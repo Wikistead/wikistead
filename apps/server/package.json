@@ -8,11 +8,11 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'noop'",
-    "migrate": "tsx src/migrate.ts",
-    "fga:bootstrap": "tsx ../../infra/openfga/bootstrap.ts",
-    "fga:seed": "tsx ../../infra/openfga/seed.ts",
-    "db:seed": "tsx ../../infra/db/seed.ts",
-    "storage:gc": "tsx src/storage/gc.ts",
+    "migrate": "tsx --env-file=../../.env src/migrate.ts",
+    "fga:bootstrap": "tsx --env-file=../../.env ../../infra/openfga/bootstrap.ts",
+    "fga:seed": "tsx --env-file=../../.env ../../infra/openfga/seed.ts",
+    "db:seed": "tsx --env-file=../../.env ../../infra/db/seed.ts",
+    "storage:gc": "tsx --env-file=../../.env src/storage/gc.ts",
     "test": "vitest run"
   },
   "dependencies": {
