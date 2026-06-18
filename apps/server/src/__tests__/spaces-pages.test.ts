@@ -7,11 +7,11 @@ import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
-import { fgaClient, check, checkRelation, writeTuples, deleteTuples } from '@kb/authz'
+import { fgaClient, check, checkRelation, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, listSpaces, deleteSpace } from '../routes/spaces.js'
 import { createPage, listPages, getPage, deletePage } from '../routes/pages.js'
-import type { Tenant } from '@kb/types'
+import type { Tenant } from '@wikistead/types'
 
 const driver = new LogicalSearchDriver()
 

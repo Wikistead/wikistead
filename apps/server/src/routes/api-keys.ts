@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
-import { emit } from '@kb/events'
+import { emit } from '@wikistead/events'
 import type { TenantDb } from '../db/index.js'
 
 interface ApiKeyRow {
@@ -20,7 +20,7 @@ export interface ApiKeyCreated extends ApiKeySummary {
 // Create a new API key. Returns plaintext once — caller must display it immediately
 // and never request it again; only the hash is persisted.
 //
-// Key format: kb_{8-char prefix}_{32-char secret}  (44 chars)
+// Key format: wks_{8-char prefix}_{32-char secret}  (45 chars)
 // key_prefix: used for O(1) DB lookup before hash comparison.
 // key_hash:   sha256(plaintext) hex — plaintext is discarded after this call.
 //
@@ -32,8 +32,8 @@ export async function createApiKey(
 ): Promise<ApiKeyCreated> {
   const prefix    = randomBytes(6).toString('base64url')   // exactly 8 chars (6 bytes → base64url)
   const secret    = randomBytes(24).toString('base64url')  // exactly 32 chars (24 bytes → base64url)
-  const plaintext = `kb_${prefix}_${secret}`
-  const keyPrefix = `kb_${prefix}`
+  const plaintext = `wks_${prefix}_${secret}`
+  const keyPrefix = `wks_${prefix}`
   const keyHash   = createHash('sha256').update(plaintext).digest('hex')
 
   const [row] = await db.sql<ApiKeyRow[]>`

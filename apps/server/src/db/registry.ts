@@ -1,5 +1,5 @@
 import type { Sql } from 'postgres'
-import type { Tenant } from '@kb/types'
+import type { Tenant } from '@wikistead/types'
 
 interface Row {
   id: string

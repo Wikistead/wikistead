@@ -6,11 +6,11 @@ import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
-import { fgaClient, writeTuples, deleteTuples } from '@kb/authz'
+import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver, buildSearchDoc } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, updatePage, deletePage } from '../routes/pages.js'
-import type { Tenant } from '@kb/types'
+import type { Tenant } from '@wikistead/types'
 
 const driver = new LogicalSearchDriver()
 let tenant: Tenant
@@ -132,7 +132,7 @@ describe('two-stage guard', () => {
     expect(stage1.some(h => h.id === 'stale-test-doc-99')).toBe(true)
 
     // Stage 2 (FGA): filters it out (no tuple for user:eve on stale-test-doc-99)
-    const { filterAuthorized } = await import('@kb/authz')
+    const { filterAuthorized } = await import('@wikistead/authz')
     const authorized = await filterAuthorized(fgaClient, 'user:eve', 'view', stage1.map(h => h.id))
     expect(authorized.has('stale-test-doc-99')).toBe(false)
 

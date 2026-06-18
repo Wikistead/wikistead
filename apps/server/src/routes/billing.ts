@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import Stripe from 'stripe'
 import { pool } from '../db/pool.js'
-import { resolveEntitlements } from '@kb/entitlements'
-import { emit } from '@kb/events'
+import { resolveEntitlements } from '@wikistead/entitlements'
+import { emit } from '@wikistead/events'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? 'sk_test_placeholder', {
   apiVersion: '2026-05-27.dahlia',

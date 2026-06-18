@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { filterAuthorized, fgaClient } from '@kb/authz'
+import { filterAuthorized, fgaClient } from '@wikistead/authz'
 
 export async function searchPlugin(app: FastifyInstance) {
   // GET /search?q=...&spaceId=...

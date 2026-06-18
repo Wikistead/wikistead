@@ -1,4 +1,4 @@
-# knowledge-saas
+# wikistead
 
 Self-hostable, multi-tenant **collaborative knowledge-base SaaS**. Markdown-based
 editor with two surfaces over one CRDT document: a **vim** source+preview surface

@@ -1,6 +1,6 @@
 // Inserts dev DB rows (spaces + pages) for local E2E use.
 // FGA tuples are handled separately by infra/openfga/seed.ts.
-// Run with: pnpm --filter @kb/server db:seed
+// Run with: pnpm --filter @wikistead/server db:seed
 import postgres from 'postgres'
 
 ;(async () => {

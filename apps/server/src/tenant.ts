@@ -2,7 +2,7 @@
 // logic only ever sees a resolved Tenant + a scoped TenantDb handle. Whether the
 // tenant lives in the shared DB (logical/RLS) or a dedicated namespace/instance
 // is decided in acquireTenantDb — never in features.
-import type { Tenant } from '@kb/types'
+import type { Tenant } from '@wikistead/types'
 import { registry } from './db/index.js'
 
 export function resolveTenantFromHost(host: string): { slug: string; domain: string } {

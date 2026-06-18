@@ -1,14 +1,14 @@
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
-import type { Tenant } from '@kb/types'
+import type { Tenant } from '@wikistead/types'
 import { resolveTenantFromHost, loadTenant } from './tenant.js'
 import { acquireTenantDb } from './db/index.js'
 import type { TenantDb } from './db/index.js'
-import { fgaClient } from '@kb/authz'
-import { makeMemberVerifier } from '@kb/auth'
+import { fgaClient } from '@wikistead/authz'
+import { makeMemberVerifier } from '@wikistead/auth'
 import { verifyApiKey } from './api-key-auth.js'
-import { getAuthProviders, getSearchDriver } from '@kb/hooks'
-import { emit } from '@kb/events'
+import { getAuthProviders, getSearchDriver } from '@wikistead/hooks'
+import { emit } from '@wikistead/events'
 import { LogicalSearchDriver } from './search/index.js'
 import type { SearchDriver } from './search/index.js'
 import { LogicalStorageDriver } from './storage/index.js'
@@ -43,7 +43,7 @@ await app.register(cors, { origin: true })
 app.decorate('fga', fgaClient)
 
 // Initialize search driver and configure Meilisearch index settings (idempotent).
-// EE may register an alternative SearchDriver via registerSearchDriver(@kb/hooks).
+// EE may register an alternative SearchDriver via registerSearchDriver(@wikistead/hooks).
 // Falls back to LogicalSearchDriver when no EE driver is registered.
 const searchDriver = getSearchDriver(new LogicalSearchDriver())
 await searchDriver.ensureIndex()
@@ -102,7 +102,7 @@ app.addHook('onRequest', async (req, reply) => {
 
   // Authentication routing: the token prefix determines the path.
   // Failing one path does NOT fall through to the other.
-  if (token.startsWith('kb_')) {
+  if (token.startsWith('wks_')) {
     // API key path. Failure → 401, no OIDC fallback.
     const apiUser = await verifyApiKey(token, req.tenant.id)
     if (!apiUser) {

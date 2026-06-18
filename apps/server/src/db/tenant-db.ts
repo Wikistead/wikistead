@@ -1,5 +1,5 @@
 import type { Sql } from 'postgres'
-import type { Tenant } from '@kb/types'
+import type { Tenant } from '@wikistead/types'
 import { pool } from './pool.js'
 
 // The only DB interface features ever see. Isolation strategy is invisible here.

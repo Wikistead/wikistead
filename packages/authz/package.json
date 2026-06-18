@@ -1,5 +1,5 @@
 {
-  "name": "@kb/authz",
+  "name": "@wikistead/authz",
   "version": "0.0.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -13,8 +13,8 @@
   },
   "dependencies": {
     "@openfga/sdk": "^0.7.0",
-    "@kb/hooks": "workspace:*",
-    "@kb/types": "workspace:*"
+    "@wikistead/hooks": "workspace:*",
+    "@wikistead/types": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

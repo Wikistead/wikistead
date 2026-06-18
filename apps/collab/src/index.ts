@@ -12,9 +12,9 @@ import {
   looksLikeGuestToken,
   verifyGuestToken,
   makeMemberVerifier,
-} from "@kb/auth";
-import { fgaClient, check, checkMemberAccess } from "@kb/authz";
-import { docName } from "@kb/types";
+} from "@wikistead/auth";
+import { fgaClient, check, checkMemberAccess } from "@wikistead/authz";
+import { docName } from "@wikistead/types";
 import { loadYdoc, storeYdoc } from "./ydoc.js";
 
 const guestCfg = {
@@ -117,12 +117,12 @@ server.listen();
 // the already-updated pages.ydoc). Correctness is never lost.
 const restoreSub = new IORedis(process.env.VALKEY_URL ?? "redis://localhost:6379");
 
-restoreSub.psubscribe("kb:restore:*", (err) => {
+restoreSub.psubscribe("wks:restore:*", (err) => {
   if (err) console.error("[restore:sub] subscribe failed:", err);
 });
 
 restoreSub.on("pmessage", (_pattern: string, channel: string, data: string) => {
-  const documentName = channel.replace("kb:restore:", "");
+  const documentName = channel.replace("wks:restore:", "");
   const document = server.documents.get(documentName);
   if (!document) return;  // not open; pages.ydoc already updated, next open loads it
 

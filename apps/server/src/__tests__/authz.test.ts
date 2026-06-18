@@ -4,7 +4,7 @@
 //
 // Prerequisite: run `pnpm fga:bootstrap && pnpm fga:seed` before this suite.
 import { describe, it, expect, afterAll, beforeEach, afterEach } from 'vitest'
-import { fgaClient, check, checkMemberAccess, writeTuples, deleteTuples } from '@kb/authz'
+import { fgaClient, check, checkMemberAccess, writeTuples, deleteTuples } from '@wikistead/authz'
 
 const now = () => new Date().toISOString()
 const page = (id: string) => ({ type: 'page' as const, id })

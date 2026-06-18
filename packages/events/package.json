@@ -1,5 +1,5 @@
 {
-  "name": "@kb/events",
+  "name": "@wikistead/events",
   "version": "0.0.0",
   "type": "module",
   "main": "./dist/index.js",

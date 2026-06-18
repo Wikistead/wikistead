@@ -15,7 +15,7 @@ const dir = dirname(fileURLToPath(import.meta.url))
   const apiUrl = process.env.OPENFGA_API_URL ?? 'http://localhost:8080'
 
   // Create store (or reuse existing one with the same name).
-  const storeName = 'knowledge-saas'
+  const storeName = 'wikistead'
   // Dummy ULID: the client requires a valid ULID format even for store-listing calls.
   const fgaAnon = new OpenFgaClient({ apiUrl, storeId: '01H5M3YCPQ3ZHWT1J8RYATM4WN' })
   const { stores } = await (fgaAnon as any).api.listStores()

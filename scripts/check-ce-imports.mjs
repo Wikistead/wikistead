@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CI guard: ensure no CE package imports from @kb-ee/* (Enterprise packages).
+// CI guard: ensure no CE package imports from @wikistead-ee/* (Enterprise packages).
 // CE → EE dependency is forbidden (ADR-011). Run via: pnpm lint:no-ee-imports
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 const CE_DIRS = ['packages', 'apps']
-const EE_IMPORT_PATTERN = /@kb-ee\//
+const EE_IMPORT_PATTERN = /@wikistead-ee\//
 
 function walk(dir) {
   const entries = readdirSync(dir)
@@ -34,7 +34,7 @@ for (const ceDir of CE_DIRS) {
 }
 
 if (found) {
-  console.error('CE must never import from @kb-ee/* (ADR-011). Fix the violations above.')
+  console.error('CE must never import from @wikistead-ee/* (ADR-011). Fix the violations above.')
   process.exit(1)
 } else {
   console.log('OK: no CE → EE imports found.')

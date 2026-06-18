@@ -1,6 +1,6 @@
 import type { OpenFgaClient } from '@openfga/sdk'
-import type { Capability, ResourceRef } from '@kb/types'
-import { getAuthzHooks } from '@kb/hooks'
+import type { Capability, ResourceRef } from '@wikistead/types'
+import { getAuthzHooks } from '@wikistead/hooks'
 
 export interface CheckContext {
   // ISO 8601 timestamp evaluated against the non_expired condition on share_link tuples.
@@ -40,7 +40,7 @@ function resolveRelation(capability: Capability, resource: ResourceRef): string 
 // Authorization check. relation is resolved via RELATION table — callers use
 // Capability values, not raw FGA relation strings.
 //
-// EE extension points (from @kb/hooks):
+// EE extension points (from @wikistead/hooks):
 //   beforeCheck: may short-circuit before FGA (approval workflow, advanced RBAC).
 //   afterCheck:  may override FGA result (additional deny conditions, etc.).
 // Both default to no-op when no EE hooks are registered.

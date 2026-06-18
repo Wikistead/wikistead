@@ -5,7 +5,7 @@
 // Both hooks default to no-op when unregistered.
 // beforeCheck: undefined return → proceed to FGA; boolean → short-circuit.
 // afterCheck:  undefined return → use FGA result; boolean → override.
-import type { ResourceRef } from '@kb/types'
+import type { ResourceRef } from '@wikistead/types'
 
 export interface AuthzCheckContext {
   user: string            // "user:alice" | "share_link:Y" | "user:anonymous"

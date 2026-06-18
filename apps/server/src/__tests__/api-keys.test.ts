@@ -7,12 +7,12 @@ import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
-import { fgaClient } from '@kb/authz'
+import { fgaClient } from '@wikistead/authz'
 import { verifyApiKey } from '../api-key-auth.js'
 import { createApiKey, listApiKeys, revokeApiKey } from '../routes/api-keys.js'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import type { Tenant } from '@kb/types'
+import type { Tenant } from '@wikistead/types'
 
 const driver    = new LogicalSearchDriver()
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -47,7 +47,7 @@ describe('createApiKey', () => {
       tenantId: tenant.id, ownerUserId: 'dev-user', name: 'test-key-1',
     })
 
-    expect(result.plaintext).toMatch(/^kb_[A-Za-z0-9_-]{8}_[A-Za-z0-9_-]{32}$/)
+    expect(result.plaintext).toMatch(/^wks_[A-Za-z0-9_-]{8}_[A-Za-z0-9_-]{32}$/)
     expect(result.keyPrefix).toBe(result.plaintext.split('_').slice(0, 2).join('_'))
 
     // Verify DB stores the hash, not the plaintext
@@ -87,7 +87,7 @@ describe('verifyApiKey', () => {
   })
 
   it('returns null for a non-existent prefix', async () => {
-    const result = await verifyApiKey('kb_ZZZZZZZZ_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', tenant.id)
+    const result = await verifyApiKey('wks_ZZZZZZZZ_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', tenant.id)
     expect(result).toBeNull()
   })
 
@@ -100,24 +100,24 @@ describe('verifyApiKey', () => {
     expect(result).toBeNull()
   })
 
-  it('no auth path fallback: kb_ prefix that fails returns null, not an OIDC attempt', async () => {
+  it('no auth path fallback: wks_ prefix that fails returns null, not an OIDC attempt', async () => {
     // verifyApiKey returns null for an invalid key — the caller (onRequest hook)
     // must send 401 at this point without trying OIDC verification.
-    const result = await verifyApiKey('kb_BadPrefix_invalidsecretherexxxxxxxxxxx', tenant.id)
+    const result = await verifyApiKey('wks_BadPrefix_invalidsecretherexxxxxxxxxxx', tenant.id)
     expect(result).toBeNull()
-    // (The routing guard in index.ts onRequest ensures no OIDC fallback for kb_ tokens)
+    // (The routing guard in index.ts onRequest ensures no OIDC fallback for wks_ tokens)
   })
 
   it('tenant isolation: key from another tenant returns null for this tenant', async () => {
     // Create a key for tenant_acme and try to use it as tenant_dev
     const [{ id: acmeKeyId }] = await adminPool<[{ id: string }]>`
       INSERT INTO api_keys (tenant_id, owner_user_id, name, key_prefix, key_hash)
-      VALUES ('tenant_acme', 'acme-user', 'cross-tenant-key', 'kb_ACME_KEY', 'fakehash')
+      VALUES ('tenant_acme', 'acme-user', 'cross-tenant-key', 'wks_ACME_KEY', 'fakehash')
       RETURNING id
     `
     try {
       // Prefix matches but tenant_id RLS returns 0 rows for tenant_dev
-      const result = await verifyApiKey('kb_ACME_KEY_anysecrethere', tenant.id)
+      const result = await verifyApiKey('wks_ACME_KEY_anysecrethere', tenant.id)
       expect(result).toBeNull()
     } finally {
       await adminPool`DELETE FROM api_keys WHERE id = ${acmeKeyId}`
@@ -153,7 +153,7 @@ describe('API key uses owner FGA permissions (per-page auth not bypassed)', () =
   it('owner can access pages they have FGA view permission for', async () => {
     // dev-user has manager on space:spaceId → has view on all pages in it
     // This verifies the same FGA check that routes use after API key auth
-    const { check } = await import('@kb/authz')
+    const { check } = await import('@wikistead/authz')
     const ok = await check(fgaClient, 'user:dev-user', 'view', { type: 'space', id: spaceId })
     // Actually check edit (since manager → editor from space → viewer)
     const edit = await check(fgaClient, 'user:dev-user', 'manage', { type: 'space', id: spaceId })
@@ -162,7 +162,7 @@ describe('API key uses owner FGA permissions (per-page auth not bypassed)', () =
 
   it('owner cannot access pages they have no FGA permission for (auth not bypassed)', async () => {
     // A page in a completely unrelated space that dev-user has no access to
-    const { check } = await import('@kb/authz')
+    const { check } = await import('@wikistead/authz')
     const canView = await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: 'nonexistent-page-xyz' })
     expect(canView).toBe(false)
     // An API key acting as dev-user would also get false here — no bypass

@@ -7,12 +7,12 @@ import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
-import { fgaClient, writeTuples, deleteTuples } from '@kb/authz'
+import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, deletePage } from '../routes/pages.js'
-import { checkRelation } from '@kb/authz'
-import type { Tenant } from '@kb/types'
+import { checkRelation } from '@wikistead/authz'
+import type { Tenant } from '@wikistead/types'
 
 // The anonymous principal used for all public checks.
 // user:anonymous has NO relationships — can only access pages via user:* wildcard.

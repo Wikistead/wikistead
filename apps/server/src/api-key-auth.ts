@@ -11,17 +11,17 @@ import { pool } from './db/pool.js'
 interface ApiKeyRow { id: string; owner_user_id: string; key_hash: string }
 
 // Verify an API key and return the owner's user ID, or null if invalid/revoked.
-// Called from onRequest ONLY when token starts with 'kb_' — no OIDC fallback.
-// Key format: kb_{8-char prefix}_{32-char secret}
+// Called from onRequest ONLY when token starts with 'wks_' — no OIDC fallback.
+// Key format: wks_{8-char prefix}_{32-char secret}
 export async function verifyApiKey(
   token: string,
   tenantId: string,
 ): Promise<{ sub: string } | null> {
-  if (!token.startsWith('kb_')) return null
+  if (!token.startsWith('wks_')) return null
 
   // Extract prefix: everything before the second underscore.
-  // kb_PPPPPPPP_SECRET → prefix = 'kb_PPPPPPPP'
-  const secondUnderscore = token.indexOf('_', 3)
+  // wks_PPPPPPPP_SECRET → prefix = 'wks_PPPPPPPP'
+  const secondUnderscore = token.indexOf('_', 4)
   if (secondUnderscore === -1) return null
   const keyPrefix = token.slice(0, secondUnderscore)
 

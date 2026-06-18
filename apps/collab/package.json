@@ -1,5 +1,5 @@
 {
-  "name": "@kb/collab",
+  "name": "@wikistead/collab",
   "version": "0.0.0",
   "type": "module",
   "scripts": {
@@ -17,9 +17,9 @@
     "ioredis": "^5.3.0",
     "postgres": "^3.4.0",
     "yjs": "^13.6.0",
-    "@kb/types": "workspace:*",
-    "@kb/auth": "workspace:*",
-    "@kb/authz": "workspace:*"
+    "@wikistead/types": "workspace:*",
+    "@wikistead/auth": "workspace:*",
+    "@wikistead/authz": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

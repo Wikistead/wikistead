@@ -4,7 +4,7 @@
 //
 // SearchDriver is defined here (not in apps/server) so EE can implement it
 // without importing from CE's application layer.
-import type { SearchDoc } from '@kb/types'
+import type { SearchDoc } from '@wikistead/types'
 
 export interface SearchHit {
   id: string

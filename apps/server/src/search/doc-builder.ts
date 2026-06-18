@@ -1,7 +1,7 @@
 import * as Y from 'yjs'
 import type { Sql } from 'postgres'
 import type { OpenFgaClient } from '@openfga/sdk'
-import type { SearchDoc } from '@kb/types'
+import type { SearchDoc } from '@wikistead/types'
 
 interface PageRow { id: string; tenant_id: string; space_id: string; title: string; ydoc: Buffer | null; updated_at: Date }
 

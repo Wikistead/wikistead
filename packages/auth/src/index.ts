@@ -7,7 +7,7 @@
 // authz graph (delete the share_link tuple) + short token TTL + silent refresh.
 
 import { SignJWT, jwtVerify, createRemoteJWKSet } from "jose";
-import type { GuestTokenClaims, Principal, Capability, ResourceRef } from "@kb/types";
+import type { GuestTokenClaims, Principal, Capability, ResourceRef } from "@wikistead/types";
 
 const enc = new TextEncoder();
 

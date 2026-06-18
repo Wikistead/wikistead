@@ -2,8 +2,8 @@ import * as Y from 'yjs'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import type IORedis from 'ioredis'
-import { check } from '@kb/authz'
-import { emit } from '@kb/events'
+import { check } from '@wikistead/authz'
+import { emit } from '@wikistead/events'
 import { pool } from '../db/pool.js'
 import type { TenantDb } from '../db/index.js'
 
@@ -130,7 +130,7 @@ export async function restoreRevision(
   // load the new state from pages.ydoc.
   const documentName = `t:${args.tenantId}:p:${args.pageId}`
   try {
-    await valkey.publish(`kb:restore:${documentName}`, Buffer.from(restoreUpdate).toString('base64'))
+    await valkey.publish(`wks:restore:${documentName}`, Buffer.from(restoreUpdate).toString('base64'))
   } catch (err) {
     console.error(`[restore:publish] failed for ${documentName} (non-fatal):`, err)
   }

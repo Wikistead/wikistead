@@ -1,5 +1,5 @@
 {
-  "name": "knowledge-saas",
+  "name": "wikistead",
   "private": true,
   "packageManager": "pnpm@9.12.0",
   "engines": { "node": ">=20" },
@@ -9,7 +9,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "license:check": "license-checker-rseidelsohn --production --onlyAllow 'MIT;MIT OR X11;ISC;Apache-2.0;BSD-2-Clause;BSD-3-Clause;0BSD;Unlicense;CC0-1.0;MPL-2.0;BlueOak-1.0.0;Python-2.0' --excludePackages 'knowledge-saas'",
+    "license:check": "license-checker-rseidelsohn --production --onlyAllow 'MIT;MIT OR X11;ISC;Apache-2.0;BSD-2-Clause;BSD-3-Clause;0BSD;Unlicense;CC0-1.0;MPL-2.0;BlueOak-1.0.0;Python-2.0' --excludePackages 'wikistead'",
     "lint:no-ee-imports": "node scripts/check-ce-imports.mjs",
     "build:ee": "turbo run build",
     "compose:up": "docker compose up -d",

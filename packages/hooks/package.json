@@ -1,5 +1,5 @@
 {
-  "name": "@kb/hooks",
+  "name": "@wikistead/hooks",
   "version": "0.0.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,6 +11,6 @@
     "typecheck": "tsc --noEmit",
     "lint": "echo 'noop'"
   },
-  "dependencies": { "@kb/types": "workspace:*" },
+  "dependencies": { "@wikistead/types": "workspace:*" },
   "devDependencies": { "typescript": "^5.6.0" }
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@kb/auth",
+  "name": "@wikistead/auth",
   "version": "0.0.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,6 +11,6 @@
     "typecheck": "tsc --noEmit",
     "lint": "echo 'noop'"
   },
-  "dependencies": { "jose": "^5.9.0", "@kb/types": "workspace:*" },
+  "dependencies": { "jose": "^5.9.0", "@wikistead/types": "workspace:*" },
   "devDependencies": { "typescript": "^5.6.0", "@types/node": "^22.0.0" }
 }

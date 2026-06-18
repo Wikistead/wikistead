@@ -1,9 +1,9 @@
 // SearchDriver and SearchHit are the CE-published extension point defined in
-// @kb/hooks. LogicalSearchDriver is CE's built-in implementation.
-// EE registers an alternative via registerSearchDriver() from @kb/hooks.
+// @wikistead/hooks. LogicalSearchDriver is CE's built-in implementation.
+// EE registers an alternative via registerSearchDriver() from @wikistead/hooks.
 import { MeiliSearch } from 'meilisearch'
-import type { SearchDoc } from '@kb/types'
-import type { SearchDriver, SearchHit } from '@kb/hooks'
+import type { SearchDoc } from '@wikistead/types'
+import type { SearchDriver, SearchHit } from '@wikistead/hooks'
 
 export type { SearchDriver, SearchHit }
 

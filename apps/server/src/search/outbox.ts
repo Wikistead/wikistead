@@ -1,6 +1,6 @@
 import type { Sql } from 'postgres'
 import { pool } from '../db/pool.js'
-import { fgaClient } from '@kb/authz'
+import { fgaClient } from '@wikistead/authz'
 import { buildSearchDoc } from './doc-builder.js'
 import type { SearchDriver } from './driver.js'
 

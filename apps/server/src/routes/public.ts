@@ -4,7 +4,7 @@
 // anonymous visitors are NOT admitted to collaboration rooms here.
 import * as Y from 'yjs'
 import type { FastifyInstance } from 'fastify'
-import { fgaClient, checkRelation } from '@kb/authz'
+import { fgaClient, checkRelation } from '@wikistead/authz'
 import { pool } from '../db/pool.js'
 import { resolveTenantFromHost, loadTenant } from '../tenant.js'
 

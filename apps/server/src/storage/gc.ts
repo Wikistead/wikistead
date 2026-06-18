@@ -1,5 +1,5 @@
 // Storage GC: reclaims orphaned and soft-deleted attachments.
-// Run manually or via a scheduled job: pnpm --filter @kb/server storage:gc
+// Run manually or via a scheduled job: pnpm --filter @wikistead/server storage:gc
 //
 // Two patterns (same philosophy as search_outbox — DB is the source of truth):
 //
@@ -46,7 +46,7 @@ export async function runStorageGc(storage: StorageDriver): Promise<void> {
   }
 }
 
-// Script entry point: pnpm --filter @kb/server storage:gc
+// Script entry point: pnpm --filter @wikistead/server storage:gc
 if (import.meta.url === `file://${process.argv[1]}`) {
   const { LogicalStorageDriver } = await import('./driver.js')
   const storage = new LogicalStorageDriver()
