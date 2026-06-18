@@ -67,11 +67,20 @@ export async function confirmAttachment(
   `
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
 
-  let sizeBytes: number
-  try {
-    const head = await storage.headObject(row.s3_key)
-    sizeBytes = head.sizeBytes
-  } catch {
+  // HeadObject with a short retry: some S3 gateways (e.g. SeaweedFS) are not
+  // strictly read-after-write consistent, so the object can be momentarily
+  // un-HEAD-able right after the client's PUT returns 200. This only re-reads the
+  // same key — it never creates another pending row, so it cannot grow orphans.
+  let sizeBytes: number | undefined
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      sizeBytes = (await storage.headObject(row.s3_key)).sizeBytes
+      break
+    } catch {
+      if (attempt < 4) await new Promise((r) => setTimeout(r, 150))
+    }
+  }
+  if (sizeBytes === undefined) {
     throw Object.assign(new Error('upload not found in storage; upload to the presigned URL first'), { statusCode: 400 })
   }
 

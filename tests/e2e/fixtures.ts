@@ -17,6 +17,8 @@ export const E2E = {
 //     so it IS a stage-1 candidate but the API's stage-2 FGA check drops it ->
 //     search.spec asserts it's not shown.
 export const LOCKED_SPACE_NAME = "E2E LOCKED SPACE";
+export const LOCKED_SPACE_ID = "e2e-locked-space";
+export const LOCKED_PAGE_ID = "e2e-locked-page";
 export const STALE_TITLE = "E2ESTALEONLYTITLE";
 const STALE_ID = "e2e-stale-doc";
 
@@ -32,11 +34,12 @@ export async function seedFixtures() {
   // --- locked space + page (admin pool bypasses RLS for the insert) ---
   const sql = postgres(E2E.pgAdmin);
   try {
-    await sql`DELETE FROM spaces WHERE tenant_id = ${E2E.tenant} AND name = ${LOCKED_SPACE_NAME}`;
-    const [s] = await sql`
-      INSERT INTO spaces (tenant_id, name) VALUES (${E2E.tenant}, ${LOCKED_SPACE_NAME}) RETURNING id`;
-    await sql`
-      INSERT INTO pages (tenant_id, space_id, title) VALUES (${E2E.tenant}, ${s.id}, 'locked page')`;
+    // Fixed ids so specs can address the locked page directly. No FGA grant is
+    // written, so dev-user can neither view nor edit it.
+    await sql`DELETE FROM pages WHERE tenant_id = ${E2E.tenant} AND id = ${LOCKED_PAGE_ID}`;
+    await sql`DELETE FROM spaces WHERE tenant_id = ${E2E.tenant} AND id = ${LOCKED_SPACE_ID}`;
+    await sql`INSERT INTO spaces (id, tenant_id, name) VALUES (${LOCKED_SPACE_ID}, ${E2E.tenant}, ${LOCKED_SPACE_NAME})`;
+    await sql`INSERT INTO pages (id, tenant_id, space_id, title) VALUES (${LOCKED_PAGE_ID}, ${E2E.tenant}, ${LOCKED_SPACE_ID}, 'locked page')`;
   } finally {
     await sql.end();
   }

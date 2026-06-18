@@ -20,7 +20,10 @@ export async function apiFetch<T = unknown>(
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
-      "content-type": "application/json",
+      // Only declare a JSON body when there actually is one — a body-less POST
+      // (e.g. /attachments/:id/confirm) with content-type: application/json is
+      // rejected by Fastify (FST_ERR_CTP_EMPTY_JSON_BODY).
+      ...(init.body != null ? { "content-type": "application/json" } : {}),
       Authorization: `Bearer ${token}`,
       ...(init.headers ?? {}),
     },

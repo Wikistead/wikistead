@@ -4,6 +4,7 @@ import { AppShell } from "./AppShell";
 import { Editor } from "../editor/Editor";
 import { Sidebar } from "../sidebar/Sidebar";
 import { SearchBox } from "../search/SearchBox";
+import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, type GuestToken } from "../data/apiClient";
 
@@ -17,7 +18,12 @@ function PageRoute() {
   const docName = `t:${tenantId}:p:${pageId}`;
   return (
     <AppShell sidebar={<Sidebar />} search={<SearchBox />}>
-      <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={user} />
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={user} />
+        </div>
+        {pageId && <AttachmentsPanel pageId={pageId} readOnly={false} />}
+      </div>
     </AppShell>
   );
 }
