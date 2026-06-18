@@ -1,0 +1,97 @@
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  HeadObjectCommand,
+  HeadBucketCommand,
+  CreateBucketCommand,
+} from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+
+export interface StorageDriver {
+  // Idempotent: create the bucket if it does not exist. Called at app startup.
+  ensureBucket(): Promise<void>
+  // Generate a presigned PUT URL for direct client upload (server never proxies bytes).
+  presignPut(key: string, opts: { contentType: string; ttlSeconds: number }): Promise<string>
+  // Generate a presigned GET URL for direct client download.
+  // Returns JSON { downloadUrl } — NOT a 302 redirect, to avoid URL leaking
+  // into browser history, Referer headers, and access logs.
+  presignGet(key: string, opts: { ttlSeconds: number }): Promise<string>
+  // Delete an object. No-op (does not throw) if the object does not exist.
+  deleteObject(key: string): Promise<void>
+  // Return the actual size of an uploaded object from S3 metadata.
+  // Used at confirm time to set size_bytes without trusting the client.
+  // Throws if the object does not exist (client has not uploaded yet).
+  headObject(key: string): Promise<{ sizeBytes: number }>
+}
+
+// Single shared bucket; tenant prefix embedded in every key.
+// Key format: {tenantId}/pages/{pageId}/{attachmentId}/{sanitized-filename}
+//
+// TODO(phase: tenancy-namespace): NamespaceStorageDriver routes to a dedicated
+// bucket + credential for namespace-isolated tenants. Same abstraction pattern
+// as SearchDriver and TenantDb (app never branches on isolation strategy).
+export class LogicalStorageDriver implements StorageDriver {
+  private readonly s3: S3Client
+  private readonly bucket: string
+
+  constructor() {
+    this.s3 = new S3Client({
+      region: process.env.S3_REGION ?? 'us-east-1',
+      endpoint: process.env.S3_ENDPOINT,
+      credentials: {
+        accessKeyId: process.env.S3_ACCESS_KEY!,
+        secretAccessKey: process.env.S3_SECRET_KEY!,
+      },
+      forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true',
+    })
+    this.bucket = process.env.S3_BUCKET!
+  }
+
+  async ensureBucket(): Promise<void> {
+    try {
+      await this.s3.send(new HeadBucketCommand({ Bucket: this.bucket }))
+    } catch {
+      await this.s3.send(new CreateBucketCommand({ Bucket: this.bucket }))
+    }
+  }
+
+  async presignPut(key: string, opts: { contentType: string; ttlSeconds: number }): Promise<string> {
+    return getSignedUrl(
+      this.s3,
+      new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: opts.contentType }),
+      { expiresIn: opts.ttlSeconds },
+    )
+  }
+
+  async presignGet(key: string, opts: { ttlSeconds: number }): Promise<string> {
+    return getSignedUrl(
+      this.s3,
+      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      { expiresIn: opts.ttlSeconds },
+    )
+  }
+
+  async deleteObject(key: string): Promise<void> {
+    // DeleteObject is a no-op (not an error) for non-existent keys.
+    await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }))
+  }
+
+  async headObject(key: string): Promise<{ sizeBytes: number }> {
+    const result = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }))
+    return { sizeBytes: result.ContentLength ?? 0 }
+  }
+}
+
+// Build the S3 object key for an attachment.
+// Tenant prefix enforces physical separation within the shared bucket.
+export function makeS3Key(
+  tenantId: string,
+  pageId: string,
+  attachmentId: string,
+  filename: string,
+): string {
+  const safe = filename.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200)
+  return `${tenantId}/pages/${pageId}/${attachmentId}/${safe}`
+}
