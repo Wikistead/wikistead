@@ -1,0 +1,5 @@
+export { makeFga, fgaClient } from './client.js'
+export { check, checkMemberAccess, filterAuthorized } from './check.js'
+export type { CheckContext, MemberAccess } from './check.js'
+export { writeTuples, deleteTuples } from './tuples.js'
+export type { TupleInput } from './tuples.js'
