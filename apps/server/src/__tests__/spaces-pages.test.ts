@@ -7,7 +7,7 @@ import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
-import { fgaClient, check, checkRelation, writeTuples, deleteTuples } from '@wikistead/authz'
+import { fgaClient, check, checkRelation, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, listSpaces, deleteSpace } from '../routes/spaces.js'
 import { createPage, listPages, getPage, deletePage } from '../routes/pages.js'
@@ -174,6 +174,74 @@ describe('page lifecycle', () => {
 
     const rows = await db.sql<{ id: string }[]>`SELECT id FROM pages WHERE title = ${title}`
     expect(rows).toHaveLength(0)
+  })
+})
+
+// ── tree listing is FGA-filtered, not just RLS-filtered ────────────────────
+//
+// the project design notes " OpenFGA ": the page tree must not list (or leak the
+// title of) a resource the user cannot view. RLS only enforces tenant isolation.
+// Anti-trivial design: the locked space/page are in the SAME tenant (so RLS
+// DOES return them) and we assert the user genuinely cannot view them — the only
+// thing that excludes them from the listing is the FGA filter under test.
+
+describe('tree listing is FGA-filtered (security)', () => {
+  // A space with NO tenant link and NO user grant in FGA. Its DB row is in
+  // tenant_dev (RLS returns it) but even the tenant admin cannot view it,
+  // because space#viewer derives only from editor/manager/(admin from tenant),
+  // and none apply without the tenant link.
+  async function seedLocked(label: string): Promise<{ spaceId: string; pageId: string }> {
+    const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
+    const [s] = await adminPool<{ id: string }[]>`
+      INSERT INTO spaces (tenant_id, name) VALUES (${tenant.id}, ${`locked-${label}`}) RETURNING id`
+    const [p] = await adminPool<{ id: string }[]>`
+      INSERT INTO pages (tenant_id, space_id, title) VALUES (${tenant.id}, ${s.id}, ${`locked-page-${label}`}) RETURNING id`
+    await adminPool.end()
+    // Wire only page->space so the model is well-formed; no tenant link, no grant.
+    await writeTuples(fgaClient, [{ user: `space:${s.id}`, relation: 'space', object: `page:${p.id}` }])
+    return { spaceId: s.id, pageId: p.id }
+  }
+  async function dropLocked(spaceId: string, pageId: string) {
+    await deleteObjectTuples(fgaClient, `page:${pageId}`)
+    const ap = postgres(process.env.DATABASE_ADMIN_URL!)
+    await ap`DELETE FROM spaces WHERE id = ${spaceId}` // ON DELETE CASCADE removes the page
+    await ap.end()
+  }
+
+  it('listPages excludes a page the user cannot view, keeps one they can', async () => {
+    const space = await createSpace(db, fgaClient, {
+      tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'tree-fga-pages',
+    })
+    const visible = await createPage(db, fgaClient, driver, {
+      tenantId: tenant.id, spaceId: space.id, userId: 'dev-user', title: 'visible',
+    })
+    const locked = await seedLocked('pages')
+
+    // Anti-trivial guards: RLS returns the locked page, and the user truly can't view it.
+    const rls = await db.sql<{ id: string }[]>`SELECT id FROM pages WHERE id = ${locked.pageId}`
+    expect(rls).toHaveLength(1)
+    expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: locked.pageId })).toBe(false)
+    expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: visible.id })).toBe(true)
+
+    expect((await listPages(db, fgaClient, { spaceId: space.id, userId: 'dev-user' })).map((p) => p.id)).toContain(visible.id)
+    expect(await listPages(db, fgaClient, { spaceId: locked.spaceId, userId: 'dev-user' })).toHaveLength(0)
+
+    await deletePage(db, fgaClient, driver, { pageId: visible.id, userId: 'dev-user' })
+    await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: space.id, userId: 'dev-user' })
+    await dropLocked(locked.spaceId, locked.pageId)
+  })
+
+  it('listSpaces excludes a space the user cannot view', async () => {
+    const locked = await seedLocked('spaces')
+
+    const rls = await db.sql<{ id: string }[]>`SELECT id FROM spaces WHERE id = ${locked.spaceId}`
+    expect(rls).toHaveLength(1)
+    expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'space', id: locked.spaceId })).toBe(false)
+
+    const spaces = await listSpaces(db, fgaClient, 'dev-user')
+    expect(spaces.map((s) => s.id)).not.toContain(locked.spaceId)
+
+    await dropLocked(locked.spaceId, locked.pageId)
   })
 })
 

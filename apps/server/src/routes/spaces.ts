@@ -50,11 +50,21 @@ export async function createSpace(
   return space
 }
 
-export async function listSpaces(db: TenantDb): Promise<Space[]> {
+// List the spaces the user is allowed to VIEW. RLS gives only tenant isolation;
+// per-space view authorization is enforced here so the sidebar never lists (or
+// leaks the name of) a space the user cannot access — the same "confirm via
+// OpenFGA before display" rule the search two-stage guard follows (the project design notes).
+export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: string): Promise<Space[]> {
   const rows = await db.sql<SpaceRow[]>`
     SELECT id, tenant_id, name, created_at FROM spaces ORDER BY created_at
   `
-  return rows.map(toSpace)
+  const checks = await Promise.all(
+    rows.map((r) =>
+      check(fga, `user:${userId}`, 'view', { type: 'space', id: r.id }).then((ok) => [r.id, ok] as const),
+    ),
+  )
+  const allowed = new Set(checks.filter(([, ok]) => ok).map(([id]) => id))
+  return rows.filter((r) => allowed.has(r.id)).map(toSpace)
 }
 
 // Delete a space and all its pages.
@@ -108,7 +118,7 @@ export async function spacesPlugin(app: FastifyInstance) {
     return reply.code(201).send(space)
   })
 
-  app.get('/spaces', async (req) => listSpaces(req.db))
+  app.get('/spaces', async (req) => listSpaces(req.db, app.fga, req.user.sub))
 
   app.delete<{ Params: { spaceId: string } }>('/spaces/:spaceId', async (req, reply) => {
     await deleteSpace(req.db, app.fga, app.searchDriver, {

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, writeTuples, deleteObjectTuples } from '@wikistead/authz'
+import { check, filterAuthorized, writeTuples, deleteObjectTuples } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
@@ -45,12 +45,22 @@ export async function createPage(
   return page
 }
 
-export async function listPages(db: TenantDb, spaceId: string): Promise<Page[]> {
+// List the pages in a space the user is allowed to VIEW. RLS gives only tenant
+// isolation; per-page view authorization is enforced here so the page tree never
+// lists (or leaks the title of) a page the user cannot open — the same
+// "confirm via OpenFGA before display" rule the search two-stage guard follows
+// (the project design notes). A page the user lacks `view` on is excluded.
+export async function listPages(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { spaceId: string; userId: string },
+): Promise<Page[]> {
   const rows = await db.sql<PageRow[]>`
     SELECT id, tenant_id, space_id, parent_id, title, created_at, updated_at
-    FROM pages WHERE space_id = ${spaceId} ORDER BY created_at
+    FROM pages WHERE space_id = ${args.spaceId} ORDER BY created_at
   `
-  return rows.map(toPage)
+  const allowed = await filterAuthorized(fga, `user:${args.userId}`, 'view', rows.map((r) => r.id))
+  return rows.filter((r) => allowed.has(r.id)).map(toPage)
 }
 
 export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: string; userId: string }): Promise<Page> {
@@ -133,7 +143,7 @@ export async function pagesPlugin(app: FastifyInstance) {
   )
 
   app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/pages', async (req) => {
-    return listPages(req.db, req.params.spaceId)
+    return listPages(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub })
   })
 
   app.get<{ Params: { pageId: string } }>('/pages/:pageId', async (req) => {
