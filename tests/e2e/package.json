@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "playwright test",
+    "e2e": "playwright test",
     "up": "node scripts/up.mjs",
     "down": "node scripts/down.mjs"
   },

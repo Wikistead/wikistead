@@ -15,7 +15,7 @@
     "compose:up": "docker compose up -d",
     "compose:down": "docker compose down",
     "setup:e2e": "node tests/e2e/scripts/up.mjs",
-    "test:e2e": "pnpm --filter @wikistead/e2e test",
+    "test:e2e": "pnpm --filter @wikistead/e2e e2e",
     "teardown:e2e": "node tests/e2e/scripts/down.mjs"
   },
   "devDependencies": {
