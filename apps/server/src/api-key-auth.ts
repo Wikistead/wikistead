@@ -19,11 +19,10 @@ export async function verifyApiKey(
 ): Promise<{ sub: string } | null> {
   if (!token.startsWith('wks_')) return null
 
-  // Extract prefix: everything before the second underscore.
-  // wks_PPPPPPPP_SECRET → prefix = 'wks_PPPPPPPP'
-  const secondUnderscore = token.indexOf('_', 4)
-  if (secondUnderscore === -1) return null
-  const keyPrefix = token.slice(0, secondUnderscore)
+  // keyPrefix is always 'wks_' (4 chars) + 8 base64url chars = 12 chars total.
+  // base64url includes '_', so indexOf('_') is unreliable — use fixed-length slice.
+  const keyPrefix = token.slice(0, 12)
+  if (token.length < 13 || token[12] !== '_') return null
 
   // DB lookup. revoked_at IS NULL is mandatory — this is the revocation gate.
   // RLS (app.tenant_id) provides tenant isolation: wrong-tenant keys return 0 rows.
