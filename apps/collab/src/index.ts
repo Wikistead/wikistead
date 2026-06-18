@@ -2,10 +2,12 @@
 // join point: a single onAuthenticate accepts BOTH member (OIDC) and guest
 // (app-signed share) tokens, resolves capability for the requested document, and
 // enforces it before letting anyone into the Yjs room. Rooms are tenant-namespaced.
+import * as Y from "yjs";
 import { Hocuspocus } from "@hocuspocus/server";
 import type { onAuthenticatePayload } from "@hocuspocus/server";
 import { Redis } from "@hocuspocus/extension-redis";
 import { Database } from "@hocuspocus/extension-database";
+import IORedis from "ioredis";
 import {
   looksLikeGuestToken,
   verifyGuestToken,
@@ -45,11 +47,13 @@ const server = new Hocuspocus({
         const { tenantId, pageId } = parseDocName(documentName);
         return loadYdoc(tenantId, pageId);
       },
-      store: async ({ documentName, state }) => {
+      store: async ({ documentName, state, context }) => {
         const { tenantId, pageId } = parseDocName(documentName);
-        await storeYdoc(tenantId, pageId, state);
-        // storeYdoc handles 0-row detection and error logging internally.
-        // search_outbox INSERT happens inside storeYdoc only when stored=true.
+        const p = (context as any)?.principal;
+        const createdBy = p?.kind === "member"  ? `user:${p.userId}`
+                        : p?.kind === "guest"   ? `guest:${p.shareLinkId}`
+                        : undefined;
+        await storeYdoc(tenantId, pageId, state, createdBy);
       },
     }),
   ],
@@ -101,6 +105,37 @@ const server = new Hocuspocus({
 });
 
 server.listen();
+
+// ── Restore signal subscriber ─────────────────────────────────────────────
+//
+// Position: pages.ydoc is correctness (already updated by the API server before
+// this publish). The Valkey signal is a performance optimisation for immediate
+// propagation to currently-connected clients.
+//
+// If this subscriber is not running or the publish fails, connected clients
+// receive the restored state on their next reconnect (onLoadDocument reads
+// the already-updated pages.ydoc). Correctness is never lost.
+const restoreSub = new IORedis(process.env.VALKEY_URL ?? "redis://localhost:6379");
+
+restoreSub.psubscribe("kb:restore:*", (err) => {
+  if (err) console.error("[restore:sub] subscribe failed:", err);
+});
+
+restoreSub.on("pmessage", (_pattern: string, channel: string, data: string) => {
+  const documentName = channel.replace("kb:restore:", "");
+  const document = server.documents.get(documentName);
+  if (!document) return;  // not open; pages.ydoc already updated, next open loads it
+
+  try {
+    const update = Buffer.from(data, "base64");
+    Y.applyUpdate(document, update);
+    // Y.applyUpdate triggers Hocuspocus onChange → debounced onStoreDocument
+    // → storeYdoc (which creates a new revision, making the restore undoable).
+    // Redis extension also propagates the update to other Hocuspocus pods.
+  } catch (err) {
+    console.error(`[restore:apply] failed for ${documentName}:`, err);
+  }
+});
 
 // ---- helpers ----
 function parseDocName(name: string): { tenantId: string; pageId: string } {
