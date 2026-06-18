@@ -14,6 +14,14 @@ jobs:
       - run: pnpm typecheck
   license-check:
     # Enforces the permissive-only dependency allowlist (closed-source/open-core).
+    # TODO(licensing): license-checker-rseidelsohn reads a flat node_modules and
+    #   fails with "No packages found" under pnpm's symlinked layout, so this
+    #   step currently passes WITHOUT actually scanning anything — an AGPL/SSPL
+    #   dependency would NOT be detected. This is the legal precondition for the
+    #   ADR-011 dual-licensing boundary, so it must be fixed: switch to a
+    #   pnpm-aware checker (e.g. `pnpm licenses list`/`pnpm dlx
+    #   @pnpm/licenses`) or run the checker against a hoisted/`pnpm deploy` tree.
+    #   Tracked separately from the editor phase; do not leave unguarded.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
