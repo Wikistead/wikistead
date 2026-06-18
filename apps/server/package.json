@@ -26,7 +26,8 @@
     "fastify": "^5.0.0",
     "meilisearch": "^0.45.0",
     "postgres": "^3.4.0",
-    "stripe": "^22.2.1"
+    "stripe": "^22.2.1",
+    "yjs": "^13.6.0"
   },
   "devDependencies": {
     "@openfga/syntax-transformer": "^0.2.1",

@@ -1,8 +1,9 @@
+import * as Y from 'yjs'
 import type { Sql } from 'postgres'
 import type { OpenFgaClient } from '@openfga/sdk'
 import type { SearchDoc } from '@kb/types'
 
-interface PageRow { id: string; tenant_id: string; space_id: string; title: string; updated_at: Date }
+interface PageRow { id: string; tenant_id: string; space_id: string; title: string; ydoc: Buffer | null; updated_at: Date }
 
 function categorize(
   user: string,
@@ -17,12 +18,16 @@ function categorize(
   if (user.includes('#member')) { viewerGroups.add(user.replace(/#member$/, '')); return }
 }
 
-// Build a Meilisearch document by reading FGA tuples to compute viewer sets.
+// Build a Meilisearch document by reading FGA tuples to compute viewer sets
+// and extracting body text from the persisted ydoc binary.
 // Returns null if the page no longer exists (caller should issue a 'delete' instead).
 //
 // FGA is read 3 times (space, page, tenant tuples). Acceptable at Phase 0 data volume.
 // TODO(phase: search): batch into a single ListObjects call or cache space/tenant
 //   tuple reads when page count per space grows large.
+//
+// ydoc decode (Y.applyUpdate) runs on every outbox flush. Acceptable at Phase 0 volume.
+// TODO(phase: search): stream-decode or cache decoded text when update frequency is high.
 export async function buildSearchDoc(
   pool: Sql,
   fga: OpenFgaClient,
@@ -33,7 +38,7 @@ export async function buildSearchDoc(
   const page = await (pool.begin(async (tx) => {
     await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
     const [r] = await tx<PageRow[]>`
-      SELECT id, tenant_id, space_id, title, updated_at FROM pages WHERE id = ${pageId}
+      SELECT id, tenant_id, space_id, title, ydoc, updated_at FROM pages WHERE id = ${pageId}
     `
     return r ?? null
   }) as Promise<PageRow | null>)
@@ -66,12 +71,21 @@ export async function buildSearchDoc(
     categorize(key.user, viewerUsers, viewerGroups, setPublic)
   }
 
+  // Extract plain text from the persisted ydoc binary.
+  // Requires collab phase ydoc persistence to be active; returns '' until then.
+  let body = ''
+  if (page.ydoc) {
+    const doc = new Y.Doc()
+    Y.applyUpdate(doc, new Uint8Array(page.ydoc))
+    body = doc.getText('content').toString()
+  }
+
   return {
     id: pageId,
     tenantId: page.tenant_id,
     spaceId: page.space_id,
     title: page.title,
-    body: '',  // TODO(phase: collab): populate from ydoc snapshot after persistence is added
+    body,
     viewerUsers: [...viewerUsers],
     viewerGroups: [...viewerGroups],
     isPublic,
