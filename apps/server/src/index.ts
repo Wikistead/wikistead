@@ -10,17 +10,20 @@ import { LogicalSearchDriver } from './search/index.js'
 import type { SearchDriver } from './search/index.js'
 import { LogicalStorageDriver } from './storage/index.js'
 import type { StorageDriver } from './storage/index.js'
+import IORedis from 'ioredis'
 import { spacesPlugin } from './routes/spaces.js'
 import { pagesPlugin } from './routes/pages.js'
 import { billingPlugin } from './routes/billing.js'
 import { searchPlugin } from './routes/search.js'
 import { attachmentsPlugin } from './routes/attachments.js'
+import { revisionsPlugin } from './routes/revisions.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
     fga: typeof fgaClient
     searchDriver: SearchDriver
     storageDriver: StorageDriver
+    valkey: IORedis
   }
   interface FastifyRequest {
     tenant: Tenant
@@ -42,6 +45,9 @@ app.decorate('searchDriver', searchDriver)
 const storageDriver = new LogicalStorageDriver()
 await storageDriver.ensureBucket()
 app.decorate('storageDriver', storageDriver)
+
+const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
+app.decorate('valkey', valkey)
 
 const verifyMember = makeMemberVerifier({
   issuer: process.env.OIDC_ISSUER!,
@@ -84,6 +90,7 @@ await app.register(pagesPlugin)
 await app.register(billingPlugin)
 await app.register(searchPlugin)
 await app.register(attachmentsPlugin)
+await app.register(revisionsPlugin)
 
 // TODO stubs (see original comments):
 // POST /share-links            [phase: guest]
