@@ -10,6 +10,7 @@ import {
   verifyGuestToken,
   makeMemberVerifier,
 } from "@kb/auth";
+import { fgaClient, check, checkMemberAccess } from "@kb/authz";
 import { docName } from "@kb/types";
 
 const guestCfg = {
@@ -24,7 +25,6 @@ const verifyMember = makeMemberVerifier({
 const server = new Hocuspocus({
   port: Number(process.env.COLLAB_PORT ?? 4100),
 
-  // Horizontal scale: fan out Yjs awareness/updates across pods via Valkey.
   extensions: [
     new Redis({ host: hostFromUrl(process.env.VALKEY_URL), port: portFromUrl(process.env.VALKEY_URL) }),
     // TODO(phase: collab): add @hocuspocus/extension-database to persist Y.Text
@@ -49,9 +49,20 @@ const server = new Hocuspocus({
       const c = await verifyGuestToken(guestCfg, token);
       assert(c.tenantId === tenantId, "tenant mismatch");
       assert(c.resource.type === "page" && c.resource.id === pageId, "resource mismatch");
-      // TODO(phase: guest): re-check against OpenFGA (share_link subject + Conditions).
-      //   A revoked link (tuple deleted) or expired Condition must reject here even
-      //   if the JWT is still structurally valid.
+
+      // Re-check against OpenFGA: the JWT asserts intent, FGA asserts authority.
+      // A revoked link (tuple deleted) or expired Condition is rejected here even
+      // if the JWT is still structurally valid. Revocation is enforced at next
+      // onAuthenticate call (connected guests hold the JWT until exp).
+      const allowed = await check(
+        fgaClient,
+        `share_link:${c.shareLinkId}`,
+        c.capability === "view" ? "view" : "edit",
+        { type: "page", id: pageId },
+        { current_time: new Date().toISOString() },
+      );
+      assert(allowed, "share_link access denied or expired");
+
       return {
         principal: { kind: "guest", tenantId, shareLinkId: c.shareLinkId, capability: c.capability },
         readOnly: c.capability === "view",
@@ -59,11 +70,13 @@ const server = new Hocuspocus({
     }
 
     const m = await verifyMember(token);
-    assert(m.tenantId === tenantId || true, "tenant mismatch"); // tenant may be host-derived; reconcile in phase: auth
-    // TODO(phase: authz): OpenFGA check(user:<sub>, edit|view, page:<pageId>).
+    // One batchCheck round-trip: edit + view → RW / RO / reject.
+    const access = await checkMemberAccess(fgaClient, m.sub, { type: "page", id: pageId });
+    assert(access !== null, "member has no access to this page");
+
     return {
       principal: { kind: "member", tenantId, userId: m.sub, groups: m.groups },
-      readOnly: false,
+      readOnly: access.readOnly,
     };
   },
 });

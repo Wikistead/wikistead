@@ -1,0 +1,21 @@
+{
+  "name": "@kb/collab",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'noop'"
+  },
+  "dependencies": {
+    "@hocuspocus/server": "^2.15.0",
+    "@hocuspocus/extension-redis": "^2.15.0",
+    "@hocuspocus/extension-database": "^2.15.0",
+    "@kb/types": "workspace:*",
+    "@kb/auth": "workspace:*",
+    "@kb/authz": "workspace:*"
+  },
+  "devDependencies": { "typescript": "^5.6.0", "tsx": "^4.19.0" }
+}
