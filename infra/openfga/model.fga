@@ -44,10 +44,11 @@ type space
     define manager: [user, group#member] or admin from tenant
     define editor: [user, group#member] or manager
     # user:* here means public space — only set this tuple intentionally.
-    # TODO(phase: spaces): add share_link and share_link with non_expired here
-    # when space-scoped share links are implemented, so that revocation of a
-    # space-level link remains one tuple deletion (space:S#viewer@share_link:Y).
-    define viewer: [user, group#member, user:*] or editor
+    # space-scoped share links: one tuple (space:S#viewer@share_link:Y) grants
+    # view access to every page in S. Revoke = delete that tuple (1 op).
+    # Permanent links omit condition; time-bounded links use non_expired.
+    # TODO(phase: guest): implement space-scoped share link issuance API.
+    define viewer: [user, group#member, user:*, share_link, share_link with non_expired] or editor
     define admin: admin from tenant
 
 # share_link has no relations — the link identity is the principal.
