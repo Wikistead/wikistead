@@ -8,15 +8,19 @@ import { fgaClient } from '@kb/authz'
 import { makeMemberVerifier } from '@kb/auth'
 import { LogicalSearchDriver } from './search/index.js'
 import type { SearchDriver } from './search/index.js'
+import { LogicalStorageDriver } from './storage/index.js'
+import type { StorageDriver } from './storage/index.js'
 import { spacesPlugin } from './routes/spaces.js'
 import { pagesPlugin } from './routes/pages.js'
 import { billingPlugin } from './routes/billing.js'
 import { searchPlugin } from './routes/search.js'
+import { attachmentsPlugin } from './routes/attachments.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
     fga: typeof fgaClient
     searchDriver: SearchDriver
+    storageDriver: StorageDriver
   }
   interface FastifyRequest {
     tenant: Tenant
@@ -34,6 +38,10 @@ app.decorate('fga', fgaClient)
 const searchDriver = new LogicalSearchDriver()
 await searchDriver.ensureIndex()
 app.decorate('searchDriver', searchDriver)
+
+const storageDriver = new LogicalStorageDriver()
+await storageDriver.ensureBucket()
+app.decorate('storageDriver', storageDriver)
 
 const verifyMember = makeMemberVerifier({
   issuer: process.env.OIDC_ISSUER!,
@@ -75,6 +83,7 @@ await app.register(spacesPlugin)
 await app.register(pagesPlugin)
 await app.register(billingPlugin)
 await app.register(searchPlugin)
+await app.register(attachmentsPlugin)
 
 // TODO stubs (see original comments):
 // POST /share-links            [phase: guest]
