@@ -182,24 +182,45 @@ describe('permission revocation', () => {
 })
 
 // ── Tenant isolation ──────────────────────────────────────────────────────
+//
+// Anti-test structure:
+//   Step 1 — verify the doc IS indexed and IS visible when searching with the
+//             correct tenant (proves the test is non-trivial).
+//   Step 2 — verify the doc is NOT visible when searching as a different tenant
+//             (proves the tenant filter enforces isolation).
+//
+// Without step 1 this test would be a trivial false: if the doc was never
+// indexed (e.g., invalid Meili ID), the isolation assertion would pass vacuously.
 
 describe('tenant isolation in search', () => {
-  it('search results do not bleed across tenants', async () => {
-    // Directly insert a stale Meili doc with acme's tenant_id
+  const DOC_ID = 'acme-leak-test-doc'  // valid Meili ID: no colons
+
+  it('search results do not bleed across tenants (with anti-test)', async () => {
+    // Insert a doc belonging to tenant_acme but with dev-user in viewerUsers.
+    // If the tenant filter was absent, dev-user would see this doc.
     await driver.upsertDoc({
-      id: 'page:acme-leak-test', tenantId: 'tenant_acme', spaceId: 'space:acme_space',
-      title: 'acme-cross-tenant-leak', body: '',
+      id: DOC_ID, tenantId: 'tenant_acme', spaceId: 'acme-space',
+      title: 'acme-cross-tenant-leak-unique-qrs321', body: '',
       viewerUsers: ['user:dev-user'], viewerGroups: [], isPublic: true, updatedAt: Date.now(),
     })
     await wait()
 
-    // dev-user searches within tenant_dev — must not see tenant_acme docs
-    const hits = await driver.search({
-      tenantId: tenant.id, userId: 'dev-user', groups: [],
-      q: 'acme-cross-tenant-leak',
+    // Anti-test: confirm the doc IS indexed and visible when searched as tenant_acme.
+    // This proves step 2's false is NOT because the doc was never indexed.
+    const hitsInAcme = await driver.search({
+      tenantId: 'tenant_acme', userId: 'dev-user', groups: [],
+      q: 'acme-cross-tenant-leak-unique-qrs321',
     })
-    expect(hits.some(h => h.id === 'page:acme-leak-test')).toBe(false)
+    expect(hitsInAcme.some(h => h.id === DOC_ID)).toBe(true)
 
-    await driver.deleteDoc('page:acme-leak-test')
+    // Isolation: searching as tenant_dev must NOT return a tenant_acme doc,
+    // even though dev-user is in viewerUsers and the doc is indexed.
+    const hitsInDev = await driver.search({
+      tenantId: tenant.id, userId: 'dev-user', groups: [],
+      q: 'acme-cross-tenant-leak-unique-qrs321',
+    })
+    expect(hitsInDev.some(h => h.id === DOC_ID)).toBe(false)
+
+    await driver.deleteDoc(DOC_ID)
   })
 })
