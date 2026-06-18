@@ -10,7 +10,7 @@ import type { TenantDb } from '../db/index.js'
 import { fgaClient, check, checkRelation, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, listSpaces, deleteSpace } from '../routes/spaces.js'
-import { createPage, listPages, getPage, deletePage } from '../routes/pages.js'
+import { createPage, listPages, getPage, deletePage, movePage } from '../routes/pages.js'
 import type { Tenant } from '@wikistead/types'
 
 const driver = new LogicalSearchDriver()
@@ -174,6 +174,68 @@ describe('page lifecycle', () => {
 
     const rows = await db.sql<{ id: string }[]>`SELECT id FROM pages WHERE title = ${title}`
     expect(rows).toHaveLength(0)
+  })
+})
+
+// ── nesting / move / reorder (intra-space, phase 3b ①) ─────────────────────
+
+describe('page nesting and ordering', () => {
+  let spaceId: string
+  beforeAll(async () => {
+    const s = await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'nesting-space' })
+    spaceId = s.id
+  })
+  afterAll(async () => {
+    await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user' })
+  })
+
+  it('creates a nested page and lists it ordered by position', async () => {
+    const parent = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'parent' })
+    const a = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'A', parentId: parent.id })
+    const b = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'B', parentId: parent.id })
+    const pages = await listPages(db, fgaClient, { spaceId, userId: 'dev-user' })
+    const child = pages.find((p) => p.id === a.id)!
+    expect(child.parentId).toBe(parent.id)
+    // created in order -> A before B by position
+    const kids = pages.filter((p) => p.parentId === parent.id)
+    expect(kids.map((k) => k.id)).toEqual([a.id, b.id])
+  })
+
+  it('reorders: moving B before A flips their order (single-row position update)', async () => {
+    const parent = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'p2' })
+    const a = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'A2', parentId: parent.id })
+    const b = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'B2', parentId: parent.id })
+    await movePage(db, fgaClient, { pageId: b.id, userId: 'dev-user', parentId: parent.id, afterId: null }) // B to first
+    const kids = (await listPages(db, fgaClient, { spaceId, userId: 'dev-user' })).filter((p) => p.parentId === parent.id)
+    expect(kids.map((k) => k.id)).toEqual([b.id, a.id])
+  })
+
+  it('rejects a cycle: cannot nest a page under its own descendant', async () => {
+    const root = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'root' })
+    const mid = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'mid', parentId: root.id })
+    await expect(
+      movePage(db, fgaClient, { pageId: root.id, userId: 'dev-user', parentId: mid.id, afterId: null }),
+    ).rejects.toThrow()
+  })
+
+  it('move requires edit on the page', async () => {
+    const page = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'move-authz' })
+    await expect(
+      movePage(db, fgaClient, { pageId: page.id, userId: 'stranger', parentId: null, afterId: null }),
+    ).rejects.toThrow()
+  })
+
+  it('delete cascades the subtree and sweeps descendants FGA grants', async () => {
+    const parent = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'del-parent' })
+    const child = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'del-child', parentId: parent.id })
+    expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: child.id })).toBe(true)
+
+    await deletePage(db, fgaClient, driver, { pageId: parent.id, userId: 'dev-user' })
+
+    const rows = await db.sql`SELECT id FROM pages WHERE id IN (${parent.id}, ${child.id})`
+    expect(rows).toHaveLength(0) // cascade removed the child too
+    // descendant's FGA grant swept (no ghost auth)
+    expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: child.id })).toBe(false)
   })
 })
 
