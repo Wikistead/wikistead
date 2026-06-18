@@ -10,12 +10,14 @@
     "lint": "echo 'noop'"
   },
   "dependencies": {
+    "@ark-ui/react": "^5.37.2",
     "@codemirror/lang-markdown": "^6.3.0",
     "@codemirror/language": "^6.10.0",
     "@codemirror/state": "^6.4.0",
     "@codemirror/view": "^6.34.0",
     "@hocuspocus/provider": "^2.15.0",
     "@replit/codemirror-vim": "^6.2.0",
+    "@tanstack/react-query": "^5.101.0",
     "codemirror": "^6.0.1",
     "lucide-react": "^1.21.0",
     "react": "^19.2.7",
