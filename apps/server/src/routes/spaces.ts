@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, writeTuples, deleteTuples, deleteObjectTuples } from '@kb/authz'
+import { resolveEntitlements } from '@kb/entitlements'
 import type { TenantDb } from '../db/index.js'
 
 interface SpaceRow { id: string; tenant_id: string; name: string; created_at: Date }
@@ -21,8 +22,23 @@ function toSpace(r: SpaceRow): Space {
 export async function createSpace(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { tenantId: string; userId: string; name: string },
+  args: { tenantId: string; userId: string; name: string; plan: string },
 ): Promise<Space> {
+  const ent = resolveEntitlements(args.plan)
+  if (isFinite(ent.maxSpaces)) {
+    // RLS scopes this count to the current tenant automatically.
+    // TODO(phase: billing): this count + insert is not atomic; two concurrent
+    // requests can both read count < limit and both succeed, briefly exceeding
+    // the cap. Acceptable at Phase 0 scale; fix with advisory lock or a DB
+    // constraint when strict enforcement is required.
+    const [{ count }] = await db.sql<[{ count: string }]>`
+      SELECT count(*)::text AS count FROM spaces
+    `
+    if (Number(count) >= ent.maxSpaces) {
+      throw Object.assign(new Error('space limit reached'), { statusCode: 403 })
+    }
+  }
+
   const row = await db.tx(async (tx) => {
     const [r] = await tx<SpaceRow[]>`
       INSERT INTO spaces (tenant_id, name)
@@ -86,6 +102,7 @@ export async function spacesPlugin(app: FastifyInstance) {
       tenantId: req.tenant.id,
       userId: req.user.sub,
       name: req.body.name,
+      plan: req.tenant.plan,
     })
     return reply.code(201).send(space)
   })

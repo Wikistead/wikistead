@@ -8,6 +8,7 @@ import { fgaClient } from '@kb/authz'
 import { makeMemberVerifier } from '@kb/auth'
 import { spacesPlugin } from './routes/spaces.js'
 import { pagesPlugin } from './routes/pages.js'
+import { billingPlugin } from './routes/billing.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -39,7 +40,7 @@ app.get('/healthz', async () => ({ ok: true }))
 app.get('/readyz', async () => ({ ok: true })) // TODO: probe pg/valkey/fga/meili
 
 app.addHook('onRequest', async (req, reply) => {
-  if (req.url === '/healthz' || req.url === '/readyz') return
+  if (req.url === '/healthz' || req.url === '/readyz' || req.url.startsWith('/webhooks/')) return
 
   // ── Tenant resolution ──────────────────────────────────────────────────
   const { slug, domain } = resolveTenantFromHost(req.headers.host ?? '')
@@ -71,6 +72,7 @@ app.addHook('onError',    async (req) => { await req.db?.release() })
 // --- Routes ---
 await app.register(spacesPlugin)
 await app.register(pagesPlugin)
+await app.register(billingPlugin)
 
 // --- Legacy / stubs ---
 // POST /share-links            -> mint guest share token                   [phase: guest]
