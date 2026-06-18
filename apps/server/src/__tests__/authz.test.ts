@@ -3,7 +3,7 @@
 // the actual OpenFGA evaluation engine.
 //
 // Prerequisite: run `pnpm fga:bootstrap && pnpm fga:seed` before this suite.
-import { describe, it, expect, afterAll } from 'vitest'
+import { describe, it, expect, afterAll, beforeEach, afterEach } from 'vitest'
 import { fgaClient, check, checkMemberAccess, writeTuples, deleteTuples } from '@kb/authz'
 
 const now = () => new Date().toISOString()
@@ -87,19 +87,33 @@ describe('non-expiring share_link', () => {
 })
 
 // ── share_link: time-bounded (with non_expired condition) ─────────────────
+// Tests create their own fresh tuples to avoid depending on the 1-hour seed expiry.
 
 describe('time-bounded share_link', () => {
-  it('demo_edit_temp can edit page:demo before expiry', async () => {
+  const LINK = 'share_link:authz_test_temp_edit'
+  const expiresAt = () => new Date(Date.now() + 3600_000).toISOString()
+
+  beforeEach(async () => {
+    await writeTuples(fgaClient, [
+      { user: LINK, relation: 'edit', object: 'page:demo',
+        condition: { name: 'non_expired', context: { expires_at: expiresAt() } } },
+    ])
+  })
+  afterEach(async () => {
+    await deleteTuples(fgaClient, [{ user: LINK, relation: 'edit', object: 'page:demo' }])
+  })
+
+  it('time-bounded link can edit page:demo before expiry', async () => {
     expect(
-      await check(fgaClient, 'share_link:demo_edit_temp', 'edit', page('demo'), { current_time: now() }),
+      await check(fgaClient, LINK, 'edit', page('demo'), { current_time: now() }),
     ).toBe(true)
   })
 
-  it('demo_edit_temp cannot edit page:demo after expiry', async () => {
+  it('time-bounded link cannot edit page:demo after expiry', async () => {
     // current_time far in the future → condition fails
     const pastExpiry = new Date(Date.now() + 7200_000).toISOString()
     expect(
-      await check(fgaClient, 'share_link:demo_edit_temp', 'edit', page('demo'), { current_time: pastExpiry }),
+      await check(fgaClient, LINK, 'edit', page('demo'), { current_time: pastExpiry }),
     ).toBe(false)
   })
 

@@ -8,9 +8,12 @@ import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { fgaClient, check, checkRelation, writeTuples, deleteTuples } from '@kb/authz'
+import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, listSpaces, deleteSpace } from '../routes/spaces.js'
 import { createPage, listPages, getPage, deletePage } from '../routes/pages.js'
 import type { Tenant } from '@kb/types'
+
+const driver = new LogicalSearchDriver()
 
 let tenant: Tenant
 let db: TenantDb
@@ -85,7 +88,7 @@ describe('space lifecycle', () => {
     expect(await check(fgaClient, 'user:dev-user', 'manage', { type: 'space', id: space.id })).toBe(true)
 
     // Cleanup
-    await deleteSpace(db, fgaClient, { tenantId: tenant.id, spaceId: space.id, userId: 'dev-user' })
+    await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: space.id, userId: 'dev-user' })
   })
 
   it('deleteSpace removes DB row and all FGA tuples', async () => {
@@ -93,7 +96,7 @@ describe('space lifecycle', () => {
       tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'delete-me-space',
     })
     const spaceId = space.id
-    await deleteSpace(db, fgaClient, { tenantId: tenant.id, spaceId, userId: 'dev-user' })
+    await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user' })
 
     const rows = await db.sql`SELECT id FROM spaces WHERE id = ${spaceId}`
     expect(rows).toHaveLength(0)
@@ -128,21 +131,21 @@ describe('page lifecycle', () => {
   })
 
   afterAll(async () => {
-    await deleteSpace(db, fgaClient, { tenantId: tenant.id, spaceId, userId: 'dev-user' })
+    await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user' })
   })
 
   it('createPage writes FGA space tuple and returns the page', async () => {
-    const page = await createPage(db, fgaClient, {
+    const page = await createPage(db, fgaClient, driver, {
       tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'Hello',
     })
     expect(page.spaceId).toBe(spaceId)
     expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: page.id })).toBe(true)
 
-    await deletePage(db, fgaClient, { pageId: page.id, userId: 'dev-user' })
+    await deletePage(db, fgaClient, driver, { pageId: page.id, userId: 'dev-user' })
   })
 
   it('deletePage removes DB row and FGA tuples including share_link grants', async () => {
-    const page = await createPage(db, fgaClient, {
+    const page = await createPage(db, fgaClient, driver, {
       tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'ToDelete',
     })
     // Simulate a share_link grant on this page
@@ -151,7 +154,7 @@ describe('page lifecycle', () => {
     ])
     expect(await check(fgaClient, 'share_link:page-delete-test-link', 'view', { type: 'page', id: page.id })).toBe(true)
 
-    await deletePage(db, fgaClient, { pageId: page.id, userId: 'dev-user' })
+    await deletePage(db, fgaClient, driver, { pageId: page.id, userId: 'dev-user' })
 
     const rows = await db.sql`SELECT id FROM pages WHERE id = ${page.id}`
     expect(rows).toHaveLength(0)
@@ -166,7 +169,7 @@ describe('page lifecycle', () => {
     })
     const title = `rollback-page-${Date.now()}`
     await expect(
-      createPage(db, badFga, { tenantId: tenant.id, spaceId, userId: 'dev-user', title }),
+      createPage(db, badFga, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title }),
     ).rejects.toThrow()
 
     const rows = await db.sql<{ id: string }[]>`SELECT id FROM pages WHERE title = ${title}`
@@ -181,10 +184,10 @@ describe('space-scoped share_link', () => {
     const space = await createSpace(db, fgaClient, {
       tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'share-link-space-test',
     })
-    const page1 = await createPage(db, fgaClient, {
+    const page1 = await createPage(db, fgaClient, driver, {
       tenantId: tenant.id, spaceId: space.id, userId: 'dev-user', title: 'P1',
     })
-    const page2 = await createPage(db, fgaClient, {
+    const page2 = await createPage(db, fgaClient, driver, {
       tenantId: tenant.id, spaceId: space.id, userId: 'dev-user', title: 'P2',
     })
 
@@ -205,6 +208,6 @@ describe('space-scoped share_link', () => {
     expect(await check(fgaClient, 'share_link:space-level-test-link', 'view', { type: 'page', id: page1.id })).toBe(false)
     expect(await check(fgaClient, 'share_link:space-level-test-link', 'view', { type: 'page', id: page2.id })).toBe(false)
 
-    await deleteSpace(db, fgaClient, { tenantId: tenant.id, spaceId: space.id, userId: 'dev-user' })
+    await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: space.id, userId: 'dev-user' })
   })
 })
