@@ -11,6 +11,7 @@
     "migrate": "tsx src/migrate.ts",
     "fga:bootstrap": "tsx ../../infra/openfga/bootstrap.ts",
     "fga:seed": "tsx ../../infra/openfga/seed.ts",
+    "db:seed": "tsx ../../infra/db/seed.ts",
     "storage:gc": "tsx src/storage/gc.ts",
     "test": "vitest run"
   },

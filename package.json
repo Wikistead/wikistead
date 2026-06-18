@@ -11,7 +11,7 @@
     "test": "turbo run test",
     "license:check": "license-checker-rseidelsohn --production --onlyAllow 'MIT;MIT OR X11;ISC;Apache-2.0;BSD-2-Clause;BSD-3-Clause;0BSD;Unlicense;CC0-1.0;MPL-2.0;BlueOak-1.0.0;Python-2.0' --excludePackages 'knowledge-saas'",
     "lint:no-ee-imports": "node scripts/check-ce-imports.mjs",
-    "build": "turbo run build --filter='!./packages-ee/**' --filter='!./apps-ee/**'",
+    "build:ee": "turbo run build",
     "compose:up": "docker compose up -d",
     "compose:down": "docker compose down"
   },
