@@ -42,14 +42,19 @@ services:
     ports: ["7700:7700"]
     volumes: ["meilidata:/meili_data"]
 
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports: ["9000:9000", "9001:9001"]
-    volumes: ["miniodata:/data"]
+  # S3-compatible object storage: SeaweedFS (Apache-2.0, pure OSS). Replaced
+  # MinIO (community edition development stalled). S3 gateway (container :8333)
+  # mapped to host :9000 so S3_ENDPOINT is unchanged; credentials come from the
+  # mounted s3.json identity (minioadmin/minioadmin). StorageDriver is unchanged
+  # — but set AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED in .env (SeaweedFS
+  # rejects the AWS SDK v3 default flexible checksums on presigned PUT).
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json"
+    ports: ["9000:8333"]
+    volumes:
+      - seaweeddata:/data
+      - ./infra/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
 
   # Optional: run the app services in-compose too. For tight dev loops, prefer
   # running them on the host via `pnpm dev` against the middleware above.
@@ -70,4 +75,4 @@ services:
 volumes:
   pgdata:
   meilidata:
-  miniodata:
+  seaweeddata:
