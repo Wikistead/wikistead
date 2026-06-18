@@ -1,0 +1,76 @@
+model
+  schema 1.1
+
+# Authorization model — confirmed design decisions (see ADR-001).
+#
+# Principals
+#   user          – authenticated member (OIDC, any compliant IdP per tenant)
+#   group#member  – convenience grouping within a tenant
+#   user:*        – PUBLIC (anyone on the internet). Used ONLY for truly public
+#                   resources; never as "all members of a tenant" (that is
+#                   tenant:T#member). The tuple page:X#view@user:* is the sole
+#                   switch between private and public; search's is_public must
+#                   stay in sync with it.
+#
+# Monotonic grant model — no explicit deny.
+#   Per-page upgrades (space-viewer to page-editor) use direct tuples.
+#   If deny semantics become necessary, add "but not" at that point.
+#
+# share_link — anonymous wildcard access. The link identity IS the principal.
+#   Capability (view vs edit) is encoded in which page relation is written.
+#   Expiry is optional: write the tuple WITH condition non_expired for
+#   time-bounded links; write WITHOUT condition for permanent links.
+#   Revocation = delete the page tuple for this share_link (instant effect
+#   on next onAuthenticate call; connected guests hold the JWT until exp).
+#
+# Inheritance depth — space is the only inheritance level wired now.
+#   page#parent is reserved for nested-page inheritance but is intentionally
+#   unlinked from permission relations until the requirement surfaces.
+
+type user
+
+type group
+  relations
+    define member: [user]
+
+type tenant
+  relations
+    define admin: [user]
+    define member: [user, group#member]
+
+type space
+  relations
+    define tenant: [tenant]
+    define manager: [user, group#member] or admin from tenant
+    define editor: [user, group#member] or manager
+    # user:* here means public space — only set this tuple intentionally.
+    define viewer: [user, group#member, user:*] or editor
+    define admin: admin from tenant
+
+# share_link has no relations — the link identity is the principal.
+# Its capability and expiry live in the page relation tuples.
+type share_link
+
+type page
+  relations
+    define space: [space]
+    # Reserved for future nested-page inheritance. Not wired into any
+    # permission relation yet — space is the sole inheritance level for now.
+    define parent: [page]
+
+    define manage: [user, group#member] or manager from space
+    # share_link entries appear twice per relation:
+    #   share_link             — permanent link (tuple written without condition)
+    #   share_link with non_expired — time-bounded link (tuple written with condition)
+    # OpenFGA requires both to be declared to allow either form.
+    define edit: [user, group#member, share_link, share_link with non_expired] or manage or editor from space
+    define comment: [user, group#member] or edit
+    # user:* here means public page — keep in sync with search is_public.
+    define view: [user, group#member, user:*, share_link, share_link with non_expired] or comment or viewer from space
+
+# Evaluated at check time using current_time from the check context.
+# expires_at is stored in the tuple condition context at write time.
+# Tuples written WITHOUT this condition are permanent (no expiry check).
+condition non_expired(current_time: timestamp, expires_at: timestamp) {
+  current_time < expires_at
+}
