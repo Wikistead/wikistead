@@ -3,7 +3,7 @@
 // logging, compliance export, webhooks, etc.
 //
 // emit() is fire-and-forget: handlers run asynchronously and must never block
-// the API response. A failed handler does not fail the request.
+// the API response. A failed handler logs to stderr but does NOT fail the request.
 
 export type DomainEvent =
   // ── Pages ────────────────────────────────────────────────────────────
@@ -18,6 +18,7 @@ export type DomainEvent =
   | { type: 'attachment.confirmed'; tenantId: string; attachmentId: string; pageId: string; actorId: string }
   | { type: 'attachment.deleted';   tenantId: string; attachmentId: string; pageId: string; actorId: string }
   // ── Share links ──────────────────────────────────────────────────────
+  // TODO(phase: guest): emit share_link.revoked in the share link revocation API.
   | { type: 'share_link.revoked'; tenantId: string; shareLinkId: string; pageId: string; actorId: string }
   // ── API keys ─────────────────────────────────────────────────────────
   | { type: 'api_key.created'; tenantId: string; keyId: string; actorId: string }
@@ -38,8 +39,18 @@ export function onDomainEvent(handler: Handler): () => void {
   return () => { const i = _handlers.indexOf(handler); if (i !== -1) _handlers.splice(i, 1) }
 }
 
-// Fire-and-forget: all handlers run concurrently; errors are swallowed.
-// API responses must never depend on event handler success.
+// Fire-and-forget: all handlers run concurrently.
+// A failed handler is logged to stderr so missing audit events are visible
+// in application logs, but the error is NOT re-thrown — API responses must
+// never depend on event handler success.
+//
+// TODO(phase: ee-audit): replace console.error with a structured logger
+// or a dead-letter queue so EE can distinguish "event fired but handler
+// failed" from "event never fired" in compliance forensics.
 export function emit(event: DomainEvent): void {
-  for (const h of _handlers) void Promise.resolve(h(event)).catch(() => {})
+  for (const h of _handlers) {
+    void Promise.resolve(h(event)).catch((err) => {
+      console.error('[events:handler-error]', event.type, err)
+    })
+  }
 }

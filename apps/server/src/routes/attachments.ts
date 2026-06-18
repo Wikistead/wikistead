@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check } from '@kb/authz'
+import { emit } from '@kb/events'
 import { pool } from '../db/pool.js'
 import { makeS3Key } from '../storage/driver.js'
 import type { StorageDriver } from '../storage/index.js'
@@ -59,7 +60,7 @@ export async function presignAttachment(
 export async function confirmAttachment(
   db: TenantDb,
   storage: StorageDriver,
-  args: { id: string; tenantId: string },
+  args: { id: string; tenantId: string; userId: string },
 ): Promise<AttachmentSummary & { downloadUrl: string }> {
   const [row] = await db.sql<AttachmentRow[]>`
     SELECT * FROM attachments WHERE id = ${args.id} AND status = 'pending'
@@ -80,6 +81,7 @@ export async function confirmAttachment(
     WHERE id = ${args.id}
   `
   const downloadUrl = await storage.presignGet(row.s3_key, { ttlSeconds: GET_TTL })
+  emit({ type: 'attachment.confirmed', tenantId: args.tenantId, attachmentId: row.id, pageId: row.page_id, actorId: args.userId })
   return { id: row.id, filename: row.filename, contentType: row.content_type, sizeBytes, createdAt: row.created_at, downloadUrl }
 }
 
@@ -143,6 +145,7 @@ export async function deleteAttachment(
 
   // Soft delete first (visible effect is immediate — row disappears from reads).
   await db.sql`UPDATE attachments SET status = 'deleted' WHERE id = ${args.id}`
+  emit({ type: 'attachment.deleted', tenantId: row.tenant_id, attachmentId: row.id, pageId: row.page_id, actorId: args.userId })
 
   // Fire-and-forget: S3 delete → physical DB delete.
   // If S3 or DB delete fails, status='deleted' remains and GC retries.
@@ -185,7 +188,7 @@ export async function attachmentsPlugin(app: FastifyInstance) {
   )
 
   app.post<{ Params: { id: string } }>('/attachments/:id/confirm', async (req) => {
-    return confirmAttachment(req.db, app.storageDriver, { id: req.params.id, tenantId: req.tenant.id })
+    return confirmAttachment(req.db, app.storageDriver, { id: req.params.id, tenantId: req.tenant.id, userId: req.user.sub })
   })
 
   app.get<{ Params: { id: string } }>('/attachments/:id/download', async (req, reply) => {
