@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { Editor } from "../editor/Editor";
 import { Sidebar } from "../sidebar/Sidebar";
+import { SearchBox } from "../search/SearchBox";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, type GuestToken } from "../data/apiClient";
 
@@ -15,7 +16,7 @@ function PageRoute() {
   const { token, tenantId, user } = useSession();
   const docName = `t:${tenantId}:p:${pageId}`;
   return (
-    <AppShell sidebar={<Sidebar />}>
+    <AppShell sidebar={<Sidebar />} search={<SearchBox />}>
       <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={user} />
     </AppShell>
   );

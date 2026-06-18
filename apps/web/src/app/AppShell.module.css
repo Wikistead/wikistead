@@ -23,6 +23,12 @@
   font-size: 14px;
 }
 
+.search {
+  margin-left: auto;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .sidebar {
   grid-area: sidebar;
   background: var(--panel);

@@ -134,3 +134,26 @@ export function useRevokeShareLink() {
     onSuccess: (_r, args) => qc.invalidateQueries({ queryKey: ["share-links", args.pageId] }),
   });
 }
+
+// ── search ───────────────────────────────────────────────────────────────
+// GET /search is two-stage-guarded server-side (Meili candidates -> FGA `view`
+// confirm). It returns ONLY authorized hits, and only the title (no body
+// snippet). The client therefore never receives — and cannot leak — a result the
+// user can't view. Hits carry id/tenantId/spaceId/title only.
+export interface SearchHit {
+  id: string;
+  tenantId: string;
+  spaceId: string;
+  title: string;
+}
+
+export function useSearch(q: string) {
+  const { token } = useSession();
+  const query = q.trim();
+  return useQuery({
+    queryKey: ["search", query],
+    queryFn: () => apiFetch<SearchHit[]>(`/search?q=${encodeURIComponent(query)}`, token).then((r) => r ?? []),
+    enabled: query.length > 0,
+    staleTime: 10_000,
+  });
+}
