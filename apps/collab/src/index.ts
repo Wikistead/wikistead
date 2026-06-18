@@ -5,6 +5,7 @@
 import { Hocuspocus } from "@hocuspocus/server";
 import type { onAuthenticatePayload } from "@hocuspocus/server";
 import { Redis } from "@hocuspocus/extension-redis";
+import { Database } from "@hocuspocus/extension-database";
 import {
   looksLikeGuestToken,
   verifyGuestToken,
@@ -12,6 +13,7 @@ import {
 } from "@kb/auth";
 import { fgaClient, check, checkMemberAccess } from "@kb/authz";
 import { docName } from "@kb/types";
+import { loadYdoc, storeYdoc } from "./ydoc.js";
 
 const guestCfg = {
   secret: process.env.GUEST_TOKEN_SECRET!,
@@ -25,10 +27,31 @@ const verifyMember = makeMemberVerifier({
 const server = new Hocuspocus({
   port: Number(process.env.COLLAB_PORT ?? 4100),
 
+  // Hocuspocus debounces onStoreDocument at the server level (default: 2000ms).
+  // Store fires 2s after the last document change — does not block the
+  // local-first <16ms edit target (Yjs handles local edits immediately).
+  debounce: 2000,
+
   extensions: [
     new Redis({ host: hostFromUrl(process.env.VALKEY_URL), port: portFromUrl(process.env.VALKEY_URL) }),
-    // TODO(phase: collab): add @hocuspocus/extension-database to persist Y.Text
-    //                      updates to Postgres + periodic named snapshots.
+
+    // Ydoc persistence via Postgres. All DB access uses withTenant() so RLS
+    // applies — cross-tenant reads return null, cross-tenant writes affect 0 rows.
+    // onAuthenticate (above) runs before onLoadDocument, so by the time fetch/store
+    // are called the principal is already authorized — persistence does not
+    // re-check authorization but inherits the tenant boundary from documentName.
+    new Database({
+      fetch: async ({ documentName }) => {
+        const { tenantId, pageId } = parseDocName(documentName);
+        return loadYdoc(tenantId, pageId);
+      },
+      store: async ({ documentName, state }) => {
+        const { tenantId, pageId } = parseDocName(documentName);
+        await storeYdoc(tenantId, pageId, state);
+        // storeYdoc handles 0-row detection and error logging internally.
+        // search_outbox INSERT happens inside storeYdoc only when stored=true.
+      },
+    }),
   ],
 
   async onAuthenticate({ token, documentName, requestParameters }: onAuthenticatePayload) {
@@ -51,9 +74,6 @@ const server = new Hocuspocus({
       assert(c.resource.type === "page" && c.resource.id === pageId, "resource mismatch");
 
       // Re-check against OpenFGA: the JWT asserts intent, FGA asserts authority.
-      // A revoked link (tuple deleted) or expired Condition is rejected here even
-      // if the JWT is still structurally valid. Revocation is enforced at next
-      // onAuthenticate call (connected guests hold the JWT until exp).
       const allowed = await check(
         fgaClient,
         `share_link:${c.shareLinkId}`,
@@ -70,7 +90,6 @@ const server = new Hocuspocus({
     }
 
     const m = await verifyMember(token);
-    // One batchCheck round-trip: edit + view → RW / RO / reject.
     const access = await checkMemberAccess(fgaClient, m.sub, { type: "page", id: pageId });
     assert(access !== null, "member has no access to this page");
 
