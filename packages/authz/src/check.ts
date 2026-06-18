@@ -10,13 +10,15 @@ export interface CheckContext {
 export async function check(
   fga: OpenFgaClient,
   user: string,
-  capability: Capability,
+  // string (not Capability) because space relations differ from page relations:
+  // page uses "manage"/"edit"/"view"; space uses "manager"/"editor"/"viewer".
+  relation: string,
   resource: ResourceRef,
   context?: CheckContext,
 ): Promise<boolean> {
   const { allowed } = await fga.check({
     user,
-    relation: capability,
+    relation,
     object: `${resource.type}:${resource.id}`,
     ...(context ? { context } : {}),
   })
@@ -28,12 +30,12 @@ export async function check(
 export async function filterAuthorized(
   fga: OpenFgaClient,
   user: string,
-  capability: Capability,
+  relation: string,
   pageIds: string[],
 ): Promise<Set<string>> {
   const results = await Promise.all(
     pageIds.map((id) =>
-      check(fga, user, capability, { type: 'page', id }).then((ok) => [id, ok] as const),
+      check(fga, user, relation, { type: 'page', id }).then((ok) => [id, ok] as const),
     ),
   )
   return new Set(results.filter(([, ok]) => ok).map(([id]) => id))

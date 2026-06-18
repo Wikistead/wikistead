@@ -33,3 +33,14 @@ export async function deleteTuples(
   }))
   await fga.write({ deletes })
 }
+
+// Read all tuples whose object matches the given string, then delete them.
+// Used when deleting a space or page to remove all FGA grants in one sweep
+// (including any share_link tuples), preventing ghost authorization.
+export async function deleteObjectTuples(fga: OpenFgaClient, object: string): Promise<void> {
+  const { tuples } = await fga.read({ object })
+  const keys = (tuples ?? [])
+    .map((t) => t.key)
+    .filter((k): k is TupleKeyWithoutCondition => !!k?.user && !!k?.relation && !!k?.object)
+  if (keys.length > 0) await fga.write({ deletes: keys })
+}
