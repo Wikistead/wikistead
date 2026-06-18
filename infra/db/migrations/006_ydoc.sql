@@ -1,0 +1,11 @@
+-- Migration 006: add ydoc column to pages for Hocuspocus persistence.
+--
+-- Y.Text (Y.Doc binary) is the canonical source of page content.
+-- This column is written by apps/collab via withTenant() under RLS so that
+-- cross-tenant writes are blocked at the DB level — same guarantee as other
+-- tenant-scoped columns.
+--
+-- No new RLS policy needed: the existing pages policy
+--   USING (tenant_id = current_setting('app.tenant_id', TRUE))
+-- already covers every column, including this one.
+ALTER TABLE pages ADD COLUMN IF NOT EXISTS ydoc BYTEA;
