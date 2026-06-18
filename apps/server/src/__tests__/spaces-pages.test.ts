@@ -73,7 +73,7 @@ describe('RLS isolation', () => {
 describe('space lifecycle', () => {
   it('createSpace writes FGA tuples and returns the space', async () => {
     const space = await createSpace(db, fgaClient, {
-      tenantId: tenant.id, userId: 'dev-user', name: 'test-space',
+      tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'test-space',
     })
     expect(space.tenantId).toBe(tenant.id)
 
@@ -90,7 +90,7 @@ describe('space lifecycle', () => {
 
   it('deleteSpace removes DB row and all FGA tuples', async () => {
     const space = await createSpace(db, fgaClient, {
-      tenantId: tenant.id, userId: 'dev-user', name: 'delete-me-space',
+      tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'delete-me-space',
     })
     const spaceId = space.id
     await deleteSpace(db, fgaClient, { tenantId: tenant.id, spaceId, userId: 'dev-user' })
@@ -107,7 +107,7 @@ describe('space lifecycle', () => {
     })
     const name = `rollback-test-${Date.now()}`
     await expect(
-      createSpace(db, badFga, { tenantId: tenant.id, userId: 'dev-user', name }),
+      createSpace(db, badFga, { tenantId: tenant.id, userId: 'dev-user', name, plan: 'pro' }),
     ).rejects.toThrow()
 
     const rows = await db.sql<{ id: string }[]>`SELECT id FROM spaces WHERE name = ${name}`
@@ -122,7 +122,7 @@ describe('page lifecycle', () => {
 
   beforeAll(async () => {
     const space = await createSpace(db, fgaClient, {
-      tenantId: tenant.id, userId: 'dev-user', name: 'page-test-space',
+      tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'page-test-space',
     })
     spaceId = space.id
   })
@@ -179,7 +179,7 @@ describe('page lifecycle', () => {
 describe('space-scoped share_link', () => {
   it('grants view on all pages in the space via one tuple, revoke removes all access', async () => {
     const space = await createSpace(db, fgaClient, {
-      tenantId: tenant.id, userId: 'dev-user', name: 'share-link-space-test',
+      tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'share-link-space-test',
     })
     const page1 = await createPage(db, fgaClient, {
       tenantId: tenant.id, spaceId: space.id, userId: 'dev-user', title: 'P1',
