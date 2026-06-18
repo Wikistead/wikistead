@@ -22,6 +22,7 @@ import { attachmentsPlugin } from './routes/attachments.js'
 import { revisionsPlugin } from './routes/revisions.js'
 import { publicPlugin } from './routes/public.js'
 import { apiKeysPlugin } from './routes/api-keys.js'
+import { shareLinksPlugin } from './routes/share-links.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -137,12 +138,13 @@ await app.register(attachmentsPlugin)
 await app.register(revisionsPlugin)
 await app.register(publicPlugin)
 await app.register(apiKeysPlugin)
+await app.register(shareLinksPlugin)
 
 // TODO stubs (see original comments):
-// POST /share-links            [phase: guest]
-// DELETE /share-links/:id      [phase: guest]
 // POST /attachments/presign    [phase: storage]
 // GET  /entitlements           (registered in billingPlugin)
+// share links (POST/GET/DELETE /share-links, POST /public/share-links/:id/token)
+//   are implemented in shareLinksPlugin.
 app.get('/', async (req) => ({ service: 'kb-server', tenant: req.tenant?.slug }))
 
 const port = Number(process.env.SERVER_PORT ?? 4000)
