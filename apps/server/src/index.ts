@@ -6,17 +6,19 @@ import { acquireTenantDb } from './db/index.js'
 import type { TenantDb } from './db/index.js'
 import { fgaClient } from '@kb/authz'
 import { makeMemberVerifier } from '@kb/auth'
+import { LogicalSearchDriver } from './search/index.js'
+import type { SearchDriver } from './search/index.js'
 import { spacesPlugin } from './routes/spaces.js'
 import { pagesPlugin } from './routes/pages.js'
 import { billingPlugin } from './routes/billing.js'
+import { searchPlugin } from './routes/search.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
     fga: typeof fgaClient
+    searchDriver: SearchDriver
   }
   interface FastifyRequest {
-    // Set in onRequest for all non-health routes. Any handler that executes
-    // is guaranteed to have these; the 404/401 paths short-circuit first.
     tenant: Tenant
     db: TenantDb
     user: { sub: string; groups: string[] }
@@ -26,23 +28,24 @@ declare module 'fastify' {
 const app = Fastify({ logger: true })
 await app.register(cors, { origin: true })
 
-// Expose fgaClient as a Fastify decorator so plugins can access it as app.fga.
 app.decorate('fga', fgaClient)
 
-// Lazy OIDC verifier (same pattern as collab: constructed on first use).
+// Initialize search driver and configure Meilisearch index settings (idempotent).
+const searchDriver = new LogicalSearchDriver()
+await searchDriver.ensureIndex()
+app.decorate('searchDriver', searchDriver)
+
 const verifyMember = makeMemberVerifier({
   issuer: process.env.OIDC_ISSUER!,
   jwksUri: process.env.OIDC_JWKS_URI!,
 })
 
-// Health endpoints bypass tenant resolution and auth.
 app.get('/healthz', async () => ({ ok: true }))
-app.get('/readyz', async () => ({ ok: true })) // TODO: probe pg/valkey/fga/meili
+app.get('/readyz', async () => ({ ok: true }))
 
 app.addHook('onRequest', async (req, reply) => {
   if (req.url === '/healthz' || req.url === '/readyz' || req.url.startsWith('/webhooks/')) return
 
-  // ── Tenant resolution ──────────────────────────────────────────────────
   const { slug, domain } = resolveTenantFromHost(req.headers.host ?? '')
   const tenant = await loadTenant(slug, domain)
   if (!tenant) {
@@ -52,7 +55,6 @@ app.addHook('onRequest', async (req, reply) => {
   req.tenant = tenant
   req.db = await acquireTenantDb(tenant)
 
-  // ── Member auth ────────────────────────────────────────────────────────
   const token = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
   if (process.env.NODE_ENV !== 'production' && token === 'dev-token') {
     req.user = { sub: 'dev-user', groups: [] }
@@ -69,17 +71,16 @@ app.addHook('onRequest', async (req, reply) => {
 app.addHook('onResponse', async (req) => { await req.db?.release() })
 app.addHook('onError',    async (req) => { await req.db?.release() })
 
-// --- Routes ---
 await app.register(spacesPlugin)
 await app.register(pagesPlugin)
 await app.register(billingPlugin)
+await app.register(searchPlugin)
 
-// --- Legacy / stubs ---
-// POST /share-links            -> mint guest share token                   [phase: guest]
-// DELETE /share-links/:id      -> revoke (delete share_link tuple)         [phase: guest]
-// GET  /search?q=...           -> Meili + tenant token + viewer FGA gate   [phase: search]
-// POST /attachments/presign    -> S3-compatible presigned PUT               [phase: storage]
-// GET  /entitlements           -> resolve {guestAccess,...} from plan       [phase: billing]
+// TODO stubs (see original comments):
+// POST /share-links            [phase: guest]
+// DELETE /share-links/:id      [phase: guest]
+// POST /attachments/presign    [phase: storage]
+// GET  /entitlements           (registered in billingPlugin)
 app.get('/', async (req) => ({ service: 'kb-server', tenant: req.tenant?.slug }))
 
 const port = Number(process.env.SERVER_PORT ?? 4000)

@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, writeTuples, deleteTuples, deleteObjectTuples } from '@kb/authz'
 import { resolveEntitlements } from '@kb/entitlements'
+import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
+import type { SearchDriver } from '../search/index.js'
 import type { TenantDb } from '../db/index.js'
 
 interface SpaceRow { id: string; tenant_id: string; name: string; created_at: Date }
@@ -10,15 +12,10 @@ function toSpace(r: SpaceRow): Space {
   return { id: r.id, tenantId: r.tenant_id, name: r.name, createdAt: r.created_at }
 }
 
-// ── Service functions (exported for direct use in tests) ──────────────────
+// ── Service functions ─────────────────────────────────────────────────────
 
-// Create a space.
-//
-// Write order: DB inside transaction → FGA inside same transaction callback.
-// If FGA write throws, postgres.js automatically rolls back the DB transaction,
-// preventing ghost spaces (DB row without FGA tuples).
-// Accepting the tradeoff of holding a DB connection open during the FGA HTTP call;
-// acceptable at Phase 0 scale.
+// Create a space. No outbox needed here (no pages exist yet in the space).
+// Space creation triggers no Meili indexing; pages do when created.
 export async function createSpace(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -26,11 +23,7 @@ export async function createSpace(
 ): Promise<Space> {
   const ent = resolveEntitlements(args.plan)
   if (isFinite(ent.maxSpaces)) {
-    // RLS scopes this count to the current tenant automatically.
-    // TODO(phase: billing): this count + insert is not atomic; two concurrent
-    // requests can both read count < limit and both succeed, briefly exceeding
-    // the cap. Acceptable at Phase 0 scale; fix with advisory lock or a DB
-    // constraint when strict enforcement is required.
+    // TODO(phase: billing): count + insert race; see billing.ts for details.
     const [{ count }] = await db.sql<[{ count: string }]>`
       SELECT count(*)::text AS count FROM spaces
     `
@@ -45,7 +38,6 @@ export async function createSpace(
       VALUES (${args.tenantId}, ${args.name})
       RETURNING id, tenant_id, name, created_at
     `
-    // FGA inside the DB transaction: failure here rolls back the INSERT.
     await writeTuples(fga, [
       { user: `tenant:${args.tenantId}`, relation: 'tenant',  object: `space:${r.id}` },
       { user: `user:${args.userId}`,    relation: 'manager', object: `space:${r.id}` },
@@ -55,7 +47,6 @@ export async function createSpace(
   return toSpace(row as SpaceRow)
 }
 
-// List spaces for the current tenant (RLS filters automatically).
 export async function listSpaces(db: TenantDb): Promise<Space[]> {
   const rows = await db.sql<SpaceRow[]>`
     SELECT id, tenant_id, name, created_at FROM spaces ORDER BY created_at
@@ -65,40 +56,46 @@ export async function listSpaces(db: TenantDb): Promise<Space[]> {
 
 // Delete a space and all its pages.
 //
-// Delete order: FGA first → DB second.
-//   FGA fails:  DB is untouched. Retry from the top is clean.
-//   DB fails after FGA:  FGA tuples are already gone (no ghost auth).
-//                        Retry the DB delete (idempotent: row may not exist).
-// Page FGA tuples (including any share_link grants) are removed via
-// deleteObjectTuples to prevent ghost authorization after page deletion.
+// Delete order: FGA first → outbox + DB in same tx.
+// Each page gets a 'delete' outbox entry so Meili docs are cleaned even if
+// Meilisearch is temporarily down. Outbox entries fire asynchronously
+// after the tx commits (non-blocking).
 export async function deleteSpace(
   db: TenantDb,
   fga: OpenFgaClient,
+  driver: SearchDriver,
   args: { tenantId: string; spaceId: string; userId: string },
 ): Promise<void> {
-  // FGA: user must manage this space
   const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'space', id: args.spaceId })
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
-  // FGA cleanup: pages first (sweep all object tuples), then space
-  const pages = await db.sql<{ id: string }[]>`
-    SELECT id FROM pages WHERE space_id = ${args.spaceId}
+  const pages = await db.sql<{ id: string; tenant_id: string }[]>`
+    SELECT id, tenant_id FROM pages WHERE space_id = ${args.spaceId}
   `
-  for (const { id } of pages) {
-    await deleteObjectTuples(fga, `page:${id}`)
-  }
+  for (const { id } of pages) await deleteObjectTuples(fga, `page:${id}`)
   await deleteObjectTuples(fga, `space:${args.spaceId}`)
 
-  // DB: ON DELETE CASCADE removes pages automatically
-  await db.sql`DELETE FROM spaces WHERE id = ${args.spaceId}`
+  // Write all 'delete' outbox entries in the same tx as the DB DELETE.
+  // ON DELETE CASCADE removes pages. Fire Meili deletes after tx commits.
+  const outboxEntries: { id: string; tenantId: string; pageId: string }[] = []
+  await db.tx(async (tx) => {
+    for (const page of pages) {
+      const oid = await enqueueOutbox(tx, { tenantId: page.tenant_id, pageId: page.id, operation: 'delete' })
+      outboxEntries.push({ id: oid, tenantId: page.tenant_id, pageId: page.id })
+    }
+    await tx`DELETE FROM spaces WHERE id = ${args.spaceId}`
+  })
+
+  for (const e of outboxEntries) {
+    processOutboxAsync(driver, e.id, { tenantId: e.tenantId, pageId: e.pageId, operation: 'delete' })
+  }
 }
 
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function spacesPlugin(app: FastifyInstance) {
   app.post<{ Body: { name: string } }>('/spaces', async (req, reply) => {
-    const { fga } = app
-    const space = await createSpace(req.db, fga, {
+    const space = await createSpace(req.db, app.fga, {
       tenantId: req.tenant.id,
       userId: req.user.sub,
       name: req.body.name,
@@ -107,13 +104,10 @@ export async function spacesPlugin(app: FastifyInstance) {
     return reply.code(201).send(space)
   })
 
-  app.get('/spaces', async (req) => {
-    return listSpaces(req.db)
-  })
+  app.get('/spaces', async (req) => listSpaces(req.db))
 
   app.delete<{ Params: { spaceId: string } }>('/spaces/:spaceId', async (req, reply) => {
-    const { fga } = app
-    await deleteSpace(req.db, fga, {
+    await deleteSpace(req.db, app.fga, app.searchDriver, {
       tenantId: req.tenant.id,
       spaceId: req.params.spaceId,
       userId: req.user.sub,

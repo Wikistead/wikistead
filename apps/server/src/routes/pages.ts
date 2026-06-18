@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, writeTuples, deleteObjectTuples } from '@kb/authz'
+import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
+import type { SearchDriver } from '../search/index.js'
 import type { TenantDb } from '../db/index.js'
 
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; created_at: Date; updated_at: Date }
@@ -11,18 +13,19 @@ function toPage(r: PageRow): Page {
 
 // ── Service functions ─────────────────────────────────────────────────────
 
-// Create a page inside a space.
-// Write order: DB inside transaction → FGA inside same transaction callback.
-// FGA failure rolls back the DB INSERT (no ghost pages).
+// Create a page. Outbox entry is written in the same DB transaction as the
+// INSERT + FGA write. Meili indexing fires asynchronously after tx commits
+// (non-blocking: API success is independent of Meili availability).
 export async function createPage(
   db: TenantDb,
   fga: OpenFgaClient,
+  driver: SearchDriver,
   args: { tenantId: string; spaceId: string; userId: string; title?: string },
 ): Promise<Page> {
-  // Must have edit (or higher) on the space to create a page.
   const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'space', id: args.spaceId })
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
+  let outboxId!: string
   const row = await db.tx(async (tx) => {
     const [r] = await tx<PageRow[]>`
       INSERT INTO pages (tenant_id, space_id, title)
@@ -32,9 +35,12 @@ export async function createPage(
     await writeTuples(fga, [
       { user: `space:${args.spaceId}`, relation: 'space', object: `page:${r.id}` },
     ])
+    outboxId = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: r.id, operation: 'upsert' })
     return r
   })
-  return toPage(row as PageRow)
+  const page = toPage(row as PageRow)
+  processOutboxAsync(driver, outboxId, { tenantId: args.tenantId, pageId: page.id, operation: 'upsert' })
+  return page
 }
 
 export async function listPages(db: TenantDb, spaceId: string): Promise<Page[]> {
@@ -56,32 +62,55 @@ export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: 
   return toPage(row)
 }
 
+// Update title. Outbox entry written in the same tx as the UPDATE.
 export async function updatePage(
   db: TenantDb,
   fga: OpenFgaClient,
+  driver: SearchDriver,
   args: { pageId: string; userId: string; title: string },
 ): Promise<Page> {
   const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: args.pageId })
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
-  const [row] = await db.sql<PageRow[]>`
-    UPDATE pages SET title = ${args.title}, updated_at = now()
-    WHERE id = ${args.pageId}
-    RETURNING id, tenant_id, space_id, parent_id, title, created_at, updated_at
-  `
-  if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
-  return toPage(row)
+
+  let outboxId!: string
+  const row = await db.tx(async (tx) => {
+    const [r] = await tx<PageRow[]>`
+      UPDATE pages SET title = ${args.title}, updated_at = now()
+      WHERE id = ${args.pageId}
+      RETURNING id, tenant_id, space_id, parent_id, title, created_at, updated_at
+    `
+    if (!r) throw Object.assign(new Error('not found'), { statusCode: 404 })
+    outboxId = await enqueueOutbox(tx, { tenantId: r.tenant_id, pageId: args.pageId, operation: 'upsert' })
+    return r
+  })
+  const page = toPage(row as PageRow)
+  processOutboxAsync(driver, outboxId, { tenantId: page.tenantId, pageId: page.id, operation: 'upsert' })
+  return page
 }
 
-// Delete order: FGA first → DB second (see spaces.ts deleteSpace for rationale).
+// Delete order: FGA first → outbox + DB in same tx.
+// Outbox 'delete' entry ensures Meili doc is removed even if Meili is temporarily down.
 export async function deletePage(
   db: TenantDb,
   fga: OpenFgaClient,
+  driver: SearchDriver,
   args: { pageId: string; userId: string },
 ): Promise<void> {
   const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: args.pageId })
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+
+  // Read tenant_id before deleting (needed for outbox entry)
+  const [meta] = await db.sql<[{ tenant_id: string }]>`SELECT tenant_id FROM pages WHERE id = ${args.pageId}`
+  const tenantId = meta?.tenant_id ?? ''
+
   await deleteObjectTuples(fga, `page:${args.pageId}`)
-  await db.sql`DELETE FROM pages WHERE id = ${args.pageId}`
+
+  let outboxId!: string
+  await db.tx(async (tx) => {
+    outboxId = await enqueueOutbox(tx, { tenantId, pageId: args.pageId, operation: 'delete' })
+    await tx`DELETE FROM pages WHERE id = ${args.pageId}`
+  })
+  processOutboxAsync(driver, outboxId, { tenantId, pageId: args.pageId, operation: 'delete' })
 }
 
 // ── Fastify plugin ────────────────────────────────────────────────────────
@@ -89,7 +118,7 @@ export async function deletePage(
 export async function pagesPlugin(app: FastifyInstance) {
   app.post<{ Params: { spaceId: string }; Body: { title?: string } }>(
     '/spaces/:spaceId/pages', async (req, reply) => {
-      const page = await createPage(req.db, app.fga, {
+      const page = await createPage(req.db, app.fga, app.searchDriver, {
         tenantId: req.tenant.id,
         spaceId: req.params.spaceId,
         userId: req.user.sub,
@@ -109,7 +138,7 @@ export async function pagesPlugin(app: FastifyInstance) {
 
   app.patch<{ Params: { pageId: string }; Body: { title: string } }>(
     '/pages/:pageId', async (req) => {
-      return updatePage(req.db, app.fga, {
+      return updatePage(req.db, app.fga, app.searchDriver, {
         pageId: req.params.pageId,
         userId: req.user.sub,
         title: req.body.title,
@@ -118,7 +147,7 @@ export async function pagesPlugin(app: FastifyInstance) {
   )
 
   app.delete<{ Params: { pageId: string } }>('/pages/:pageId', async (req, reply) => {
-    await deletePage(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub })
+    await deletePage(req.db, app.fga, app.searchDriver, { pageId: req.params.pageId, userId: req.user.sub })
     return reply.code(204).send()
   })
 }
