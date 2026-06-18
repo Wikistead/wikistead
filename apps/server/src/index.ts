@@ -17,6 +17,7 @@ import { billingPlugin } from './routes/billing.js'
 import { searchPlugin } from './routes/search.js'
 import { attachmentsPlugin } from './routes/attachments.js'
 import { revisionsPlugin } from './routes/revisions.js'
+import { publicPlugin } from './routes/public.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -58,7 +59,9 @@ app.get('/healthz', async () => ({ ok: true }))
 app.get('/readyz', async () => ({ ok: true }))
 
 app.addHook('onRequest', async (req, reply) => {
-  if (req.url === '/healthz' || req.url === '/readyz' || req.url.startsWith('/webhooks/')) return
+  // Public routes handle their own tenant resolution; no auth required.
+  if (req.url === '/healthz' || req.url === '/readyz' ||
+      req.url.startsWith('/webhooks/') || req.url.startsWith('/public/')) return
 
   const { slug, domain } = resolveTenantFromHost(req.headers.host ?? '')
   const tenant = await loadTenant(slug, domain)
@@ -91,6 +94,7 @@ await app.register(billingPlugin)
 await app.register(searchPlugin)
 await app.register(attachmentsPlugin)
 await app.register(revisionsPlugin)
+await app.register(publicPlugin)
 
 // TODO stubs (see original comments):
 // POST /share-links            [phase: guest]
