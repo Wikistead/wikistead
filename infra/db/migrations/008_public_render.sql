@@ -1,0 +1,11 @@
+-- Migration 008: noindex toggle for public pages.
+--
+-- noindex=false (default): public page is indexable by crawlers.
+-- noindex=true:  signals that the public page should not be indexed.
+--
+-- NOTE: the JSON API at /public/pages/:id returns this field so the
+-- frontend can render <meta name="robots" content="noindex">.
+-- Actual noindex enforcement (X-Robots-Tag on the served HTML) is the
+-- responsibility of the public HTML rendering layer — not this JSON API.
+-- TODO(phase: public-html): enforce noindex in the HTML response headers.
+ALTER TABLE pages ADD COLUMN IF NOT EXISTS noindex BOOLEAN NOT NULL DEFAULT FALSE;
