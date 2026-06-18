@@ -6,6 +6,7 @@ import { acquireTenantDb } from './db/index.js'
 import type { TenantDb } from './db/index.js'
 import { fgaClient } from '@kb/authz'
 import { makeMemberVerifier } from '@kb/auth'
+import { verifyApiKey } from './api-key-auth.js'
 import { LogicalSearchDriver } from './search/index.js'
 import type { SearchDriver } from './search/index.js'
 import { LogicalStorageDriver } from './storage/index.js'
@@ -18,6 +19,7 @@ import { searchPlugin } from './routes/search.js'
 import { attachmentsPlugin } from './routes/attachments.js'
 import { revisionsPlugin } from './routes/revisions.js'
 import { publicPlugin } from './routes/public.js'
+import { apiKeysPlugin } from './routes/api-keys.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -73,10 +75,32 @@ app.addHook('onRequest', async (req, reply) => {
   req.db = await acquireTenantDb(tenant)
 
   const token = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
+
+  // Dev bypass — guarded by NODE_ENV !== 'production'.
+  // In production NODE_ENV is always 'production'; this branch is dead.
   if (process.env.NODE_ENV !== 'production' && token === 'dev-token') {
     req.user = { sub: 'dev-user', groups: [] }
     return
   }
+
+  // Authentication routing: the token prefix determines the path.
+  // Failing one path does NOT fall through to the other — this prevents
+  // an attacker from using a partially valid API key to probe the OIDC path
+  // (or vice versa).
+  if (token.startsWith('kb_')) {
+    // API key path. Failure → 401, no OIDC fallback.
+    const apiUser = await verifyApiKey(token, req.tenant.id)
+    if (!apiUser) {
+      await reply.code(401).send({ error: 'invalid or revoked API key' })
+      return
+    }
+    // API key acts as user:{ownerUserId} — same FGA principal as a member.
+    // Per-page authorisation (check / filterAuthorized) is unchanged.
+    req.user = { sub: apiUser.sub, groups: [] }
+    return
+  }
+
+  // OIDC member path. Failure → 401, no API key fallback.
   try {
     const m = await verifyMember(token)
     req.user = { sub: m.sub, groups: m.groups }
@@ -95,6 +119,7 @@ await app.register(searchPlugin)
 await app.register(attachmentsPlugin)
 await app.register(revisionsPlugin)
 await app.register(publicPlugin)
+await app.register(apiKeysPlugin)
 
 // TODO stubs (see original comments):
 // POST /share-links            [phase: guest]
