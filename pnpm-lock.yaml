@@ -29,13 +29,13 @@ importers:
       '@hocuspocus/server':
         specifier: ^2.15.0
         version: 2.15.3(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)
-      '@kb/auth':
+      '@wikistead/auth':
         specifier: workspace:*
         version: link:../../packages/auth
-      '@kb/authz':
+      '@wikistead/authz':
         specifier: workspace:*
         version: link:../../packages/authz
-      '@kb/types':
+      '@wikistead/types':
         specifier: workspace:*
         version: link:../../packages/types
       ioredis:
@@ -72,27 +72,27 @@ importers:
       '@fastify/cors':
         specifier: ^10.0.0
         version: 10.1.0
-      '@kb/auth':
-        specifier: workspace:*
-        version: link:../../packages/auth
-      '@kb/authz':
-        specifier: workspace:*
-        version: link:../../packages/authz
-      '@kb/entitlements':
-        specifier: workspace:^
-        version: link:../../packages/entitlements
-      '@kb/events':
-        specifier: workspace:^
-        version: link:../../packages/events
-      '@kb/hooks':
-        specifier: workspace:^
-        version: link:../../packages/hooks
-      '@kb/types':
-        specifier: workspace:*
-        version: link:../../packages/types
       '@openfga/sdk':
         specifier: ^0.7.0
         version: 0.7.0
+      '@wikistead/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@wikistead/authz':
+        specifier: workspace:*
+        version: link:../../packages/authz
+      '@wikistead/entitlements':
+        specifier: workspace:^
+        version: link:../../packages/entitlements
+      '@wikistead/events':
+        specifier: workspace:^
+        version: link:../../packages/events
+      '@wikistead/hooks':
+        specifier: workspace:^
+        version: link:../../packages/hooks
+      '@wikistead/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       fastify:
         specifier: ^5.0.0
         version: 5.8.5
@@ -133,6 +133,9 @@ importers:
       '@codemirror/lang-markdown':
         specifier: ^6.3.0
         version: 6.5.0
+      '@codemirror/language':
+        specifier: ^6.10.0
+        version: 6.12.3
       '@codemirror/state':
         specifier: ^6.4.0
         version: 6.6.0
@@ -164,7 +167,7 @@ importers:
 
   packages/auth:
     dependencies:
-      '@kb/types':
+      '@wikistead/types':
         specifier: workspace:*
         version: link:../types
       jose:
@@ -180,15 +183,15 @@ importers:
 
   packages/authz:
     dependencies:
-      '@kb/hooks':
-        specifier: workspace:*
-        version: link:../hooks
-      '@kb/types':
-        specifier: workspace:*
-        version: link:../types
       '@openfga/sdk':
         specifier: ^0.7.0
         version: 0.7.0
+      '@wikistead/hooks':
+        specifier: workspace:*
+        version: link:../hooks
+      '@wikistead/types':
+        specifier: workspace:*
+        version: link:../types
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -211,7 +214,7 @@ importers:
 
   packages/hooks:
     dependencies:
-      '@kb/types':
+      '@wikistead/types':
         specifier: workspace:*
         version: link:../types
     devDependencies:
