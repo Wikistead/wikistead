@@ -36,6 +36,15 @@ const server = new Hocuspocus({
     // re-derive what they're allowed to do regardless of what they claim.
     const { tenantId, pageId } = parseDocName(documentName);
 
+    // Dev-only bypass: allows the hardcoded "dev-token" from apps/web/src/main.ts
+    // to connect without real OIDC. Disabled in production at the env level.
+    if (process.env.NODE_ENV !== "production" && token === "dev-token") {
+      return {
+        principal: { kind: "member", tenantId, userId: "dev-user", groups: [] },
+        readOnly: false,
+      };
+    }
+
     if (looksLikeGuestToken(token)) {
       const c = await verifyGuestToken(guestCfg, token);
       assert(c.tenantId === tenantId, "tenant mismatch");
