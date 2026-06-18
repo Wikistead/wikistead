@@ -42,15 +42,14 @@ services:
     ports: ["7700:7700"]
     volumes: ["meilidata:/meili_data"]
 
-  # S3-compatible object storage: SeaweedFS (Apache-2.0, pure OSS). Replaced
-  # MinIO (community edition development stalled). S3 gateway (container :8333)
-  # mapped to host :9000 so S3_ENDPOINT is unchanged; credentials come from the
-  # mounted s3.json identity (minioadmin/minioadmin). StorageDriver is unchanged
-  # — but set AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED in .env (SeaweedFS
-  # rejects the AWS SDK v3 default flexible checksums on presigned PUT).
+  # S3-compatible object storage: SeaweedFS (Apache-2.0, pure OSS, actively
+  # maintained). Replaces MinIO (community edition development stalled — see
+  # ADR-014). S3 gateway (container :8333) on host :9000 so S3_ENDPOINT is
+  # unchanged; identity from s3.json. -s3.allowedOrigins must list the web origin
+  # so the browser presigned-PUT/GET (CORS) works on the actual response.
   seaweedfs:
     image: chrislusf/seaweedfs:latest
-    command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json"
+    command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://localhost:5173"
     ports: ["9000:8333"]
     volumes:
       - seaweeddata:/data

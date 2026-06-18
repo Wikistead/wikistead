@@ -43,14 +43,13 @@ services:
     ports: ["7701:7700"]
     volumes: ["e2e_meilidata:/meili_data"]
 
-  # Storage: SeaweedFS (Apache-2.0, pure OSS, S3-compatible) — step (2).
-  # Its S3 gateway (container :8333) is mapped to host :9002 so .env.e2e
-  # (S3_ENDPOINT=localhost:9002) is unchanged — the MinIO->SeaweedFS swap stays
-  # confined to this one compose file. Same credentials as before (s3.json
-  # identity = minioadmin/minioadmin) so the StorageDriver needs no changes.
+  # Storage: MinIO. We evaluated SeaweedFS (to drop MinIO) but its S3 gateway has
+  # multiple presigned-flow incompatibilities for the browser direct-upload the
+  # attachment feature needs (see the storage decision note). MinIO passes the
+  # attachment e2e cleanly. S3 on host :9002 keeps .env.e2e unchanged.
   seaweedfs:
     image: chrislusf/seaweedfs:latest
-    command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json"
+    command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://localhost:5180"
     ports: ["9002:8333"]
     volumes:
       - e2e_seaweeddata:/data
