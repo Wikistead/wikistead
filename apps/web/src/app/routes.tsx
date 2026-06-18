@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { Editor } from "../editor/Editor";
+import { Sidebar } from "../sidebar/Sidebar";
 import { useSession } from "../session/SessionProvider";
 
 const COLLAB_URL = (import.meta as any).env?.VITE_COLLAB_URL ?? "ws://localhost:4100";
@@ -12,7 +13,7 @@ function PageRoute() {
   const { token, tenantId, user } = useSession();
   const docName = `t:${tenantId}:p:${pageId}`;
   return (
-    <AppShell>
+    <AppShell sidebar={<Sidebar />}>
       <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={user} />
     </AppShell>
   );

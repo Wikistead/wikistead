@@ -1,0 +1,99 @@
+import { useEffect, useState } from "react";
+import { Dialog } from "@ark-ui/react/dialog";
+import { Portal } from "@ark-ui/react/portal";
+import styles from "./dialogs.module.css";
+
+// Thin Ark Dialog wrappers (accessible: focus trap, ESC, aria) for the tree's
+// rename and delete-confirm flows. Ark is the headless layer chosen in ADR-013.
+
+export function RenameDialog({
+  open,
+  initial,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  initial: string;
+  onClose: () => void;
+  onSubmit: (value: string) => void;
+}) {
+  const [value, setValue] = useState(initial);
+  useEffect(() => {
+    if (open) setValue(initial);
+  }, [open, initial]);
+
+  return (
+    <Dialog.Root open={open} onOpenChange={(d) => !d.open && onClose()}>
+      <Portal>
+        <Dialog.Backdrop className={styles.backdrop} />
+        <Dialog.Positioner className={styles.positioner}>
+          <Dialog.Content className={styles.content} data-testid="rename-dialog">
+            <Dialog.Title className={styles.title}>Rename page</Dialog.Title>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const v = value.trim();
+                if (v) onSubmit(v);
+              }}
+            >
+              <input
+                className={styles.input}
+                value={value}
+                autoFocus
+                aria-label="Page title"
+                onChange={(e) => setValue(e.target.value)}
+              />
+              <div className={styles.actions}>
+                <button type="button" className={styles.btn} onClick={onClose}>
+                  Cancel
+                </button>
+                <button type="submit" className={`${styles.btn} ${styles.primary}`}>
+                  Save
+                </button>
+              </div>
+            </form>
+          </Dialog.Content>
+        </Dialog.Positioner>
+      </Portal>
+    </Dialog.Root>
+  );
+}
+
+export function ConfirmDialog({
+  open,
+  message,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  message: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog.Root open={open} onOpenChange={(d) => !d.open && onClose()}>
+      <Portal>
+        <Dialog.Backdrop className={styles.backdrop} />
+        <Dialog.Positioner className={styles.positioner}>
+          <Dialog.Content className={styles.content} data-testid="confirm-dialog">
+            <Dialog.Title className={styles.title}>Confirm</Dialog.Title>
+            <Dialog.Description className={styles.message}>{message}</Dialog.Description>
+            <div className={styles.actions}>
+              <button type="button" className={styles.btn} onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={`${styles.btn} ${styles.danger}`}
+                data-testid="confirm-delete"
+                onClick={onConfirm}
+              >
+                Delete
+              </button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Positioner>
+      </Portal>
+    </Dialog.Root>
+  );
+}

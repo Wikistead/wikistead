@@ -1,0 +1,70 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+.positioner {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.content {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: var(--space-3);
+  width: min(360px, 90vw);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+}
+.title {
+  margin: 0 0 var(--space-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+.message {
+  margin: 0 0 var(--space-3);
+  color: var(--fg-dim);
+}
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  font: inherit;
+  margin-bottom: var(--space-3);
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--fg);
+  cursor: pointer;
+}
+.btn:hover {
+  background: var(--border);
+}
+.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06243f;
+  font-weight: 600;
+}
+.danger {
+  background: #b3261e;
+  border-color: #b3261e;
+  color: #fff;
+  font-weight: 600;
+}

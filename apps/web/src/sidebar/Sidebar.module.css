@@ -1,0 +1,112 @@
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-size: 13px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.title {
+  font-weight: 600;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.header button {
+  background: none;
+  border: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  display: flex;
+  padding: 2px;
+  border-radius: 4px;
+}
+.header button:hover {
+  color: var(--fg);
+  background: var(--panel-2);
+}
+
+.state {
+  padding: var(--space-3);
+  color: var(--fg-dim);
+}
+.state button {
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.tree {
+  overflow: auto;
+  padding: var(--space-1) 0;
+}
+
+/* Ark indents nested levels via the data-depth attribute it sets on items. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 3px var(--space-3);
+  padding-left: calc(var(--space-2) + var(--depth, 0) * 14px);
+  cursor: pointer;
+  border-radius: 4px;
+  user-select: none;
+}
+.row:hover {
+  background: var(--panel-2);
+}
+.row[data-selected] {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.row[data-depth] {
+  --depth: attr(data-depth);
+}
+
+.indicator {
+  display: flex;
+  transition: transform 0.12s ease;
+}
+.indicator[data-state="open"] {
+  transform: rotate(90deg);
+}
+.fileIcon {
+  color: var(--fg-dim);
+  flex: 0 0 auto;
+}
+.name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: none;
+  gap: 2px;
+}
+/* Reveal on hover AND keyboard focus so actions are reachable without a mouse. */
+.row:hover .actions,
+.row:focus-within .actions {
+  display: flex;
+}
+.actions button {
+  background: none;
+  border: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  display: flex;
+  padding: 2px;
+  border-radius: 4px;
+}
+.actions button:hover {
+  color: var(--fg);
+  background: var(--border);
+}
