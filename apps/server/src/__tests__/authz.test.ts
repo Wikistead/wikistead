@@ -33,14 +33,40 @@ describe('member access', () => {
 })
 
 // ── Cross-tenant isolation ────────────────────────────────────────────────
+//
+// OpenFGA enforces isolation via the tuple graph, not via a hard model
+// constraint. Cross-tenant access is impossible when no cross-tenant tuples
+// exist; it WOULD succeed if such tuples were accidentally written.
+//
+// The anti-test below proves the false results are non-trivial: the same
+// infrastructure that makes the isolation tests pass also makes cross-tenant
+// access possible when a tuple is explicitly written — confirming that the
+// isolation boundary is real and not an artifact of an empty graph.
 
 describe('cross-tenant isolation', () => {
   it('dev-user cannot view page:acme_page (different tenant)', async () => {
+    // dev-user has manager access to space:demo_space (tenant_dev) but no
+    // relation to space:acme_space or page:acme_page (tenant_acme).
     expect(await check(fgaClient, 'user:dev-user', 'view', page('acme_page'))).toBe(false)
   })
 
   it('acme-admin cannot view page:demo (different tenant)', async () => {
     expect(await check(fgaClient, 'user:acme-admin', 'view', page('demo'))).toBe(false)
+  })
+
+  it('cross-tenant access IS granted when a cross-tenant tuple exists (anti-test)', async () => {
+    // Proves the isolation tests are non-trivial: the model does not prevent
+    // cross-tenant tuples — the application layer must never write them.
+    await writeTuples(fgaClient, [
+      { user: 'user:dev-user', relation: 'viewer', object: 'space:acme_space' },
+    ])
+    expect(await check(fgaClient, 'user:dev-user', 'view', page('acme_page'))).toBe(true)
+
+    // Cleanup — restore isolation.
+    await deleteTuples(fgaClient, [
+      { user: 'user:dev-user', relation: 'viewer', object: 'space:acme_space' },
+    ])
+    expect(await check(fgaClient, 'user:dev-user', 'view', page('acme_page'))).toBe(false)
   })
 })
 
