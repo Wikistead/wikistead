@@ -20,7 +20,7 @@ export async function createPage(
   args: { tenantId: string; spaceId: string; userId: string; title?: string },
 ): Promise<Page> {
   // Must have edit (or higher) on the space to create a page.
-  const canEdit = await check(fga, `user:${args.userId}`, 'editor', { type: 'space', id: args.spaceId })
+  const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'space', id: args.spaceId })
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
   const row = await db.tx(async (tx) => {

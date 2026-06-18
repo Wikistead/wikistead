@@ -7,7 +7,7 @@ import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
-import { fgaClient, check, writeTuples, deleteTuples } from '@kb/authz'
+import { fgaClient, check, checkRelation, writeTuples, deleteTuples } from '@kb/authz'
 import { createSpace, listSpaces, deleteSpace } from '../routes/spaces.js'
 import { createPage, listPages, getPage, deletePage } from '../routes/pages.js'
 import type { Tenant } from '@kb/types'
@@ -77,9 +77,12 @@ describe('space lifecycle', () => {
     })
     expect(space.tenantId).toBe(tenant.id)
 
-    // FGA tuples must exist
-    expect(await check(fgaClient, `tenant:${tenant.id}`, 'tenant', { type: 'space', id: space.id })).toBe(true)
-    expect(await check(fgaClient, 'user:dev-user', 'manager', { type: 'space', id: space.id })).toBe(true)
+    // Verify FGA tuples were written (structural checks use checkRelation, not check).
+    // 'tenant' and 'manager' are raw FGA relation names, not Capability values.
+    expect(await checkRelation(fgaClient, `tenant:${tenant.id}`, 'tenant',  { type: 'space', id: space.id })).toBe(true)
+    expect(await checkRelation(fgaClient, 'user:dev-user',        'manager', { type: 'space', id: space.id })).toBe(true)
+    // Capability-level check: 'manage' maps to 'manager' for space internally.
+    expect(await check(fgaClient, 'user:dev-user', 'manage', { type: 'space', id: space.id })).toBe(true)
 
     // Cleanup
     await deleteSpace(db, fgaClient, { tenantId: tenant.id, spaceId: space.id, userId: 'dev-user' })
@@ -94,7 +97,7 @@ describe('space lifecycle', () => {
 
     const rows = await db.sql`SELECT id FROM spaces WHERE id = ${spaceId}`
     expect(rows).toHaveLength(0)
-    expect(await check(fgaClient, 'user:dev-user', 'manager', { type: 'space', id: spaceId })).toBe(false)
+    expect(await check(fgaClient, 'user:dev-user', 'manage', { type: 'space', id: spaceId })).toBe(false)
   })
 
   it('FGA write failure rolls back DB INSERT (no ghost space)', async () => {

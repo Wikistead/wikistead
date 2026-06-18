@@ -7,11 +7,60 @@ export interface CheckContext {
   [key: string]: unknown
 }
 
+// Maps user-facing Capability to the FGA relation name per resource type.
+// All application-level check() calls go through this table, keeping the
+// mapping in one place and preventing typos at call sites.
+//
+// Page relations mirror Capability names directly.
+// Space relations differ (OpenFGA model uses "viewer/editor/manager").
+const RELATION: Record<ResourceRef['type'], Partial<Record<Capability, string>>> = {
+  page: {
+    view:    'view',
+    comment: 'comment',
+    edit:    'edit',
+    manage:  'manage',
+  },
+  space: {
+    view:   'viewer',
+    edit:   'editor',
+    manage: 'manager',
+    // comment: not defined on space
+  },
+}
+
+function resolveRelation(capability: Capability, resource: ResourceRef): string {
+  const rel = RELATION[resource.type]?.[capability]
+  if (!rel) {
+    throw new Error(`no FGA relation for capability "${capability}" on type "${resource.type}"`)
+  }
+  return rel
+}
+
+// Authorization check. relation is resolved via RELATION table — callers use
+// Capability values, not raw FGA relation strings.
 export async function check(
   fga: OpenFgaClient,
   user: string,
-  // string (not Capability) because space relations differ from page relations:
-  // page uses "manage"/"edit"/"view"; space uses "manager"/"editor"/"viewer".
+  capability: Capability,
+  resource: ResourceRef,
+  context?: CheckContext,
+): Promise<boolean> {
+  const { allowed } = await fga.check({
+    user,
+    relation: resolveRelation(capability, resource),
+    object: `${resource.type}:${resource.id}`,
+    ...(context ? { context } : {}),
+  })
+  return Boolean(allowed)
+}
+
+// Low-level check that bypasses the capability→relation mapping.
+// Use only for structural/administrative checks (e.g., verifying that a
+// specific tuple was written correctly in tests). Prefer check() for all
+// application-level authorization — it enforces the type constraint.
+export async function checkRelation(
+  fga: OpenFgaClient,
+  user: string,
   relation: string,
   resource: ResourceRef,
   context?: CheckContext,
@@ -30,12 +79,12 @@ export async function check(
 export async function filterAuthorized(
   fga: OpenFgaClient,
   user: string,
-  relation: string,
+  capability: Capability,
   pageIds: string[],
 ): Promise<Set<string>> {
   const results = await Promise.all(
     pageIds.map((id) =>
-      check(fga, user, relation, { type: 'page', id }).then((ok) => [id, ok] as const),
+      check(fga, user, capability, { type: 'page', id }).then((ok) => [id, ok] as const),
     ),
   )
   return new Set(results.filter(([, ok]) => ok).map(([id]) => id))

@@ -61,7 +61,7 @@ export async function deleteSpace(
   args: { tenantId: string; spaceId: string; userId: string },
 ): Promise<void> {
   // FGA: user must manage this space
-  const canManage = await check(fga, `user:${args.userId}`, 'manager', { type: 'space', id: args.spaceId })
+  const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'space', id: args.spaceId })
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
   // FGA cleanup: pages first (sweep all object tuples), then space
