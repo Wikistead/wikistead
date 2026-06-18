@@ -89,3 +89,48 @@ export function useDeleteSpace() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
   });
 }
+
+// ── share links ────────────────────────────────────────────────────────────
+export interface ShareLink {
+  id: string;
+  resource: { type: "page"; id: string };
+  capability: "view" | "edit";
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export function useShareLinks(pageId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["share-links", pageId],
+    queryFn: () => apiFetch<ShareLink[]>(`/pages/${pageId}/share-links`, token).then((r) => r ?? []),
+    enabled,
+  });
+}
+
+export function useCreateShareLink() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { pageId: string; capability: "view" | "edit"; expiresInSeconds: number | null }) =>
+      apiFetch<ShareLink>("/share-links", token, {
+        method: "POST",
+        body: JSON.stringify({
+          resource: { type: "page", id: args.pageId },
+          capability: args.capability,
+          expiresInSeconds: args.expiresInSeconds,
+        }),
+      }),
+    onSuccess: (_l, args) => qc.invalidateQueries({ queryKey: ["share-links", args.pageId] }),
+  });
+}
+
+export function useRevokeShareLink() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; pageId: string }) =>
+      apiFetch<null>(`/share-links/${args.id}`, token, { method: "DELETE" }),
+    onSuccess: (_r, args) => qc.invalidateQueries({ queryKey: ["share-links", args.pageId] }),
+  });
+}

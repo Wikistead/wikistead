@@ -1,8 +1,10 @@
+import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { Editor } from "../editor/Editor";
 import { Sidebar } from "../sidebar/Sidebar";
 import { useSession } from "../session/SessionProvider";
+import { fetchGuestToken, type GuestToken } from "../data/apiClient";
 
 const COLLAB_URL = (import.meta as any).env?.VITE_COLLAB_URL ?? "ws://localhost:4100";
 
@@ -19,38 +21,42 @@ function PageRoute() {
   );
 }
 
-// Decode the unverified JWT payload just to form the docName. The collab server
-// re-verifies the token authoritatively (apps/collab onAuthenticate); this is
-// only for routing.
-function decodeGuestDoc(shareToken: string): string | null {
-  try {
-    const payload = JSON.parse(atob(shareToken.split(".")[1]));
-    const tenantId = payload.tenantId;
-    const pageId = payload.resource?.type === "page" ? payload.resource.id : null;
-    return tenantId && pageId ? `t:${tenantId}:p:${pageId}` : null;
-  } catch {
-    return null;
-  }
-}
-
-// Guest route: /share/:shareToken — token IS the app-signed share token. The
-// guest-facing chrome (read-only affordances, capability banner) is a next-stage
-// screen; this wires the editor surface so the route is functional.
+// Guest route: /share/:linkId. The URL carries only the unguessable link id; we
+// exchange it for a short-lived guest token at the public landing endpoint, then
+// open the editor (read-only for view-capability links). No member chrome.
 function ShareRoute() {
-  const { shareToken } = useParams<{ shareToken: string }>();
-  const docName = shareToken ? decodeGuestDoc(shareToken) : null;
-  if (!shareToken || !docName) {
-    return <AppShell><div style={{ padding: 16 }}>Invalid or expired share link.</div></AppShell>;
+  const { linkId } = useParams<{ linkId: string }>();
+  const [state, setState] = useState<{ status: "loading" | "denied" | "ok"; minted?: GuestToken }>({
+    status: "loading",
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!linkId) {
+      setState({ status: "denied" });
+      return;
+    }
+    fetchGuestToken(linkId).then((minted) => {
+      if (cancelled) return;
+      setState(minted ? { status: "ok", minted } : { status: "denied" });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [linkId]);
+
+  if (state.status === "loading") {
+    return <AppShell><div style={{ padding: 16 }}>Opening shared page…</div></AppShell>;
   }
+  if (state.status === "denied" || !state.minted) {
+    return <AppShell><div style={{ padding: 16 }}>This share link is invalid, expired, or revoked.</div></AppShell>;
+  }
+  const { token, docName, readOnly } = state.minted;
+  // Anonymous guest identity (never an OIDC account / seat — the project design notes).
+  const guest = { name: `guest-${Math.floor(Math.random() * 1000)}`, color: "#7d8590" };
   return (
     <AppShell>
-      <Editor
-        key={docName}
-        docName={docName}
-        token={shareToken}
-        collabUrl={COLLAB_URL}
-        user={{ name: "guest", color: "#888888" }}
-      />
+      <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} readOnly={readOnly} />
     </AppShell>
   );
 }
@@ -59,7 +65,7 @@ export function AppRoutes() {
   return (
     <Routes>
       <Route path="/p/:pageId" element={<PageRoute />} />
-      <Route path="/share/:shareToken" element={<ShareRoute />} />
+      <Route path="/share/:linkId" element={<ShareRoute />} />
       {/* Dev default: the seeded demo page. Real landing/space routing is a
           next-stage screen. */}
       <Route path="*" element={<Navigate to="/p/demo" replace />} />

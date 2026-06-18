@@ -18,6 +18,7 @@ export interface EditorProps {
   token: string;
   collabUrl: string;
   user: EditorUser;
+  readOnly?: boolean;
 }
 
 function userField(user: EditorUser) {
@@ -35,7 +36,7 @@ function userField(user: EditorUser) {
 //  - Cleanup clears local awareness BEFORE destroying the provider so rapid
 //    A->B->A page switches and React StrictMode's double mount/unmount cannot
 //    leak a WebSocket or leave a ghost cursor for other collaborators.
-export function Editor({ docName, token, collabUrl, user }: EditorProps) {
+export function Editor({ docName, token, collabUrl, user, readOnly }: EditorProps) {
   const sourceRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const awarenessRef = useRef<Awareness | null>(null);
@@ -57,8 +58,8 @@ export function Editor({ docName, token, collabUrl, user }: EditorProps) {
     awarenessRef.current = provider.awareness ?? null;
     provider.awareness?.setLocalStateField("user", userField(user));
 
-    const sourceView = mountSource(sourceHost, ytext, provider);
-    const previewView = mountLivePreview(previewHost, ytext, provider);
+    const sourceView = mountSource(sourceHost, ytext, provider, { readOnly });
+    const previewView = mountLivePreview(previewHost, ytext, provider, { readOnly });
 
     return () => {
       // Tear down the CodeMirror views, then fully disconnect (drops presence +
@@ -74,7 +75,7 @@ export function Editor({ docName, token, collabUrl, user }: EditorProps) {
       sourceHost.replaceChildren();
       previewHost.replaceChildren();
     };
-  }, [docName, token, collabUrl]);
+  }, [docName, token, collabUrl, readOnly]);
 
   // Presence label changes must NOT rebuild the editors — just update awareness.
   useEffect(() => {

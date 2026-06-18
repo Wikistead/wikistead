@@ -30,3 +30,21 @@ export async function apiFetch<T = unknown>(
   }
   return res.status === 204 ? null : ((await res.json()) as T);
 }
+
+export interface GuestToken {
+  token: string;
+  docName: string;
+  capability: "view" | "edit";
+  readOnly: boolean;
+}
+
+// Guest landing: exchange a share-link id for a short-lived guest token. No auth
+// (the link id is the capability). Any failure -> null (server answers a uniform
+// 404 for missing/revoked/expired so we cannot distinguish — by design).
+export async function fetchGuestToken(linkId: string): Promise<GuestToken | null> {
+  const res = await fetch(`${API_URL}/public/share-links/${encodeURIComponent(linkId)}/token`, {
+    method: "POST",
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as GuestToken;
+}

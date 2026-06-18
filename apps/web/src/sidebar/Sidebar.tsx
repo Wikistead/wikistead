@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQueries } from "@tanstack/react-query";
 import { TreeView, createTreeCollection } from "@ark-ui/react/tree-view";
-import { ChevronRight, FilePlus, FileText, FolderPlus, Pencil, Trash2 } from "lucide-react";
+import { ChevronRight, FilePlus, FileText, FolderPlus, Pencil, Share2, Trash2 } from "lucide-react";
 import {
   useSpaces,
   useCreateSpace,
@@ -15,6 +15,7 @@ import {
 import { apiFetch } from "../data/apiClient";
 import { useSession } from "../session/SessionProvider";
 import { RenameDialog, ConfirmDialog } from "../ui/dialogs";
+import { ShareDialog } from "../ui/ShareDialog";
 import styles from "./Sidebar.module.css";
 
 // Node value namespaces space vs page so selection/expansion can tell them apart
@@ -101,6 +102,7 @@ export function Sidebar() {
     | { kind: "space"; id: string; name: string }
     | null
   >(null);
+  const [sharing, setSharing] = useState<string | null>(null);
 
   const renderNode = (node: Node, indexPath: number[]) => (
     <TreeView.NodeProvider key={valueOf(node)} node={node} indexPath={indexPath}>
@@ -148,6 +150,17 @@ export function Sidebar() {
           <FileText size={14} className={styles.fileIcon} />
           <TreeView.ItemText className={styles.name}>{node.name}</TreeView.ItemText>
           <span className={styles.actions}>
+            <button
+              type="button"
+              title="Share"
+              aria-label="Share page"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSharing(node.id);
+              }}
+            >
+              <Share2 size={14} />
+            </button>
             <button
               type="button"
               title="Rename"
@@ -250,6 +263,7 @@ export function Sidebar() {
           setDeleting(null);
         }}
       />
+      <ShareDialog pageId={sharing} onClose={() => setSharing(null)} />
     </div>
   );
 }

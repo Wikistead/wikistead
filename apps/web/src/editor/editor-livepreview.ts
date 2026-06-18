@@ -1,4 +1,5 @@
 import { EditorView, minimalSetup } from "codemirror";
+import { EditorState } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
@@ -15,6 +16,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
+  opts: { readOnly?: boolean } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -26,10 +28,12 @@ export function mountLivePreview(
       livePreviewTheme,
       livePreview,
       yCollab(ytext, provider.awareness),
+      ...(opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
     ],
   });
 
-  mountToolbar(parent, () => view);
+  // View-capability guests get no insert toolbar.
+  if (!opts.readOnly) mountToolbar(parent, () => view);
 
   const host = document.createElement("div");
   host.className = "lp-editor-host";
