@@ -7,6 +7,8 @@ import type { TenantDb } from './db/index.js'
 import { fgaClient } from '@kb/authz'
 import { makeMemberVerifier } from '@kb/auth'
 import { verifyApiKey } from './api-key-auth.js'
+import { getAuthProviders, getSearchDriver } from '@kb/hooks'
+import { emit } from '@kb/events'
 import { LogicalSearchDriver } from './search/index.js'
 import type { SearchDriver } from './search/index.js'
 import { LogicalStorageDriver } from './storage/index.js'
@@ -41,7 +43,9 @@ await app.register(cors, { origin: true })
 app.decorate('fga', fgaClient)
 
 // Initialize search driver and configure Meilisearch index settings (idempotent).
-const searchDriver = new LogicalSearchDriver()
+// EE may register an alternative SearchDriver via registerSearchDriver(@kb/hooks).
+// Falls back to LogicalSearchDriver when no EE driver is registered.
+const searchDriver = getSearchDriver(new LogicalSearchDriver())
 await searchDriver.ensureIndex()
 app.decorate('searchDriver', searchDriver)
 
@@ -80,23 +84,34 @@ app.addHook('onRequest', async (req, reply) => {
   // In production NODE_ENV is always 'production'; this branch is dead.
   if (process.env.NODE_ENV !== 'production' && token === 'dev-token') {
     req.user = { sub: 'dev-user', groups: [] }
+    emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: 'dev-user', method: 'dev' })
     return
   }
 
+  // EE auth providers (SAML, LDAP, SCIM, etc.) are tried first.
+  // They return null if they cannot handle the token; the next path is then tried.
+  // Each provider is its own path — there is no fallback between providers.
+  for (const provider of getAuthProviders()) {
+    const result = await provider.verify(token, req.tenant.id)
+    if (result) {
+      req.user = result
+      emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: result.sub, method: provider.name })
+      return
+    }
+  }
+
   // Authentication routing: the token prefix determines the path.
-  // Failing one path does NOT fall through to the other — this prevents
-  // an attacker from using a partially valid API key to probe the OIDC path
-  // (or vice versa).
+  // Failing one path does NOT fall through to the other.
   if (token.startsWith('kb_')) {
     // API key path. Failure → 401, no OIDC fallback.
     const apiUser = await verifyApiKey(token, req.tenant.id)
     if (!apiUser) {
+      emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'invalid or revoked' })
       await reply.code(401).send({ error: 'invalid or revoked API key' })
       return
     }
-    // API key acts as user:{ownerUserId} — same FGA principal as a member.
-    // Per-page authorisation (check / filterAuthorized) is unchanged.
     req.user = { sub: apiUser.sub, groups: [] }
+    emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: apiUser.sub, method: 'apikey' })
     return
   }
 
@@ -104,7 +119,9 @@ app.addHook('onRequest', async (req, reply) => {
   try {
     const m = await verifyMember(token)
     req.user = { sub: m.sub, groups: m.groups }
+    emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: m.sub, method: 'oidc' })
   } catch {
+    emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'oidc', reason: 'token verification failed' })
     await reply.code(401).send({ error: 'unauthorized' })
   }
 })

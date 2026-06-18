@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, writeTuples, deleteTuples, deleteObjectTuples } from '@kb/authz'
 import { resolveEntitlements } from '@kb/entitlements'
+import { emit } from '@kb/events'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import type { TenantDb } from '../db/index.js'
@@ -44,7 +45,9 @@ export async function createSpace(
     ])
     return r
   })
-  return toSpace(row as SpaceRow)
+  const space = toSpace(row as SpaceRow)
+  emit({ type: 'space.created', tenantId: args.tenantId, spaceId: space.id, actorId: args.userId })
+  return space
 }
 
 export async function listSpaces(db: TenantDb): Promise<Space[]> {
@@ -89,6 +92,7 @@ export async function deleteSpace(
   for (const e of outboxEntries) {
     processOutboxAsync(driver, e.id, { tenantId: e.tenantId, pageId: e.pageId, operation: 'delete' })
   }
+  emit({ type: 'space.deleted', tenantId: args.tenantId, spaceId: args.spaceId, actorId: args.userId })
 }
 
 // ── Fastify plugin ────────────────────────────────────────────────────────

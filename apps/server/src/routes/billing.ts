@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import Stripe from 'stripe'
 import { pool } from '../db/pool.js'
 import { resolveEntitlements } from '@kb/entitlements'
+import { emit } from '@kb/events'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? 'sk_test_placeholder', {
   apiVersion: '2026-05-27.dahlia',
@@ -55,6 +56,7 @@ export async function processWebhookEvent(event: Stripe.Event): Promise<void> {
   if (result.count === 0) return
 
   await pool`UPDATE tenants SET plan = ${newPlan} WHERE id = ${tenant.id}`
+  emit({ type: 'tenant.plan_changed', tenantId: tenant.id, oldPlan: tenant.plan, newPlan })
 }
 
 // ── Fastify plugin ────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import type IORedis from 'ioredis'
 import { check } from '@kb/authz'
+import { emit } from '@kb/events'
 import { pool } from '../db/pool.js'
 import type { TenantDb } from '../db/index.js'
 
@@ -134,6 +135,7 @@ export async function restoreRevision(
     console.error(`[restore:publish] failed for ${documentName} (non-fatal):`, err)
   }
 
+  emit({ type: 'page.restored', tenantId: args.tenantId, pageId: args.pageId, fromRevisionId: args.revId, actorId: args.userId })
   return { documentName }
 }
 

@@ -1,6 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "outDir": "dist", "rootDir": "src" },
-  "references": [{ "path": "../../packages/types" }, { "path": "../../packages/hooks" }],
+  "references": [{ "path": "../../packages/types" }],
   "include": ["src"]
 }

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, writeTuples, deleteObjectTuples } from '@kb/authz'
+import { emit } from '@kb/events'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import type { TenantDb } from '../db/index.js'
@@ -40,6 +41,7 @@ export async function createPage(
   })
   const page = toPage(row as PageRow)
   processOutboxAsync(driver, outboxId, { tenantId: args.tenantId, pageId: page.id, operation: 'upsert' })
+  emit({ type: 'page.created', tenantId: args.tenantId, pageId: page.id, spaceId: args.spaceId, actorId: args.userId })
   return page
 }
 
@@ -85,6 +87,7 @@ export async function updatePage(
   })
   const page = toPage(row as PageRow)
   processOutboxAsync(driver, outboxId, { tenantId: page.tenantId, pageId: page.id, operation: 'upsert' })
+  emit({ type: 'page.updated', tenantId: page.tenantId, pageId: page.id, actorId: args.userId })
   return page
 }
 
@@ -111,6 +114,7 @@ export async function deletePage(
     await tx`DELETE FROM pages WHERE id = ${args.pageId}`
   })
   processOutboxAsync(driver, outboxId, { tenantId, pageId: args.pageId, operation: 'delete' })
+  emit({ type: 'page.deleted', tenantId, pageId: args.pageId, actorId: args.userId })
 }
 
 // ── Fastify plugin ────────────────────────────────────────────────────────

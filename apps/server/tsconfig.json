@@ -1,6 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "outDir": "dist", "rootDir": "src" },
-  "references": [{ "path": "../../packages/types" }, { "path": "../../packages/auth" }, { "path": "../../packages/authz" }, { "path": "../../packages/entitlements" }],
+  "references": [{ "path": "../../packages/types" }, { "path": "../../packages/auth" }, { "path": "../../packages/authz" }, { "path": "../../packages/entitlements" }, { "path": "../../packages/hooks" }, { "path": "../../packages/events" }],
   "include": ["src"]
 }

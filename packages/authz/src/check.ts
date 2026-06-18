@@ -1,5 +1,6 @@
 import type { OpenFgaClient } from '@openfga/sdk'
 import type { Capability, ResourceRef } from '@kb/types'
+import { getAuthzHooks } from '@kb/hooks'
 
 export interface CheckContext {
   // ISO 8601 timestamp evaluated against the non_expired condition on share_link tuples.
@@ -38,6 +39,11 @@ function resolveRelation(capability: Capability, resource: ResourceRef): string 
 
 // Authorization check. relation is resolved via RELATION table — callers use
 // Capability values, not raw FGA relation strings.
+//
+// EE extension points (from @kb/hooks):
+//   beforeCheck: may short-circuit before FGA (approval workflow, advanced RBAC).
+//   afterCheck:  may override FGA result (additional deny conditions, etc.).
+// Both default to no-op when no EE hooks are registered.
 export async function check(
   fga: OpenFgaClient,
   user: string,
@@ -45,13 +51,23 @@ export async function check(
   resource: ResourceRef,
   context?: CheckContext,
 ): Promise<boolean> {
+  const hooks = getAuthzHooks()
+  const relation = resolveRelation(capability, resource)
+  const ctx = { user, relation, resource, tenantId: '' }  // tenantId enriched by caller if needed
+
+  const before = await hooks.beforeCheck?.(ctx)
+  if (before !== undefined) return before
+
   const { allowed } = await fga.check({
     user,
-    relation: resolveRelation(capability, resource),
+    relation,
     object: `${resource.type}:${resource.id}`,
     ...(context ? { context } : {}),
   })
-  return Boolean(allowed)
+  const fgaResult = Boolean(allowed)
+
+  const after = await hooks.afterCheck?.(ctx, fgaResult)
+  return after ?? fgaResult
 }
 
 // Low-level check that bypasses the capability→relation mapping.

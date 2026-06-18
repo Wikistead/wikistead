@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
+import { emit } from '@kb/events'
 import type { TenantDb } from '../db/index.js'
 
 interface ApiKeyRow {
@@ -40,14 +41,9 @@ export async function createApiKey(
     VALUES (${args.tenantId}, ${args.ownerUserId}, ${args.name}, ${keyPrefix}, ${keyHash})
     RETURNING id, tenant_id, owner_user_id, name, key_prefix, created_at, last_used_at, revoked_at
   `
-  return {
-    id: row.id,
-    name: row.name,
-    keyPrefix: row.key_prefix,
-    createdAt: row.created_at,
-    lastUsedAt: null,
-    plaintext,
-  }
+  const result: ApiKeyCreated = { id: row.id, name: row.name, keyPrefix: row.key_prefix, createdAt: row.created_at, lastUsedAt: null, plaintext }
+  emit({ type: 'api_key.created', tenantId: args.tenantId, keyId: row.id, actorId: args.ownerUserId })
+  return result
 }
 
 // List active API keys for the current tenant (RLS scopes automatically).
@@ -78,6 +74,11 @@ export async function revokeApiKey(
       AND owner_user_id   = ${args.ownerUserId}
       AND revoked_at IS NULL
   `
+  if (result.count > 0) {
+    // Derive tenantId from db context (RLS ensures this is the correct tenant)
+    const [row] = await db.sql<[{ tenant_id: string }]>`SELECT tenant_id FROM api_keys WHERE id = ${args.id}`
+    if (row) emit({ type: 'api_key.revoked', tenantId: row.tenant_id, keyId: args.id, actorId: args.ownerUserId })
+  }
   return result.count > 0
 }
 

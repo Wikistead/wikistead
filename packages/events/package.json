@@ -1,5 +1,5 @@
 {
-  "name": "@kb/authz",
+  "name": "@kb/events",
   "version": "0.0.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,13 +11,5 @@
     "typecheck": "tsc --noEmit",
     "lint": "echo 'noop'"
   },
-  "dependencies": {
-    "@openfga/sdk": "^0.7.0",
-    "@kb/hooks": "workspace:*",
-    "@kb/types": "workspace:*"
-  },
-  "devDependencies": {
-    "typescript": "^5.6.0",
-    "@types/node": "^22.0.0"
-  }
+  "devDependencies": { "typescript": "^5.6.0" }
 }
