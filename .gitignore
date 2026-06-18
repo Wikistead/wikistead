@@ -4,5 +4,9 @@ dist/
 *.log
 .env
 .env.local
+.env.e2e.local
 .DS_Store
 coverage/
+test-results/
+playwright-report/
+.playwright/

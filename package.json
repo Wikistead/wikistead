@@ -13,9 +13,13 @@
     "lint:no-ee-imports": "node scripts/check-ce-imports.mjs",
     "build:ee": "turbo run build",
     "compose:up": "docker compose up -d",
-    "compose:down": "docker compose down"
+    "compose:down": "docker compose down",
+    "setup:e2e": "node tests/e2e/scripts/up.mjs",
+    "test:e2e": "pnpm --filter @wikistead/e2e test",
+    "teardown:e2e": "node tests/e2e/scripts/down.mjs"
   },
   "devDependencies": {
+    "tsx": "^4.19.0",
     "turbo": "^2.1.0",
     "typescript": "^5.6.0"
   }

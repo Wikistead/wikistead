@@ -1,0 +1,14 @@
+{
+  "name": "@wikistead/e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "up": "node scripts/up.mjs",
+    "down": "node scripts/down.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "postgres": "^3.4.0"
+  }
+}

@@ -1,0 +1,62 @@
+# E2E middleware — FULLY ISOLATED from the dev stack.
+#   - separate compose project (name: wikistead-e2e) => separate containers/network
+#   - separate named volumes => e2e seed/teardown never touches dev data
+#   - distinct host ports => can run alongside the dev stack
+# Step (1) of this phase keeps MinIO (prove the E2E harness on a known-good store);
+# step (2) swaps the storage service to SeaweedFS.
+name: wikistead-e2e
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: app
+    ports: ["5433:5432"]
+    volumes:
+      - e2e_pgdata:/var/lib/postgresql/data
+      - ./infra/db/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  valkey:
+    image: valkey/valkey:8
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    ports: ["6380:6379"]
+
+  openfga:
+    image: openfga/openfga:latest
+    command: run
+    environment:
+      OPENFGA_DATASTORE_ENGINE: memory
+    ports: ["8090:8080", "8091:8081"]
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.10
+    environment:
+      MEILI_MASTER_KEY: dev_master_key_change_me
+      MEILI_ENV: development
+    ports: ["7701:7700"]
+    volumes: ["e2e_meilidata:/meili_data"]
+
+  # Storage: SeaweedFS (Apache-2.0, pure OSS, S3-compatible) — step (2).
+  # Its S3 gateway (container :8333) is mapped to host :9002 so .env.e2e
+  # (S3_ENDPOINT=localhost:9002) is unchanged — the MinIO->SeaweedFS swap stays
+  # confined to this one compose file. Same credentials as before (s3.json
+  # identity = minioadmin/minioadmin) so the StorageDriver needs no changes.
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json"
+    ports: ["9002:8333"]
+    volumes:
+      - e2e_seaweeddata:/data
+      - ./infra/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+
+volumes:
+  e2e_pgdata:
+  e2e_meilidata:
+  e2e_seaweeddata:
