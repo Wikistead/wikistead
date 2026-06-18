@@ -1,0 +1,65 @@
+/* Design tokens + global rules. Component styling lives in *.module.css; rules
+   that must match imperatively-set class names (CodeMirror, the live-preview
+   toolbar) stay global here because CSS Modules would hash the selectors. */
+:root {
+  --bg: #1e1e1e;
+  --fg: #dddddd;
+  --fg-dim: #9a9a9a;
+  --panel: #252526;
+  --panel-2: #2d2d2e;
+  --border: #3a3a3a;
+  --accent: #4ea1ff;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --header-h: 40px;
+  --sidebar-w: 260px;
+  --font: system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+}
+
+/* CodeMirror fills its host; the editor scrolls internally. */
+.cm-editor {
+  height: 100%;
+}
+
+/* Live-preview insert toolbar (DOM built imperatively in editor/live-preview). */
+.lp-toolbar {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.lp-toolbar-btn {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--fg);
+  cursor: pointer;
+}
+.lp-toolbar-btn:hover {
+  background: #3a3a3b;
+}
+.lp-editor-host {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
