@@ -90,3 +90,40 @@ test("moving the open page via drag keeps the editor connected", async ({ page }
   expect(await page.locator("[data-pane=preview] .cm-content").count()).toBe(1);
   expect(rendersAfter).toBe(rendersBefore);
 });
+
+test("dragging a page onto another space moves it across spaces (3b ②)", async ({ page }) => {
+  await openDemo(page);
+  const moverId = await apiCreate(page, "X-Move-Me", null);
+
+  // make a second space and learn its id
+  await page.getByRole("button", { name: "New space" }).click();
+  await sleep(800);
+  const newSpaceId = await page.evaluate(async (api) => {
+    const spaces = await (await fetch(`${api}/spaces`, { headers: { Authorization: "Bearer dev-token" } })).json();
+    return spaces.find((s: { name: string }) => s.name === "Untitled space").id as string;
+  }, API);
+
+  await page.reload();
+  await page.waitForSelector("[data-testid=sidebar]");
+  await sleep(500);
+  await page.getByText("Demo Space", { exact: true }).click(); // reveal X-Move-Me
+  await sleep(300);
+
+  // drop the page onto the new space row -> cross-space move (top level of that space)
+  const src = page.locator("[data-testid=tree-page]", { hasText: "X-Move-Me" }).first();
+  const dst = page.locator("[data-testid=tree-space]", { hasText: "Untitled space" }).first();
+  await src.dragTo(dst);
+  await sleep(1000);
+
+  // BE: the page's space changed; it left demo_space's listing for the new space.
+  const movedSpace = await page.evaluate(
+    async ({ api, id }) => (await (await fetch(`${api}/pages/${id}`, { headers: { Authorization: "Bearer dev-token" } })).json()).spaceId,
+    { api: API, id: moverId },
+  );
+  expect(movedSpace).toBe(newSpaceId);
+  const demoPageIds = await page.evaluate(
+    async (api) => (await (await fetch(`${api}/spaces/demo_space/pages`, { headers: { Authorization: "Bearer dev-token" } })).json()).map((p: { id: string }) => p.id),
+    API,
+  );
+  expect(demoPageIds).not.toContain(moverId);
+});

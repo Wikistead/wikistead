@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, filterAuthorized, writeTuples, deleteObjectTuples } from '@wikistead/authz'
+import { check, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
@@ -146,19 +146,62 @@ async function descendantIds(db: TenantDb, rootId: string): Promise<string[]> {
   return rows.map((r) => r.id)
 }
 
-// Move/reorder a page WITHIN its space: change parent_id and/or position.
-// Intra-space only (cross-space move is a later step). Permissions derive from
-// the space and don't change here, so this needs `edit` on the page. The move is
-// a single-row UPDATE of a fractional position between the new neighbours (no
-// sibling renumber → concurrent moves of different pages don't conflict).
+// Swap each page's direct `space:<id>#space@page:<id>` grant from oldSpace to
+// newSpace, in the ORDER delete-OLD → add-NEW (ADR-003). Authorization for a
+// page derives solely from its space (page#parent is unwired), so a cross-space
+// move must re-point every page in the moved subtree.
+//
+// Ordering matters for the failure mode: by deleting OLD first, the only
+// reachable intermediate is "the page is grantless = invisible from ANY space"
+// — never "granted by BOTH spaces" (which would leak the page to the source
+// space's members after it has logically left). If the add-NEW write throws, the
+// caller's surrounding tx rolls the DB back to oldSpace, leaving the page
+// fail-closed (invisible) and the move retryable.
+//
+// The OLD delete is idempotent and surgical: we read each page's tuples and
+// delete only the oldSpace `space` grant that actually exists, so a retry after a
+// partial failure is safe and share_link grants on the page are left untouched.
+async function swapSpaceTuples(
+  fga: OpenFgaClient,
+  oldSpace: string,
+  newSpace: string,
+  pageIds: string[],
+): Promise<void> {
+  const deletes: { user: string; relation: string; object: string }[] = []
+  const writes: { user: string; relation: string; object: string }[] = []
+  for (const id of pageIds) {
+    const { tuples } = await fga.read({ object: `page:${id}` })
+    const keys = (tuples ?? []).map((t) => t.key).filter((k): k is NonNullable<typeof k> => !!k)
+    if (keys.some((k) => k.relation === 'space' && k.user === `space:${oldSpace}`)) {
+      deletes.push({ user: `space:${oldSpace}`, relation: 'space', object: `page:${id}` })
+    }
+    if (!keys.some((k) => k.relation === 'space' && k.user === `space:${newSpace}`)) {
+      writes.push({ user: `space:${newSpace}`, relation: 'space', object: `page:${id}` })
+    }
+  }
+  if (deletes.length) await deleteTuples(fga, deletes) // (1) OLD removed → invisible from any space
+  if (writes.length) await writeTuples(fga, writes) // (2) NEW added; if this throws, see caller rollback
+}
+
+// Move/reorder a page: change parent_id, position, and optionally its space.
+//
+// Intra-space (no space change): permissions derive from the space and don't
+// change, so this needs `edit` on the page. It is a single-row UPDATE of a
+// fractional position between the new neighbours (no sibling renumber →
+// concurrent moves of different pages don't conflict).
+//
+// Cross-space (3b ②): the whole subtree follows the page into the destination
+// space, so it needs `manage` on the page (a structural ownership change) AND
+// `edit` on the destination space. ADR-003 (DB-first): the DB writes and the FGA
+// tuple swap run inside one tx with the FGA swap LAST, so a swap failure throws
+// and rolls the DB back (no ghost authorization), and only the commit itself can
+// fall after a successful swap.
 export async function movePage(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { pageId: string; userId: string; parentId: string | null; afterId: string | null },
+  driver: SearchDriver,
+  args: { pageId: string; userId: string; parentId: string | null; afterId: string | null; spaceId?: string | null },
 ): Promise<Page> {
-  const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: args.pageId })
-  if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
-
   const [page] = await db.sql<PageRow[]>`
     SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
     FROM pages WHERE id = ${args.pageId}
@@ -166,20 +209,41 @@ export async function movePage(
   if (!page) throw Object.assign(new Error('not found'), { statusCode: 404 })
 
   const newParent = args.parentId ?? null
+  let targetSpace = args.spaceId ?? page.space_id
   if (newParent) {
     const [p] = await db.sql<{ space_id: string }[]>`SELECT space_id FROM pages WHERE id = ${newParent}`
-    if (!p || p.space_id !== page.space_id) throw Object.assign(new Error('parent not in space'), { statusCode: 400 })
-    // No cycles: a page cannot be nested under itself or its own descendant.
+    if (!p) throw Object.assign(new Error('parent not found'), { statusCode: 400 })
+    if (args.spaceId != null && p.space_id !== args.spaceId) {
+      throw Object.assign(new Error('parent not in target space'), { statusCode: 400 })
+    }
+    targetSpace = p.space_id // the parent's space is authoritative for the destination
+  }
+  const crossSpace = targetSpace !== page.space_id
+
+  // Authorization: cross-space is a structural ownership move.
+  if (crossSpace) {
+    const [canManage, canEditDest] = await Promise.all([
+      check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: args.pageId }),
+      check(fga, `user:${args.userId}`, 'edit', { type: 'space', id: targetSpace }),
+    ])
+    if (!canManage || !canEditDest) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  } else {
+    const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: args.pageId })
+    if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  }
+
+  // No cycles: a page cannot be nested under itself or its own descendant.
+  if (newParent) {
     if (newParent === args.pageId) throw Object.assign(new Error('cannot nest under itself'), { statusCode: 400 })
     if ((await descendantIds(db, args.pageId)).includes(newParent)) {
       throw Object.assign(new Error('cannot nest under own descendant'), { statusCode: 400 })
     }
   }
 
-  // Position between afterId and the next sibling (afterId null = first child).
+  // Position between afterId and the next sibling in the DESTINATION sibling list.
   const sibs = await db.sql<{ id: string; position: number }[]>`
     SELECT id, position FROM pages
-    WHERE space_id = ${page.space_id} AND parent_id IS NOT DISTINCT FROM ${newParent} AND id <> ${args.pageId}
+    WHERE space_id = ${targetSpace} AND parent_id IS NOT DISTINCT FROM ${newParent} AND id <> ${args.pageId}
     ORDER BY position, created_at
   `
   let before: number | null = null
@@ -194,13 +258,38 @@ export async function movePage(
   }
   const position = positionBetween(before, after)
 
-  const [r] = await db.sql<PageRow[]>`
-    UPDATE pages SET parent_id = ${newParent}, position = ${position}, updated_at = now()
-    WHERE id = ${args.pageId}
-    RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
-  `
+  if (!crossSpace) {
+    const [r] = await db.sql<PageRow[]>`
+      UPDATE pages SET parent_id = ${newParent}, position = ${position}, updated_at = now()
+      WHERE id = ${args.pageId}
+      RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
+    `
+    emit({ type: 'page.updated', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
+    return toPage(r)
+  }
+
+  // ── cross-space: subtree follows the page; re-index each; swap space grants ──
+  const subtree = [args.pageId, ...(await descendantIds(db, args.pageId))]
+  const oldSpace = page.space_id
+  const outboxIds: { id: string; pageId: string }[] = []
+  const row = await db.tx(async (tx) => {
+    await tx`UPDATE pages SET space_id = ${targetSpace}, updated_at = now() WHERE id IN ${tx(subtree)}`
+    const [r] = await tx<PageRow[]>`
+      UPDATE pages SET parent_id = ${newParent}, position = ${position}, updated_at = now()
+      WHERE id = ${args.pageId}
+      RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
+    `
+    // Viewer denormalization in Meili changes with the space → re-index the subtree.
+    for (const id of subtree) {
+      outboxIds.push({ id: await enqueueOutbox(tx, { tenantId: page.tenant_id, pageId: id, operation: 'upsert' }), pageId: id })
+    }
+    // FGA swap LAST: a throw here rolls back every DB write above (ADR-003).
+    await swapSpaceTuples(fga, oldSpace, targetSpace, subtree)
+    return r
+  })
+  for (const o of outboxIds) processOutboxAsync(driver, o.id, { tenantId: page.tenant_id, pageId: o.pageId, operation: 'upsert' })
   emit({ type: 'page.updated', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
-  return toPage(r)
+  return toPage(row as PageRow)
 }
 
 // Delete order: FGA first → outbox + DB in same tx.
@@ -251,15 +340,17 @@ export async function pagesPlugin(app: FastifyInstance) {
     },
   )
 
-  // Move/reorder within the space (intra-space). parentId null = top level;
-  // afterId null = first child of the target parent.
-  app.patch<{ Params: { pageId: string }; Body: { parentId?: string | null; afterId?: string | null } }>(
+  // Move/reorder a page. parentId null = top level; afterId null = first child of
+  // the target parent. spaceId moves the page (and its subtree) to another space
+  // (3b ②); when parentId is given, the parent's space is authoritative.
+  app.patch<{ Params: { pageId: string }; Body: { parentId?: string | null; afterId?: string | null; spaceId?: string | null } }>(
     '/pages/:pageId/move', async (req) => {
-      return movePage(req.db, app.fga, {
+      return movePage(req.db, app.fga, app.searchDriver, {
         pageId: req.params.pageId,
         userId: req.user.sub,
         parentId: req.body.parentId ?? null,
         afterId: req.body.afterId ?? null,
+        spaceId: req.body.spaceId ?? null,
       })
     },
   )

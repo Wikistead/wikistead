@@ -110,7 +110,7 @@ export function Sidebar() {
   const treeBox = useRef<HTMLDivElement>(null);
   const size = useSize(treeBox);
 
-  // DnD: only pages move, only WITHIN their space (cross-space = phase 3b ②).
+  // DnD: pages move within their space (reorder/reparent) or across spaces (3b ②).
   const onMove = ({ dragIds, parentId, index }: { dragIds: string[]; parentId: string | null; index: number }) => {
     const dragId = dragIds[0];
     if (!dragId?.startsWith("page:")) return;
@@ -127,12 +127,11 @@ export function Sidebar() {
       targetSpaceId = pp.spaceId;
       parentPageId = pp.id;
     }
-    if (targetSpaceId !== moved.spaceId) return; // cross-space deferred to ②
     const siblings = (pagesBySpace[targetSpaceId] ?? [])
       .filter((p) => p.parentId === parentPageId && p.id !== moved.id)
       .sort((a, b) => a.position - b.position);
     const afterId = index > 0 ? siblings[index - 1]?.id ?? null : null;
-    movePage.mutate({ pageId: moved.id, spaceId: moved.spaceId, parentId: parentPageId, afterId });
+    movePage.mutate({ pageId: moved.id, fromSpaceId: moved.spaceId, toSpaceId: targetSpaceId, parentId: parentPageId, afterId });
   };
 
   const NodeRow = ({ node, style, dragHandle }: NodeRendererProps<Node>) => {
@@ -210,7 +209,18 @@ export function Sidebar() {
             disableDrop={({ parentNode, dragNodes }) => {
               if (!parentNode) return true; // no top-level (space-less) drops
               const drag = dragNodes[0]?.data as Node | undefined;
-              return !drag || (parentNode.data as Node).spaceId !== drag.spaceId; // same-space only (①)
+              if (!drag || drag.kind !== "page") return true;
+              // Block dropping a page onto itself or its own descendant (cycle);
+              // cross-space drops are allowed (3b ②).
+              const parent = parentNode.data as Node;
+              if (parent.kind === "page") {
+                let cur: Page | undefined = pageById.get(parent.pageId!);
+                while (cur) {
+                  if (cur.id === drag.pageId) return true;
+                  cur = cur.parentId ? pageById.get(cur.parentId) : undefined;
+                }
+              }
+              return false;
             }}
             onMove={onMove}
             onActivate={(n: NodeApi<Node>) => { if (n.data.kind === "page") navigate(`/p/${n.data.pageId}`); }}

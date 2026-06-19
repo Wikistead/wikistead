@@ -205,7 +205,7 @@ describe('page nesting and ordering', () => {
     const parent = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'p2' })
     const a = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'A2', parentId: parent.id })
     const b = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'B2', parentId: parent.id })
-    await movePage(db, fgaClient, { pageId: b.id, userId: 'dev-user', parentId: parent.id, afterId: null }) // B to first
+    await movePage(db, fgaClient, driver, { pageId: b.id, userId: 'dev-user', parentId: parent.id, afterId: null }) // B to first
     const kids = (await listPages(db, fgaClient, { spaceId, userId: 'dev-user' })).filter((p) => p.parentId === parent.id)
     expect(kids.map((k) => k.id)).toEqual([b.id, a.id])
   })
@@ -214,14 +214,14 @@ describe('page nesting and ordering', () => {
     const root = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'root' })
     const mid = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'mid', parentId: root.id })
     await expect(
-      movePage(db, fgaClient, { pageId: root.id, userId: 'dev-user', parentId: mid.id, afterId: null }),
+      movePage(db, fgaClient, driver, { pageId: root.id, userId: 'dev-user', parentId: mid.id, afterId: null }),
     ).rejects.toThrow()
   })
 
   it('move requires edit on the page', async () => {
     const page = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'move-authz' })
     await expect(
-      movePage(db, fgaClient, { pageId: page.id, userId: 'stranger', parentId: null, afterId: null }),
+      movePage(db, fgaClient, driver, { pageId: page.id, userId: 'stranger', parentId: null, afterId: null }),
     ).rejects.toThrow()
   })
 
@@ -236,6 +236,129 @@ describe('page nesting and ordering', () => {
     expect(rows).toHaveLength(0) // cascade removed the child too
     // descendant's FGA grant swept (no ghost auth)
     expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: child.id })).toBe(false)
+  })
+})
+
+// ── cross-space move (3b ②): subtree + FGA tuple swap per ADR-003 ──────────
+//
+// Authorization for a page derives solely from its space, so moving a page to
+// another space must re-point the `space` grant of the page AND its whole
+// subtree. The swap is delete-OLD → add-NEW inside the DB tx (FGA last): a swap
+// failure throws and rolls the DB back (no ghost auth), and the only reachable
+// intermediate is "grantless = invisible from any space" (never visible-from-both).
+
+describe('cross-space move (security)', () => {
+  // The actual space grant on a page (filters out share_link tuples).
+  async function spaceGrantOf(pageId: string): Promise<string | null> {
+    const { tuples } = await fgaClient.read({ object: `page:${pageId}` })
+    const k = (tuples ?? []).map((t) => t.key).find((k) => k?.relation === 'space')
+    return k ? k.user : null
+  }
+
+  // Inject an FGA failure on the add-NEW write (writes targeting destUser),
+  // letting the delete-OLD pass through — to reach the "invisible side".
+  function fgaFailingAddTo(destUser: string): OpenFgaClient {
+    return new Proxy(fgaClient, {
+      get(t, prop, recv) {
+        if (prop === 'write') {
+          return async (body: { writes?: { user: string }[] }) => {
+            if (body?.writes?.some((w) => w.user === destUser)) throw new Error('injected FGA write failure')
+            return (t as unknown as { write: (b: unknown) => Promise<unknown> }).write(body)
+          }
+        }
+        const v = Reflect.get(t, prop, recv)
+        return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(t) : v
+      },
+    }) as OpenFgaClient
+  }
+
+  let spaceA: string
+  let spaceB: string
+  beforeAll(async () => {
+    spaceA = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'xmove-A' })).id
+    spaceB = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'xmove-B' })).id
+  })
+  afterAll(async () => {
+    await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: spaceA, userId: 'dev-user' })
+    await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: spaceB, userId: 'dev-user' })
+  })
+
+  it('moves the whole subtree and swaps every page grant from old to new space', async () => {
+    const parent = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId: spaceA, userId: 'dev-user', title: 'x-parent' })
+    const child = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId: spaceA, userId: 'dev-user', title: 'x-child', parentId: parent.id })
+
+    // A user who can view spaceA (only) sees both pages via `viewer from space`.
+    await writeTuples(fgaClient, [{ user: 'user:src-viewer', relation: 'viewer', object: `space:${spaceA}` }])
+    expect(await check(fgaClient, 'user:src-viewer', 'view', { type: 'page', id: parent.id })).toBe(true)
+    expect(await check(fgaClient, 'user:src-viewer', 'view', { type: 'page', id: child.id })).toBe(true)
+
+    await movePage(db, fgaClient, driver, { pageId: parent.id, userId: 'dev-user', parentId: null, afterId: null, spaceId: spaceB })
+
+    // DB: the whole subtree followed into spaceB; the root is now top-level there.
+    const rows = await db.sql<{ id: string; space_id: string; parent_id: string | null }[]>`
+      SELECT id, space_id, parent_id FROM pages WHERE id IN (${parent.id}, ${child.id})`
+    expect(rows.find((r) => r.id === parent.id)).toMatchObject({ space_id: spaceB, parent_id: null })
+    expect(rows.find((r) => r.id === child.id)).toMatchObject({ space_id: spaceB, parent_id: parent.id })
+
+    // FGA: each page's space grant swapped A → B.
+    expect(await spaceGrantOf(parent.id)).toBe(`space:${spaceB}`)
+    expect(await spaceGrantOf(child.id)).toBe(`space:${spaceB}`)
+
+    // The source-only viewer can no longer see either page (they left its space);
+    // dev-user (manager of B) still can.
+    expect(await check(fgaClient, 'user:src-viewer', 'view', { type: 'page', id: parent.id })).toBe(false)
+    expect(await check(fgaClient, 'user:src-viewer', 'view', { type: 'page', id: child.id })).toBe(false)
+    expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: parent.id })).toBe(true)
+
+    await deleteTuples(fgaClient, [{ user: 'user:src-viewer', relation: 'viewer', object: `space:${spaceA}` }])
+    await deletePage(db, fgaClient, driver, { pageId: parent.id, userId: 'dev-user' })
+  })
+
+  it('requires manage on the page AND edit on the destination space', async () => {
+    const page = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId: spaceA, userId: 'dev-user', title: 'x-authz' })
+
+    // a stranger has neither manage on the page nor edit on B
+    await expect(
+      movePage(db, fgaClient, driver, { pageId: page.id, userId: 'stranger', parentId: null, afterId: null, spaceId: spaceB }),
+    ).rejects.toThrow()
+
+    // an editor of spaceA can `edit` the page but cannot move it OUT (no manage),
+    // and has no rights on the destination space B either.
+    await writeTuples(fgaClient, [{ user: 'user:a-editor', relation: 'editor', object: `space:${spaceA}` }])
+    expect(await check(fgaClient, 'user:a-editor', 'edit', { type: 'page', id: page.id })).toBe(true)
+    await expect(
+      movePage(db, fgaClient, driver, { pageId: page.id, userId: 'a-editor', parentId: null, afterId: null, spaceId: spaceB }),
+    ).rejects.toThrow()
+
+    // the page never left spaceA
+    expect((await db.sql<{ space_id: string }[]>`SELECT space_id FROM pages WHERE id = ${page.id}`)[0].space_id).toBe(spaceA)
+
+    await deleteTuples(fgaClient, [{ user: 'user:a-editor', relation: 'editor', object: `space:${spaceA}` }])
+    await deletePage(db, fgaClient, driver, { pageId: page.id, userId: 'dev-user' })
+  })
+
+  it('FGA add-NEW failure rolls the DB back to the old space and falls to the invisible side', async () => {
+    const page = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId: spaceA, userId: 'dev-user', title: 'x-rollback' })
+    expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: page.id })).toBe(true)
+
+    // The add-NEW (space:B grant) write throws; the delete-OLD (space:A) passes.
+    await expect(
+      movePage(db, fgaFailingAddTo(`space:${spaceB}`), driver, {
+        pageId: page.id, userId: 'dev-user', parentId: null, afterId: null, spaceId: spaceB,
+      }),
+    ).rejects.toThrow()
+
+    // DB rolled back: the page is still in spaceA (no ghost "moved" state).
+    expect((await db.sql<{ space_id: string }[]>`SELECT space_id FROM pages WHERE id = ${page.id}`)[0].space_id).toBe(spaceA)
+    // Invisible side: OLD grant was deleted, NEW never written → the page has NO
+    // space grant, so it is invisible from ANY space (NOT visible-from-both). Even
+    // dev-user, manager of both spaces, cannot view it.
+    expect(await spaceGrantOf(page.id)).toBeNull()
+    expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: page.id })).toBe(false)
+
+    // Repair so the row can be cleaned up through the normal (manage) path.
+    await writeTuples(fgaClient, [{ user: `space:${spaceA}`, relation: 'space', object: `page:${page.id}` }])
+    await deletePage(db, fgaClient, driver, { pageId: page.id, userId: 'dev-user' })
   })
 })
 

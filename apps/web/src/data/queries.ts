@@ -58,18 +58,24 @@ export function useCreatePage() {
   });
 }
 
-// Intra-space reparent + reorder (phase 3b ①). parentId null = top level of the
-// space; afterId null = first child of the target parent.
+// Reparent + reorder, and (3b ②) move across spaces. parentId null = top level
+// of the destination space; afterId null = first child of the target parent.
+// toSpaceId is always sent; the server treats it as a cross-space move only when
+// it differs from the page's current space (and the parent's space wins when
+// nesting under a page). Both affected space page-lists are invalidated.
 export function useMovePage() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { pageId: string; spaceId: string; parentId: string | null; afterId: string | null }) =>
+    mutationFn: (args: { pageId: string; fromSpaceId: string; toSpaceId: string; parentId: string | null; afterId: string | null }) =>
       apiFetch<Page>(`/pages/${args.pageId}/move`, token, {
         method: "PATCH",
-        body: JSON.stringify({ parentId: args.parentId, afterId: args.afterId }),
+        body: JSON.stringify({ parentId: args.parentId, afterId: args.afterId, spaceId: args.toSpaceId }),
       }),
-    onSuccess: (_p, args) => qc.invalidateQueries({ queryKey: ["pages", args.spaceId] }),
+    onSuccess: (_p, args) => {
+      qc.invalidateQueries({ queryKey: ["pages", args.fromSpaceId] });
+      if (args.toSpaceId !== args.fromSpaceId) qc.invalidateQueries({ queryKey: ["pages", args.toSpaceId] });
+    },
   });
 }
 
