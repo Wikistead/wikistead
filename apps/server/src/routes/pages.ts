@@ -13,8 +13,16 @@ function toPage(r: PageRow): Page {
 }
 
 // Fractional sibling ordering: a new value between two neighbours, no renumber.
-// front = min-1, end = max+1, between = midpoint, empty = 0. (v1 float; rebalance
-// on eventual precision exhaustion is future work.)
+// front = min-1, end = max+1, between = midpoint, empty = 0.
+//
+// v1 uses a float midpoint (chosen over a LexoRank-style string rank to avoid the
+// string min-boundary edge; both satisfy the no-renumber / single-row-UPDATE
+// concurrency property). KNOWN LIMITATION: ~53 consecutive inserts into the SAME
+// gap make two positions compare equal (float precision exhaustion) and the order
+// becomes ambiguous.
+// TODO(phase: tree-rebalance): detect a collapsed/duplicate gap and re-spread the
+//   affected siblings' positions (or switch to a LexoRank string key). Until then
+//   listPages tie-breaks equal positions by created_at so order stays stable.
 function positionBetween(before: number | null, after: number | null): number {
   if (before == null && after == null) return 0
   if (before == null) return (after as number) - 1
