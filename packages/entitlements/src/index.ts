@@ -36,10 +36,17 @@ const GB = 1_000_000_000
 // Canonical plan → entitlement table. Add rows here when new plans are introduced.
 // Enterprise tiers with custom limits override this at runtime (future work).
 //
-// Pricing philosophy: anonymous share-link collaboration is FREE on every plan
-// (it is what makes the product spread). Paid tiers monetize team SCALE — more
-// spaces, longer history, more storage, more members.
+// AGREED (business): anonymous share-link collaboration is FREE on every plan
+// (the viral hook), and paid tiers monetize team SCALE along these four levers
+// (spaces / history / storage / members).
+//
+// TODO(business): the SPECIFIC NUMBERS, the NUMBER OF TIERS (free/pro only?
+// + Team/Enterprise?), and PRICING are NOT decided yet — the values below are
+// PLACEHOLDERS chosen from rough SaaS norms so enforcement could be wired and
+// tested. They must not be treated as a product decision. Replace once the tier
+// design (limits + rationale + price, mapped to CE/EE/Cloud) is agreed.
 const PLANS: Record<string, Entitlements> = {
+  // PLACEHOLDER VALUES — pending business sign-off (see TODO above).
   free: { guestAccess: true, maxSpaces: 3,        maxMembersPerTenant: 5,  historyRetentionDays: 7,        maxStorageBytes: 1 * GB   },
   pro:  { guestAccess: true, maxSpaces: Infinity, maxMembersPerTenant: 50, historyRetentionDays: Infinity, maxStorageBytes: 100 * GB },
 }
