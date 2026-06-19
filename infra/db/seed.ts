@@ -2,6 +2,7 @@
 // FGA tuples are handled separately by infra/openfga/seed.ts.
 // Run with: pnpm --filter @wikistead/server db:seed
 import postgres from 'postgres'
+import { encryptSecret } from '../../apps/server/src/auth/secret-crypto.js'
 
 ;(async () => {
   const sql = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -20,6 +21,19 @@ import postgres from 'postgres'
       ON CONFLICT (tenant_id, id) DO NOTHING
     `
     console.log('seeded: tenant_dev / demo_space / demo (page)')
+
+    // Dev OIDC config (placeholder issuer; real IdP is configured per deployment).
+    // client_secret is stored ENCRYPTED via the same helper the app uses.
+    const clientSecret = process.env.OIDC_CLIENT_SECRET
+    await tx`
+      INSERT INTO tenant_oidc (tenant_id, issuer, client_id, client_secret_enc, redirect_uri)
+      VALUES ('tenant_dev', ${process.env.OIDC_ISSUER!}, ${process.env.OIDC_CLIENT_ID!},
+              ${clientSecret ? encryptSecret(clientSecret) : null}, ${process.env.OIDC_REDIRECT_URI!})
+      ON CONFLICT (tenant_id) DO UPDATE SET
+        issuer = EXCLUDED.issuer, client_id = EXCLUDED.client_id,
+        client_secret_enc = EXCLUDED.client_secret_enc, redirect_uri = EXCLUDED.redirect_uri, updated_at = now()
+    `
+    console.log('seeded: tenant_dev / tenant_oidc')
   })
 
   await sql.begin(async (tx) => {

@@ -17,6 +17,7 @@ import { LogicalStorageDriver } from './storage/index.js'
 import type { StorageDriver } from './storage/index.js'
 import IORedis from 'ioredis'
 import { SESSION_COOKIE, readSession } from './auth/session.js'
+import { assertSecretKey } from './auth/secret-crypto.js'
 import { spacesPlugin } from './routes/spaces.js'
 import { pagesPlugin } from './routes/pages.js'
 import { billingPlugin } from './routes/billing.js'
@@ -46,6 +47,10 @@ declare module 'fastify' {
 // (the auth hook — cookie sessions, cross-tenant rejection — is HTTP-level and
 // must be exercised through real requests). The entry (index.ts) calls listen().
 export async function buildApp(): Promise<FastifyInstance> {
+  // Fail-closed at boot: refuse to start without a valid OIDC secret key (would
+  // otherwise risk plaintext secret storage). See auth/secret-crypto.ts.
+  assertSecretKey()
+
   const app = Fastify({ logger: true })
   await app.register(cors, { origin: true })
   await app.register(cookie)
