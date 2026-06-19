@@ -48,6 +48,7 @@ export default defineConfig({
         // Same-origin: relative URLs go through the Vite proxy to the e2e ports.
         VITE_API_URL: "/api",
         VITE_COLLAB_URL: "/collab",
+        VITE_DEV_TOKEN: "dev-token", // member specs use the dev bypass (login.spec covers real OIDC)
         API_PROXY_TARGET: "http://localhost:4010",
         COLLAB_PROXY_TARGET: "http://localhost:4110",
       },
