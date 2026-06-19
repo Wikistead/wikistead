@@ -8,6 +8,7 @@ import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { looksLikeMemberCollabToken } from '@wikistead/auth'
 import { buildApp } from '../app.js'
 import { establishMemberSession, createSession, readSession, destroySession, sessionCookieOptions, SESSION_COOKIE } from '../auth/session.js'
 import type { Tenant } from '@wikistead/types'
@@ -106,5 +107,16 @@ describe('session endpoints', () => {
     expect(out.statusCode).toBe(204)
     expect(String(out.headers['set-cookie'] ?? '')).toContain(SESSION_COOKIE) // cleared
     expect(await readSession(valkey, sid)).toBeNull() // real revocation: Valkey entry gone
+  })
+
+  it('/auth/collab-token mints a member collab token from the session', async () => {
+    await writeTuples(fgaClient, [{ user: `user:${MEMBER}`, relation: 'member', object: `tenant:${tenant.id}` }]).catch(() => {})
+    const sid = await establishMemberSession({ db, fga: fgaClient, valkey }, { id: tenant.id }, { sub: MEMBER, email: 'm@x.test' })
+    const res = await app.inject({ method: 'POST', url: '/auth/collab-token', headers: { host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${sid}` } })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { token: string; expiresInSeconds: number }
+    expect(looksLikeMemberCollabToken(body.token)).toBe(true)
+    expect(body.expiresInSeconds).toBeGreaterThan(0)
+    await destroySession(valkey, sid)
   })
 })
