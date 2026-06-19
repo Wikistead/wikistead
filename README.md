@@ -47,15 +47,22 @@ docker-compose.yml        full local middleware stack
 ## Local development
 ```
 cp .env.example .env
+cp apps/web/.env.example apps/web/.env.local   # web → API on dev.localhost (tenant routing)
+pnpm install
 docker compose up -d           # postgres, valkey, openfga, meilisearch, seaweedfs
 pnpm --filter @wikistead/server migrate        # apply DB migrations
-pnpm --filter @wikistead/server fga:bootstrap  # prints OPENFGA_STORE_ID / MODEL_ID → put in .env
-pnpm --filter @wikistead/server fga:seed       # demo FGA tuples
+pnpm --filter @wikistead/server fga:bootstrap  # prints OPENFGA_STORE_ID / MODEL_ID → paste into .env
+pnpm --filter @wikistead/server fga:seed       # demo FGA tuples (needs the ids above)
 pnpm --filter @wikistead/server db:seed        # demo tenant / space / page
-pnpm install
 pnpm dev                       # runs server + collab + web on the host
 ```
+Open **http://localhost:5173/p/demo**. The API resolves the tenant from the Host
+header, so the web calls it on `dev.localhost:4000` (see `apps/web/.env.example`).
 Run app services in containers too: `docker compose --profile apps up -d --build`.
+
+> ⚠️ The server integration tests run against this same dev middleware and
+> `billing.test` wipes `tenant_dev` spaces, so `pnpm test` destroys the demo seed.
+> Re-run `db:seed` afterwards (or use the isolated e2e stack: `pnpm setup:e2e`).
 
 - OpenFGA playground: http://localhost:3000
 - Meilisearch: http://localhost:7700  ·  SeaweedFS S3 gateway: http://localhost:9000
