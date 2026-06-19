@@ -17,6 +17,13 @@ export default defineConfig({
         changeOrigin: false,
         rewrite: (p) => p.replace(/^\/api/, ""),
       },
+      // /auth/* is a TOP-LEVEL navigation flow (login → IdP → callback), so its
+      // path must be preserved end-to-end (NO prefix strip) — the OIDC redirect_uri
+      // the browser sees must equal what the server reconstructs.
+      "/auth": {
+        target: process.env.API_PROXY_TARGET ?? "http://localhost:4000",
+        changeOrigin: false,
+      },
       "/collab": {
         target: process.env.COLLAB_PROXY_TARGET ?? "http://localhost:4100",
         ws: true,

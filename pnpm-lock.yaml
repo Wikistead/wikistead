@@ -272,6 +272,9 @@ importers:
       '@playwright/test':
         specifier: ^1.49.0
         version: 1.61.0
+      jose:
+        specifier: ^5.9.0
+        version: 5.10.0
       postgres:
         specifier: ^3.4.0
         version: 3.4.9
