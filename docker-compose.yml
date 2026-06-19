@@ -49,7 +49,7 @@ services:
   # so the browser presigned-PUT/GET (CORS) works on the actual response.
   seaweedfs:
     image: chrislusf/seaweedfs:latest
-    command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://localhost:5173"
+    command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://dev.localhost:5173"
     ports: ["9000:8333"]
     volumes:
       - seaweeddata:/data

@@ -8,7 +8,16 @@ import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, type GuestToken } from "../data/apiClient";
 
-const COLLAB_URL = (import.meta as any).env?.VITE_COLLAB_URL ?? "ws://localhost:4100";
+// Same-origin collab (ADR-016): a relative "/collab" is resolved against the
+// current origin to an absolute ws(s):// URL (WebSocket needs an absolute URL),
+// so it goes through the same proxy as /api. Absolute ws URLs are used as-is.
+function resolveCollabUrl(): string {
+  const v = (import.meta as any).env?.VITE_COLLAB_URL ?? "/collab";
+  if (/^wss?:\/\//.test(v)) return v;
+  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${scheme}://${window.location.host}${v.startsWith("/") ? v : `/${v}`}`;
+}
+const COLLAB_URL = resolveCollabUrl();
 
 // Member route: /p/:pageId — tenant comes from the session, docName is formed
 // the same way the collab server expects ("t:<tenant>:p:<page>").

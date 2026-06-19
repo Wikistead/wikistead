@@ -49,7 +49,7 @@ services:
   # attachment e2e cleanly. S3 on host :9002 keeps .env.e2e unchanged.
   seaweedfs:
     image: chrislusf/seaweedfs:latest
-    command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://localhost:5180"
+    command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://dev.localhost:5180"
     ports: ["9002:8333"]
     volumes:
       - e2e_seaweeddata:/data
