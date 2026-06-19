@@ -29,6 +29,18 @@
   justify-content: flex-end;
 }
 
+.logout {
+  margin-left: var(--space-2);
+  background: none;
+  border: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  display: flex;
+  padding: 4px;
+  border-radius: 4px;
+}
+.logout:hover { color: var(--fg); background: var(--panel-2); }
+
 .sidebar {
   grid-area: sidebar;
   background: var(--panel);

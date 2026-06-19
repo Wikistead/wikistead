@@ -19,17 +19,39 @@ function resolveCollabUrl(): string {
 }
 const COLLAB_URL = resolveCollabUrl();
 
+// Shown when there is no member session (real mode). Kicks off the OIDC flow as a
+// top-level navigation to /auth/login (preserving where the user wanted to go).
+function LoginScreen() {
+  const returnTo = window.location.pathname + window.location.search;
+  return (
+    <AppShell>
+      <div style={{ padding: 24, maxWidth: 420 }}>
+        <h2 style={{ marginTop: 0 }}>Sign in to wikistead</h2>
+        <p style={{ color: "var(--fg-dim)" }}>Continue with your organization's identity provider.</p>
+        <button
+          type="button"
+          onClick={() => { window.location.href = `/auth/login?returnTo=${encodeURIComponent(returnTo)}`; }}
+        >
+          Sign in
+        </button>
+      </div>
+    </AppShell>
+  );
+}
+
 // Member route: /p/:pageId — tenant comes from the session, docName is formed
 // the same way the collab server expects ("t:<tenant>:p:<page>").
 function PageRoute() {
   const { pageId } = useParams<{ pageId: string }>();
-  const { token, tenantId, user } = useSession();
+  const { status, collabToken, tenantId, user, logout } = useSession();
+  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>Loading…</div></AppShell>;
+  if (status === "anon") return <LoginScreen />;
   const docName = `t:${tenantId}:p:${pageId}`;
   return (
-    <AppShell sidebar={<Sidebar />} search={<SearchBox />}>
+    <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         <div style={{ flex: 1, minHeight: 0 }}>
-          <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={user} />
+          <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} />
         </div>
         {pageId && <AttachmentsPanel pageId={pageId} readOnly={false} />}
       </div>
