@@ -39,7 +39,7 @@ afterAll(async () => {
 describe('share link lifecycle', () => {
   it('creates a view link, writes the FGA grant, and mints a read-only guest token', async () => {
     const link = await createShareLink(db, fgaClient, {
-      tenantId: tenant.id, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null,
+      tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null,
     })
     expect(link.capability).toBe('view')
     expect(await checkRelation(fgaClient, `share_link:${link.id}`, 'view', { type: 'page', id: pageId })).toBe(true)
@@ -58,7 +58,7 @@ describe('share link lifecycle', () => {
 
   it('an edit link mints a non-read-only token', async () => {
     const link = await createShareLink(db, fgaClient, {
-      tenantId: tenant.id, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'edit', expiresInSeconds: null,
+      tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'edit', expiresInSeconds: null,
     })
     const minted = await mintTokenForShareLink(fgaClient, tenant.id, link.id)
     expect(minted!.readOnly).toBe(false)
@@ -67,8 +67,8 @@ describe('share link lifecycle', () => {
   })
 
   it('lists only active links', async () => {
-    const a = await createShareLink(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null })
-    const b = await createShareLink(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'edit', expiresInSeconds: null })
+    const a = await createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null })
+    const b = await createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'edit', expiresInSeconds: null })
     await revokeShareLink(db, fgaClient, { id: b.id, userId: 'dev-user', tenantId: tenant.id })
     const active = await listShareLinks(db, fgaClient, { pageId, userId: 'dev-user' })
     const ids = active.map((l) => l.id)
@@ -80,7 +80,7 @@ describe('share link lifecycle', () => {
 
 describe('share link security', () => {
   it('revoked link no longer mints a token (tuple deleted = instant)', async () => {
-    const link = await createShareLink(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null })
+    const link = await createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null })
     expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id)).not.toBeNull()
     await revokeShareLink(db, fgaClient, { id: link.id, userId: 'dev-user', tenantId: tenant.id })
     expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id)).toBeNull()
@@ -91,7 +91,7 @@ describe('share link security', () => {
   })
 
   it('FGA is the authoritative gate: tuple gone but DB still active -> no token', async () => {
-    const link = await createShareLink(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null })
+    const link = await createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null })
     // Simulate DB/FGA divergence: delete the grant WITHOUT stamping revoked_at.
     await deleteTuples(fgaClient, [{ user: `share_link:${link.id}`, relation: 'view', object: `page:${pageId}` }])
     const [row] = await db.sql<{ revoked_at: Date | null }[]>`SELECT revoked_at FROM share_links WHERE id = ${link.id}`
@@ -102,7 +102,7 @@ describe('share link security', () => {
   })
 
   it('expired link mints nothing; an unexpired one works', async () => {
-    const link = await createShareLink(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: 1 })
+    const link = await createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: 1 })
     expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id)).not.toBeNull() // still within 1s
     await new Promise((r) => setTimeout(r, 1200))
     expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id)).toBeNull() // expired
@@ -111,12 +111,12 @@ describe('share link security', () => {
 
   it('a user without manage cannot create a link', async () => {
     await expect(
-      createShareLink(db, fgaClient, { tenantId: tenant.id, userId: 'stranger', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null }),
+      createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'stranger', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null }),
     ).rejects.toThrow()
   })
 
   it('cross-tenant: minting under another tenant cannot see the link', async () => {
-    const link = await createShareLink(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null })
+    const link = await createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null })
     // tenant_acme RLS context cannot read a tenant_dev share_link row -> null.
     expect(await mintTokenForShareLink(fgaClient, 'tenant_acme', link.id)).toBeNull()
     await revokeShareLink(db, fgaClient, { id: link.id, userId: 'dev-user', tenantId: tenant.id })

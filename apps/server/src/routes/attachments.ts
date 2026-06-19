@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check } from '@wikistead/authz'
+import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import { pool } from '../db/pool.js'
 import { makeS3Key } from '../storage/driver.js'
@@ -34,10 +35,25 @@ export async function presignAttachment(
   db: TenantDb,
   storage: StorageDriver,
   fga: OpenFgaClient,
-  args: { tenantId: string; pageId: string; userId: string; filename: string; contentType: string },
+  args: { tenantId: string; plan: string; pageId: string; userId: string; filename: string; contentType: string },
 ): Promise<{ attachmentId: string; uploadUrl: string; expiresAt: string }> {
   const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: args.pageId })
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+
+  // Plan-gated storage quota: sum of CONFIRMED attachment sizes for the tenant.
+  // Pending uploads aren't counted until confirmed (size is unknown until then),
+  // so concurrent presigns can overshoot slightly — same count+insert race class
+  // as maxSpaces; acceptable for v1.
+  const quota = resolveEntitlements(args.plan).maxStorageBytes
+  if (isFinite(quota)) {
+    const [{ used }] = await db.sql<[{ used: string }]>`
+      SELECT COALESCE(SUM(size_bytes), 0)::text AS used
+      FROM attachments WHERE tenant_id = ${args.tenantId} AND status = 'confirmed'
+    `
+    if (Number(used) >= quota) {
+      throw Object.assign(new Error('storage quota exceeded'), { statusCode: 402 })
+    }
+  }
 
   // Pre-generate the UUID so we can include it in the S3 key before INSERT.
   const [{ id }] = await db.sql<[{ id: string }]>`SELECT gen_random_uuid()::text AS id`
@@ -182,6 +198,7 @@ export async function attachmentsPlugin(app: FastifyInstance) {
     async (req, reply) => {
       const result = await presignAttachment(req.db, app.storageDriver, app.fga, {
         tenantId: req.tenant.id,
+        plan: req.tenant.plan,
         pageId: req.params.pageId,
         userId: req.user.sub,
         filename: req.body.filename,

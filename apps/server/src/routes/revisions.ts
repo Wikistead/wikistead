@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import type IORedis from 'ioredis'
 import { check } from '@wikistead/authz'
+import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import { pool } from '../db/pool.js'
 import type { TenantDb } from '../db/index.js'
@@ -49,17 +50,25 @@ export function computeRestoreUpdate(current: Buffer, snapshot: Buffer): Uint8Ar
 
 // ── Service functions ─────────────────────────────────────────────────────
 
+// History retention cutoff for a plan: revisions older than this are hidden and
+// not restorable on that plan. Infinity retention => epoch (everything visible).
+function retentionCutoff(plan: string): Date {
+  const days = resolveEntitlements(plan).historyRetentionDays
+  return isFinite(days) ? new Date(Date.now() - days * 86_400_000) : new Date(0)
+}
+
 export async function listRevisions(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { pageId: string; userId: string },
+  args: { pageId: string; userId: string; plan: string },
 ): Promise<RevisionSummary[]> {
   const canView = await check(fga, `user:${args.userId}`, 'view', { type: 'page', id: args.pageId })
   if (!canView) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
+  // Plan-gated retention: free tiers only expose recent history.
   const rows = await db.sql<RevisionRow[]>`
     SELECT id, tenant_id, page_id, title, created_by, created_at
-    FROM revisions WHERE page_id = ${args.pageId}
+    FROM revisions WHERE page_id = ${args.pageId} AND created_at >= ${retentionCutoff(args.plan)}
     ORDER BY created_at DESC
   `
   return rows.map(r => ({ id: r.id, pageId: r.page_id, title: r.title, createdBy: r.created_by, createdAt: r.created_at }))
@@ -83,7 +92,7 @@ export async function restoreRevision(
   db: TenantDb,
   fga: OpenFgaClient,
   valkey: IORedis,
-  args: { tenantId: string; pageId: string; revId: string; userId: string },
+  args: { tenantId: string; pageId: string; revId: string; userId: string; plan: string },
 ): Promise<{ documentName: string }> {
   const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: args.pageId })
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
@@ -94,8 +103,11 @@ export async function restoreRevision(
   `
   if (!current) throw Object.assign(new Error('not found'), { statusCode: 404 })
 
+  // Plan-gated retention: a revision outside the window is not restorable (and is
+  // reported as not found, matching what listRevisions exposes).
   const [rev] = await db.sql<[{ ydoc: Buffer; tenant_id: string }]>`
-    SELECT ydoc, tenant_id FROM revisions WHERE id = ${args.revId} AND page_id = ${args.pageId}
+    SELECT ydoc, tenant_id FROM revisions
+    WHERE id = ${args.revId} AND page_id = ${args.pageId} AND created_at >= ${retentionCutoff(args.plan)}
   `
   if (!rev) throw Object.assign(new Error('revision not found'), { statusCode: 404 })
 
@@ -143,7 +155,7 @@ export async function restoreRevision(
 
 export async function revisionsPlugin(app: FastifyInstance) {
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/revisions', async (req) => {
-    return listRevisions(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub })
+    return listRevisions(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub, plan: req.tenant.plan })
   })
 
   app.post<{ Params: { pageId: string; revId: string } }>(
@@ -154,6 +166,7 @@ export async function revisionsPlugin(app: FastifyInstance) {
         pageId: req.params.pageId,
         revId: req.params.revId,
         userId: req.user.sub,
+        plan: req.tenant.plan,
       })
       return reply.code(204).send()
     },

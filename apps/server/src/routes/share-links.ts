@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, writeTuples, deleteTuples } from '@wikistead/authz'
 import { mintGuestToken } from '@wikistead/auth'
+import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import type { Capability, ResourceRef } from '@wikistead/types'
 import { pool } from '../db/pool.js'
@@ -59,6 +60,7 @@ export async function createShareLink(
   fga: OpenFgaClient,
   args: {
     tenantId: string
+    plan: string
     userId: string
     resource: ResourceRef
     capability: Capability
@@ -67,6 +69,11 @@ export async function createShareLink(
 ): Promise<ShareLink> {
   if (args.resource.type !== 'page') {
     throw Object.assign(new Error('only page links are supported'), { statusCode: 400 })
+  }
+  // Entitlement gate (issuance only): blocked plans cannot mint new links, but
+  // already-issued links keep working. Free includes guest access (the hook).
+  if (!resolveEntitlements(args.plan).guestAccess) {
+    throw Object.assign(new Error('share links not available on this plan'), { statusCode: 402 })
   }
   const relation = relationFor(args.capability)
 
@@ -212,6 +219,7 @@ export async function shareLinksPlugin(app: FastifyInstance) {
     async (req, reply) => {
       const link = await createShareLink(req.db, app.fga, {
         tenantId: req.tenant.id,
+        plan: req.tenant.plan,
         userId: req.user.sub,
         resource: req.body.resource,
         capability: req.body.capability,
