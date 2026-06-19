@@ -34,10 +34,18 @@ export async function seedFixtures() {
   // --- locked space + page (admin pool bypasses RLS for the insert) ---
   const sql = postgres(E2E.pgAdmin);
   try {
-    // Fixed ids so specs can address the locked page directly. No FGA grant is
-    // written, so dev-user can neither view nor edit it.
-    await sql`DELETE FROM pages WHERE tenant_id = ${E2E.tenant} AND id = ${LOCKED_PAGE_ID}`;
-    await sql`DELETE FROM spaces WHERE tenant_id = ${E2E.tenant} AND id = ${LOCKED_SPACE_ID}`;
+    // Clean baseline so specs are idempotent across runs: the e2e DB persists
+    // between runs and tests create/move/delete pages, so we fully wipe the
+    // tenant and re-create the canonical seed (demo_space/demo — matching the
+    // fixed ids that fga:seed grants) plus the locked fixtures. Wiping pages
+    // cascades their attachments/revisions (composite FK ON DELETE CASCADE).
+    await sql`DELETE FROM pages WHERE tenant_id = ${E2E.tenant}`;
+    await sql`DELETE FROM spaces WHERE tenant_id = ${E2E.tenant}`;
+    await sql`INSERT INTO spaces (id, tenant_id, name) VALUES ('demo_space', ${E2E.tenant}, 'Demo Space')`;
+    await sql`INSERT INTO pages (id, tenant_id, space_id, title) VALUES ('demo', ${E2E.tenant}, 'demo_space', 'Demo Page')`;
+
+    // Locked fixtures: present in Postgres (RLS returns them) but with NO FGA
+    // grant, so dev-user can neither view nor edit them.
     await sql`INSERT INTO spaces (id, tenant_id, name) VALUES (${LOCKED_SPACE_ID}, ${E2E.tenant}, ${LOCKED_SPACE_NAME})`;
     await sql`INSERT INTO pages (id, tenant_id, space_id, title) VALUES (${LOCKED_PAGE_ID}, ${E2E.tenant}, ${LOCKED_SPACE_ID}, 'locked page')`;
   } finally {

@@ -15,6 +15,7 @@ export interface Page {
   spaceId: string;
   parentId: string | null;
   title: string;
+  position: number;
 }
 
 export function useSpaces() {
@@ -48,10 +49,25 @@ export function useCreatePage() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { spaceId: string; title: string }) =>
+    mutationFn: (args: { spaceId: string; title: string; parentId?: string | null }) =>
       apiFetch<Page>(`/spaces/${args.spaceId}/pages`, token, {
         method: "POST",
-        body: JSON.stringify({ title: args.title }),
+        body: JSON.stringify({ title: args.title, parentId: args.parentId ?? null }),
+      }),
+    onSuccess: (_p, args) => qc.invalidateQueries({ queryKey: ["pages", args.spaceId] }),
+  });
+}
+
+// Intra-space reparent + reorder (phase 3b ①). parentId null = top level of the
+// space; afterId null = first child of the target parent.
+export function useMovePage() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { pageId: string; spaceId: string; parentId: string | null; afterId: string | null }) =>
+      apiFetch<Page>(`/pages/${args.pageId}/move`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ parentId: args.parentId, afterId: args.afterId }),
       }),
     onSuccess: (_p, args) => qc.invalidateQueries({ queryKey: ["pages", args.spaceId] }),
   });

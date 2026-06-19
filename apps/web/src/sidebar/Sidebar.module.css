@@ -28,75 +28,38 @@
   padding: 2px;
   border-radius: 4px;
 }
-.header button:hover {
-  color: var(--fg);
-  background: var(--panel-2);
-}
+.header button:hover { color: var(--fg); background: var(--panel-2); }
 
-.state {
-  padding: var(--space-3);
-  color: var(--fg-dim);
-}
-.state button {
-  color: var(--accent);
-  background: none;
-  border: none;
-  cursor: pointer;
-}
+.state { padding: var(--space-3); color: var(--fg-dim); }
+.state button { color: var(--accent); background: none; border: none; cursor: pointer; }
 
-.tree {
-  overflow: auto;
-  padding: var(--space-1) 0;
-}
+/* react-arborist fills this box; useSize feeds its width/height. */
+.treeBox { flex: 1 1 auto; min-height: 0; }
 
-/* Ark indents nested levels via the data-depth attribute it sets on items. */
+/* react-arborist passes positioning/indent via the row `style`; we add layout. */
 .row {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 3px var(--space-3);
-  padding-left: calc(var(--space-2) + var(--depth, 0) * 14px);
+  padding-right: var(--space-2);
   cursor: pointer;
-  border-radius: 4px;
   user-select: none;
+  border-radius: 4px;
 }
-.row:hover {
-  background: var(--panel-2);
-}
-.row[data-selected] {
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
-}
-.row[data-depth] {
-  --depth: attr(data-depth);
-}
+.row:hover { background: var(--panel-2); }
+.selected { background: color-mix(in srgb, var(--accent) 28%, transparent); }
 
-.indicator {
-  display: flex;
-  transition: transform 0.12s ease;
-}
-.indicator[data-state="open"] {
-  transform: rotate(90deg);
-}
-.fileIcon {
-  color: var(--fg-dim);
-  flex: 0 0 auto;
-}
-.name {
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.indicator { display: inline-flex; align-items: center; flex: 0 0 auto; }
+.indicator :global(.lucide) { transition: transform 0.12s ease; }
+.caretOpen { transform: rotate(90deg); }
+.caretSpace { display: inline-block; width: 14px; }
 
-.actions {
-  display: none;
-  gap: 2px;
-}
-/* Reveal on hover AND keyboard focus so actions are reachable without a mouse. */
+.fileIcon { color: var(--fg-dim); flex: 0 0 auto; }
+.name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.actions { display: none; gap: 2px; }
 .row:hover .actions,
-.row:focus-within .actions {
-  display: flex;
-}
+.row:focus-within .actions { display: flex; }
 .actions button {
   background: none;
   border: none;
@@ -106,7 +69,4 @@
   padding: 2px;
   border-radius: 4px;
 }
-.actions button:hover {
-  color: var(--fg);
-  background: var(--border);
-}
+.actions button:hover { color: var(--fg); background: var(--border); }
