@@ -3,6 +3,7 @@ import { resolveTenantFromHost, loadTenant } from '../tenant.js'
 import { acquireTenantDb } from '../db/index.js'
 import type { TenantDb } from '../db/index.js'
 import type { Tenant } from '@wikistead/types'
+import { mintMemberCollabToken } from '@wikistead/auth'
 import { SESSION_COOKIE, destroySession, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
 import { buildLogin, exchangeCode, type TenantOidcConfig } from '../auth/oidc.js'
 import { saveState, consumeState } from '../auth/oidc-state.js'
@@ -93,6 +94,19 @@ export async function authPlugin(app: FastifyInstance) {
 
   // Who am I — lets the SPA know the current member (401 if unauthenticated).
   app.get('/auth/me', async (req) => ({ sub: req.user.sub, groups: req.user.groups }))
+
+  // Mint a short-lived collab token from the (cookie) session: the collab
+  // WebSocket is token-based, so the browser member exchanges its session for a
+  // signed token to hand to HocuspocusProvider. Collab re-derives per-document
+  // authority from OpenFGA (the token asserts identity, not authority).
+  const COLLAB_TOKEN_TTL = 300
+  app.post('/auth/collab-token', async (req) => {
+    const token = await mintMemberCollabToken(
+      { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: COLLAB_TOKEN_TTL },
+      { tenantId: req.tenant.id, sub: req.user.sub, groups: req.user.groups },
+    )
+    return { token, expiresInSeconds: COLLAB_TOKEN_TTL }
+  })
 
   // Logout = real revocation: DELETE the Valkey session (not just the cookie, or a
   // resent sid would still authenticate) AND clear the cookie.

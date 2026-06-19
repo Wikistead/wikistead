@@ -41,6 +41,46 @@ export async function verifyGuestToken(cfg: GuestTokenConfig, token: string): Pr
   return payload as unknown as GuestTokenClaims;
 }
 
+// ── Member collab tokens (P1.1 C4) ──────────────────────────────────────────
+// Browser members authenticate to the API via a host-only session cookie (BFF),
+// but the collab WebSocket is token-based. So the API mints a SHORT-LIVED,
+// app-signed member token from the session; collab verifies it and re-derives
+// per-document access from OpenFGA (the token asserts identity, not authority —
+// same rule as guest tokens). Distinct typ from guest so one socket can tell them
+// apart. Reuses the guest signing secret.
+export interface MemberCollabClaims {
+  tenantId: string;
+  sub: string;
+  groups: string[];
+}
+
+export async function mintMemberCollabToken(
+  cfg: GuestTokenConfig,
+  args: { tenantId: string; sub: string; groups: string[] },
+): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  return new SignJWT({ tenantId: args.tenantId, sub: args.sub, groups: args.groups })
+    .setProtectedHeader({ alg: "HS256", typ: "member+jwt" })
+    .setIssuedAt(now)
+    .setExpirationTime(now + cfg.ttlSeconds)
+    .sign(enc.encode(cfg.secret));
+}
+
+export async function verifyMemberCollabToken(cfg: GuestTokenConfig, token: string): Promise<MemberCollabClaims> {
+  const { payload } = await jwtVerify(token, enc.encode(cfg.secret), { typ: "member+jwt" });
+  return payload as unknown as MemberCollabClaims;
+}
+
+export function looksLikeMemberCollabToken(token: string): boolean {
+  try {
+    const [h] = token.split(".");
+    const header = JSON.parse(Buffer.from(h, "base64url").toString());
+    return header?.typ === "member+jwt";
+  } catch {
+    return false;
+  }
+}
+
 export interface OidcConfig {
   issuer: string;
   jwksUri: string;
