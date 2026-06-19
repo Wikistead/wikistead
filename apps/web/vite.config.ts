@@ -3,5 +3,26 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  server: { port: Number(process.env.WEB_PORT ?? 5173) },
+  // Same-origin model (ADR-016): the browser only talks to the web origin; /api and
+  // /collab are proxied to the API and collab services so the BFF session cookie
+  // (host-only) is sent to them. changeOrigin:false PRESERVES the Host header so the
+  // API still resolves the tenant from it (dev.localhost → slug "dev"). This mirrors
+  // the production reverse-proxy path-split (dev/prod parity). Targets are env-driven
+  // so the e2e harness can point at its own ports.
+  server: {
+    port: Number(process.env.WEB_PORT ?? 5173),
+    proxy: {
+      "/api": {
+        target: process.env.API_PROXY_TARGET ?? "http://localhost:4000",
+        changeOrigin: false,
+        rewrite: (p) => p.replace(/^\/api/, ""),
+      },
+      "/collab": {
+        target: process.env.COLLAB_PROXY_TARGET ?? "http://localhost:4100",
+        ws: true,
+        changeOrigin: false,
+        rewrite: (p) => p.replace(/^\/collab/, ""),
+      },
+    },
+  },
 });

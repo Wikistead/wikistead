@@ -14,7 +14,9 @@ export default defineConfig({
   globalSetup: "./global-setup.ts",
   reporter: [["list"]],
   use: {
-    baseURL: "http://localhost:5180",
+    // Same-origin (ADR-016): the browser hits the web origin only; Vite proxies
+    // /api + /collab. dev.localhost (not localhost) so the API resolves slug "dev".
+    baseURL: "http://dev.localhost:5180",
     channel: "chrome", // system Chrome — no browser download
     headless: true,
     launchOptions: { args: ["--no-sandbox"] },
@@ -43,8 +45,11 @@ export default defineConfig({
       timeout: 60_000,
       env: {
         WEB_PORT: "5180",
-        VITE_API_URL: "http://dev.localhost:4010",
-        VITE_COLLAB_URL: "ws://localhost:4110",
+        // Same-origin: relative URLs go through the Vite proxy to the e2e ports.
+        VITE_API_URL: "/api",
+        VITE_COLLAB_URL: "/collab",
+        API_PROXY_TARGET: "http://localhost:4010",
+        COLLAB_PROXY_TARGET: "http://localhost:4110",
       },
     },
   ],
