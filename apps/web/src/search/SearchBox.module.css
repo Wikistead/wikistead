@@ -43,6 +43,7 @@
 }
 .item {
   display: flex;
+  flex-wrap: wrap; /* snippet wraps to its own full-width line below title + space */
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-2);
@@ -62,4 +63,12 @@
   flex: 0 0 auto;
   font-size: 11px;
   color: var(--fg-dim);
+}
+.itemSnippet {
+  flex: 0 0 100%;
+  font-size: 12px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

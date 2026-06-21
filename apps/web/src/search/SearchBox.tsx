@@ -11,13 +11,15 @@ interface Item {
   value: string; // page id
   label: string; // title
   space: string; // space name (breadcrumb)
+  snippet: string; // cropped plain-text body excerpt (may be empty)
 }
 
 // Tenant page search. The two-stage guard (Meili + FGA) lives entirely in the
-// API; this component only renders the authorized hits it returns (title-only —
-// no body snippet, so nothing the user can't view is ever shown). Cmd/Ctrl-K
-// focuses the input. Not rendered on guest routes (no cross-tenant search for
-// anonymous link visitors).
+// API; this component only renders the authorized hits it returns. The body
+// snippet is plain text (the API strips markup) and rendered AS TEXT — never via
+// dangerouslySetInnerHTML — so user-authored content cannot inject markup, and a
+// snippet only ever appears for a page the user is allowed to view. Cmd/Ctrl-K
+// focuses the input. Not rendered on guest routes.
 export function SearchBox() {
   const navigate = useNavigate();
   const [input, setInput] = useState("");
@@ -39,6 +41,7 @@ export function SearchBox() {
           value: h.id,
           label: h.title || "Untitled",
           space: spaceName.get(h.spaceId) ?? "",
+          snippet: h.snippet ?? "",
         })),
         itemToValue: (i) => i.value,
         itemToString: (i) => i.label,
@@ -90,6 +93,7 @@ export function SearchBox() {
                 <Combobox.Item key={item.value} item={item} className={styles.item} data-testid="search-item">
                   <Combobox.ItemText className={styles.itemTitle}>{item.label}</Combobox.ItemText>
                   {item.space && <span className={styles.itemSpace}>{item.space}</span>}
+                  {item.snippet && <span className={styles.itemSnippet} data-testid="search-snippet">{item.snippet}</span>}
                 </Combobox.Item>
               ))
             )}
