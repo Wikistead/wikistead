@@ -3,6 +3,7 @@
 // openid-client runs its genuine discovery/PKCE/nonce/code-exchange flow.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
+import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
@@ -25,16 +26,16 @@ let tenant: Tenant
 let db: TenantDb
 
 // Drive login → IdP /authorize (real fetch) → return the relative callback path.
-async function startLogin(returnTo?: string): Promise<string> {
+async function startLogin(returnTo?: string, host = 'dev.localhost'): Promise<string> {
   const url = '/auth/login' + (returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : '')
-  const res = await app.inject({ method: 'GET', url, headers: { host: 'dev.localhost' } })
+  const res = await app.inject({ method: 'GET', url, headers: { host } })
   expect(res.statusCode).toBe(302)
   const authorizeUrl = res.headers.location as string
   const authRes = await fetch(authorizeUrl, { redirect: 'manual' })
-  const cb = new URL(authRes.headers.get('location')!)
-  return cb.pathname + cb.search // /auth/callback?code=...&state=...
+  const u = new URL(authRes.headers.get('location')!)
+  return u.pathname + u.search // /auth/callback?code=...&state=...
 }
-const cb = (path: string) => app.inject({ method: 'GET', url: path, headers: { host: 'dev.localhost' } })
+const cb = (path: string, host = 'dev.localhost') => app.inject({ method: 'GET', url: path, headers: { host } })
 
 beforeAll(async () => {
   issuer = await startTestIssuer({ clientId: CLIENT_ID })
@@ -113,5 +114,51 @@ describe('OIDC login flow', () => {
     const res = await cb(await startLogin('https://evil.com/phish'))
     expect(res.statusCode).toBe(302)
     expect(res.headers.location).toBe('/') // NOT evil.com
+  })
+})
+
+// CE first-admin bootstrap THROUGH the real callback (P1.2 P2c): a member-less
+// tenant configured with its own IdP makes the FIRST login admin, exactly once.
+describe('CE first-admin bootstrap via callback', () => {
+  const admin = postgres(process.env.DATABASE_ADMIN_URL!)
+  const slug = `boot-cb-${Date.now().toString(36)}`
+  const host = `${slug}.localhost`
+  const BOOT = 'boot-admin-cb'
+  const SECOND = 'boot-second-cb'
+  let tenantId: string
+
+  beforeAll(async () => {
+    const [t] = await admin<{ id: string }[]>`INSERT INTO tenants (slug, plan) VALUES (${slug}, 'free') RETURNING id`
+    tenantId = t.id
+    await admin`
+      INSERT INTO tenant_oidc (tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri)
+      VALUES (${tenantId}, ${issuer.url}, ${CLIENT_ID}, ${encryptSecret('test-secret')}, 'openid email profile', ${`http://${host}/auth/callback`})`
+  })
+  afterAll(async () => {
+    await deleteTuples(fgaClient, [
+      { user: `user:${BOOT}`, relation: 'admin', object: `tenant:${tenantId}` },
+      { user: `user:${BOOT}`, relation: 'member', object: `tenant:${tenantId}` },
+    ]).catch(() => {})
+    await admin`DELETE FROM members WHERE tenant_id = ${tenantId}`.catch(() => {})
+    await admin`DELETE FROM tenant_oidc WHERE tenant_id = ${tenantId}`.catch(() => {})
+    await admin`DELETE FROM tenants WHERE id = ${tenantId}`.catch(() => {})
+    await admin.end()
+  })
+
+  it('first login into a member-less tenant is bootstrapped as admin', async () => {
+    issuer.setSubject(BOOT, { email: 'boot@x.test' })
+    const res = await cb(await startLogin('/', host), host)
+    expect(res.statusCode).toBe(302)
+    expect(res.headers.location).toBe('/')
+    expect(String(res.headers['set-cookie'] ?? '')).toContain(`${SESSION_COOKIE}=`)
+    expect((await fgaClient.check({ user: `user:${BOOT}`, relation: 'admin', object: `tenant:${tenantId}` })).allowed).toBe(true)
+  })
+
+  it('a second login is NOT auto-admitted — membership now requires an invite', async () => {
+    issuer.setSubject(SECOND, { email: 'second@x.test' })
+    const res = await cb(await startLogin('/', host), host)
+    expect(res.statusCode).toBe(302)
+    expect(res.headers.location).toBe('/login?error=access') // vague denial
+    expect(String(res.headers['set-cookie'] ?? '')).not.toContain(`${SESSION_COOKIE}=`)
   })
 })

@@ -12,6 +12,9 @@ export interface OidcLoginState {
   codeVerifier: string
   tenantId: string
   returnTo: string
+  // Which config authenticated: the tenant's own IdP (eligible for CE first-admin
+  // bootstrap) vs the platform IdP (Cloud — never bootstraps; admin comes from signup).
+  viaTenantOidc: boolean
 }
 
 export async function saveState(valkey: IORedis, state: string, data: OidcLoginState): Promise<void> {

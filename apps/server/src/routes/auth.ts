@@ -8,13 +8,15 @@ import { SESSION_COOKIE, destroySession, establishMemberSession, sessionCookieOp
 import { buildLogin, exchangeCode, type TenantOidcConfig } from '../auth/oidc.js'
 import { saveState, consumeState } from '../auth/oidc-state.js'
 import { safeReturnTo } from '../auth/return-to.js'
+import { decryptSecret } from '../auth/secret-crypto.js'
+import { bootstrapFirstAdmin } from '../auth/provisioning.js'
 
 async function resolveTenant(host: string | undefined): Promise<Tenant | null> {
   const { slug, domain } = resolveTenantFromHost(host ?? '')
   return loadTenant(slug, domain)
 }
 
-// Read the tenant's OIDC config under its RLS context (one row per tenant).
+// The tenant's own IdP (RLS-scoped, one row per tenant); secret decrypted here.
 async function loadTenantOidc(db: TenantDb): Promise<TenantOidcConfig | null> {
   const [row] = await db.sql<
     { issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean }[]
@@ -23,10 +25,36 @@ async function loadTenantOidc(db: TenantDb): Promise<TenantOidcConfig | null> {
   return {
     issuer: row.issuer,
     clientId: row.client_id,
-    clientSecretEnc: row.client_secret_enc,
+    clientSecret: row.client_secret_enc ? decryptSecret(row.client_secret_enc) : null,
     scopes: row.scopes,
     redirectUri: row.redirect_uri,
   }
+}
+
+// The platform IdP (Cloud only) from env — the DEFAULT identity source for tenants
+// that have not configured their own IdP (ADR-016). Unset on CE.
+function loadPlatformOidc(): TenantOidcConfig | null {
+  const issuer = process.env.PLATFORM_OIDC_ISSUER
+  if (!issuer) return null
+  return {
+    issuer,
+    clientId: process.env.PLATFORM_OIDC_CLIENT_ID!,
+    clientSecret: process.env.PLATFORM_OIDC_CLIENT_SECRET ?? null,
+    scopes: process.env.PLATFORM_OIDC_SCOPES ?? 'openid email profile',
+    redirectUri: process.env.PLATFORM_OIDC_REDIRECT_URI!,
+  }
+}
+
+// Resolution order (ADR-016): the tenant's own IdP overrides; else the platform
+// IdP (Cloud); else none (CE without OIDC configured). viaTenantOidc gates the CE
+// first-admin bootstrap — only the tenant's own IdP can bootstrap, never the
+// platform IdP (Cloud admins come from signup).
+async function resolveLoginConfig(db: TenantDb): Promise<{ cfg: TenantOidcConfig; viaTenantOidc: boolean } | null> {
+  const tenantCfg = await loadTenantOidc(db)
+  if (tenantCfg) return { cfg: tenantCfg, viaTenantOidc: true }
+  const platform = loadPlatformOidc()
+  if (platform) return { cfg: platform, viaTenantOidc: false }
+  return null
 }
 
 // Session-backed auth endpoints (P1.1). /auth/login + /auth/callback are PUBLIC
@@ -40,11 +68,11 @@ export async function authPlugin(app: FastifyInstance) {
     if (!tenant) return reply.code(404).send({ error: 'not found' })
     const db = await acquireTenantDb(tenant)
     try {
-      const cfg = await loadTenantOidc(db)
-      if (!cfg) return reply.code(404).send({ error: 'login not configured' })
-      const { url, state, nonce, codeVerifier } = await buildLogin(cfg)
+      const resolved = await resolveLoginConfig(db)
+      if (!resolved) return reply.code(404).send({ error: 'login not configured' })
+      const { url, state, nonce, codeVerifier } = await buildLogin(resolved.cfg)
       const returnTo = safeReturnTo(req.query?.returnTo)
-      await saveState(app.valkey, state, { nonce, codeVerifier, tenantId: tenant.id, returnTo })
+      await saveState(app.valkey, state, { nonce, codeVerifier, tenantId: tenant.id, returnTo, viaTenantOidc: resolved.viaTenantOidc })
       return reply.redirect(url)
     } finally {
       await db.release()
@@ -66,27 +94,37 @@ export async function authPlugin(app: FastifyInstance) {
 
     const db = await acquireTenantDb(tenant)
     try {
-      const cfg = await loadTenantOidc(db)
-      if (!cfg) return reply.code(404).send({ error: 'login not configured' })
+      const resolved = await resolveLoginConfig(db)
+      if (!resolved) return reply.code(404).send({ error: 'login not configured' })
 
       const currentUrl = `${req.protocol}://${req.headers.host}${req.url}`
       let claims
       try {
-        claims = await exchangeCode(cfg, currentUrl, { state: req.query!.state!, nonce: st.nonce, codeVerifier: st.codeVerifier })
+        claims = await exchangeCode(resolved.cfg, currentUrl, { state: req.query!.state!, nonce: st.nonce, codeVerifier: st.codeVerifier })
       } catch {
         return reply.redirect('/login?error=auth') // token/sig/nonce check failed
       }
 
+      const deps = { db, fga: app.fga, valkey: app.valkey }
+      let sid: string | null = null
       try {
-        const sid = await establishMemberSession({ db, fga: app.fga, valkey: app.valkey }, tenant, claims)
-        reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
-        return reply.redirect(st.returnTo)
+        sid = await establishMemberSession(deps, tenant, claims) // existing member → session
       } catch {
-        // Not a member (or any post-auth failure). Deliberately VAGUE — telling the
-        // caller "authenticated but not a member" would confirm the sub exists in
-        // the IdP (enumeration). Membership is never created here.
+        // Not a member yet. The ONLY way to gain membership here is the CE
+        // first-admin bootstrap (tenant's own IdP + member-less tenant); a 2nd
+        // login or the platform IdP (Cloud) never does — membership comes from
+        // invite (P1.4) / signup (provisionTenant).
+        if (st.viaTenantOidc && (await bootstrapFirstAdmin({ db, fga: app.fga }, tenant, claims))) {
+          sid = await establishMemberSession(deps, tenant, claims)
+        }
+      }
+      if (!sid) {
+        // Deliberately VAGUE (no "authenticated but not a member" — that would
+        // confirm the sub exists in the IdP = enumeration).
         return reply.redirect('/login?error=access')
       }
+      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+      return reply.redirect(st.returnTo)
     } finally {
       await db.release()
     }
