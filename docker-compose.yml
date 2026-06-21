@@ -71,6 +71,11 @@ services:
     ports: ["4100:4100"]
     profiles: ["apps"]
 
+  # Local mail catcher (P1.3). SMTP on 1025, web UI + HTTP API on 8025.
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ["1025:1025", "8025:8025"]
+
 volumes:
   pgdata:
   meilidata:
