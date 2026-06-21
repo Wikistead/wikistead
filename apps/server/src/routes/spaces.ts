@@ -8,7 +8,7 @@ import type { SearchDriver } from '../search/index.js'
 import type { TenantDb } from '../db/index.js'
 
 interface SpaceRow { id: string; tenant_id: string; name: string; created_at: Date }
-export interface Space { id: string; tenantId: string; name: string; createdAt: Date }
+export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage' }
 function toSpace(r: SpaceRow): Space {
   return { id: r.id, tenantId: r.tenant_id, name: r.name, createdAt: r.created_at }
 }
@@ -58,13 +58,24 @@ export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: strin
   const rows = await db.sql<SpaceRow[]>`
     SELECT id, tenant_id, name, created_at FROM spaces ORDER BY created_at
   `
-  const checks = await Promise.all(
-    rows.map((r) =>
-      check(fga, `user:${userId}`, 'view', { type: 'space', id: r.id }).then((ok) => [r.id, ok] as const),
-    ),
+  // Per space, derive the caller's capability (view|edit|manage) so the sidebar can
+  // show/hide management actions (the UI signal; the server stays the fortress).
+  // Spaces are few, so a few checks each is cheap. Non-viewable spaces are dropped.
+  const caps = await Promise.all(
+    rows.map(async (r) => {
+      const ref = { type: 'space', id: r.id } as const
+      const user = `user:${userId}`
+      const [view, edit, manage] = await Promise.all([
+        check(fga, user, 'view', ref),
+        check(fga, user, 'edit', ref),
+        check(fga, user, 'manage', ref),
+      ])
+      const capability: Space['capability'] | null = manage ? 'manage' : edit ? 'edit' : view ? 'view' : null
+      return [r.id, capability] as const
+    }),
   )
-  const allowed = new Set(checks.filter(([, ok]) => ok).map(([id]) => id))
-  return rows.filter((r) => allowed.has(r.id)).map(toSpace)
+  const capById = new Map(caps)
+  return rows.filter((r) => capById.get(r.id) != null).map((r) => ({ ...toSpace(r), capability: capById.get(r.id)! }))
 }
 
 // Delete a space and all its pages.

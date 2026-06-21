@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
 import { Menu } from "@ark-ui/react/menu";
 import { Portal } from "@ark-ui/react/portal";
-import { ChevronRight, ChevronsUpDown, FilePlus, FileText, Pencil, Plus, Share2, Trash2 } from "lucide-react";
+import { ChevronRight, ChevronsUpDown, FilePlus, FileText, MoreHorizontal, Pencil, Plus, Share2, Trash2 } from "lucide-react";
 import {
   useSpaces,
   useCreateSpace,
@@ -81,6 +81,13 @@ export function Sidebar() {
   const pageById = useMemo(() => new Map(pages.map((p) => [p.id, p])), [pages]);
   const data = useMemo(() => buildPageNodes(pages, null), [pages]);
 
+  // Active space capability gates management actions (UI only; the server is the
+  // fortress). Space-level: a per-page edit override inside a view-only space would
+  // widen beyond this — not possible until per-page grants exist (Phase 4 E; TODO).
+  const currentSpace = spaces.find((s) => s.id === current);
+  const canEdit = currentSpace?.capability === "edit" || currentSpace?.capability === "manage";
+  const canManage = currentSpace?.capability === "manage";
+
   const createSpace = useCreateSpace();
   const renameSpace = useRenameSpace();
   const createPage = useCreatePage();
@@ -115,6 +122,15 @@ export function Sidebar() {
     movePage.mutate({ pageId: moved.id, fromSpaceId: moved.spaceId, toSpaceId: current, parentId: parentPageId, afterId });
   };
 
+  // Page-row actions, consolidated into one "…" menu. Shown only when the active
+  // space is editable (view-only ⇒ no edit actions; the server rejects regardless).
+  const onRowAction = (value: string, d: Node) => {
+    if (value === "subpage") newPage(d.pageId);
+    else if (value === "share") setSharing(d.pageId);
+    else if (value === "rename") setRenaming({ pageId: d.pageId, spaceId: d.spaceId, title: d.name });
+    else if (value === "delete") setDeleting({ kind: "page", id: d.pageId, name: d.name });
+  };
+
   const NodeRow = ({ node, style, dragHandle }: NodeRendererProps<Node>) => {
     const d = node.data;
     const selected = d.pageId === pageId;
@@ -133,17 +149,26 @@ export function Sidebar() {
         </span>
         <FileText size={14} className={styles.fileIcon} />
         <span className={styles.name}>{d.name}</span>
-        <span className={styles.actions}>
-          <button type="button" title="Add sub-page" aria-label="Add sub-page" data-testid="add-subpage" onClick={(e) => { e.stopPropagation(); newPage(d.pageId); }}><FilePlus size={14} /></button>
-          <button type="button" title="Share" aria-label="Share page" onClick={(e) => { e.stopPropagation(); setSharing(d.pageId); }}><Share2 size={14} /></button>
-          <button type="button" title="Rename" aria-label="Rename page" onClick={(e) => { e.stopPropagation(); setRenaming({ pageId: d.pageId, spaceId: d.spaceId, title: d.name }); }}><Pencil size={14} /></button>
-          <button type="button" title="Delete" aria-label="Delete page" onClick={(e) => { e.stopPropagation(); setDeleting({ kind: "page", id: d.pageId, name: d.name }); }}><Trash2 size={14} /></button>
-        </span>
+        {canEdit && (
+          <span className={styles.actions} onClick={(e) => e.stopPropagation()}>
+            <Menu.Root onSelect={(m) => onRowAction(m.value, d)}>
+              <Menu.Trigger className={styles.rowMenuBtn} aria-label="Page actions" data-testid="page-actions"><MoreHorizontal size={14} /></Menu.Trigger>
+              <Portal>
+                <Menu.Positioner>
+                  <Menu.Content className={styles.menu} data-testid="page-menu">
+                    <Menu.Item value="subpage" className={styles.menuItem} data-testid="add-subpage"><FilePlus size={13} /> Add sub-page</Menu.Item>
+                    <Menu.Item value="share" className={styles.menuItem}><Share2 size={13} /> Share</Menu.Item>
+                    <Menu.Item value="rename" className={styles.menuItem}><Pencil size={13} /> Rename</Menu.Item>
+                    <Menu.Item value="delete" className={styles.menuItem}><Trash2 size={13} /> Delete</Menu.Item>
+                  </Menu.Content>
+                </Menu.Positioner>
+              </Portal>
+            </Menu.Root>
+          </span>
+        )}
       </div>
     );
   };
-
-  const currentSpace = spaces.find((s) => s.id === current);
 
   return (
     <div className={styles.sidebar} data-testid="sidebar">
@@ -167,16 +192,16 @@ export function Sidebar() {
                   <Menu.Item key={s.id} value={s.id} className={styles.menuItem} data-testid="space-option">{s.name || "Untitled space"}</Menu.Item>
                 ))}
                 <Menu.Separator className={styles.menuSep} />
-                {currentSpace && <Menu.Item value="__rename__" className={styles.menuItem}><Pencil size={13} /> Rename space</Menu.Item>}
+                {currentSpace && canManage && <Menu.Item value="__rename__" className={styles.menuItem}><Pencil size={13} /> Rename space</Menu.Item>}
                 <Menu.Item value="__new__" className={styles.menuItem}><Plus size={13} /> New space</Menu.Item>
               </Menu.Content>
             </Menu.Positioner>
           </Portal>
         </Menu.Root>
-        {current && (
+        {current && (canEdit || canManage) && (
           <div className={styles.headerActions}>
-            <button type="button" title="New page" aria-label="New page" data-testid="new-page" onClick={() => newPage(null)}><FilePlus size={15} /></button>
-            <button type="button" title="Delete space" aria-label="Delete space" onClick={() => currentSpace && setDeleting({ kind: "space", id: current, name: currentSpace.name })}><Trash2 size={15} /></button>
+            {canEdit && <button type="button" title="New page" aria-label="New page" data-testid="new-page" onClick={() => newPage(null)}><FilePlus size={15} /></button>}
+            {canManage && <button type="button" title="Delete space" aria-label="Delete space" onClick={() => currentSpace && setDeleting({ kind: "space", id: current, name: currentSpace.name })}><Trash2 size={15} /></button>}
           </div>
         )}
       </div>

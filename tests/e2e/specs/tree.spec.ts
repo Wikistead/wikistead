@@ -39,7 +39,8 @@ test("① nesting: the sub-page button creates a child under the page", async ({
 
   const demoRow = page.locator("[data-testid=tree-page]", { hasText: "Demo Page" }).first();
   await demoRow.hover();
-  await demoRow.locator("[data-testid=add-subpage]").click();
+  await demoRow.locator("[data-testid=page-actions]").click(); // open the "…" menu
+  await page.locator("[data-testid=page-menu][data-state=open]").getByTestId("add-subpage").click();
   await sleep(800);
 
   // a NESTED page (parent = demo) was created from the UI — the missing affordance.

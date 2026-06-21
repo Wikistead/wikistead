@@ -111,3 +111,5 @@
   border-radius: 4px;
 }
 .actions button:hover { color: var(--fg); background: var(--border); }
+.rowMenuBtn { background: none; border: none; color: var(--fg-dim); cursor: pointer; display: flex; padding: 2px; border-radius: 4px; }
+.rowMenuBtn:hover { color: var(--fg); background: var(--border); }
