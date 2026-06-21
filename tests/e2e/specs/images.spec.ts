@@ -122,3 +122,57 @@ test("the toolbar Image button uploads and inserts a wks-attachment reference", 
     .poll(async () => img.evaluate((el: HTMLImageElement) => el.naturalWidth), { timeout: 6000 })
     .toBeGreaterThan(0);
 });
+
+// 2e-1 regression guard: in the DEFAULT read-only view mode, reveal-on-cursor is
+// inert — so a FIRST-LINE image (the view's default selection sits at position 0)
+// still renders as an <img> instead of leaking raw markdown. The earlier P3 image
+// tests only ever asserted in EDIT mode with the caret moved off the image line,
+// so this view-mode + line-1 case was the blind spot that shipped the bug.
+test("view mode renders a first-line image (reveal-on-cursor is off when read-only)", async ({ page }) => {
+  await openDemo(page);
+  const pageId = await page.evaluate(async (api) => {
+    const r = await fetch(`${api}/spaces/demo_space/pages`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ title: "P3 image view-mode line1" }),
+    });
+    return (await r.json()).id as string;
+  }, API);
+
+  await page.goto(`/p/${pageId}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(400);
+
+  // upload an image via the proven attachments path
+  await page.click("[data-testid=attachments-panel] [aria-expanded]");
+  await sleep(300);
+  await page.setInputFiles("[data-testid=attachments-panel] input[type=file]", {
+    name: "hero.png", mimeType: "image/png", buffer: Buffer.from(PNG_1x1, "base64"),
+  });
+  await page.waitForFunction(
+    () => [...document.querySelectorAll("[data-testid=attach-item]")].some((e) => (e as HTMLElement).innerText.includes("hero.png")),
+    undefined, { timeout: 8000 });
+  const id = await page.evaluate(async ({ api, pageId }) => {
+    const list = await (await fetch(`${api}/spaces/demo_space/pages/${pageId}/attachments`, { headers: { Authorization: "Bearer dev-token" } })).json();
+    return (list.find((a: { filename: string }) => a.filename === "hero.png") as { id: string }).id;
+  }, { api: API, pageId });
+
+  // author the image on LINE 1 (a leading hero image — the common KB layout)
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type(`![hero](wks-attachment:${id})`);
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("caption below");
+  await sleep(400);
+
+  // leave edit mode → DEFAULT read-only view, then reload fresh (no prior caret)
+  await page.click("[data-testid=view-toggle]");
+  await page.reload();
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(600);
+
+  // the first-line image renders as an <img>; the raw ref is NOT shown
+  const img = page.locator("[data-pane=preview] img.cm-lp-image");
+  await expect(img).toBeVisible();
+  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("wks-attachment:");
+});
