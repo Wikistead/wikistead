@@ -28,6 +28,7 @@ import { publicPlugin } from './routes/public.js'
 import { apiKeysPlugin } from './routes/api-keys.js'
 import { shareLinksPlugin } from './routes/share-links.js'
 import { authPlugin } from './routes/auth.js'
+import { signupPlugin } from './routes/signup.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -83,7 +84,8 @@ export async function buildApp(): Promise<FastifyInstance> {
     // must be reachable WITHOUT one.
     if (req.url === '/healthz' || req.url === '/readyz' ||
         req.url.startsWith('/webhooks/') || req.url.startsWith('/public/') ||
-        req.url.startsWith('/auth/login') || req.url.startsWith('/auth/callback')) return
+        req.url.startsWith('/auth/login') || req.url.startsWith('/auth/callback') ||
+        req.url.startsWith('/signup/')) return
 
     const { slug, domain } = resolveTenantFromHost(req.headers.host ?? '')
     const tenant = await loadTenant(slug, domain)
@@ -165,6 +167,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.addHook('onError',    async (req) => { await req.db?.release() })
 
   await app.register(authPlugin)
+  await app.register(signupPlugin)
   await app.register(spacesPlugin)
   await app.register(pagesPlugin)
   await app.register(billingPlugin)
