@@ -7,6 +7,7 @@ import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, type GuestToken } from "../data/apiClient";
+import { MembersPage } from "../settings/MembersPage";
 
 // Same-origin collab (ADR-016): a relative "/collab" is resolved against the
 // current origin to an absolute ws(s):// URL (WebSocket needs an absolute URL),
@@ -151,11 +152,41 @@ function WorkspaceRoute() {
   );
 }
 
+// Invite acceptance landing: the link carries ?token. Accepting starts the OIDC
+// login with the token attached (?invite=) — the callback accepts the invite and
+// seats the user (the new membership grant). The token is opaque to the SPA.
+function InviteRoute() {
+  const token = new URLSearchParams(window.location.search).get("token") ?? "";
+  const accept = () => {
+    window.location.href = `/auth/login?invite=${encodeURIComponent(token)}&returnTo=${encodeURIComponent("/p/demo")}`;
+  };
+  return (
+    <AppShell>
+      <div style={{ padding: 24, maxWidth: 440 }}>
+        <h2 style={{ marginTop: 0 }}>You've been invited</h2>
+        <p style={{ color: "var(--fg-dim)" }}>Sign in to accept your invitation and join the workspace.</p>
+        <button type="button" disabled={!token} onClick={accept}>Accept invite</button>
+      </div>
+    </AppShell>
+  );
+}
+
+// Admin Console (members). Requires a member session; the page itself enforces
+// admin-only via the API (non-admins see an "admin only" notice).
+function SettingsMembersRoute() {
+  const { status, logout } = useSession();
+  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>Loading…</div></AppShell>;
+  if (status === "anon") return <LoginScreen />;
+  return <AppShell onLogout={logout}><MembersPage /></AppShell>;
+}
+
 export function AppRoutes() {
   return (
     <Routes>
       <Route path="/p/:pageId" element={<PageRoute />} />
       <Route path="/share/:linkId" element={<ShareRoute />} />
+      <Route path="/invite" element={<InviteRoute />} />
+      <Route path="/settings/members" element={<SettingsMembersRoute />} />
       <Route path="/join" element={<JoinRoute />} />
       <Route path="/join/workspace" element={<WorkspaceRoute />} />
       {/* Dev default: the seeded demo page. Real landing/space routing is a

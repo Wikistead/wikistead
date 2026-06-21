@@ -29,6 +29,10 @@ export default async function globalSetup() {
       await sql`DELETE FROM tenant_oidc WHERE tenant_id = ${t.id}`;
       await sql`DELETE FROM tenants WHERE id = ${t.id}`;
     }
+    // Clean invite-test artifacts so each run grants membership fresh (invite.spec
+    // mints invitees as sub "inv-<ts>" and creates invites in tenant_dev).
+    await sql`DELETE FROM invites WHERE tenant_id = ${E2E.tenant}`;
+    await sql`DELETE FROM members WHERE tenant_id = ${E2E.tenant} AND sub LIKE 'inv-%'`;
     await sql`
       INSERT INTO tenant_oidc (tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri)
       VALUES (${E2E.tenant}, ${issuer.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${REDIRECT})
