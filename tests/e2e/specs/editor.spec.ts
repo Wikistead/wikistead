@@ -1,5 +1,5 @@
 import { test, expect, type Browser } from "@playwright/test";
-import { openDemo, resetDoc, paneText, charAfterCaret, sleep } from "../helpers";
+import { openDemo, resetDoc, paneText, charAfterCaret, enterSplit, sleep } from "../helpers";
 
 // Core two-surface editor + the locked invariant: a collaborator's caret lands on
 // the SAME logical char in the raw source pane and the decorated preview pane.
@@ -8,6 +8,10 @@ test("decorations, sync, and cross-surface presence", async ({ browser }: { brow
   const B = await (await browser.newContext()).newPage();
   await openDemo(A);
   await openDemo(B);
+  // P3: the editor defaults to read-only view; this test drives both surfaces, so
+  // open the editable source+preview split on each.
+  await enterSplit(A);
+  await enterSplit(B);
   await resetDoc(A);
 
   // (1) real editor + markdown decorations (cursor parked off the construct lines)

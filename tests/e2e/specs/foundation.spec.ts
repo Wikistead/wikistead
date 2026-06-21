@@ -1,5 +1,5 @@
 import { test, expect, type Browser } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { enterEdit, sleep } from "../helpers";
 
 // The <Editor/> isolation invariant + lifecycle robustness.
 test("editor isolation: typing doesn't re-render React; rapid page switch leaks nothing", async ({ browser }: { browser: Browser }) => {
@@ -15,6 +15,9 @@ test("editor isolation: typing doesn't re-render React; rapid page switch leaks 
   for (const p of [O, E]) await p.waitForSelector("[data-pane=preview] .cm-content");
   await sleep(1200);
 
+  // P3: reveal the editable surface (dev-token = edit capability). Capture the
+  // render baseline AFTER this deliberate mode change, so we measure ONLY typing.
+  await enterEdit(E);
   // typing must NOT re-render the React <Editor> (content lives in Y.Text/CM)
   const r0 = await E.evaluate(() => (window as any).__editorRenders ?? 0);
   await E.click("[data-pane=preview] .cm-content");
@@ -30,6 +33,9 @@ test("editor isolation: typing doesn't re-render React; rapid page switch leaks 
     await sleep(250);
     await nav(E, "/p/fdn1");
     await E.waitForSelector("[data-pane=preview] .cm-content");
+    // Each page switch remounts <Editor> (new docName key) → mode resets to view;
+    // re-enter edit so the caret/selection is published to the observer.
+    await enterEdit(E);
     await E.click("[data-pane=preview] .cm-content");
     await E.keyboard.press("ArrowRight");
     await sleep(250);

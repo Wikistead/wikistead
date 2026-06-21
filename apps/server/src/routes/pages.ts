@@ -1,13 +1,13 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
+import { check, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import type { TenantDb } from '../db/index.js'
 
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date }
-export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date }
+export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit' }
 function toPage(r: PageRow): Page {
   return { id: r.id, tenantId: r.tenant_id, spaceId: r.space_id, parentId: r.parent_id, title: r.title, position: r.position, createdAt: r.created_at, updatedAt: r.updated_at }
 }
@@ -96,14 +96,18 @@ export async function listPages(
 }
 
 export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: string; userId: string }): Promise<Page> {
-  const canView = await check(fga, `user:${args.userId}`, 'view', { type: 'page', id: args.pageId })
-  if (!canView) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  // Resolve view AND edit in one batch: the web uses `capability` to decide whether
+  // to offer the Edit control. This is convenience only — the collab server is the
+  // fortress (it re-derives readOnly from FGA per document, so a forged edit button
+  // still cannot write). null = no view access at all → 403.
+  const access = await checkMemberAccess(fga, args.userId, { type: 'page', id: args.pageId })
+  if (!access) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
   const [row] = await db.sql<PageRow[]>`
     SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
     FROM pages WHERE id = ${args.pageId}
   `
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
-  return toPage(row)
+  return { ...toPage(row), capability: access.readOnly ? 'view' : 'edit' }
 }
 
 // Update title. Outbox entry written in the same tx as the UPDATE.

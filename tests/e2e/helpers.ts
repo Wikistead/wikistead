@@ -9,6 +9,19 @@ export async function openDemo(page: Page) {
   await sleep(800);
 }
 
+// P3: the editor opens in read-only "view" mode. These reveal the editable
+// surfaces (requires an edit-capable user — the dev-token bypass qualifies).
+export async function enterEdit(page: Page) {
+  await page.click("[data-testid=edit-toggle]");
+  await sleep(150);
+}
+export async function enterSplit(page: Page) {
+  await page.click("[data-testid=edit-toggle]");
+  await page.click("[data-testid=source-toggle]");
+  await page.waitForSelector("[data-pane=source] .cm-content");
+  await sleep(150);
+}
+
 export async function resetDoc(page: Page) {
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.press("Control+a");

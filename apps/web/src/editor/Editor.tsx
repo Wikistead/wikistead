@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { connect } from "./collab";
 import { mountSource } from "./editor-source";
 import { mountLivePreview } from "./editor-livepreview";
@@ -13,84 +13,127 @@ export interface EditorUser {
   color: string;
 }
 
+export type EditorCapability = "view" | "edit";
+
+// Three display states (P3). Default is "view" for everyone — readers are the
+// majority. An edit-capable user reveals the editable surfaces on demand:
+//   view  → single preview pane, read-only (still receives remote edits + carets)
+//   edit  → single preview pane, editable
+//   split → source (vim) + preview, editable
+type Mode = "view" | "edit" | "split";
+
 export interface EditorProps {
   docName: string;
   token: string;
   collabUrl: string;
   user: EditorUser;
-  readOnly?: boolean;
+  // Edit gate (UI only — the collab server is the fortress; see below). Defaults
+  // to view so an unresolved/forbidden page is never editable.
+  capability?: EditorCapability;
 }
 
 function userField(user: EditorUser) {
   return { name: user.name, color: user.color, colorLight: `${user.color}33` };
 }
 
-// React wrapper around the two CodeMirror surfaces. This is the ONLY place that
-// builds and tears down a collab connection (ADR-013 isolation invariant):
+// React wrapper around the CodeMirror surfaces. TWO independent lifecycles
+// (ADR-013 isolation invariant, extended for P3):
 //
-//  - The editor document lives entirely in Y.Text / CodeMirror and is NEVER put
-//    into React state, so parent re-renders never touch the editor subtree
-//    (preserves the <16ms local-edit target).
-//  - We rebuild only when the collab target (docName/token/collabUrl) changes,
-//    not on every render.
-//  - Cleanup clears local awareness BEFORE destroying the provider so rapid
-//    A->B->A page switches and React StrictMode's double mount/unmount cannot
-//    leak a WebSocket or leave a ghost cursor for other collaborators.
-export function Editor({ docName, token, collabUrl, user, readOnly }: EditorProps) {
+//   1. COLLAB connection — keyed on (docName, token, collabUrl). Owns the
+//      provider / Y.Doc / WebSocket / awareness. Mode changes do NOT touch it, so
+//      toggling view↔edit↔split never reconnects, never drops presence, never
+//      leaves a ghost cursor. Only a page (docName) switch rebuilds it.
+//   2. SURFACE views — keyed additionally on the mode. Mounts/destroys the CM
+//      view(s) onto the SAME canonical Y.Text. Effects run in declaration order
+//      within a commit, so on a docName switch the collab effect reconnects first
+//      and the surface effect then mounts against the fresh connection.
+//
+// The two-layer edit defense: this component hides the editable surfaces for a
+// view-only capability, but that is convenience. The collab server re-derives
+// readOnly from OpenFGA per document, so a forged edit button still cannot write.
+export function Editor({ docName, token, collabUrl, user, capability = "view" }: EditorProps) {
   const sourceRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const collabRef = useRef<ReturnType<typeof connect> | null>(null);
   const awarenessRef = useRef<Awareness | null>(null);
 
-  // Dev-only probe for the isolation invariant (ADR-013): editor content is not
-  // in React state, so typing must NOT re-render this component. The §8
-  // verification reads window.__editorRenders before/after typing and asserts it
-  // does not change. Stripped from production builds.
+  const [mode, setMode] = useState<Mode>("view");
+  // A view-only capability can never leave view mode (the controls aren't
+  // rendered, and this guarantees it even if some state went stale).
+  const effectiveMode: Mode = capability === "edit" ? mode : "view";
+
+  // Dev-only probe for the isolation invariant (ADR-013): editor content is not in
+  // React state, so typing must NOT re-render this component (read before/after).
   if (import.meta.env.DEV) {
     (window as unknown as { __editorRenders?: number }).__editorRenders =
       ((window as unknown as { __editorRenders?: number }).__editorRenders ?? 0) + 1;
   }
 
+  // (1) Collab connection — survives mode toggles.
   useLayoutEffect(() => {
-    const sourceHost = sourceRef.current!;
+    const c = connect({ url: collabUrl, docName, token });
+    collabRef.current = c;
+    awarenessRef.current = c.provider.awareness ?? null;
+    c.provider.awareness?.setLocalStateField("user", userField(user));
+    return () => {
+      c.disconnect();
+      collabRef.current = null;
+      awarenessRef.current = null;
+    };
+    // user intentionally excluded — presence updates go through the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docName, token, collabUrl]);
+
+  // (2) Surfaces — remount on mode change (same connection) or after a reconnect.
+  useLayoutEffect(() => {
+    const c = collabRef.current;
+    if (!c) return;
+    const editable = effectiveMode !== "view";
+    const sourceHost = sourceRef.current;
     const previewHost = previewRef.current!;
 
-    const { provider, ytext, disconnect } = connect({ url: collabUrl, docName, token });
-    awarenessRef.current = provider.awareness ?? null;
-    provider.awareness?.setLocalStateField("user", userField(user));
-
-    const sourceView = mountSource(sourceHost, ytext, provider, { readOnly });
-    const previewView = mountLivePreview(previewHost, ytext, provider, { readOnly });
+    const views: { destroy(): void }[] = [];
+    if (effectiveMode === "split" && sourceHost) {
+      views.push(mountSource(sourceHost, c.ytext, c.provider, { readOnly: false }));
+    }
+    views.push(mountLivePreview(previewHost, c.ytext, c.provider, { readOnly: !editable }));
 
     return () => {
-      // Tear down the CodeMirror views, then fully disconnect (drops presence +
-      // closes the WebSocket + frees the doc — see collab.ts). Robust to
-      // StrictMode (destroy -> immediate re-connect) because each mount owns its
-      // own Y.Doc/provider/socket.
-      sourceView.destroy();
-      previewView.destroy();
-      disconnect();
-      awarenessRef.current = null;
-      // mountLivePreview appends a toolbar + host wrapper imperatively; clear any
-      // leftover imperative DOM so a re-mount can't duplicate it.
-      sourceHost.replaceChildren();
+      views.forEach((v) => v.destroy());
+      sourceHost?.replaceChildren();
       previewHost.replaceChildren();
     };
-  }, [docName, token, collabUrl, readOnly]);
+  }, [docName, token, collabUrl, effectiveMode]);
 
   // Presence label changes must NOT rebuild the editors — just update awareness.
   useEffect(() => {
     awarenessRef.current?.setLocalStateField("user", userField(user));
   }, [user.name, user.color]);
 
+  const canEdit = capability === "edit";
+
   return (
-    <div className={styles.editor}>
-      <section className={styles.pane}>
+    <div className={styles.editor} data-mode={effectiveMode}>
+      <section className={styles.pane} data-pane="source" hidden={effectiveMode !== "split"}>
         <h2 className={styles.paneTitle}>source (vim)</h2>
-        <div ref={sourceRef} className={styles.host} data-pane="source" />
+        <div ref={sourceRef} className={styles.host} />
       </section>
-      <section className={styles.pane}>
-        <h2 className={styles.paneTitle}>live preview</h2>
-        <div ref={previewRef} className={styles.host} data-pane="preview" />
+      <section className={styles.pane} data-pane="preview">
+        {canEdit && (
+          <div className={styles.modeBar} data-testid="editor-modebar">
+            {effectiveMode === "view" ? (
+              <button type="button" data-testid="edit-toggle" onClick={() => setMode("edit")}>Edit</button>
+            ) : (
+              <>
+                <button type="button" data-testid="source-toggle" onClick={() => setMode(effectiveMode === "split" ? "edit" : "split")}>
+                  {effectiveMode === "split" ? "Hide source" : "Source (vim)"}
+                </button>
+                <button type="button" data-testid="view-toggle" onClick={() => setMode("view")}>Done</button>
+              </>
+            )}
+          </div>
+        )}
+        <div ref={previewRef} className={styles.host} />
       </section>
     </div>
   );
