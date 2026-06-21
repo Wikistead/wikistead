@@ -5,6 +5,7 @@ import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { livePreview, livePreviewTheme, imageResolver, type ImageResolver } from "./live-preview/decorations";
+import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { mountToolbar, type ImageUploader } from "./live-preview/toolbar";
 
 // Non-technical surface: Obsidian-style live preview bound to the SAME canonical
@@ -28,6 +29,9 @@ export function mountLivePreview(
       markdownExtension(),
       livePreviewTheme,
       livePreview,
+      // Inline-comment anchor highlights (display-only; fed via setCommentRanges).
+      commentHighlightTheme,
+      commentHighlights,
       // Resolves wks-attachment image ids → fresh presigned URLs (member only).
       ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
       yCollab(ytext, provider.awareness),
