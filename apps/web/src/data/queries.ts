@@ -178,6 +178,7 @@ export interface SearchHit {
 // this never widens what a user can actually write.
 export interface PageMeta {
   id: string;
+  spaceId: string;
   title: string;
   capability: "view" | "edit";
 }

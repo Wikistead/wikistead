@@ -80,3 +80,45 @@ test("wks-attachment image renders as <img>; the doc holds only the id", async (
   expect(raw).toContain(`wks-attachment:${attachmentId}`);
   expect(raw).not.toContain(src.split("?")[0]!);
 });
+
+test("the toolbar Image button uploads and inserts a wks-attachment reference", async ({ page }) => {
+  await openDemo(page);
+  const pageId = await page.evaluate(async (api) => {
+    const r = await fetch(`${api}/spaces/demo_space/pages`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ title: "P3 image insert" }),
+    });
+    return (await r.json()).id as string;
+  }, API);
+
+  await page.goto(`/p/${pageId}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(400);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content"); // caret in the (empty) doc
+
+  // The image button opens a hidden file input; set the file directly to upload +
+  // insert (presign → PUT → confirm → ![alt](wks-attachment:<id>) at the caret).
+  await page.setInputFiles("[data-testid=lp-image-input]", {
+    name: "shot.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG_1x1, "base64"),
+  });
+
+  // The caret lands on the inserted image line → raw is revealed; it references the
+  // attachment by id with the filename as alt text.
+  await expect
+    .poll(async () => page.locator("[data-pane=preview] .cm-content").innerText(), { timeout: 10_000 })
+    .toMatch(/!\[shot\.png\]\(wks-attachment:/);
+
+  // Move the caret off the line → the reference renders as an <img> that loads.
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await sleep(400);
+  const img = page.locator("[data-pane=preview] img.cm-lp-image");
+  await expect(img).toBeVisible();
+  await expect
+    .poll(async () => img.evaluate((el: HTMLImageElement) => el.naturalWidth), { timeout: 6000 })
+    .toBeGreaterThan(0);
+});

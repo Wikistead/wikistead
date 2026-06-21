@@ -5,7 +5,7 @@ import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { livePreview, livePreviewTheme, imageResolver, type ImageResolver } from "./live-preview/decorations";
-import { mountToolbar } from "./live-preview/toolbar";
+import { mountToolbar, type ImageUploader } from "./live-preview/toolbar";
 
 // Non-technical surface: Obsidian-style live preview bound to the SAME canonical
 // Y.Text and SAME awareness as the vim surface. No vim, no CRDT bridge. Both
@@ -16,7 +16,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver } = {},
+  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; uploadImage?: ImageUploader } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -36,7 +36,7 @@ export function mountLivePreview(
   });
 
   // View-capability guests get no insert toolbar.
-  if (!opts.readOnly) mountToolbar(parent, () => view);
+  if (!opts.readOnly) mountToolbar(parent, () => view, { uploadImage: opts.uploadImage });
 
   const host = document.createElement("div");
   host.className = "lp-editor-host";

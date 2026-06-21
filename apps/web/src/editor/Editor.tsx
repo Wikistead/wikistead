@@ -34,6 +34,9 @@ export interface EditorProps {
   // API auth for image resolution (dev-token bearer, or "" for the cookie session)
   // — distinct from the collab token above. Omit for guests (images won't resolve).
   apiToken?: string;
+  // Uploads a picked image and returns the ref+alt to insert. Omit to hide the
+  // image button (e.g. guests, or a view-only surface).
+  onUploadImage?: (file: File) => Promise<{ ref: string; alt: string } | null>;
 }
 
 function userField(user: EditorUser) {
@@ -55,7 +58,7 @@ function userField(user: EditorUser) {
 // The two-layer edit defense: this component hides the editable surfaces for a
 // view-only capability, but that is convenience. The collab server re-derives
 // readOnly from OpenFGA per document, so a forged edit button still cannot write.
-export function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "" }: EditorProps) {
+export function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", onUploadImage }: EditorProps) {
   const sourceRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
@@ -104,14 +107,14 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
     if (effectiveMode === "split" && sourceHost) {
       views.push(mountSource(sourceHost, c.ytext, c.provider, { readOnly: false }));
     }
-    views.push(mountLivePreview(previewHost, c.ytext, c.provider, { readOnly: !editable, resolveImageUrl }));
+    views.push(mountLivePreview(previewHost, c.ytext, c.provider, { readOnly: !editable, resolveImageUrl, uploadImage: onUploadImage }));
 
     return () => {
       views.forEach((v) => v.destroy());
       sourceHost?.replaceChildren();
       previewHost.replaceChildren();
     };
-  }, [docName, token, collabUrl, effectiveMode, resolveImageUrl]);
+  }, [docName, token, collabUrl, effectiveMode, resolveImageUrl, onUploadImage]);
 
   // Presence label changes must NOT rebuild the editors — just update awareness.
   useEffect(() => {
