@@ -172,6 +172,25 @@ export interface SearchHit {
   snippet?: string;
 }
 
+// GET /pages/:id returns the page plus the caller's capability (view|edit),
+// derived server-side from OpenFGA. The editor uses capability ONLY to decide
+// whether to offer the Edit control — the collab server is the real fortress, so
+// this never widens what a user can actually write.
+export interface PageMeta {
+  id: string;
+  title: string;
+  capability: "view" | "edit";
+}
+export function usePage(pageId: string) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["page", pageId],
+    queryFn: () => apiFetch<PageMeta>(`/pages/${encodeURIComponent(pageId)}`, token),
+    enabled: pageId.length > 0,
+    staleTime: 30_000,
+  });
+}
+
 export function useSearch(q: string) {
   const { token } = useSession();
   const query = q.trim();

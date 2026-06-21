@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Browser } from "@playwright/test";
-import { openDemo, resetDoc, paneText, sleep } from "../helpers";
+import { openDemo, resetDoc, paneText, enterSplit, enterEdit, sleep } from "../helpers";
 
 const API = "http://dev.localhost:4010";
 
@@ -29,6 +29,9 @@ async function createLink(page: Page, capability: "view" | "edit"): Promise<stri
 test("anonymous share: create -> open -> co-edit -> read-only -> revoke denied", async ({ browser }: { browser: Browser }) => {
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
+  // P3: editor defaults to read-only view; the member edits + reads the source
+  // pane below, so open the editable split.
+  await enterSplit(member);
   await resetDoc(member);
 
   // member creates an EDIT link
@@ -40,6 +43,8 @@ test("anonymous share: create -> open -> co-edit -> read-only -> revoke denied",
   await guest.goto(editUrl);
   await guest.waitForSelector("[data-pane=preview] .cm-content", { timeout: 10000 });
   await sleep(1000);
+  // Edit-capable guest: reveal the editable surface (defaults to view).
+  await enterEdit(guest);
   expect(await guest.$eval("[data-pane=preview] .cm-content", (el) => el.getAttribute("contenteditable"))).toBe("true");
 
   // guest edit syncs to member (anonymous co-editing)

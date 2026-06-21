@@ -7,6 +7,7 @@ import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, type GuestToken } from "../data/apiClient";
+import { usePage } from "../data/queries";
 import { MembersPage } from "../settings/MembersPage";
 
 // Same-origin collab (ADR-016): a relative "/collab" is resolved against the
@@ -44,7 +45,14 @@ function LoginScreen() {
 // the same way the collab server expects ("t:<tenant>:p:<page>").
 function PageRoute() {
   const { pageId } = useParams<{ pageId: string }>();
-  const { status, collabToken, tenantId, user, logout } = useSession();
+  const { status, collabToken, tenantId, user, logout, token } = useSession();
+  // Capability gates the Edit control (UI only — collab server is the fortress).
+  // Defaults to view until resolved, so a page is never editable speculatively.
+  // The dev-token bypass is god-mode (matches collab's dev-token = readOnly:false),
+  // so it defaults to edit — and works for not-yet-persisted pages getPage 404s on.
+  const devMode = token === "dev-token";
+  const { data: page } = usePage(pageId ?? "");
+  const capability = page?.capability ?? (devMode ? "edit" : "view");
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>Loading…</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
   const docName = `t:${tenantId}:p:${pageId}`;
@@ -52,9 +60,9 @@ function PageRoute() {
     <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         <div style={{ flex: 1, minHeight: 0 }}>
-          <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} />
+          <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} />
         </div>
-        {pageId && <AttachmentsPanel pageId={pageId} readOnly={false} />}
+        {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
       </div>
     </AppShell>
   );
@@ -90,12 +98,12 @@ function ShareRoute() {
   if (state.status === "denied" || !state.minted) {
     return <AppShell><div style={{ padding: 16 }}>This share link is invalid, expired, or revoked.</div></AppShell>;
   }
-  const { token, docName, readOnly } = state.minted;
+  const { token, docName, capability } = state.minted;
   // Anonymous guest identity (never an OIDC account / seat — the project design notes).
   const guest = { name: `guest-${Math.floor(Math.random() * 1000)}`, color: "#7d8590" };
   return (
     <AppShell>
-      <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} readOnly={readOnly} />
+      <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} />
     </AppShell>
   );
 }
