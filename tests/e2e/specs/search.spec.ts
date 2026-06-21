@@ -16,8 +16,12 @@ const resultsText = (page: Page) => page.$eval("[data-testid=search-results]", (
 test("search: find by title, FGA-excluded title hidden, empty, keyboard", async ({ page }) => {
   await openDemo(page);
 
-  // create an indexed page via the member API (createPage -> Meili upsert)
-  const title = "SEARCHME-E2E-UNIQUE";
+  // Create an indexed page via the member API (createPage -> Meili upsert). The
+  // title is UNIQUE PER RUN: the e2e Meili index accumulates docs across runs, and a
+  // shared title eventually exceeds the search limit (20) so stage-1 returns only
+  // OLD docs whose FGA grants are gone (wiped with prior stores) → stage-2 drops all
+  // and the fresh page is crowded out. A unique title is the sole match.
+  const title = `SEARCHME-${Date.now().toString(36)}`;
   await page.evaluate(async ({ api, title }) => {
     await fetch(`${api}/spaces/demo_space/pages`, {
       method: "POST",
@@ -25,9 +29,18 @@ test("search: find by title, FGA-excluded title hidden, empty, keyboard", async 
       body: JSON.stringify({ title }),
     });
   }, { api: API, title });
-  await sleep(2000); // allow async indexing
-
-  // (1) found by title; (2) selecting navigates
+  // (1) found by title; (2) selecting navigates. Indexing is async (outbox → Meili);
+  // poll the API directly (NOT the UI — re-typing the same query would hit the
+  // react-query cache) until the page is indexed, then the UI search fetches it fresh.
+  await expect
+    .poll(
+      () => page.evaluate(async ({ api, q }) => {
+        const r = await fetch(`${api}/search?q=${encodeURIComponent(q)}`, { headers: { Authorization: "Bearer dev-token" } });
+        return ((await r.json()) as unknown[]).length;
+      }, { api: API, q: title }),
+      { timeout: 20_000, intervals: [500, 1000, 1000] },
+    )
+    .toBeGreaterThan(0);
   await typeSearch(page, title);
   await page.waitForSelector("[data-testid=search-item]", { timeout: 5000 });
   expect(await resultsText(page)).toContain(title);
