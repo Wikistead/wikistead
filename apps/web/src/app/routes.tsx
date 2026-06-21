@@ -85,6 +85,18 @@ function PageRoute() {
   const inlineComments = (threads ?? [])
     .filter((t) => t.kind === "inline" && t.anchorStart && t.anchorEnd)
     .map((t) => ({ threadId: t.id, anchorStart: t.anchorStart!, anchorEnd: t.anchorEnd!, resolved: t.status === "resolved" }));
+  const openComments = (threads ?? []).filter((t) => t.status === "open").length;
+
+  // Comments panel is toggled (not always-on); the choice persists. Inline blue
+  // underlines stay in the editor regardless — the panel is the thread list layer.
+  const [commentsOpen, setCommentsOpen] = useState(() => {
+    try { return localStorage.getItem("wks.commentsOpen") === "1"; } catch { return false; }
+  });
+  const toggleComments = () => setCommentsOpen((v) => {
+    const n = !v;
+    try { localStorage.setItem("wks.commentsOpen", n ? "1" : "0"); } catch { /* no storage */ }
+    return n;
+  });
 
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>Loading…</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
@@ -100,13 +112,16 @@ function PageRoute() {
             <button type="button" data-testid="print-page" onClick={() => window.print()}>
               Print / PDF
             </button>
+            <button type="button" data-testid="comments-toggle" aria-pressed={commentsOpen} onClick={toggleComments}>
+              Comments{openComments > 0 ? ` (${openComments})` : ""}
+            </button>
           </div>
           <div style={{ flex: 1, minHeight: 0 }}>
             <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} />
           </div>
           {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
         </div>
-        {pageId && <CommentsPanel pageId={pageId} canComment={capability === "edit"} anchorGetterRef={anchorGetterRef} />}
+        {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={capability === "edit"} anchorGetterRef={anchorGetterRef} />}
       </div>
     </AppShell>
   );
