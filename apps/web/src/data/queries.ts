@@ -159,14 +159,17 @@ export function useRevokeShareLink() {
 
 // ── search ───────────────────────────────────────────────────────────────
 // GET /search is two-stage-guarded server-side (Meili candidates -> FGA `view`
-// confirm). It returns ONLY authorized hits, and only the title (no body
-// snippet). The client therefore never receives — and cannot leak — a result the
-// user can't view. Hits carry id/tenantId/spaceId/title only.
+// confirm). It returns ONLY authorized hits. The optional snippet is a cropped
+// PLAIN-TEXT body excerpt around the match (P2) — and it is part of the hit, so a
+// result the FGA stage drops takes its snippet with it. The client never receives
+// — and cannot leak — a snippet for a page the user can't view. Render it as text
+// (no dangerouslySetInnerHTML): the body is user-authored content.
 export interface SearchHit {
   id: string;
   tenantId: string;
   spaceId: string;
   title: string;
+  snippet?: string;
 }
 
 export function useSearch(q: string) {
