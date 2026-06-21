@@ -9,6 +9,9 @@ import { useSession } from "../session/SessionProvider";
 export interface Space {
   id: string;
   name: string;
+  // The caller's capability on the space (server-derived from FGA). Drives which
+  // management actions the sidebar shows — UI convenience; the server is the gate.
+  capability?: "view" | "edit" | "manage";
 }
 export interface Page {
   id: string;

@@ -10,12 +10,11 @@ async function ensureExpanded(page: Page) {
 }
 async function createLink(page: Page, capability: "view" | "edit"): Promise<string> {
   await ensureExpanded(page);
-  // Click the DEMO row's Share button (actions are hover-revealed; dispatch bypasses
-  // visibility and targets the demo page specifically).
-  await page.evaluate(() => {
-    const row = [...document.querySelectorAll("[data-testid=tree-page]")].find((r) => r.textContent?.includes("Demo Page"));
-    row?.querySelector('button[aria-label="Share page"]')?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  });
+  // Open the demo row's "…" menu and pick Share.
+  const row = page.locator("[data-testid=tree-page]", { hasText: "Demo Page" }).first();
+  await row.hover();
+  await row.locator("[data-testid=page-actions]").click();
+  await page.locator("[data-testid=page-menu][data-state=open]").getByText("Share").click();
   await page.waitForSelector("[data-testid=share-dialog]");
   await page.selectOption('[data-testid=share-dialog] select[aria-label="Capability"]', capability);
   const before = await page.$$eval('[data-testid=share-dialog] input[aria-label="Share URL"]', (e) => e.length);
