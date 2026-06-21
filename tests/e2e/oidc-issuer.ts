@@ -3,9 +3,23 @@
 // genuine OIDC login flow through the same-origin proxy. /authorize auto-approves
 // and issues a fixed subject (default "dev-user", which fga:seed already grants
 // tenant#member), so no extra provisioning is needed.
+//
+// Subject override: a real OP decides WHO is logged in from its own IdP session.
+// Here that session is stood in for by an `e2e_sub` cookie on the issuer origin —
+// when present, /authorize issues that subject instead of the default. This lets a
+// second browser context log in as a DIFFERENT (non-member) identity, which the
+// invite-acceptance e2e needs to mint a fresh invitee.
 import { createServer, type Server } from "node:http";
 import { createHash } from "node:crypto";
 import { generateKeyPair, exportJWK, SignJWT, type KeyLike } from "jose";
+
+function cookieValue(header: string | undefined, name: string): string | null {
+  for (const part of (header ?? "").split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(v.join("="));
+  }
+  return null;
+}
 
 export interface E2eIssuer {
   url: string;
@@ -20,7 +34,7 @@ export async function startE2eIssuer(opts: { clientId: string; sub?: string; por
   jwk.alg = "RS256";
   jwk.use = "sig";
 
-  const codes = new Map<string, { nonce: string; codeChallenge: string | null }>();
+  const codes = new Map<string, { nonce: string; codeChallenge: string | null; sub: string }>();
   let seq = 0;
 
   const server: Server = createServer((req, res) => {
@@ -45,7 +59,8 @@ export async function startE2eIssuer(opts: { clientId: string; sub?: string; por
 
     if (u.pathname === "/authorize") {
       const code = `e2e-code-${++seq}`;
-      codes.set(code, { nonce: u.searchParams.get("nonce") ?? "", codeChallenge: u.searchParams.get("code_challenge") });
+      const chosenSub = cookieValue(req.headers.cookie, "e2e_sub") ?? sub;
+      codes.set(code, { nonce: u.searchParams.get("nonce") ?? "", codeChallenge: u.searchParams.get("code_challenge"), sub: chosenSub });
       const loc = `${u.searchParams.get("redirect_uri")}?code=${encodeURIComponent(code)}&state=${encodeURIComponent(u.searchParams.get("state") ?? "")}`;
       res.writeHead(302, { location: loc });
       return res.end();
@@ -64,9 +79,10 @@ export async function startE2eIssuer(opts: { clientId: string; sub?: string; por
           if (pending.codeChallenge && pending.codeChallenge !== challenge) {
             res.writeHead(400, { "content-type": "application/json" }); return res.end('{"error":"invalid_grant"}');
           }
-          const idToken = await new SignJWT({ nonce: pending.nonce, email: `${sub}@e2e.test`, name: sub })
+          const s = pending.sub;
+          const idToken = await new SignJWT({ nonce: pending.nonce, email: `${s}@e2e.test`, name: s })
             .setProtectedHeader({ alg: "RS256", kid: "e2e-key" })
-            .setIssuedAt().setIssuer(issuerUrl).setAudience(opts.clientId).setSubject(sub).setExpirationTime("5m")
+            .setIssuedAt().setIssuer(issuerUrl).setAudience(opts.clientId).setSubject(s).setExpirationTime("5m")
             .sign(privateKey as KeyLike);
           json({ access_token: "e2e-access", id_token: idToken, token_type: "Bearer", expires_in: 300 });
         })();
