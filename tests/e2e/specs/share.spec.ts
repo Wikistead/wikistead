@@ -4,14 +4,18 @@ import { openDemo, resetDoc, paneText, enterSplit, enterEdit, sleep } from "../h
 const API = "http://dev.localhost:4010";
 
 async function ensureExpanded(page: Page) {
-  if (!(await page.getByText("Demo Page", { exact: true }).count())) {
-    await page.getByText("Demo Space", { exact: true }).click();
-    await sleep(300);
-  }
+  // Active space follows the open page (demo), so the demo row is already in the
+  // sidebar tree — just wait for it (no space-expand; that would open the switcher).
+  await page.waitForSelector("[data-testid=tree-page]", { timeout: 5000 });
 }
 async function createLink(page: Page, capability: "view" | "edit"): Promise<string> {
   await ensureExpanded(page);
-  await page.evaluate(() => document.querySelector('[data-testid=sidebar] button[aria-label="Share page"]')?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  // Click the DEMO row's Share button (actions are hover-revealed; dispatch bypasses
+  // visibility and targets the demo page specifically).
+  await page.evaluate(() => {
+    const row = [...document.querySelectorAll("[data-testid=tree-page]")].find((r) => r.textContent?.includes("Demo Page"));
+    row?.querySelector('button[aria-label="Share page"]')?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
   await page.waitForSelector("[data-testid=share-dialog]");
   await page.selectOption('[data-testid=share-dialog] select[aria-label="Capability"]', capability);
   const before = await page.$$eval('[data-testid=share-dialog] input[aria-label="Share URL"]', (e) => e.length);

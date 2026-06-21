@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQueries } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
-import { ChevronRight, FilePlus, FileText, Folder, FolderPlus, Pencil, Share2, Trash2 } from "lucide-react";
+import { Menu } from "@ark-ui/react/menu";
+import { Portal } from "@ark-ui/react/portal";
+import { ChevronRight, ChevronsUpDown, FilePlus, FileText, Pencil, Plus, Share2, Trash2 } from "lucide-react";
 import {
   useSpaces,
   useCreateSpace,
@@ -15,19 +17,18 @@ import {
 } from "../data/queries";
 import { apiFetch } from "../data/apiClient";
 import { useSession } from "../session/SessionProvider";
+import { useActiveSpace } from "../app/ActiveSpace";
 import { RenameDialog, ConfirmDialog } from "../ui/dialogs";
 import { ShareDialog } from "../ui/ShareDialog";
 import styles from "./Sidebar.module.css";
 
-// Tree node: spaces are roots, pages nest under their space/parent. Pages are
-// always "internal" (children: []) so they accept drops (nest-under). id is
-// namespaced so selection/DnD can tell spaces from pages.
+// One space at a time (Notion/Outline style): the sidebar shows ONLY the active
+// space's page tree; the space itself is chosen in the switcher, not a tree root.
 interface Node {
-  id: string;
+  id: string; // "page:<id>"
   name: string;
-  kind: "space" | "page";
+  pageId: string;
   spaceId: string;
-  pageId?: string;
   children?: Node[];
 }
 
@@ -35,14 +36,7 @@ function buildPageNodes(pages: Page[], parentId: string | null): Node[] {
   return pages
     .filter((p) => p.parentId === parentId)
     .sort((a, b) => a.position - b.position)
-    .map((p) => ({
-      id: `page:${p.id}`,
-      name: p.title || "Untitled",
-      kind: "page" as const,
-      spaceId: p.spaceId,
-      pageId: p.id,
-      children: buildPageNodes(pages, p.id),
-    }));
+    .map((p) => ({ id: `page:${p.id}`, name: p.title || "Untitled", pageId: p.id, spaceId: p.spaceId, children: buildPageNodes(pages, p.id) }));
 }
 
 function useSize(ref: React.RefObject<HTMLElement | null>) {
@@ -58,39 +52,33 @@ function useSize(ref: React.RefObject<HTMLElement | null>) {
 }
 
 export function Sidebar() {
-  const { token, tenantId } = useSession();
+  const { token } = useSession();
   const navigate = useNavigate();
   const { pageId } = useParams<{ pageId: string }>();
+  const { activeSpaceId, setActiveSpaceId } = useActiveSpace();
 
   const spacesQ = useSpaces();
-  const spaces = spacesQ.data ?? [];
-  const pageQs = useQueries({
-    queries: spaces.map((s) => ({
-      queryKey: ["pages", s.id],
-      queryFn: () => apiFetch<Page[]>(`/spaces/${s.id}/pages`, token).then((r) => r ?? []),
-      staleTime: 30_000,
-    })),
-  });
-  const pagesBySpace: Record<string, Page[]> = {};
-  const pageById = new Map<string, Page>();
-  spaces.forEach((s, i) => {
-    const ps = (pageQs[i]?.data as Page[] | undefined) ?? [];
-    pagesBySpace[s.id] = ps;
-    ps.forEach((p) => pageById.set(p.id, p));
-  });
+  const spaces = useMemo(() => spacesQ.data ?? [], [spacesQ.data]);
 
-  const data: Node[] = useMemo(
-    () =>
-      spaces.map((s) => ({
-        id: `space:${s.id}`,
-        name: s.name || "Untitled space",
-        kind: "space" as const,
-        spaceId: s.id,
-        children: buildPageNodes(pagesBySpace[s.id] ?? [], null),
-      })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [JSON.stringify(spaces), JSON.stringify(pagesBySpace)],
+  // Active space: the stored choice if it still exists, else the first space.
+  const current = useMemo(
+    () => (activeSpaceId && spaces.find((s) => s.id === activeSpaceId) ? activeSpaceId : spaces[0]?.id),
+    [activeSpaceId, spaces],
   );
+  // Seed/repair the stored active space (first load, or the stored one was deleted).
+  useEffect(() => {
+    if (current && current !== activeSpaceId) setActiveSpaceId(current);
+  }, [current, activeSpaceId, setActiveSpaceId]);
+
+  const pagesQ = useQuery({
+    queryKey: ["pages", current],
+    queryFn: () => apiFetch<Page[]>(`/spaces/${current}/pages`, token).then((r) => r ?? []),
+    enabled: !!current,
+    staleTime: 30_000,
+  });
+  const pages = useMemo(() => pagesQ.data ?? [], [pagesQ.data]);
+  const pageById = useMemo(() => new Map(pages.map((p) => [p.id, p])), [pages]);
+  const data = useMemo(() => buildPageNodes(pages, null), [pages]);
 
   const createSpace = useCreateSpace();
   const createPage = useCreatePage();
@@ -100,90 +88,92 @@ export function Sidebar() {
   const movePage = useMovePage();
 
   const [renaming, setRenaming] = useState<{ pageId: string; spaceId: string; title: string } | null>(null);
-  const [deleting, setDeleting] = useState<
-    | { kind: "page"; id: string; spaceId: string; name: string }
-    | { kind: "space"; id: string; name: string }
-    | null
-  >(null);
+  const [deleting, setDeleting] = useState<{ kind: "page"; id: string; name: string } | { kind: "space"; id: string; name: string } | null>(null);
   const [sharing, setSharing] = useState<string | null>(null);
 
   const treeBox = useRef<HTMLDivElement>(null);
   const size = useSize(treeBox);
 
-  // DnD: pages move within their space (reorder/reparent) or across spaces (3b ②).
+  const newPage = (parentId: string | null) => {
+    if (!current) return;
+    createPage.mutate({ spaceId: current, parentId, title: "Untitled" }, { onSuccess: (p) => p && navigate(`/p/${p.id}`) });
+  };
+
+  // DnD within the active space: reparent (drop onto a page) or reorder (drop at root).
   const onMove = ({ dragIds, parentId, index }: { dragIds: string[]; parentId: string | null; index: number }) => {
     const dragId = dragIds[0];
-    if (!dragId?.startsWith("page:")) return;
+    if (!dragId?.startsWith("page:") || !current) return;
     const moved = pageById.get(dragId.slice(5));
-    if (!moved || parentId == null) return;
-    let targetSpaceId: string;
-    let parentPageId: string | null;
-    if (parentId.startsWith("space:")) {
-      targetSpaceId = parentId.slice(6);
-      parentPageId = null;
-    } else {
-      const pp = pageById.get(parentId.slice(5));
-      if (!pp) return;
-      targetSpaceId = pp.spaceId;
-      parentPageId = pp.id;
-    }
-    const siblings = (pagesBySpace[targetSpaceId] ?? [])
-      .filter((p) => p.parentId === parentPageId && p.id !== moved.id)
-      .sort((a, b) => a.position - b.position);
+    if (!moved) return;
+    const parentPageId = parentId == null ? null : parentId.startsWith("page:") ? parentId.slice(5) : undefined;
+    if (parentPageId === undefined) return;
+    const siblings = pages.filter((p) => p.parentId === parentPageId && p.id !== moved.id).sort((a, b) => a.position - b.position);
     const afterId = index > 0 ? siblings[index - 1]?.id ?? null : null;
-    movePage.mutate({ pageId: moved.id, fromSpaceId: moved.spaceId, toSpaceId: targetSpaceId, parentId: parentPageId, afterId });
+    movePage.mutate({ pageId: moved.id, fromSpaceId: moved.spaceId, toSpaceId: current, parentId: parentPageId, afterId });
   };
 
   const NodeRow = ({ node, style, dragHandle }: NodeRendererProps<Node>) => {
     const d = node.data;
-    const isPage = d.kind === "page";
-    const selected = isPage && d.pageId === pageId;
+    const selected = d.pageId === pageId;
     const hasChildren = (d.children?.length ?? 0) > 0;
     return (
       <div
         ref={dragHandle}
         style={style}
         className={`${styles.row} ${selected ? styles.selected : ""}`}
-        data-testid={isPage ? "tree-page" : "tree-space"}
+        data-testid="tree-page"
         data-selected={selected ? "" : undefined}
-        onClick={() => {
-          if (isPage) navigate(`/p/${d.pageId}`);
-          else node.toggle();
-        }}
+        onClick={() => navigate(`/p/${d.pageId}`)}
       >
-        <span
-          className={styles.indicator}
-          onClick={(e) => { e.stopPropagation(); node.toggle(); }}
-        >
+        <span className={styles.indicator} onClick={(e) => { e.stopPropagation(); node.toggle(); }}>
           {hasChildren ? <ChevronRight size={14} className={node.isOpen ? styles.caretOpen : ""} /> : <span className={styles.caretSpace} />}
         </span>
-        {isPage ? <FileText size={14} className={styles.fileIcon} /> : <Folder size={14} className={styles.fileIcon} />}
+        <FileText size={14} className={styles.fileIcon} />
         <span className={styles.name}>{d.name}</span>
         <span className={styles.actions}>
-          {isPage ? (
-            <>
-              <button type="button" title="Share" aria-label="Share page" onClick={(e) => { e.stopPropagation(); setSharing(d.pageId!); }}><Share2 size={14} /></button>
-              <button type="button" title="Rename" aria-label="Rename page" onClick={(e) => { e.stopPropagation(); setRenaming({ pageId: d.pageId!, spaceId: d.spaceId, title: d.name }); }}><Pencil size={14} /></button>
-              <button type="button" title="Delete" aria-label="Delete page" onClick={(e) => { e.stopPropagation(); setDeleting({ kind: "page", id: d.pageId!, spaceId: d.spaceId, name: d.name }); }}><Trash2 size={14} /></button>
-            </>
-          ) : (
-            <>
-              <button type="button" title="New page" aria-label="New page" onClick={(e) => { e.stopPropagation(); createPage.mutate({ spaceId: d.spaceId, title: "Untitled" }, { onSuccess: (p) => p && navigate(`/p/${p.id}`) }); }}><FilePlus size={14} /></button>
-              <button type="button" title="Delete space" aria-label="Delete space" onClick={(e) => { e.stopPropagation(); setDeleting({ kind: "space", id: d.spaceId, name: d.name }); }}><Trash2 size={14} /></button>
-            </>
-          )}
+          <button type="button" title="Add sub-page" aria-label="Add sub-page" data-testid="add-subpage" onClick={(e) => { e.stopPropagation(); newPage(d.pageId); }}><FilePlus size={14} /></button>
+          <button type="button" title="Share" aria-label="Share page" onClick={(e) => { e.stopPropagation(); setSharing(d.pageId); }}><Share2 size={14} /></button>
+          <button type="button" title="Rename" aria-label="Rename page" onClick={(e) => { e.stopPropagation(); setRenaming({ pageId: d.pageId, spaceId: d.spaceId, title: d.name }); }}><Pencil size={14} /></button>
+          <button type="button" title="Delete" aria-label="Delete page" onClick={(e) => { e.stopPropagation(); setDeleting({ kind: "page", id: d.pageId, name: d.name }); }}><Trash2 size={14} /></button>
         </span>
       </div>
     );
   };
 
+  const currentSpace = spaces.find((s) => s.id === current);
+
   return (
     <div className={styles.sidebar} data-testid="sidebar">
+      {/* Space switcher — the space is a separate layer, not a tree root. */}
       <div className={styles.header}>
-        <span className={styles.title}>Spaces</span>
-        <button type="button" title="New space" aria-label="New space" onClick={() => createSpace.mutate("Untitled space")}>
-          <FolderPlus size={15} />
-        </button>
+        <Menu.Root
+          onSelect={(d) => {
+            if (d.value === "__new__") createSpace.mutate("Untitled space", { onSuccess: (s) => s && setActiveSpaceId(s.id) });
+            else setActiveSpaceId(d.value);
+          }}
+        >
+          <Menu.Trigger className={styles.switcher} data-testid="space-switcher">
+            <span className={styles.switcherName}>{currentSpace?.name || "No space"}</span>
+            <ChevronsUpDown size={14} />
+          </Menu.Trigger>
+          <Portal>
+            <Menu.Positioner>
+              <Menu.Content className={styles.menu} data-testid="space-menu">
+                {spaces.map((s) => (
+                  <Menu.Item key={s.id} value={s.id} className={styles.menuItem} data-testid="space-option">{s.name || "Untitled space"}</Menu.Item>
+                ))}
+                <Menu.Separator className={styles.menuSep} />
+                <Menu.Item value="__new__" className={styles.menuItem}><Plus size={13} /> New space</Menu.Item>
+              </Menu.Content>
+            </Menu.Positioner>
+          </Portal>
+        </Menu.Root>
+        {current && (
+          <div className={styles.headerActions}>
+            <button type="button" title="New page" aria-label="New page" data-testid="new-page" onClick={() => newPage(null)}><FilePlus size={15} /></button>
+            <button type="button" title="Delete space" aria-label="Delete space" onClick={() => currentSpace && setDeleting({ kind: "space", id: current, name: currentSpace.name })}><Trash2 size={15} /></button>
+          </div>
+        )}
       </div>
 
       {spacesQ.isLoading ? (
@@ -192,6 +182,8 @@ export function Sidebar() {
         <div className={styles.state}>Failed to load. <button type="button" onClick={() => spacesQ.refetch()}>Retry</button></div>
       ) : spaces.length === 0 ? (
         <div className={styles.state}>No spaces yet — create one above.</div>
+      ) : pages.length === 0 ? (
+        <div className={styles.state}>No pages yet — add one above.</div>
       ) : (
         <div ref={treeBox} className={styles.treeBox}>
           <Tree<Node>
@@ -205,16 +197,13 @@ export function Sidebar() {
             rowHeight={28}
             selection={pageId ? `page:${pageId}` : undefined}
             disableMultiSelection
-            disableDrag={(d) => (d as Node).kind === "space"}
             disableDrop={({ parentNode, dragNodes }) => {
-              if (!parentNode) return true; // no top-level (space-less) drops
               const drag = dragNodes[0]?.data as Node | undefined;
-              if (!drag || drag.kind !== "page") return true;
-              // Block dropping a page onto itself or its own descendant (cycle);
-              // cross-space drops are allowed (3b ②).
-              const parent = parentNode.data as Node;
-              if (parent.kind === "page") {
-                let cur: Page | undefined = pageById.get(parent.pageId!);
+              if (!drag) return true;
+              // Block dropping a page onto itself or a descendant (cycle). Root drops
+              // (parentNode null) and page parents within the active space are fine.
+              if (parentNode && (parentNode.data as Node).pageId) {
+                let cur: Page | undefined = pageById.get((parentNode.data as Node).pageId);
                 while (cur) {
                   if (cur.id === drag.pageId) return true;
                   cur = cur.parentId ? pageById.get(cur.parentId) : undefined;
@@ -223,7 +212,7 @@ export function Sidebar() {
               return false;
             }}
             onMove={onMove}
-            onActivate={(n: NodeApi<Node>) => { if (n.data.kind === "page") navigate(`/p/${n.data.pageId}`); }}
+            onActivate={(n: NodeApi<Node>) => navigate(`/p/${n.data.pageId}`)}
           >
             {NodeRow}
           </Tree>
@@ -241,8 +230,8 @@ export function Sidebar() {
         message={deleting?.kind === "space" ? `Delete space "${deleting.name}" and all its pages?` : `Delete page "${deleting?.name}" and its sub-pages?`}
         onClose={() => setDeleting(null)}
         onConfirm={() => {
-          if (deleting?.kind === "page") deletePage.mutate({ pageId: deleting.id, spaceId: deleting.spaceId });
-          else if (deleting?.kind === "space") deleteSpace.mutate(deleting.id);
+          if (deleting?.kind === "page") deletePage.mutate({ pageId: deleting.id, spaceId: current! });
+          else if (deleting?.kind === "space") { deleteSpace.mutate(deleting.id); setActiveSpaceId(spaces.find((s) => s.id !== deleting.id)?.id ?? null); }
           setDeleting(null);
         }}
       />

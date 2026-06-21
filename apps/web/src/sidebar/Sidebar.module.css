@@ -29,6 +29,47 @@
   border-radius: 4px;
 }
 .header button:hover { color: var(--fg); background: var(--panel-2); }
+.headerActions { display: flex; gap: 2px; flex: 0 0 auto; }
+
+/* Space switcher (Ark Menu trigger). */
+.switcher {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.switcher:hover { background: var(--panel-2); }
+.switcherName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.menu {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  min-width: 200px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
+  z-index: 50;
+}
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+}
+.menuItem[data-highlighted] { background: var(--panel-2); }
+.menuSep { height: 1px; background: var(--border); margin: 4px 0; }
 
 .state { padding: var(--space-3); color: var(--fg-dim); }
 .state button { color: var(--accent); background: none; border: none; cursor: pointer; }
