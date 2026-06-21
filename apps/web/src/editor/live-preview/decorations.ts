@@ -53,91 +53,108 @@ function lineRevealed(state: EditorState, pos: number): boolean {
   return state.selection.ranges.some((r) => r.from <= line.to && r.to >= line.from);
 }
 
+// ── Extensible block-render registry (P3) ──────────────────────────────────
+// Each renderer maps markdown syntax-tree nodes to DECORATIONS. The builder it
+// receives (RenderCtx) can ONLY push decorations — it exposes no way to dispatch a
+// document change — so the ADR-008 invariant (display-only, OFFSET-INVARIANT: the
+// CM doc stays 1:1 with the canonical Y.Text, so remote carets stay correct) holds
+// BY CONSTRUCTION for every present and future renderer. Adding a block type
+// (table, image, …) = adding a renderer to RENDERERS; the core walk never changes.
+//
+// This is NOT a macro system: renderers render static, markdown-derived blocks.
+// Executing user-authored code (sandbox, trust boundary, review) is deliberately
+// out of scope — a future macro would be "a renderer that executes", but none of
+// that machinery exists or is implied here.
+export interface RenderCtx {
+  readonly state: EditorState;
+  // Style a range (mark decoration) or a whole line (line decoration at line.from
+  // — pass only `from`). Cannot change document length.
+  add(deco: Decoration, from: number, to?: number): void;
+  // Hide a syntax marker unless the cursor is on its line; also feeds atomicRanges
+  // so local cursor motion skips it cleanly. Display-only (never mutates the doc).
+  hideMarker(from: number, to: number, deco?: Decoration): void;
+}
+
+// Minimal structural view of a syntax-tree node — what renderers need. A real
+// @lezer SyntaxNodeRef (what tree.iterate yields) satisfies this, so we avoid a
+// direct @lezer/common dependency just for the type.
+export interface RenderNode {
+  readonly name: string;
+  readonly from: number;
+  readonly to: number;
+  readonly node: { readonly parent: { readonly parent: { readonly name: string } | null } | null };
+}
+
+export interface BlockRenderer {
+  match(name: string): boolean;
+  enter(node: RenderNode, ctx: RenderCtx): void;
+}
+
+const RENDERERS: BlockRenderer[] = [
+  {
+    // Heading line styling; the HeaderMark child is hidden by its own renderer.
+    match: (n) => /^ATXHeading[1-6]$/.test(n),
+    enter: (node, ctx) => {
+      const level = Number(/([1-6])$/.exec(node.name)![1]);
+      ctx.add(headingLine(level), ctx.state.doc.lineAt(node.from).from);
+    },
+  },
+  {
+    match: (n) => n === "HeaderMark",
+    enter: (node, ctx) => {
+      // Include the single trailing space so the heading text isn't indented.
+      let to = node.to;
+      if (ctx.state.doc.sliceString(to, to + 1) === " ") to += 1;
+      ctx.hideMarker(node.from, to);
+    },
+  },
+  { match: (n) => n === "StrongEmphasis", enter: (node, ctx) => ctx.add(strongMark, node.from, node.to) },
+  { match: (n) => n === "Emphasis", enter: (node, ctx) => ctx.add(emphasisMark, node.from, node.to) },
+  { match: (n) => n === "EmphasisMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
+  { match: (n) => n === "InlineCode", enter: (node, ctx) => ctx.add(inlineCodeMark, node.from, node.to) },
+  {
+    match: (n) => n === "FencedCode",
+    enter: (node, ctx) => {
+      const first = ctx.state.doc.lineAt(node.from).number;
+      const last = ctx.state.doc.lineAt(node.to).number;
+      for (let n = first; n <= last; n++) ctx.add(codeBlockLine, ctx.state.doc.line(n).from);
+    },
+  },
+  { match: (n) => n === "CodeMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
+  {
+    match: (n) => n === "ListMark",
+    enter: (node, ctx) => {
+      const list = node.node.parent?.parent?.name; // ListItem -> Bullet/OrderedList
+      // Replace "-"/"*" with a bullet glyph (space stays). OrderedList keeps "1.".
+      if (list === "BulletList") ctx.hideMarker(node.from, node.to, bullet);
+    },
+  },
+  { match: (n) => n === "Link", enter: (node, ctx) => ctx.add(linkMark, node.from, node.to) },
+  { match: (n) => n === "LinkMark" || n === "URL", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
+];
+
 function buildDecorations(state: EditorState): {
   decorations: DecorationSet;
   atomic: DecorationSet;
 } {
   const all: Range<Decoration>[] = [];
   const hidden: Range<Decoration>[] = [];
-  const tree = syntaxTree(state);
-
-  // Hide a marker range (and feed it to atomicRanges so local cursor motion skips
-  // it cleanly) unless the cursor is on that line.
-  const hideMarker = (from: number, to: number, deco: Decoration = hide) => {
-    if (from >= to) return;
-    if (lineRevealed(state, from)) return;
-    all.push(deco.range(from, to));
-    hidden.push(hide.range(from, to));
+  const ctx: RenderCtx = {
+    state,
+    add: (deco, from, to = from) => all.push(deco.range(from, to)),
+    hideMarker: (from, to, deco = hide) => {
+      if (from >= to) return;
+      if (lineRevealed(state, from)) return;
+      all.push(deco.range(from, to));
+      hidden.push(hide.range(from, to));
+    },
   };
 
-  tree.iterate({
+  syntaxTree(state).iterate({
     enter: (node) => {
-      const name = node.name;
-
-      const heading = /^ATXHeading([1-6])$/.exec(name);
-      if (heading) {
-        const line = state.doc.lineAt(node.from);
-        all.push(headingLine(Number(heading[1])).range(line.from));
-        return; // descend to hide the HeaderMark child
-      }
-
-      if (name === "HeaderMark") {
-        // Include the single trailing space so the heading text isn't indented.
-        let to = node.to;
-        if (state.doc.sliceString(to, to + 1) === " ") to += 1;
-        hideMarker(node.from, to);
-        return;
-      }
-
-      if (name === "StrongEmphasis") {
-        all.push(strongMark.range(node.from, node.to));
-        return;
-      }
-      if (name === "Emphasis") {
-        all.push(emphasisMark.range(node.from, node.to));
-        return;
-      }
-      if (name === "EmphasisMark") {
-        hideMarker(node.from, node.to);
-        return;
-      }
-
-      if (name === "InlineCode") {
-        all.push(inlineCodeMark.range(node.from, node.to));
-        return;
-      }
-
-      if (name === "FencedCode") {
-        const first = state.doc.lineAt(node.from).number;
-        const last = state.doc.lineAt(node.to).number;
-        for (let n = first; n <= last; n++) {
-          all.push(codeBlockLine.range(state.doc.line(n).from));
-        }
-        return; // descend to hide the fence CodeMark children
-      }
-      if (name === "CodeMark") {
-        hideMarker(node.from, node.to);
-        return;
-      }
-
-      if (name === "ListMark") {
-        const list = node.node.parent?.parent?.name; // ListItem -> Bullet/OrderedList
-        if (list === "BulletList") {
-          // Replace "-"/"*" with a bullet glyph; the following space stays.
-          hideMarker(node.from, node.to, bullet);
-        }
-        // OrderedList: keep the "1." number visible.
-        return;
-      }
-
-      if (name === "Link") {
-        all.push(linkMark.range(node.from, node.to));
-        return; // descend to hide brackets + URL
-      }
-      if (name === "LinkMark" || name === "URL") {
-        hideMarker(node.from, node.to);
-        return;
-      }
+      // Mutually-exclusive matches by node name; descend by default (return void)
+      // so child markers (HeaderMark, CodeMark, LinkMark/URL) are still visited.
+      for (const r of RENDERERS) if (r.match(node.name)) r.enter(node, ctx);
     },
   });
 
