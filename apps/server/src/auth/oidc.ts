@@ -43,15 +43,20 @@ export interface LoginRedirect {
 }
 
 // Build the IdP authorization URL with a fresh state/nonce/PKCE verifier. The
-// caller persists {state → nonce, codeVerifier, ...} (consume-once) before redirect.
-export async function buildLogin(cfg: TenantOidcConfig): Promise<LoginRedirect> {
+// redirect_uri is passed in (derived from the request: scheme+host+callback path)
+// rather than read from cfg, because it varies by tenant subdomain and by flow
+// (/auth/callback vs /signup/callback). The caller persists {state → nonce,
+// codeVerifier, ...} (consume-once) before redirecting. NOTE: a production IdP must
+// have these redirect_uris registered (wildcard subdomain or a central callback) —
+// an ops concern (P7).
+export async function buildLogin(cfg: TenantOidcConfig, redirectUri: string): Promise<LoginRedirect> {
   const config = await discover(cfg)
   const codeVerifier = oidc.randomPKCECodeVerifier()
   const codeChallenge = await oidc.calculatePKCECodeChallenge(codeVerifier)
   const state = oidc.randomState()
   const nonce = oidc.randomNonce()
   const url = oidc.buildAuthorizationUrl(config, {
-    redirect_uri: cfg.redirectUri,
+    redirect_uri: redirectUri,
     scope: cfg.scopes,
     state,
     nonce,

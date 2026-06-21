@@ -99,11 +99,65 @@ function ShareRoute() {
   );
 }
 
+// Cloud signup landing (platform origin). Public — no session yet. Starts the
+// platform-IdP flow as a top-level navigation to /signup/login (proxied to the API).
+function JoinRoute() {
+  return (
+    <AppShell>
+      <div style={{ padding: 24, maxWidth: 440 }}>
+        <h2 style={{ marginTop: 0 }}>Create your wikistead workspace</h2>
+        <p style={{ color: "var(--fg-dim)" }}>Sign up with your identity provider to get started.</p>
+        <button type="button" onClick={() => { window.location.href = "/signup/login"; }}>Sign up</button>
+      </div>
+    </AppShell>
+  );
+}
+
+// After platform-IdP signup: choose a workspace name → POST /signup/tenants (uses
+// the signup session cookie) → redirect to the new tenant subdomain, where the
+// member logs in via platform-IdP SSO (a fresh host-only member session there).
+function WorkspaceRoute() {
+  const [slug, setSlug] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setBusy(true);
+    setErr(null);
+    const res = await fetch("/signup/tenants", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slug }),
+    });
+    if (res.ok) {
+      const { tenantUrl } = (await res.json()) as { tenantUrl: string };
+      window.location.href = tenantUrl;
+      return;
+    }
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    setErr(body.error ?? "Could not create workspace");
+    setBusy(false);
+  };
+  return (
+    <AppShell>
+      <div style={{ padding: 24, maxWidth: 440 }}>
+        <h2 style={{ marginTop: 0 }}>Name your workspace</h2>
+        <p style={{ color: "var(--fg-dim)" }}>This becomes your subdomain. Lowercase letters, numbers and hyphens.</p>
+        <input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="my-team" aria-label="Workspace name" />
+        {err && <p style={{ color: "crimson" }}>{err}</p>}
+        <button type="button" disabled={busy || !slug} onClick={submit}>Create workspace</button>
+      </div>
+    </AppShell>
+  );
+}
+
 export function AppRoutes() {
   return (
     <Routes>
       <Route path="/p/:pageId" element={<PageRoute />} />
       <Route path="/share/:linkId" element={<ShareRoute />} />
+      <Route path="/join" element={<JoinRoute />} />
+      <Route path="/join/workspace" element={<WorkspaceRoute />} />
       {/* Dev default: the seeded demo page. Real landing/space routing is a
           next-stage screen. */}
       <Route path="*" element={<Navigate to="/p/demo" replace />} />

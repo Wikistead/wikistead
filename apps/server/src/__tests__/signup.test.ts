@@ -62,7 +62,7 @@ describe('Cloud signup', () => {
   it('signup → callback issues a signup session cookie (Path=/signup), not a member session', async () => {
     const res = await app.inject({ method: 'GET', url: await startSignup(), headers: { host: PLATFORM_HOST } })
     expect(res.statusCode).toBe(302)
-    expect(res.headers.location).toBe('/signup/workspace')
+    expect(res.headers.location).toBe('/join/workspace')
     const setCookie = String(res.headers['set-cookie'] ?? '')
     expect(setCookie).toContain(`${SIGNUP_COOKIE}=`)
     expect(setCookie).toMatch(/Path=\/signup/i) // confined to /signup

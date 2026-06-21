@@ -12,7 +12,7 @@ export interface E2eIssuer {
   close(): Promise<void>;
 }
 
-export async function startE2eIssuer(opts: { clientId: string; sub?: string }): Promise<E2eIssuer> {
+export async function startE2eIssuer(opts: { clientId: string; sub?: string; port?: number }): Promise<E2eIssuer> {
   const sub = opts.sub ?? "dev-user";
   const { publicKey, privateKey } = await generateKeyPair("RS256");
   const jwk = await exportJWK(publicKey);
@@ -76,7 +76,7 @@ export async function startE2eIssuer(opts: { clientId: string; sub?: string }): 
     res.writeHead(404); res.end();
   });
 
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(opts.port ?? 0, "127.0.0.1", resolve));
   server.unref(); // don't keep the Playwright process alive at teardown
   return {
     url: `http://127.0.0.1:${(server.address() as { port: number }).port}`,

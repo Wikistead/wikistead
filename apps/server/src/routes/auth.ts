@@ -56,7 +56,8 @@ export async function authPlugin(app: FastifyInstance) {
     try {
       const resolved = await resolveLoginConfig(db)
       if (!resolved) return reply.code(404).send({ error: 'login not configured' })
-      const { url, state, nonce, codeVerifier } = await buildLogin(resolved.cfg)
+      const redirectUri = `${req.protocol}://${req.headers.host}/auth/callback`
+      const { url, state, nonce, codeVerifier } = await buildLogin(resolved.cfg, redirectUri)
       const returnTo = safeReturnTo(req.query?.returnTo)
       await saveState(app.valkey, state, { nonce, codeVerifier, tenantId: tenant.id, returnTo, viaTenantOidc: resolved.viaTenantOidc })
       return reply.redirect(url)
