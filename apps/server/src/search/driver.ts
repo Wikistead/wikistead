@@ -1,6 +1,6 @@
 // SearchDriver and SearchHit are the CE-published extension point defined in
 // @wikistead/hooks. LogicalSearchDriver is CE's built-in implementation.
-// EE registers an alternative via registerSearchDriver() from @wikistead/hooks.
+// EE registers an alternative via registerSearchDriver from @wikistead/hooks.
 import { MeiliSearch } from 'meilisearch'
 import type { SearchDoc } from '@wikistead/types'
 import type { SearchDriver, SearchHit } from '@wikistead/hooks'
@@ -27,8 +27,12 @@ export class LogicalSearchDriver implements SearchDriver {
       'tenantId', 'viewerUsers', 'viewerGroups', 'isPublic', 'spaceId',
     ])
     const t2 = await index.updateSearchableAttributes([
+      // Order = ranking priority: title outranks body. body is the page text
+      // extracted from the ydoc snapshot (doc-builder). Making it searchable is
+      // what enables in-body matches, including CJK — Meili's default tokenizer
+      // segments Japanese (charabia/lindera), so matches body .
       'title',
-      // TODO(phase: collab): add 'body' after ydoc snapshot persistence is added
+      'body',
     ])
     await this.client.waitForTasks([t1.taskUid, t2.taskUid])
   }
@@ -45,12 +49,22 @@ export class LogicalSearchDriver implements SearchDriver {
     const filters = [`tenantId = "${tenantId}"`, `(${visibilityFilter})`]
     if (spaceId) filters.push(`spaceId = "${spaceId}"`)
 
+    // Crop a plain-text body excerpt around the match for the result snippet. No
+    // attributesToHighlight → _formatted.body is cropped but NOT marked up, so the
+    // UI renders it as text (no XSS). cropLength is a placeholder (tune later).
     const result = await this.client.index(this.INDEX).search<SearchDoc>(q, {
       filter: filters.join(' AND '),
       limit: 20,
       attributesToRetrieve: ['id', 'tenantId', 'spaceId', 'title'],
+      attributesToCrop: ['body'],
+      cropLength: 30,
     })
-    return result.hits as SearchHit[]
+    return result.hits.map((h) => {
+      const snippet = (h as { _formatted?: { body?: string } })._formatted?.body?.trim()
+      const hit: SearchHit = { id: h.id, tenantId: h.tenantId, spaceId: h.spaceId, title: h.title }
+      if (snippet) hit.snippet = snippet
+      return hit
+    })
   }
 
   async upsertDoc(doc: SearchDoc): Promise<void> {

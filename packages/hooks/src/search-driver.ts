@@ -11,6 +11,11 @@ export interface SearchHit {
   tenantId: string
   spaceId: string
   title: string
+  // Cropped plain-text excerpt of the body around the match (P2). PLAIN text only
+  // (no highlight markup) so the UI can render it as text — no XSS surface for what
+  // is, after all, user-authored content. Present only for hits that pass the
+  // two-stage guard; never returned for a result the FGA stage drops.
+  snippet?: string
 }
 
 export interface SearchDriver {
