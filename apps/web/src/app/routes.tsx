@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { Editor, type AnchorGetter } from "../editor/Editor";
 import { CommentsPanel } from "../comments/CommentsPanel";
+import { HistoryPanel } from "../history/HistoryPanel";
 import { useComments } from "../data/comments";
 import { Sidebar } from "../sidebar/Sidebar";
 import { SearchBox } from "../search/SearchBox";
@@ -98,6 +99,17 @@ function PageRoute() {
     return n;
   });
 
+  // History panel is toggled the same way (persisted). Listing needs view; restore
+  // is offered only to edit-capable users (the server re-checks both).
+  const [historyOpen, setHistoryOpen] = useState(() => {
+    try { return localStorage.getItem("wks.historyOpen") === "1"; } catch { return false; }
+  });
+  const toggleHistory = () => setHistoryOpen((v) => {
+    const n = !v;
+    try { localStorage.setItem("wks.historyOpen", n ? "1" : "0"); } catch { /* no storage */ }
+    return n;
+  });
+
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>Loading…</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
   const docName = `t:${tenantId}:p:${pageId}`;
@@ -115,6 +127,9 @@ function PageRoute() {
             <button type="button" data-testid="comments-toggle" aria-pressed={commentsOpen} onClick={toggleComments}>
               Comments{openComments > 0 ? ` (${openComments})` : ""}
             </button>
+            <button type="button" data-testid="history-toggle" aria-pressed={historyOpen} onClick={toggleHistory}>
+              History
+            </button>
           </div>
           <div style={{ flex: 1, minHeight: 0 }}>
             <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} />
@@ -122,6 +137,7 @@ function PageRoute() {
           {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
         </div>
         {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={capability === "edit"} anchorGetterRef={anchorGetterRef} />}
+        {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} />}
       </div>
     </AppShell>
   );
