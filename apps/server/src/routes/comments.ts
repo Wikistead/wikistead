@@ -48,6 +48,52 @@ async function isTenantAdmin(req: FastifyRequest): Promise<boolean> {
   return !!allowed
 }
 
+interface MentionTarget { sub: string; displayName: string | null; email: string | null }
+
+// @mention candidates = tenant members WHO CAN VIEW THIS PAGE. The page-view filter
+// is the key no-leak guard: mentioning a member who can't view the page would leak
+// the page's existence/title to them via the notification — so they are excluded
+// from BOTH autocomplete and notification (same discipline as search/tree). Tenant
+// scope (RLS on members) already prevents cross-tenant mentions.
+async function mentionableViewers(req: FastifyRequest, pageId: string): Promise<MentionTarget[]> {
+  const members = await req.db.sql<{ sub: string; display_name: string | null; email: string | null }[]>`
+    SELECT sub, display_name, email FROM members`
+  if (members.length === 0) return []
+  const { responses } = await req.server.fga.batchCheck(
+    members.map((m) => ({ user: `user:${m.sub}`, relation: 'view', object: `page:${pageId}` })),
+  )
+  const canView = new Set(responses.filter((r) => r.allowed).map((r) => r._request.user))
+  return members
+    .filter((m) => canView.has(`user:${m.sub}`))
+    .map((m) => ({ sub: m.sub, displayName: m.display_name, email: m.email }))
+}
+
+// Best-effort @mention notification. The client sends the resolved subs; the server
+// re-validates each against mentionableViewers (member + page-view) so a forged sub
+// can neither be notified nor leak the page. Email is best-effort (P1.3): the
+// comment is already saved, so a failed/disabled send changes nothing.
+async function notifyMentions(req: FastifyRequest, pageId: string, mentions: string[] | undefined): Promise<void> {
+  if (!mentions?.length) return
+  const allowed = await mentionableViewers(req, pageId)
+  const wanted = new Set(mentions)
+  const targets = allowed.filter((t) => wanted.has(t.sub) && t.email && t.sub !== req.user.sub)
+  if (targets.length === 0) return
+  const scheme = process.env.NODE_ENV === 'production' ? 'https' : 'http'
+  const link = `${scheme}://${req.headers.host}/p/${pageId}`
+  await Promise.all(
+    targets.map((t) =>
+      req.server.email
+        .send({
+          to: t.email!,
+          subject: `You were mentioned in ${req.tenant.slug} on wikistead`,
+          text: `You were mentioned in a comment. Open the page:\n\n${link}`,
+          html: `<p>You were mentioned in a comment on <strong>${req.tenant.slug}</strong>.</p><p><a href="${link}">Open the page</a></p>`,
+        })
+        .catch((err) => req.log.warn({ err }, 'mention email failed — comment still saved')),
+    ),
+  )
+}
+
 // Resolve a thread's page (RLS-scoped) — the authz anchor for thread/comment ops.
 async function threadPage(req: FastifyRequest, threadId: string): Promise<{ pageId: string } | null> {
   const [row] = await req.db.sql<[{ page_id: string }?]>`SELECT page_id FROM comment_threads WHERE id = ${threadId}`
@@ -79,8 +125,17 @@ export async function commentsPlugin(app: FastifyInstance) {
     }
   })
 
+  // @mention autocomplete directory: members who can VIEW this page, exposed as
+  // ONLY { sub, displayName } (no email/role/createdAt — not needed to mention, and
+  // listing those would over-share). page#comment required (only commenters mention).
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/mentionable', async (req, reply) => {
+    if (!(await requirePage(req, reply, req.params.pageId, 'comment'))) return
+    const targets = await mentionableViewers(req, req.params.pageId)
+    return { members: targets.map((t) => ({ sub: t.sub, displayName: t.displayName })) }
+  })
+
   // Start a thread (page or inline) with its first comment. page#comment required.
-  app.post<{ Params: { pageId: string }; Body: { body?: string; kind?: string; anchorStart?: string; anchorEnd?: string; quotedText?: string } }>(
+  app.post<{ Params: { pageId: string }; Body: { body?: string; kind?: string; anchorStart?: string; anchorEnd?: string; quotedText?: string; mentions?: string[] } }>(
     '/pages/:pageId/comments',
     async (req, reply) => {
       if (!(await requirePage(req, reply, req.params.pageId, 'comment'))) return
@@ -99,12 +154,13 @@ export async function commentsPlugin(app: FastifyInstance) {
         return t
       })
       emit({ type: 'comment.created', tenantId: req.tenant.id, actorId: req.user.sub, pageId: req.params.pageId, threadId: thread.id })
+      await notifyMentions(req, req.params.pageId, req.body?.mentions)
       return reply.code(201).send({ threadId: thread.id })
     },
   )
 
   // Reply to a thread. page#comment on the thread's page required.
-  app.post<{ Params: { threadId: string }; Body: { body?: string } }>('/comments/threads/:threadId/comments', async (req, reply) => {
+  app.post<{ Params: { threadId: string }; Body: { body?: string; mentions?: string[] } }>('/comments/threads/:threadId/comments', async (req, reply) => {
     const t = await threadPage(req, req.params.threadId)
     if (!t) return reply.code(404).send({ error: 'not found' })
     if (!(await requirePage(req, reply, t.pageId, 'comment'))) return
@@ -113,6 +169,7 @@ export async function commentsPlugin(app: FastifyInstance) {
     const [c] = await req.db.sql<[{ id: string }]>`
       INSERT INTO comments (tenant_id, thread_id, body, author_sub) VALUES (${req.tenant.id}, ${req.params.threadId}, ${body}, ${req.user.sub}) RETURNING id`
     emit({ type: 'comment.created', tenantId: req.tenant.id, actorId: req.user.sub, pageId: t.pageId, threadId: req.params.threadId })
+    await notifyMentions(req, t.pageId, req.body?.mentions)
     return reply.code(201).send({ commentId: c.id })
   })
 

@@ -38,6 +38,13 @@ beforeAll(async () => {
   // Own space + page (admin pool bypasses RLS for the fixture insert).
   await admin`INSERT INTO spaces (id, tenant_id, name) VALUES (${SPACE}, ${TENANT}, 'Comments Test Space') ON CONFLICT (id) DO NOTHING`
   await admin`INSERT INTO pages (id, tenant_id, space_id, title) VALUES (${PAGE}, ${TENANT}, ${SPACE}, 'Comments Test') ON CONFLICT (id) DO NOTHING`
+  // Member rows (with email) for @mention resolution. cmt-outsider is a member but
+  // gets NO page grant → a member who cannot view the page (the leak case).
+  await admin`INSERT INTO members (tenant_id, sub, email, display_name, role) VALUES
+    (${TENANT}, 'cmt-author', 'author@x.test', 'Comment Author', 'member'),
+    (${TENANT}, 'cmt-viewer', 'viewer@x.test', 'Comment Viewer', 'member'),
+    (${TENANT}, 'cmt-outsider', 'outsider@x.test', 'Outsider', 'member')
+    ON CONFLICT (tenant_id, sub) DO NOTHING`
   for (const who of ['author', 'viewer', 'stranger', 'admin']) {
     sids[who] = await createSession(valkey, { tenantId: TENANT, sub: who === 'admin' ? 'dev-user' : `cmt-${who}`, role: who === 'admin' ? 'admin' : 'member' })
   }
@@ -49,6 +56,7 @@ afterAll(async () => {
   await deleteTuples(fgaClient, fgaFixture).catch(() => {})
   await admin`DELETE FROM comments WHERE tenant_id = ${TENANT}`.catch(() => {})
   await admin`DELETE FROM comment_threads WHERE tenant_id = ${TENANT}`.catch(() => {})
+  await admin`DELETE FROM members WHERE tenant_id = ${TENANT} AND sub LIKE 'cmt-%'`.catch(() => {})
   await admin`DELETE FROM pages WHERE id = ${PAGE}`.catch(() => {})
   await admin`DELETE FROM spaces WHERE id = ${SPACE}`.catch(() => {})
   await admin.end()
@@ -125,5 +133,51 @@ describe('tenant isolation', () => {
     const acmeSid = await createSession(valkey, { tenantId: 'tenant_acme', sub: 'acme-admin' })
     const res = await app.inject({ method: 'GET', url: `/pages/${PAGE}/comments`, headers: { host: 'acme.localhost', cookie: `${SESSION_COOKIE}=${acmeSid}` } })
     expect(res.statusCode).toBe(404)
+  })
+})
+
+describe('@mention (directory scoped to page-viewers; notification best-effort)', () => {
+  const MAILPIT = 'http://localhost:8025/api/v1'
+  const clearMail = () => fetch(`${MAILPIT}/messages`, { method: 'DELETE' })
+  // Returns true as soon as a message to `addr` appears; false after the window.
+  async function mailedTo(addr: string, windowMs = 1500): Promise<boolean> {
+    for (let i = 0; i < windowMs / 100; i++) {
+      const r = await fetch(`${MAILPIT}/messages`)
+      if (r.ok) {
+        const body = (await r.json()) as { messages: { To: { Address: string }[] }[] }
+        if (body.messages.some((m) => m.To.some((t) => t.Address === addr))) return true
+      }
+      await new Promise((res) => setTimeout(res, 100))
+    }
+    return false
+  }
+
+  it('directory = members who can VIEW the page, exposing ONLY sub + displayName', async () => {
+    const res = await get('author', `/pages/${PAGE}/mentionable`)
+    expect(res.statusCode).toBe(200)
+    const members = res.json().members as { sub: string; displayName: string }[]
+    const subs = members.map((m) => m.sub)
+    expect(subs).toContain('cmt-author')
+    expect(subs).toContain('cmt-viewer')
+    expect(subs).not.toContain('cmt-outsider') // a member, but cannot view the page
+    expect(Object.keys(members[0]!).sort()).toEqual(['displayName', 'sub']) // no email/role leaked
+  })
+
+  it('a non-commenter cannot read the mention directory', async () => {
+    expect((await get('viewer', `/pages/${PAGE}/mentionable`)).statusCode).toBe(403)
+  })
+
+  it('notifies a mentioned page-viewer by email (best-effort, real SMTP via Mailpit)', async () => {
+    await clearMail()
+    const r = await post('author', `/pages/${PAGE}/comments`, { body: 'hey @viewer', mentions: ['cmt-viewer'] })
+    expect(r.statusCode).toBe(201)
+    expect(await mailedTo('viewer@x.test')).toBe(true)
+  })
+
+  it('does NOT notify a mentioned member who cannot view the page (no page-existence leak)', async () => {
+    await clearMail()
+    const r = await post('author', `/pages/${PAGE}/comments`, { body: 'hey @outsider', mentions: ['cmt-outsider'] })
+    expect(r.statusCode).toBe(201) // the comment is still created
+    expect(await mailedTo('outsider@x.test')).toBe(false) // but no notification leaks the page
   })
 })
