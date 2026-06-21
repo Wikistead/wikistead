@@ -47,6 +47,25 @@ test("① nesting: the sub-page button creates a child under the page", async ({
   expect(children.length).toBe(before + 1);
 });
 
+test("rename a space via the switcher menu (manage)", async ({ page }) => {
+  await openDemo(page);
+  await page.waitForSelector("[data-testid=tree-page]");
+  // create a fresh space so we don't rename demo_space (other specs depend on it)
+  await page.click("[data-testid=space-switcher]");
+  await page.locator("[data-testid=space-menu]").getByText("New space").click();
+  await sleep(800);
+  // the new space is now active → rename it
+  await page.click("[data-testid=space-switcher]");
+  await page.locator("[data-testid=space-menu]").getByText("Rename space").click();
+  // page + space rename reuse the same dialog testid; target the OPEN one.
+  const dlg = page.locator("[data-testid=rename-dialog][data-state=open]");
+  await dlg.waitFor();
+  await dlg.locator("input").fill("Renamed Space E2E");
+  await dlg.locator("button[type=submit]").click();
+  await sleep(600);
+  expect(await page.textContent("[data-testid=space-switcher]")).toContain("Renamed Space E2E");
+});
+
 test("new-page button creates a page in the active space", async ({ page }) => {
   await openDemo(page);
   await page.waitForSelector("[data-testid=new-page]");

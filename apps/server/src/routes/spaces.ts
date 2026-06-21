@@ -105,6 +105,24 @@ export async function deleteSpace(
   emit({ type: 'space.deleted', tenantId: args.tenantId, spaceId: args.spaceId, actorId: args.userId })
 }
 
+// Rename a space. manage authority required (a management action, same as delete /
+// the 3b cross-space move) — not everyone who can edit should rename the space.
+export async function updateSpace(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { spaceId: string; userId: string; name: string },
+): Promise<Space> {
+  const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'space', id: args.spaceId })
+  if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  const name = args.name.trim()
+  if (!name) throw Object.assign(new Error('empty name'), { statusCode: 400 })
+  const [row] = await db.sql<SpaceRow[]>`
+    UPDATE spaces SET name = ${name} WHERE id = ${args.spaceId} RETURNING id, tenant_id, name, created_at`
+  if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  emit({ type: 'space.updated', tenantId: row.tenant_id, spaceId: row.id, actorId: args.userId })
+  return toSpace(row)
+}
+
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function spacesPlugin(app: FastifyInstance) {
@@ -119,6 +137,10 @@ export async function spacesPlugin(app: FastifyInstance) {
   })
 
   app.get('/spaces', async (req) => listSpaces(req.db, app.fga, req.user.sub))
+
+  app.patch<{ Params: { spaceId: string }; Body: { name?: string } }>('/spaces/:spaceId', async (req) => {
+    return updateSpace(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub, name: req.body?.name ?? '' })
+  })
 
   app.delete<{ Params: { spaceId: string } }>('/spaces/:spaceId', async (req, reply) => {
     await deleteSpace(req.db, app.fga, app.searchDriver, {
