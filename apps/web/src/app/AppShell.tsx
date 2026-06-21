@@ -1,11 +1,12 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { LogOut, PanelLeft } from "lucide-react";
 import styles from "./AppShell.module.css";
 
 // App skeleton: header / sidebar slot / main content. `sidebar` holds the page
 // tree and `search` the search box — both member-only; guest (share) routes pass
 // neither (no cross-tenant search/navigation for anonymous link visitors).
-// `onLogout`, when given, renders a logout control (member chrome only).
+// `onLogout`, when given, renders a logout control (member chrome only). The
+// sidebar can be collapsed via the header toggle; the choice persists.
 export function AppShell({
   children,
   sidebar,
@@ -17,10 +18,25 @@ export function AppShell({
   search?: ReactNode;
   onLogout?: () => void;
 }) {
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("wks.sidebarCollapsed") === "1"; } catch { return false; }
+  });
+  const toggle = () => setCollapsed((v) => {
+    const n = !v;
+    try { localStorage.setItem("wks.sidebarCollapsed", n ? "1" : "0"); } catch { /* no storage */ }
+    return n;
+  });
+
   return (
-    <div className={styles.shell}>
+    <div className={styles.shell} data-collapsed={sidebar && collapsed ? "true" : "false"}>
       <header className={styles.header}>
-        <PanelLeft size={16} aria-hidden />
+        {sidebar ? (
+          <button type="button" className={styles.collapseBtn} aria-label="Toggle sidebar" aria-pressed={!collapsed} data-testid="sidebar-toggle" onClick={toggle}>
+            <PanelLeft size={16} />
+          </button>
+        ) : (
+          <PanelLeft size={16} aria-hidden />
+        )}
         <span className={styles.brand}>wikistead</span>
         {search && <div className={styles.search}>{search}</div>}
         {onLogout && (

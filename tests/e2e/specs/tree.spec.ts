@@ -76,6 +76,25 @@ test("new-page button creates a page in the active space", async ({ page }) => {
   expect((await pagesOf(page, "demo_space")).length).toBe(before + 1);
 });
 
+test("Phase 2d: the header toggle collapses the sidebar and the choice persists", async ({ page }) => {
+  await openDemo(page);
+  await page.waitForSelector("[data-testid=tree-page]");
+  await expect(page.locator("[data-testid=sidebar]")).toBeVisible();
+
+  // collapse via the header button → the aside is hidden
+  await page.click("[data-testid=sidebar-toggle]");
+  await expect(page.locator("[data-testid=sidebar]")).toBeHidden();
+
+  // the choice survives a reload (persisted to localStorage)
+  await page.reload();
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await expect(page.locator("[data-testid=sidebar]")).toBeHidden();
+
+  // toggling again restores it
+  await page.click("[data-testid=sidebar-toggle]");
+  await expect(page.locator("[data-testid=sidebar]")).toBeVisible();
+});
+
 test("moving the open page via drag keeps the editor connected", async ({ page }) => {
   await openDemo(page);
   await page.evaluate(async (api) => {
