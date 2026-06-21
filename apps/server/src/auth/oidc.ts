@@ -3,12 +3,13 @@
 // verification, code exchange, id_token signature/iss/aud/exp validation — which
 // we deliberately do NOT hand-roll.
 import * as oidc from 'openid-client'
-import { decryptSecret } from './secret-crypto.js'
 
+// clientSecret is the DECRYPTED value (loaders decrypt tenant_oidc; the platform
+// config reads it from env in plaintext). null = public/PKCE client.
 export interface TenantOidcConfig {
   issuer: string
   clientId: string
-  clientSecretEnc: string | null
+  clientSecret: string | null
   scopes: string
   redirectUri: string
 }
@@ -16,9 +17,8 @@ export interface TenantOidcConfig {
 // allowInsecureRequests is enabled ONLY for http issuers (local/test). Production
 // issuers are https and get the default (TLS-required) behavior.
 async function discover(cfg: TenantOidcConfig): Promise<oidc.Configuration> {
-  const secret = cfg.clientSecretEnc ? decryptSecret(cfg.clientSecretEnc) : undefined
   const options = cfg.issuer.startsWith('http://') ? { execute: [oidc.allowInsecureRequests] } : undefined
-  return oidc.discovery(new URL(cfg.issuer), cfg.clientId, secret, undefined, options)
+  return oidc.discovery(new URL(cfg.issuer), cfg.clientId, cfg.clientSecret ?? undefined, undefined, options)
 }
 
 export interface LoginRedirect {

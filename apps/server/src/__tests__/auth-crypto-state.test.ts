@@ -37,7 +37,7 @@ describe('secret-crypto (AES-256-GCM, fail-closed key)', () => {
 describe('oidc-state (short-lived, consume-once)', () => {
   it('a state can be consumed exactly once (GETDEL)', async () => {
     const state = 'st-' + Math.random().toString(36).slice(2)
-    await saveState(valkey, state, { nonce: 'n', codeVerifier: 'v', tenantId: 'tenant_dev', returnTo: '/' })
+    await saveState(valkey, state, { nonce: 'n', codeVerifier: 'v', tenantId: 'tenant_dev', returnTo: '/', viaTenantOidc: true })
     const first = await consumeState(valkey, state)
     expect(first).toMatchObject({ nonce: 'n', tenantId: 'tenant_dev' })
     const second = await consumeState(valkey, state) // reuse → null

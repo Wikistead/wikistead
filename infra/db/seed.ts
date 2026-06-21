@@ -20,7 +20,15 @@ import { encryptSecret } from '../../apps/server/src/auth/secret-crypto.js'
       VALUES ('demo', 'tenant_dev', 'demo_space', 'Demo Page', false)
       ON CONFLICT (tenant_id, id) DO NOTHING
     `
-    console.log('seeded: tenant_dev / demo_space / demo (page)')
+    // Seed the admin member row to match the FGA seed (dev-user is tenant#admin).
+    // Keeps the members table consistent with FGA so the tenant is NOT member-less
+    // (the first-admin bootstrap must not fire for an already-admined tenant).
+    await tx`
+      INSERT INTO members (tenant_id, sub, email, display_name, role)
+      VALUES ('tenant_dev', 'dev-user', 'dev@example.com', 'Dev User', 'admin')
+      ON CONFLICT (tenant_id, sub) DO NOTHING
+    `
+    console.log('seeded: tenant_dev / demo_space / demo (page) / admin member')
 
     // Dev OIDC config (placeholder issuer; real IdP is configured per deployment).
     // client_secret is stored ENCRYPTED via the same helper the app uses.
@@ -48,7 +56,12 @@ import { encryptSecret } from '../../apps/server/src/auth/secret-crypto.js'
       VALUES ('acme_page', 'tenant_acme', 'acme_space', 'Acme Page', false)
       ON CONFLICT (tenant_id, id) DO NOTHING
     `
-    console.log('seeded: tenant_acme / acme_space / acme_page')
+    await tx`
+      INSERT INTO members (tenant_id, sub, email, display_name, role)
+      VALUES ('tenant_acme', 'acme-admin', 'admin@acme.test', 'Acme Admin', 'admin')
+      ON CONFLICT (tenant_id, sub) DO NOTHING
+    `
+    console.log('seeded: tenant_acme / acme_space / acme_page / admin member')
   })
 
   await sql.end()
