@@ -24,12 +24,33 @@ export interface EditorUser {
 
 export type EditorCapability = "view" | "edit";
 
-// Three display states (P3). Default is "view" for everyone — readers are the
-// majority. An edit-capable user reveals the editable surfaces on demand:
-//   view  → single preview pane, read-only (still receives remote edits + carets)
-//   edit  → single preview pane, editable
-//   split → source (vim) + preview, editable
-type Mode = "view" | "edit" | "split";
+// Two orthogonal concerns:
+//   - editing (transient, default false): the page opens RENDERED (read-only
+//     preview) for everyone; an edit-capable user clicks Edit to start editing.
+//   - layout (PERSISTED per user): when editing, which editor — a single WYSIWYG
+//     preview, or the vim source + preview split. A split user always edits in
+//     split; everyone else always gets the single editor. Persisted so the choice
+//     sticks across pages and sessions.
+export type EditorLayout = "wysiwyg" | "split";
+// The mounted surface: 'view' (read-only preview) | 'wysiwyg' (editable preview) |
+// 'split' (source + editable preview).
+type SurfaceKey = "view" | EditorLayout;
+
+const LAYOUT_KEY = "wks.editorLayout";
+function loadLayout(): EditorLayout {
+  try {
+    return localStorage.getItem(LAYOUT_KEY) === "split" ? "split" : "wysiwyg";
+  } catch {
+    return "wysiwyg";
+  }
+}
+function saveLayout(l: EditorLayout): void {
+  try {
+    localStorage.setItem(LAYOUT_KEY, l);
+  } catch {
+    /* private mode / no storage — preference just won't persist */
+  }
+}
 
 export interface EditorProps {
   docName: string;
@@ -93,10 +114,13 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
     view.dispatch({ effects: setCommentRanges.of(ranges) });
   };
 
-  const [mode, setMode] = useState<Mode>("view");
-  // A view-only capability can never leave view mode (the controls aren't
-  // rendered, and this guarantees it even if some state went stale).
-  const effectiveMode: Mode = capability === "edit" ? mode : "view";
+  const canEdit = capability === "edit";
+  const [editing, setEditing] = useState(false);
+  const [layout, setLayout] = useState<EditorLayout>(loadLayout);
+  const setLayoutPref = (l: EditorLayout) => { setLayout(l); saveLayout(l); };
+  // A view-only capability can never edit (the controls aren't rendered, and this
+  // guarantees it even if some state went stale). The collab server is the fortress.
+  const surfaceKey: SurfaceKey = canEdit && editing ? layout : "view";
 
   // Resolves wks-attachment image ids to fresh presigned URLs (TTL-cached). Bound
   // to the API token (cookie/dev-token), rebuilt only when it changes.
@@ -124,16 +148,18 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docName, token, collabUrl]);
 
-  // (2) Surfaces — remount on mode change (same connection) or after a reconnect.
+  // (2) Surfaces — remount when the surface changes (same connection) or after a
+  // reconnect. The collab connection above is untouched, so editing/layout toggles
+  // never reconnect or drop presence.
   useLayoutEffect(() => {
     const c = collabRef.current;
     if (!c) return;
-    const editable = effectiveMode !== "view";
+    const editable = surfaceKey !== "view";
     const sourceHost = sourceRef.current;
     const previewHost = previewRef.current!;
 
     const views: { destroy(): void }[] = [];
-    if (effectiveMode === "split" && sourceHost) {
+    if (surfaceKey === "split" && sourceHost) {
       views.push(mountSource(sourceHost, c.ytext, c.provider, { readOnly: false }));
     }
     const previewView = mountLivePreview(previewHost, c.ytext, c.provider, { readOnly: !editable, resolveImageUrl, uploadImage: onUploadImage });
@@ -160,7 +186,7 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
       previewHost.replaceChildren();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docName, token, collabUrl, effectiveMode, resolveImageUrl, onUploadImage]);
+  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, onUploadImage]);
 
   // Re-resolve + push highlights when the comment set changes (the StateField keeps
   // them aligned through edits in between).
@@ -172,25 +198,29 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
     awarenessRef.current?.setLocalStateField("user", userField(user));
   }, [user.name, user.color]);
 
-  const canEdit = capability === "edit";
-
   return (
-    <div className={styles.editor} data-mode={effectiveMode}>
-      <section className={styles.pane} data-pane="source" hidden={effectiveMode !== "split"}>
+    <div className={styles.editor} data-mode={surfaceKey}>
+      <section className={styles.pane} data-pane="source" hidden={surfaceKey !== "split"}>
         <h2 className={styles.paneTitle}>source (vim)</h2>
         <div ref={sourceRef} className={styles.host} />
       </section>
       <section className={styles.pane} data-pane="preview">
         {canEdit && (
           <div className={styles.modeBar} data-testid="editor-modebar">
-            {effectiveMode === "view" ? (
-              <button type="button" data-testid="edit-toggle" onClick={() => setMode("edit")}>Edit</button>
+            {surfaceKey === "view" ? (
+              <button type="button" data-testid="edit-toggle" onClick={() => setEditing(true)}>Edit</button>
             ) : (
               <>
-                <button type="button" data-testid="source-toggle" onClick={() => setMode(effectiveMode === "split" ? "edit" : "split")}>
-                  {effectiveMode === "split" ? "Hide source" : "Source (vim)"}
+                {/* Persisted layout preference: split users stay in split, others in single. */}
+                <button
+                  type="button"
+                  data-testid="layout-toggle"
+                  aria-pressed={layout === "split"}
+                  onClick={() => setLayoutPref(layout === "split" ? "wysiwyg" : "split")}
+                >
+                  {layout === "split" ? "Single editor" : "Split editor (vim)"}
                 </button>
-                <button type="button" data-testid="view-toggle" onClick={() => setMode("view")}>Done</button>
+                <button type="button" data-testid="view-toggle" onClick={() => setEditing(false)}>Done</button>
               </>
             )}
           </div>

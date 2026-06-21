@@ -9,15 +9,20 @@ export async function openDemo(page: Page) {
   await sleep(800);
 }
 
-// P3: the editor opens in read-only "view" mode. These reveal the editable
-// surfaces (requires an edit-capable user — the dev-token bypass qualifies).
+// The editor opens rendered (read-only). Edit reveals the editable surface in the
+// user's persisted layout (default: single WYSIWYG preview). enterSplit also flips
+// the layout preference to the vim source+preview split. Requires an edit-capable
+// user (the dev-token bypass qualifies).
 export async function enterEdit(page: Page) {
   await page.click("[data-testid=edit-toggle]");
   await sleep(150);
 }
 export async function enterSplit(page: Page) {
   await page.click("[data-testid=edit-toggle]");
-  await page.click("[data-testid=source-toggle]");
+  // Default layout is single (wysiwyg) in a fresh context; flip to split.
+  if ((await page.locator("[data-pane=source] .cm-content").count()) === 0) {
+    await page.click("[data-testid=layout-toggle]");
+  }
   await page.waitForSelector("[data-pane=source] .cm-content");
   await sleep(150);
 }
