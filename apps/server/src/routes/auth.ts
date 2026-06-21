@@ -10,6 +10,7 @@ import { saveState, consumeState } from '../auth/oidc-state.js'
 import { safeReturnTo } from '../auth/return-to.js'
 import { decryptSecret } from '../auth/secret-crypto.js'
 import { bootstrapFirstAdmin } from '../auth/provisioning.js'
+import { acceptInvite } from '../auth/invites.js'
 
 async function resolveTenant(host: string | undefined): Promise<Tenant | null> {
   const { slug, domain } = resolveTenantFromHost(host ?? '')
@@ -49,7 +50,7 @@ async function resolveLoginConfig(db: TenantDb): Promise<{ cfg: TenantOidcConfig
 // existing session and run through the normal hook.
 export async function authPlugin(app: FastifyInstance) {
   // Start the OIDC flow: redirect to the tenant's IdP with state/nonce/PKCE.
-  app.get<{ Querystring: { returnTo?: string } }>('/auth/login', async (req, reply) => {
+  app.get<{ Querystring: { returnTo?: string; invite?: string } }>('/auth/login', async (req, reply) => {
     const tenant = await resolveTenant(req.headers.host)
     if (!tenant) return reply.code(404).send({ error: 'not found' })
     const db = await acquireTenantDb(tenant)
@@ -59,7 +60,10 @@ export async function authPlugin(app: FastifyInstance) {
       const redirectUri = `${req.protocol}://${req.headers.host}/auth/callback`
       const { url, state, nonce, codeVerifier } = await buildLogin(resolved.cfg, redirectUri)
       const returnTo = safeReturnTo(req.query?.returnTo)
-      await saveState(app.valkey, state, { nonce, codeVerifier, tenantId: tenant.id, returnTo, viaTenantOidc: resolved.viaTenantOidc })
+      // An invite link starts login with ?invite=<token>; carry it (opaque) through
+      // the round-trip so the callback can accept the invite after identity is proven.
+      const inviteToken = req.query?.invite || undefined
+      await saveState(app.valkey, state, { nonce, codeVerifier, tenantId: tenant.id, returnTo, viaTenantOidc: resolved.viaTenantOidc, inviteToken })
       return reply.redirect(url)
     } finally {
       await db.release()
@@ -97,13 +101,27 @@ export async function authPlugin(app: FastifyInstance) {
       try {
         sid = await establishMemberSession(deps, tenant, claims) // existing member → session
       } catch {
-        // Not a member yet. The ONLY way to gain membership here is the CE
-        // first-admin bootstrap (tenant's own IdP + member-less tenant); a 2nd
-        // login or the platform IdP (Cloud) never does — membership comes from
-        // invite (P1.4) / signup (provisionTenant).
-        if (st.viaTenantOidc && (await bootstrapFirstAdmin({ db, fga: app.fga }, tenant, claims))) {
-          sid = await establishMemberSession(deps, tenant, claims)
-        }
+        // Not a member yet. Identity is proven but membership is NOT — login alone
+        // never grants it (the identity≠membership invariant). Membership appears
+        // here ONLY via one of the two explicit grants below; otherwise we reject.
+      }
+
+      // (1) Invite acceptance — the normal, open-ended membership grant (P1.4).
+      // Accept the consume-once invite, then establish the session. A bad/expired/
+      // revoked/cross-tenant invite returns false → no grant; a seat-cap hit throws
+      // → no grant. Either way sid stays null and we fall through to the vague error.
+      if (!sid && st.inviteToken) {
+        try {
+          if (await acceptInvite({ db, fga: app.fga }, tenant, st.inviteToken, claims)) {
+            sid = await establishMemberSession(deps, tenant, claims)
+          }
+        } catch { /* seat full / FGA failure → no session */ }
+      }
+
+      // (2) CE first-admin bootstrap — the bounded exception (tenant's own IdP +
+      // member-less tenant). A 2nd login or the platform IdP (Cloud) never does.
+      if (!sid && st.viaTenantOidc && (await bootstrapFirstAdmin({ db, fga: app.fga }, tenant, claims))) {
+        sid = await establishMemberSession(deps, tenant, claims)
       }
       if (!sid) {
         // Deliberately VAGUE (no "authenticated but not a member" — that would
