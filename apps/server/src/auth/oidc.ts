@@ -14,6 +14,20 @@ export interface TenantOidcConfig {
   redirectUri: string
 }
 
+// The platform IdP (Cloud only) from env — the DEFAULT identity source for tenants
+// without their own IdP, AND the identity check for Cloud signup. Unset on CE.
+export function loadPlatformOidc(): TenantOidcConfig | null {
+  const issuer = process.env.PLATFORM_OIDC_ISSUER
+  if (!issuer) return null
+  return {
+    issuer,
+    clientId: process.env.PLATFORM_OIDC_CLIENT_ID!,
+    clientSecret: process.env.PLATFORM_OIDC_CLIENT_SECRET ?? null,
+    scopes: process.env.PLATFORM_OIDC_SCOPES ?? 'openid email profile',
+    redirectUri: process.env.PLATFORM_OIDC_REDIRECT_URI!,
+  }
+}
+
 // allowInsecureRequests is enabled ONLY for http issuers (local/test). Production
 // issuers are https and get the default (TLS-required) behavior.
 async function discover(cfg: TenantOidcConfig): Promise<oidc.Configuration> {

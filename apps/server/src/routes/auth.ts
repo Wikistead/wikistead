@@ -5,7 +5,7 @@ import type { TenantDb } from '../db/index.js'
 import type { Tenant } from '@wikistead/types'
 import { mintMemberCollabToken } from '@wikistead/auth'
 import { SESSION_COOKIE, destroySession, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
-import { buildLogin, exchangeCode, type TenantOidcConfig } from '../auth/oidc.js'
+import { buildLogin, exchangeCode, loadPlatformOidc, type TenantOidcConfig } from '../auth/oidc.js'
 import { saveState, consumeState } from '../auth/oidc-state.js'
 import { safeReturnTo } from '../auth/return-to.js'
 import { decryptSecret } from '../auth/secret-crypto.js'
@@ -28,20 +28,6 @@ async function loadTenantOidc(db: TenantDb): Promise<TenantOidcConfig | null> {
     clientSecret: row.client_secret_enc ? decryptSecret(row.client_secret_enc) : null,
     scopes: row.scopes,
     redirectUri: row.redirect_uri,
-  }
-}
-
-// The platform IdP (Cloud only) from env — the DEFAULT identity source for tenants
-// that have not configured their own IdP (ADR-016). Unset on CE.
-function loadPlatformOidc(): TenantOidcConfig | null {
-  const issuer = process.env.PLATFORM_OIDC_ISSUER
-  if (!issuer) return null
-  return {
-    issuer,
-    clientId: process.env.PLATFORM_OIDC_CLIENT_ID!,
-    clientSecret: process.env.PLATFORM_OIDC_CLIENT_SECRET ?? null,
-    scopes: process.env.PLATFORM_OIDC_SCOPES ?? 'openid email profile',
-    redirectUri: process.env.PLATFORM_OIDC_REDIRECT_URI!,
   }
 }
 
