@@ -50,6 +50,14 @@ export const setHeading = (view: EditorView, level = 2) =>
 export const toggleBulletList = (view: EditorView) => prefixLines(view, "- ");
 
 // Insert "[text](url)" and leave the caret selecting "url" so it can be typed
+// Insert an image reference at the caret: ![alt](wks-attachment:<id>). The ref is
+// the stable attachment id (resolved to a presigned URL at render time — never
+// persisted). Propagates to the vim surface + Y.Text like any other edit.
+export function insertImage(view: EditorView, alt: string, ref: string): void {
+  view.dispatch(view.state.replaceSelection(`![${alt}](${ref})`));
+  view.focus();
+}
+
 // over. With a selection, the selected text becomes the link label.
 export function insertLink(view: EditorView): void {
   const { state } = view;

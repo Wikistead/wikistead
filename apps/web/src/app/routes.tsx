@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { Editor } from "../editor/Editor";
@@ -8,6 +8,7 @@ import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, type GuestToken } from "../data/apiClient";
 import { usePage } from "../data/queries";
+import { uploadAttachment } from "../attachments/useAttachments";
 import { MembersPage } from "../settings/MembersPage";
 
 // Same-origin collab (ADR-016): a relative "/collab" is resolved against the
@@ -53,6 +54,18 @@ function PageRoute() {
   const devMode = token === "dev-token";
   const { data: page } = usePage(pageId ?? "");
   const capability = page?.capability ?? (devMode ? "edit" : "view");
+
+  // Upload a picked image to this page's space, returning the ref to insert. Bound
+  // to the resolved spaceId; null (no image button) until the page meta loads.
+  const spaceId = page?.spaceId;
+  const onUploadImage = useCallback(
+    async (file: File) => {
+      if (!spaceId || !pageId) return null;
+      const { id, filename } = await uploadAttachment(spaceId, pageId, token, file);
+      return { ref: `wks-attachment:${id}`, alt: filename };
+    },
+    [spaceId, pageId, token],
+  );
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>Loading…</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
   const docName = `t:${tenantId}:p:${pageId}`;
@@ -60,7 +73,7 @@ function PageRoute() {
     <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         <div style={{ flex: 1, minHeight: 0 }}>
-          <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} />
+          <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} onUploadImage={onUploadImage} />
         </div>
         {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
       </div>
