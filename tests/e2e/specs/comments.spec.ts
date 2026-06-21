@@ -25,6 +25,8 @@ test("comments: page comment + resolve/tabs, inline highlight that follows edits
   await page.keyboard.type("The quick brown fox jumps");
   await sleep(400);
 
+  // Comments panel is toggled now — open it.
+  await page.click("[data-testid=comments-toggle]");
   const panel = page.locator("[data-testid=comments-panel]");
   await expect(panel).toBeVisible();
 
