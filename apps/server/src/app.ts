@@ -30,6 +30,7 @@ import { apiKeysPlugin } from './routes/api-keys.js'
 import { shareLinksPlugin } from './routes/share-links.js'
 import { authPlugin } from './routes/auth.js'
 import { signupPlugin } from './routes/signup.js'
+import { membersPlugin } from './routes/members.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -174,6 +175,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(authPlugin)
   await app.register(signupPlugin)
+  await app.register(membersPlugin)
   await app.register(spacesPlugin)
   await app.register(pagesPlugin)
   await app.register(billingPlugin)

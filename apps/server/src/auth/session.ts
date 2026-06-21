@@ -39,6 +39,13 @@ export interface SessionData {
 }
 
 const key = (sid: string) => `sess:${sid}`
+// Per-member index of live session ids, so removal / admin force-logout can find
+// and delete EVERY session for a (tenant, sub) — clearing the cookie alone does
+// not revoke a server-side session. Without this index a removed member's existing
+// session would keep working until its TTL (the security gap session removal must
+// close; see destroyMemberSessions). The set self-expires after the absolute
+// session lifetime so dangling sids cannot accumulate forever.
+const memberKey = (tenantId: string, sub: string) => `member-sess:${tenantId}:${sub}`
 
 // Fresh 256-bit id on every login → no session fixation (a pre-auth id is never
 // promoted; each established session gets a brand-new id).
@@ -62,6 +69,10 @@ export async function createSession(
   }
   const sid = newSid()
   await valkey.set(key(sid), JSON.stringify(data), 'EX', IDLE_TTL_S)
+  // Index this sid under (tenant, sub) for force-logout / removal. TTL the set to
+  // the absolute session lifetime so it cannot outlive the longest possible session.
+  await valkey.sadd(memberKey(m.tenantId, m.sub), sid)
+  await valkey.expire(memberKey(m.tenantId, m.sub), ABSOLUTE_TTL_S)
   return sid
 }
 
@@ -88,9 +99,27 @@ export async function readSession(valkey: IORedis, sid: string): Promise<Session
   return data
 }
 
-// Real revocation: delete the Valkey entry. Callers also clear the cookie.
+// Real revocation: delete the Valkey entry. Callers also clear the cookie. Reads
+// the session first to de-index the sid from its (tenant, sub) set (best-effort —
+// the entry itself is gone regardless).
 export async function destroySession(valkey: IORedis, sid: string): Promise<void> {
+  const raw = await valkey.get(key(sid))
   await valkey.del(key(sid))
+  if (raw) {
+    try {
+      const d = JSON.parse(raw) as SessionData
+      await valkey.srem(memberKey(d.tenantId, d.sub), sid)
+    } catch { /* malformed entry — nothing to de-index */ }
+  }
+}
+
+// Revoke EVERY session of a member: used on removal and admin force-logout. This
+// is what makes "removed → can no longer enter" take effect immediately rather
+// than at TTL expiry. Deletes each indexed session entry, then the index itself.
+export async function destroyMemberSessions(valkey: IORedis, tenantId: string, sub: string): Promise<void> {
+  const sids = await valkey.smembers(memberKey(tenantId, sub))
+  if (sids.length > 0) await valkey.del(...sids.map(key))
+  await valkey.del(memberKey(tenantId, sub))
 }
 
 // Turn already-verified identity claims into a membership-checked session.
