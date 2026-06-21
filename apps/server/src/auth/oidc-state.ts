@@ -15,6 +15,11 @@ export interface OidcLoginState {
   // Which config authenticated: the tenant's own IdP (eligible for CE first-admin
   // bootstrap) vs the platform IdP (Cloud — never bootstraps; admin comes from signup).
   viaTenantOidc: boolean
+  // Present when the login was started from an invite link. Carried through the
+  // OIDC round-trip so /auth/callback can accept the invite (the new membership
+  // grant) once identity is proven. The invite row is itself consume-once, and so
+  // is this state (GETDEL) — double single-use.
+  inviteToken?: string
 }
 
 export async function saveState(valkey: IORedis, state: string, data: OidcLoginState): Promise<void> {
