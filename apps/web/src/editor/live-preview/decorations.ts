@@ -141,11 +141,20 @@ class TableWidget extends WidgetType {
 }
 
 // A construct's syntax markers reveal (become editable raw text) when the main
-// selection touches the LINE the marker sits on — matching Obsidian's per-line
+// selection touches the range the marker sits on — matching Obsidian's per-line
 // reveal. This only changes rendering, never offsets.
+//
+// Reveal exists so you can edit the raw markdown under your cursor. In a READ-ONLY
+// surface (the default "view" mode) there is nothing to edit, so NOTHING is ever
+// revealed — otherwise the view's default selection (position 0) would reveal any
+// first-line construct (a leading image, heading, or table) as raw markdown.
+function rangeRevealed(state: EditorState, from: number, to: number): boolean {
+  if (state.readOnly) return false;
+  return state.selection.ranges.some((r) => r.from <= to && r.to >= from);
+}
 function lineRevealed(state: EditorState, pos: number): boolean {
   const line = state.doc.lineAt(pos);
-  return state.selection.ranges.some((r) => r.from <= line.to && r.to >= line.from);
+  return rangeRevealed(state, line.from, line.to);
 }
 
 // ── Extensible block-render registry (P3) ──────────────────────────────────
@@ -236,8 +245,7 @@ const RENDERERS: BlockRenderer[] = [
       const doc = ctx.state.doc;
       const from = doc.lineAt(node.from).from;
       const to = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1)).to;
-      const revealed = ctx.state.selection.ranges.some((r) => r.from <= to && r.to >= from);
-      if (revealed) return;
+      if (rangeRevealed(ctx.state, from, to)) return;
       ctx.add(Decoration.replace({ widget: new TableWidget(doc.sliceString(from, to)), block: true }), from, to);
     },
   },
