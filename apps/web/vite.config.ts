@@ -17,10 +17,15 @@ export default defineConfig({
         changeOrigin: false,
         rewrite: (p) => p.replace(/^\/api/, ""),
       },
-      // /auth/* is a TOP-LEVEL navigation flow (login → IdP → callback), so its
-      // path must be preserved end-to-end (NO prefix strip) — the OIDC redirect_uri
-      // the browser sees must equal what the server reconstructs.
+      // /auth/* and /signup/* are TOP-LEVEL navigation flows (login/signup → IdP →
+      // callback), so their path must be preserved end-to-end (NO prefix strip) —
+      // the OIDC redirect_uri the browser sees must equal what the server
+      // reconstructs. (The SPA's own signup pages live under /join, not /signup.)
       "/auth": {
+        target: process.env.API_PROXY_TARGET ?? "http://localhost:4000",
+        changeOrigin: false,
+      },
+      "/signup": {
         target: process.env.API_PROXY_TARGET ?? "http://localhost:4000",
         changeOrigin: false,
       },

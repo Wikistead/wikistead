@@ -13,14 +13,17 @@ import { provisionTenant, isValidSlug } from '../auth/provisioning.js'
 // Cloud self-serve signup (P1.2 P2d). All routes are PUBLIC (no tenant — they
 // CREATE one) and skipped by the auth hook. They use the SIGNUP session, which is
 // strictly separate from the member session (see auth/signup-session.ts).
-const WORKSPACE_PAGE = '/signup/workspace' // web page to choose a workspace name
+// Web page to choose a workspace name. NOT under /signup (that path is proxied to
+// the API) — the SPA serves /join/*.
+const WORKSPACE_PAGE = '/join/workspace'
 
 export async function signupPlugin(app: FastifyInstance) {
   // Start signup: platform IdP login (CE has no platform IdP → 404).
-  app.get<{ Querystring: { provider?: string } }>('/signup/login', async (_req, reply) => {
+  app.get<{ Querystring: { provider?: string } }>('/signup/login', async (req, reply) => {
     const cfg = loadPlatformOidc()
     if (!cfg) return reply.code(404).send({ error: 'signup not available' })
-    const { url, state, nonce, codeVerifier } = await buildLogin(cfg)
+    const redirectUri = `${req.protocol}://${req.headers.host}/signup/callback`
+    const { url, state, nonce, codeVerifier } = await buildLogin(cfg, redirectUri)
     await saveState(app.valkey, state, { nonce, codeVerifier, tenantId: '', returnTo: '', viaTenantOidc: false })
     return reply.redirect(url)
   })
