@@ -25,6 +25,12 @@
   min-height: 0;
   border-right: 1px solid var(--border);
 }
+/* The `hidden` attribute must win over `.pane { display: flex }` (class specificity
+   otherwise overrides the UA [hidden] rule) — else the empty source pane shows in
+   single/view layouts and looks like a 2-pane split. */
+.pane[hidden] {
+  display: none;
+}
 
 .paneTitle {
   flex: 0 0 auto;
