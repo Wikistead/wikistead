@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { connect } from "./collab";
 import { mountSource } from "./editor-source";
 import { mountLivePreview } from "./editor-livepreview";
+import { makeImageResolver } from "./image-resolver";
 import styles from "./Editor.module.css";
 
 // Awareness type derived from the provider so we don't take a direct dependency
@@ -24,12 +25,15 @@ type Mode = "view" | "edit" | "split";
 
 export interface EditorProps {
   docName: string;
-  token: string;
+  token: string; // collab WebSocket token
   collabUrl: string;
   user: EditorUser;
   // Edit gate (UI only — the collab server is the fortress; see below). Defaults
   // to view so an unresolved/forbidden page is never editable.
   capability?: EditorCapability;
+  // API auth for image resolution (dev-token bearer, or "" for the cookie session)
+  // — distinct from the collab token above. Omit for guests (images won't resolve).
+  apiToken?: string;
 }
 
 function userField(user: EditorUser) {
@@ -51,7 +55,7 @@ function userField(user: EditorUser) {
 // The two-layer edit defense: this component hides the editable surfaces for a
 // view-only capability, but that is convenience. The collab server re-derives
 // readOnly from OpenFGA per document, so a forged edit button still cannot write.
-export function Editor({ docName, token, collabUrl, user, capability = "view" }: EditorProps) {
+export function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "" }: EditorProps) {
   const sourceRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
@@ -61,6 +65,10 @@ export function Editor({ docName, token, collabUrl, user, capability = "view" }:
   // A view-only capability can never leave view mode (the controls aren't
   // rendered, and this guarantees it even if some state went stale).
   const effectiveMode: Mode = capability === "edit" ? mode : "view";
+
+  // Resolves wks-attachment image ids to fresh presigned URLs (TTL-cached). Bound
+  // to the API token (cookie/dev-token), rebuilt only when it changes.
+  const resolveImageUrl = useMemo(() => makeImageResolver(apiToken), [apiToken]);
 
   // Dev-only probe for the isolation invariant (ADR-013): editor content is not in
   // React state, so typing must NOT re-render this component (read before/after).
@@ -96,14 +104,14 @@ export function Editor({ docName, token, collabUrl, user, capability = "view" }:
     if (effectiveMode === "split" && sourceHost) {
       views.push(mountSource(sourceHost, c.ytext, c.provider, { readOnly: false }));
     }
-    views.push(mountLivePreview(previewHost, c.ytext, c.provider, { readOnly: !editable }));
+    views.push(mountLivePreview(previewHost, c.ytext, c.provider, { readOnly: !editable, resolveImageUrl }));
 
     return () => {
       views.forEach((v) => v.destroy());
       sourceHost?.replaceChildren();
       previewHost.replaceChildren();
     };
-  }, [docName, token, collabUrl, effectiveMode]);
+  }, [docName, token, collabUrl, effectiveMode, resolveImageUrl]);
 
   // Presence label changes must NOT rebuild the editors — just update awareness.
   useEffect(() => {

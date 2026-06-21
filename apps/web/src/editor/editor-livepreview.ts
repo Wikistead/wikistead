@@ -4,7 +4,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, imageResolver, type ImageResolver } from "./live-preview/decorations";
 import { mountToolbar } from "./live-preview/toolbar";
 
 // Non-technical surface: Obsidian-style live preview bound to the SAME canonical
@@ -16,7 +16,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: { readOnly?: boolean } = {},
+  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -28,6 +28,8 @@ export function mountLivePreview(
       markdownExtension(),
       livePreviewTheme,
       livePreview,
+      // Resolves wks-attachment image ids → fresh presigned URLs (member only).
+      ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
       yCollab(ytext, provider.awareness),
       ...(opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
     ],

@@ -1,5 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import { StateField, type EditorState, type Range } from "@codemirror/state";
+import { Facet, StateField, type EditorState, type Range } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -42,6 +42,55 @@ class BulletWidget extends WidgetType {
   }
 }
 const bullet = Decoration.replace({ widget: new BulletWidget() });
+
+// Image attachments are referenced in the canonical Y.Text by a STABLE id —
+// ![alt](wks-attachment:<id>) — never by a presigned URL (those are short-lived
+// bearer tokens; persisting one in the CRDT/its revision history would both break
+// on expiry and leak a credential). The widget resolves the id to a fresh
+// presigned URL at render time via this resolver. Resolution goes through the
+// authenticated download endpoint, which re-checks FGA `view` on the attachment's
+// page — so a user who can't view the page can't resolve its images either.
+export type ImageResolver = (id: string, opts?: { refresh?: boolean }) => Promise<string | null>;
+const noopResolver: ImageResolver = async () => null;
+export const imageResolver = Facet.define<ImageResolver, ImageResolver>({
+  combine: (values) => values[0] ?? noopResolver,
+});
+const ATTACHMENT_REF = /^!\[([^\]]*)\]\(wks-attachment:([^)\s]+)\)$/;
+
+// Renders an image from a wks-attachment reference. src is filled in
+// asynchronously from the resolver; on load error (e.g. the presigned URL
+// expired) it re-resolves ONCE (refresh) before giving up — TTL caching means a
+// repeated image still costs one resolve while the URL is valid.
+class ImageWidget extends WidgetType {
+  constructor(readonly id: string, readonly alt: string) {
+    super();
+  }
+  eq(other: ImageWidget) {
+    return other.id === this.id && other.alt === this.alt;
+  }
+  toDOM(view: EditorView) {
+    const img = document.createElement("img");
+    img.className = "cm-lp-image";
+    img.alt = this.alt;
+    const resolve = view.state.facet(imageResolver);
+    const load = (refresh: boolean) => {
+      void resolve(this.id, { refresh }).then((url) => {
+        if (url) img.src = url;
+      });
+    };
+    let retried = false;
+    img.addEventListener("error", () => {
+      if (retried) return;
+      retried = true;
+      load(true); // presigned URL likely expired → re-resolve once
+    });
+    load(false);
+    return img;
+  }
+  ignoreEvent() {
+    return false; // clicks pass through so the cursor can enter → reveal raw
+  }
+}
 
 // Splits a GFM table row into trimmed cell strings, dropping the leading/trailing
 // pipe. (Escaped pipes are not handled — a v1 limitation.)
@@ -192,6 +241,19 @@ const RENDERERS: BlockRenderer[] = [
       ctx.add(Decoration.replace({ widget: new TableWidget(doc.sliceString(from, to)), block: true }), from, to);
     },
   },
+  {
+    // ![alt](wks-attachment:<id>) → an <img> (resolved to a fresh presigned URL).
+    // Only OUR attachment refs are rendered; other image syntax is left as raw
+    // markdown (no arbitrary external <img>). Reveals raw when the cursor is on the
+    // line. Offset-invariant: replace hides the range but never shifts offsets.
+    match: (n) => n === "Image",
+    enter: (node, ctx) => {
+      const m = ATTACHMENT_REF.exec(ctx.state.doc.sliceString(node.from, node.to));
+      if (!m) return;
+      if (lineRevealed(ctx.state, node.from)) return;
+      ctx.add(Decoration.replace({ widget: new ImageWidget(m[2]!, m[1]!) }), node.from, node.to);
+    },
+  },
 ];
 
 function buildDecorations(state: EditorState): {
@@ -268,4 +330,5 @@ export const livePreviewTheme = EditorView.baseTheme({
     textAlign: "left",
   },
   ".cm-lp-table th": { background: "rgba(127,127,127,0.12)", fontWeight: "700" },
+  ".cm-lp-image": { maxWidth: "100%", height: "auto", borderRadius: "4px", verticalAlign: "bottom" },
 });
