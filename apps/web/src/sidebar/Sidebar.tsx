@@ -8,6 +8,7 @@ import { ChevronRight, ChevronsUpDown, FilePlus, FileText, Pencil, Plus, Share2,
 import {
   useSpaces,
   useCreateSpace,
+  useRenameSpace,
   useCreatePage,
   useRenamePage,
   useDeletePage,
@@ -81,6 +82,7 @@ export function Sidebar() {
   const data = useMemo(() => buildPageNodes(pages, null), [pages]);
 
   const createSpace = useCreateSpace();
+  const renameSpace = useRenameSpace();
   const createPage = useCreatePage();
   const renamePage = useRenamePage();
   const deletePage = useDeletePage();
@@ -88,6 +90,7 @@ export function Sidebar() {
   const movePage = useMovePage();
 
   const [renaming, setRenaming] = useState<{ pageId: string; spaceId: string; title: string } | null>(null);
+  const [renamingSpace, setRenamingSpace] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState<{ kind: "page"; id: string; name: string } | { kind: "space"; id: string; name: string } | null>(null);
   const [sharing, setSharing] = useState<string | null>(null);
 
@@ -149,6 +152,7 @@ export function Sidebar() {
         <Menu.Root
           onSelect={(d) => {
             if (d.value === "__new__") createSpace.mutate("Untitled space", { onSuccess: (s) => s && setActiveSpaceId(s.id) });
+            else if (d.value === "__rename__") { if (currentSpace) setRenamingSpace({ id: currentSpace.id, name: currentSpace.name }); }
             else setActiveSpaceId(d.value);
           }}
         >
@@ -163,6 +167,7 @@ export function Sidebar() {
                   <Menu.Item key={s.id} value={s.id} className={styles.menuItem} data-testid="space-option">{s.name || "Untitled space"}</Menu.Item>
                 ))}
                 <Menu.Separator className={styles.menuSep} />
+                {currentSpace && <Menu.Item value="__rename__" className={styles.menuItem}><Pencil size={13} /> Rename space</Menu.Item>}
                 <Menu.Item value="__new__" className={styles.menuItem}><Plus size={13} /> New space</Menu.Item>
               </Menu.Content>
             </Menu.Positioner>
@@ -234,6 +239,12 @@ export function Sidebar() {
           else if (deleting?.kind === "space") { deleteSpace.mutate(deleting.id); setActiveSpaceId(spaces.find((s) => s.id !== deleting.id)?.id ?? null); }
           setDeleting(null);
         }}
+      />
+      <RenameDialog
+        open={renamingSpace !== null}
+        initial={renamingSpace?.name ?? ""}
+        onClose={() => setRenamingSpace(null)}
+        onSubmit={(name) => { if (renamingSpace) renameSpace.mutate({ spaceId: renamingSpace.id, name }); setRenamingSpace(null); }}
       />
       <ShareDialog pageId={sharing} onClose={() => setSharing(null)} />
     </div>

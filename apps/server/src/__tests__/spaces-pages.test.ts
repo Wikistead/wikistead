@@ -9,7 +9,7 @@ import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { fgaClient, check, checkRelation, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
-import { createSpace, listSpaces, deleteSpace } from '../routes/spaces.js'
+import { createSpace, listSpaces, deleteSpace, updateSpace } from '../routes/spaces.js'
 import { createPage, listPages, getPage, deletePage, movePage } from '../routes/pages.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -88,6 +88,18 @@ describe('space lifecycle', () => {
     expect(await check(fgaClient, 'user:dev-user', 'manage', { type: 'space', id: space.id })).toBe(true)
 
     // Cleanup
+    await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: space.id, userId: 'dev-user' })
+  })
+
+  it('updateSpace renames with manage authority; a non-manager is rejected', async () => {
+    const space = await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'old-name' })
+    // manager (creator) can rename
+    const renamed = await updateSpace(db, fgaClient, { spaceId: space.id, userId: 'dev-user', name: 'new-name' })
+    expect(renamed.name).toBe('new-name')
+    const [row] = await db.sql<{ name: string }[]>`SELECT name FROM spaces WHERE id = ${space.id}`
+    expect(row.name).toBe('new-name')
+    // a user without manage on the space is rejected (UI hides it; this is the fortress)
+    await expect(updateSpace(db, fgaClient, { spaceId: space.id, userId: 'space-rando', name: 'hijack' })).rejects.toMatchObject({ statusCode: 403 })
     await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: space.id, userId: 'dev-user' })
   })
 

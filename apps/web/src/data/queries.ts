@@ -45,6 +45,16 @@ export function useCreateSpace() {
   });
 }
 
+export function useRenameSpace() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { spaceId: string; name: string }) =>
+      apiFetch<Space>(`/spaces/${args.spaceId}`, token, { method: "PATCH", body: JSON.stringify({ name: args.name }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
+  });
+}
+
 export function useCreatePage() {
   const { token } = useSession();
   const qc = useQueryClient();

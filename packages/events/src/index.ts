@@ -13,6 +13,7 @@ export type DomainEvent =
   | { type: 'page.restored';  tenantId: string; pageId: string; fromRevisionId: string; actorId: string }
   // ── Spaces ───────────────────────────────────────────────────────────
   | { type: 'space.created';  tenantId: string; spaceId: string; actorId: string }
+  | { type: 'space.updated';  tenantId: string; spaceId: string; actorId: string }
   | { type: 'space.deleted';  tenantId: string; spaceId: string; actorId: string }
   // ── Attachments ──────────────────────────────────────────────────────
   | { type: 'attachment.confirmed'; tenantId: string; attachmentId: string; pageId: string; actorId: string }
