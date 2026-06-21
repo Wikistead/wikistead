@@ -64,11 +64,21 @@ export function ConfirmDialog({
   message,
   onClose,
   onConfirm,
+  title = "Confirm",
+  confirmLabel = "Delete",
+  tone = "danger",
+  confirmTestId = "confirm-delete",
 }: {
   open: boolean;
   message: string;
   onClose: () => void;
   onConfirm: () => void;
+  // Defaults preserve the original delete-confirm behavior; non-destructive
+  // confirms (e.g. restore a revision) pass a primary tone + their own label.
+  title?: string;
+  confirmLabel?: string;
+  tone?: "danger" | "primary";
+  confirmTestId?: string;
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={(d) => !d.open && onClose()}>
@@ -76,7 +86,7 @@ export function ConfirmDialog({
         <Dialog.Backdrop className={styles.backdrop} />
         <Dialog.Positioner className={styles.positioner}>
           <Dialog.Content className={styles.content} data-testid="confirm-dialog">
-            <Dialog.Title className={styles.title}>Confirm</Dialog.Title>
+            <Dialog.Title className={styles.title}>{title}</Dialog.Title>
             <Dialog.Description className={styles.message}>{message}</Dialog.Description>
             <div className={styles.actions}>
               <button type="button" className={styles.btn} onClick={onClose}>
@@ -84,11 +94,11 @@ export function ConfirmDialog({
               </button>
               <button
                 type="button"
-                className={`${styles.btn} ${styles.danger}`}
-                data-testid="confirm-delete"
+                className={`${styles.btn} ${tone === "primary" ? styles.primary : styles.danger}`}
+                data-testid={confirmTestId}
                 onClick={onConfirm}
               >
-                Delete
+                {confirmLabel}
               </button>
             </div>
           </Dialog.Content>

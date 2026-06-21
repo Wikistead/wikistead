@@ -170,6 +170,41 @@ export function useRevokeShareLink() {
   });
 }
 
+// ── revisions (page history) ───────────────────────────────────────────────
+// GET /pages/:id/revisions is FGA-gated (requires `view`) and plan-gated for
+// retention; restore requires `edit`. Both re-checked server-side — the server is
+// the fortress; the UI only decides whether to OFFER restore. The backend has
+// existed since Phase 0; this is the previously-missing UI wiring.
+export interface Revision {
+  id: string;
+  pageId: string;
+  title: string;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export function usePageRevisions(pageId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["revisions", pageId],
+    queryFn: () => apiFetch<Revision[]>(`/pages/${encodeURIComponent(pageId)}/revisions`, token).then((r) => r ?? []),
+    enabled: enabled && pageId.length > 0,
+  });
+}
+
+// Restore is non-destructive: the server appends a CRDT delta (delete+insert) and
+// inserts a fresh revision, then publishes to Valkey so the open editor updates
+// live (no reload). We invalidate the list so the new revision appears.
+export function useRestoreRevision(pageId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (revId: string) =>
+      apiFetch<null>(`/pages/${encodeURIComponent(pageId)}/revisions/${encodeURIComponent(revId)}/restore`, token, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["revisions", pageId] }),
+  });
+}
+
 // ── search ───────────────────────────────────────────────────────────────
 // GET /search is two-stage-guarded server-side (Meili candidates -> FGA `view`
 // confirm). It returns ONLY authorized hits. The optional snippet is a cropped
