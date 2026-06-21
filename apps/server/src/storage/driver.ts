@@ -24,6 +24,14 @@ export interface StorageDriver {
   // Used at confirm time to set size_bytes without trusting the client.
   // Throws if the object does not exist (client has not uploaded yet).
   headObject(key: string): Promise<{ sizeBytes: number }>
+  // Read the raw object bytes. INTERNAL, AUTH-BYPASSING: unlike presignGet (which is
+  // requested only after an FGA `view` check), this is a direct store read with NO
+  // authorization gate — the CALLER must have already authorized access to the
+  // resource this key belongs to. Used by export to bundle images, where the caller
+  // resolves keys ONLY from view-confirmed pages and re-checks view on each
+  // attachment's page before reading. Never expose a path that takes a caller-
+  // supplied key straight through to this.
+  getObject(key: string): Promise<Uint8Array>
 }
 
 // Single shared bucket; tenant prefix embedded in every key.
@@ -81,6 +89,12 @@ export class LogicalStorageDriver implements StorageDriver {
   async headObject(key: string): Promise<{ sizeBytes: number }> {
     const result = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }))
     return { sizeBytes: result.ContentLength ?? 0 }
+  }
+
+  // Auth-bypassing raw read — see the interface note. Callers own authorization.
+  async getObject(key: string): Promise<Uint8Array> {
+    const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }))
+    return result.Body!.transformToByteArray()
   }
 }
 

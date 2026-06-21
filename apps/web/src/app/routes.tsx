@@ -11,6 +11,7 @@ import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, type GuestToken } from "../data/apiClient";
 import { usePage } from "../data/queries";
 import { uploadAttachment } from "../attachments/useAttachments";
+import { downloadPageExport } from "../data/exportApi";
 import { MembersPage } from "../settings/MembersPage";
 
 // Same-origin collab (ADR-016): a relative "/collab" is resolved against the
@@ -85,6 +86,11 @@ function PageRoute() {
     <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
       <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", borderBottom: "1px solid var(--border)" }}>
+            <button type="button" data-testid="export-page" onClick={() => { if (pageId) void downloadPageExport(token, pageId); }}>
+              Export
+            </button>
+          </div>
           <div style={{ flex: 1, minHeight: 0 }}>
             <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} />
           </div>

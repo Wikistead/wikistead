@@ -32,6 +32,7 @@ import { authPlugin } from './routes/auth.js'
 import { signupPlugin } from './routes/signup.js'
 import { membersPlugin } from './routes/members.js'
 import { commentsPlugin } from './routes/comments.js'
+import { exportPlugin } from './routes/export.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -178,6 +179,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(signupPlugin)
   await app.register(membersPlugin)
   await app.register(commentsPlugin)
+  await app.register(exportPlugin)
   await app.register(spacesPlugin)
   await app.register(pagesPlugin)
   await app.register(billingPlugin)
