@@ -8,6 +8,16 @@
     "sidebar main";
 }
 
+/* Collapsed: drop the sidebar column and hide the aside. The header toggle
+   restores it; the choice persists (localStorage wks.sidebarCollapsed). */
+.shell[data-collapsed="true"] {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "header"
+    "main";
+}
+.shell[data-collapsed="true"] .sidebar { display: none; }
+
 .header {
   grid-area: header;
   display: flex;
@@ -17,6 +27,17 @@
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
+
+.collapseBtn {
+  background: none;
+  border: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  display: flex;
+  padding: 4px;
+  border-radius: 4px;
+}
+.collapseBtn:hover { color: var(--fg); background: var(--panel-2); }
 
 .brand {
   font-weight: 600;
