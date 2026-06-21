@@ -1,6 +1,6 @@
 import { EditorView, basicSetup } from "codemirror";
 import { EditorState } from "@codemirror/state";
-import { markdown } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { vim } from "@replit/codemirror-vim";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
@@ -23,7 +23,7 @@ export function mountSource(
     extensions: [
       vim(), // remove this extension for the non-technical surface
       basicSetup,
-      markdown(),
+      markdown({ base: markdownLanguage }), // GFM tables (matches the live-preview parser)
       yCollab(ytext, provider.awareness),
       ...(opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
     ],
