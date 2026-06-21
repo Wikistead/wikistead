@@ -48,7 +48,9 @@ describe('createApiKey', () => {
     })
 
     expect(result.plaintext).toMatch(/^wks_[A-Za-z0-9_-]{8}_[A-Za-z0-9_-]{32}$/)
-    expect(result.keyPrefix).toBe(result.plaintext.split('_').slice(0, 2).join('_'))
+    // keyPrefix is a FIXED-LENGTH slice (wks_ + 8 chars = 12), matching the auth
+    // path — base64url contains '_', so a split('_') expectation is flaky.
+    expect(result.keyPrefix).toBe(result.plaintext.slice(0, 12))
 
     // Verify DB stores the hash, not the plaintext
     const [row] = await adminPool<[{ key_hash: string; key_prefix: string }]>`
