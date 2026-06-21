@@ -4,7 +4,10 @@ import { pool } from '../db/pool.js'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? 'sk_test_placeholder', {
+// `||` not `??`: an explicitly-empty STRIPE_SECRET_KEY (CE/dev/test .env) must
+// fall back to the placeholder — `new Stripe('')` throws at module load and would
+// crash boot for every deployment that doesn't use Stripe.
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder', {
   apiVersion: '2026-05-27.dahlia',
 })
 
