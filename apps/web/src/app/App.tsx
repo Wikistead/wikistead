@@ -2,6 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { SessionProvider } from "../session/SessionProvider";
 import { queryClient } from "../data/queryClient";
+import { ActiveSpaceProvider } from "./ActiveSpace";
 import { AppRoutes } from "./routes";
 
 export function App() {
@@ -9,7 +10,9 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <SessionProvider>
-          <AppRoutes />
+          <ActiveSpaceProvider>
+            <AppRoutes />
+          </ActiveSpaceProvider>
         </SessionProvider>
       </BrowserRouter>
     </QueryClientProvider>

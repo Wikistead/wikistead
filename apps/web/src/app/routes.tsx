@@ -12,6 +12,7 @@ import { fetchGuestToken, type GuestToken } from "../data/apiClient";
 import { usePage } from "../data/queries";
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport } from "../data/exportApi";
+import { useActiveSpace } from "./ActiveSpace";
 import { MembersPage } from "../settings/MembersPage";
 
 // Same-origin collab (ADR-016): a relative "/collab" is resolved against the
@@ -57,6 +58,12 @@ function PageRoute() {
   const devMode = token === "dev-token";
   const { data: page } = usePage(pageId ?? "");
   const capability = page?.capability ?? (devMode ? "edit" : "view");
+
+  // Opening any page makes its space the active one, so the sidebar follows —
+  // including when arriving from cross-space search or a share link.
+  const { setActiveSpaceId } = useActiveSpace();
+  const openSpaceId = page?.spaceId;
+  useEffect(() => { if (openSpaceId) setActiveSpaceId(openSpaceId); }, [openSpaceId, setActiveSpaceId]);
 
   // Upload a picked image to this page's space, returning the ref to insert. Bound
   // to the resolved spaceId; null (no image button) until the page meta loads.
