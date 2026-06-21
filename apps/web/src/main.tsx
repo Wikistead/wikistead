@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import "./styles/tokens.css";
+import "./styles/print.css";
 
 // StrictMode is intentional: it double-invokes effects in dev, which exercises
 // the <Editor/> connect/destroy/reconnect path and surfaces any WS leak or ghost

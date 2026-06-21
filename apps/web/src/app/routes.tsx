@@ -90,6 +90,9 @@ function PageRoute() {
             <button type="button" data-testid="export-page" onClick={() => { if (pageId) void downloadPageExport(token, pageId); }}>
               Export
             </button>
+            <button type="button" data-testid="print-page" onClick={() => window.print()}>
+              Print / PDF
+            </button>
           </div>
           <div style={{ flex: 1, minHeight: 0 }}>
             <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} />

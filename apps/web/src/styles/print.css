@@ -1,0 +1,25 @@
+/* P5 PDF (v1 = browser print → "Save as PDF"). No server, no headless Chrome.
+   When printing, show ONLY the rendered page surface (the live-preview pane) and
+   hide all app chrome — sidebar, search, comments, attachments, toolbars, the
+   export/print strip. The visibility trick prints just that subtree regardless of
+   layout structure; the rendered preview prints as formatted text. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  [data-pane="preview"],
+  [data-pane="preview"] * {
+    visibility: visible;
+  }
+  [data-pane="preview"] {
+    position: absolute;
+    inset: 0;
+    border: none;
+    overflow: visible;
+  }
+  /* In-pane chrome (mode bar, insert toolbar) must not print. */
+  [data-testid="editor-modebar"],
+  .lp-toolbar {
+    display: none !important;
+  }
+}
