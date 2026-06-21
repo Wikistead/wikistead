@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
-import { Editor } from "../editor/Editor";
+import { Editor, type AnchorGetter } from "../editor/Editor";
+import { CommentsPanel } from "../comments/CommentsPanel";
+import { useComments } from "../data/comments";
 import { Sidebar } from "../sidebar/Sidebar";
 import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
@@ -66,16 +68,29 @@ function PageRoute() {
     },
     [spaceId, pageId, token],
   );
+
+  // Inline-comment integration: the panel and the editor share one comments query.
+  // Inline threads (with anchors) become editor highlights; the panel builds inline
+  // threads from the editor's current selection via this anchor getter.
+  const anchorGetterRef = useRef<AnchorGetter | null>(null);
+  const { data: threads } = useComments(pageId ?? "");
+  const inlineComments = (threads ?? [])
+    .filter((t) => t.kind === "inline" && t.anchorStart && t.anchorEnd)
+    .map((t) => ({ threadId: t.id, anchorStart: t.anchorStart!, anchorEnd: t.anchorEnd!, resolved: t.status === "resolved" }));
+
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>Loading…</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
   const docName = `t:${tenantId}:p:${pageId}`;
   return (
     <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-        <div style={{ flex: 1, minHeight: 0 }}>
-          <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} onUploadImage={onUploadImage} />
+      <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
+        <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} />
+          </div>
+          {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
         </div>
-        {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
+        {pageId && <CommentsPanel pageId={pageId} canComment={capability === "edit"} anchorGetterRef={anchorGetterRef} />}
       </div>
     </AppShell>
   );

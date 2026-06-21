@@ -1,9 +1,17 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import type { EditorView } from "@codemirror/view";
 import { connect } from "./collab";
 import { mountSource } from "./editor-source";
 import { mountLivePreview } from "./editor-livepreview";
 import { makeImageResolver } from "./image-resolver";
+import { createAnchor, resolveAnchor } from "./comment-anchors";
+import { setCommentRanges, type CommentRange } from "./live-preview/comment-highlights";
 import styles from "./Editor.module.css";
+
+// Inline-comment integration surface for the host (CommentsPanel via PageRoute).
+export interface InlineAnchorInput { anchorStart: string; anchorEnd: string; quotedText: string }
+export interface InlineThread { threadId: string; anchorStart: string; anchorEnd: string; resolved: boolean }
+export type AnchorGetter = () => InlineAnchorInput | null;
 
 // Awareness type derived from the provider so we don't take a direct dependency
 // on y-protocols just for a type.
@@ -37,6 +45,11 @@ export interface EditorProps {
   // Uploads a picked image and returns the ref+alt to insert. Omit to hide the
   // image button (e.g. guests, or a view-only surface).
   onUploadImage?: (file: File) => Promise<{ ref: string; alt: string } | null>;
+  // Inline comments to highlight (resolved against the live doc → blue underline).
+  inlineComments?: InlineThread[];
+  // The host sets this ref to a getter that builds an anchor from the current
+  // selection (for "Add comment on selection"). Null when nothing is selected.
+  anchorGetterRef?: MutableRefObject<AnchorGetter | null>;
 }
 
 function userField(user: EditorUser) {
@@ -58,11 +71,27 @@ function userField(user: EditorUser) {
 // The two-layer edit defense: this component hides the editable surfaces for a
 // view-only capability, but that is convenience. The collab server re-derives
 // readOnly from OpenFGA per document, so a forged edit button still cannot write.
-export function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", onUploadImage }: EditorProps) {
+export function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", onUploadImage, inlineComments, anchorGetterRef }: EditorProps) {
   const sourceRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
+  const previewViewRef = useRef<EditorView | null>(null);
   const awarenessRef = useRef<Awareness | null>(null);
+
+  // Resolve inline-comment anchors against the live doc and push the ranges to the
+  // preview's highlight field. The field maps marks through edits between pushes, so
+  // highlights track text live; we re-resolve when the comment set changes.
+  const pushHighlights = (view: EditorView | null) => {
+    const c = collabRef.current;
+    if (!view || !c) return;
+    const ranges: CommentRange[] = (inlineComments ?? [])
+      .map((t) => {
+        const r = resolveAnchor(c.doc, { start: t.anchorStart, end: t.anchorEnd });
+        return r ? { from: r.from, to: r.to, resolved: t.resolved } : null;
+      })
+      .filter((r): r is CommentRange => r !== null);
+    view.dispatch({ effects: setCommentRanges.of(ranges) });
+  };
 
   const [mode, setMode] = useState<Mode>("view");
   // A view-only capability can never leave view mode (the controls aren't
@@ -107,14 +136,36 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
     if (effectiveMode === "split" && sourceHost) {
       views.push(mountSource(sourceHost, c.ytext, c.provider, { readOnly: false }));
     }
-    views.push(mountLivePreview(previewHost, c.ytext, c.provider, { readOnly: !editable, resolveImageUrl, uploadImage: onUploadImage }));
+    const previewView = mountLivePreview(previewHost, c.ytext, c.provider, { readOnly: !editable, resolveImageUrl, uploadImage: onUploadImage });
+    views.push(previewView);
+    previewViewRef.current = previewView;
+
+    // Expose an anchor getter built from the preview's current selection (works in
+    // any mode — read-only CM still has a selection). Null when nothing is selected.
+    if (anchorGetterRef) {
+      anchorGetterRef.current = () => {
+        const sel = previewView.state.selection.main;
+        if (sel.empty) return null;
+        const { start, end } = createAnchor(c.ytext, sel.from, sel.to);
+        return { anchorStart: start, anchorEnd: end, quotedText: previewView.state.doc.sliceString(sel.from, sel.to) };
+      };
+    }
+    pushHighlights(previewView); // initial highlights for this freshly-mounted view
 
     return () => {
       views.forEach((v) => v.destroy());
+      previewViewRef.current = null;
+      if (anchorGetterRef) anchorGetterRef.current = null;
       sourceHost?.replaceChildren();
       previewHost.replaceChildren();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docName, token, collabUrl, effectiveMode, resolveImageUrl, onUploadImage]);
+
+  // Re-resolve + push highlights when the comment set changes (the StateField keeps
+  // them aligned through edits in between).
+  useEffect(() => { pushHighlights(previewViewRef.current); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inlineComments]);
 
   // Presence label changes must NOT rebuild the editors — just update awareness.
   useEffect(() => {
