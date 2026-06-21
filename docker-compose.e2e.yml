@@ -55,6 +55,10 @@ services:
       - e2e_seaweeddata:/data
       - ./infra/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
 
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ["1026:1025", "8026:8025"] # distinct host ports so dev + e2e coexist
+
 volumes:
   e2e_pgdata:
   e2e_meilidata:

@@ -9,7 +9,8 @@ import type { TenantDb } from './db/index.js'
 import { fgaClient } from '@wikistead/authz'
 import { makeMemberVerifier } from '@wikistead/auth'
 import { verifyApiKey } from './api-key-auth.js'
-import { getAuthProviders, getSearchDriver } from '@wikistead/hooks'
+import { getAuthProviders, getSearchDriver, getEmailDriver, type EmailDriver } from '@wikistead/hooks'
+import { resolveEmailDriver } from './email/index.js'
 import { emit } from '@wikistead/events'
 import { LogicalSearchDriver } from './search/index.js'
 import type { SearchDriver } from './search/index.js'
@@ -35,6 +36,7 @@ declare module 'fastify' {
     fga: typeof fgaClient
     searchDriver: SearchDriver
     storageDriver: StorageDriver
+    email: EmailDriver
     valkey: IORedis
   }
   interface FastifyRequest {
@@ -69,6 +71,10 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
   app.decorate('valkey', valkey)
+
+  // Transactional email (P1.3). EE/Cloud may registerEmailDriver; CE uses SMTP
+  // when configured, else a no-op (announced once — see email/index.ts).
+  app.decorate('email', getEmailDriver(resolveEmailDriver((m) => app.log.info(m))))
 
   const verifyMember = makeMemberVerifier({
     issuer: process.env.OIDC_ISSUER!,

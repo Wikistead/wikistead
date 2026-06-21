@@ -10,6 +10,8 @@ import { execSync } from "node:child_process";
 // Same allowlist as the previous (broken) license-checker invocation.
 const ALLOW = new Set([
   "MIT",
+  "MIT-0", // MIT No Attribution — OSI-approved, MORE permissive than MIT (same
+           // no-attribution class as 0BSD / CC0-1.0 / Unlicense below). Not copyleft.
   "MIT OR X11",
   "ISC",
   "Apache-2.0",
