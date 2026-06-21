@@ -1,14 +1,18 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, resetDoc, enterEdit, sleep } from "../helpers";
+import { enterEdit, sleep } from "../helpers";
 
 // P3: a GFM table renders as an HTML <table> in the live preview, and putting the
 // cursor in it reveals the raw markdown (so it stays editable). Display-only: the
 // canonical Y.Text is unchanged.
+//
+// Uses a UNIQUE page (not the shared demo doc) so this test's transient presence
+// caret cannot linger as a ghost into other demo-based specs (see foundation.spec).
 test("GFM table renders as an HTML table; cursor reveals raw markdown", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
-  await openDemo(page);
+  await page.goto("/p/p3tables");
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(600);
   await enterEdit(page);
-  await resetDoc(page);
 
   await page.click("[data-pane=preview] .cm-content");
   for (const line of ["| Name | Age |", "| --- | --- |", "| Alice | 30 |", "below the table"]) {

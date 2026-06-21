@@ -64,23 +64,49 @@ test("decorations, sync, and cross-surface presence", async ({ browser }: { brow
     const r = l.getBoundingClientRect();
     (document.elementFromPoint(r.x + 6, r.y + r.height / 2) as HTMLElement)?.click();
   });
-  // A places a collapsed caret at offset 5 in the source (vim) pane
-  await A.click("[data-pane=source] .cm-content");
-  await A.keyboard.press("Escape");
-  await A.keyboard.type("gg0");
-  await A.keyboard.type("i");
-  for (let i = 0; i < 5; i++) await A.keyboard.press("ArrowRight");
+  // A places a collapsed caret at offset 5 (the 'o' of "bold") in the source pane.
+  // The source pane is used because it hides nothing, so its glyphs map 1:1 to doc
+  // offsets (the preview's atomic markers would not). A typed into the PREVIEW pane
+  // above; the source is a separate CM view on the same Y.Text, so first wait until
+  // it has synced the text. We place via a precise click on the glyph (DOM Range →
+  // coordinates) rather than vim keystrokes — keystroke timing is dropped under
+  // full-suite load, but the click is deterministic, and the offset-invariance of
+  // the caret across surfaces is what this test actually proves.
+  await A.waitForFunction(
+    () => (document.querySelector("[data-pane=source] .cm-content")?.textContent ?? "").includes("bold"),
+    undefined,
+    { timeout: 6000 },
+  );
+  const caretXY = await A.evaluate(() => {
+    const content = document.querySelector("[data-pane=source] .cm-content")!;
+    // Walk text nodes to find document offset 5 (CM may split the line into spans).
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    let remaining = 5;
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      const len = node.nodeValue!.length;
+      if (remaining <= len) {
+        const range = document.createRange();
+        range.setStart(node, remaining);
+        range.collapse(true);
+        const r = range.getBoundingClientRect();
+        return { x: r.x, y: r.y + r.height / 2 };
+      }
+      remaining -= len;
+    }
+    return null;
+  });
+  await A.mouse.click(caretXY!.x, caretXY!.y);
   await A.bringToFront();
   await sleep(450);
 
   await B.waitForFunction(
-    () => document.querySelector("[data-pane=source] .cm-ySelectionCaret") && document.querySelector("[data-pane=preview] .cm-ySelectionCaret"),
+    () => !!document.querySelector("[data-pane=source] .cm-ySelectionCaret") && !!document.querySelector("[data-pane=preview] .cm-ySelectionCaret"),
     undefined,
     { timeout: 6000 },
   );
-  const src = await B.evaluate(charAfterCaret(), "[data-pane=source]");
-  const pv = await B.evaluate(charAfterCaret(), "[data-pane=preview]");
-  // KEY: same logical char in both surfaces despite the preview hiding '**'.
-  expect(src.char).toBe("o");
-  expect(pv.char).toBe("o");
+  // KEY: same logical char in BOTH surfaces despite the preview hiding '**'. Poll
+  // to absorb cross-client awareness propagation latency.
+  await expect.poll(async () => (await B.evaluate(charAfterCaret(), "[data-pane=preview]")).char, { timeout: 6000 }).toBe("o");
+  expect((await B.evaluate(charAfterCaret(), "[data-pane=source]")).char).toBe("o");
 });

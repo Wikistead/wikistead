@@ -11,7 +11,10 @@
   },
   "dependencies": {
     "@ark-ui/react": "^5.37.2",
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lang-markdown": "^6.3.0",
+    "@codemirror/lang-python": "^6.2.1",
     "@codemirror/language": "^6.10.0",
     "@codemirror/state": "^6.4.0",
     "@codemirror/view": "^6.34.0",

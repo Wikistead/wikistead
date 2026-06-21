@@ -1,6 +1,6 @@
 import { EditorView, minimalSetup } from "codemirror";
 import { EditorState } from "@codemirror/state";
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
@@ -24,9 +24,8 @@ export function mountLivePreview(
     extensions: [
       minimalSetup,
       EditorView.lineWrapping,
-      // markdownLanguage base = GFM (tables etc.), so the table renderer finds
-      // Table nodes. The doc stays plain markdown.
-      markdown({ base: markdownLanguage }),
+      // GFM base (tables) + fenced-code highlighting. The doc stays plain markdown.
+      markdownExtension(),
       livePreviewTheme,
       livePreview,
       yCollab(ytext, provider.awareness),
