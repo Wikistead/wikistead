@@ -60,7 +60,7 @@ function PageRoute() {
     <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         <div style={{ flex: 1, minHeight: 0 }}>
-          <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} />
+          <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} />
         </div>
         {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
       </div>
