@@ -33,6 +33,8 @@ export type DomainEvent =
   | { type: 'member.removed';      tenantId: string; actorId: string; targetSub: string }
   | { type: 'invite.created';      tenantId: string; actorId: string; role: string }
   | { type: 'invite.revoked';      tenantId: string; actorId: string }
+  // ── Comments (P4) ─────────────────────────────────────────────────────
+  | { type: 'comment.created'; tenantId: string; actorId: string; pageId: string; threadId: string }
 
 type Handler = (event: DomainEvent) => void | Promise<void>
 
