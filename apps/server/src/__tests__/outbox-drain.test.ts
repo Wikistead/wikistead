@@ -36,12 +36,14 @@ beforeAll(async () => {
   app = await buildApp()
   await app.ready()
   await admin`INSERT INTO spaces (id, tenant_id, name) VALUES (${SPACE}, ${TENANT}, 'Outbox Space') ON CONFLICT (id) DO NOTHING`
-  // A page with BODY content only (the token is NOT in the title).
-  await admin`INSERT INTO pages (id, tenant_id, space_id, title, ydoc)
-              VALUES (${PAGE}, ${TENANT}, ${SPACE}, 'Plain Title', ${ydoc(`# Plain Title\n\n${TOKEN} 東京都庁の本文\n`)})
+  // A page whose PUBLISHED body holds the token (NOT the title). Search indexes
+  // published_md (draft/publish model), so the fixture is a published page.
+  const body = `# Plain Title\n\n${TOKEN} 東京都庁の本文\n`
+  await admin`INSERT INTO pages (id, tenant_id, space_id, title, ydoc, published_md)
+              VALUES (${PAGE}, ${TENANT}, ${SPACE}, 'Plain Title', ${ydoc(body)}, ${body})
               ON CONFLICT (id) DO NOTHING`
   await writeTuples(fgaClient, fgaFixture)
-  // Mimic the collab server: enqueue an 'upsert' WITHOUT any inline processing.
+  // Mimic publish: enqueue an 'upsert' WITHOUT any inline processing.
   await admin`INSERT INTO search_outbox (tenant_id, page_id, operation) VALUES (${TENANT}, ${PAGE}, 'upsert')`
 })
 

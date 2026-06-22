@@ -1,14 +1,16 @@
 // Public render routes — no authentication required.
-// These routes serve read-only snapshots of publicly accessible pages.
+// These routes serve read-only snapshots of publicly accessible pages. They render
+// the PUBLISHED version (pages.published_md), never the live draft — this is the
+// most exposed surface (no auth at all), so reading the draft here would let anyone
+// see in-progress, unpublished content.
 // Collab WebSocket (Hocuspocus) is a completely separate path;
 // anonymous visitors are NOT admitted to collaboration rooms here.
-import * as Y from 'yjs'
 import type { FastifyInstance } from 'fastify'
 import { fgaClient, checkRelation } from '@wikistead/authz'
 import { pool } from '../db/pool.js'
 import { resolveTenantFromHost, loadTenant } from '../tenant.js'
 
-interface PublicPageRow { id: string; title: string; ydoc: Buffer | null; noindex: boolean }
+interface PublicPageRow { id: string; title: string; published_md: string | null; noindex: boolean }
 
 // Anonymous principal for FGA check/listObjects.
 // user:anonymous has NO tenant memberships, no groups, no explicit grants.
@@ -30,17 +32,10 @@ async function loadPublicPage(tenantId: string, pageId: string): Promise<PublicP
   return pool.begin(async (tx) => {
     await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
     const [r] = await tx<PublicPageRow[]>`
-      SELECT id, title, ydoc, noindex FROM pages WHERE id = ${pageId}
+      SELECT id, title, published_md, noindex FROM pages WHERE id = ${pageId}
     `
     return r ?? null
   }) as Promise<PublicPageRow | null>
-}
-
-function decodeYdoc(ydoc: Buffer | null): string {
-  if (!ydoc) return ''
-  const doc = new Y.Doc()
-  Y.applyUpdate(doc, new Uint8Array(ydoc))
-  return doc.getText('content').toString()
 }
 
 // ── Fastify plugin ────────────────────────────────────────────────────────
@@ -60,7 +55,7 @@ export async function publicPlugin(app: FastifyInstance) {
     const page = await loadPublicPage(tenant.id, req.params.pageId)
     if (!page) return reply.code(404).send({ error: 'not found' })
 
-    const content = decodeYdoc(page.ydoc)
+    const content = page.published_md ?? ''
 
     // TODO(phase: public-html): noindex enforcement (X-Robots-Tag header) belongs
     // in the HTML rendering layer that crawlers actually visit, not here.

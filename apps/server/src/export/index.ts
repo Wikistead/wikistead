@@ -1,5 +1,6 @@
-// Export (P5). A page + its descendant subtree, as Markdown. The canon is already
-// Markdown (Y.Text), so each page is decoded straight to .md. Images referenced as
+// Export (P5). A page + its descendant subtree, as Markdown. Export reflects the
+// PUBLISHED version (pages.published_md), never the live draft — so an in-progress
+// edit is not exported until published. Images referenced as
 // ![alt](wks-attachment:<id>) are BUNDLED (bytes co-located beside the page) with
 // the link rewritten to a relative path — never a presigned URL (those expire and
 // would leave a bearer token in the distributed file) and never the bare id (won't
@@ -11,7 +12,6 @@
 // storage.getObject is an auth-bypassing raw read, so the CALLER re-checks `view`
 // on each attachment's page before reading — a page that merely *references*
 // another page's private attachment id never gets those bytes.
-import * as Y from 'yjs'
 import { zipSync, strToU8 } from 'fflate'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check } from '@wikistead/authz'
@@ -19,13 +19,6 @@ import type { TenantDb } from '../db/index.js'
 import type { StorageDriver } from '../storage/index.js'
 
 const ATTACHMENT_REF = /!\[([^\]]*)\]\(wks-attachment:([^)\s]+)\)/g
-
-function decodeYdoc(ydoc: Buffer | null): string {
-  if (!ydoc) return ''
-  const doc = new Y.Doc()
-  Y.applyUpdate(doc, new Uint8Array(ydoc))
-  return doc.getText('content').toString()
-}
 
 // Sanitize user content into a safe ZIP path segment — no path traversal or
 // separators (zip-slip defense: the archive is unpacked on someone else's machine).
@@ -49,7 +42,7 @@ export function imageEntryName(id: string, filename: string, contentType: string
   return `${id}.${ext}`
 }
 
-interface PageRow { id: string; title: string | null; ydoc: Buffer | null }
+interface PageRow { id: string; title: string | null; published_md: string | null }
 
 // Collect the view-authorized subtree rooted at rootId, each with its zip dir.
 async function collectTree(
@@ -63,13 +56,13 @@ async function collectTree(
   const used = new Set<string>()
 
   async function walk(pageId: string, prefix: string): Promise<void> {
-    const [row] = await db.sql<PageRow[]>`SELECT id, title, ydoc FROM pages WHERE id = ${pageId}`
+    const [row] = await db.sql<PageRow[]>`SELECT id, title, published_md FROM pages WHERE id = ${pageId}`
     if (!row) return
     const base = safeSegment(row.title ?? '', row.id)
     let dir = prefix ? `${prefix}/${base}` : base
     for (let n = 2; used.has(dir); n++) dir = `${prefix ? `${prefix}/` : ''}${base}-${n}` // sibling collisions
     used.add(dir)
-    out.push({ dir, id: row.id, title: row.title ?? '', body: decodeYdoc(row.ydoc) })
+    out.push({ dir, id: row.id, title: row.title ?? '', body: row.published_md ?? '' })
     const kids = await db.sql<{ id: string }[]>`
       SELECT id FROM pages WHERE parent_id = ${pageId} ORDER BY position, created_at`
     for (const k of kids) {

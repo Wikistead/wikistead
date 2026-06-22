@@ -1,12 +1,11 @@
 import { test, expect } from "@playwright/test";
 import { openDemo, enterEdit, paneText, sleep } from "../helpers";
 
-// 2e-2: page history & restore UI wiring the Phase-0 revisions backend (GET list /
-// POST restore). The first persisted store always snapshots a revision (the 5-min
-// interval gate sees no prior snapshot); a later edit within the window does not.
-// So we author "ALPHA", wait for its snapshot, then add "BETA" — the single
-// revision holds "ALPHA". Restoring it reverts the OPEN editor live (Valkey
-// propagation), with no reload.
+// 2e-2 + 2f-1: page history & restore. In the draft/publish model a revision is
+// created by an explicit PUBLISH (the auto-snapshot was removed); history IS the
+// publish history. So we author "ALPHA", PUBLISH it (→ one revision holding ALPHA),
+// then add "BETA" to the draft (published stays ALPHA). Restoring the revision
+// reverts the OPEN editor live (Valkey propagation), with no reload.
 const API = "http://dev.localhost:4010";
 
 test("history: a revision is listed and restoring it reverts the live editor", async ({ page }) => {
@@ -26,8 +25,13 @@ test("history: a revision is listed and restoring it reverts the live editor", a
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
 
-  // (1) author "ALPHA" and wait until its snapshot is persisted (poll the API).
+  // (1) author "ALPHA", let the draft persist (collab debounce), then PUBLISH it via
+  // API (publish snapshots the persisted draft → creates the single revision).
   await page.keyboard.type("ALPHA");
+  await sleep(2800);
+  await page.evaluate(async ({ api, pageId }) => {
+    await fetch(`${api}/pages/${pageId}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+  }, { api: API, pageId });
   await expect
     .poll(
       async () =>
@@ -39,13 +43,13 @@ test("history: a revision is listed and restoring it reverts the live editor", a
     )
     .toBeGreaterThanOrEqual(1);
 
-  // (2) add " BETA" — current content diverges from the snapshot (no new revision
-  // yet: within the 5-min interval). Wait past the 2s store debounce.
+  // (2) add " BETA" to the draft — diverges from the published revision (no new
+  // publish). Wait past the 2s store debounce so restore's delta sees "ALPHA BETA".
   await page.keyboard.type(" BETA");
   await sleep(2800);
   expect(await paneText(page, "preview")).toContain("BETA");
 
-  // (3) open History → the revision is listed; restore it (confirm dialog).
+  // (3) open History → the published revision is listed; restore it (confirm dialog).
   await page.click("[data-testid=history-toggle]");
   await expect(page.locator("[data-testid=history-panel]")).toBeVisible();
   await expect(page.locator("[data-testid=revision-item]").first()).toBeVisible();

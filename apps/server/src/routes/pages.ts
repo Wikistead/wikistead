@@ -1,3 +1,4 @@
+import * as Y from 'yjs'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
@@ -28,6 +29,16 @@ function positionBetween(before: number | null, after: number | null): number {
   if (before == null) return (after as number) - 1
   if (after == null) return before + 1
   return (before + after) / 2
+}
+
+// Decode the markdown body from a persisted Y.Doc binary (the canonical 'content'
+// Y.Text). null/never-edited → ''. Used by publish (draft → published snapshot) and
+// the published-read endpoint's draft-vs-published comparison.
+function decodeYdocContent(buf: Buffer | null): string {
+  if (!buf) return ''
+  const doc = new Y.Doc()
+  Y.applyUpdate(doc, new Uint8Array(buf))
+  return doc.getText('content').toString()
 }
 
 // ── Service functions ─────────────────────────────────────────────────────
@@ -135,6 +146,73 @@ export async function updatePage(
   processOutboxAsync(driver, outboxId, { tenantId: page.tenantId, pageId: page.id, operation: 'upsert' })
   emit({ type: 'page.updated', tenantId: page.tenantId, pageId: page.id, actorId: args.userId })
   return page
+}
+
+// Publish: promote the current draft (pages.ydoc) to the published version. The
+// published snapshot is what viewers / search / export / public render read, so a
+// draft's in-progress content never leaks until published. edit-gated (a guest with
+// an edit share-link qualifies — guest-token auth on this route is wired in 2f-3).
+//
+// A revision records the published snapshot (this is the history entry — the old
+// 5-min auto-snapshot was removed; history is now the publish history). ADR-003
+// order: the DB tx commits (revision + published_* + outbox) before the async
+// reindex + emit, so a tx failure leaves NO half-published state.
+export async function publishPage(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; userId: string },
+): Promise<{ publishedAt: Date; revisionId: string }> {
+  const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: args.pageId })
+  if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+
+  const [draft] = await db.sql<[{ tenant_id: string; ydoc: Buffer | null; title: string }]>`
+    SELECT tenant_id, ydoc, title FROM pages WHERE id = ${args.pageId}
+  `
+  if (!draft) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  const md = decodeYdocContent(draft.ydoc)
+  // revisions.ydoc is NOT NULL — a never-edited page publishes an empty Y.Doc.
+  const ydocBuf = draft.ydoc ?? Buffer.from(Y.encodeStateAsUpdate(new Y.Doc()))
+
+  let outboxId!: string
+  let revisionId!: string
+  let publishedAt!: Date
+  await db.tx(async (tx) => {
+    const [rev] = await tx<[{ id: string }]>`
+      INSERT INTO revisions (tenant_id, page_id, ydoc, title, created_by)
+      VALUES (${draft.tenant_id}, ${args.pageId}, ${ydocBuf}, ${draft.title}, ${`user:${args.userId}`})
+      RETURNING id
+    `
+    revisionId = rev.id
+    const [p] = await tx<[{ published_at: Date }]>`
+      UPDATE pages SET published_md = ${md}, published_revision_id = ${rev.id}, published_at = now()
+      WHERE id = ${args.pageId}
+      RETURNING published_at
+    `
+    publishedAt = p.published_at
+    outboxId = await enqueueOutbox(tx, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' })
+  })
+  processOutboxAsync(driver, outboxId, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' })
+  emit({ type: 'page.published', tenantId: draft.tenant_id, pageId: args.pageId, revisionId, actorId: args.userId })
+  return { publishedAt, revisionId }
+}
+
+// Read the published content (view-gated). hasUnpublishedChanges = the live shared
+// draft differs from the published snapshot — a PAGE-level state (the draft is one
+// shared collaborative doc, not per-user), shown to all editors.
+export async function getPublished(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { pageId: string; userId: string },
+): Promise<{ publishedMd: string | null; publishedAt: Date | null; hasUnpublishedChanges: boolean }> {
+  const canView = await check(fga, `user:${args.userId}`, 'view', { type: 'page', id: args.pageId })
+  if (!canView) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  const [row] = await db.sql<[{ published_md: string | null; published_at: Date | null; ydoc: Buffer | null }]>`
+    SELECT published_md, published_at, ydoc FROM pages WHERE id = ${args.pageId}
+  `
+  if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  const hasUnpublishedChanges = decodeYdocContent(row.ydoc) !== (row.published_md ?? '')
+  return { publishedMd: row.published_md, publishedAt: row.published_at, hasUnpublishedChanges }
 }
 
 // All descendant page ids of root (RLS-scoped to the tenant), via the parent_id tree.
@@ -380,5 +458,16 @@ export async function pagesPlugin(app: FastifyInstance) {
   app.delete<{ Params: { pageId: string } }>('/pages/:pageId', async (req, reply) => {
     await deletePage(req.db, app.fga, app.searchDriver, { pageId: req.params.pageId, userId: req.user.sub })
     return reply.code(204).send()
+  })
+
+  // Publish the current draft as the new published version (edit-gated).
+  app.post<{ Params: { pageId: string } }>('/pages/:pageId/publish', async (req) => {
+    return publishPage(req.db, app.fga, app.searchDriver, { pageId: req.params.pageId, userId: req.user.sub })
+  })
+
+  // Read the published content + draft-vs-published state (view-gated). The web
+  // view surface renders this; guest-token auth is added in 2f-3.
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/published', async (req) => {
+    return getPublished(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub })
   })
 }
