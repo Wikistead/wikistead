@@ -9,6 +9,7 @@ import { commentHighlights, commentHighlightTheme } from "./live-preview/comment
 import { mountToolbar, type ImageUploader } from "./live-preview/toolbar";
 import { attachImageDrop } from "./live-preview/image-drop";
 import { cmTheme } from "../styles/cm-theme";
+import { remoteCursors } from "./remote-cursors";
 
 // Non-technical surface: Obsidian-style live preview bound to the SAME canonical
 // Y.Text and SAME awareness as the vim surface. No vim, no CRDT bridge. Both
@@ -38,6 +39,7 @@ export function mountLivePreview(
       // Resolves wks-attachment image ids → fresh presigned URLs (member only).
       ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
       yCollab(ytext, provider.awareness),
+      remoteCursors, // #8: avatar+name flags (additive overlay; yCollab untouched)
       ...(opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
     ],
   });

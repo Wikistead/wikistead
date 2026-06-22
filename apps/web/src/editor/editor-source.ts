@@ -6,6 +6,7 @@ import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { cmTheme } from "../styles/cm-theme";
+import { remoteCursors } from "./remote-cursors";
 
 // vim user's surface: markdown source + (vim keymap) bound directly to Y.Text.
 // Presence cursors live in Y.Text offsets via yCollab/awareness.
@@ -27,6 +28,7 @@ export function mountSource(
       cmTheme, // CSS-variable-driven colors (follows light/dark)
       markdownExtension(), // GFM tables + fenced-code highlighting (matches live preview)
       yCollab(ytext, provider.awareness),
+      remoteCursors, // #8: avatar+name flags (additive overlay; yCollab untouched)
       ...(opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
     ],
   });

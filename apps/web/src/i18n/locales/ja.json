@@ -7,6 +7,9 @@
     "loading": "読み込み中…",
     "untitled": "無題"
   },
+  "collab": {
+    "guest": "ゲスト"
+  },
   "toast": {
     "published": "公開しました",
     "publishFailed": "公開できませんでした",
