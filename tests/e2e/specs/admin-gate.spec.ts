@@ -58,6 +58,16 @@ test("space Members tab renders and the member typeahead finds a seeded member",
   await expect(page.getByTestId("space-grant-candidate").first()).toContainText("dev-user");
 });
 
+test("admin Spaces tab lists tenant spaces with counts and links to settings", async ({ page }) => {
+  await openDemo(page);
+  await page.goto("/admin/spaces");
+  await expect(page.getByTestId("admin-spaces")).toBeVisible();
+  const row = page.locator("[data-testid=admin-space-row]", { hasText: "Demo Space" });
+  await expect(row).toBeVisible();
+  await row.getByTestId("admin-space-settings").click();
+  await expect(page).toHaveURL(/\/spaces\/demo_space\/settings/);
+});
+
 test("non-admin member is denied: admin → 403 (no menu entry); unviewable space settings → 404, then view→403", async ({ browser }) => {
   // Admin (dev-user) invites a member via the real-mode console.
   const adminCtx = await browser.newContext();

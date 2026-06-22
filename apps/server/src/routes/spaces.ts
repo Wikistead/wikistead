@@ -191,6 +191,39 @@ async function requireSpaceManage(fga: OpenFgaClient, userId: string, spaceId: s
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 }
 
+async function requireTenantAdmin(fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> {
+  const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'admin', object: `tenant:${tenantId}` })
+  if (!allowed) throw Object.assign(new Error('admin only'), { statusCode: 403 })
+}
+
+// Tenant-wide spaces overview for the admin console (Phase 5 #4). tenant#admin
+// gated. pageCount = pages in the space; grantCount = people/groups with a DIRECT
+// space grant (inherited tenant-admin access is not counted — that's everyone).
+export async function listAdminSpaces(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { tenantId: string; userId: string },
+): Promise<{ id: string; name: string; pageCount: number; grantCount: number }[]> {
+  await requireTenantAdmin(fga, args.userId, args.tenantId)
+  const rows = await db.sql<{ id: string; name: string; page_count: number }[]>`
+    SELECT s.id, s.name, count(p.id)::int AS page_count
+    FROM spaces s LEFT JOIN pages p ON p.space_id = s.id
+    GROUP BY s.id, s.name ORDER BY s.created_at
+  `
+  const out: { id: string; name: string; pageCount: number; grantCount: number }[] = []
+  for (const r of rows) {
+    const { tuples } = await fga.read({ object: `space:${r.id}` })
+    const grantees = new Set<string>()
+    for (const { key } of tuples ?? []) {
+      if (!key || !(key.relation in RELATION_TO_CAP)) continue
+      if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
+      grantees.add(key.user)
+    }
+    out.push({ id: r.id, name: r.name, pageCount: r.page_count, grantCount: grantees.size })
+  }
+  return out
+}
+
 // A space access change alters inheritance for every PUBLISHED page in the space,
 // so the denormalized search viewer set (doc-builder includes space viewers ONLY
 // when page#space is present = published) must be refreshed for each. Drafts have
@@ -288,6 +321,9 @@ export async function spacesPlugin(app: FastifyInstance) {
   })
 
   app.get('/spaces', async (req) => listSpaces(req.db, app.fga, req.user.sub))
+
+  // Tenant admin overview of all spaces (tenant#admin).
+  app.get('/admin/spaces', async (req) => listAdminSpaces(req.db, app.fga, { tenantId: req.tenant.id, userId: req.user.sub }))
 
   app.patch<{ Params: { spaceId: string }; Body: { name?: string } }>('/spaces/:spaceId', async (req) => {
     return updateSpace(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub, name: req.body?.name ?? '' })
