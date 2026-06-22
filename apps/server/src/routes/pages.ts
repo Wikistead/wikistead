@@ -1,5 +1,5 @@
 import * as Y from 'yjs'
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
@@ -166,9 +166,12 @@ export async function publishPage(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { pageId: string; userId: string },
+  // subject = FGA principal for the edit check ("user:<sub>" | "share_link:<id>");
+  // createdBy attributes the revision/event ("user:<sub>" | "guest:<id>"); context
+  // (guests) evaluates the share_link's non_expired condition.
+  args: { pageId: string; subject: string; createdBy: string; context?: { current_time: string } },
 ): Promise<{ publishedAt: Date | null; revisionId: string | null; noop: boolean }> {
-  const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: args.pageId })
+  const canEdit = await check(fga, args.subject, 'edit', { type: 'page', id: args.pageId }, args.context)
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
   const [draft] = await db.sql<[{ tenant_id: string; ydoc: Buffer | null; title: string; published_md: string | null; published_at: Date | null; published_revision_id: string | null }]>`
@@ -195,7 +198,7 @@ export async function publishPage(
   await db.tx(async (tx) => {
     const [rev] = await tx<[{ id: string }]>`
       INSERT INTO revisions (tenant_id, page_id, ydoc, title, created_by)
-      VALUES (${draft.tenant_id}, ${args.pageId}, ${ydocBuf}, ${draft.title}, ${`user:${args.userId}`})
+      VALUES (${draft.tenant_id}, ${args.pageId}, ${ydocBuf}, ${draft.title}, ${args.createdBy})
       RETURNING id
     `
     revisionId = rev.id
@@ -209,7 +212,7 @@ export async function publishPage(
     outboxId = await enqueueOutbox(tx, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' })
   })
   processOutboxAsync(driver, outboxId, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' })
-  emit({ type: 'page.published', tenantId: draft.tenant_id, pageId: args.pageId, revisionId, actorId: args.userId })
+  emit({ type: 'page.published', tenantId: draft.tenant_id, pageId: args.pageId, revisionId, actorId: args.createdBy })
   return { publishedAt, revisionId, noop: false }
 }
 
@@ -219,9 +222,11 @@ export async function publishPage(
 export async function getPublished(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { pageId: string; userId: string },
+  // subject is the FGA principal ("user:<sub>" | "share_link:<id>"); guests pass a
+  // context so the share_link's non_expired condition is evaluated (expired = denied).
+  args: { pageId: string; subject: string; context?: { current_time: string } },
 ): Promise<{ publishedMd: string | null; publishedAt: Date | null; hasUnpublishedChanges: boolean }> {
-  const canView = await check(fga, `user:${args.userId}`, 'view', { type: 'page', id: args.pageId })
+  const canView = await check(fga, args.subject, 'view', { type: 'page', id: args.pageId }, args.context)
   if (!canView) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
   const [row] = await db.sql<[{ published_md: string | null; published_at: Date | null; ydoc: Buffer | null }]>`
     SELECT published_md, published_at, ydoc FROM pages WHERE id = ${args.pageId}
@@ -422,6 +427,28 @@ export async function deletePage(
   emit({ type: 'page.deleted', tenantId, pageId: args.pageId, actorId: args.userId })
 }
 
+// Resolve the request principal (member OR guest) for a page action and bind a
+// guest to the page its token was issued for. Returns the FGA subject, the
+// attribution id, and (guests) the time context for the share_link condition.
+// A guest whose token resource is NOT this page is rejected (resource binding) —
+// a token for page A can never read/publish page B.
+function principalForPage(req: FastifyRequest, pageId: string): { subject: string; createdBy: string; context?: { current_time: string } } {
+  if (req.user) {
+    return { subject: `user:${req.user.sub}`, createdBy: `user:${req.user.sub}` }
+  }
+  if (req.guest) {
+    if (req.guest.resource.type !== 'page' || req.guest.resource.id !== pageId) {
+      throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+    }
+    return {
+      subject: `share_link:${req.guest.shareLinkId}`,
+      createdBy: `guest:${req.guest.shareLinkId}`,
+      context: { current_time: new Date().toISOString() },
+    }
+  }
+  throw Object.assign(new Error('unauthorized'), { statusCode: 401 })
+}
+
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function pagesPlugin(app: FastifyInstance) {
@@ -476,14 +503,17 @@ export async function pagesPlugin(app: FastifyInstance) {
     return reply.code(204).send()
   })
 
-  // Publish the current draft as the new published version (edit-gated).
-  app.post<{ Params: { pageId: string } }>('/pages/:pageId/publish', async (req) => {
-    return publishPage(req.db, app.fga, app.searchDriver, { pageId: req.params.pageId, userId: req.user.sub })
+  // Publish the current draft as the new published version (edit-gated). Members or
+  // an edit-capable guest (share-link) — same FGA `edit` check either way.
+  app.post<{ Params: { pageId: string } }>('/pages/:pageId/publish', { config: { guest: 'edit' } }, async (req) => {
+    const p = principalForPage(req, req.params.pageId)
+    return publishPage(req.db, app.fga, app.searchDriver, { pageId: req.params.pageId, ...p })
   })
 
-  // Read the published content + draft-vs-published state (view-gated). The web
-  // view surface renders this; guest-token auth is added in 2f-3.
-  app.get<{ Params: { pageId: string } }>('/pages/:pageId/published', async (req) => {
-    return getPublished(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub })
+  // Read the published content + draft-vs-published state (view-gated). Members or a
+  // view-capable guest. The web view surface and guest share routes render this.
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/published', { config: { guest: 'view' } }, async (req) => {
+    const { subject, context } = principalForPage(req, req.params.pageId)
+    return getPublished(req.db, app.fga, { pageId: req.params.pageId, subject, context })
   })
 }

@@ -66,7 +66,7 @@ afterAll(async () => {
 
 describe('draft/publish editing model', () => {
   it('a draft body is NOT published or searchable until publish', async () => {
-    const pub = await getPublished(db, fgaClient, { pageId, userId: 'dev-user' })
+    const pub = await getPublished(db, fgaClient, { pageId, subject: 'user:dev-user' })
     expect(pub.publishedMd).toBeNull()
     expect(pub.hasUnpublishedChanges).toBe(true) // draft has content, nothing published
     // the cheap sidebar-badge flag agrees (set true by the draft save)
@@ -75,8 +75,8 @@ describe('draft/publish editing model', () => {
   })
 
   it('publish promotes the draft: published content + body searchable + a revision', async () => {
-    await publishPage(db, fgaClient, app.searchDriver, { pageId, userId: 'dev-user' })
-    const pub = await getPublished(db, fgaClient, { pageId, userId: 'dev-user' })
+    await publishPage(db, fgaClient, app.searchDriver, { pageId, subject: 'user:dev-user', createdBy: 'user:dev-user' })
+    const pub = await getPublished(db, fgaClient, { pageId, subject: 'user:dev-user' })
     expect(pub.publishedMd).toContain(T1)
     expect(pub.hasUnpublishedChanges).toBe(false) // draft == published
     // publish cleared the cheap badge flag too
@@ -90,7 +90,7 @@ describe('draft/publish editing model', () => {
     // After the previous publish, draft == published. Publishing again must not add
     // a revision (the server is the accurate gate; the UI only disables the button).
     const [{ n: before }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM revisions WHERE page_id = ${pageId}`
-    const res = await publishPage(db, fgaClient, app.searchDriver, { pageId, userId: 'dev-user' })
+    const res = await publishPage(db, fgaClient, app.searchDriver, { pageId, subject: 'user:dev-user', createdBy: 'user:dev-user' })
     expect(res.noop).toBe(true)
     const [{ n: after }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM revisions WHERE page_id = ${pageId}`
     expect(after).toBe(before)
@@ -98,7 +98,7 @@ describe('draft/publish editing model', () => {
 
   it('editing the draft again does NOT change the published version (nor search) until the next publish', async () => {
     await setDraft(pageId, `# Publish Test\n\n${T2} 新しい本文\n`) // new draft content
-    const pub = await getPublished(db, fgaClient, { pageId, userId: 'dev-user' })
+    const pub = await getPublished(db, fgaClient, { pageId, subject: 'user:dev-user' })
     expect(pub.hasUnpublishedChanges).toBe(true)
     expect(pub.publishedMd).toContain(T1)      // still the OLD published body
     expect(pub.publishedMd).not.toContain(T2)
@@ -107,14 +107,14 @@ describe('draft/publish editing model', () => {
     expect(await search(T1)).toContain(pageId)
 
     // the NEXT publish promotes the new content
-    await publishPage(db, fgaClient, app.searchDriver, { pageId, userId: 'dev-user' })
-    const pub2 = await getPublished(db, fgaClient, { pageId, userId: 'dev-user' })
+    await publishPage(db, fgaClient, app.searchDriver, { pageId, subject: 'user:dev-user', createdBy: 'user:dev-user' })
+    const pub2 = await getPublished(db, fgaClient, { pageId, subject: 'user:dev-user' })
     expect(pub2.publishedMd).toContain(T2)
     expect(await drainAndSearch(T2)).toContain(pageId)
   })
 
   it('publish is edit-gated: a user without edit is rejected (403)', async () => {
-    await expect(publishPage(db, fgaClient, app.searchDriver, { pageId, userId: 'pub-rando-xyz' }))
+    await expect(publishPage(db, fgaClient, app.searchDriver, { pageId, subject: 'user:pub-rando-xyz', createdBy: 'user:pub-rando-xyz' }))
       .rejects.toMatchObject({ statusCode: 403 })
   })
 })
