@@ -117,3 +117,13 @@ test("moving the open page via drag keeps the editor connected", async ({ page }
   expect(await page.locator("[data-pane=preview] .cm-content").count()).toBe(1);
   expect(rendersAfter).toBe(rendersBefore);
 });
+
+test("the page-actions … trigger stays laid out when unhovered (menu positioning regression)", async ({ page }) => {
+  await openDemo(page);
+  await page.waitForSelector("[data-testid=tree-page]");
+  // Do NOT hover. The "…" is visually hidden (opacity) but must keep its layout box,
+  // else Ark measures a zero rect once focus leaves the row and flings the menu to
+  // 0,0 (top-left). display:none would make width 0 here.
+  const w = await page.locator("[data-testid=page-actions]").first().evaluate((el) => el.getBoundingClientRect().width);
+  expect(w).toBeGreaterThan(0);
+});

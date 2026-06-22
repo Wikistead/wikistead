@@ -102,9 +102,14 @@
 /* Draft badge: a muted "Draft" chip for never-published pages. */
 .draftBadge { flex: 0 0 auto; font-size: 10px; line-height: 1; padding: 2px 5px; margin: 0 4px; border-radius: 4px; color: var(--fg-dim); border: 1px solid var(--border); }
 
-.actions { display: none; gap: 2px; }
+/* Reveal on hover/focus via opacity — NOT display:none. The "…" trigger must keep
+   its layout box so Ark can measure it: once the menu opens, focus moves to the
+   portaled menu and the row loses :hover; if the trigger were display:none then,
+   Ark would re-measure a zero rect and fling the menu to 0,0 (top-left). */
+.actions { display: flex; gap: 2px; opacity: 0; pointer-events: none; }
 .row:hover .actions,
-.row:focus-within .actions { display: flex; }
+.row:focus-within .actions,
+.actions:has([aria-expanded="true"]) { opacity: 1; pointer-events: auto; }
 .actions button {
   background: none;
   border: none;
