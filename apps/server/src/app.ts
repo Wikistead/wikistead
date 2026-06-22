@@ -2,12 +2,12 @@ import Fastify from 'fastify'
 import type { FastifyInstance } from 'fastify'
 import cors from '@fastify/cors'
 import cookie from '@fastify/cookie'
-import type { Tenant } from '@wikistead/types'
+import type { Tenant, ResourceRef, Capability } from '@wikistead/types'
 import { resolveTenantFromHost, loadTenant } from './tenant.js'
 import { acquireTenantDb } from './db/index.js'
 import type { TenantDb } from './db/index.js'
 import { fgaClient } from '@wikistead/authz'
-import { makeMemberVerifier } from '@wikistead/auth'
+import { makeMemberVerifier, looksLikeGuestToken, verifyGuestToken } from '@wikistead/auth'
 import { verifyApiKey } from './api-key-auth.js'
 import { getAuthProviders, getSearchDriver, getEmailDriver, type EmailDriver } from '@wikistead/hooks'
 import { resolveEmailDriver } from './email/index.js'
@@ -46,6 +46,16 @@ declare module 'fastify' {
     tenant: Tenant
     db: TenantDb
     user: { sub: string; groups: string[] }
+    // Set ONLY on routes that declare `config: { guest }` and only when an anonymous
+    // share (guest) token is presented. Distinct from `user` so member-only routes
+    // (which read `user`) are never reachable by a guest. Authority is still derived
+    // from OpenFGA per request (the token asserts intent, not authority).
+    guest?: { shareLinkId: string; resource: ResourceRef; capability: Capability }
+  }
+  interface FastifyContextConfig {
+    // Marks a route as guest-accessible and the capability a guest token must assert
+    // to use it (FGA re-checks the share_link's real authority regardless).
+    guest?: 'view' | 'edit'
   }
 }
 
@@ -83,6 +93,12 @@ export async function buildApp(): Promise<FastifyInstance> {
     issuer: process.env.OIDC_ISSUER!,
     jwksUri: process.env.OIDC_JWKS_URI!,
   })
+  // Guest (anonymous share) tokens reuse the collab signing secret + verifier, so
+  // the HTTP guest path and the collab join point validate identically.
+  const guestCfg = {
+    secret: process.env.GUEST_TOKEN_SECRET!,
+    ttlSeconds: Number(process.env.GUEST_TOKEN_TTL_SECONDS ?? 3600),
+  }
 
   app.get('/healthz', async () => ({ ok: true }))
   app.get('/readyz', async () => ({ ok: true }))
@@ -135,6 +151,25 @@ export async function buildApp(): Promise<FastifyInstance> {
     if (process.env.NODE_ENV !== 'production' && token === 'dev-token') {
       req.user = { sub: 'dev-user', groups: [] }
       emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: 'dev-user', method: 'dev' })
+      return
+    }
+
+    // Guest (anonymous share) token. Accepted ONLY on routes that opt in via
+    // `config: { guest }`; on any other route a guest token is rejected (member
+    // routes stay member-only). Sets `req.guest`, NEVER `req.user`. The token
+    // asserts intent (tenant/resource/capability); the route handler re-derives
+    // authority from OpenFGA against `share_link:<id>` + binds to the URL resource.
+    if (looksLikeGuestToken(token)) {
+      const need = req.routeOptions?.config?.guest
+      const c = need ? await verifyGuestToken(guestCfg, token).catch(() => null) : null
+      // need-but-not-edit-token guard (convenience layer; FGA is the real gate).
+      if (!need || !c || c.tenantId !== req.tenant.id || (need === 'edit' && c.capability !== 'edit')) {
+        emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'guest', reason: 'guest token rejected' })
+        await reply.code(401).send({ error: 'unauthorized' })
+        return
+      }
+      req.guest = { shareLinkId: c.shareLinkId, resource: c.resource, capability: c.capability }
+      emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: `guest:${c.shareLinkId}`, method: 'guest' })
       return
     }
 
