@@ -7,6 +7,7 @@ import { AdminRoutes } from "../settings/AdminPage";
 import { SpaceSettingsRoutes } from "../settings/SpaceSettingsPage";
 import { Editor, type AnchorGetter, type EditorLayout } from "../editor/Editor";
 import { createDirtySignal } from "../editor/dirtySignal";
+import { colorFromString } from "../ui/avatar";
 import { PageToolbar } from "./PageToolbar";
 import { ShareDialog } from "../ui/ShareDialog";
 import { CommentsPanel } from "../comments/CommentsPanel";
@@ -228,8 +229,10 @@ function GuestPage({ minted }: { minted: GuestToken }) {
   const { t } = useTranslation();
   const { token, docName, capability } = minted;
   const pageId = docName.replace(/^t:.+?:p:/, "");
-  // Anonymous guest identity (never an OIDC account / seat — the project design notes).
-  const [guest] = useState(() => ({ name: `guest-${Math.floor(Math.random() * 1000)}`, color: "#7d8590" }));
+  // Anonymous guest identity (never an OIDC account / seat — the project design notes). Guests have
+  // no real name → labelled "Guest"; each session gets a distinct auto colour (no
+  // picture) so multiple guests on a doc are still visually distinguishable (#8).
+  const [guest] = useState(() => ({ name: t("collab.guest"), color: colorFromString(`guest-${Math.random()}`), picture: null }));
   const [publishedMd, setPublishedMd] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const canEdit = capability === "edit";

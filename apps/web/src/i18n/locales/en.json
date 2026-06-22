@@ -7,6 +7,9 @@
     "loading": "Loading…",
     "untitled": "Untitled"
   },
+  "collab": {
+    "guest": "Guest"
+  },
   "toast": {
     "published": "Published",
     "publishFailed": "Couldn't publish",
