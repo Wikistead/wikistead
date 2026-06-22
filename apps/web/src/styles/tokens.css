@@ -130,6 +130,21 @@
   to   { opacity: 1; transform: none; }
 }
 
+/* Animation utility classes. Global so CSS-module rules can `composes: <name> from
+   global` — the reliable way to apply a shared keyframe from a module (a plain
+   `animation: wks-pop` inside a *.module.css gets its animation-name HASHED to a
+   nonexistent keyframe by the CSS-modules transform, so nothing runs). */
+.wks-pop {
+  transform-origin: top;
+  animation: wks-pop var(--dur-base) var(--ease-out);
+}
+.wks-slide-right {
+  animation: wks-slide-in-right var(--dur-slow) var(--ease-out);
+}
+.wks-slide-up {
+  animation: wks-slide-in-up var(--dur-slow) var(--ease-out);
+}
+
 /* Accessibility: honour reduced-motion globally. Anyone who asks for less motion gets
    effectively-instant transitions/animations across the whole app. */
 @media (prefers-reduced-motion: reduce) {

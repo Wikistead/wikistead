@@ -16,8 +16,8 @@
   border-radius: var(--radius-lg);
   padding: var(--space-3);
   width: min(360px, 90vw);
+  composes: wks-pop from global;
   box-shadow: var(--shadow-lg);
-  animation: wks-pop var(--dur-base) var(--ease-out);
   outline: none; /* Ark focuses the container; suppress the browser focus ring that
                     otherwise reads as a thickened border. Inner controls keep theirs. */
 }

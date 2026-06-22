@@ -20,6 +20,7 @@
 .caret { flex: 0 0 auto; color: var(--fg-dim); }
 
 .content {
+  composes: wks-pop from global;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -28,8 +29,6 @@
   box-shadow: var(--shadow-md);
   z-index: 60;
   outline: none;
-  transform-origin: top;
-  animation: wks-pop var(--dur-base) var(--ease-out);
   max-height: 260px;
   overflow-y: auto;
 }
