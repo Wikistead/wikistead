@@ -4,6 +4,7 @@ import { AppShell } from "./AppShell";
 import { Editor, type AnchorGetter } from "../editor/Editor";
 import { CommentsPanel } from "../comments/CommentsPanel";
 import { HistoryPanel } from "../history/HistoryPanel";
+import { PermissionsDialog } from "../ui/PermissionsDialog";
 import { useComments } from "../data/comments";
 import { Sidebar } from "../sidebar/Sidebar";
 import { SearchBox } from "../search/SearchBox";
@@ -117,6 +118,9 @@ function PageRoute() {
     return n;
   });
 
+  // Per-page permissions (manage only). Also the invite-to-draft surface.
+  const [permsOpen, setPermsOpen] = useState(false);
+
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>Loading…</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
   const docName = `t:${tenantId}:p:${pageId}`;
@@ -137,6 +141,11 @@ function PageRoute() {
             <button type="button" data-testid="history-toggle" aria-pressed={historyOpen} onClick={toggleHistory}>
               History
             </button>
+            {page?.canManage && (
+              <button type="button" data-testid="permissions-open" onClick={() => setPermsOpen(true)}>
+                Permissions
+              </button>
+            )}
             {capability === "edit" && (
               <>
                 {/* 3-state: Draft (never published) / Unpublished changes / (clean) */}
@@ -164,6 +173,7 @@ function PageRoute() {
         {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={capability === "edit"} anchorGetterRef={anchorGetterRef} />}
         {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} />}
       </div>
+      {pageId && <PermissionsDialog pageId={pageId} open={permsOpen} onClose={() => setPermsOpen(false)} />}
     </AppShell>
   );
 }
