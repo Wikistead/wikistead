@@ -1,0 +1,42 @@
+/* Shared button design system (Phase 3b-2). Token-driven so it follows light/dark
+   and (later) tenant branding automatically. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--fg);
+  cursor: pointer;
+  user-select: none;
+}
+.btn:hover { background: var(--panel-3); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+
+/* sizes */
+.md { padding: 6px 12px; }
+.sm { padding: 4px 9px; font-size: 12px; }
+
+/* variants */
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+.primary:hover { background: color-mix(in srgb, var(--accent) 88%, black); }
+.ghost { background: transparent; border-color: transparent; color: var(--fg-dim); }
+.ghost:hover { background: var(--panel-2); color: var(--fg); }
+.danger { background: #b3261e; border-color: #b3261e; color: #fff; font-weight: 600; }
+.danger:hover { background: #9b201a; }
+
+/* icon-only: square, ghost by default */
+.icon {
+  padding: 6px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-dim);
+}
+.icon:hover { background: var(--panel-2); color: var(--fg); }
