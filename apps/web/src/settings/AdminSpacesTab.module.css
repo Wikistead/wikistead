@@ -22,3 +22,7 @@
 }
 .num { text-align: right; width: 72px; }
 .actions { text-align: right; width: 96px; }
+
+/* Status chips (shared by the space Pages overview). */
+.draft { color: var(--fg-dim); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; font-size: 11px; }
+.dirty { color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border)); border-radius: 999px; padding: 1px 8px; font-size: 11px; }

@@ -70,6 +70,7 @@
     "title": "{{name}} · Settings",
     "general": "General",
     "members": "Members & permissions",
+    "pages": "Pages",
     "theme": "Theme",
     "nameLabel": "Space name",
     "dangerZone": "Danger zone",
@@ -77,6 +78,16 @@
     "deleteSpace": "Delete space",
     "deleteConfirmTitle": "Delete this space",
     "deleteConfirm": "Delete space \"{{name}}\" and all of its pages? This cannot be undone."
+  },
+  "spacePages": {
+    "title": "Pages",
+    "status": "Status",
+    "grants": "Grants",
+    "links": "Links",
+    "draft": "Draft",
+    "unpublished": "Unpublished changes",
+    "published": "Published",
+    "empty": "No pages in this space yet."
   },
   "spaceMembers": {
     "title": "Members & permissions",

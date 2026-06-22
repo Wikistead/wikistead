@@ -58,6 +58,13 @@ test("space Members tab renders and the member typeahead finds a seeded member",
   await expect(page.getByTestId("space-grant-candidate").first()).toContainText("dev-user");
 });
 
+test("space Pages overview lists the space's pages", async ({ page }) => {
+  await openDemo(page);
+  await page.goto("/spaces/demo_space/settings/pages");
+  await expect(page.getByTestId("space-pages")).toBeVisible();
+  await expect(page.locator("[data-testid=space-page-row]").first()).toBeVisible();
+});
+
 test("admin Spaces tab lists tenant spaces with counts and links to settings", async ({ page }) => {
   await openDemo(page);
   await page.goto("/admin/spaces");
