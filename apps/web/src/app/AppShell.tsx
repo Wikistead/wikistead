@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { PanelLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "./ThemeToggle";
+import { LanguageToggle } from "./LanguageToggle";
 import { UserMenu } from "./UserMenu";
 import { useBranding } from "../data/queries";
 import styles from "./AppShell.module.css";
@@ -46,6 +47,7 @@ export function AppShell({
         <span className={styles.brand} data-testid="brand">{branding.data?.displayName || "wikistead"}</span>
         <div className={styles.spacer} />
         {search && <div className={styles.search}>{search}</div>}
+        <LanguageToggle />
         <ThemeToggle />
         {onLogout && <UserMenu onLogout={onLogout} />}
       </header>
