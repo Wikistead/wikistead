@@ -171,7 +171,7 @@ export function Sidebar() {
                     <Menu.Item value="subpage" className={styles.menuItem} data-testid="add-subpage"><FilePlus size={13} /> {t("sidebar.addSubpage")}</Menu.Item>
                     <Menu.Item value="share" className={styles.menuItem}><Share2 size={13} /> {t("sidebar.share")}</Menu.Item>
                     <Menu.Item value="rename" className={styles.menuItem}><Pencil size={13} /> {t("sidebar.rename")}</Menu.Item>
-                    <Menu.Item value="delete" className={styles.menuItem}><Trash2 size={13} /> {t("sidebar.delete")}</Menu.Item>
+                    <Menu.Item value="delete" className={styles.menuItem} data-danger=""><Trash2 size={13} /> {t("sidebar.delete")}</Menu.Item>
                   </Menu.Content>
                 </Menu.Positioner>
               </Portal>
@@ -213,7 +213,7 @@ export function Sidebar() {
         {current && (canEdit || canManage) && (
           <div className={styles.headerActions}>
             {canEdit && <button type="button" title={t("sidebar.newPage")} aria-label={t("sidebar.newPage")} data-testid="new-page" onClick={() => newPage(null)}><FilePlus size={15} /></button>}
-            {canManage && <button type="button" title={t("sidebar.deleteSpace")} aria-label={t("sidebar.deleteSpace")} onClick={() => currentSpace && setDeleting({ kind: "space", id: current, name: currentSpace.name })}><Trash2 size={15} /></button>}
+            {canManage && <button type="button" className={styles.dangerBtn} title={t("sidebar.deleteSpace")} aria-label={t("sidebar.deleteSpace")} onClick={() => currentSpace && setDeleting({ kind: "space", id: current, name: currentSpace.name })}><Trash2 size={15} /></button>}
           </div>
         )}
       </div>

@@ -19,6 +19,8 @@
   --border: #d0d7de;
   --accent: #2563eb;
   --accent-fg: #ffffff; /* text/icon on an accent fill */
+  --danger: #cf222e;    /* destructive actions (delete / remove / revoke) */
+  --danger-fg: #ffffff;
   --selection: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
@@ -33,6 +35,8 @@
   --border: #3a3a3a;
   --accent: #4ea1ff;
   --accent-fg: #06243f;
+  --danger: #f0584d;
+  --danger-fg: #ffffff;
   --selection: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 @media (prefers-color-scheme: dark) {
@@ -46,6 +50,8 @@
     --border: #3a3a3a;
     --accent: #4ea1ff;
     --accent-fg: #06243f;
+    --danger: #f0584d;
+    --danger-fg: #ffffff;
     --selection: color-mix(in srgb, var(--accent) 30%, transparent);
   }
 }

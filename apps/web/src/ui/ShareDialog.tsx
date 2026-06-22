@@ -97,6 +97,7 @@ export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClos
                     <button
                       type="button"
                       className={styles.iconBtn}
+                      data-danger=""
                       title={t("shareDialog.revoke")}
                       data-testid="revoke-link"
                       onClick={() => pageId && revoke.mutate({ id: l.id, pageId })}

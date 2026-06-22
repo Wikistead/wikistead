@@ -29,8 +29,11 @@
 .primary:hover { background: color-mix(in srgb, var(--accent) 88%, black); }
 .ghost { background: transparent; border-color: transparent; color: var(--fg-dim); }
 .ghost:hover { background: var(--panel-2); color: var(--fg); }
-.danger { background: #b3261e; border-color: #b3261e; color: #fff; font-weight: 600; }
-.danger:hover { background: #9b201a; }
+.danger { background: var(--danger); border-color: var(--danger); color: var(--danger-fg); font-weight: 600; }
+.danger:hover { background: color-mix(in srgb, var(--danger) 85%, black); }
+/* Low-emphasis destructive: red text/border on a transparent fill (Remove/Revoke). */
+.dangerGhost { background: transparent; border-color: var(--border); color: var(--danger); }
+.dangerGhost:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); border-color: var(--danger); }
 
 /* icon-only: square, ghost by default */
 .icon {

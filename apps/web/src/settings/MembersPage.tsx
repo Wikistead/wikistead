@@ -79,7 +79,7 @@ export function MembersPage() {
                 </select>
               </td>
               <td style={{ textAlign: "right" }}>
-                <Button size="sm" onClick={() => void guarded(() => removeMember(token, m.sub))()}>{t("members.remove")}</Button>
+                <Button variant="dangerGhost" size="sm" onClick={() => void guarded(() => removeMember(token, m.sub))()}>{t("members.remove")}</Button>
               </td>
             </tr>
           ))}
@@ -109,7 +109,7 @@ export function MembersPage() {
             {invites.map((i) => (
               <li key={i.id} style={{ marginBottom: 4 }}>
                 {i.email || t("members.noEmail")} — {i.role}{" "}
-                <Button size="sm" onClick={() => void guarded(() => revokeInvite(token, i.id))()}>{t("members.revoke")}</Button>
+                <Button variant="dangerGhost" size="sm" onClick={() => void guarded(() => revokeInvite(token, i.id))()}>{t("members.revoke")}</Button>
               </li>
             ))}
           </ul>

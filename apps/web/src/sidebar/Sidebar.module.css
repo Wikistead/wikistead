@@ -32,6 +32,13 @@
 }
 .header button:hover { color: var(--fg); background: var(--panel-2); }
 .headerActions { display: flex; gap: 2px; flex: 0 0 auto; }
+.headerActions button {
+  background: none; border: none; color: var(--fg-dim); cursor: pointer;
+  display: flex; padding: 4px; border-radius: 4px;
+}
+.headerActions button:hover { color: var(--fg); background: var(--panel-2); }
+/* Destructive header action (delete space) — turns red on hover. */
+.dangerBtn:hover { color: var(--danger) !important; background: color-mix(in srgb, var(--danger) 12%, transparent) !important; }
 
 /* Space switcher (Ark Menu trigger). */
 .switcher {
@@ -71,6 +78,9 @@
   outline: none;
 }
 .menuItem[data-highlighted] { background: var(--panel-2); }
+/* Destructive item (Delete) — red, intensifying on highlight. */
+.menuItem[data-danger] { color: var(--danger); }
+.menuItem[data-danger][data-highlighted] { background: color-mix(in srgb, var(--danger) 14%, transparent); }
 .menuSep { height: 1px; background: var(--border); margin: 4px 0; }
 
 .state { padding: var(--space-3); color: var(--fg-dim); }

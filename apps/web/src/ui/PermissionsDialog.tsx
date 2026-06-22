@@ -49,7 +49,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
                 <div key={`${g.grantee}:${g.relation}`} className={styles.linkItem} data-testid="grant-item">
                   <span className={styles.linkMeta}>{g.relation}</span>
                   <span className={styles.linkUrl} style={{ border: "none" }}>{label(g.grantee)}</span>
-                  <button type="button" className={styles.iconBtn} aria-label={t("permissions.revoke")} data-testid="grant-revoke" onClick={() => revoke.mutate({ grantee: g.grantee, relation: g.relation })}>×</button>
+                  <button type="button" className={styles.iconBtn} data-danger="" aria-label={t("permissions.revoke")} data-testid="grant-revoke" onClick={() => revoke.mutate({ grantee: g.grantee, relation: g.relation })}>×</button>
                 </div>
               ))}
               {(grants?.length ?? 0) === 0 && <p style={{ color: "var(--fg-dim)", fontSize: 12, margin: 0 }}>{t("permissions.empty")}</p>}

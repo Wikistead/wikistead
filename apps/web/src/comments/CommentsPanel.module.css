@@ -101,13 +101,15 @@
 .suggest li button:hover { background: var(--panel-2); }
 
 /* Subtle inline link (delete). */
+/* Destructive inline link (delete) — muted red, intensifies on hover. */
 .link {
   background: none;
   border: none;
-  color: var(--fg-dim);
+  color: var(--danger);
+  opacity: 0.8;
   cursor: pointer;
   padding: 0;
   font-size: 0.8em;
 }
-.link:hover { color: var(--fg); text-decoration: underline; }
+.link:hover { opacity: 1; text-decoration: underline; }
 .hint { color: var(--fg-dim); font-size: 0.85em; margin: 0; }
