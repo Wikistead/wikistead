@@ -8,12 +8,13 @@ import { AdminSpacesTab } from "./AdminSpacesTab";
 import { TenantBrandingTab } from "./TenantBrandingTab";
 import { AdminAuthTab } from "./AdminAuthTab";
 import { AdminApiTab } from "./AdminApiTab";
-import { SettingsShell, SettingsDenied, SettingsPlaceholder, type SettingsTab } from "./SettingsShell";
+import { AdminBillingTab } from "./AdminBillingTab";
+import { SettingsShell, SettingsDenied, type SettingsTab } from "./SettingsShell";
 
-// Tenant admin console (Phase 5a). Gate: tenant#admin. Members ships now; the
-// other tabs are placeholders whose features land in later subphases (the IA — the
-// vertical tab rail — stands first). The admin-screen leak rule is 403 (not 404):
-// a tenant having an admin area is not a secret, the non-admin simply can't enter.
+// Tenant admin console (Phase 5a). Gate: tenant#admin. All tabs now live (Members,
+// Spaces, Branding, Auth, API, Billing). The admin-screen leak rule is 403 (not
+// 404): a tenant having an admin area is not a secret, the non-admin simply can't
+// enter (the server re-checks tenant#admin on every admin action).
 function useAdminTabs(): SettingsTab[] {
   const { t } = useTranslation();
   return [
@@ -22,7 +23,7 @@ function useAdminTabs(): SettingsTab[] {
     { key: "branding", label: t("adminNav.branding"), to: "/admin/branding" },
     { key: "auth", label: t("adminNav.auth"), to: "/admin/auth" },
     { key: "api", label: t("adminNav.api"), to: "/admin/api" },
-    { key: "billing", label: t("adminNav.billing"), to: "/admin/billing", soon: true },
+    { key: "billing", label: t("adminNav.billing"), to: "/admin/billing" },
   ];
 }
 
@@ -46,11 +47,6 @@ function AdminLayout() {
   );
 }
 
-function AdminPlaceholder({ tabKey }: { tabKey: string }) {
-  const { t } = useTranslation();
-  return <SettingsPlaceholder label={t(`adminNav.${tabKey}`)} />;
-}
-
 // Returned as inline <Route> elements so the parent <Routes> can parse them.
 export function AdminRoutes() {
   return (
@@ -61,7 +57,7 @@ export function AdminRoutes() {
       <Route path="branding" element={<TenantBrandingTab />} />
       <Route path="auth" element={<AdminAuthTab />} />
       <Route path="api" element={<AdminApiTab />} />
-      <Route path="billing" element={<AdminPlaceholder tabKey="billing" />} />
+      <Route path="billing" element={<AdminBillingTab />} />
     </Route>
   );
 }

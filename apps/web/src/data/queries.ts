@@ -421,6 +421,23 @@ export function useUpdateSpaceBranding(spaceId: string) {
   });
 }
 
+// Billing (Phase 5g). billingEnabled is false on self-host (no Stripe) → the UI
+// shows "self-hosted" instead of upgrade/manage. checkout/portal return a Stripe
+// URL the client redirects to.
+export interface BillingStatus { plan: string; billingEnabled: boolean }
+export function useBillingStatus() {
+  const { token } = useSession();
+  return useQuery({ queryKey: ["billing-status"], queryFn: () => apiFetch<BillingStatus>("/billing/status", token), staleTime: 30_000 });
+}
+export function useCheckout() {
+  const { token } = useSession();
+  return useMutation({ mutationFn: (plan: string) => apiFetch<{ url: string }>("/billing/checkout", token, { method: "POST", body: JSON.stringify({ plan }) }) });
+}
+export function usePortal() {
+  const { token } = useSession();
+  return useMutation({ mutationFn: () => apiFetch<{ url: string }>("/billing/portal", token, { method: "POST" }) });
+}
+
 // API keys (Phase 5f). Per-member ownership; scope ('read'|'write') restricts a key
 // below its owner's authority. The tenant policy caps issuable scope.
 export type ApiScope = "read" | "write";

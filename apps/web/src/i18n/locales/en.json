@@ -58,6 +58,21 @@
     "api": "API",
     "billing": "Billing"
   },
+  "billing": {
+    "title": "Billing",
+    "selfHosted": "This is a self-hosted workspace — all features are included, with no plan limits or billing.",
+    "currentPlan": "Current plan:",
+    "plan_free": "Free",
+    "plan_pro": "Pro",
+    "plan_team": "Team",
+    "branding": "Custom branding",
+    "included": "included",
+    "notIncluded": "not included",
+    "upgradePro": "Upgrade to Pro",
+    "manage": "Manage billing",
+    "teamNote": "Need SSO provisioning, audit logs, or annual invoicing? Contact us about the Team plan.",
+    "portalUnavailable": "No billing set up yet — upgrade first."
+  },
   "adminApi": {
     "title": "API",
     "body": "API keys act with your own permissions. A read key can only read; the scope never grants more than you have.",

@@ -194,6 +194,14 @@ export async function billingPlugin(app: FastifyInstance) {
     return resolveEntitlements(req.tenant.plan)
   })
 
+  // GET /billing/status — current plan + whether self-serve billing is active.
+  // billingEnabled is false on self-host/CE (no Stripe key) → the UI shows the
+  // "self-hosted, all features included" state instead of upgrade/manage controls.
+  app.get('/billing/status', async (req) => ({
+    plan: req.tenant.plan,
+    billingEnabled: !!process.env.STRIPE_SECRET_KEY,
+  }))
+
   const baseUrl = (req: { protocol: string; headers: Record<string, unknown> }) => `${req.protocol}://${req.headers.host}`
 
   // POST /billing/checkout — start a self-serve subscription (tenant#admin).
