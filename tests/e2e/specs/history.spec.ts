@@ -49,14 +49,16 @@ test("history: a revision is listed and restoring it reverts the live editor", a
   await sleep(3500);
   expect(await paneText(page, "preview")).toContain("BETA");
 
-  // (3) open History → the published revision is listed; restore it (confirm dialog).
+  // (3) open History (••• menu) → the published revision is listed; restore it.
+  await page.click("[data-testid=page-overflow-trigger]");
   await page.click("[data-testid=history-toggle]");
   await expect(page.locator("[data-testid=history-panel]")).toBeVisible();
   await expect(page.locator("[data-testid=revision-item]").first()).toBeVisible();
   await page.locator("[data-testid=revision-restore]").first().click();
   await page.locator("[data-testid=confirm-dialog] [data-testid=confirm-restore]").click();
 
-  // (4) the open editor reverts live to the snapshot ("ALPHA", no "BETA") — no reload.
-  await expect.poll(async () => paneText(page, "preview"), { timeout: 10_000 }).toContain("ALPHA");
-  expect(await paneText(page, "preview")).not.toContain("BETA");
+  // (4) the open editor reverts live to the snapshot — no reload. Poll on BETA's
+  // REMOVAL (the async Valkey restore lands shortly after "ALPHA" is already present).
+  await expect.poll(async () => paneText(page, "preview"), { timeout: 10_000 }).not.toContain("BETA");
+  expect(await paneText(page, "preview")).toContain("ALPHA");
 });

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, type MutableRefObject } from "react";
 import type { EditorView } from "@codemirror/view";
 import { connect } from "./collab";
 import { mountSource } from "./editor-source";
@@ -24,33 +24,16 @@ export interface EditorUser {
 
 export type EditorCapability = "view" | "edit";
 
-// Two orthogonal concerns:
-//   - editing (transient, default false): the page opens RENDERED (read-only
-//     preview) for everyone; an edit-capable user clicks Edit to start editing.
-//   - layout (PERSISTED per user): when editing, which editor — a single WYSIWYG
-//     preview, or the vim source + preview split. A split user always edits in
-//     split; everyone else always gets the single editor. Persisted so the choice
-//     sticks across pages and sessions.
+// Two orthogonal concerns, both now CONTROLLED by the host (PageToolbar owns the
+// chrome since 3b-3):
+//   - editing: the page opens RENDERED (published, read-only) for everyone; an
+//     edit-capable user enters edit via the host's Edit control.
+//   - layout: when editing, which editor — single WYSIWYG preview, or vim source +
+//     preview split. The host persists the preference.
 export type EditorLayout = "wysiwyg" | "split";
 // The mounted surface: 'view' (read-only preview) | 'wysiwyg' (editable preview) |
 // 'split' (source + editable preview).
 type SurfaceKey = "view" | EditorLayout;
-
-const LAYOUT_KEY = "wks.editorLayout";
-function loadLayout(): EditorLayout {
-  try {
-    return localStorage.getItem(LAYOUT_KEY) === "split" ? "split" : "wysiwyg";
-  } catch {
-    return "wysiwyg";
-  }
-}
-function saveLayout(l: EditorLayout): void {
-  try {
-    localStorage.setItem(LAYOUT_KEY, l);
-  } catch {
-    /* private mode / no storage — preference just won't persist */
-  }
-}
 
 export interface EditorProps {
   docName: string;
@@ -66,9 +49,10 @@ export interface EditorProps {
   // The PUBLISHED markdown rendered in view mode (draft/publish model). The live
   // draft (collab) is only ever shown in EDIT mode; view shows this snapshot.
   publishedMd?: string | null;
-  // Start in edit mode (only honored for edit-capable users) — used by the
-  // create-page flow, which opens a brand-new draft straight in the editor.
-  autoEdit?: boolean;
+  // Controlled by the host (PageToolbar): whether the editable draft surface is
+  // shown (only honored for edit-capable users) and which editor layout.
+  editing?: boolean;
+  layout?: EditorLayout;
   // Uploads a picked image and returns the ref+alt to insert. Omit to hide the
   // image button (e.g. guests, or a view-only surface).
   onUploadImage?: (file: File) => Promise<{ ref: string; alt: string } | null>;
@@ -98,7 +82,7 @@ function userField(user: EditorUser) {
 // The two-layer edit defense: this component hides the editable surfaces for a
 // view-only capability, but that is convenience. The collab server re-derives
 // readOnly from OpenFGA per document, so a forged edit button still cannot write.
-export function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, autoEdit = false, onUploadImage, inlineComments, anchorGetterRef }: EditorProps) {
+export function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, layout = "wysiwyg", onUploadImage, inlineComments, anchorGetterRef }: EditorProps) {
   const sourceRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
@@ -121,11 +105,9 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
   };
 
   const canEdit = capability === "edit";
-  const [editing, setEditing] = useState(autoEdit);
-  const [layout, setLayout] = useState<EditorLayout>(loadLayout);
-  const setLayoutPref = (l: EditorLayout) => { setLayout(l); saveLayout(l); };
-  // A view-only capability can never edit (the controls aren't rendered, and this
-  // guarantees it even if some state went stale). The collab server is the fortress.
+  // editing + layout are controlled by the host (PageToolbar). A view-only
+  // capability can never edit (surface stays "view" even if editing is forced) —
+  // the collab server is the fortress regardless.
   const surfaceKey: SurfaceKey = canEdit && editing ? layout : "view";
 
   // Resolves wks-attachment image ids to fresh presigned URLs (TTL-cached). Bound
@@ -251,26 +233,7 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
         <div ref={sourceRef} className={styles.host} />
       </section>
       <section className={styles.pane} data-pane="preview">
-        {canEdit && (
-          <div className={styles.modeBar} data-testid="editor-modebar">
-            {surfaceKey === "view" ? (
-              <button type="button" data-testid="edit-toggle" onClick={() => setEditing(true)}>Edit</button>
-            ) : (
-              <>
-                {/* Persisted layout preference: split users stay in split, others in single. */}
-                <button
-                  type="button"
-                  data-testid="layout-toggle"
-                  aria-pressed={layout === "split"}
-                  onClick={() => setLayoutPref(layout === "split" ? "wysiwyg" : "split")}
-                >
-                  {layout === "split" ? "Single editor" : "Split editor (vim)"}
-                </button>
-                <button type="button" data-testid="view-toggle" onClick={() => setEditing(false)}>Done</button>
-              </>
-            )}
-          </div>
-        )}
+        {/* Edit/Done/layout controls live in the host PageToolbar (3b-3). */}
         <div ref={previewRef} className={styles.host} />
       </section>
     </div>

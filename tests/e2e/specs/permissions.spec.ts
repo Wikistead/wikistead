@@ -18,8 +18,8 @@ test("manager grants and revokes page access via the Permissions dialog", async 
 
   await page.goto(`/p/${pageId}`);
   await page.waitForSelector("[data-pane=preview] .cm-content");
-  // the creator (dev-user) has manage → the Permissions control is offered
-  await page.waitForSelector("[data-testid=permissions-open]");
+  // the creator (dev-user) has manage → Permissions is offered in the ••• menu
+  await page.click("[data-testid=page-overflow-trigger]");
   await page.click("[data-testid=permissions-open]");
   await expect(page.locator("[data-testid=permissions-dialog]")).toBeVisible();
 

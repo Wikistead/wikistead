@@ -111,7 +111,7 @@ test("guest EDIT link can publish", async ({ browser }: { browser: Browser }) =>
   await guest.click("[data-pane=preview] .cm-content");
   await guest.keyboard.type("PUBLISHEDBYGUEST");
   await sleep(2800);
-  await guest.click("[data-testid=guest-publish]");
+  await guest.click("[data-testid=publish-page]"); // Publish in the edit-mode toolbar
   await sleep(800);
 
   // the published content (read back via the member API) reflects the guest's publish
