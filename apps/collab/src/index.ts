@@ -84,6 +84,44 @@ restoreSub.on("pmessage", (_pattern: string, channel: string, data: string) => {
   }
 });
 
+// ── Publish flush subscriber ───────────────────────────────────────────────
+//
+// The API server publishes the LAST PERSISTED draft (pages.ydoc), which lags the
+// live doc by the onStoreDocument debounce. Before publishing, the API asks us to
+// persist the live in-memory doc NOW so the snapshot includes the just-typed edits.
+// We force a store (which also sets has_unpublished_changes accurately) and ack so
+// the API can wait for completion, then read the fresh pages.ydoc. Presence/awareness
+// are untouched — this is purely the persistence path.
+//
+// If the doc is not open here (no live edits in this pod), pages.ydoc is already
+// current — we ack immediately. Request and ack use DISTINCT prefixes so the
+// request pattern never matches an ack.
+const flushSub = new IORedis(process.env.VALKEY_URL ?? "redis://localhost:6379");
+const flushPub = new IORedis(process.env.VALKEY_URL ?? "redis://localhost:6379");
+
+flushSub.psubscribe("wks:flushreq:*", (err) => {
+  if (err) console.error("[flush:sub] subscribe failed:", err);
+});
+
+flushSub.on("pmessage", async (_pattern: string, channel: string, reqId: string) => {
+  const documentName = channel.replace("wks:flushreq:", "");
+  try {
+    const document = server.documents.get(documentName);
+    if (document) {
+      const { tenantId, pageId } = parseDocName(documentName);
+      // Persist the current in-memory state immediately (bypass the debounce). This
+      // is exactly what the Database extension stores, just on demand.
+      await storeYdoc(tenantId, pageId, Y.encodeStateAsUpdate(document));
+    }
+  } catch (err) {
+    console.error(`[flush:apply] failed for ${documentName}:`, err);
+  } finally {
+    // Ack regardless: a store error or a not-open doc both mean "proceed" (pages.ydoc
+    // is the best available snapshot). The API also has a timeout as a backstop.
+    flushPub.publish(`wks:flushack:${reqId}`, "1").catch(() => {});
+  }
+});
+
 // ---- helpers ----
 function hostFromUrl(u?: string) { return u ? new URL(u).hostname : "localhost"; }
 function portFromUrl(u?: string) { return u ? Number(new URL(u).port || 6379) : 6379; }
