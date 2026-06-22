@@ -134,6 +134,118 @@ export async function updateSpace(
   return toSpace(row)
 }
 
+// ── per-space access grant/revoke/list (Phase 5b) ───────────────────────────
+// The space-level analogue of per-page access (Phase 4b). A space grant is the
+// INHERITANCE ROOT: viewer/editor/manager on the space flows (OR) to every
+// PUBLISHED page in it. It only ever WIDENS (monotonic) — there is no way to make
+// one published page MORE private than its space here (that is a known limitation;
+// privacy before publish is the draft model). Only a `manage` holder may
+// list/grant/revoke, so the permission structure is never shown to — or handed out
+// by — someone without authority. Grantees are members (user:<sub>) or groups
+// (group:<id>#member); share_link / wildcard are not hand-grantable.
+export type SpaceCapability = 'view' | 'edit' | 'manage'
+const SPACE_CAPS: SpaceCapability[] = ['view', 'edit', 'manage']
+// Capability vocabulary (shared with page access) → the space's FGA relations.
+const CAP_TO_RELATION: Record<SpaceCapability, string> = { view: 'viewer', edit: 'editor', manage: 'manager' }
+const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', editor: 'edit', manager: 'manage' }
+
+function validateSpaceGrant(grantee: string, capability: string): asserts capability is SpaceCapability {
+  if (!SPACE_CAPS.includes(capability as SpaceCapability)) {
+    throw Object.assign(new Error('relation must be view, edit, or manage'), { statusCode: 400 })
+  }
+  if (!/^user:[^*\s]+$/.test(grantee) && !/^group:[^\s]+#member$/.test(grantee)) {
+    throw Object.assign(new Error('grantee must be user:<sub> or group:<id>#member'), { statusCode: 400 })
+  }
+}
+
+async function requireSpaceManage(fga: OpenFgaClient, userId: string, spaceId: string): Promise<void> {
+  const canManage = await check(fga, `user:${userId}`, 'manage', { type: 'space', id: spaceId })
+  if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+}
+
+// A space access change alters inheritance for every PUBLISHED page in the space,
+// so the denormalized search viewer set (doc-builder includes space viewers ONLY
+// when page#space is present = published) must be refreshed for each. Drafts have
+// no page#space, so they neither inherit nor need reindexing. Same reliable outbox
+// path as deleteSpace; stage-2 FGA stays authoritative during any reindex lag.
+async function reindexPublishedPages(db: TenantDb, driver: SearchDriver, tenantId: string, spaceId: string): Promise<void> {
+  const pages = await db.sql<{ id: string }[]>`
+    SELECT id FROM pages WHERE space_id = ${spaceId} AND published_at IS NOT NULL
+  `
+  if (pages.length === 0) return
+  const entries: { id: string; pageId: string }[] = []
+  await db.tx(async (tx) => {
+    for (const p of pages) {
+      const oid = await enqueueOutbox(tx, { tenantId, pageId: p.id, operation: 'upsert' })
+      entries.push({ id: oid, pageId: p.id })
+    }
+  })
+  for (const e of entries) processOutboxAsync(driver, e.id, { tenantId, pageId: e.pageId, operation: 'upsert' })
+}
+
+export async function grantSpaceAccess(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string },
+): Promise<void> {
+  validateSpaceGrant(args.grantee, args.capability)
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  await writeTuples(fga, [{ user: args.grantee, relation: CAP_TO_RELATION[args.capability], object: `space:${args.spaceId}` }])
+  await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
+  emit({ type: 'space.access_granted', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
+}
+
+export async function revokeSpaceAccess(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string },
+): Promise<void> {
+  validateSpaceGrant(args.grantee, args.capability)
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  await deleteTuples(fga, [{ user: args.grantee, relation: CAP_TO_RELATION[args.capability], object: `space:${args.spaceId}` }])
+  await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
+  emit({ type: 'space.access_revoked', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
+}
+
+export async function listSpaceAccess(
+  fga: OpenFgaClient,
+  args: { spaceId: string; userId: string },
+): Promise<{ grantee: string; capability: SpaceCapability }[]> {
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  const { tuples } = await fga.read({ object: `space:${args.spaceId}` })
+  const out: { grantee: string; capability: SpaceCapability }[] = []
+  for (const { key } of tuples ?? []) {
+    if (!key || !(key.relation in RELATION_TO_CAP)) continue
+    // Direct member/group grants only — never expose share_link, user:* (public)
+    // or the structural tenant link.
+    if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
+    out.push({ grantee: key.user, capability: RELATION_TO_CAP[key.relation]! })
+  }
+  return out
+}
+
+// Member typeahead for the grant picker. manage-gated (a space manager may add any
+// tenant member — Confluence parity), RLS-scoped to the tenant. Minimal projection
+// {sub, displayName} ONLY — email is contact info (not needed to PICK), so it is
+// not exposed in a candidate list (least exposure).
+export async function listMemberCandidates(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { spaceId: string; userId: string; q: string },
+): Promise<{ sub: string; displayName: string | null }[]> {
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  const like = `%${args.q.trim()}%`
+  const rows = await db.sql<{ sub: string; display_name: string | null }[]>`
+    SELECT sub, display_name FROM members
+    WHERE display_name ILIKE ${like} OR sub ILIKE ${like}
+    ORDER BY display_name NULLS LAST, sub
+    LIMIT 10
+  `
+  return rows.map((r) => ({ sub: r.sub, displayName: r.display_name }))
+}
+
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function spacesPlugin(app: FastifyInstance) {
@@ -160,5 +272,30 @@ export async function spacesPlugin(app: FastifyInstance) {
       userId: req.user.sub,
     })
     return reply.code(204).send()
+  })
+
+  // ── per-space access (Phase 5b) — all manage-gated ──
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/access', async (req) => {
+    return listSpaceAccess(app.fga, { spaceId: req.params.spaceId, userId: req.user.sub })
+  })
+
+  app.post<{ Params: { spaceId: string }; Body: { grantee: string; relation: string } }>('/spaces/:spaceId/access', async (req, reply) => {
+    await grantSpaceAccess(req.db, app.fga, app.searchDriver, {
+      spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
+      grantee: req.body?.grantee ?? '', capability: req.body?.relation ?? '',
+    })
+    return reply.code(204).send()
+  })
+
+  app.delete<{ Params: { spaceId: string }; Body: { grantee: string; relation: string } }>('/spaces/:spaceId/access', async (req, reply) => {
+    await revokeSpaceAccess(req.db, app.fga, app.searchDriver, {
+      spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
+      grantee: req.body?.grantee ?? '', capability: req.body?.relation ?? '',
+    })
+    return reply.code(204).send()
+  })
+
+  app.get<{ Params: { spaceId: string }; Querystring: { q?: string } }>('/spaces/:spaceId/member-candidates', async (req) => {
+    return listMemberCandidates(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub, q: req.query?.q ?? '' })
   })
 }

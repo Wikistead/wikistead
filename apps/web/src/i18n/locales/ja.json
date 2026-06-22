@@ -65,6 +65,19 @@
     "deleteConfirmTitle": "このスペースを削除",
     "deleteConfirm": "スペース「{{name}}」と配下のすべてのページを削除しますか？ この操作は元に戻せません。"
   },
+  "spaceMembers": {
+    "title": "メンバーと権限",
+    "body": "このスペースへのアクセスをメンバーに付与します。配下のすべての公開ページに波及します。",
+    "addPlaceholder": "メンバーを検索…",
+    "capability": "権限",
+    "view": "閲覧可",
+    "edit": "編集可",
+    "manage": "管理可",
+    "add": "追加",
+    "revoke": "取り消し",
+    "empty": "直接付与はまだありません。",
+    "group": "グループ"
+  },
   "auth": {
     "signInTitle": "wikistead にサインイン",
     "signInBody": "組織の ID プロバイダーで続行します。",

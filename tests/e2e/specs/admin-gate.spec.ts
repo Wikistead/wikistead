@@ -49,7 +49,16 @@ test("admin: user menu opens the tenant console; space settings rename + delete"
   await expect(page).toHaveURL(/\/p\//);
 });
 
-test("non-admin member is denied: admin → 403 (no menu entry); unviewable space settings → 404", async ({ browser }) => {
+test("space Members tab renders and the member typeahead finds a seeded member", async ({ page }) => {
+  await openDemo(page);
+  await page.goto("/spaces/demo_space/settings/members");
+  await expect(page.getByTestId("space-members")).toBeVisible();
+  // Typeahead is manage-gated server-side and returns the minimal {sub,displayName}.
+  await page.getByTestId("space-grant-input").fill("dev");
+  await expect(page.getByTestId("space-grant-candidate").first()).toContainText("dev-user");
+});
+
+test("non-admin member is denied: admin → 403 (no menu entry); unviewable space settings → 404, then view→403", async ({ browser }) => {
   // Admin (dev-user) invites a member via the real-mode console.
   const adminCtx = await browser.newContext();
   const admin = await adminCtx.newPage();
@@ -82,6 +91,21 @@ test("non-admin member is denied: admin → 403 (no menu entry); unviewable spac
   // A space the member cannot even view → 404 (existence hidden), not 403.
   await member.goto(`${REAL_WEB}/spaces/demo_space/settings/general`);
   await expect(member.getByTestId("settings-notfound")).toBeVisible();
+
+  // Now the admin grants the member space VIEW (5b API). The member can now see the
+  // space, so its settings flip from 404 (hidden) to 403 (known but not manage) —
+  // the leak-rule branch deferred from 5a, proven here.
+  const granted = await admin.request.post(`${REAL_WEB}/api/spaces/demo_space/access`, {
+    data: { grantee: `user:${memberSub}`, relation: "view" },
+  });
+  expect(granted.status()).toBe(204);
+  await member.goto(`${REAL_WEB}/spaces/demo_space/settings/general`);
+  await expect(member.getByTestId("settings-forbidden")).toBeVisible();
+
+  // Clean up the grant (FGA persists across runs).
+  await admin.request.delete(`${REAL_WEB}/api/spaces/demo_space/access`, {
+    data: { grantee: `user:${memberSub}`, relation: "view" },
+  });
 
   await adminCtx.close();
   await memberCtx.close();

@@ -319,6 +319,47 @@ export function usePage(pageId: string) {
   });
 }
 
+// ── per-space access (Phase 5b) — same vocabulary as page access ─────────────
+export interface SpaceGrant { grantee: string; capability: PageRelation }
+export interface MemberCandidate { sub: string; displayName: string | null }
+
+export function useSpaceAccess(spaceId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["space-access", spaceId],
+    queryFn: () => apiFetch<SpaceGrant[]>(`/spaces/${encodeURIComponent(spaceId)}/access`, token).then((r) => r ?? []),
+    enabled: enabled && spaceId.length > 0,
+  });
+}
+export function useGrantSpaceAccess(spaceId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    // The API body keys the capability as `relation` (shared page/space vocabulary).
+    mutationFn: (args: { grantee: string; capability: PageRelation }) =>
+      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/access`, token, { method: "POST", body: JSON.stringify({ grantee: args.grantee, relation: args.capability }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["space-access", spaceId] }),
+  });
+}
+export function useRevokeSpaceAccess(spaceId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { grantee: string; capability: PageRelation }) =>
+      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/access`, token, { method: "DELETE", body: JSON.stringify({ grantee: args.grantee, relation: args.capability }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["space-access", spaceId] }),
+  });
+}
+export function useMemberCandidates(spaceId: string, q: string) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["member-candidates", spaceId, q],
+    queryFn: () => apiFetch<MemberCandidate[]>(`/spaces/${encodeURIComponent(spaceId)}/member-candidates?q=${encodeURIComponent(q)}`, token).then((r) => r ?? []),
+    enabled: spaceId.length > 0 && q.trim().length > 0,
+    staleTime: 10_000,
+  });
+}
+
 export function useSearch(q: string) {
   const { token } = useSession();
   const query = q.trim();
