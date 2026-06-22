@@ -22,16 +22,19 @@ test("publish flow: create→edit, draft hidden in view until publish, then visi
   await page.keyboard.type("SECRETDRAFTXYZ visible only after publish");
   await sleep(2800);
 
-  // (2) BEFORE publish: view mode shows the published snapshot (empty) — NOT the draft
+  // (2) BEFORE publish: never-published → "Draft" state; view shows the published
+  // snapshot (empty) — NOT the draft.
+  await expect(page.locator("[data-testid=draft-badge]")).toBeVisible(); // header state
   await page.click("[data-testid=view-toggle]"); // Done → view
   await sleep(500);
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("SECRETDRAFTXYZ");
 
-  // (3) publish → the content now appears in view
+  // (3) publish → the content appears in view and the Draft badge is gone
   await page.click("[data-testid=publish-page]");
   await expect
     .poll(async () => page.locator("[data-pane=preview] .cm-content").innerText(), { timeout: 8000 })
     .toContain("SECRETDRAFTXYZ");
+  await expect(page.locator("[data-testid=draft-badge]")).toHaveCount(0);
 
   // (4) edit again → the "unpublished changes" indicator appears
   await page.click("[data-testid=edit-toggle]");

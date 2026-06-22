@@ -7,12 +7,14 @@ import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import type { TenantDb } from '../db/index.js'
 
-interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean }
-export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean }
+interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean }
+export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean }
 function toPage(r: PageRow): Page {
-  // hasUnpublishedChanges is only present when the SELECT included the column
-  // (listPages / getPage); the cheap denormalized flag drives the sidebar badge.
-  return { id: r.id, tenantId: r.tenant_id, spaceId: r.space_id, parentId: r.parent_id, title: r.title, position: r.position, createdAt: r.created_at, updatedAt: r.updated_at, hasUnpublishedChanges: r.has_unpublished_changes ?? false }
+  // hasUnpublishedChanges + published are only present when the SELECT included the
+  // columns (listPages); together they drive the sidebar's 3-state badge
+  // (Draft / Published / Unpublished changes). `published` is a cheap check
+  // (published_at IS NOT NULL) — the heavy published_md is not read for the tree.
+  return { id: r.id, tenantId: r.tenant_id, spaceId: r.space_id, parentId: r.parent_id, title: r.title, position: r.position, createdAt: r.created_at, updatedAt: r.updated_at, hasUnpublishedChanges: r.has_unpublished_changes ?? false, published: r.published ?? false }
 }
 
 // Fractional sibling ordering: a new value between two neighbours, no renumber.
@@ -101,7 +103,8 @@ export async function listPages(
   args: { spaceId: string; userId: string },
 ): Promise<Page[]> {
   const rows = await db.sql<PageRow[]>`
-    SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at, has_unpublished_changes
+    SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at,
+           has_unpublished_changes, (published_at IS NOT NULL) AS published
     FROM pages WHERE space_id = ${args.spaceId} ORDER BY position, created_at
   `
   const allowed = await filterAuthorized(fga, `user:${args.userId}`, 'view', rows.map((r) => r.id))
@@ -164,15 +167,25 @@ export async function publishPage(
   fga: OpenFgaClient,
   driver: SearchDriver,
   args: { pageId: string; userId: string },
-): Promise<{ publishedAt: Date; revisionId: string }> {
+): Promise<{ publishedAt: Date | null; revisionId: string | null; noop: boolean }> {
   const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: args.pageId })
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
-  const [draft] = await db.sql<[{ tenant_id: string; ydoc: Buffer | null; title: string }]>`
-    SELECT tenant_id, ydoc, title FROM pages WHERE id = ${args.pageId}
+  const [draft] = await db.sql<[{ tenant_id: string; ydoc: Buffer | null; title: string; published_md: string | null; published_at: Date | null; published_revision_id: string | null }]>`
+    SELECT tenant_id, ydoc, title, published_md, published_at, published_revision_id FROM pages WHERE id = ${args.pageId}
   `
   if (!draft) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const md = decodeYdocContent(draft.ydoc)
+
+  // No-op guard (server is the accurate gate): if the draft text equals what is
+  // already published, do NOT create a revision — that would be meaningless history.
+  // The UI's enable/disable uses the cheap over-approximated flag; this is the exact
+  // check. Reconcile the cheap flag to false so a spurious "unpublished" badge clears.
+  if (md === draft.published_md) {
+    await db.sql`UPDATE pages SET has_unpublished_changes = false WHERE id = ${args.pageId}`
+    return { publishedAt: draft.published_at, revisionId: draft.published_revision_id, noop: true }
+  }
+
   // revisions.ydoc is NOT NULL — a never-edited page publishes an empty Y.Doc.
   const ydocBuf = draft.ydoc ?? Buffer.from(Y.encodeStateAsUpdate(new Y.Doc()))
 
@@ -197,7 +210,7 @@ export async function publishPage(
   })
   processOutboxAsync(driver, outboxId, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' })
   emit({ type: 'page.published', tenantId: draft.tenant_id, pageId: args.pageId, revisionId, actorId: args.userId })
-  return { publishedAt, revisionId }
+  return { publishedAt, revisionId, noop: false }
 }
 
 // Read the published content (view-gated). hasUnpublishedChanges = the live shared

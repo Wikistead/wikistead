@@ -30,6 +30,7 @@ interface Node {
   name: string;
   pageId: string;
   spaceId: string;
+  published: boolean;
   unpublished: boolean;
   children?: Node[];
 }
@@ -38,7 +39,7 @@ function buildPageNodes(pages: Page[], parentId: string | null): Node[] {
   return pages
     .filter((p) => p.parentId === parentId)
     .sort((a, b) => a.position - b.position)
-    .map((p) => ({ id: `page:${p.id}`, name: p.title || "Untitled", pageId: p.id, spaceId: p.spaceId, unpublished: p.hasUnpublishedChanges ?? false, children: buildPageNodes(pages, p.id) }));
+    .map((p) => ({ id: `page:${p.id}`, name: p.title || "Untitled", pageId: p.id, spaceId: p.spaceId, published: p.published ?? false, unpublished: p.hasUnpublishedChanges ?? false, children: buildPageNodes(pages, p.id) }));
 }
 
 function useSize(ref: React.RefObject<HTMLElement | null>) {
@@ -152,7 +153,12 @@ export function Sidebar() {
         </span>
         <FileText size={14} className={styles.fileIcon} />
         <span className={styles.name}>{d.name}</span>
-        {d.unpublished && <span className={styles.unpublishedDot} data-testid="unpublished-dot" title="Unpublished changes" aria-label="Unpublished changes" />}
+        {/* 3-state: Draft (never published) / Unpublished changes / clean (nothing). */}
+        {!d.published ? (
+          <span className={styles.draftBadge} data-testid="tree-draft-badge" title="Draft (not published)">Draft</span>
+        ) : d.unpublished ? (
+          <span className={styles.unpublishedDot} data-testid="unpublished-dot" title="Unpublished changes" aria-label="Unpublished changes" />
+        ) : null}
         {canEdit && (
           <span className={styles.actions} onClick={(e) => e.stopPropagation()}>
             <Menu.Root onSelect={(m) => onRowAction(m.value, d)}>
