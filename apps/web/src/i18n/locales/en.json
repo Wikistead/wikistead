@@ -65,6 +65,19 @@
     "deleteConfirmTitle": "Delete this space",
     "deleteConfirm": "Delete space \"{{name}}\" and all of its pages? This cannot be undone."
   },
+  "spaceMembers": {
+    "title": "Members & permissions",
+    "body": "Grant members access to this space. Access flows to every published page in it.",
+    "addPlaceholder": "Search members…",
+    "capability": "Permission",
+    "view": "Can view",
+    "edit": "Can edit",
+    "manage": "Can manage",
+    "add": "Add",
+    "revoke": "Revoke",
+    "empty": "No direct grants yet.",
+    "group": "group"
+  },
   "auth": {
     "signInTitle": "Sign in to wikistead",
     "signInBody": "Continue with your organization's identity provider.",

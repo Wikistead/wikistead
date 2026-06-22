@@ -18,6 +18,8 @@ export type DomainEvent =
   | { type: 'space.created';  tenantId: string; spaceId: string; actorId: string }
   | { type: 'space.updated';  tenantId: string; spaceId: string; actorId: string }
   | { type: 'space.deleted';  tenantId: string; spaceId: string; actorId: string }
+  | { type: 'space.access_granted'; tenantId: string; spaceId: string; grantee: string; relation: string; actorId: string }
+  | { type: 'space.access_revoked'; tenantId: string; spaceId: string; grantee: string; relation: string; actorId: string }
   // ── Attachments ──────────────────────────────────────────────────────
   | { type: 'attachment.confirmed'; tenantId: string; attachmentId: string; pageId: string; actorId: string }
   | { type: 'attachment.deleted';   tenantId: string; attachmentId: string; pageId: string; actorId: string }

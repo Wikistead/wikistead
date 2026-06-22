@@ -9,6 +9,7 @@ import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
 import { SettingsShell, SettingsDenied, SettingsPlaceholder, type SettingsTab } from "./SettingsShell";
+import { SpaceMembersTab } from "./SpaceMembersTab";
 
 interface SpaceCtx { spaceId: string; name: string }
 
@@ -16,7 +17,7 @@ function useSpaceTabs(spaceId: string): SettingsTab[] {
   const { t } = useTranslation();
   return [
     { key: "general", label: t("spaceSettings.general"), to: `/spaces/${spaceId}/settings/general` },
-    { key: "members", label: t("spaceSettings.members"), to: `/spaces/${spaceId}/settings/members`, soon: true },
+    { key: "members", label: t("spaceSettings.members"), to: `/spaces/${spaceId}/settings/members` },
     { key: "theme", label: t("spaceSettings.theme"), to: `/spaces/${spaceId}/settings/theme`, soon: true },
   ];
 }
@@ -113,7 +114,7 @@ export function SpaceSettingsRoutes() {
     <Route path="/spaces/:spaceId/settings" element={<SpaceSettingsLayout />}>
       <Route index element={<Navigate to="general" replace />} />
       <Route path="general" element={<SpaceGeneralTab />} />
-      <Route path="members" element={<SpacePlaceholder tabKey="members" />} />
+      <Route path="members" element={<SpaceMembersTab />} />
       <Route path="theme" element={<SpacePlaceholder tabKey="theme" />} />
     </Route>
   );
