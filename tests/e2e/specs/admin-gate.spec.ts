@@ -65,6 +65,14 @@ test("space Pages overview lists the space's pages", async ({ page }) => {
   await expect(page.locator("[data-testid=space-page-row]").first()).toBeVisible();
 });
 
+test("admin Billing tab renders (self-hosted state when Stripe is not configured)", async ({ page }) => {
+  await openDemo(page);
+  await page.goto("/admin/billing");
+  await expect(page.getByTestId("admin-billing")).toBeVisible();
+  // The e2e stack has no STRIPE_SECRET_KEY → billing disabled → self-hosted notice.
+  await expect(page.getByTestId("billing-selfhosted")).toBeVisible();
+});
+
 test("admin API tab: create a key shows the plaintext once, then revoke", async ({ page }) => {
   await openDemo(page);
   await page.goto("/admin/api");

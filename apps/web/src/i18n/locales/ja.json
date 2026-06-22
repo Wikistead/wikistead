@@ -58,6 +58,21 @@
     "api": "API",
     "billing": "課金"
   },
+  "billing": {
+    "title": "課金",
+    "selfHosted": "これはセルフホストのワークスペースです — すべての機能が含まれ、プラン制限も課金もありません。",
+    "currentPlan": "現在のプラン:",
+    "plan_free": "Free",
+    "plan_pro": "Pro",
+    "plan_team": "Team",
+    "branding": "カスタムブランディング",
+    "included": "含む",
+    "notIncluded": "含まない",
+    "upgradePro": "Pro にアップグレード",
+    "manage": "課金を管理",
+    "teamNote": "SSO プロビジョニング・監査ログ・年間請求が必要ですか？ Team プランについてお問い合わせください。",
+    "portalUnavailable": "まだ課金が設定されていません — 先にアップグレードしてください。"
+  },
   "adminApi": {
     "title": "API",
     "body": "API キーはあなた自身の権限で動作します。read キーは読み取りのみ可能で、scope が権限以上を与えることはありません。",
