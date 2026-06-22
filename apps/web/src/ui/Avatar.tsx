@@ -17,6 +17,9 @@ export interface AvatarProps {
   // Stable seed for the colour. Defaults to `name`, but pass a more stable id (a
   // user's sub, a space id) so a rename doesn't recolour the avatar.
   seed?: string;
+  // Verbatim glyph override (an emoji / short label) shown instead of the computed
+  // initials. Used by the #4 space-icon override. `src` (a picture) still wins.
+  glyph?: string | null;
   size?: number; // px (width = height). Default 24.
   shape?: "circle" | "rounded"; // circle = person (default), rounded = space/object
   title?: string;
@@ -24,13 +27,13 @@ export interface AvatarProps {
   "data-testid"?: string;
 }
 
-export function Avatar({ name, src, seed, size = 24, shape = "circle", title, className, ...rest }: AvatarProps) {
+export function Avatar({ name, src, seed, glyph, size = 24, shape = "circle", title, className, ...rest }: AvatarProps) {
   const [failed, setFailed] = useState(false);
   const showImg = src && !failed;
   const style: CSSProperties = {
     width: size,
     height: size,
-    fontSize: Math.round(size * 0.42),
+    fontSize: Math.round(size * (glyph ? 0.55 : 0.42)),
     background: showImg ? undefined : colorFromString(seed ?? name),
   };
   const cls = [styles.avatar, shape === "rounded" ? styles.rounded : styles.circle, className].filter(Boolean).join(" ");
@@ -40,7 +43,7 @@ export function Avatar({ name, src, seed, size = 24, shape = "circle", title, cl
         // referrerPolicy: don't leak the app URL to the IdP/CDN serving the picture.
         <img className={styles.img} src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
       ) : (
-        initials(name)
+        glyph || initials(name)
       )}
     </span>
   );

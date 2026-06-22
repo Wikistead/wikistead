@@ -9,7 +9,7 @@ import type { SearchDriver } from '../search/index.js'
 import type { TenantDb } from '../db/index.js'
 
 interface SpaceRow { id: string; tenant_id: string; name: string; created_at: Date }
-export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage'; accentKey?: string | null }
+export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage'; accentKey?: string | null; icon?: string | null }
 function toSpace(r: SpaceRow): Space {
   return { id: r.id, tenantId: r.tenant_id, name: r.name, createdAt: r.created_at }
 }
@@ -58,8 +58,8 @@ export async function createSpace(
 export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: string): Promise<Space[]> {
   // accent_key (space branding, Phase 5c) joined in so the client can apply the
   // space ▷ tenant ▷ default accent cascade without a per-space fetch.
-  const rows = await db.sql<(SpaceRow & { accent_key: string | null })[]>`
-    SELECT s.id, s.tenant_id, s.name, s.created_at, ss.accent_key
+  const rows = await db.sql<(SpaceRow & { accent_key: string | null; icon: string | null })[]>`
+    SELECT s.id, s.tenant_id, s.name, s.created_at, ss.accent_key, ss.icon
     FROM spaces s LEFT JOIN space_settings ss ON ss.space_id = s.id
     ORDER BY s.created_at
   `
@@ -80,7 +80,7 @@ export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: strin
     }),
   )
   const capById = new Map(caps)
-  return rows.filter((r) => capById.get(r.id) != null).map((r) => ({ ...toSpace(r), capability: capById.get(r.id)!, accentKey: r.accent_key }))
+  return rows.filter((r) => capById.get(r.id) != null).map((r) => ({ ...toSpace(r), capability: capById.get(r.id)!, accentKey: r.accent_key, icon: r.icon }))
 }
 
 // Set/clear a space's branding accent (Phase 5c). manage-gated AND entitlement-
@@ -104,6 +104,30 @@ export async function updateSpaceBranding(
     ON CONFLICT (space_id) DO UPDATE SET accent_key = ${args.accentKey}, updated_at = now()
   `
   emit({ type: 'space.branding_updated', tenantId: args.tenantId, spaceId: args.spaceId, actorId: args.userId })
+}
+
+// Set/clear a space's icon override (#4). manage-gated but NOT entitlement-gated — an
+// icon is basic UX, not a Pro lever (unlike the accent). `icon` is a short glyph
+// (emoji / 1–2 letters) or null to clear (revert to the auto initials chip). We cap
+// the length so it stays a glyph, not a label; multi-code-unit emoji (ZWJ/flags) fit
+// under 16 UTF-16 units. The chip's COLOUR is always client-derived from the space id.
+export async function updateSpaceIcon(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { spaceId: string; tenantId: string; userId: string; icon: string | null },
+): Promise<void> {
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  let icon = args.icon
+  if (icon !== null) {
+    icon = icon.trim()
+    if (!icon || icon.length > 16) throw Object.assign(new Error('invalid icon'), { statusCode: 400 })
+  }
+  await db.sql`
+    INSERT INTO space_settings (space_id, tenant_id, icon, updated_at)
+    VALUES (${args.spaceId}, ${args.tenantId}, ${icon}, now())
+    ON CONFLICT (space_id) DO UPDATE SET icon = ${icon}, updated_at = now()
+  `
+  emit({ type: 'space.updated', tenantId: args.tenantId, spaceId: args.spaceId, actorId: args.userId })
 }
 
 // Delete a space and all its pages.
@@ -368,6 +392,15 @@ export async function spacesPlugin(app: FastifyInstance) {
     await updateSpaceBranding(req.db, app.fga, {
       spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
       plan: req.tenant.plan, accentKey: req.body?.accentKey ?? null,
+    })
+    return reply.code(204).send()
+  })
+
+  // Space icon override (#4) — manage-gated only (basic UX, not entitlement-gated).
+  app.patch<{ Params: { spaceId: string }; Body: { icon?: string | null } }>('/spaces/:spaceId/icon', async (req, reply) => {
+    await updateSpaceIcon(req.db, app.fga, {
+      spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
+      icon: req.body?.icon ?? null,
     })
     return reply.code(204).send()
   })

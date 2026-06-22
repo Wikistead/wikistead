@@ -21,6 +21,7 @@ import { useSession } from "../session/SessionProvider";
 import { useActiveSpace } from "../app/ActiveSpace";
 import { RenameDialog, ConfirmDialog } from "../ui/dialogs";
 import { ShareDialog } from "../ui/ShareDialog";
+import { SpaceIcon } from "../ui/SpaceIcon";
 import styles from "./Sidebar.module.css";
 
 // One space at a time (Notion/Outline style): the sidebar shows ONLY the active
@@ -195,6 +196,7 @@ export function Sidebar() {
           }}
         >
           <Menu.Trigger className={styles.switcher} data-testid="space-switcher">
+            {currentSpace && <SpaceIcon id={currentSpace.id} name={currentSpace.name} icon={currentSpace.icon} size={20} data-testid="space-icon" />}
             <span className={styles.switcherName}>{currentSpace?.name || t("sidebar.noSpace")}</span>
             <ChevronsUpDown size={14} />
           </Menu.Trigger>
@@ -202,7 +204,10 @@ export function Sidebar() {
             <Menu.Positioner>
               <Menu.Content className={styles.menu} data-testid="space-menu">
                 {spaces.map((s) => (
-                  <Menu.Item key={s.id} value={s.id} className={styles.menuItem} data-testid="space-option">{s.name || t("sidebar.untitledSpace")}</Menu.Item>
+                  <Menu.Item key={s.id} value={s.id} className={styles.menuItem} data-testid="space-option">
+                    <SpaceIcon id={s.id} name={s.name} icon={s.icon} size={18} />
+                    {s.name || t("sidebar.untitledSpace")}
+                  </Menu.Item>
                 ))}
                 <Menu.Separator className={styles.menuSep} />
                 {currentSpace && canManage && <Menu.Item value="__rename__" className={styles.menuItem}><Pencil size={13} /> {t("sidebar.renameSpace")}</Menu.Item>}
