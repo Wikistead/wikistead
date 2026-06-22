@@ -6,6 +6,7 @@ import { openDemo, enterEdit, sleep } from "../helpers";
 // the collab room — the draft is not delivered to their browser). An EDIT guest can
 // publish.
 const API = "http://dev.localhost:4010";
+const PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
 async function newPage(page: import("@playwright/test").Page, title: string): Promise<string> {
   return page.evaluate(async ({ api, title }) => {
@@ -57,6 +58,43 @@ test("guest VIEW link shows the published version, never the live draft", async 
   expect(text).not.toContain("DRAFTONLYFORGUEST");    // the live draft never reaches a view guest
   // and it is read-only
   expect(await guest.$eval("[data-pane=preview] .cm-content", (el) => el.getAttribute("contenteditable"))).toBe("false");
+});
+
+test("guest VIEW link renders a published image (guest image resolution)", async ({ browser }: { browser: Browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  await openDemo(member);
+  const pageId = await newPage(member, "guest image page");
+  await member.goto(`/p/${pageId}`);
+  await member.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(300);
+
+  // upload an image via the attachments panel (proven path)
+  await member.click("[data-testid=attachments-panel] [aria-expanded]");
+  await sleep(300);
+  await member.setInputFiles("[data-testid=attachments-panel] input[type=file]", { name: "g.png", mimeType: "image/png", buffer: Buffer.from(PNG_1x1, "base64") });
+  await member.waitForFunction(() => [...document.querySelectorAll("[data-testid=attach-item]")].some((e) => (e as HTMLElement).innerText.includes("g.png")), undefined, { timeout: 8000 });
+  const attId = await member.evaluate(async ({ api, pageId }) => {
+    const list = await (await fetch(`${api}/spaces/demo_space/pages/${pageId}/attachments`, { headers: { Authorization: "Bearer dev-token" } })).json();
+    return (list.find((a: { filename: string }) => a.filename === "g.png") as { id: string }).id;
+  }, { api: API, pageId });
+
+  // reference it in the draft, then PUBLISH
+  await enterEdit(member);
+  await member.click("[data-pane=preview] .cm-content");
+  await member.keyboard.type(`![pic](wks-attachment:${attId})`);
+  await sleep(2800);
+  await member.evaluate(async ({ api, pageId }) => {
+    await fetch(`${api}/pages/${pageId}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+  }, { api: API, pageId });
+
+  // guest opens the VIEW link → the published image renders AND actually loads
+  const url = await shareUrl(member, pageId, "view");
+  const guest = await (await browser.newContext()).newPage();
+  await guest.goto(url);
+  await guest.waitForSelector("[data-pane=preview] .cm-content");
+  const img = guest.locator("[data-pane=preview] img.cm-lp-image");
+  await expect(img).toBeVisible({ timeout: 8000 });
+  await expect.poll(async () => img.evaluate((el: HTMLImageElement) => el.naturalWidth), { timeout: 8000 }).toBeGreaterThan(0);
 });
 
 test("guest EDIT link can publish", async ({ browser }: { browser: Browser }) => {

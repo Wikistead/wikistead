@@ -110,23 +110,31 @@ export async function confirmAttachment(
   return { id: row.id, filename: row.filename, contentType: row.content_type, sizeBytes, createdAt: row.created_at, downloadUrl }
 }
 
-// Return a presigned GET URL for a confirmed attachment.
-// Status rules enforced here:
-//   pending → 404 (upload not yet complete; treat as not found)
-//   deleted → 410 Gone (explicitly removed)
-//   confirmed → issue presigned GET
-// FGA check: view on page.
+// Return a presigned GET URL for a confirmed attachment. This is the first
+// implementation of the general "page-view-gated internal-resource resolution"
+// pattern: a principal (member OR guest) resolves an internal resource only after
+// OpenFGA confirms `view` on the resource's OWN page. The presigned URL is issued
+// AFTER that check — never to an unauthorized principal (the P3 image-authz rule,
+// extended to the guest principal; guests are not a softer path).
+//
+// Status rules: pending → 404, deleted → 410 Gone, confirmed → issue presigned GET.
+//
+// subject = "user:<sub>" | "share_link:<id>"; guests pass a time context so the
+// share_link's non_expired condition is evaluated (expired/revoked → denied). No
+// explicit resource binding is needed: a share_link grants view on its ONE bound
+// page (1 link = 1 resource), so a view check against a DIFFERENT page (the
+// attachment's own page) is naturally false — the FGA tuple structure IS the bind.
 export async function downloadAttachment(
   db: TenantDb,
   storage: StorageDriver,
   fga: OpenFgaClient,
-  args: { id: string; userId: string },
+  args: { id: string; subject: string; context?: { current_time: string } },
 ): Promise<{ downloadUrl: string; filename: string; expiresAt: string }> {
   const [row] = await db.sql<AttachmentRow[]>`SELECT * FROM attachments WHERE id = ${args.id}`
   if (!row || row.status === 'pending') throw Object.assign(new Error('not found'), { statusCode: 404 })
   if (row.status === 'deleted') throw Object.assign(new Error('gone'), { statusCode: 410 })
 
-  const canView = await check(fga, `user:${args.userId}`, 'view', { type: 'page', id: row.page_id })
+  const canView = await check(fga, args.subject, 'view', { type: 'page', id: row.page_id }, args.context)
   if (!canView) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
   const downloadUrl = await storage.presignGet(row.s3_key, { ttlSeconds: GET_TTL })
@@ -217,11 +225,13 @@ export async function attachmentsPlugin(app: FastifyInstance) {
     return confirmAttachment(req.db, app.storageDriver, { id: req.params.id, tenantId: req.tenant.id, userId: req.user.sub })
   })
 
-  app.get<{ Params: { id: string } }>('/attachments/:id/download', async (req, reply) => {
-    const result = await downloadAttachment(req.db, app.storageDriver, app.fga, {
-      id: req.params.id,
-      userId: req.user.sub,
-    })
+  // Members OR a guest (view share-link). The principal is resolved here; the FGA
+  // `view` check on the attachment's page is the authority (guests not softer).
+  app.get<{ Params: { id: string } }>('/attachments/:id/download', { config: { guest: 'view' } }, async (req, reply) => {
+    const principal = req.user
+      ? { subject: `user:${req.user.sub}` }
+      : { subject: `share_link:${req.guest!.shareLinkId}`, context: { current_time: new Date().toISOString() } }
+    const result = await downloadAttachment(req.db, app.storageDriver, app.fga, { id: req.params.id, ...principal })
     return reply.send(result)
   })
 
