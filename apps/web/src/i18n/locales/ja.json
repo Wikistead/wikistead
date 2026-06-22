@@ -7,6 +7,18 @@
     "loading": "読み込み中…",
     "untitled": "無題"
   },
+  "toast": {
+    "published": "公開しました",
+    "publishFailed": "公開できませんでした",
+    "restored": "選択したバージョンに復元しました",
+    "restoreFailed": "復元できませんでした",
+    "accessGranted": "アクセスを付与しました",
+    "accessRevoked": "アクセスを取り消しました",
+    "linkCreated": "共有リンクを作成しました",
+    "linkRevoked": "共有リンクを取り消しました",
+    "copied": "リンクをクリップボードにコピーしました",
+    "actionFailed": "問題が発生しました"
+  },
   "theme": {
     "label": "テーマ",
     "light": "ライト",

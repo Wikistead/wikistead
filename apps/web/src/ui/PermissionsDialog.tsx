@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Dialog } from "@ark-ui/react/dialog";
 import { Portal } from "@ark-ui/react/portal";
 import { usePageAccess, useGrantAccess, useRevokeAccess, type PageRelation } from "../data/queries";
+import { notify } from "./toast";
 import styles from "./dialogs.module.css";
 
 // Per-page permission management (Phase 4c). Shown only to managers (the open page's
@@ -20,7 +21,10 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   const add = () => {
     const s = sub.trim();
     if (!s) return;
-    grant.mutate({ grantee: `user:${s}`, relation });
+    grant.mutate({ grantee: `user:${s}`, relation }, {
+      onSuccess: () => notify.success(t("toast.accessGranted")),
+      onError: () => notify.error(t("toast.actionFailed")),
+    });
     setSub("");
   };
   const label = (g: string) => g.startsWith("group:") ? `${g.replace(/^group:/, "").replace(/#member$/, "")} (${t("permissions.group")})` : g.replace(/^user:/, "");
@@ -49,7 +53,10 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
                 <div key={`${g.grantee}:${g.relation}`} className={styles.linkItem} data-testid="grant-item">
                   <span className={styles.linkMeta}>{g.relation}</span>
                   <span className={styles.linkUrl} style={{ border: "none" }}>{label(g.grantee)}</span>
-                  <button type="button" className={styles.iconBtn} data-danger="" aria-label={t("permissions.revoke")} data-testid="grant-revoke" onClick={() => revoke.mutate({ grantee: g.grantee, relation: g.relation })}>×</button>
+                  <button type="button" className={styles.iconBtn} data-danger="" aria-label={t("permissions.revoke")} data-testid="grant-revoke" onClick={() => revoke.mutate({ grantee: g.grantee, relation: g.relation }, {
+                    onSuccess: () => notify.success(t("toast.accessRevoked")),
+                    onError: () => notify.error(t("toast.actionFailed")),
+                  })}>×</button>
                 </div>
               ))}
               {(grants?.length ?? 0) === 0 && <p style={{ color: "var(--fg-dim)", fontSize: 12, margin: 0 }}>{t("permissions.empty")}</p>}

@@ -9,6 +9,7 @@ import { CommentsPanel } from "../comments/CommentsPanel";
 import { HistoryPanel } from "../history/HistoryPanel";
 import { PermissionsDialog } from "../ui/PermissionsDialog";
 import { Button } from "../ui/Button";
+import { notify } from "../ui/toast";
 import { useComments } from "../data/comments";
 import { Sidebar } from "../sidebar/Sidebar";
 import { SearchBox } from "../search/SearchBox";
@@ -161,7 +162,10 @@ function PageRoute() {
             onDone={() => setEditing(false)}
             publishState={publishState}
             canPublish={!!published?.hasUnpublishedChanges}
-            onPublish={canEdit ? () => publish.mutate() : undefined}
+            onPublish={canEdit ? () => publish.mutate(undefined, {
+              onSuccess: () => notify.success(t("toast.published")),
+              onError: () => notify.error(t("toast.publishFailed")),
+            }) : undefined}
             publishing={publish.isPending}
             layout={layout}
             onToggleLayout={toggleLayout}
@@ -228,6 +232,7 @@ function ShareRoute() {
 // the collab draft to co-edit and can Publish. The published content is fetched
 // over HTTP with the guest token (the server re-checks the share_link's authority).
 function GuestPage({ minted }: { minted: GuestToken }) {
+  const { t } = useTranslation();
   const { token, docName, capability } = minted;
   const pageId = docName.replace(/^t:.+?:p:/, "");
   // Anonymous guest identity (never an OIDC account / seat — the project design notes).
@@ -254,7 +259,12 @@ function GuestPage({ minted }: { minted: GuestToken }) {
 
   const onPublish = async () => {
     setPublishing(true);
-    await apiFetch(`/pages/${encodeURIComponent(pageId)}/publish`, token, { method: "POST" }).catch(() => {});
+    try {
+      await apiFetch(`/pages/${encodeURIComponent(pageId)}/publish`, token, { method: "POST" });
+      notify.success(t("toast.published"));
+    } catch {
+      notify.error(t("toast.publishFailed"));
+    }
     setPublishing(false);
     reloadPublished();
   };
