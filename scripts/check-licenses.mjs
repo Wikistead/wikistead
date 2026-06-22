@@ -29,6 +29,16 @@ const ALLOW = new Set([
 // distribution-licensing concern — skip them.
 const isWorkspacePkg = (name) => name === "wikistead" || name.startsWith("@wikistead/");
 
+// Scoped font-license exception (ADR-011): the SIL Open Font License (OFL-1.1) is
+// permissive for the purpose of the code dual-licensing premise — it explicitly
+// permits bundling the font with any software, including commercial/closed-source
+// distribution and sale, and imposes NO license requirement on that software. It
+// only governs the font files themselves. We therefore allow OFL-1.1, but ONLY for
+// font packages (so it can never wave through an OFL-licensed *code* dependency).
+// Self-hosted Plus Jakarta Sans (@fontsource/*) is the brand typeface — approved.
+const FONT_LICENSE_ALLOW = new Set(["OFL-1.1"]);
+const isFontPkg = (name) => name.startsWith("@fontsource/") || name.startsWith("@fontsource-variable/");
+
 let raw;
 try {
   raw = execSync("pnpm licenses list --prod --json", {
@@ -52,6 +62,7 @@ for (const [license, pkgs] of Object.entries(byLicense)) {
   if (ALLOW.has(license)) continue;
   for (const pkg of pkgs) {
     if (isWorkspacePkg(pkg.name)) continue;
+    if (FONT_LICENSE_ALLOW.has(license) && isFontPkg(pkg.name)) continue;
     violations.push({ name: pkg.name, versions: (pkg.versions || []).join(", "), license });
   }
 }
