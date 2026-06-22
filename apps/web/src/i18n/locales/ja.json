@@ -196,7 +196,13 @@
     "body": "ワークスペース名とアクセントカラーを設定します。既定で全体に適用され、スペースごとにアクセントを上書きできます。",
     "displayName": "ワークスペース名",
     "displayNamePlaceholder": "wikistead",
-    "default": "デフォルト"
+    "default": "デフォルト",
+    "logo": "ロゴ",
+    "logoHint": "ヘッダのワークスペース名を置き換えます。PNG・JPEG・WebP、512 KB まで。",
+    "logoUpload": "ロゴをアップロード",
+    "logoRemove": "削除",
+    "logoType": "対応していない画像形式です — PNG・JPEG・WebP を使ってください。",
+    "logoSize": "画像が大きすぎます（最大 512 KB）。"
   },
   "accent": {
     "label": "アクセントカラー",

@@ -196,7 +196,13 @@
     "body": "Set your workspace name and accent colour. These apply everywhere by default; a space can override the accent.",
     "displayName": "Workspace name",
     "displayNamePlaceholder": "wikistead",
-    "default": "Default"
+    "default": "Default",
+    "logo": "Logo",
+    "logoHint": "Replaces the workspace name in the header. PNG, JPEG or WebP, up to 512 KB.",
+    "logoUpload": "Upload logo",
+    "logoRemove": "Remove",
+    "logoType": "Unsupported image type — use PNG, JPEG or WebP.",
+    "logoSize": "Image too large (max 512 KB)."
   },
   "accent": {
     "label": "Accent colour",

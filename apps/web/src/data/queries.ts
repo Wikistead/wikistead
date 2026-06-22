@@ -358,7 +358,7 @@ export function useRevokeSpaceAccess(spaceId: string) {
 // it works for members, guests, and unauthenticated visitors — it drives the header
 // wordmark and the tenant layer of the accent cascade. The server strips branding
 // when the plan isn't entitled.
-export interface BrandingDTO { displayName: string | null; accentKey: string | null }
+export interface BrandingDTO { displayName: string | null; accentKey: string | null; logoUrl: string | null }
 export function useBranding() {
   const { token } = useSession();
   return useQuery({
@@ -373,6 +373,24 @@ export function useUpdateTenantBranding() {
   return useMutation({
     mutationFn: (args: { accentKey: string | null; displayName: string | null }) =>
       apiFetch<null>("/tenant/branding", token, { method: "PATCH", body: JSON.stringify(args) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["branding"] }),
+  });
+}
+// Logo: base64 in (no multipart dependency); the server validates magic bytes + size.
+export function useUploadTenantLogo() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (dataBase64: string) =>
+      apiFetch<null>("/tenant/branding/logo", token, { method: "POST", body: JSON.stringify({ data: dataBase64 }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["branding"] }),
+  });
+}
+export function useRemoveTenantLogo() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<null>("/tenant/branding/logo", token, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["branding"] }),
   });
 }

@@ -14,6 +14,11 @@ export interface StorageDriver {
   ensureBucket(): Promise<void>
   // Generate a presigned PUT URL for direct client upload (server never proxies bytes).
   presignPut(key: string, opts: { contentType: string; ttlSeconds: number }): Promise<string>
+  // Server-mediated write of raw bytes. Used for SMALL, server-validated assets
+  // (e.g. the tenant logo) where the server must inspect the bytes (magic-byte +
+  // size) BEFORE storing — presignPut cannot validate content. Callers MUST have
+  // validated size + content type first.
+  putObject(key: string, bytes: Uint8Array, contentType: string): Promise<void>
   // Generate a presigned GET URL for direct client download.
   // Returns JSON { downloadUrl } — NOT a 302 redirect, to avoid URL leaking
   // into browser history, Referer headers, and access logs.
@@ -71,6 +76,10 @@ export class LogicalStorageDriver implements StorageDriver {
       new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: opts.contentType }),
       { expiresIn: opts.ttlSeconds },
     )
+  }
+
+  async putObject(key: string, bytes: Uint8Array, contentType: string): Promise<void> {
+    await this.s3.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: bytes, ContentType: contentType }))
   }
 
   async presignGet(key: string, opts: { ttlSeconds: number }): Promise<string> {
