@@ -6,11 +6,11 @@
   justify-content: center;
   gap: 6px;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-ui);
   line-height: 1;
   white-space: nowrap;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--panel-2);
   color: var(--fg);
   cursor: pointer;
@@ -19,14 +19,16 @@
 .btn:hover { background: var(--panel-3); }
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .btn:disabled { opacity: 0.5; cursor: default; }
+/* Tactile press feedback (the smoothing transition is added in the motion phase). */
+.btn:not(:disabled):active { transform: translateY(0.5px); }
 
 /* sizes */
 .md { padding: 6px 12px; }
-.sm { padding: 4px 9px; font-size: 12px; }
+.sm { padding: 4px 9px; font-size: var(--text-sm); }
 
 /* variants */
 .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
-.primary:hover { background: color-mix(in srgb, var(--accent) 88%, black); }
+.primary:hover { background: color-mix(in srgb, var(--accent) 88%, black); box-shadow: var(--shadow-sm); }
 .ghost { background: transparent; border-color: transparent; color: var(--fg-dim); }
 .ghost:hover { background: var(--panel-2); color: var(--fg); }
 .danger { background: var(--danger); border-color: var(--danger); color: var(--danger-fg); font-weight: 600; }
