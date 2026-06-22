@@ -8,7 +8,7 @@ import type { SearchDriver } from '../search/index.js'
 import type { TenantDb } from '../db/index.js'
 
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean }
-export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean }
+export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean }
 function toPage(r: PageRow): Page {
   // hasUnpublishedChanges + published are only present when the SELECT included the
   // columns (listPages); together they drive the sidebar's 3-state badge
@@ -128,7 +128,9 @@ export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: 
     FROM pages WHERE id = ${args.pageId}
   `
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
-  return { ...toPage(row), capability: access.readOnly ? 'view' : 'edit' }
+  // canManage gates the permission UI (server re-checks on the access endpoints).
+  const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: args.pageId })
+  return { ...toPage(row), capability: access.readOnly ? 'view' : 'edit', canManage }
 }
 
 // Update title. Outbox entry written in the same tx as the UPDATE.

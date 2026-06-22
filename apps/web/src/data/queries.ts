@@ -274,6 +274,40 @@ export interface PageMeta {
   title: string;
   capability: "view" | "edit";
   hasUnpublishedChanges?: boolean;
+  canManage?: boolean; // gates the per-page permission UI (server re-checks)
+}
+
+// ── per-page access (Phase 4) ──────────────────────────────────────────────
+export type PageRelation = "view" | "edit" | "manage";
+export interface PageGrant { grantee: string; relation: PageRelation }
+
+export function usePageAccess(pageId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["page-access", pageId],
+    queryFn: () => apiFetch<PageGrant[]>(`/pages/${encodeURIComponent(pageId)}/access`, token).then((r) => r ?? []),
+    enabled: enabled && pageId.length > 0,
+  });
+}
+
+export function useGrantAccess(pageId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { grantee: string; relation: PageRelation }) =>
+      apiFetch<null>(`/pages/${encodeURIComponent(pageId)}/access`, token, { method: "POST", body: JSON.stringify(args) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["page-access", pageId] }),
+  });
+}
+
+export function useRevokeAccess(pageId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { grantee: string; relation: PageRelation }) =>
+      apiFetch<null>(`/pages/${encodeURIComponent(pageId)}/access`, token, { method: "DELETE", body: JSON.stringify(args) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["page-access", pageId] }),
+  });
 }
 export function usePage(pageId: string) {
   const { token } = useSession();
