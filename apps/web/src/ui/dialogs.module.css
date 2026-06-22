@@ -17,6 +17,8 @@
   padding: var(--space-3);
   width: min(360px, 90vw);
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  outline: none; /* Ark focuses the container; suppress the browser focus ring that
+                    otherwise reads as a thickened border. Inner controls keep theirs. */
 }
 .title {
   margin: 0 0 var(--space-2);
