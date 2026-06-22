@@ -9,7 +9,7 @@ import { Sidebar } from "../sidebar/Sidebar";
 import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
-import { fetchGuestToken, type GuestToken } from "../data/apiClient";
+import { fetchGuestToken, apiFetch, type GuestToken } from "../data/apiClient";
 import { usePage, usePublished, usePublish } from "../data/queries";
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport } from "../data/exportApi";
@@ -157,7 +157,7 @@ function PageRoute() {
             )}
           </div>
           <div style={{ flex: 1, minHeight: 0 }}>
-            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} publishedView autoEdit={autoEdit} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} />
+            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} autoEdit={autoEdit} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} />
           </div>
           {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
         </div>
@@ -198,12 +198,48 @@ function ShareRoute() {
   if (state.status === "denied" || !state.minted) {
     return <AppShell><div style={{ padding: 16 }}>This share link is invalid, expired, or revoked.</div></AppShell>;
   }
-  const { token, docName, capability } = state.minted;
+  return <GuestPage minted={state.minted} />;
+}
+
+// The shared page for an anonymous guest (after the link → token exchange). Same
+// draft/publish model as members: VIEW links render the PUBLISHED snapshot (no
+// collab — the live draft never reaches a view guest's browser); EDIT links join
+// the collab draft to co-edit and can Publish. The published content is fetched
+// over HTTP with the guest token (the server re-checks the share_link's authority).
+function GuestPage({ minted }: { minted: GuestToken }) {
+  const { token, docName, capability } = minted;
+  const pageId = docName.replace(/^t:.+?:p:/, "");
   // Anonymous guest identity (never an OIDC account / seat — the project design notes).
-  const guest = { name: `guest-${Math.floor(Math.random() * 1000)}`, color: "#7d8590" };
+  const [guest] = useState(() => ({ name: `guest-${Math.floor(Math.random() * 1000)}`, color: "#7d8590" }));
+  const [publishedMd, setPublishedMd] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+
+  const reloadPublished = useCallback(() => {
+    apiFetch<{ publishedMd: string | null }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
+      .then((r) => setPublishedMd(r?.publishedMd ?? null))
+      .catch(() => { /* denied/expired → empty view */ });
+  }, [pageId, token]);
+  useEffect(() => { reloadPublished(); }, [reloadPublished]);
+
+  const onPublish = async () => {
+    setPublishing(true);
+    await apiFetch(`/pages/${encodeURIComponent(pageId)}/publish`, token, { method: "POST" }).catch(() => {});
+    setPublishing(false);
+    reloadPublished();
+  };
+
   return (
     <AppShell>
-      <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} />
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+        {capability === "edit" && (
+          <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", borderBottom: "1px solid var(--border)" }}>
+            <button type="button" data-testid="guest-publish" disabled={publishing} onClick={onPublish}>Publish</button>
+          </div>
+        )}
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} />
+        </div>
+      </div>
     </AppShell>
   );
 }
