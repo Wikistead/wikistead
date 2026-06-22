@@ -28,13 +28,15 @@
   cursor: pointer;
   display: flex;
   padding: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
 .header button:hover { color: var(--fg); background: var(--panel-2); }
 .headerActions { display: flex; gap: 2px; flex: 0 0 auto; }
 .headerActions button {
   background: none; border: none; color: var(--fg-dim); cursor: pointer;
-  display: flex; padding: 4px; border-radius: 4px;
+  display: flex; padding: 4px; border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
 .headerActions button:hover { color: var(--fg); background: var(--panel-2); }
 /* Destructive header action (delete space) — turns red on hover. */
@@ -54,7 +56,8 @@
   font: inherit;
   font-weight: 600;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease-standard);
 }
 .switcher:hover { background: var(--panel-2); }
 .switcherName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -69,15 +72,18 @@
   z-index: 50;
   outline: none;
   user-select: none;
+  transform-origin: top;
+  animation: wks-pop var(--dur-base) var(--ease-out);
 }
 .menuItem {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   outline: none;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
 .menuItem[data-highlighted] { background: var(--panel-2); }
 /* Destructive item (Delete) — red, intensifying on highlight. */
@@ -104,6 +110,7 @@
   cursor: pointer;
   user-select: none;
   border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease-standard);
 }
 .row:hover { background: var(--panel-2); }
 /* Selected = neutral fill + a 2px accent indicator bar (inset shadow keeps it off the
@@ -127,7 +134,7 @@
    its layout box so Ark can measure it: once the menu opens, focus moves to the
    portaled menu and the row loses :hover; if the trigger were display:none then,
    Ark would re-measure a zero rect and fling the menu to 0,0 (top-left). */
-.actions { display: flex; gap: 2px; opacity: 0; pointer-events: none; }
+.actions { display: flex; gap: 2px; opacity: 0; pointer-events: none; transition: opacity var(--dur-fast) var(--ease-standard); }
 .row:hover .actions,
 .row:focus-within .actions,
 .actions:has([aria-expanded="true"]) { opacity: 1; pointer-events: auto; }
@@ -138,8 +145,9 @@
   cursor: pointer;
   display: flex;
   padding: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
 .actions button:hover { color: var(--fg); background: var(--border); }
-.rowMenuBtn { background: none; border: none; color: var(--fg-dim); cursor: pointer; display: flex; padding: 2px; border-radius: 4px; }
+.rowMenuBtn { background: none; border: none; color: var(--fg-dim); cursor: pointer; display: flex; padding: 2px; border-radius: var(--radius-sm); transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard); }
 .rowMenuBtn:hover { color: var(--fg); background: var(--border); }

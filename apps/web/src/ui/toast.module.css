@@ -13,6 +13,13 @@
   padding: 10px 12px;
   box-shadow: var(--shadow-lg);
   font-size: var(--text-ui);
+  /* Ark drives translate/scale/opacity per [data-state] (enter/exit) and for the
+     stack offset (overlap); we only supply the timing so all of it animates. Uses
+     the individual transform properties Ark sets — do NOT add a `transform` here. */
+  transition: translate var(--dur-base) var(--ease-out),
+              scale var(--dur-base) var(--ease-out),
+              opacity var(--dur-base) var(--ease-out);
+  will-change: translate, scale, opacity;
 }
 .toast[data-type="success"] { border-left-color: #2da44e; }
 .toast[data-type="error"] { border-left-color: var(--danger); }

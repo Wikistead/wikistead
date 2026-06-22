@@ -9,6 +9,7 @@
   overflow-y: auto;
   min-height: 0;
   background: var(--panel);
+  animation: wks-slide-in-right var(--dur-slow) var(--ease-out);
 }
 .header { display: flex; align-items: center; justify-content: space-between; }
 .title { font-size: 14px; font-weight: 600; }

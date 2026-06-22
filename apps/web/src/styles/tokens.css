@@ -101,6 +101,45 @@
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-full: 999px;
+
+  /* Motion scale (Group C phase 6). "Fast and refined" (Linear-grade): short
+     durations, ease-out for entrances. Reference these everywhere — never sprinkle
+     ad-hoc durations — so motion stays consistent. Surface-only (toasts, menus,
+     panels, hovers); the editor / collab / presence path is never animated. */
+  --dur-fast: 120ms;  /* hover / press / small state changes */
+  --dur-base: 180ms;  /* default: menus, dialogs, toasts */
+  --dur-slow: 240ms;  /* larger surfaces: panels */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);     /* entrances (decelerate) */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);   /* general state changes */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);         /* exits (accelerate) */
+}
+
+/* Shared enter animations (global so CSS-module files can reference them by name).
+   Entrances only — exits unmount instantly (Ark/React), which is fine and keeps the
+   close path snappy. */
+@keyframes wks-pop {
+  from { opacity: 0; transform: scale(0.96) translateY(-2px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes wks-slide-in-right {
+  from { opacity: 0; transform: translateX(10px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes wks-slide-in-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Accessibility: honour reduced-motion globally. Anyone who asks for less motion gets
+   effectively-instant transitions/animations across the whole app. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 html,
