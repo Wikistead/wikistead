@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { LogOut, PanelLeft } from "lucide-react";
+import { ThemeToggle } from "./ThemeToggle";
 import styles from "./AppShell.module.css";
 
 // App skeleton: header / sidebar slot / main content. `sidebar` holds the page
@@ -38,7 +39,9 @@ export function AppShell({
           <PanelLeft size={16} aria-hidden />
         )}
         <span className={styles.brand}>wikistead</span>
+        <div className={styles.spacer} />
         {search && <div className={styles.search}>{search}</div>}
+        <ThemeToggle />
         {onLogout && (
           <button type="button" className={styles.logout} aria-label="Sign out" title="Sign out" onClick={onLogout}>
             <LogOut size={15} />

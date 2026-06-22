@@ -5,6 +5,7 @@ import { vim } from "@replit/codemirror-vim";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
+import { cmTheme } from "../styles/cm-theme";
 
 // vim user's surface: markdown source + (vim keymap) bound directly to Y.Text.
 // Presence cursors live in Y.Text offsets via yCollab/awareness.
@@ -23,6 +24,7 @@ export function mountSource(
     extensions: [
       vim(), // remove this extension for the non-technical surface
       basicSetup,
+      cmTheme, // CSS-variable-driven colors (follows light/dark)
       markdownExtension(), // GFM tables + fenced-code highlighting (matches live preview)
       yCollab(ytext, provider.awareness),
       ...(opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),

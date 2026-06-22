@@ -1,15 +1,56 @@
 /* Design tokens + global rules. Component styling lives in *.module.css; rules
    that must match imperatively-set class names (CodeMirror, the live-preview
-   toolbar) stay global here because CSS Modules would hash the selectors. */
-:root {
+   toolbar) stay global here because CSS Modules would hash the selectors.
+
+   Theming (Phase 3a): semantic color tokens have a LIGHT base (:root) and a DARK
+   override. ThemeProvider sets data-theme on <html> to 'light' | 'dark' | 'system'
+   (default 'system'); 'system' follows prefers-color-scheme. Components and the
+   CSS-variable-driven CodeMirror theme (styles/cm-theme.ts) read these vars, so a
+   theme switch recolors everything WITHOUT reconfiguring the editor (the collab
+   connection / presence is never rebuilt — ADR-013). */
+:root,
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --fg-dim: #656d76;
+  --panel: #f6f8fa;
+  --panel-2: #eaeef2;
+  --panel-3: #dfe5eb;   /* hover/elevated */
+  --border: #d0d7de;
+  --accent: #2563eb;
+  --accent-fg: #ffffff; /* text/icon on an accent fill */
+  --selection: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* Explicit dark, and system-dark (only when the OS prefers dark). */
+:root[data-theme="dark"] {
   --bg: #1e1e1e;
   --fg: #dddddd;
   --fg-dim: #9a9a9a;
   --panel: #252526;
   --panel-2: #2d2d2e;
+  --panel-3: #3a3a3b;
   --border: #3a3a3a;
   --accent: #4ea1ff;
+  --accent-fg: #06243f;
+  --selection: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    --bg: #1e1e1e;
+    --fg: #dddddd;
+    --fg-dim: #9a9a9a;
+    --panel: #252526;
+    --panel-2: #2d2d2e;
+    --panel-3: #3a3a3b;
+    --border: #3a3a3a;
+    --accent: #4ea1ff;
+    --accent-fg: #06243f;
+    --selection: color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+}
 
+:root {
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -32,7 +73,8 @@ body {
   font-family: var(--font);
 }
 
-/* CodeMirror fills its host; the editor scrolls internally. */
+/* CodeMirror fills its host; the editor scrolls internally. Colors come from the
+   CSS-variable-driven theme in styles/cm-theme.ts (no hard-coded light/dark). */
 .cm-editor {
   height: 100%;
 }
@@ -56,7 +98,7 @@ body {
   cursor: pointer;
 }
 .lp-toolbar-btn:hover {
-  background: #3a3a3b;
+  background: var(--panel-3);
 }
 .lp-editor-host {
   flex: 1;
