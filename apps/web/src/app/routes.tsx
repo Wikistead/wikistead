@@ -19,7 +19,7 @@ import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, type GuestToken } from "../data/apiClient";
-import { usePage, usePublished, usePublish } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage } from "../data/queries";
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport } from "../data/exportApi";
 import { useActiveSpace } from "./ActiveSpace";
@@ -55,6 +55,7 @@ function PageRoute() {
   // Publish control + an "unpublished changes" indicator.
   const { data: published } = usePublished(pageId ?? "");
   const publish = usePublish(pageId ?? "");
+  const renamePage = useRenamePage();
 
   // Opening any page makes its space the active one, so the sidebar follows —
   // including when arriving from cross-space search or a share link.
@@ -158,6 +159,10 @@ function PageRoute() {
             onExport={() => { if (pageId) void downloadPageExport(token, pageId); }}
             onPrint={() => window.print()}
             onPermissions={page?.canManage ? () => setPermsOpen(true) : undefined}
+            onRename={canEdit && spaceId ? (title) => renamePage.mutate({ pageId: pageId!, spaceId, title }, {
+              onSuccess: () => notify.success(t("toast.saved")),
+              onError: () => notify.error(t("toast.actionFailed")),
+            }) : undefined}
           />
           <div style={{ flex: 1, minHeight: 0 }}>
             <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} layout={layout} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} />

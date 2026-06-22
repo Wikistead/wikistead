@@ -112,7 +112,10 @@ export function useRenamePage() {
         method: "PATCH",
         body: JSON.stringify({ title: args.title }),
       }),
-    onSuccess: (_p, args) => qc.invalidateQueries({ queryKey: ["pages", args.spaceId] }),
+    onSuccess: (_p, args) => {
+      qc.invalidateQueries({ queryKey: ["pages", args.spaceId] }); // sidebar tree
+      qc.invalidateQueries({ queryKey: ["page", args.pageId] });   // toolbar title
+    },
   });
 }
 

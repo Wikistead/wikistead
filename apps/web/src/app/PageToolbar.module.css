@@ -13,6 +13,37 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Click-to-rename title (edit-capable). Looks like .title until hovered. */
+.titleBtn {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  background: none;
+  border: none;
+  cursor: text;
+  text-align: left;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 4px;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.titleBtn:hover { background: var(--panel-2); }
+.titleInput {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: -2px 0;
+  min-width: 200px;
+  max-width: 360px;
+}
 .chip {
   font-size: 11px;
   color: var(--fg-dim);
