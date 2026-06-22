@@ -17,7 +17,9 @@
     "linkCreated": "共有リンクを作成しました",
     "linkRevoked": "共有リンクを取り消しました",
     "copied": "リンクをクリップボードにコピーしました",
-    "actionFailed": "問題が発生しました"
+    "actionFailed": "問題が発生しました",
+    "saved": "保存しました",
+    "spaceDeleted": "スペースを削除しました"
   },
   "theme": {
     "label": "テーマ",
@@ -28,6 +30,40 @@
   "nav": {
     "toggleSidebar": "サイドバーを切り替え",
     "signOut": "サインアウト"
+  },
+  "userMenu": {
+    "label": "アカウント",
+    "tenantAdmin": "テナント管理"
+  },
+  "settings": {
+    "back": "アプリに戻る",
+    "soon": "近日",
+    "placeholder": "このセクションは近日対応予定です。",
+    "forbiddenTitle": "アクセス権がありません",
+    "forbiddenBody": "このエリアを表示するには管理者権限が必要です。",
+    "notFoundTitle": "見つかりません",
+    "notFoundBody": "このページは存在しないか、アクセス権がありません。"
+  },
+  "adminNav": {
+    "title": "テナント管理",
+    "members": "メンバー",
+    "spaces": "スペース",
+    "branding": "ブランディング",
+    "auth": "認証",
+    "api": "API",
+    "billing": "課金"
+  },
+  "spaceSettings": {
+    "title": "{{name}} · 設定",
+    "general": "一般",
+    "members": "メンバーと権限",
+    "theme": "テーマ",
+    "nameLabel": "スペース名",
+    "dangerZone": "危険な操作",
+    "deleteHint": "スペースを削除すると、配下のすべてのページも完全に削除されます。",
+    "deleteSpace": "スペースを削除",
+    "deleteConfirmTitle": "このスペースを削除",
+    "deleteConfirm": "スペース「{{name}}」と配下のすべてのページを削除しますか？ この操作は元に戻せません。"
   },
   "auth": {
     "signInTitle": "wikistead にサインイン",
@@ -69,6 +105,7 @@
   "sidebar": {
     "newSpace": "新しいスペース",
     "renameSpace": "スペース名を変更",
+    "spaceSettings": "スペース設定",
     "deleteSpace": "スペースを削除",
     "newPage": "新しいページ",
     "addSubpage": "サブページを追加",

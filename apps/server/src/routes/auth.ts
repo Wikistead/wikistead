@@ -136,7 +136,16 @@ export async function authPlugin(app: FastifyInstance) {
   })
 
   // Who am I — lets the SPA know the current member (401 if unauthenticated).
-  app.get('/auth/me', async (req) => ({ sub: req.user.sub, groups: req.user.groups }))
+  // isAdmin is a UI-convenience signal only (drives menu visibility); it is NOT a
+  // gate — every admin action re-checks tenant#admin server-side (requireTenantAdmin).
+  app.get('/auth/me', async (req) => {
+    const { allowed } = await req.server.fga.check({
+      user: `user:${req.user.sub}`,
+      relation: 'admin',
+      object: `tenant:${req.tenant.id}`,
+    })
+    return { sub: req.user.sub, groups: req.user.groups, isAdmin: Boolean(allowed) }
+  })
 
   // Mint a short-lived collab token from the (cookie) session: the collab
   // WebSocket is token-based, so the browser member exchanges its session for a

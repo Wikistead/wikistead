@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
-import { LogOut, PanelLeft } from "lucide-react";
+import { PanelLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "./ThemeToggle";
+import { UserMenu } from "./UserMenu";
 import styles from "./AppShell.module.css";
 
 // App skeleton: header / sidebar slot / main content. `sidebar` holds the page
@@ -44,11 +45,7 @@ export function AppShell({
         <div className={styles.spacer} />
         {search && <div className={styles.search}>{search}</div>}
         <ThemeToggle />
-        {onLogout && (
-          <button type="button" className={styles.logout} aria-label={t("nav.signOut")} title={t("nav.signOut")} onClick={onLogout}>
-            <LogOut size={15} />
-          </button>
-        )}
+        {onLogout && <UserMenu onLogout={onLogout} />}
       </header>
       <aside className={styles.sidebar}>{sidebar}</aside>
       <main className={styles.main}>{children}</main>

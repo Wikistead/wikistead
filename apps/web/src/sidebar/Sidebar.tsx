@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
 import { Menu } from "@ark-ui/react/menu";
 import { Portal } from "@ark-ui/react/portal";
-import { ChevronRight, ChevronsUpDown, FilePlus, FileText, MoreHorizontal, Pencil, Plus, Share2, Trash2 } from "lucide-react";
+import { ChevronRight, ChevronsUpDown, FilePlus, FileText, MoreHorizontal, Pencil, Plus, Settings, Share2, Trash2 } from "lucide-react";
 import {
   useSpaces,
   useCreateSpace,
@@ -190,6 +190,7 @@ export function Sidebar() {
           onSelect={(d) => {
             if (d.value === "__new__") createSpace.mutate("Untitled space", { onSuccess: (s) => s && setActiveSpaceId(s.id) });
             else if (d.value === "__rename__") { if (currentSpace) setRenamingSpace({ id: currentSpace.id, name: currentSpace.name }); }
+            else if (d.value === "__settings__") { if (current) navigate(`/spaces/${current}/settings`); }
             else setActiveSpaceId(d.value);
           }}
         >
@@ -205,6 +206,7 @@ export function Sidebar() {
                 ))}
                 <Menu.Separator className={styles.menuSep} />
                 {currentSpace && canManage && <Menu.Item value="__rename__" className={styles.menuItem}><Pencil size={13} /> {t("sidebar.renameSpace")}</Menu.Item>}
+                {currentSpace && canManage && <Menu.Item value="__settings__" className={styles.menuItem} data-testid="space-settings-open"><Settings size={13} /> {t("sidebar.spaceSettings")}</Menu.Item>}
                 <Menu.Item value="__new__" className={styles.menuItem}><Plus size={13} /> {t("sidebar.newSpace")}</Menu.Item>
               </Menu.Content>
             </Menu.Positioner>
