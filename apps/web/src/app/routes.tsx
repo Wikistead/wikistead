@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
+import { LoginScreen } from "./LoginScreen";
+import { AdminRoutes } from "../settings/AdminPage";
+import { SpaceSettingsRoutes } from "../settings/SpaceSettingsPage";
 import { Editor, type AnchorGetter, type EditorLayout } from "../editor/Editor";
 import { PageToolbar } from "./PageToolbar";
 import { ShareDialog } from "../ui/ShareDialog";
@@ -20,7 +23,6 @@ import { usePage, usePublished, usePublish } from "../data/queries";
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport } from "../data/exportApi";
 import { useActiveSpace } from "./ActiveSpace";
-import { MembersPage } from "../settings/MembersPage";
 
 // Same-origin collab (ADR-016): a relative "/collab" is resolved against the
 // current origin to an absolute ws(s):// URL (WebSocket needs an absolute URL),
@@ -32,27 +34,6 @@ function resolveCollabUrl(): string {
   return `${scheme}://${window.location.host}${v.startsWith("/") ? v : `/${v}`}`;
 }
 const COLLAB_URL = resolveCollabUrl();
-
-// Shown when there is no member session (real mode). Kicks off the OIDC flow as a
-// top-level navigation to /auth/login (preserving where the user wanted to go).
-function LoginScreen() {
-  const { t } = useTranslation();
-  const returnTo = window.location.pathname + window.location.search;
-  return (
-    <AppShell>
-      <div style={{ padding: 24, maxWidth: 420 }}>
-        <h2 style={{ marginTop: 0 }}>{t("auth.signInTitle")}</h2>
-        <p style={{ color: "var(--fg-dim)" }}>{t("auth.signInBody")}</p>
-        <Button
-          variant="primary"
-          onClick={() => { window.location.href = `/auth/login?returnTo=${encodeURIComponent(returnTo)}`; }}
-        >
-          {t("auth.signIn")}
-        </Button>
-      </div>
-    </AppShell>
-  );
-}
 
 // Member route: /p/:pageId — tenant comes from the session, docName is formed
 // the same way the collab server expects ("t:<tenant>:p:<page>").
@@ -366,23 +347,16 @@ function InviteRoute() {
   );
 }
 
-// Admin Console (members). Requires a member session; the page itself enforces
-// admin-only via the API (non-admins see an "admin only" notice).
-function SettingsMembersRoute() {
-  const { t } = useTranslation();
-  const { status, logout } = useSession();
-  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
-  if (status === "anon") return <LoginScreen />;
-  return <AppShell onLogout={logout}><MembersPage /></AppShell>;
-}
-
 export function AppRoutes() {
   return (
     <Routes>
       <Route path="/p/:pageId" element={<PageRoute />} />
       <Route path="/share/:linkId" element={<ShareRoute />} />
       <Route path="/invite" element={<InviteRoute />} />
-      <Route path="/settings/members" element={<SettingsMembersRoute />} />
+      {AdminRoutes()}
+      {SpaceSettingsRoutes()}
+      {/* Back-compat: the old members URL now lives under the admin console. */}
+      <Route path="/settings/members" element={<Navigate to="/admin/members" replace />} />
       <Route path="/join" element={<JoinRoute />} />
       <Route path="/join/workspace" element={<WorkspaceRoute />} />
       {/* Dev default: the seeded demo page. Real landing/space routing is a

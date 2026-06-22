@@ -16,6 +16,7 @@ import type { Tenant } from '@wikistead/types'
 const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
 const MEMBER = 'sess-member-c2'
 const STRANGER = 'sess-stranger-c2'
+const ADMIN_SUB = 'sess-admin-c2'
 
 let tenant: Tenant
 let db: TenantDb
@@ -31,7 +32,11 @@ beforeAll(async () => {
 afterAll(async () => {
   await app.close()
   await deleteTuples(fgaClient, [{ user: `user:${MEMBER}`, relation: 'member', object: `tenant:${tenant.id}` }]).catch(() => {})
-  await db.sql`DELETE FROM members WHERE sub IN (${MEMBER}, ${STRANGER})`.catch(() => {})
+  await deleteTuples(fgaClient, [
+    { user: `user:${ADMIN_SUB}`, relation: 'member', object: `tenant:${tenant.id}` },
+    { user: `user:${ADMIN_SUB}`, relation: 'admin', object: `tenant:${tenant.id}` },
+  ]).catch(() => {})
+  await db.sql`DELETE FROM members WHERE sub IN (${MEMBER}, ${STRANGER}, ${ADMIN_SUB})`.catch(() => {})
   await db.release()
   await valkey.quit()
   await pool.end()
@@ -101,12 +106,29 @@ describe('session endpoints', () => {
 
     const me = await app.inject({ method: 'GET', url: '/auth/me', headers: { host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${sid}` } })
     expect(me.statusCode).toBe(200)
-    expect(me.json()).toMatchObject({ sub: MEMBER })
+    // isAdmin is a UI-convenience signal (tenant#admin). A plain member is false.
+    expect(me.json()).toMatchObject({ sub: MEMBER, isAdmin: false })
 
     const out = await app.inject({ method: 'POST', url: '/auth/logout', headers: { host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${sid}` } })
     expect(out.statusCode).toBe(204)
     expect(String(out.headers['set-cookie'] ?? '')).toContain(SESSION_COOKIE) // cleared
     expect(await readSession(valkey, sid)).toBeNull() // real revocation: Valkey entry gone
+  })
+
+  it('/auth/me reports isAdmin=true for a tenant admin (UI-gating signal only)', async () => {
+    await writeTuples(fgaClient, [
+      { user: `user:${ADMIN_SUB}`, relation: 'member', object: `tenant:${tenant.id}` },
+      { user: `user:${ADMIN_SUB}`, relation: 'admin', object: `tenant:${tenant.id}` },
+    ]).catch(() => {})
+    const sid = await establishMemberSession({ db, fga: fgaClient, valkey }, { id: tenant.id }, { sub: ADMIN_SUB, email: 'a@x.test' })
+    const me = await app.inject({ method: 'GET', url: '/auth/me', headers: { host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${sid}` } })
+    expect(me.statusCode).toBe(200)
+    expect(me.json()).toMatchObject({ sub: ADMIN_SUB, isAdmin: true })
+    await destroySession(valkey, sid)
+    await deleteTuples(fgaClient, [
+      { user: `user:${ADMIN_SUB}`, relation: 'member', object: `tenant:${tenant.id}` },
+      { user: `user:${ADMIN_SUB}`, relation: 'admin', object: `tenant:${tenant.id}` },
+    ]).catch(() => {})
   })
 
   it('/auth/collab-token mints a member collab token from the session', async () => {

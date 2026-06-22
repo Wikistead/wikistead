@@ -17,7 +17,9 @@
     "linkCreated": "Share link created",
     "linkRevoked": "Share link revoked",
     "copied": "Link copied to clipboard",
-    "actionFailed": "Something went wrong"
+    "actionFailed": "Something went wrong",
+    "saved": "Saved",
+    "spaceDeleted": "Space deleted"
   },
   "theme": {
     "label": "Theme",
@@ -28,6 +30,40 @@
   "nav": {
     "toggleSidebar": "Toggle sidebar",
     "signOut": "Sign out"
+  },
+  "userMenu": {
+    "label": "Account",
+    "tenantAdmin": "Tenant admin"
+  },
+  "settings": {
+    "back": "Back to app",
+    "soon": "Soon",
+    "placeholder": "This section is coming soon.",
+    "forbiddenTitle": "You don't have access",
+    "forbiddenBody": "You need administrator permission to view this area.",
+    "notFoundTitle": "Not found",
+    "notFoundBody": "This page doesn't exist, or you don't have access to it."
+  },
+  "adminNav": {
+    "title": "Tenant admin",
+    "members": "Members",
+    "spaces": "Spaces",
+    "branding": "Branding",
+    "auth": "Authentication",
+    "api": "API",
+    "billing": "Billing"
+  },
+  "spaceSettings": {
+    "title": "{{name}} · Settings",
+    "general": "General",
+    "members": "Members & permissions",
+    "theme": "Theme",
+    "nameLabel": "Space name",
+    "dangerZone": "Danger zone",
+    "deleteHint": "Deleting a space permanently removes it and all of its pages.",
+    "deleteSpace": "Delete space",
+    "deleteConfirmTitle": "Delete this space",
+    "deleteConfirm": "Delete space \"{{name}}\" and all of its pages? This cannot be undone."
   },
   "auth": {
     "signInTitle": "Sign in to wikistead",
@@ -69,6 +105,7 @@
   "sidebar": {
     "newSpace": "New space",
     "renameSpace": "Rename space",
+    "spaceSettings": "Space settings",
     "deleteSpace": "Delete space",
     "newPage": "New page",
     "addSubpage": "Add sub-page",

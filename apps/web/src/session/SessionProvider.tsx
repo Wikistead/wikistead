@@ -15,6 +15,9 @@ export interface Session {
   collabToken: string; // token handed to the collab WebSocket
   tenantId: string;
   sub: string | null;
+  // UI-convenience flag (tenant#admin) for menu/route gating ONLY. NOT a security
+  // boundary — every admin action re-checks tenant#admin server-side.
+  isAdmin: boolean;
   user: EditorUser; // presence identity
   logout: () => Promise<void>;
 }
@@ -40,6 +43,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }));
   const [status, setStatus] = useState<AuthStatus>(devToken ? "authed" : "loading");
   const [sub, setSub] = useState<string | null>(devToken ? "dev-user" : null);
+  // dev-token is god-mode (tenant admin) to match the server's dev bypass.
+  const [isAdmin, setIsAdmin] = useState<boolean>(!!devToken);
   const [collabToken, setCollabToken] = useState<string>(devToken ?? "");
 
   useEffect(() => {
@@ -47,10 +52,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     void (async () => {
       try {
-        const me = await apiFetch<{ sub: string }>("/auth/me", ""); // cookie
+        const me = await apiFetch<{ sub: string; isAdmin?: boolean }>("/auth/me", ""); // cookie
         if (cancelled) return;
         if (!me) return setStatus("anon");
         setSub(me.sub);
+        setIsAdmin(!!me.isAdmin);
         const ct = await apiFetch<{ token: string }>("/auth/collab-token", "", { method: "POST" });
         if (cancelled) return;
         setCollabToken(ct?.token ?? "");
@@ -66,6 +72,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await apiFetch("/auth/logout", "", { method: "POST" }).catch(() => {});
     setStatus("anon");
     setSub(null);
+    setIsAdmin(false);
     setCollabToken("");
   };
 
@@ -75,6 +82,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     collabToken,
     tenantId,
     sub,
+    isAdmin,
     user: presence,
     logout,
   };
