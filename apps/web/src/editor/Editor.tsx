@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, type MutableRefObject } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, type MutableRefObject } from "react";
 import type { EditorView } from "@codemirror/view";
 import { connect } from "./collab";
 import { mountSource } from "./editor-source";
@@ -6,6 +6,7 @@ import { mountLivePreview, mountPublishedView } from "./editor-livepreview";
 import { makeImageResolver } from "./image-resolver";
 import { createAnchor, resolveAnchor } from "./comment-anchors";
 import { setCommentRanges, type CommentRange } from "./live-preview/comment-highlights";
+import type { DirtySignal } from "./dirtySignal";
 import styles from "./Editor.module.css";
 
 // Inline-comment integration surface for the host (CommentsPanel via PageRoute).
@@ -61,6 +62,11 @@ export interface EditorProps {
   // The host sets this ref to a getter that builds an anchor from the current
   // selection (for "Add comment on selection"). Null when nothing is selected.
   anchorGetterRef?: MutableRefObject<AnchorGetter | null>;
+  // External "unpublished changes" store written here (edit mode) and read only by
+  // the publish control — NOT React state, so writing it never re-renders the editor
+  // or its host (keeps it off the presence path). The canonical Y.Text IS the
+  // markdown, so `ytext !== publishedMd` is exactly the server's check, but instant.
+  dirtySignal?: DirtySignal;
 }
 
 function userField(user: EditorUser) {
@@ -82,7 +88,13 @@ function userField(user: EditorUser) {
 // The two-layer edit defense: this component hides the editable surfaces for a
 // view-only capability, but that is convenience. The collab server re-derives
 // readOnly from OpenFGA per document, so a forged edit button still cannot write.
-export function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, layout = "wysiwyg", onUploadImage, inlineComments, anchorGetterRef }: EditorProps) {
+// memo: the host (PageRoute) re-renders on its own state and on the published poll;
+// without memo those re-render <Editor> too, which (a) the tree-move e2e forbids
+// (rendersAfter===rendersBefore) and (b) churns the editor needlessly. Props are
+// referentially stable across host re-renders (inlineComments memoized; the dirty
+// signal is an external store, not a prop value), so memo skips them. A page switch
+// changes docName (the key) and remounts regardless.
+export const Editor = memo(function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, layout = "wysiwyg", onUploadImage, inlineComments, anchorGetterRef, dirtySignal }: EditorProps) {
   const sourceRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
@@ -221,6 +233,29 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
   useEffect(() => { pushHighlights(previewViewRef.current); // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inlineComments]);
 
+  // Optimistic "unpublished changes" signal (edit mode): a passive DOM `input`
+  // listener on the edit surface flips the external store to true the instant the
+  // user types/pastes/deletes — enabling Publish with no perceptible delay. This is
+  // deliberately NOT a Yjs/CM observer: a Y.Text observe (even writing an external
+  // store, not React state) destabilized the presence/awareness e2e under load
+  // (see editor-dirty-presence-constraint). A DOM input listener is orthogonal to
+  // the collab/awareness machinery. It over-approximates (any input → dirty); the
+  // server is the fortress (publish no-ops if unchanged) and the published poll
+  // reconciles the real state (incl. pre-existing dirt and remote edits). Reset to
+  // false on publish/page-change happens in the host.
+  useEffect(() => {
+    if (!dirtySignal || !(canEdit && editing)) return;
+    const host = previewRef.current;
+    const src = sourceRef.current;
+    const onInput = () => dirtySignal.set(true);
+    host?.addEventListener("input", onInput);
+    src?.addEventListener("input", onInput);
+    return () => {
+      host?.removeEventListener("input", onInput);
+      src?.removeEventListener("input", onInput);
+    };
+  }, [canEdit, editing, surfaceKey, dirtySignal]);
+
   // Presence label changes must NOT rebuild the editors — just update awareness.
   useEffect(() => {
     awarenessRef.current?.setLocalStateField("user", userField(user));
@@ -238,4 +273,4 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
       </section>
     </div>
   );
-}
+});

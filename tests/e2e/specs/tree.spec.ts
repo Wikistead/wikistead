@@ -102,18 +102,28 @@ test("Phase 2d: the header toggle collapses the sidebar and the choice persists"
 
 test("moving the open page via drag keeps the editor connected", async ({ page }) => {
   await openDemo(page);
-  await page.evaluate(async (api) => {
-    await fetch(`${api}/spaces/demo_space/pages`, { method: "POST", headers: { Authorization: "Bearer dev-token", "content-type": "application/json" }, body: JSON.stringify({ title: "Folder-Page", parentId: null }) });
-  }, API);
-  await page.reload();
   await page.waitForSelector("[data-pane=preview] .cm-content");
   await page.waitForSelector("[data-testid=tree-page]");
-  await sleep(400);
+  // Need a sibling to drop onto. In an isolated run demo_space has only the open
+  // page, so create one; in the full suite there are already several.
+  if ((await page.locator("[data-testid=tree-page]").count()) < 2) {
+    await page.evaluate(async (api) => {
+      await fetch(`${api}/spaces/demo_space/pages`, { method: "POST", headers: { Authorization: "Bearer dev-token", "content-type": "application/json" }, body: JSON.stringify({ title: "Sibling-Page", parentId: null }) });
+    }, API);
+    await page.reload();
+    await page.waitForSelector("[data-pane=preview] .cm-content");
+  }
+  // Drag the OPEN page (selected, always rendered at the top) onto the first sibling
+  // (also at the top) — both are inside the virtualized window regardless of how many
+  // pages the space has, so this is robust to tree size. The move reparents the open
+  // page but its editor (docName = pageId) must NOT rebuild.
+  const src = page.locator("[data-testid=tree-page][data-selected]").first();
+  const dst = page.locator("[data-testid=tree-page]:not([data-selected])").first();
+  await src.waitFor({ state: "visible", timeout: 15000 });
+  await dst.waitFor({ state: "visible", timeout: 15000 });
 
   const rendersBefore = await page.evaluate(() => (window as any).__editorRenders ?? 0);
-  const src = page.locator("[data-testid=tree-page]", { hasText: "Demo Page" }).first();
-  const dst = page.locator("[data-testid=tree-page]", { hasText: "Folder-Page" }).first();
-  await src.dragTo(dst);
+  await src.dragTo(dst, { force: true }); // force: skip mid-drag stability wait (drop indicator re-renders)
   await sleep(800);
 
   // the open page's editor (docName uses pageId) is NOT rebuilt by the move.

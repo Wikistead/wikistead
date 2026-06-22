@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button, IconButton } from "../ui/Button";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
 import type { EditorLayout } from "../editor/Editor";
+import { useDirty, type DirtySignal } from "../editor/dirtySignal";
 import styles from "./PageToolbar.module.css";
 
 // Inline-editable page title (Phase 5 #6). Click to rename (Notion/Outline style);
@@ -75,10 +76,17 @@ export interface PageToolbarProps {
   onPrint?: () => void;
   onPermissions?: () => void; // implies canManage (caller gates)
   onRename?: (title: string) => void; // present ⇒ title is click-to-rename (edit-capable)
+  // Optimistic "unpublished changes" signal: enables Publish the instant an edit
+  // diverges, without re-rendering the editor. ORed with canPublish (server poll).
+  dirtySignal?: DirtySignal;
 }
 
 export function PageToolbar(p: PageToolbarProps) {
   const { t } = useTranslation();
+  // Optimistic dirty (instant on edit) ORed with the server-poll canPublish. Only
+  // this toolbar re-renders on the signal — the editor is a sibling, untouched.
+  const dirty = useDirty(p.dirtySignal);
+  const canPublish = p.canPublish || dirty;
   const overflow: OverflowItem[] = [];
   if (p.onExport) overflow.push({ value: "export", label: t("page.export"), icon: <Download size={14} />, testId: "export-page" });
   if (p.onPrint) overflow.push({ value: "print", label: t("page.print"), icon: <Printer size={14} />, testId: "print-page" });
@@ -114,7 +122,7 @@ export function PageToolbar(p: PageToolbarProps) {
               </Button>
             )}
             {p.onPublish && (
-              <Button size="sm" variant="primary" data-testid="publish-page" disabled={p.publishing || !p.canPublish} onClick={p.onPublish}>
+              <Button size="sm" variant="primary" data-testid="publish-page" disabled={p.publishing || !canPublish} onClick={p.onPublish}>
                 {t("page.publish")}
               </Button>
             )}
