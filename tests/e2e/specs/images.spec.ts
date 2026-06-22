@@ -123,6 +123,53 @@ test("the toolbar Image button uploads and inserts a wks-attachment reference", 
     .toBeGreaterThan(0);
 });
 
+test("drag-and-drop an image file onto the editor uploads and inserts it", async ({ page }) => {
+  await openDemo(page);
+  const pageId = await page.evaluate(async (api) => {
+    const r = await fetch(`${api}/spaces/demo_space/pages`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ title: "P3 image drop" }),
+    });
+    return (await r.json()).id as string;
+  }, API);
+
+  await page.goto(`/p/${pageId}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(400);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content"); // caret in the (empty) doc
+
+  // Build a DataTransfer carrying an image File and dispatch a real drop on the
+  // editor — the drop handler uploads (presign → PUT → confirm) then inserts the
+  // ![alt](wks-attachment:<id>) reference.
+  const dt = await page.evaluateHandle((b64) => {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(new File([bytes], "dropped.png", { type: "image/png" }));
+    return dataTransfer;
+  }, PNG_1x1);
+  await page.dispatchEvent("[data-pane=preview] .cm-content", "dragover", { dataTransfer: dt });
+  await page.dispatchEvent("[data-pane=preview] .cm-content", "drop", { dataTransfer: dt });
+
+  // the reference is inserted (caret lands on its line → raw revealed)
+  await expect
+    .poll(async () => page.locator("[data-pane=preview] .cm-content").innerText(), { timeout: 10_000 })
+    .toMatch(/!\[dropped\.png\]\(wks-attachment:/);
+
+  // move the caret off the line → it renders as an <img> that actually loads
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await sleep(400);
+  const img = page.locator("[data-pane=preview] img.cm-lp-image");
+  await expect(img).toBeVisible();
+  await expect
+    .poll(async () => img.evaluate((el: HTMLImageElement) => el.naturalWidth), { timeout: 6000 })
+    .toBeGreaterThan(0);
+});
+
 // 2e-1 regression guard: in the DEFAULT read-only view mode, reveal-on-cursor is
 // inert — so a FIRST-LINE image (the view's default selection sits at position 0)
 // still renders as an <img> instead of leaking raw markdown. The earlier P3 image
