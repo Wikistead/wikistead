@@ -69,10 +69,6 @@ export interface EditorProps {
   // Start in edit mode (only honored for edit-capable users) — used by the
   // create-page flow, which opens a brand-new draft straight in the editor.
   autoEdit?: boolean;
-  // Draft/publish view behavior (members). When true, VIEW mode renders publishedMd
-  // (no collab for view-only users). When false (guest share routes, until 2f-3),
-  // VIEW mode falls back to the legacy read-only collab render.
-  publishedView?: boolean;
   // Uploads a picked image and returns the ref+alt to insert. Omit to hide the
   // image button (e.g. guests, or a view-only surface).
   onUploadImage?: (file: File) => Promise<{ ref: string; alt: string } | null>;
@@ -102,7 +98,7 @@ function userField(user: EditorUser) {
 // The two-layer edit defense: this component hides the editable surfaces for a
 // view-only capability, but that is convenience. The collab server re-derives
 // readOnly from OpenFGA per document, so a forged edit button still cannot write.
-export function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, autoEdit = false, publishedView = false, onUploadImage, inlineComments, anchorGetterRef }: EditorProps) {
+export function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, autoEdit = false, onUploadImage, inlineComments, anchorGetterRef }: EditorProps) {
   const sourceRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
@@ -150,9 +146,11 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
   // view↔edit toggles (keyed on docName/token, not the surface), so toggling never
   // reconnects or drops presence (ADR-013).
   useLayoutEffect(() => {
-    // Skip collab ONLY for a view-only member with the published-view surface; edit-
-    // capable users always connect, and legacy (guest) view still uses collab.
-    if (!canEdit && publishedView) return;
+    // Only edit-capable principals (members or edit share-link guests) join the
+    // collab room. View-only users never receive the live draft — they render the
+    // published snapshot over HTTP. Edit-capable users keep the connection across
+    // view↔edit toggles (ADR-013), so toggling never reconnects or drops presence.
+    if (!canEdit) return;
     const c = connect({ url: collabUrl, docName, token });
     collabRef.current = c;
     awarenessRef.current = c.provider.awareness ?? null;
@@ -164,7 +162,7 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
     };
     // user intentionally excluded — presence updates go through the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docName, token, collabUrl, canEdit, publishedView]);
+  }, [docName, token, collabUrl, canEdit]);
 
   // (2) Surfaces — remount when the surface changes (same connection) or after a
   // reconnect. The collab connection above is untouched, so editing/layout toggles
@@ -174,10 +172,9 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
     const previewHost = previewRef.current!;
     const views: { destroy(): void }[] = [];
 
-    // VIEW mode (members, publishedView): render the PUBLISHED snapshot read-only —
-    // NOT collab-bound, so the live draft is never shown here (and a view-only user
-    // has no collab at all). Guest/legacy view falls through to the collab branch.
-    if (surfaceKey === "view" && publishedView) {
+    // VIEW mode: render the PUBLISHED snapshot read-only — NOT collab-bound, so the
+    // live draft is never shown here (and a view-only user has no collab at all).
+    if (surfaceKey === "view") {
       const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl });
       views.push(v);
       previewViewRef.current = v;
@@ -190,10 +187,10 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
       };
     }
 
-    // EDIT surfaces (and legacy/guest read-only view) use the live collab doc.
+    // EDIT surfaces use the live collab doc.
     const c = collabRef.current;
     if (!c) return;
-    const editable = surfaceKey !== "view";
+    const editable = true;
     if (surfaceKey === "split" && sourceHost) {
       views.push(mountSource(sourceHost, c.ytext, c.provider, { readOnly: false }));
     }
@@ -228,14 +225,14 @@ export function Editor({ docName, token, collabUrl, user, capability = "view", a
   // view. Edit mode is untouched (publishedMd is not in the surface effect's deps,
   // so a publish never rebuilds the live editor / drops the caret).
   useEffect(() => {
-    if (!publishedView || surfaceKey !== "view") return; // only the published view (not a collab CM)
+    if (surfaceKey !== "view") return; // only the published view (not a collab CM)
     const v = previewViewRef.current;
     if (!v) return;
     const next = publishedMd ?? "";
     if (v.state.doc.toString() !== next) {
       v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: next } });
     }
-  }, [publishedMd, surfaceKey, publishedView]);
+  }, [publishedMd, surfaceKey]);
 
   // Re-resolve + push highlights when the comment set changes (the StateField keeps
   // them aligned through edits in between).
