@@ -4,6 +4,7 @@ import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useSession } from "../session/SessionProvider";
 import { MembersPage } from "./MembersPage";
+import { TenantBrandingTab } from "./TenantBrandingTab";
 import { SettingsShell, SettingsDenied, SettingsPlaceholder, type SettingsTab } from "./SettingsShell";
 
 // Tenant admin console (Phase 5a). Gate: tenant#admin. Members ships now; the
@@ -15,7 +16,7 @@ function useAdminTabs(): SettingsTab[] {
   return [
     { key: "members", label: t("adminNav.members"), to: "/admin/members" },
     { key: "spaces", label: t("adminNav.spaces"), to: "/admin/spaces", soon: true },
-    { key: "branding", label: t("adminNav.branding"), to: "/admin/branding", soon: true },
+    { key: "branding", label: t("adminNav.branding"), to: "/admin/branding" },
     { key: "auth", label: t("adminNav.auth"), to: "/admin/auth", soon: true },
     { key: "api", label: t("adminNav.api"), to: "/admin/api", soon: true },
     { key: "billing", label: t("adminNav.billing"), to: "/admin/billing", soon: true },
@@ -54,7 +55,7 @@ export function AdminRoutes() {
       <Route index element={<Navigate to="members" replace />} />
       <Route path="members" element={<MembersPage />} />
       <Route path="spaces" element={<AdminPlaceholder tabKey="spaces" />} />
-      <Route path="branding" element={<AdminPlaceholder tabKey="branding" />} />
+      <Route path="branding" element={<TenantBrandingTab />} />
       <Route path="auth" element={<AdminPlaceholder tabKey="auth" />} />
       <Route path="api" element={<AdminPlaceholder tabKey="api" />} />
       <Route path="billing" element={<AdminPlaceholder tabKey="billing" />} />

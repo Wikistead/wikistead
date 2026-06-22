@@ -3,6 +3,7 @@ import { PanelLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "./ThemeToggle";
 import { UserMenu } from "./UserMenu";
+import { useBranding } from "../data/queries";
 import styles from "./AppShell.module.css";
 
 // App skeleton: header / sidebar slot / main content. `sidebar` holds the page
@@ -22,6 +23,7 @@ export function AppShell({
   onLogout?: () => void;
 }) {
   const { t } = useTranslation();
+  const branding = useBranding();
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem("wks.sidebarCollapsed") === "1"; } catch { return false; }
   });
@@ -41,7 +43,7 @@ export function AppShell({
         ) : (
           <PanelLeft size={16} aria-hidden />
         )}
-        <span className={styles.brand}>wikistead</span>
+        <span className={styles.brand} data-testid="brand">{branding.data?.displayName || "wikistead"}</span>
         <div className={styles.spacer} />
         {search && <div className={styles.search}>{search}</div>}
         <ThemeToggle />

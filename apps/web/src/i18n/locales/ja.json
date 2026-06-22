@@ -186,6 +186,13 @@
     "upgradeTitle": "ブランディングは Pro 機能です",
     "upgradeBody": "プランをアップグレードすると、独自のアクセントとロゴを設定できます。"
   },
+  "tenantBranding": {
+    "title": "ブランディング",
+    "body": "ワークスペース名とアクセントカラーを設定します。既定で全体に適用され、スペースごとにアクセントを上書きできます。",
+    "displayName": "ワークスペース名",
+    "displayNamePlaceholder": "wikistead",
+    "default": "デフォルト"
+  },
   "accent": {
     "label": "アクセントカラー",
     "blue": "ブルー",

@@ -28,3 +28,26 @@ test("space accent overrides --accent inline and leaves --bg untouched; inherit 
 
   await sleep(100);
 });
+
+// Phase 5d: tenant branding (admin) — the cascade root + header wordmark. Resets
+// to default at the end so it doesn't leak into other specs (branding persists).
+test("tenant branding: name shows in the header and accent applies app-wide; reset", async ({ page }) => {
+  await openDemo(page);
+  await page.goto("/admin/branding");
+  await expect(page.getByTestId("tenant-branding")).toBeVisible();
+
+  await page.getByTestId("tenant-name-input").fill("Acme Wiki");
+  await page.getByTestId("tenant-name-save").click();
+  await expect.poll(() => page.getByTestId("brand").textContent()).toBe("Acme Wiki");
+
+  await page.getByTestId("accent-rose").click();
+  await expect.poll(() => page.evaluate(accentVar)).toMatch(/^#(e11d48|fb7185)$/); // light|dark rose
+  expect(await page.evaluate(bgVar)).toBe(""); // personal base untouched
+
+  // Reset: accent → default, name → empty (header back to the product wordmark).
+  await page.getByTestId("accent-inherit").click();
+  await expect.poll(() => page.evaluate(accentVar)).toBe("");
+  await page.getByTestId("tenant-name-input").fill("");
+  await page.getByTestId("tenant-name-save").click();
+  await expect.poll(() => page.getByTestId("brand").textContent()).toBe("wikistead");
+});

@@ -186,6 +186,13 @@
     "upgradeTitle": "Branding is a Pro feature",
     "upgradeBody": "Upgrade your plan to set a custom accent and logo."
   },
+  "tenantBranding": {
+    "title": "Branding",
+    "body": "Set your workspace name and accent colour. These apply everywhere by default; a space can override the accent.",
+    "displayName": "Workspace name",
+    "displayNamePlaceholder": "wikistead",
+    "default": "Default"
+  },
   "accent": {
     "label": "Accent colour",
     "blue": "Blue",
