@@ -338,6 +338,45 @@ export async function listPageAccess(
   return out
 }
 
+// Pages overview for a space (Phase 5 #5). space#manage gated — a manager sees the
+// pages ONLY of a space they manage (RLS scopes to the tenant; the space#manage
+// check is the authority), so nothing leaks beyond their authority. Per page:
+// published state, the cheap unpublished-changes flag, the count of DIRECT page
+// grants (user/group only — never share_link/wildcard/the space link), and the
+// count of active share links.
+export interface PageOverview {
+  id: string; title: string; published: boolean; hasUnpublishedChanges: boolean; grantCount: number; linkCount: number
+}
+export async function listSpacePagesOverview(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { spaceId: string; userId: string },
+): Promise<PageOverview[]> {
+  const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'space', id: args.spaceId })
+  if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  const rows = await db.sql<{ id: string; title: string; published: boolean; has_unpublished_changes: boolean; link_count: number }[]>`
+    SELECT p.id, p.title, (p.published_at IS NOT NULL) AS published, p.has_unpublished_changes,
+           count(sl.id) FILTER (WHERE sl.revoked_at IS NULL)::int AS link_count
+    FROM pages p
+    LEFT JOIN share_links sl ON sl.resource_type = 'page' AND sl.resource_id = p.id
+    WHERE p.space_id = ${args.spaceId}
+    GROUP BY p.id, p.title, p.published_at, p.has_unpublished_changes, p.position, p.created_at
+    ORDER BY p.position, p.created_at
+  `
+  const out: PageOverview[] = []
+  for (const r of rows) {
+    const { tuples } = await fga.read({ object: `page:${r.id}` })
+    let grantCount = 0
+    for (const { key } of tuples ?? []) {
+      if (!key || !PAGE_RELATIONS.includes(key.relation as PageRelation)) continue
+      if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
+      grantCount++
+    }
+    out.push({ id: r.id, title: r.title, published: r.published, hasUnpublishedChanges: r.has_unpublished_changes, grantCount, linkCount: r.link_count })
+  }
+  return out
+}
+
 // All descendant page ids of root (RLS-scoped to the tenant), via the parent_id tree.
 async function descendantIds(db: TenantDb, rootId: string): Promise<string[]> {
   const rows = await db.sql<{ id: string }[]>`
@@ -588,6 +627,11 @@ export async function pagesPlugin(app: FastifyInstance) {
 
   app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/pages', async (req) => {
     return listPages(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub })
+  })
+
+  // Pages overview for space managers (Phase 5 #5) — space#manage gated.
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/pages-overview', async (req) => {
+    return listSpacePagesOverview(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub })
   })
 
   app.get<{ Params: { pageId: string } }>('/pages/:pageId', async (req) => {

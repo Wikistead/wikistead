@@ -70,6 +70,7 @@
     "title": "{{name}} · 設定",
     "general": "一般",
     "members": "メンバーと権限",
+    "pages": "ページ",
     "theme": "テーマ",
     "nameLabel": "スペース名",
     "dangerZone": "危険な操作",
@@ -77,6 +78,16 @@
     "deleteSpace": "スペースを削除",
     "deleteConfirmTitle": "このスペースを削除",
     "deleteConfirm": "スペース「{{name}}」と配下のすべてのページを削除しますか？ この操作は元に戻せません。"
+  },
+  "spacePages": {
+    "title": "ページ",
+    "status": "状態",
+    "grants": "権限付与",
+    "links": "リンク",
+    "draft": "下書き",
+    "unpublished": "未公開の変更",
+    "published": "公開済み",
+    "empty": "このスペースにはまだページがありません。"
   },
   "spaceMembers": {
     "title": "メンバーと権限",

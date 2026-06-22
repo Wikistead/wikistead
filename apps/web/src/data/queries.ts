@@ -421,6 +421,17 @@ export function useUpdateSpaceBranding(spaceId: string) {
   });
 }
 
+// Pages overview for a space (Phase 5 #5) — space#manage only.
+export interface PageOverview { id: string; title: string; published: boolean; hasUnpublishedChanges: boolean; grantCount: number; linkCount: number }
+export function useSpacePagesOverview(spaceId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["pages-overview", spaceId],
+    queryFn: () => apiFetch<PageOverview[]>(`/spaces/${encodeURIComponent(spaceId)}/pages-overview`, token).then((r) => r ?? []),
+    enabled: enabled && spaceId.length > 0,
+  });
+}
+
 // Tenant-wide spaces overview (Phase 5 #4) — tenant#admin only.
 export interface AdminSpace { id: string; name: string; pageCount: number; grantCount: number }
 export function useAdminSpaces(enabled = true) {
