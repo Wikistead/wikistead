@@ -39,9 +39,31 @@
 }
 .collapseBtn:hover { color: var(--fg); background: var(--panel-2); }
 
+/* Wikistead brand lockup (icon + wordmark) — proportions per the brand guide,
+   scaled to the compact header. Colour follows currentColor (dark/light). */
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+}
+.brandIcon {
+  display: block;
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+.brandName {
+  font-family: "Plus Jakarta Sans", var(--font);
   font-weight: 600;
-  font-size: 14px;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+/* A tenant's own display name (their wordmark, not Wikistead's). */
+.wordmark {
+  font-weight: 600;
+  font-size: 15px;
 }
 
 /* Tenant logo replaces the wordmark; capped to the header height. */

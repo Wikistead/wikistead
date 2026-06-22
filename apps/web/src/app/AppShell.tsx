@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "./ThemeToggle";
 import { LanguageToggle } from "./LanguageToggle";
 import { UserMenu } from "./UserMenu";
+import { BrandLockup } from "./BrandLockup";
 import { useBranding } from "../data/queries";
 import styles from "./AppShell.module.css";
 
@@ -44,10 +45,13 @@ export function AppShell({
         ) : (
           <PanelLeft size={16} aria-hidden />
         )}
+        {/* Brand: tenant logo ▷ tenant display name ▷ the Wikistead lockup. */}
         {branding.data?.logoUrl ? (
-          <img className={styles.logo} src={branding.data.logoUrl} alt={branding.data.displayName || "wikistead"} data-testid="brand-logo" />
+          <img className={styles.logo} src={branding.data.logoUrl} alt={branding.data.displayName || "Wikistead"} data-testid="brand-logo" />
+        ) : branding.data?.displayName ? (
+          <span className={styles.wordmark} data-testid="brand">{branding.data.displayName}</span>
         ) : (
-          <span className={styles.brand} data-testid="brand">{branding.data?.displayName || "wikistead"}</span>
+          <BrandLockup />
         )}
         <div className={styles.spacer} />
         {search && <div className={styles.search}>{search}</div>}
