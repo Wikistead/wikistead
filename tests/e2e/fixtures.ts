@@ -58,6 +58,24 @@ export async function seedFixtures() {
     method: "PUT",
     body: JSON.stringify(["tenantId", "spaceId", "viewerUsers", "viewerGroups", "isPublic"]),
   });
+  // Wipe ALL Meili docs to match the Postgres wipe above — the e2e Meili persists
+  // between runs, and specs that index a fixed-body doc (e.g. cjk-search) would
+  // otherwise pile up identical docs across runs. Once enough accumulate, the
+  // stage-1 limit window fills with orphaned cruft whose FGA grants are gone, so
+  // the two-stage guard drops them all and the current run's hit is crowded out
+  // (→ "No results"). Clearing here keeps search specs idempotent. Wait on the
+  // task so the re-added stale doc below isn't deleted by a late-running clear.
+  {
+    const r = await meili(`/indexes/${E2E.index}/documents`, { method: "DELETE" });
+    const { taskUid } = await r.json();
+    if (typeof taskUid === "number") {
+      for (let i = 0; i < 60; i++) {
+        const t = await (await meili(`/tasks/${taskUid}`)).json();
+        if (t.status === "succeeded" || t.status === "failed" || t.status === "canceled") break;
+        await new Promise((res) => setTimeout(res, 250));
+      }
+    }
+  }
   await meili(`/indexes/${E2E.index}/documents`, {
     method: "POST",
     body: JSON.stringify([

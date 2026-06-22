@@ -17,11 +17,32 @@ async function meiliUpsert(doc: Record<string, unknown>) {
   });
 }
 
+async function meiliDoc(id: string): Promise<Record<string, unknown> | null> {
+  const r = await fetch(`${E2E.meili}/indexes/${E2E.index}/documents/${id}`, {
+    headers: { Authorization: `Bearer ${E2E.meiliKey}` },
+  });
+  return r.ok ? ((await r.json()) as Record<string, unknown>) : null;
+}
+
+// Poll until `pred` holds (or we give up). Fixed sleeps are racy here: createPage
+// fires an ASYNC outbox reindex that rewrites this doc with the page's PUBLISHED
+// body (empty for a draft) — if it lands after our manual upsert it clobbers the
+// injected Japanese body. So we (1) wait for that create-reindex to land, then
+// (2) upsert, then (3) confirm the upsert stuck before searching.
+async function poll(pred: () => Promise<boolean>, tries = 40, gap = 250) {
+  for (let i = 0; i < tries; i++) {
+    if (await pred()) return;
+    await sleep(gap);
+  }
+  throw new Error("poll: condition never became true");
+}
+
 test("searching Japanese shows a correctly-rendered body snippet", async ({ page }) => {
   await openDemo(page);
 
-  // Create a page dev-user can view (createPage writes the FGA space-inheritance
-  // tuple, so the two-stage guard's FGA stage passes for this page).
+  // Create a page dev-user can view: post-4a a new page is a DRAFT (no page#space),
+  // but createPage grants the CREATOR direct `manage` (→ view), so the two-stage
+  // guard's FGA stage passes for dev-user on this page.
   const id = await page.evaluate(async ({ api }) => {
     const r = await fetch(`${api}/spaces/demo_space/pages`, {
       method: "POST",
@@ -31,15 +52,18 @@ test("searching Japanese shows a correctly-rendered body snippet", async ({ page
     return (await r.json()).id as string;
   }, { api: API });
 
-  // Let createPage's async (empty-body) Meili upsert settle, THEN overwrite the
-  // doc with a Japanese body. Latin title forces the query to match the BODY only.
-  await sleep(2000);
+  // Wait for createPage's async (empty-body) reindex to land FIRST, then overwrite
+  // the doc with a Japanese body — otherwise that late reindex clobbers our body.
+  // Latin title forces the query to match the BODY only.
+  const JP_BODY = "新宿区にある東京都庁についてのまとめwiki本文スニペット表示テストです。";
+  await poll(async () => (await meiliDoc(id)) !== null);
   await meiliUpsert({
     id, tenantId: E2E.tenant, spaceId: "demo_space", title: "CJKSNIPPETPAGE",
-    body: "新宿区にある東京都庁についてのまとめwiki本文スニペット表示テストです。",
+    body: JP_BODY,
     viewerUsers: ["user:dev-user"], viewerGroups: [], isPublic: false, updatedAt: Date.now(),
   });
-  await sleep(1500);
+  // Confirm the injected body stuck (no further reindex raced past it) before searching.
+  await poll(async () => (await meiliDoc(id))?.body === JP_BODY);
 
   // Search a mid-text Japanese keyword (matches the body, not the latin title).
   const input = page.locator("[data-testid=search-input]");
