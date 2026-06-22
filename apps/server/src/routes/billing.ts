@@ -13,23 +13,50 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder'
 
 // ── Webhook event processing ──────────────────────────────────────────────
 
+// price ID → internal plan name, from env (one price per self-serve/invoiced tier).
+// Read per call so tests/config can set it without a module reload. Enterprise is
+// contact-sales (invoiced); its price still maps here so a manual subscription
+// resolves to the right plan.
+function priceToPlan(): Record<string, string> {
+  const m: Record<string, string> = {}
+  if (process.env.STRIPE_PRICE_PRO) m[process.env.STRIPE_PRICE_PRO] = 'pro'
+  // Cloud top tier is "team" (ADR-015; "enterprise" = the self-host edition).
+  if (process.env.STRIPE_PRICE_TEAM) m[process.env.STRIPE_PRICE_TEAM] = 'team'
+  return m
+}
+
 // Maps Stripe subscription status + price ID → internal plan name.
-// TODO(phase: billing): read price → plan mapping from DB or env config
-// rather than hardcoding here.
 function determinePlan(subscription: Stripe.Subscription): string {
   if (subscription.status === 'canceled') return 'free'
   const priceId = subscription.items.data[0]?.price?.id ?? ''
-  const map: Record<string, string> = {
-    [process.env.STRIPE_PRICE_PRO ?? '__unset__']: 'pro',
-  }
-  return map[priceId] ?? 'free'
+  return priceToPlan()[priceId] ?? 'free'
 }
 
-// Process a verified Stripe event.
-// Uses pool directly (not TenantDb) because we need to look up the tenant
-// from stripe_customer_id before we know which tenant this is.
-// tenants table has no RLS, so pool queries it without app.tenant_id.
+// Link a tenant to its Stripe customer/subscription when Checkout completes. This
+// is a backup to the checkout endpoint (which links the customer up-front to avoid
+// the subscription.created-before-link race); the UPDATE is idempotent.
+async function linkCheckout(session: Stripe.Checkout.Session): Promise<void> {
+  const tenantId = session.client_reference_id
+  if (!tenantId) return
+  const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id ?? null
+  if (!customerId) return
+  const subId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id ?? null
+  await pool`UPDATE tenants SET stripe_customer_id = ${customerId}, stripe_subscription_id = ${subId} WHERE id = ${tenantId}`
+}
+
+// Process a verified Stripe event. Billing-critical, so:
+//   - idempotent: plan_events.stripe_event_id UNIQUE; a duplicate is a no-op.
+//   - ATOMIC: the idempotency marker (plan_events) and the plan change (tenants)
+//     commit in ONE transaction — never "marked processed but plan not updated".
+//   - the caller returns 2xx only after this resolves, so Stripe's retries are
+//     safe (a failed event is retried; a succeeded one is deduped).
+// Uses pool directly (not TenantDb): we resolve the tenant from stripe_customer_id
+// before we know which tenant this is, and tenants has no RLS.
 export async function processWebhookEvent(event: Stripe.Event): Promise<void> {
+  if (event.type === 'checkout.session.completed') {
+    await linkCheckout(event.data.object as Stripe.Checkout.Session)
+    return
+  }
   const HANDLED = new Set([
     'customer.subscription.created',
     'customer.subscription.updated',
@@ -49,17 +76,19 @@ export async function processWebhookEvent(event: Stripe.Event): Promise<void> {
 
   const newPlan = determinePlan(subscription)
 
-  // Idempotency: ON CONFLICT DO NOTHING means duplicate events are silently
-  // skipped. count === 0 → already processed, skip the plan update too.
-  const result = await pool`
-    INSERT INTO plan_events (tenant_id, event_type, stripe_event_id, old_plan, new_plan)
-    VALUES (${tenant.id}, ${event.type}, ${event.id}, ${tenant.plan}, ${newPlan})
-    ON CONFLICT (stripe_event_id) DO NOTHING
-  `
-  if (result.count === 0) return
-
-  await pool`UPDATE tenants SET plan = ${newPlan} WHERE id = ${tenant.id}`
-  emit({ type: 'tenant.plan_changed', tenantId: tenant.id, oldPlan: tenant.plan, newPlan })
+  // Idempotency + atomicity in one tx: insert the marker AND apply the plan change
+  // together. ON CONFLICT DO NOTHING → a duplicate inserts 0 rows → skip the update.
+  const applied = await pool.begin(async (tx) => {
+    const ins = await tx`
+      INSERT INTO plan_events (tenant_id, event_type, stripe_event_id, old_plan, new_plan)
+      VALUES (${tenant.id}, ${event.type}, ${event.id}, ${tenant.plan}, ${newPlan})
+      ON CONFLICT (stripe_event_id) DO NOTHING
+    `
+    if (ins.count === 0) return false
+    await tx`UPDATE tenants SET plan = ${newPlan} WHERE id = ${tenant.id}`
+    return true
+  })
+  if (applied) emit({ type: 'tenant.plan_changed', tenantId: tenant.id, oldPlan: tenant.plan, newPlan })
 }
 
 // ── Fastify plugin ────────────────────────────────────────────────────────

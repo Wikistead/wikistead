@@ -70,6 +70,10 @@ const GB = 1_000_000_000
 const CLOUD_PLANS: Record<string, Entitlements> = {
   free: { guestAccess: true, maxSeats: 5,        maxSpaces: Infinity, historyRetentionDays: 7,        maxStorageBytes: 5 * GB,     branding: false },
   pro:  { guestAccess: true, maxSeats: Infinity, maxSpaces: Infinity, historyRetentionDays: Infinity, maxStorageBytes: Infinity, branding: true },
+  // The Cloud top tier is "team" (contact-sales / invoiced) — NOT "enterprise",
+  // which ADR-015 reserves for the self-host proprietary edition. Mirrors Pro for
+  // now; its differentiators (SCIM, audit log) are post-launch and add flags here.
+  team: { guestAccess: true, maxSeats: Infinity, maxSpaces: Infinity, historyRetentionDays: Infinity, maxStorageBytes: Infinity, branding: true },
 }
 
 // The Cloud resolver. Registered by the Cloud entrypoint; exported so tests can
