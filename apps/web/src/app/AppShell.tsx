@@ -44,7 +44,11 @@ export function AppShell({
         ) : (
           <PanelLeft size={16} aria-hidden />
         )}
-        <span className={styles.brand} data-testid="brand">{branding.data?.displayName || "wikistead"}</span>
+        {branding.data?.logoUrl ? (
+          <img className={styles.logo} src={branding.data.logoUrl} alt={branding.data.displayName || "wikistead"} data-testid="brand-logo" />
+        ) : (
+          <span className={styles.brand} data-testid="brand">{branding.data?.displayName || "wikistead"}</span>
+        )}
         <div className={styles.spacer} />
         {search && <div className={styles.search}>{search}</div>}
         <LanguageToggle />

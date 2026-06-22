@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useBranding, useEntitlements, useUpdateTenantBranding } from "../data/queries";
+import { useBranding, useEntitlements, useUpdateTenantBranding, useUploadTenantLogo, useRemoveTenantLogo } from "../data/queries";
 import { Button } from "../ui/Button";
 import { notify } from "../ui/toast";
 import { AccentPicker } from "./AccentPicker";
 import styles from "./SpaceThemeTab.module.css";
+
+const LOGO_MAX_BYTES = 512 * 1024;
+const LOGO_TYPES = /^image\/(png|jpeg|webp)$/;
 
 // Tenant Branding (Phase 5d). The cascade root below space settings: sets the
 // workspace-wide accent + the header wordmark (display name). admin + entitlement
@@ -15,6 +18,9 @@ export function TenantBrandingTab() {
   const branding = useBranding();
   const ent = useEntitlements();
   const update = useUpdateTenantBranding();
+  const uploadLogo = useUploadTenantLogo();
+  const removeLogo = useRemoveTenantLogo();
+  const fileRef = useRef<HTMLInputElement>(null);
   const locked = ent.data ? !ent.data.branding : false;
 
   const accentKey = branding.data?.accentKey ?? null;
@@ -34,6 +40,24 @@ export function TenantBrandingTab() {
       onSuccess: () => notify.success(t("toast.saved")),
       onError: () => notify.error(t("toast.actionFailed")),
     });
+  };
+  const onPickLogo = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+    // Client-side guards for UX; the server re-validates (magic bytes + size).
+    if (!LOGO_TYPES.test(file.type)) { notify.error(t("tenantBranding.logoType")); return; }
+    if (file.size > LOGO_MAX_BYTES) { notify.error(t("tenantBranding.logoSize")); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const res = String(reader.result);
+      const b64 = res.slice(res.indexOf(",") + 1); // strip the data: URL prefix
+      uploadLogo.mutate(b64, {
+        onSuccess: () => notify.success(t("toast.saved")),
+        onError: () => notify.error(t("toast.actionFailed")),
+      });
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -57,6 +81,20 @@ export function TenantBrandingTab() {
 
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 10 }}>{t("accent.label")}</label>
       <AccentPicker value={accentKey} onChange={chooseAccent} disabled={locked || update.isPending} inheritLabel={t("tenantBranding.default")} />
+
+      <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", margin: "28px 0 6px" }}>{t("tenantBranding.logo")}</label>
+      <p className={styles.body} style={{ marginTop: 0 }}>{t("tenantBranding.logoHint")}</p>
+      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        {branding.data?.logoUrl && (
+          <img src={branding.data.logoUrl} alt="logo" data-testid="tenant-logo-preview" style={{ height: 28, maxWidth: 160, objectFit: "contain", border: "1px solid var(--border)", borderRadius: 4, padding: 2 }} />
+        )}
+        <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" hidden data-testid="tenant-logo-input" onChange={onPickLogo} />
+        <Button variant="default" size="sm" disabled={locked || uploadLogo.isPending} onClick={() => fileRef.current?.click()} data-testid="tenant-logo-upload">{t("tenantBranding.logoUpload")}</Button>
+        {branding.data?.logoUrl && (
+          <Button variant="dangerGhost" size="sm" disabled={locked || removeLogo.isPending} data-testid="tenant-logo-remove"
+            onClick={() => removeLogo.mutate(undefined, { onSuccess: () => notify.success(t("toast.saved")), onError: () => notify.error(t("toast.actionFailed")) })}>{t("tenantBranding.logoRemove")}</Button>
+        )}
+      </div>
     </div>
   );
 }

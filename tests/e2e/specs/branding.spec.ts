@@ -51,3 +51,24 @@ test("tenant branding: name shows in the header and accent applies app-wide; res
   await page.getByTestId("tenant-name-save").click();
   await expect.poll(() => page.getByTestId("brand").textContent()).toBe("wikistead");
 });
+
+// Phase 5d-2: tenant logo (base64 upload, no new dependency). A 1x1 PNG is enough —
+// the server validates magic bytes + size; the header swaps the wordmark for the
+// logo. Resets at the end so it doesn't leak into other specs.
+const PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+test("tenant logo: upload shows the logo in the header; remove reverts to the wordmark", async ({ page }) => {
+  await openDemo(page);
+  await page.goto("/admin/branding");
+  await expect(page.getByTestId("tenant-branding")).toBeVisible();
+
+  await page.getByTestId("tenant-logo-input").setInputFiles({
+    name: "logo.png", mimeType: "image/png", buffer: Buffer.from(PNG_1x1, "base64"),
+  });
+  await expect(page.getByTestId("brand-logo")).toBeVisible();
+  await expect(page.getByTestId("brand")).toHaveCount(0); // wordmark replaced
+
+  await page.getByTestId("tenant-logo-remove").click();
+  await expect(page.getByTestId("brand")).toBeVisible(); // wordmark back
+  await expect(page.getByTestId("brand-logo")).toHaveCount(0);
+});

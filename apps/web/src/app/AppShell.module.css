@@ -44,6 +44,14 @@
   font-size: 14px;
 }
 
+/* Tenant logo replaces the wordmark; capped to the header height. */
+.logo {
+  height: 22px;
+  max-width: 160px;
+  object-fit: contain;
+  display: block;
+}
+
 .spacer { flex: 1 1 auto; }
 
 .search {
