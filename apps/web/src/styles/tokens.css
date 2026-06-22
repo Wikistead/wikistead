@@ -176,6 +176,26 @@ body {
   height: 100%;
 }
 
+/* Reading column (Group C-A). The single preview surface (view + wysiwyg edit) reads
+   as a centred ~740px column with generous breathing room — the Notion/Outline layout.
+   Display-only (padding/max-width/centring on .cm-content); offsets are measured live,
+   so presence/caret math is unaffected. Targets the data attributes Editor.tsx sets,
+   so it does NOT depend on the (hashed) CSS-module class names.
+   The scroller keeps full width (the column centres within it). */
+[data-pane="preview"] .cm-content {
+  max-width: 740px;
+  margin-inline: auto;
+  padding: var(--space-6) var(--space-5);
+  line-height: var(--lh-normal);
+}
+/* Split (vim power-user) keeps the preview full-width — the column would waste the
+   half-pane. data-mode lives on the .editor ancestor. */
+[data-mode="split"] [data-pane="preview"] .cm-content {
+  max-width: none;
+  margin-inline: 0;
+  padding: var(--space-3);
+}
+
 /* Live-preview insert toolbar (DOM built imperatively in editor/live-preview). */
 .lp-toolbar {
   display: flex;

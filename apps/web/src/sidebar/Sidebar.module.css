@@ -11,7 +11,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3);
   border-bottom: 1px solid var(--border);
 }
 .title {
@@ -112,10 +112,15 @@
   transition: background var(--dur-fast) var(--ease-standard);
 }
 .row:hover { background: var(--panel-2); }
-/* Selected = neutral fill + a 2px accent indicator bar (inset shadow keeps it off the
-   layout, so the row width/scroll is unaffected). Replaces the heavy accent wash. */
+/* Selected = a clearly-readable (but not loud) accent-tinted neutral fill + a 3px
+   accent indicator bar (inset shadow keeps it off the layout, so row width/scroll is
+   unaffected). The tint makes "selected" obvious where a pure panel-3 was too faint. */
 .selected,
-.row.selected:hover { background: var(--selected); box-shadow: inset 2px 0 0 var(--accent); }
+.row.selected:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-3));
+  box-shadow: inset 3px 0 0 var(--accent);
+  font-weight: 500;
+}
 
 .indicator { display: inline-flex; align-items: center; flex: 0 0 auto; }
 .indicator :global(.lucide) { transition: transform 0.12s ease; }
