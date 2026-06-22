@@ -192,8 +192,11 @@
   "sidebar": {
     "newSpace": "新しいスペース",
     "renameSpace": "スペース名を変更",
+    "spaceName": "スペース名",
+    "createSpace": "作成",
     "spaceSettings": "スペース設定",
     "deleteSpace": "スペースを削除",
+    "deletePageConfirm": "ページ「{{name}}」とそのサブページを削除しますか？",
     "newPage": "新しいページ",
     "addSubpage": "サブページを追加",
     "share": "共有",

@@ -12,11 +12,18 @@ export function RenameDialog({
   initial,
   onClose,
   onSubmit,
+  title,
+  label,
+  submitLabel,
 }: {
   open: boolean;
   initial: string;
   onClose: () => void;
   onSubmit: (value: string) => void;
+  // Optional overrides so this serves rename AND create flows (default: page rename).
+  title?: string;
+  label?: string;
+  submitLabel?: string;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState(initial);
@@ -30,7 +37,7 @@ export function RenameDialog({
         <Dialog.Backdrop className={styles.backdrop} />
         <Dialog.Positioner className={styles.positioner}>
           <Dialog.Content className={styles.content} data-testid="rename-dialog">
-            <Dialog.Title className={styles.title}>{t("dialogs.renamePageTitle")}</Dialog.Title>
+            <Dialog.Title className={styles.title}>{title ?? t("dialogs.renamePageTitle")}</Dialog.Title>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -42,7 +49,7 @@ export function RenameDialog({
                 className={styles.input}
                 value={value}
                 autoFocus
-                aria-label={t("dialogs.pageTitleLabel")}
+                aria-label={label ?? t("dialogs.pageTitleLabel")}
                 onChange={(e) => setValue(e.target.value)}
               />
               <div className={styles.actions}>
@@ -50,7 +57,7 @@ export function RenameDialog({
                   {t("common.cancel")}
                 </button>
                 <button type="submit" className={`${styles.btn} ${styles.primary}`}>
-                  {t("common.save")}
+                  {submitLabel ?? t("common.save")}
                 </button>
               </div>
             </form>

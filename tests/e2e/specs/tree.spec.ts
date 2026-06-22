@@ -54,6 +54,11 @@ test("rename a space via the switcher menu (manage)", async ({ page }) => {
   // create a fresh space so we don't rename demo_space (other specs depend on it)
   await page.click("[data-testid=space-switcher]");
   await page.locator("[data-testid=space-menu]").getByText("New space").click();
+  // New space now prompts for a name.
+  const create = page.locator("[data-testid=rename-dialog][data-state=open]");
+  await create.waitFor();
+  await create.locator("input").fill("E2E Space");
+  await create.locator("button[type=submit]").click();
   await sleep(800);
   // the new space is now active → rename it
   await page.click("[data-testid=space-switcher]");

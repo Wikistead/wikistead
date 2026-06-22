@@ -192,8 +192,11 @@
   "sidebar": {
     "newSpace": "New space",
     "renameSpace": "Rename space",
+    "spaceName": "Space name",
+    "createSpace": "Create",
     "spaceSettings": "Space settings",
     "deleteSpace": "Delete space",
+    "deletePageConfirm": "Delete page \"{{name}}\" and its sub-pages?",
     "newPage": "New page",
     "addSubpage": "Add sub-page",
     "share": "Share",
