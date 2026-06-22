@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronRight, Download, Paperclip, Trash2, Upload } from "lucide-react";
 import { useSession } from "../session/SessionProvider";
 import {
@@ -23,6 +24,7 @@ interface UploadState { name: string; status: "uploading" | "error"; message?: s
 // authorization is server-side: upload needs `edit`, list/download `view`,
 // delete `manage`. readOnly hides upload/delete (the server 403 is the real gate).
 export function AttachmentsPanel({ pageId, readOnly }: { pageId: string; readOnly: boolean }) {
+  const { t } = useTranslation();
   const { token } = useSession();
   const meta = usePageMeta(pageId);
   const spaceId = meta.data?.spaceId;
@@ -64,7 +66,7 @@ export function AttachmentsPanel({ pageId, readOnly }: { pageId: string; readOnl
       <button type="button" className={styles.header} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <ChevronRight size={14} className={open ? styles.caretOpen : styles.caret} />
         <Paperclip size={14} />
-        <span>Attachments ({count})</span>
+        <span>{t("attachments.header", { count })}</span>
       </button>
 
       {open && (
@@ -72,7 +74,7 @@ export function AttachmentsPanel({ pageId, readOnly }: { pageId: string; readOnl
           {!readOnly && (
             <div className={styles.uploadRow}>
               <button type="button" className={styles.uploadBtn} data-testid="attach-upload" onClick={() => fileRef.current?.click()}>
-                <Upload size={14} /> Upload
+                <Upload size={14} /> {t("attachments.upload")}
               </button>
               <input ref={fileRef} type="file" multiple hidden onChange={(e) => onFiles(e.target.files)} />
             </div>
@@ -82,25 +84,25 @@ export function AttachmentsPanel({ pageId, readOnly }: { pageId: string; readOnl
             <div key={u.name} className={styles.item}>
               <span className={styles.name}>{u.name}</span>
               <span className={u.status === "error" ? styles.error : styles.dim}>
-                {u.status === "uploading" ? "uploading…" : `failed: ${u.message ?? "error"}`}
+                {u.status === "uploading" ? t("attachments.uploading") : t("attachments.failed", { msg: u.message ?? t("attachments.error") })}
               </span>
             </div>
           ))}
 
           {list.isLoading ? (
-            <div className={styles.dim}>Loading…</div>
+            <div className={styles.dim}>{t("common.loading")}</div>
           ) : count === 0 && uploads.length === 0 ? (
-            <div className={styles.dim}>No attachments</div>
+            <div className={styles.dim}>{t("attachments.empty")}</div>
           ) : (
             list.data!.map((a) => (
               <div key={a.id} className={styles.item} data-testid="attach-item">
                 <span className={styles.name} title={a.filename}>{a.filename}</span>
                 <span className={styles.dim}>{fmtSize(a.sizeBytes)}</span>
-                <button type="button" className={styles.iconBtn} title="Download" data-testid="attach-download" onClick={() => onDownload(a.id)}>
+                <button type="button" className={styles.iconBtn} title={t("attachments.download")} data-testid="attach-download" onClick={() => onDownload(a.id)}>
                   <Download size={14} />
                 </button>
                 {!readOnly && (
-                  <button type="button" className={styles.iconBtn} title="Delete" onClick={() => del.mutate(a.id)}>
+                  <button type="button" className={styles.iconBtn} title={t("attachments.delete")} onClick={() => del.mutate(a.id)}>
                     <Trash2 size={14} />
                   </button>
                 )}

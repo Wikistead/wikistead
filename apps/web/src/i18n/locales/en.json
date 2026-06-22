@@ -80,17 +80,26 @@
     "confirmTitle": "Confirm"
   },
   "shareDialog": {
-    "title": "Share",
+    "title": "Share page",
     "capability": "Capability",
+    "canView": "Can view",
+    "canEdit": "Can edit",
+    "expiry": "Expiry",
+    "never": "Never",
+    "oneHour": "1 hour",
+    "oneDay": "1 day",
+    "sevenDays": "7 days",
+    "create": "Create link",
+    "noLinks": "No active links.",
     "view": "View",
     "edit": "Edit",
-    "expiry": "Expiry",
-    "create": "Create link",
+    "expires": "expires {{when}}",
+    "neverExpires": "never expires",
     "shareUrl": "Share URL",
-    "copy": "Copy",
-    "copied": "Copied",
+    "copyUrl": "Copy URL",
     "revoke": "Revoke",
-    "none": "No share links yet."
+    "copied": "Copied link to clipboard.",
+    "done": "Done"
   },
   "permissions": {
     "title": "Permissions",
@@ -127,10 +136,28 @@
     "restoreConfirm": "Restore the page to the version from {{when}}? Current content is kept in history, so you can undo this."
   },
   "attachments": {
-    "title": "Attachments",
+    "header": "Attachments ({{count}})",
     "upload": "Upload",
+    "download": "Download",
     "delete": "Delete",
-    "empty": "No attachments."
+    "empty": "No attachments",
+    "uploading": "uploading…",
+    "failed": "failed: {{msg}}",
+    "error": "error"
+  },
+  "search": {
+    "placeholder": "Search pages…",
+    "placeholderKbd": "Search pages…  (Ctrl-K)",
+    "searching": "Searching…",
+    "noResults": "No results"
+  },
+  "lpToolbar": {
+    "bold": "Bold",
+    "heading": "Heading",
+    "bulletList": "Bullet list",
+    "inlineCode": "Inline code",
+    "link": "Link",
+    "image": "Insert image"
   },
   "members": {
     "title": "Members",
