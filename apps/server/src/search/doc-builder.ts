@@ -1,9 +1,8 @@
-import * as Y from 'yjs'
 import type { Sql } from 'postgres'
 import type { OpenFgaClient } from '@openfga/sdk'
 import type { SearchDoc } from '@wikistead/types'
 
-interface PageRow { id: string; tenant_id: string; space_id: string; title: string; ydoc: Buffer | null; updated_at: Date }
+interface PageRow { id: string; tenant_id: string; space_id: string; title: string; published_md: string | null; updated_at: Date }
 
 function categorize(
   user: string,
@@ -19,15 +18,13 @@ function categorize(
 }
 
 // Build a Meilisearch document by reading FGA tuples to compute viewer sets
-// and extracting body text from the persisted ydoc binary.
+// and taking the body from the page's PUBLISHED content (published_md) — the live
+// draft is never indexed.
 // Returns null if the page no longer exists (caller should issue a 'delete' instead).
 //
 // FGA is read 3 times (space, page, tenant tuples). Acceptable at Phase 0 data volume.
 // TODO(phase: search): batch into a single ListObjects call or cache space/tenant
 //   tuple reads when page count per space grows large.
-//
-// ydoc decode (Y.applyUpdate) runs on every outbox flush. Acceptable at Phase 0 volume.
-// TODO(phase: search): stream-decode or cache decoded text when update frequency is high.
 export async function buildSearchDoc(
   pool: Sql,
   fga: OpenFgaClient,
@@ -38,7 +35,7 @@ export async function buildSearchDoc(
   const page = await (pool.begin(async (tx) => {
     await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
     const [r] = await tx<PageRow[]>`
-      SELECT id, tenant_id, space_id, title, ydoc, updated_at FROM pages WHERE id = ${pageId}
+      SELECT id, tenant_id, space_id, title, published_md, updated_at FROM pages WHERE id = ${pageId}
     `
     return r ?? null
   }) as Promise<PageRow | null>)
@@ -71,14 +68,10 @@ export async function buildSearchDoc(
     categorize(key.user, viewerUsers, viewerGroups, setPublic)
   }
 
-  // Extract plain text from the persisted ydoc binary.
-  // Requires collab phase ydoc persistence to be active; returns '' until then.
-  let body = ''
-  if (page.ydoc) {
-    const doc = new Y.Doc()
-    Y.applyUpdate(doc, new Uint8Array(page.ydoc))
-    body = doc.getText('content').toString()
-  }
+  // Index the PUBLISHED body only — never the live draft. published_md is set by
+  // POST /pages/:id/publish; it is null/'' until first publish, so a draft's
+  // in-progress content is never searchable until the author publishes it.
+  const body = page.published_md ?? ''
 
   return {
     id: pageId,

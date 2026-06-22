@@ -72,11 +72,16 @@ describe('storeYdoc', () => {
     expect(stored).toBe(false)
   })
 
-  it('does NOT insert to search_outbox when stored=false', async () => {
-    // If 0-row UPDATE → no outbox entry (no point reindexing a page that was not saved).
-    await storeYdoc(TENANT, 'nonexistent-page-xyz', new Uint8Array([1, 2, 3]))
-
-    const rows = await adminPool`SELECT id FROM search_outbox WHERE page_id = ${'nonexistent-page-xyz'}`
+  it('does NOT enqueue search_outbox on a draft save (publish reindexes, not the draft)', async () => {
+    // Draft/publish model: storeYdoc only autosaves the draft. Search/export reflect
+    // the PUBLISHED version, reindexed solely by POST /pages/:id/publish — a draft
+    // save must NOT reindex, otherwise in-progress (unpublished) body would leak.
+    await adminPool`DELETE FROM search_outbox WHERE page_id = ${testPageId}`
+    const doc = new Y.Doc()
+    doc.getText('content').insert(0, 'draft-only body')
+    const { stored } = await storeYdoc(TENANT, testPageId, Y.encodeStateAsUpdate(doc))
+    expect(stored).toBe(true)
+    const rows = await adminPool`SELECT id FROM search_outbox WHERE page_id = ${testPageId}`
     expect(rows).toHaveLength(0)
   })
 

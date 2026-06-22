@@ -120,15 +120,25 @@ export async function restoreRevision(
   Y.applyUpdate(restoredDoc, new Uint8Array(current.ydoc))
   Y.applyUpdate(restoredDoc, restoreUpdate)
   const newYdoc = Buffer.from(Y.encodeStateAsUpdate(restoredDoc))
+  // Restore = RE-PUBLISH (draft/publish model): the restored content becomes the
+  // current PUBLISHED version too, not just the draft — otherwise viewers would
+  // still see the old published version after a restore. published_md is the
+  // restored body text; the freshly-inserted revision is the new published pointer.
+  const restoredMd = restoredDoc.getText('content').toString()
 
-  // Write new state + always-insert revision (even within the 5-min interval)
-  // so the restored state is immediately visible in history and undoable.
+  // Write new state + always-insert revision so the restored state is immediately
+  // visible in history and undoable, AND repoint published_* to it.
   await pool.begin(async (tx) => {
     await tx`SELECT set_config('app.tenant_id', ${args.tenantId}, true)`
-    await tx`UPDATE pages SET ydoc = ${newYdoc}, updated_at = now() WHERE id = ${args.pageId}`
-    await tx`
+    const [newRev] = await tx<[{ id: string }]>`
       INSERT INTO revisions (tenant_id, page_id, ydoc, title, created_by)
       VALUES (${args.tenantId}, ${args.pageId}, ${newYdoc}, ${current.title}, ${`user:${args.userId}`})
+      RETURNING id
+    `
+    await tx`
+      UPDATE pages SET ydoc = ${newYdoc}, updated_at = now(),
+        published_md = ${restoredMd}, published_revision_id = ${newRev.id}, published_at = now()
+      WHERE id = ${args.pageId}
     `
     await tx`
       INSERT INTO search_outbox (tenant_id, page_id, operation)

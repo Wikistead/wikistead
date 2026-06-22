@@ -43,11 +43,15 @@ beforeAll(async () => {
   db = await acquireTenantDb(asTenant(TENANT))
   await admin`INSERT INTO spaces (id, tenant_id, name) VALUES (${SPACE}, ${TENANT}, 'Export Space') ON CONFLICT (id) DO NOTHING`
   const rootBody = `# Root page\n\n![diagram](wks-attachment:${ATT})\n\n![secret](wks-attachment:${FORBIDDEN_ATT})\n`
-  await admin`INSERT INTO pages (id, tenant_id, space_id, parent_id, title, ydoc) VALUES
-    (${ROOT},   ${TENANT}, ${SPACE}, NULL,    'Root Page',   ${ydoc(rootBody)}),
-    (${CHILD},  ${TENANT}, ${SPACE}, ${ROOT}, 'Child Page',  ${ydoc('## Child page body')}),
-    (${HIDDEN}, ${TENANT}, ${SPACE}, ${ROOT}, 'Secret Child',${ydoc('## secret child body')}),
-    (${OTHER},  ${TENANT}, ${SPACE}, NULL,    'Other Page',  ${ydoc('## other')})
+  // Export reads the PUBLISHED content (published_md), not the draft ydoc — so these
+  // fixtures set published_md to the body (the draft/publish model: a page must be
+  // published to export). ydoc is set too, mirroring a real published page.
+  const childBody = '## Child page body', hiddenBody = '## secret child body', otherBody = '## other'
+  await admin`INSERT INTO pages (id, tenant_id, space_id, parent_id, title, ydoc, published_md) VALUES
+    (${ROOT},   ${TENANT}, ${SPACE}, NULL,    'Root Page',   ${ydoc(rootBody)},   ${rootBody}),
+    (${CHILD},  ${TENANT}, ${SPACE}, ${ROOT}, 'Child Page',  ${ydoc(childBody)},  ${childBody}),
+    (${HIDDEN}, ${TENANT}, ${SPACE}, ${ROOT}, 'Secret Child',${ydoc(hiddenBody)}, ${hiddenBody}),
+    (${OTHER},  ${TENANT}, ${SPACE}, NULL,    'Other Page',  ${ydoc(otherBody)},  ${otherBody})
     ON CONFLICT (id) DO NOTHING`
   // ATT belongs to ROOT (viewable). FORBIDDEN_ATT belongs to OTHER (not viewable).
   // ATT's filename is a zip-slip attempt.
