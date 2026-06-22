@@ -1,4 +1,5 @@
 import { useRef, useState, type MutableRefObject } from "react";
+import { useTranslation } from "react-i18next";
 import { useSession } from "../session/SessionProvider";
 import { useComments, useCommentMutations, fetchMentionable } from "../data/comments";
 import type { Mentionable } from "../data/commentsApi";
@@ -9,6 +10,7 @@ import styles from "./CommentsPanel.module.css";
 // mentionable directory (server limits it to members who can VIEW this page), so a
 // member who can't see the page never appears as a suggestion.
 function Composer({ pageId, onSubmit, placeholder }: { pageId: string; onSubmit: (body: string, mentions: string[]) => void; placeholder: string }) {
+  const { t } = useTranslation();
   const { token } = useSession();
   const [text, setText] = useState("");
   const [suggest, setSuggest] = useState<Mentionable[]>([]);
@@ -60,13 +62,14 @@ function Composer({ pageId, onSubmit, placeholder }: { pageId: string; onSubmit:
         </ul>
       )}
       <button type="button" className={styles.submit} data-testid="comment-submit" disabled={!text.trim()} onClick={submit}>
-        Comment
+        {t("commentsPanel.submit")}
       </button>
     </div>
   );
 }
 
 export function CommentsPanel({ pageId, canComment, anchorGetterRef }: { pageId: string; canComment: boolean; anchorGetterRef: MutableRefObject<AnchorGetter | null> }) {
+  const { t: tr } = useTranslation(); // `t` is used as the thread loop var below
   const { sub: me } = useSession();
   const { data: threads } = useComments(pageId);
   const { createThread, reply, setStatus, remove } = useCommentMutations(pageId);
@@ -80,9 +83,9 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef }: { pageId:
 
   const addInline = () => {
     const anchor = anchorGetterRef.current?.();
-    if (!anchor) { setInlineHint("Select text in the page first, then click Add comment."); return; }
+    if (!anchor) { setInlineHint(tr("commentsPanel.selectFirst")); return; }
     setInlineHint(null);
-    const body = window.prompt(`Comment on "${anchor.quotedText.slice(0, 40)}":`);
+    const body = window.prompt(tr("commentsPanel.promptInline", { quote: anchor.quotedText.slice(0, 40) }));
     if (!body?.trim()) return;
     createThread.mutate({ body: body.trim(), kind: "inline", anchorStart: anchor.anchorStart, anchorEnd: anchor.anchorEnd, quotedText: anchor.quotedText });
   };
@@ -90,46 +93,46 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef }: { pageId:
   return (
     <aside className={styles.panel} data-testid="comments-panel">
       <header className={styles.header}>
-        <strong>Comments</strong>
+        <strong>{tr("page.comments")}</strong>
         <div className={styles.tabs}>
-          <button type="button" data-testid="tab-open" aria-pressed={tab === "open"} onClick={() => setTab("open")}>Open</button>
-          <button type="button" data-testid="tab-resolved" aria-pressed={tab === "resolved"} onClick={() => setTab("resolved")}>Resolved</button>
+          <button type="button" data-testid="tab-open" aria-pressed={tab === "open"} onClick={() => setTab("open")}>{tr("commentsPanel.open")}</button>
+          <button type="button" data-testid="tab-resolved" aria-pressed={tab === "resolved"} onClick={() => setTab("resolved")}>{tr("commentsPanel.resolved")}</button>
         </div>
       </header>
 
       {canComment && (
         <div className={styles.section}>
-          <button type="button" data-testid="add-inline" onClick={addInline}>Add comment on selection</button>
+          <button type="button" data-testid="add-inline" onClick={addInline}>{tr("commentsPanel.addInline")}</button>
           {inlineHint && <p className={styles.hint}>{inlineHint}</p>}
         </div>
       )}
 
       <div className={styles.threads}>
-        {shown.length === 0 && <p className={styles.hint}>No {tab} comments.</p>}
+        {shown.length === 0 && <p className={styles.hint}>{tab === "open" ? tr("commentsPanel.emptyOpen") : tr("commentsPanel.emptyResolved")}</p>}
         {shown.map((t) => (
           <div key={t.id} className={styles.thread} data-testid="comment-thread">
             {t.kind === "inline" && (
-              <blockquote className={styles.quote}>{t.quotedText || "(anchored text deleted)"}</blockquote>
+              <blockquote className={styles.quote}>{t.quotedText || tr("commentsPanel.anchoredDeleted")}</blockquote>
             )}
             {t.comments.map((c) => (
               <div key={c.id} className={styles.comment} data-testid="comment-item">
                 <span className={styles.author}>{c.authorSub}</span>
                 <span className={styles.body}>{c.body}</span>
                 {c.authorSub === me && (
-                  <button type="button" className={styles.link} data-testid="comment-delete" onClick={() => remove.mutate(c.id)}>delete</button>
+                  <button type="button" className={styles.link} data-testid="comment-delete" onClick={() => remove.mutate(c.id)}>{tr("commentsPanel.delete")}</button>
                 )}
               </div>
             ))}
             {canComment && (
               <>
-                <Composer pageId={pageId} placeholder="Reply…" onSubmit={(body, mentions) => reply.mutate({ threadId: t.id, body, mentions })} />
+                <Composer pageId={pageId} placeholder={tr("commentsPanel.reply")} onSubmit={(body, mentions) => reply.mutate({ threadId: t.id, body, mentions })} />
                 <button
                   type="button"
                   className={styles.link}
                   data-testid="thread-toggle"
                   onClick={() => setStatus.mutate({ threadId: t.id, action: t.status === "open" ? "resolve" : "reopen" })}
                 >
-                  {t.status === "open" ? "Resolve" : "Reopen"}
+                  {t.status === "open" ? tr("commentsPanel.resolve") : tr("commentsPanel.reopen")}
                 </button>
               </>
             )}
@@ -139,7 +142,7 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef }: { pageId:
 
       {canComment && tab === "open" && (
         <div className={styles.section}>
-          <Composer pageId={pageId} placeholder="Comment on the page…" onSubmit={(body, mentions) => createThread.mutate({ body, kind: "page", mentions })} />
+          <Composer pageId={pageId} placeholder={tr("commentsPanel.pagePlaceholder")} onSubmit={(body, mentions) => createThread.mutate({ body, kind: "page", mentions })} />
         </div>
       )}
     </aside>

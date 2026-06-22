@@ -162,12 +162,39 @@
   "members": {
     "title": "メンバー",
     "adminOnly": "管理者のみ。",
+    "member": "メンバー",
     "role": "ロール",
+    "roleMember": "メンバー",
+    "roleAdmin": "管理者",
+    "you": "（あなた）",
     "remove": "削除",
-    "invitesTitle": "招待",
-    "emailPlaceholder": "name@example.com",
+    "inviteTitle": "メンバーを招待",
+    "emailPlaceholder": "email@example.com",
+    "inviteEmail": "招待メール",
+    "inviteRole": "招待ロール",
+    "roleFor": "{{sub}} のロール",
     "sendInvite": "招待を送信",
-    "revoke": "取り消し",
-    "pending": "保留中"
+    "inviteLinkLabel": "招待リンク（メールが無効な場合は共有）:",
+    "emailed": "受信者に送信しました。",
+    "notEmailed": "メール未送信 — 上のリンクをコピーしてください。",
+    "pendingTitle": "保留中の招待",
+    "noEmail": "（メールなし）",
+    "revoke": "取り消し"
+  },
+  "commentsPanel": {
+    "open": "未解決",
+    "resolved": "解決済み",
+    "submit": "コメント",
+    "addInline": "選択範囲にコメント",
+    "selectFirst": "先にページ内のテキストを選択してから「コメント」を押してください。",
+    "promptInline": "「{{quote}}」へのコメント:",
+    "anchoredDeleted": "（アンカーされたテキストは削除されました）",
+    "delete": "削除",
+    "reply": "返信…",
+    "pagePlaceholder": "ページにコメント…",
+    "resolve": "解決",
+    "reopen": "再オープン",
+    "emptyOpen": "未解決のコメントはありません。",
+    "emptyResolved": "解決済みのコメントはありません。"
   }
 }
