@@ -1,9 +1,48 @@
+import { useEffect, useState } from "react";
 import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, Columns2, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button, IconButton } from "../ui/Button";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
 import type { EditorLayout } from "../editor/Editor";
 import styles from "./PageToolbar.module.css";
+
+// Inline-editable page title (Phase 5 #6). Click to rename (Notion/Outline style);
+// shown editable only to edit-capable users — the server re-checks page#edit on the
+// PATCH regardless. Enter/blur commits (if changed & non-empty), Escape cancels.
+function EditableTitle({ title, onRename }: { title: string; onRename: (title: string) => void }) {
+  const { t } = useTranslation();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(title);
+  useEffect(() => { if (!editing) setDraft(title); }, [title, editing]);
+  const commit = () => {
+    const next = draft.trim();
+    setEditing(false);
+    if (next && next !== title) onRename(next);
+  };
+  if (editing) {
+    return (
+      <input
+        className={styles.titleInput}
+        data-testid="page-title-input"
+        autoFocus
+        value={draft}
+        aria-label={t("dialogs.renamePageTitle")}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); commit(); }
+          else if (e.key === "Escape") { setDraft(title); setEditing(false); }
+        }}
+        onBlur={commit}
+      />
+    );
+  }
+  return (
+    <button type="button" className={styles.titleBtn} data-testid="page-title" title={t("dialogs.renamePageTitle")}
+      onClick={() => { setDraft(title); setEditing(true); }}>
+      {title || t("common.untitled")}
+    </button>
+  );
+}
 
 // Mode-aware page top bar (Phase 3b-3). One component for members AND guests, driven
 // by `editing`. READ mode = title + Edit/Share/Comments + ••• (Export/Print/History/
@@ -35,6 +74,7 @@ export interface PageToolbarProps {
   onExport?: () => void;
   onPrint?: () => void;
   onPermissions?: () => void; // implies canManage (caller gates)
+  onRename?: (title: string) => void; // present ⇒ title is click-to-rename (edit-capable)
 }
 
 export function PageToolbar(p: PageToolbarProps) {
@@ -53,7 +93,9 @@ export function PageToolbar(p: PageToolbarProps) {
 
   return (
     <div className={styles.bar} data-testid="page-toolbar">
-      <span className={styles.title}>{p.title || t("common.untitled")}</span>
+      {p.onRename
+        ? <EditableTitle title={p.title} onRename={p.onRename} />
+        : <span className={styles.title}>{p.title || t("common.untitled")}</span>}
       {p.publishState === "draft" && <span className={styles.chip} data-testid="draft-badge">{t("page.draft")}</span>}
       {p.publishState === "unpublished" && <span className={`${styles.chip} ${styles.chipDirty}`} data-testid="unpublished-badge">{t("page.unpublishedChanges")}</span>}
       <div className={styles.spacer} />
