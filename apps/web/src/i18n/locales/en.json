@@ -177,6 +177,26 @@
     "empty": "No direct grants yet.",
     "group": "group"
   },
+  "spaceTheme": {
+    "title": "Theme",
+    "body": "Choose an accent colour for this space. It overrides the workspace accent for everyone viewing this space; light/dark is each person's own choice.",
+    "inherit": "Inherit"
+  },
+  "branding": {
+    "upgradeTitle": "Branding is a Pro feature",
+    "upgradeBody": "Upgrade your plan to set a custom accent and logo."
+  },
+  "accent": {
+    "label": "Accent colour",
+    "blue": "Blue",
+    "indigo": "Indigo",
+    "violet": "Violet",
+    "green": "Green",
+    "teal": "Teal",
+    "amber": "Amber",
+    "rose": "Rose",
+    "slate": "Slate"
+  },
   "comments": {
     "title": "Comments",
     "open": "Open",

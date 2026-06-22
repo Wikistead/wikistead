@@ -35,6 +35,13 @@ export interface Entitlements {
   // Total CONFIRMED attachment storage per tenant, in bytes. Infinity = no hard
   // cap (Cloud Pro uses metered overage instead). Enforced at presign time.
   maxStorageBytes: number
+
+  // Custom branding (tenant/space accent + tenant logo). A Pro value lever:
+  // self-host is unlimited (Community First), Cloud free is off, Cloud Pro is on.
+  // The server gates WRITES (403) and STRIPS branding on READ when false, so a
+  // downgrade cleanly reverts to the default look while stored values survive for a
+  // re-upgrade. Personal light/dark theme is NOT gated (always available).
+  branding: boolean
 }
 
 // Self-host / Community edition: never plan-limited.
@@ -44,6 +51,7 @@ export const UNLIMITED: Entitlements = {
   maxSpaces: Infinity,
   historyRetentionDays: Infinity,
   maxStorageBytes: Infinity,
+  branding: true,
 }
 
 const GB = 1_000_000_000
@@ -60,8 +68,8 @@ const GB = 1_000_000_000
 // TODO(open-core): these Cloud numbers are a commercial concern; move CLOUD_PLANS
 //   into an EE/Cloud package when one exists, so the AGPL CE package stays clean.
 const CLOUD_PLANS: Record<string, Entitlements> = {
-  free: { guestAccess: true, maxSeats: 5,        maxSpaces: Infinity, historyRetentionDays: 7,        maxStorageBytes: 5 * GB },
-  pro:  { guestAccess: true, maxSeats: Infinity, maxSpaces: Infinity, historyRetentionDays: Infinity, maxStorageBytes: Infinity },
+  free: { guestAccess: true, maxSeats: 5,        maxSpaces: Infinity, historyRetentionDays: 7,        maxStorageBytes: 5 * GB,     branding: false },
+  pro:  { guestAccess: true, maxSeats: Infinity, maxSpaces: Infinity, historyRetentionDays: Infinity, maxStorageBytes: Infinity, branding: true },
 }
 
 // The Cloud resolver. Registered by the Cloud entrypoint; exported so tests can

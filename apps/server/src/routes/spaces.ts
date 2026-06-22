@@ -2,13 +2,14 @@ import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
+import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import type { TenantDb } from '../db/index.js'
 
 interface SpaceRow { id: string; tenant_id: string; name: string; created_at: Date }
-export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage' }
+export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage'; accentKey?: string | null }
 function toSpace(r: SpaceRow): Space {
   return { id: r.id, tenantId: r.tenant_id, name: r.name, createdAt: r.created_at }
 }
@@ -55,8 +56,12 @@ export async function createSpace(
 // leaks the name of) a space the user cannot access — the same "confirm via
 // OpenFGA before display" rule the search two-stage guard follows (the project design notes).
 export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: string): Promise<Space[]> {
-  const rows = await db.sql<SpaceRow[]>`
-    SELECT id, tenant_id, name, created_at FROM spaces ORDER BY created_at
+  // accent_key (space branding, Phase 5c) joined in so the client can apply the
+  // space ▷ tenant ▷ default accent cascade without a per-space fetch.
+  const rows = await db.sql<(SpaceRow & { accent_key: string | null })[]>`
+    SELECT s.id, s.tenant_id, s.name, s.created_at, ss.accent_key
+    FROM spaces s LEFT JOIN space_settings ss ON ss.space_id = s.id
+    ORDER BY s.created_at
   `
   // Per space, derive the caller's capability (view|edit|manage) so the sidebar can
   // show/hide management actions (the UI signal; the server stays the fortress).
@@ -75,7 +80,30 @@ export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: strin
     }),
   )
   const capById = new Map(caps)
-  return rows.filter((r) => capById.get(r.id) != null).map((r) => ({ ...toSpace(r), capability: capById.get(r.id)! }))
+  return rows.filter((r) => capById.get(r.id) != null).map((r) => ({ ...toSpace(r), capability: capById.get(r.id)!, accentKey: r.accent_key }))
+}
+
+// Set/clear a space's branding accent (Phase 5c). manage-gated AND entitlement-
+// gated (branding is a Pro lever): a non-entitled tenant gets 403 upgrade_required.
+// accentKey must be a known preset (see ACCENT_PRESETS) or null to clear (inherit).
+export async function updateSpaceBranding(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { spaceId: string; tenantId: string; userId: string; plan: string; accentKey: string | null },
+): Promise<void> {
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  if (!resolveEntitlements(args.plan).branding) {
+    throw Object.assign(new Error('branding requires an upgrade'), { statusCode: 403, code: 'upgrade_required' })
+  }
+  if (args.accentKey !== null && !isAccentKey(args.accentKey)) {
+    throw Object.assign(new Error('unknown accent'), { statusCode: 400 })
+  }
+  await db.sql`
+    INSERT INTO space_settings (space_id, tenant_id, accent_key, updated_at)
+    VALUES (${args.spaceId}, ${args.tenantId}, ${args.accentKey}, now())
+    ON CONFLICT (space_id) DO UPDATE SET accent_key = ${args.accentKey}, updated_at = now()
+  `
+  emit({ type: 'space.branding_updated', tenantId: args.tenantId, spaceId: args.spaceId, actorId: args.userId })
 }
 
 // Delete a space and all its pages.
@@ -297,5 +325,14 @@ export async function spacesPlugin(app: FastifyInstance) {
 
   app.get<{ Params: { spaceId: string }; Querystring: { q?: string } }>('/spaces/:spaceId/member-candidates', async (req) => {
     return listMemberCandidates(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub, q: req.query?.q ?? '' })
+  })
+
+  // Space branding accent (Phase 5c) — manage + entitlement gated.
+  app.patch<{ Params: { spaceId: string }; Body: { accentKey?: string | null } }>('/spaces/:spaceId/branding', async (req, reply) => {
+    await updateSpaceBranding(req.db, app.fga, {
+      spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
+      plan: req.tenant.plan, accentKey: req.body?.accentKey ?? null,
+    })
+    return reply.code(204).send()
   })
 }

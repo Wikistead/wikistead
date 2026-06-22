@@ -1,24 +1,26 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, Outlet, Route, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
+import { useActiveSpace } from "../app/ActiveSpace";
 import { useSession } from "../session/SessionProvider";
 import { useSpaces, useRenameSpace, useDeleteSpace } from "../data/queries";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
-import { SettingsShell, SettingsDenied, SettingsPlaceholder, type SettingsTab } from "./SettingsShell";
+import { SettingsShell, SettingsDenied, type SettingsTab } from "./SettingsShell";
 import { SpaceMembersTab } from "./SpaceMembersTab";
+import { SpaceThemeTab } from "./SpaceThemeTab";
 
-interface SpaceCtx { spaceId: string; name: string }
+interface SpaceCtx { spaceId: string; name: string; accentKey: string | null }
 
 function useSpaceTabs(spaceId: string): SettingsTab[] {
   const { t } = useTranslation();
   return [
     { key: "general", label: t("spaceSettings.general"), to: `/spaces/${spaceId}/settings/general` },
     { key: "members", label: t("spaceSettings.members"), to: `/spaces/${spaceId}/settings/members` },
-    { key: "theme", label: t("spaceSettings.theme"), to: `/spaces/${spaceId}/settings/theme`, soon: true },
+    { key: "theme", label: t("spaceSettings.theme"), to: `/spaces/${spaceId}/settings/theme` },
   ];
 }
 
@@ -26,8 +28,13 @@ function SpaceSettingsLayout() {
   const { t } = useTranslation();
   const { spaceId } = useParams<{ spaceId: string }>();
   const { status, logout } = useSession();
+  const { setActiveSpaceId } = useActiveSpace();
   const spacesQ = useSpaces();
   const tabs = useSpaceTabs(spaceId ?? "");
+
+  // Opening a space's settings makes it the active space, so the accent cascade
+  // (BrandingApplier) previews this space's accent live as it's edited on the Theme tab.
+  useEffect(() => { if (spaceId) setActiveSpaceId(spaceId); }, [spaceId, setActiveSpaceId]);
 
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
@@ -41,7 +48,7 @@ function SpaceSettingsLayout() {
   if (!space) return <AppShell onLogout={logout}><SettingsDenied kind="notFound" /></AppShell>;
   if (space.capability !== "manage") return <AppShell onLogout={logout}><SettingsDenied kind="forbidden" /></AppShell>;
 
-  const ctx: SpaceCtx = { spaceId: space.id, name: space.name };
+  const ctx: SpaceCtx = { spaceId: space.id, name: space.name, accentKey: space.accentKey ?? null };
   return (
     <AppShell onLogout={logout}>
       <SettingsShell title={t("spaceSettings.title", { name: space.name })} tabs={tabs}>
@@ -103,11 +110,6 @@ function SpaceGeneralTab() {
   );
 }
 
-function SpacePlaceholder({ tabKey }: { tabKey: string }) {
-  const { t } = useTranslation();
-  return <SettingsPlaceholder label={t(`spaceSettings.${tabKey}`)} />;
-}
-
 // Returned as inline <Route> elements so the parent <Routes> can parse them.
 export function SpaceSettingsRoutes() {
   return (
@@ -115,7 +117,7 @@ export function SpaceSettingsRoutes() {
       <Route index element={<Navigate to="general" replace />} />
       <Route path="general" element={<SpaceGeneralTab />} />
       <Route path="members" element={<SpaceMembersTab />} />
-      <Route path="theme" element={<SpacePlaceholder tabKey="theme" />} />
+      <Route path="theme" element={<SpaceThemeTab />} />
     </Route>
   );
 }
