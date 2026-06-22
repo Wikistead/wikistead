@@ -7,6 +7,18 @@
     "loading": "Loading…",
     "untitled": "Untitled"
   },
+  "toast": {
+    "published": "Published",
+    "publishFailed": "Couldn't publish",
+    "restored": "Restored to the selected version",
+    "restoreFailed": "Couldn't restore",
+    "accessGranted": "Access granted",
+    "accessRevoked": "Access removed",
+    "linkCreated": "Share link created",
+    "linkRevoked": "Share link revoked",
+    "copied": "Link copied to clipboard",
+    "actionFailed": "Something went wrong"
+  },
   "theme": {
     "label": "Theme",
     "light": "Light",

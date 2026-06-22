@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { RotateCcw } from "lucide-react";
 import { usePageRevisions, useRestoreRevision, type Revision } from "../data/queries";
 import { ConfirmDialog } from "../ui/dialogs";
+import { notify } from "../ui/toast";
 import styles from "./HistoryPanel.module.css";
 
 // Page history: lists the snapshot revisions (newest first) and, for edit-capable
@@ -68,7 +69,10 @@ export function HistoryPanel({ pageId, canRestore }: { pageId: string; canRestor
         confirmTestId="confirm-restore"
         onClose={() => setConfirming(null)}
         onConfirm={() => {
-          if (confirming) restore.mutate(confirming.id);
+          if (confirming) restore.mutate(confirming.id, {
+            onSuccess: () => notify.success(t("toast.restored")),
+            onError: () => notify.error(t("toast.restoreFailed")),
+          });
           setConfirming(null);
         }}
       />

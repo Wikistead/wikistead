@@ -4,6 +4,7 @@ import { SessionProvider } from "../session/SessionProvider";
 import { queryClient } from "../data/queryClient";
 import { ActiveSpaceProvider } from "./ActiveSpace";
 import { ThemeProvider } from "./ThemeProvider";
+import { Toasts } from "../ui/toast";
 import { AppRoutes } from "./routes";
 
 export function App() {
@@ -14,6 +15,7 @@ export function App() {
           <SessionProvider>
             <ActiveSpaceProvider>
               <AppRoutes />
+              <Toasts />
             </ActiveSpaceProvider>
           </SessionProvider>
         </BrowserRouter>

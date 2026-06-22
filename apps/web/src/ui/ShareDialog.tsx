@@ -4,6 +4,7 @@ import { Dialog } from "@ark-ui/react/dialog";
 import { Portal } from "@ark-ui/react/portal";
 import { Copy, Trash2 } from "lucide-react";
 import { useShareLinks, useCreateShareLink, useRevokeShareLink } from "../data/queries";
+import { notify } from "./toast";
 import styles from "./dialogs.module.css";
 
 const EXPIRY_OPTIONS: { key: string; seconds: number | null }[] = [
@@ -64,7 +65,10 @@ export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClos
                 className={`${styles.btn} ${styles.primary}`}
                 data-testid="create-link"
                 disabled={pageId === null || create.isPending}
-                onClick={() => pageId && create.mutate({ pageId, capability, expiresInSeconds: expiry })}
+                onClick={() => pageId && create.mutate({ pageId, capability, expiresInSeconds: expiry }, {
+                  onSuccess: () => notify.success(t("toast.linkCreated")),
+                  onError: () => notify.error(t("toast.actionFailed")),
+                })}
               >
                 {t("shareDialog.create")}
               </button>
@@ -90,6 +94,7 @@ export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClos
                       onClick={() => {
                         navigator.clipboard?.writeText(linkUrl(l.id));
                         setCopied(l.id);
+                        notify.success(t("toast.copied"));
                       }}
                     >
                       <Copy size={14} />
@@ -100,7 +105,10 @@ export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClos
                       data-danger=""
                       title={t("shareDialog.revoke")}
                       data-testid="revoke-link"
-                      onClick={() => pageId && revoke.mutate({ id: l.id, pageId })}
+                      onClick={() => pageId && revoke.mutate({ id: l.id, pageId }, {
+                        onSuccess: () => notify.success(t("toast.linkRevoked")),
+                        onError: () => notify.error(t("toast.actionFailed")),
+                      })}
                     >
                       <Trash2 size={14} />
                     </button>
