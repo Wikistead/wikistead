@@ -13,7 +13,6 @@ import {
   useCreatePage,
   useRenamePage,
   useDeletePage,
-  useDeleteSpace,
   useMovePage,
   type Page,
 } from "../data/queries";
@@ -97,12 +96,14 @@ export function Sidebar() {
   const createPage = useCreatePage();
   const renamePage = useRenamePage();
   const deletePage = useDeletePage();
-  const deleteSpace = useDeleteSpace();
   const movePage = useMovePage();
 
   const [renaming, setRenaming] = useState<{ pageId: string; spaceId: string; title: string } | null>(null);
   const [renamingSpace, setRenamingSpace] = useState<{ id: string; name: string } | null>(null);
-  const [deleting, setDeleting] = useState<{ kind: "page"; id: string; name: string } | { kind: "space"; id: string; name: string } | null>(null);
+  const [creatingSpace, setCreatingSpace] = useState(false);
+  // Page deletion only — space deletion lives in Space settings (avoids accidental
+  // destruction from the sidebar; #1).
+  const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const [sharing, setSharing] = useState<string | null>(null);
 
   const treeBox = useRef<HTMLDivElement>(null);
@@ -134,7 +135,7 @@ export function Sidebar() {
     if (value === "subpage") newPage(d.pageId);
     else if (value === "share") setSharing(d.pageId);
     else if (value === "rename") setRenaming({ pageId: d.pageId, spaceId: d.spaceId, title: d.name });
-    else if (value === "delete") setDeleting({ kind: "page", id: d.pageId, name: d.name });
+    else if (value === "delete") setDeleting({ id: d.pageId, name: d.name });
   };
 
   const NodeRow = ({ node, style, dragHandle }: NodeRendererProps<Node>) => {
@@ -188,9 +189,8 @@ export function Sidebar() {
       <div className={styles.header}>
         <Menu.Root
           onSelect={(d) => {
-            if (d.value === "__new__") createSpace.mutate("Untitled space", { onSuccess: (s) => s && setActiveSpaceId(s.id) });
+            if (d.value === "__new__") setCreatingSpace(true);
             else if (d.value === "__rename__") { if (currentSpace) setRenamingSpace({ id: currentSpace.id, name: currentSpace.name }); }
-            else if (d.value === "__settings__") { if (current) navigate(`/spaces/${current}/settings`); }
             else setActiveSpaceId(d.value);
           }}
         >
@@ -206,7 +206,6 @@ export function Sidebar() {
                 ))}
                 <Menu.Separator className={styles.menuSep} />
                 {currentSpace && canManage && <Menu.Item value="__rename__" className={styles.menuItem}><Pencil size={13} /> {t("sidebar.renameSpace")}</Menu.Item>}
-                {currentSpace && canManage && <Menu.Item value="__settings__" className={styles.menuItem} data-testid="space-settings-open"><Settings size={13} /> {t("sidebar.spaceSettings")}</Menu.Item>}
                 <Menu.Item value="__new__" className={styles.menuItem}><Plus size={13} /> {t("sidebar.newSpace")}</Menu.Item>
               </Menu.Content>
             </Menu.Positioner>
@@ -215,7 +214,7 @@ export function Sidebar() {
         {current && (canEdit || canManage) && (
           <div className={styles.headerActions}>
             {canEdit && <button type="button" title={t("sidebar.newPage")} aria-label={t("sidebar.newPage")} data-testid="new-page" onClick={() => newPage(null)}><FilePlus size={15} /></button>}
-            {canManage && <button type="button" className={styles.dangerBtn} title={t("sidebar.deleteSpace")} aria-label={t("sidebar.deleteSpace")} onClick={() => currentSpace && setDeleting({ kind: "space", id: current, name: currentSpace.name })}><Trash2 size={15} /></button>}
+            {canManage && <button type="button" title={t("sidebar.spaceSettings")} aria-label={t("sidebar.spaceSettings")} data-testid="space-settings-open" onClick={() => current && navigate(`/spaces/${current}/settings`)}><Settings size={15} /></button>}
           </div>
         )}
       </div>
@@ -272,19 +271,29 @@ export function Sidebar() {
       />
       <ConfirmDialog
         open={deleting !== null}
-        message={deleting?.kind === "space" ? `Delete space "${deleting.name}" and all its pages?` : `Delete page "${deleting?.name}" and its sub-pages?`}
+        message={t("sidebar.deletePageConfirm", { name: deleting?.name ?? "" })}
         onClose={() => setDeleting(null)}
         onConfirm={() => {
-          if (deleting?.kind === "page") deletePage.mutate({ pageId: deleting.id, spaceId: current! });
-          else if (deleting?.kind === "space") { deleteSpace.mutate(deleting.id); setActiveSpaceId(spaces.find((s) => s.id !== deleting.id)?.id ?? null); }
+          if (deleting) deletePage.mutate({ pageId: deleting.id, spaceId: current! });
           setDeleting(null);
         }}
       />
       <RenameDialog
         open={renamingSpace !== null}
         initial={renamingSpace?.name ?? ""}
+        title={t("sidebar.renameSpace")}
+        label={t("sidebar.spaceName")}
         onClose={() => setRenamingSpace(null)}
         onSubmit={(name) => { if (renamingSpace) renameSpace.mutate({ spaceId: renamingSpace.id, name }); setRenamingSpace(null); }}
+      />
+      <RenameDialog
+        open={creatingSpace}
+        initial=""
+        title={t("sidebar.newSpace")}
+        label={t("sidebar.spaceName")}
+        submitLabel={t("sidebar.createSpace")}
+        onClose={() => setCreatingSpace(false)}
+        onSubmit={(name) => { createSpace.mutate(name, { onSuccess: (s) => s && setActiveSpaceId(s.id) }); setCreatingSpace(false); }}
       />
       <ShareDialog pageId={sharing} onClose={() => setSharing(null)} />
     </div>

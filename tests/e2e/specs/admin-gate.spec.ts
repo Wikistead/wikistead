@@ -30,11 +30,14 @@ test("admin: user menu opens the tenant console; space settings rename + delete"
   await page.goto("/p/demo");
   await page.waitForSelector("[data-testid=space-switcher]");
   await page.getByTestId("space-switcher").click();
-  await page.getByText("New space").click();
+  await page.locator("[data-testid=space-menu]").getByText("New space").click();
+  const createDlg = page.locator("[data-testid=rename-dialog][data-state=open]");
+  await createDlg.waitFor();
+  await createDlg.locator("input").fill("Settings E2E Space");
+  await createDlg.locator("button[type=submit]").click();
   await sleep(400);
 
-  // Open its settings from the switcher menu and rename it on the General tab.
-  await page.getByTestId("space-switcher").click();
+  // Open its settings from the gear button (now in the sidebar header) and rename it.
   await page.getByTestId("space-settings-open").click();
   await expect(page).toHaveURL(/\/spaces\/.+\/settings\/general$/);
   await expect(page.getByTestId("space-general")).toBeVisible();
