@@ -7,6 +7,7 @@ import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { livePreview, livePreviewTheme, imageResolver, type ImageResolver } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { mountToolbar, type ImageUploader } from "./live-preview/toolbar";
+import { attachImageDrop } from "./live-preview/image-drop";
 
 // Non-technical surface: Obsidian-style live preview bound to the SAME canonical
 // Y.Text and SAME awareness as the vim surface. No vim, no CRDT bridge. Both
@@ -41,6 +42,8 @@ export function mountLivePreview(
 
   // View-capability guests get no insert toolbar.
   if (!opts.readOnly) mountToolbar(parent, () => view, { uploadImage: opts.uploadImage });
+  // Drag-and-drop image attach (editable surface only — needs an uploader).
+  if (!opts.readOnly && opts.uploadImage) attachImageDrop(view, opts.uploadImage);
 
   const host = document.createElement("div");
   host.className = "lp-editor-host";
