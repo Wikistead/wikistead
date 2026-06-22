@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { LogOut, PanelLeft } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "./ThemeToggle";
 import styles from "./AppShell.module.css";
 
@@ -19,6 +20,7 @@ export function AppShell({
   search?: ReactNode;
   onLogout?: () => void;
 }) {
+  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem("wks.sidebarCollapsed") === "1"; } catch { return false; }
   });
@@ -32,7 +34,7 @@ export function AppShell({
     <div className={styles.shell} data-collapsed={sidebar && collapsed ? "true" : "false"}>
       <header className={styles.header}>
         {sidebar ? (
-          <button type="button" className={styles.collapseBtn} aria-label="Toggle sidebar" aria-pressed={!collapsed} data-testid="sidebar-toggle" onClick={toggle}>
+          <button type="button" className={styles.collapseBtn} aria-label={t("nav.toggleSidebar")} aria-pressed={!collapsed} data-testid="sidebar-toggle" onClick={toggle}>
             <PanelLeft size={16} />
           </button>
         ) : (
@@ -43,7 +45,7 @@ export function AppShell({
         {search && <div className={styles.search}>{search}</div>}
         <ThemeToggle />
         {onLogout && (
-          <button type="button" className={styles.logout} aria-label="Sign out" title="Sign out" onClick={onLogout}>
+          <button type="button" className={styles.logout} aria-label={t("nav.signOut")} title={t("nav.signOut")} onClick={onLogout}>
             <LogOut size={15} />
           </button>
         )}

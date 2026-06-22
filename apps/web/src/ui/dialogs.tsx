@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Dialog } from "@ark-ui/react/dialog";
 import { Portal } from "@ark-ui/react/portal";
 import styles from "./dialogs.module.css";
@@ -17,6 +18,7 @@ export function RenameDialog({
   onClose: () => void;
   onSubmit: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   const [value, setValue] = useState(initial);
   useEffect(() => {
     if (open) setValue(initial);
@@ -28,7 +30,7 @@ export function RenameDialog({
         <Dialog.Backdrop className={styles.backdrop} />
         <Dialog.Positioner className={styles.positioner}>
           <Dialog.Content className={styles.content} data-testid="rename-dialog">
-            <Dialog.Title className={styles.title}>Rename page</Dialog.Title>
+            <Dialog.Title className={styles.title}>{t("dialogs.renamePageTitle")}</Dialog.Title>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -40,15 +42,15 @@ export function RenameDialog({
                 className={styles.input}
                 value={value}
                 autoFocus
-                aria-label="Page title"
+                aria-label={t("dialogs.pageTitleLabel")}
                 onChange={(e) => setValue(e.target.value)}
               />
               <div className={styles.actions}>
                 <button type="button" className={styles.btn} onClick={onClose}>
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button type="submit" className={`${styles.btn} ${styles.primary}`}>
-                  Save
+                  {t("common.save")}
                 </button>
               </div>
             </form>
@@ -64,8 +66,8 @@ export function ConfirmDialog({
   message,
   onClose,
   onConfirm,
-  title = "Confirm",
-  confirmLabel = "Delete",
+  title,
+  confirmLabel,
   tone = "danger",
   confirmTestId = "confirm-delete",
 }: {
@@ -80,17 +82,18 @@ export function ConfirmDialog({
   tone?: "danger" | "primary";
   confirmTestId?: string;
 }) {
+  const { t } = useTranslation();
   return (
     <Dialog.Root open={open} onOpenChange={(d) => !d.open && onClose()}>
       <Portal>
         <Dialog.Backdrop className={styles.backdrop} />
         <Dialog.Positioner className={styles.positioner}>
           <Dialog.Content className={styles.content} data-testid="confirm-dialog">
-            <Dialog.Title className={styles.title}>{title}</Dialog.Title>
+            <Dialog.Title className={styles.title}>{title ?? t("dialogs.confirmTitle")}</Dialog.Title>
             <Dialog.Description className={styles.message}>{message}</Dialog.Description>
             <div className={styles.actions}>
               <button type="button" className={styles.btn} onClick={onClose}>
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -98,7 +101,7 @@ export function ConfirmDialog({
                 data-testid={confirmTestId}
                 onClick={onConfirm}
               >
-                {confirmLabel}
+                {confirmLabel ?? t("common.delete")}
               </button>
             </div>
           </Dialog.Content>
