@@ -21,6 +21,12 @@ type Awareness = NonNullable<ReturnType<typeof connect>["provider"]["awareness"]
 export interface EditorUser {
   name: string;
   color: string;
+  // Peer-visible avatar URL (OIDC `picture`); null → initials avatar. Carried in the
+  // awareness payload so remote collaborators can render it on the cursor (#8).
+  picture?: string | null;
+  // Stable colour/identity seed (the member's sub) — kept off the wire-visible name so
+  // avatars don't recolour on rename. Optional: guests/anon have none.
+  seed?: string;
 }
 
 export type EditorCapability = "view" | "edit";
@@ -70,7 +76,15 @@ export interface EditorProps {
 }
 
 function userField(user: EditorUser) {
-  return { name: user.name, color: user.color, colorLight: `${user.color}33` };
+  // colorLight (caret-selection tint) uses an HSL alpha so it works whether `color`
+  // is hex (#rrggbb) or hsl(...) — the deterministic palette is HSL.
+  return { name: user.name, color: user.color, colorLight: tint(user.color), picture: user.picture ?? null };
+}
+
+// Translucent variant of the caret colour for the selection highlight. hsl(...) →
+// hsl(... / 0.2); hex → append a 33 (20%) alpha. Keeps both colour spaces working.
+function tint(color: string): string {
+  return color.startsWith("hsl(") ? color.replace(/\)\s*$/, " / 0.2)") : `${color}33`;
 }
 
 // React wrapper around the CodeMirror surfaces. TWO independent lifecycles
@@ -259,7 +273,7 @@ export const Editor = memo(function Editor({ docName, token, collabUrl, user, ca
   // Presence label changes must NOT rebuild the editors — just update awareness.
   useEffect(() => {
     awarenessRef.current?.setLocalStateField("user", userField(user));
-  }, [user.name, user.color]);
+  }, [user.name, user.color, user.picture]);
 
   return (
     <div className={styles.editor} data-mode={surfaceKey}>

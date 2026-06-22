@@ -144,7 +144,18 @@ export async function authPlugin(app: FastifyInstance) {
       relation: 'admin',
       object: `tenant:${req.tenant.id}`,
     })
-    return { sub: req.user.sub, groups: req.user.groups, isAdmin: Boolean(allowed) }
+    // Peer-visible identity for the avatar (#3): displayName + picture, NEVER email.
+    // Read from the members row (kept fresh by the login upsert). The dev bypass user
+    // ('dev-user') has no row → both null → client falls back to an initials avatar.
+    const [m] = await req.db.sql<[{ display_name: string | null; picture_url: string | null }?]>`
+      SELECT display_name, picture_url FROM members WHERE sub = ${req.user.sub} LIMIT 1`
+    return {
+      sub: req.user.sub,
+      groups: req.user.groups,
+      isAdmin: Boolean(allowed),
+      displayName: m?.display_name ?? null,
+      picture: m?.picture_url ?? null,
+    }
   })
 
   // Mint a short-lived collab token from the (cookie) session: the collab

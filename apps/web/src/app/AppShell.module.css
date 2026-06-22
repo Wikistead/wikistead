@@ -94,6 +94,20 @@
 }
 .iconBtn:hover { color: var(--fg); background: var(--panel-2); }
 
+/* Avatar trigger: a borderless button hugging the round avatar, with a focus ring. */
+.avatarBtn {
+  margin-left: var(--space-2);
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  display: flex;
+  border-radius: 50%;
+  line-height: 0;
+}
+.avatarBtn:hover { box-shadow: 0 0 0 2px var(--panel-2); }
+.avatarBtn:focus-visible { outline: 2px solid var(--accent, #4363d8); outline-offset: 2px; }
+
 /* Header dropdown menu (Ark Menu content) — theme switcher. */
 .menu {
   background: var(--panel);

@@ -36,8 +36,8 @@ export async function membersPlugin(app: FastifyInstance) {
   app.get('/members', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
     const rows = await req.db.sql<
-      { sub: string; email: string | null; display_name: string | null; role: string; created_at: Date }[]
-    >`SELECT sub, email, display_name, role, created_at FROM members ORDER BY created_at`
+      { sub: string; email: string | null; display_name: string | null; picture_url: string | null; role: string; created_at: Date }[]
+    >`SELECT sub, email, display_name, picture_url, role, created_at FROM members ORDER BY created_at`
     return { members: rows }
   })
 

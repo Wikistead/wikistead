@@ -7,6 +7,7 @@ export interface Member {
   sub: string;
   email: string | null;
   display_name: string | null;
+  picture_url: string | null;
   role: "admin" | "member";
   created_at: string;
 }

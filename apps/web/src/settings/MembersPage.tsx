@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../session/SessionProvider";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
+import { Avatar } from "../ui/Avatar";
 import {
   listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember,
   ApiError, type Member, type Invite,
@@ -72,7 +73,12 @@ export function MembersPage() {
         <tbody>
           {members.map((m) => (
             <tr key={m.sub} style={{ borderBottom: "1px solid var(--border, #222)" }}>
-              <td style={{ padding: "8px 4px" }}>{m.display_name || m.email || m.sub}{m.sub === me && t("members.you")}</td>
+              <td style={{ padding: "8px 4px" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <Avatar name={m.display_name || m.email || m.sub} src={m.picture_url} seed={m.sub} size={24} />
+                  {m.display_name || m.email || m.sub}{m.sub === me && t("members.you")}
+                </span>
+              </td>
               <td>
                 <Select
                   value={m.role}
