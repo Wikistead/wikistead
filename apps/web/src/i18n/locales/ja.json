@@ -1,8 +1,146 @@
 {
+  "common": {
+    "cancel": "キャンセル",
+    "save": "保存",
+    "close": "閉じる",
+    "delete": "削除",
+    "loading": "読み込み中…",
+    "untitled": "無題"
+  },
   "theme": {
     "label": "テーマ",
     "light": "ライト",
     "dark": "ダーク",
     "system": "システム"
+  },
+  "nav": {
+    "toggleSidebar": "サイドバーを切り替え",
+    "signOut": "サインアウト"
+  },
+  "auth": {
+    "signInTitle": "wikistead にサインイン",
+    "signInBody": "組織の ID プロバイダーで続行します。",
+    "signIn": "サインイン",
+    "joinTitle": "wikistead ワークスペースを作成",
+    "joinBody": "ID プロバイダーでサインアップして始めましょう。",
+    "signUp": "サインアップ",
+    "workspaceTitle": "ワークスペース名を設定",
+    "workspaceBody": "これがサブドメインになります。英小文字・数字・ハイフンが使えます。",
+    "workspacePlaceholder": "my-team",
+    "workspaceName": "ワークスペース名",
+    "createWorkspace": "ワークスペースを作成",
+    "createWorkspaceError": "ワークスペースを作成できませんでした",
+    "inviteTitle": "招待されています",
+    "inviteBody": "サインインして招待を承認し、ワークスペースに参加します。",
+    "acceptInvite": "招待を承認"
+  },
+  "share": {
+    "opening": "共有ページを開いています…",
+    "invalid": "この共有リンクは無効・期限切れ・取り消し済みです。"
+  },
+  "page": {
+    "edit": "編集",
+    "share": "共有",
+    "done": "完了",
+    "publish": "公開",
+    "split": "分割",
+    "single": "単一",
+    "comments": "コメント",
+    "draft": "下書き",
+    "unpublishedChanges": "未公開の変更",
+    "moreActions": "その他の操作",
+    "export": "エクスポート",
+    "print": "印刷 / PDF",
+    "history": "履歴",
+    "permissions": "権限"
+  },
+  "sidebar": {
+    "newSpace": "新しいスペース",
+    "renameSpace": "スペース名を変更",
+    "deleteSpace": "スペースを削除",
+    "newPage": "新しいページ",
+    "addSubpage": "サブページを追加",
+    "share": "共有",
+    "rename": "名前を変更",
+    "delete": "削除",
+    "draft": "下書き",
+    "draftTitle": "下書き（未公開）",
+    "unpublished": "未公開の変更",
+    "pageActions": "ページの操作",
+    "noSpace": "スペースなし",
+    "untitledSpace": "無題のスペース",
+    "loadFailed": "読み込みに失敗しました。",
+    "retry": "再試行",
+    "noSpaces": "スペースがまだありません — 上から作成してください。",
+    "noPages": "ページがまだありません — 上から追加してください。"
+  },
+  "dialogs": {
+    "renamePageTitle": "ページ名を変更",
+    "pageTitleLabel": "ページタイトル",
+    "confirmTitle": "確認"
+  },
+  "shareDialog": {
+    "title": "共有",
+    "capability": "権限",
+    "view": "閲覧",
+    "edit": "編集",
+    "expiry": "有効期限",
+    "create": "リンクを作成",
+    "shareUrl": "共有 URL",
+    "copy": "コピー",
+    "copied": "コピーしました",
+    "revoke": "取り消し",
+    "none": "共有リンクはまだありません。"
+  },
+  "permissions": {
+    "title": "権限",
+    "body": "このページへのアクセスをメンバーに付与します。未公開ページはここに記載された人だけが閲覧できます。",
+    "member": "メンバー",
+    "memberPlaceholder": "メンバー ID",
+    "relation": "権限",
+    "view": "閲覧",
+    "edit": "編集",
+    "manage": "管理",
+    "add": "追加",
+    "revoke": "取り消し",
+    "empty": "直接付与はまだありません。",
+    "group": "グループ"
+  },
+  "comments": {
+    "title": "コメント",
+    "open": "未解決",
+    "resolved": "解決済み",
+    "addOnSelection": "選択範囲にコメント",
+    "placeholder": "コメントを追加…",
+    "pagePlaceholder": "ページにコメント…",
+    "submit": "コメント",
+    "resolve": "解決",
+    "reopen": "再オープン",
+    "empty": "コメントはまだありません。"
+  },
+  "history": {
+    "title": "履歴",
+    "restore": "復元",
+    "empty": "保存されたバージョンはまだありません。ページの編集に伴い自動的に記録されます。",
+    "unknown": "不明",
+    "restoreConfirmTitle": "このバージョンを復元",
+    "restoreConfirm": "{{when}} のバージョンに復元しますか？ 現在の内容は履歴に残るので、元に戻せます。"
+  },
+  "attachments": {
+    "title": "添付ファイル",
+    "upload": "アップロード",
+    "delete": "削除",
+    "empty": "添付ファイルはありません。"
+  },
+  "members": {
+    "title": "メンバー",
+    "adminOnly": "管理者のみ。",
+    "role": "ロール",
+    "remove": "削除",
+    "invitesTitle": "招待",
+    "emailPlaceholder": "name@example.com",
+    "sendInvite": "招待を送信",
+    "revoke": "取り消し",
+    "pending": "保留中"
   }
 }

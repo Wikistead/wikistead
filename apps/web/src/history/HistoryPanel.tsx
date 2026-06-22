@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { RotateCcw } from "lucide-react";
 import { usePageRevisions, useRestoreRevision, type Revision } from "../data/queries";
 import { ConfirmDialog } from "../ui/dialogs";
@@ -13,13 +14,14 @@ function fmt(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
-// created_by is stored as the FGA subject ("user:<sub>"); show just the sub.
-function author(createdBy: string | null): string {
-  if (!createdBy) return "unknown";
-  return createdBy.startsWith("user:") ? createdBy.slice(5) : createdBy;
+// created_by is stored as the FGA subject ("user:<sub>" / "guest:<id>"); show the sub.
+function author(createdBy: string | null, unknown: string): string {
+  if (!createdBy) return unknown;
+  return createdBy.replace(/^(user|guest):/, "");
 }
 
 export function HistoryPanel({ pageId, canRestore }: { pageId: string; canRestore: boolean }) {
+  const { t } = useTranslation();
   const { data: revisions, isLoading } = usePageRevisions(pageId);
   const restore = useRestoreRevision(pageId);
   const [confirming, setConfirming] = useState<Revision | null>(null);
@@ -27,12 +29,12 @@ export function HistoryPanel({ pageId, canRestore }: { pageId: string; canRestor
   return (
     <aside className={styles.panel} data-testid="history-panel">
       <div className={styles.header}>
-        <strong>History</strong>
+        <strong>{t("history.title")}</strong>
       </div>
 
-      {isLoading && <p className={styles.hint}>Loading…</p>}
+      {isLoading && <p className={styles.hint}>{t("common.loading")}</p>}
       {!isLoading && (revisions?.length ?? 0) === 0 && (
-        <p className={styles.hint}>No saved versions yet. Versions are captured automatically as the page is edited.</p>
+        <p className={styles.hint}>{t("history.empty")}</p>
       )}
 
       <ul className={styles.list}>
@@ -40,7 +42,7 @@ export function HistoryPanel({ pageId, canRestore }: { pageId: string; canRestor
           <li key={rev.id} className={styles.item} data-testid="revision-item">
             <div className={styles.meta}>
               <span className={styles.when}>{fmt(rev.createdAt)}</span>
-              <span className={styles.who}>{author(rev.createdBy)}</span>
+              <span className={styles.who}>{author(rev.createdBy, t("history.unknown"))}</span>
             </div>
             {canRestore && (
               <button
@@ -50,7 +52,7 @@ export function HistoryPanel({ pageId, canRestore }: { pageId: string; canRestor
                 disabled={restore.isPending}
                 onClick={() => setConfirming(rev)}
               >
-                <RotateCcw size={13} aria-hidden /> Restore
+                <RotateCcw size={13} aria-hidden /> {t("history.restore")}
               </button>
             )}
           </li>
@@ -59,9 +61,9 @@ export function HistoryPanel({ pageId, canRestore }: { pageId: string; canRestor
 
       <ConfirmDialog
         open={confirming !== null}
-        title="Restore this version"
-        message={confirming ? `Restore the page to the version from ${fmt(confirming.createdAt)}? Current content is kept in history, so you can undo this.` : ""}
-        confirmLabel="Restore"
+        title={t("history.restoreConfirmTitle")}
+        message={confirming ? t("history.restoreConfirm", { when: fmt(confirming.createdAt) }) : ""}
+        confirmLabel={t("history.restore")}
         tone="primary"
         confirmTestId="confirm-restore"
         onClose={() => setConfirming(null)}

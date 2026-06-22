@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { Editor, type AnchorGetter, type EditorLayout } from "../editor/Editor";
@@ -34,17 +35,18 @@ const COLLAB_URL = resolveCollabUrl();
 // Shown when there is no member session (real mode). Kicks off the OIDC flow as a
 // top-level navigation to /auth/login (preserving where the user wanted to go).
 function LoginScreen() {
+  const { t } = useTranslation();
   const returnTo = window.location.pathname + window.location.search;
   return (
     <AppShell>
       <div style={{ padding: 24, maxWidth: 420 }}>
-        <h2 style={{ marginTop: 0 }}>Sign in to wikistead</h2>
-        <p style={{ color: "var(--fg-dim)" }}>Continue with your organization's identity provider.</p>
+        <h2 style={{ marginTop: 0 }}>{t("auth.signInTitle")}</h2>
+        <p style={{ color: "var(--fg-dim)" }}>{t("auth.signInBody")}</p>
         <Button
           variant="primary"
           onClick={() => { window.location.href = `/auth/login?returnTo=${encodeURIComponent(returnTo)}`; }}
         >
-          Sign in
+          {t("auth.signIn")}
         </Button>
       </div>
     </AppShell>
@@ -54,6 +56,7 @@ function LoginScreen() {
 // Member route: /p/:pageId — tenant comes from the session, docName is formed
 // the same way the collab server expects ("t:<tenant>:p:<page>").
 function PageRoute() {
+  const { t } = useTranslation();
   const { pageId } = useParams<{ pageId: string }>();
   const [searchParams] = useSearchParams();
   const autoEdit = searchParams.get("edit") === "1"; // set by the create-page flow
@@ -143,7 +146,7 @@ function PageRoute() {
   // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
   const publishState = !canEdit ? null : published?.publishedMd == null ? "draft" : published?.hasUnpublishedChanges ? "unpublished" : null;
 
-  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>Loading…</div></AppShell>;
+  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
   const docName = `t:${tenantId}:p:${pageId}`;
   return (
@@ -189,6 +192,7 @@ function PageRoute() {
 // exchange it for a short-lived guest token at the public landing endpoint, then
 // open the editor (read-only for view-capability links). No member chrome.
 function ShareRoute() {
+  const { t } = useTranslation();
   const { linkId } = useParams<{ linkId: string }>();
   const [state, setState] = useState<{ status: "loading" | "denied" | "ok"; minted?: GuestToken }>({
     status: "loading",
@@ -210,10 +214,10 @@ function ShareRoute() {
   }, [linkId]);
 
   if (state.status === "loading") {
-    return <AppShell><div style={{ padding: 16 }}>Opening shared page…</div></AppShell>;
+    return <AppShell><div style={{ padding: 16 }}>{t("share.opening")}</div></AppShell>;
   }
   if (state.status === "denied" || !state.minted) {
-    return <AppShell><div style={{ padding: 16 }}>This share link is invalid, expired, or revoked.</div></AppShell>;
+    return <AppShell><div style={{ padding: 16 }}>{t("share.invalid")}</div></AppShell>;
   }
   return <GuestPage minted={state.minted} />;
 }
@@ -281,12 +285,13 @@ function GuestPage({ minted }: { minted: GuestToken }) {
 // Cloud signup landing (platform origin). Public — no session yet. Starts the
 // platform-IdP flow as a top-level navigation to /signup/login (proxied to the API).
 function JoinRoute() {
+  const { t } = useTranslation();
   return (
     <AppShell>
       <div style={{ padding: 24, maxWidth: 440 }}>
-        <h2 style={{ marginTop: 0 }}>Create your wikistead workspace</h2>
-        <p style={{ color: "var(--fg-dim)" }}>Sign up with your identity provider to get started.</p>
-        <Button variant="primary" onClick={() => { window.location.href = "/signup/login"; }}>Sign up</Button>
+        <h2 style={{ marginTop: 0 }}>{t("auth.joinTitle")}</h2>
+        <p style={{ color: "var(--fg-dim)" }}>{t("auth.joinBody")}</p>
+        <Button variant="primary" onClick={() => { window.location.href = "/signup/login"; }}>{t("auth.signUp")}</Button>
       </div>
     </AppShell>
   );
@@ -296,6 +301,7 @@ function JoinRoute() {
 // the signup session cookie) → redirect to the new tenant subdomain, where the
 // member logs in via platform-IdP SSO (a fresh host-only member session there).
 function WorkspaceRoute() {
+  const { t } = useTranslation();
   const [slug, setSlug] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -314,17 +320,17 @@ function WorkspaceRoute() {
       return;
     }
     const body = (await res.json().catch(() => ({}))) as { error?: string };
-    setErr(body.error ?? "Could not create workspace");
+    setErr(body.error ?? t("auth.createWorkspaceError"));
     setBusy(false);
   };
   return (
     <AppShell>
       <div style={{ padding: 24, maxWidth: 440 }}>
-        <h2 style={{ marginTop: 0 }}>Name your workspace</h2>
-        <p style={{ color: "var(--fg-dim)" }}>This becomes your subdomain. Lowercase letters, numbers and hyphens.</p>
-        <input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="my-team" aria-label="Workspace name" />
+        <h2 style={{ marginTop: 0 }}>{t("auth.workspaceTitle")}</h2>
+        <p style={{ color: "var(--fg-dim)" }}>{t("auth.workspaceBody")}</p>
+        <input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder={t("auth.workspacePlaceholder")} aria-label={t("auth.workspaceName")} />
         {err && <p style={{ color: "crimson" }}>{err}</p>}
-        <Button variant="primary" disabled={busy || !slug} onClick={submit}>Create workspace</Button>
+        <Button variant="primary" disabled={busy || !slug} onClick={submit}>{t("auth.createWorkspace")}</Button>
       </div>
     </AppShell>
   );
@@ -334,6 +340,7 @@ function WorkspaceRoute() {
 // login with the token attached (?invite=) — the callback accepts the invite and
 // seats the user (the new membership grant). The token is opaque to the SPA.
 function InviteRoute() {
+  const { t } = useTranslation();
   const token = new URLSearchParams(window.location.search).get("token") ?? "";
   const accept = () => {
     window.location.href = `/auth/login?invite=${encodeURIComponent(token)}&returnTo=${encodeURIComponent("/p/demo")}`;
@@ -341,9 +348,9 @@ function InviteRoute() {
   return (
     <AppShell>
       <div style={{ padding: 24, maxWidth: 440 }}>
-        <h2 style={{ marginTop: 0 }}>You've been invited</h2>
-        <p style={{ color: "var(--fg-dim)" }}>Sign in to accept your invitation and join the workspace.</p>
-        <Button variant="primary" disabled={!token} onClick={accept}>Accept invite</Button>
+        <h2 style={{ marginTop: 0 }}>{t("auth.inviteTitle")}</h2>
+        <p style={{ color: "var(--fg-dim)" }}>{t("auth.inviteBody")}</p>
+        <Button variant="primary" disabled={!token} onClick={accept}>{t("auth.acceptInvite")}</Button>
       </div>
     </AppShell>
   );
@@ -352,8 +359,9 @@ function InviteRoute() {
 // Admin Console (members). Requires a member session; the page itself enforces
 // admin-only via the API (non-admins see an "admin only" notice).
 function SettingsMembersRoute() {
+  const { t } = useTranslation();
   const { status, logout } = useSession();
-  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>Loading…</div></AppShell>;
+  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
   return <AppShell onLogout={logout}><MembersPage /></AppShell>;
 }

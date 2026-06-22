@@ -1,4 +1,5 @@
 import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, Columns2, Check } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button, IconButton } from "../ui/Button";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
 import type { EditorLayout } from "../editor/Editor";
@@ -37,11 +38,12 @@ export interface PageToolbarProps {
 }
 
 export function PageToolbar(p: PageToolbarProps) {
+  const { t } = useTranslation();
   const overflow: OverflowItem[] = [];
-  if (p.onExport) overflow.push({ value: "export", label: "Export", icon: <Download size={14} />, testId: "export-page" });
-  if (p.onPrint) overflow.push({ value: "print", label: "Print / PDF", icon: <Printer size={14} />, testId: "print-page" });
-  if (p.onHistory) overflow.push({ value: "history", label: "History", icon: <History size={14} />, testId: "history-toggle" });
-  if (p.onPermissions) overflow.push({ value: "permissions", label: "Permissions", icon: <Shield size={14} />, testId: "permissions-open" });
+  if (p.onExport) overflow.push({ value: "export", label: t("page.export"), icon: <Download size={14} />, testId: "export-page" });
+  if (p.onPrint) overflow.push({ value: "print", label: t("page.print"), icon: <Printer size={14} />, testId: "print-page" });
+  if (p.onHistory) overflow.push({ value: "history", label: t("page.history"), icon: <History size={14} />, testId: "history-toggle" });
+  if (p.onPermissions) overflow.push({ value: "permissions", label: t("page.permissions"), icon: <Shield size={14} />, testId: "permissions-open" });
   const onOverflow = (v: string) => {
     if (v === "export") p.onExport?.();
     else if (v === "print") p.onPrint?.();
@@ -51,14 +53,14 @@ export function PageToolbar(p: PageToolbarProps) {
 
   return (
     <div className={styles.bar} data-testid="page-toolbar">
-      <span className={styles.title}>{p.title || "Untitled"}</span>
-      {p.publishState === "draft" && <span className={styles.chip} data-testid="draft-badge">Draft</span>}
-      {p.publishState === "unpublished" && <span className={`${styles.chip} ${styles.chipDirty}`} data-testid="unpublished-badge">Unpublished changes</span>}
+      <span className={styles.title}>{p.title || t("common.untitled")}</span>
+      {p.publishState === "draft" && <span className={styles.chip} data-testid="draft-badge">{t("page.draft")}</span>}
+      {p.publishState === "unpublished" && <span className={`${styles.chip} ${styles.chipDirty}`} data-testid="unpublished-badge">{t("page.unpublishedChanges")}</span>}
       <div className={styles.spacer} />
       <div className={styles.right}>
         {/* Comments is useful in both modes (read + while editing). */}
         {p.onToggleComments && (
-          <IconButton aria-label="Comments" data-testid="comments-toggle" aria-pressed={p.commentsOpen} onClick={p.onToggleComments}>
+          <IconButton aria-label={t("page.comments")} data-testid="comments-toggle" aria-pressed={p.commentsOpen} onClick={p.onToggleComments}>
             <MessageSquare size={15} />{p.openComments ? <span className={styles.commentBadge}>{p.openComments}</span> : null}
           </IconButton>
         )}
@@ -66,24 +68,24 @@ export function PageToolbar(p: PageToolbarProps) {
           <>
             {p.onToggleLayout && (
               <Button size="sm" variant="ghost" data-testid="layout-toggle" aria-pressed={p.layout === "split"} onClick={p.onToggleLayout}>
-                <Columns2 size={14} /> {p.layout === "split" ? "Single" : "Split"}
+                <Columns2 size={14} /> {p.layout === "split" ? t("page.single") : t("page.split")}
               </Button>
             )}
             {p.onPublish && (
               <Button size="sm" variant="primary" data-testid="publish-page" disabled={p.publishing || !p.canPublish} onClick={p.onPublish}>
-                Publish
+                {t("page.publish")}
               </Button>
             )}
-            <Button size="sm" data-testid="view-toggle" onClick={p.onDone}><Check size={14} /> Done</Button>
+            <Button size="sm" data-testid="view-toggle" onClick={p.onDone}><Check size={14} /> {t("page.done")}</Button>
           </>
         ) : (
           <>
-            {p.canEdit && <Button size="sm" data-testid="edit-toggle" onClick={p.onEdit}><Pencil size={14} /> Edit</Button>}
-            {p.onShare && <Button size="sm" variant="ghost" data-testid="share-open" onClick={p.onShare}><Share2 size={14} /> Share</Button>}
+            {p.canEdit && <Button size="sm" data-testid="edit-toggle" onClick={p.onEdit}><Pencil size={14} /> {t("page.edit")}</Button>}
+            {p.onShare && <Button size="sm" variant="ghost" data-testid="share-open" onClick={p.onShare}><Share2 size={14} /> {t("page.share")}</Button>}
           </>
         )}
         {/* Secondary actions are one click away in both modes. */}
-        {overflow.length > 0 && <OverflowMenu items={overflow} onSelect={onOverflow} />}
+        {overflow.length > 0 && <OverflowMenu items={overflow} onSelect={onOverflow} label={t("page.moreActions")} />}
       </div>
     </div>
   );

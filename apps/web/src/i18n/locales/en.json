@@ -1,8 +1,146 @@
 {
+  "common": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "close": "Close",
+    "delete": "Delete",
+    "loading": "Loading…",
+    "untitled": "Untitled"
+  },
   "theme": {
     "label": "Theme",
     "light": "Light",
     "dark": "Dark",
     "system": "System"
+  },
+  "nav": {
+    "toggleSidebar": "Toggle sidebar",
+    "signOut": "Sign out"
+  },
+  "auth": {
+    "signInTitle": "Sign in to wikistead",
+    "signInBody": "Continue with your organization's identity provider.",
+    "signIn": "Sign in",
+    "joinTitle": "Create your wikistead workspace",
+    "joinBody": "Sign up with your identity provider to get started.",
+    "signUp": "Sign up",
+    "workspaceTitle": "Name your workspace",
+    "workspaceBody": "This becomes your subdomain. Lowercase letters, numbers and hyphens.",
+    "workspacePlaceholder": "my-team",
+    "workspaceName": "Workspace name",
+    "createWorkspace": "Create workspace",
+    "createWorkspaceError": "Could not create workspace",
+    "inviteTitle": "You've been invited",
+    "inviteBody": "Sign in to accept your invitation and join the workspace.",
+    "acceptInvite": "Accept invite"
+  },
+  "share": {
+    "opening": "Opening shared page…",
+    "invalid": "This share link is invalid, expired, or revoked."
+  },
+  "page": {
+    "edit": "Edit",
+    "share": "Share",
+    "done": "Done",
+    "publish": "Publish",
+    "split": "Split",
+    "single": "Single",
+    "comments": "Comments",
+    "draft": "Draft",
+    "unpublishedChanges": "Unpublished changes",
+    "moreActions": "More actions",
+    "export": "Export",
+    "print": "Print / PDF",
+    "history": "History",
+    "permissions": "Permissions"
+  },
+  "sidebar": {
+    "newSpace": "New space",
+    "renameSpace": "Rename space",
+    "deleteSpace": "Delete space",
+    "newPage": "New page",
+    "addSubpage": "Add sub-page",
+    "share": "Share",
+    "rename": "Rename",
+    "delete": "Delete",
+    "draft": "Draft",
+    "draftTitle": "Draft (not published)",
+    "unpublished": "Unpublished changes",
+    "pageActions": "Page actions",
+    "noSpace": "No space",
+    "untitledSpace": "Untitled space",
+    "loadFailed": "Failed to load.",
+    "retry": "Retry",
+    "noSpaces": "No spaces yet — create one above.",
+    "noPages": "No pages yet — add one above."
+  },
+  "dialogs": {
+    "renamePageTitle": "Rename page",
+    "pageTitleLabel": "Page title",
+    "confirmTitle": "Confirm"
+  },
+  "shareDialog": {
+    "title": "Share",
+    "capability": "Capability",
+    "view": "View",
+    "edit": "Edit",
+    "expiry": "Expiry",
+    "create": "Create link",
+    "shareUrl": "Share URL",
+    "copy": "Copy",
+    "copied": "Copied",
+    "revoke": "Revoke",
+    "none": "No share links yet."
+  },
+  "permissions": {
+    "title": "Permissions",
+    "body": "Grant members access to this page. An unpublished page is private to the people listed here.",
+    "member": "Member",
+    "memberPlaceholder": "member id",
+    "relation": "Relation",
+    "view": "view",
+    "edit": "edit",
+    "manage": "manage",
+    "add": "Add",
+    "revoke": "Revoke",
+    "empty": "No direct grants yet.",
+    "group": "group"
+  },
+  "comments": {
+    "title": "Comments",
+    "open": "Open",
+    "resolved": "Resolved",
+    "addOnSelection": "Comment on selection",
+    "placeholder": "Add a comment…",
+    "pagePlaceholder": "Comment on the page…",
+    "submit": "Comment",
+    "resolve": "Resolve",
+    "reopen": "Reopen",
+    "empty": "No comments yet."
+  },
+  "history": {
+    "title": "History",
+    "restore": "Restore",
+    "empty": "No saved versions yet. Versions are captured automatically as the page is edited.",
+    "unknown": "unknown",
+    "restoreConfirmTitle": "Restore this version",
+    "restoreConfirm": "Restore the page to the version from {{when}}? Current content is kept in history, so you can undo this."
+  },
+  "attachments": {
+    "title": "Attachments",
+    "upload": "Upload",
+    "delete": "Delete",
+    "empty": "No attachments."
+  },
+  "members": {
+    "title": "Members",
+    "adminOnly": "Admin only.",
+    "role": "Role",
+    "remove": "Remove",
+    "invitesTitle": "Invites",
+    "emailPlaceholder": "name@example.com",
+    "sendInvite": "Send invite",
+    "revoke": "Revoke",
+    "pending": "pending"
   }
 }

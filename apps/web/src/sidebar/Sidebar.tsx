@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
@@ -39,7 +40,7 @@ function buildPageNodes(pages: Page[], parentId: string | null): Node[] {
   return pages
     .filter((p) => p.parentId === parentId)
     .sort((a, b) => a.position - b.position)
-    .map((p) => ({ id: `page:${p.id}`, name: p.title || "Untitled", pageId: p.id, spaceId: p.spaceId, published: p.published ?? false, unpublished: p.hasUnpublishedChanges ?? false, children: buildPageNodes(pages, p.id) }));
+    .map((p) => ({ id: `page:${p.id}`, name: p.title, pageId: p.id, spaceId: p.spaceId, published: p.published ?? false, unpublished: p.hasUnpublishedChanges ?? false, children: buildPageNodes(pages, p.id) }));
 }
 
 function useSize(ref: React.RefObject<HTMLElement | null>) {
@@ -55,6 +56,7 @@ function useSize(ref: React.RefObject<HTMLElement | null>) {
 }
 
 export function Sidebar() {
+  const { t } = useTranslation();
   const { token } = useSession();
   const navigate = useNavigate();
   const { pageId } = useParams<{ pageId: string }>();
@@ -152,24 +154,24 @@ export function Sidebar() {
           {hasChildren ? <ChevronRight size={14} className={node.isOpen ? styles.caretOpen : ""} /> : <span className={styles.caretSpace} />}
         </span>
         <FileText size={14} className={styles.fileIcon} />
-        <span className={styles.name}>{d.name}</span>
+        <span className={styles.name}>{d.name || t("common.untitled")}</span>
         {/* 3-state: Draft (never published) / Unpublished changes / clean (nothing). */}
         {!d.published ? (
-          <span className={styles.draftBadge} data-testid="tree-draft-badge" title="Draft (not published)">Draft</span>
+          <span className={styles.draftBadge} data-testid="tree-draft-badge" title={t("sidebar.draftTitle")}>{t("sidebar.draft")}</span>
         ) : d.unpublished ? (
-          <span className={styles.unpublishedDot} data-testid="unpublished-dot" title="Unpublished changes" aria-label="Unpublished changes" />
+          <span className={styles.unpublishedDot} data-testid="unpublished-dot" title={t("sidebar.unpublished")} aria-label={t("sidebar.unpublished")} />
         ) : null}
         {canEdit && (
           <span className={styles.actions} onClick={(e) => e.stopPropagation()}>
             <Menu.Root onSelect={(m) => onRowAction(m.value, d)}>
-              <Menu.Trigger className={styles.rowMenuBtn} aria-label="Page actions" data-testid="page-actions"><MoreHorizontal size={14} /></Menu.Trigger>
+              <Menu.Trigger className={styles.rowMenuBtn} aria-label={t("sidebar.pageActions")} data-testid="page-actions"><MoreHorizontal size={14} /></Menu.Trigger>
               <Portal>
                 <Menu.Positioner>
                   <Menu.Content className={styles.menu} data-testid="page-menu">
-                    <Menu.Item value="subpage" className={styles.menuItem} data-testid="add-subpage"><FilePlus size={13} /> Add sub-page</Menu.Item>
-                    <Menu.Item value="share" className={styles.menuItem}><Share2 size={13} /> Share</Menu.Item>
-                    <Menu.Item value="rename" className={styles.menuItem}><Pencil size={13} /> Rename</Menu.Item>
-                    <Menu.Item value="delete" className={styles.menuItem}><Trash2 size={13} /> Delete</Menu.Item>
+                    <Menu.Item value="subpage" className={styles.menuItem} data-testid="add-subpage"><FilePlus size={13} /> {t("sidebar.addSubpage")}</Menu.Item>
+                    <Menu.Item value="share" className={styles.menuItem}><Share2 size={13} /> {t("sidebar.share")}</Menu.Item>
+                    <Menu.Item value="rename" className={styles.menuItem}><Pencil size={13} /> {t("sidebar.rename")}</Menu.Item>
+                    <Menu.Item value="delete" className={styles.menuItem}><Trash2 size={13} /> {t("sidebar.delete")}</Menu.Item>
                   </Menu.Content>
                 </Menu.Positioner>
               </Portal>
@@ -192,38 +194,38 @@ export function Sidebar() {
           }}
         >
           <Menu.Trigger className={styles.switcher} data-testid="space-switcher">
-            <span className={styles.switcherName}>{currentSpace?.name || "No space"}</span>
+            <span className={styles.switcherName}>{currentSpace?.name || t("sidebar.noSpace")}</span>
             <ChevronsUpDown size={14} />
           </Menu.Trigger>
           <Portal>
             <Menu.Positioner>
               <Menu.Content className={styles.menu} data-testid="space-menu">
                 {spaces.map((s) => (
-                  <Menu.Item key={s.id} value={s.id} className={styles.menuItem} data-testid="space-option">{s.name || "Untitled space"}</Menu.Item>
+                  <Menu.Item key={s.id} value={s.id} className={styles.menuItem} data-testid="space-option">{s.name || t("sidebar.untitledSpace")}</Menu.Item>
                 ))}
                 <Menu.Separator className={styles.menuSep} />
-                {currentSpace && canManage && <Menu.Item value="__rename__" className={styles.menuItem}><Pencil size={13} /> Rename space</Menu.Item>}
-                <Menu.Item value="__new__" className={styles.menuItem}><Plus size={13} /> New space</Menu.Item>
+                {currentSpace && canManage && <Menu.Item value="__rename__" className={styles.menuItem}><Pencil size={13} /> {t("sidebar.renameSpace")}</Menu.Item>}
+                <Menu.Item value="__new__" className={styles.menuItem}><Plus size={13} /> {t("sidebar.newSpace")}</Menu.Item>
               </Menu.Content>
             </Menu.Positioner>
           </Portal>
         </Menu.Root>
         {current && (canEdit || canManage) && (
           <div className={styles.headerActions}>
-            {canEdit && <button type="button" title="New page" aria-label="New page" data-testid="new-page" onClick={() => newPage(null)}><FilePlus size={15} /></button>}
-            {canManage && <button type="button" title="Delete space" aria-label="Delete space" onClick={() => currentSpace && setDeleting({ kind: "space", id: current, name: currentSpace.name })}><Trash2 size={15} /></button>}
+            {canEdit && <button type="button" title={t("sidebar.newPage")} aria-label={t("sidebar.newPage")} data-testid="new-page" onClick={() => newPage(null)}><FilePlus size={15} /></button>}
+            {canManage && <button type="button" title={t("sidebar.deleteSpace")} aria-label={t("sidebar.deleteSpace")} onClick={() => currentSpace && setDeleting({ kind: "space", id: current, name: currentSpace.name })}><Trash2 size={15} /></button>}
           </div>
         )}
       </div>
 
       {spacesQ.isLoading ? (
-        <div className={styles.state}>Loading…</div>
+        <div className={styles.state}>{t("common.loading")}</div>
       ) : spacesQ.isError ? (
-        <div className={styles.state}>Failed to load. <button type="button" onClick={() => spacesQ.refetch()}>Retry</button></div>
+        <div className={styles.state}>{t("sidebar.loadFailed")} <button type="button" onClick={() => spacesQ.refetch()}>{t("sidebar.retry")}</button></div>
       ) : spaces.length === 0 ? (
-        <div className={styles.state}>No spaces yet — create one above.</div>
+        <div className={styles.state}>{t("sidebar.noSpaces")}</div>
       ) : pages.length === 0 ? (
-        <div className={styles.state}>No pages yet — add one above.</div>
+        <div className={styles.state}>{t("sidebar.noPages")}</div>
       ) : (
         <div ref={treeBox} className={styles.treeBox}>
           <Tree<Node>
