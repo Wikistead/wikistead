@@ -47,25 +47,34 @@ export async function buildSearchDoc(
   let isPublic = false
   const setPublic = () => { isPublic = true }
 
-  // 1. Space-level direct grants (viewer/editor/manager → all grant view access)
-  const { tuples: spaceTuples } = await fga.read({ object: `space:${page.space_id}` })
-  for (const { key } of spaceTuples ?? []) {
-    if (!key || !['manager', 'editor', 'viewer'].includes(key.relation)) continue
-    categorize(key.user, viewerUsers, viewerGroups, setPublic)
-  }
-
-  // 2. Page-level direct grants (view/edit/manage); share_link subjects excluded
+  // 1. Page-level grants. Direct view/edit/manage grants always apply; the
+  //    `page#space` link (written only at publish — the visibility gate) tells us
+  //    whether SPACE inheritance is active. A DRAFT has no page#space, so space
+  //    members must NOT be denormalized as viewers (else an unpublished page's title
+  //    would surface to space members in stage-1 search). stage-2 FGA is the real
+  //    gate, but excluding them from stage-1 keeps drafts out of space search.
   const { tuples: pageTuples } = await fga.read({ object: `page:${pageId}` })
+  let linkedToSpace = false
   for (const { key } of pageTuples ?? []) {
-    if (!key || !['manage', 'edit', 'view'].includes(key.relation)) continue
+    if (!key) continue
+    if (key.relation === 'space' && key.user === `space:${page.space_id}`) { linkedToSpace = true; continue }
+    if (!['manage', 'edit', 'view'].includes(key.relation)) continue
     categorize(key.user, viewerUsers, viewerGroups, setPublic)
   }
 
-  // 3. Tenant admins (have manager access on all spaces via model inheritance)
-  const { tuples: tenantTuples } = await fga.read({ object: `tenant:${tenantId}` })
-  for (const { key } of tenantTuples ?? []) {
-    if (!key || key.relation !== 'admin') continue
-    categorize(key.user, viewerUsers, viewerGroups, setPublic)
+  // 2. Space inheritance + tenant admins — ONLY for a PUBLISHED page (page#space
+  //    present). For a draft these are withheld (the gate), matching FGA exactly.
+  if (linkedToSpace) {
+    const { tuples: spaceTuples } = await fga.read({ object: `space:${page.space_id}` })
+    for (const { key } of spaceTuples ?? []) {
+      if (!key || !['manager', 'editor', 'viewer'].includes(key.relation)) continue
+      categorize(key.user, viewerUsers, viewerGroups, setPublic)
+    }
+    const { tuples: tenantTuples } = await fga.read({ object: `tenant:${tenantId}` })
+    for (const { key } of tenantTuples ?? []) {
+      if (!key || key.relation !== 'admin') continue
+      categorize(key.user, viewerUsers, viewerGroups, setPublic)
+    }
   }
 
   // Index the PUBLISHED body only — never the live draft. published_md is set by

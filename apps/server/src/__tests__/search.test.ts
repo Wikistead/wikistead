@@ -152,6 +152,9 @@ describe('permission revocation', () => {
     const page = await createPage(db, fgaClient, driver, {
       tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'revoke-viewer-test',
     })
+    // Phase 4 gate: link to space (publish) so space-viewer inheritance applies in
+    // buildSearchDoc — this test is about a PUBLISHED page's viewer denormalization.
+    await writeTuples(fgaClient, [{ user: `space:${spaceId}`, relation: 'space', object: `page:${page.id}` }])
     createdPageIds.push(page.id)
     await wait()
 

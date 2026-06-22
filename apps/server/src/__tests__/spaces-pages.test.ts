@@ -15,6 +15,13 @@ import type { Tenant } from '@wikistead/types'
 
 const driver = new LogicalSearchDriver()
 
+// Phase 4 visibility gate: createPage no longer links a page to its space (drafts
+// are creator-only); publishing writes `page#space`. Tests that exercise SPACE-
+// inheritance behavior (cross-space move, space-scoped share links, space-viewer
+// search) operate on PUBLISHED pages, so they link the page to its space first.
+const linkToSpace = (pageId: string, spaceId: string) =>
+  writeTuples(fgaClient, [{ user: `space:${spaceId}`, relation: 'space', object: `page:${pageId}` }])
+
 let tenant: Tenant
 let db: TenantDb
 
@@ -298,6 +305,7 @@ describe('cross-space move (security)', () => {
   it('moves the whole subtree and swaps every page grant from old to new space', async () => {
     const parent = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId: spaceA, userId: 'dev-user', title: 'x-parent' })
     const child = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId: spaceA, userId: 'dev-user', title: 'x-child', parentId: parent.id })
+    await linkToSpace(parent.id, spaceA); await linkToSpace(child.id, spaceA) // published → space-visible
 
     // A user who can view spaceA (only) sees both pages via `viewer from space`.
     await writeTuples(fgaClient, [{ user: 'user:src-viewer', relation: 'viewer', object: `space:${spaceA}` }])
@@ -328,6 +336,7 @@ describe('cross-space move (security)', () => {
 
   it('requires manage on the page AND edit on the destination space', async () => {
     const page = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId: spaceA, userId: 'dev-user', title: 'x-authz' })
+    await linkToSpace(page.id, spaceA) // published → space editor inherits edit
 
     // a stranger has neither manage on the page nor edit on B
     await expect(
@@ -351,6 +360,7 @@ describe('cross-space move (security)', () => {
 
   it('FGA add-NEW failure rolls the DB back to the old space and falls to the invisible side', async () => {
     const page = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId: spaceA, userId: 'dev-user', title: 'x-rollback' })
+    await linkToSpace(page.id, spaceA) // published → the swap has an old grant to move
     expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: page.id })).toBe(true)
 
     // The add-NEW (space:B grant) write throws; the delete-OLD (space:A) passes.
@@ -363,10 +373,11 @@ describe('cross-space move (security)', () => {
     // DB rolled back: the page is still in spaceA (no ghost "moved" state).
     expect((await db.sql<{ space_id: string }[]>`SELECT space_id FROM pages WHERE id = ${page.id}`)[0].space_id).toBe(spaceA)
     // Invisible side: OLD grant was deleted, NEW never written → the page has NO
-    // space grant, so it is invisible from ANY space (NOT visible-from-both). Even
-    // dev-user, manager of both spaces, cannot view it.
+    // space grant, so it is invisible via inheritance from ANY space (NOT visible-
+    // from-both). The CREATOR keeps DIRECT access (Phase 4 grant) — a failed move
+    // never strands the owner out of their own page; only inheritance was affected.
     expect(await spaceGrantOf(page.id)).toBeNull()
-    expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: page.id })).toBe(false)
+    expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: page.id })).toBe(true)
 
     // Repair so the row can be cleaned up through the normal (manage) path.
     await writeTuples(fgaClient, [{ user: `space:${spaceA}`, relation: 'space', object: `page:${page.id}` }])
@@ -455,6 +466,7 @@ describe('space-scoped share_link', () => {
     const page2 = await createPage(db, fgaClient, driver, {
       tenantId: tenant.id, spaceId: space.id, userId: 'dev-user', title: 'P2',
     })
+    await linkToSpace(page1.id, space.id); await linkToSpace(page2.id, space.id) // published → space inheritance active
 
     // Write one space-level share_link tuple (permanent).
     // TODO(phase: guest): issuance API. Direct write here for model verification.
