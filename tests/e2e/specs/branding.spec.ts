@@ -49,7 +49,7 @@ test("tenant branding: name shows in the header and accent applies app-wide; res
   await expect.poll(() => page.evaluate(accentVar)).toBe("");
   await page.getByTestId("tenant-name-input").fill("");
   await page.getByTestId("tenant-name-save").click();
-  await expect.poll(() => page.getByTestId("brand").textContent()).toBe("wikistead");
+  await expect.poll(() => page.getByTestId("brand").textContent()).toBe("Wikistead");
 });
 
 // Phase 5d-2: tenant logo (base64 upload, no new dependency). A 1x1 PNG is enough —

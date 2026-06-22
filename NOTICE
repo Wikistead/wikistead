@@ -1,0 +1,14 @@
+Wikistead — NOTICE
+
+Trademarks / brand assets
+-------------------------
+The "Wikistead" name and logo (the house-with-page-lines icon: icon.svg,
+icon-solid.svg, favicon.svg and the derived favicon/app-icon PNGs) are brand
+assets of Wikistead and are NOT covered by the source code license. A fork or
+derivative work MUST replace the name and logo with its own and remove the
+Wikistead marks. (Full legal handling is tracked for the P8 legal pass.)
+
+Fonts
+-----
+"Plus Jakarta Sans" (bundled via @fontsource/plus-jakarta-sans) is licensed under
+the SIL Open Font License 1.1 (OFL-1.1), a permissive font license.

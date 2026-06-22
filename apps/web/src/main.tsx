@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import "./i18n"; // initialize i18next before the app renders
+import "@fontsource/plus-jakarta-sans/600.css"; // brand wordmark (OFL); self-hosted
 import "./styles/tokens.css";
 import "./styles/print.css";
 
