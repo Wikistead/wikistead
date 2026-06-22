@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useTheme } from "./ThemeProvider";
 import { useActiveSpace } from "./ActiveSpace";
 import { useSession } from "../session/SessionProvider";
-import { useSpaces } from "../data/queries";
+import { useSpaces, useBranding } from "../data/queries";
 import { applyAccent } from "./branding";
 
 // Applies the accent cascade (Phase 5c: space ▷ default; 5d adds tenant in the
@@ -18,7 +18,9 @@ export function BrandingApplier() {
   const spaceAccent = status === "authed"
     ? (spacesQ.data?.find((s) => s.id === activeSpaceId)?.accentKey ?? null)
     : null;
-  const effective = spaceAccent; // 5d: ?? tenantAccent
+  // Tenant accent is public (GET /branding), so it applies for everyone incl. guests.
+  const tenantAccent = useBranding().data?.accentKey ?? null;
+  const effective = spaceAccent ?? tenantAccent; // space ▷ tenant ▷ default
 
   useEffect(() => {
     applyAccent(effective, theme);

@@ -33,6 +33,7 @@ import { signupPlugin } from './routes/signup.js'
 import { membersPlugin } from './routes/members.js'
 import { commentsPlugin } from './routes/comments.js'
 import { exportPlugin } from './routes/export.js'
+import { brandingPlugin } from './routes/branding.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -56,6 +57,10 @@ declare module 'fastify' {
     // Marks a route as guest-accessible and the capability a guest token must assert
     // to use it (FGA re-checks the share_link's real authority regardless).
     guest?: 'view' | 'edit'
+    // Marks a route as public-but-tenant-scoped: the tenant is resolved from the
+    // Host, but no authentication is required (e.g. GET /branding). The handler
+    // must only return intentionally-public data.
+    public?: boolean
   }
 }
 
@@ -120,6 +125,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     }
     req.tenant = tenant
     req.db = await acquireTenantDb(tenant)
+
+    // Public-but-tenant-scoped routes (e.g. GET /branding) opt in via
+    // `config: { public: true }`: the tenant is resolved from the Host (so the
+    // response is per-tenant and no tenant id is ever in the URL), but NO auth is
+    // required — the resource is intentionally public (visible to members, guests,
+    // and unauthenticated visitors of the tenant's pages).
+    if (req.routeOptions?.config?.public) return
 
     // ── Browser member path: host-only session cookie (BFF) ──────────────────
     // Three cases, kept distinct:
@@ -215,6 +227,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(membersPlugin)
   await app.register(commentsPlugin)
   await app.register(exportPlugin)
+  await app.register(brandingPlugin)
   await app.register(spacesPlugin)
   await app.register(pagesPlugin)
   await app.register(billingPlugin)

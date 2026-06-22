@@ -354,6 +354,29 @@ export function useRevokeSpaceAccess(spaceId: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["space-access", spaceId] }),
   });
 }
+// Tenant branding (Phase 5d). GET /branding is PUBLIC (resolved from the Host) so
+// it works for members, guests, and unauthenticated visitors — it drives the header
+// wordmark and the tenant layer of the accent cascade. The server strips branding
+// when the plan isn't entitled.
+export interface BrandingDTO { displayName: string | null; accentKey: string | null }
+export function useBranding() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["branding"],
+    queryFn: () => apiFetch<BrandingDTO>("/branding", token),
+    staleTime: 60_000,
+  });
+}
+export function useUpdateTenantBranding() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { accentKey: string | null; displayName: string | null }) =>
+      apiFetch<null>("/tenant/branding", token, { method: "PATCH", body: JSON.stringify(args) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["branding"] }),
+  });
+}
+
 // Tenant entitlements (plan feature flags). Used for UI gating (e.g. show an
 // upgrade state for branding on Cloud free); the server stays the fortress.
 export interface EntitlementsDTO { branding: boolean }
