@@ -263,6 +263,79 @@ export async function getPublished(
   return { publishedMd: row.published_md, publishedAt: row.published_at, hasUnpublishedChanges }
 }
 
+// ── per-page access grant/revoke/list (Phase 4b) ────────────────────────────
+// The generic "grant X access to page Y" mechanism — the shared base for the
+// permission UI AND draft invitations (a draft is created with only a creator
+// grant; inviting someone = granting them view/edit here). Only a `manage` holder
+// may grant/revoke/list, so the permission structure is never shown to — or handed
+// out by — someone without authority. A grantee is a member (user:<sub>) or a group
+// (group:<id>#member); share_link / wildcard subjects are not grantable here.
+export type PageRelation = 'view' | 'edit' | 'manage'
+const PAGE_RELATIONS: PageRelation[] = ['view', 'edit', 'manage']
+
+function validateGrant(grantee: string, relation: string): asserts relation is PageRelation {
+  if (!PAGE_RELATIONS.includes(relation as PageRelation)) {
+    throw Object.assign(new Error('relation must be view, edit, or manage'), { statusCode: 400 })
+  }
+  // Only real principals: a member or a group's member-set. NOT share_link, user:*,
+  // page:, space: — those are not hand-grantable per-page access.
+  if (!/^user:[^*\s]+$/.test(grantee) && !/^group:[^\s]+#member$/.test(grantee)) {
+    throw Object.assign(new Error('grantee must be user:<sub> or group:<id>#member'), { statusCode: 400 })
+  }
+}
+
+async function requireManage(fga: OpenFgaClient, userId: string, pageId: string): Promise<void> {
+  const canManage = await check(fga, `user:${userId}`, 'manage', { type: 'page', id: pageId })
+  if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+}
+
+export async function grantPageAccess(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; tenantId: string; userId: string; grantee: string; relation: string },
+): Promise<void> {
+  validateGrant(args.grantee, args.relation)
+  await requireManage(fga, args.userId, args.pageId)
+  await writeTuples(fga, [{ user: args.grantee, relation: args.relation, object: `page:${args.pageId}` }])
+  // Reindex so the new grantee appears in the search viewer set.
+  const oid = await db.tx(async (tx) => enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' }))
+  processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+  emit({ type: 'page.access_granted', tenantId: args.tenantId, pageId: args.pageId, grantee: args.grantee, relation: args.relation, actorId: args.userId })
+}
+
+export async function revokePageAccess(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; tenantId: string; userId: string; grantee: string; relation: string },
+): Promise<void> {
+  validateGrant(args.grantee, args.relation)
+  await requireManage(fga, args.userId, args.pageId)
+  await deleteTuples(fga, [{ user: args.grantee, relation: args.relation, object: `page:${args.pageId}` }])
+  // Reindex so the revoked grantee drops out of the search viewer set immediately
+  // (FGA-derived surfaces — tree/comments/attachments/collab — drop on next request).
+  const oid = await db.tx(async (tx) => enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' }))
+  processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+  emit({ type: 'page.access_revoked', tenantId: args.tenantId, pageId: args.pageId, grantee: args.grantee, relation: args.relation, actorId: args.userId })
+}
+
+export async function listPageAccess(
+  fga: OpenFgaClient,
+  args: { pageId: string; userId: string },
+): Promise<{ grantee: string; relation: PageRelation }[]> {
+  await requireManage(fga, args.userId, args.pageId)
+  const { tuples } = await fga.read({ object: `page:${args.pageId}` })
+  const out: { grantee: string; relation: PageRelation }[] = []
+  for (const { key } of tuples ?? []) {
+    if (!key || !PAGE_RELATIONS.includes(key.relation as PageRelation)) continue
+    // Direct member/group grants only — never expose share_link or the space link.
+    if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
+    out.push({ grantee: key.user, relation: key.relation as PageRelation })
+  }
+  return out
+}
+
 // All descendant page ids of root (RLS-scoped to the tenant), via the parent_id tree.
 async function descendantIds(db: TenantDb, rootId: string): Promise<string[]> {
   const rows = await db.sql<{ id: string }[]>`
@@ -546,5 +619,26 @@ export async function pagesPlugin(app: FastifyInstance) {
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/published', { config: { guest: 'view' } }, async (req) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
     return getPublished(req.db, app.fga, { pageId: req.params.pageId, subject, context })
+  })
+
+  // ── per-page access (manage-gated; member-only, no guest config) ──────────
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/access', async (req) => {
+    return listPageAccess(app.fga, { pageId: req.params.pageId, userId: req.user.sub })
+  })
+
+  app.post<{ Params: { pageId: string }; Body: { grantee: string; relation: string } }>('/pages/:pageId/access', async (req, reply) => {
+    await grantPageAccess(req.db, app.fga, app.searchDriver, {
+      pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub,
+      grantee: req.body?.grantee ?? '', relation: req.body?.relation ?? '',
+    })
+    return reply.code(204).send()
+  })
+
+  app.delete<{ Params: { pageId: string }; Body: { grantee: string; relation: string } }>('/pages/:pageId/access', async (req, reply) => {
+    await revokePageAccess(req.db, app.fga, app.searchDriver, {
+      pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub,
+      grantee: req.body?.grantee ?? '', relation: req.body?.relation ?? '',
+    })
+    return reply.code(204).send()
   })
 }
