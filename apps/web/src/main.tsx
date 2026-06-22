@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
+import "./i18n"; // initialize i18next before the app renders
 import "./styles/tokens.css";
 import "./styles/print.css";
 
