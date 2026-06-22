@@ -130,7 +130,7 @@ export async function destroyMemberSessions(valkey: IORedis, tenantId: string, s
 export async function establishMemberSession(
   deps: { db: TenantDb; fga: OpenFgaClient; valkey: IORedis },
   tenant: { id: string },
-  claims: { sub: string; email?: string | null; name?: string | null; groups?: string[] },
+  claims: { sub: string; email?: string | null; name?: string | null; picture?: string | null; groups?: string[] },
 ): Promise<string> {
   // tenant#member is the authority (raw relation on a tenant object — not a page/
   // space Capability — so call FGA directly). Membership = the right to enter.
@@ -138,10 +138,10 @@ export async function establishMemberSession(
   if (!allowed) throw Object.assign(new Error('not a member of this tenant'), { statusCode: 403 })
 
   const [row] = await deps.db.sql<[{ role: string; groups: string[] }]>`
-    INSERT INTO members (tenant_id, sub, email, display_name, groups)
-    VALUES (${tenant.id}, ${claims.sub}, ${claims.email ?? null}, ${claims.name ?? null}, ${deps.db.sql.array(claims.groups ?? [])})
+    INSERT INTO members (tenant_id, sub, email, display_name, picture_url, groups)
+    VALUES (${tenant.id}, ${claims.sub}, ${claims.email ?? null}, ${claims.name ?? null}, ${claims.picture ?? null}, ${deps.db.sql.array(claims.groups ?? [])})
     ON CONFLICT (tenant_id, sub) DO UPDATE SET
-      email = EXCLUDED.email, display_name = EXCLUDED.display_name, groups = EXCLUDED.groups, updated_at = now()
+      email = EXCLUDED.email, display_name = EXCLUDED.display_name, picture_url = EXCLUDED.picture_url, groups = EXCLUDED.groups, updated_at = now()
     RETURNING role, groups
   `
   return createSession(deps.valkey, {

@@ -70,6 +70,9 @@ export interface IdpClaims {
   sub: string
   email: string | null
   name: string | null
+  // `picture` is the standard OIDC profile-image URL claim. Peer-visible identity
+  // (avatar / collab cursor) — never email. NULL when the IdP omits it.
+  picture: string | null
 }
 
 // Exchange the callback code for tokens and return the verified id_token claims.
@@ -91,5 +94,6 @@ export async function exchangeCode(
     sub: String(claims.sub),
     email: typeof claims.email === 'string' ? claims.email : null,
     name: typeof claims.name === 'string' ? claims.name : null,
+    picture: typeof claims.picture === 'string' ? claims.picture : null,
   }
 }

@@ -1,9 +1,10 @@
 import { Menu } from "@ark-ui/react/menu";
 import { Portal } from "@ark-ui/react/portal";
 import { useNavigate } from "react-router-dom";
-import { Shield, LogOut, User } from "lucide-react";
+import { Shield, LogOut } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../session/SessionProvider";
+import { Avatar } from "../ui/Avatar";
 import styles from "./AppShell.module.css";
 
 // Header user menu (member chrome only — rendered when onLogout is provided).
@@ -11,8 +12,9 @@ import styles from "./AppShell.module.css";
 // server re-checks tenant#admin on every admin action) and Sign out.
 export function UserMenu({ onLogout }: { onLogout: () => void }) {
   const { t } = useTranslation();
-  const { isAdmin } = useSession();
+  const { isAdmin, displayName, picture, sub, user } = useSession();
   const navigate = useNavigate();
+  const name = displayName ?? sub ?? t("userMenu.label");
   return (
     <Menu.Root
       onSelect={(d) => {
@@ -20,8 +22,8 @@ export function UserMenu({ onLogout }: { onLogout: () => void }) {
         else if (d.value === "logout") onLogout();
       }}
     >
-      <Menu.Trigger className={styles.iconBtn} aria-label={t("userMenu.label")} title={t("userMenu.label")} data-testid="user-menu">
-        <User size={15} />
+      <Menu.Trigger className={styles.avatarBtn} aria-label={t("userMenu.label")} title={name} data-testid="user-menu">
+        <Avatar name={name} src={picture} seed={user.seed ?? sub ?? name} size={26} data-testid="user-avatar" />
       </Menu.Trigger>
       <Portal>
         <Menu.Positioner>

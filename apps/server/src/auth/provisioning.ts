@@ -65,7 +65,7 @@ export async function provisionTenant(
 export async function bootstrapFirstAdmin(
   deps: { db: TenantDb; fga: OpenFgaClient },
   tenant: { id: string },
-  claims: { sub: string; email?: string | null; name?: string | null },
+  claims: { sub: string; email?: string | null; name?: string | null; picture?: string | null },
 ): Promise<boolean> {
   return deps.db.tx(async (tx) => {
     // Serialize concurrent first-logins for this tenant so EXACTLY ONE wins.
@@ -73,8 +73,8 @@ export async function bootstrapFirstAdmin(
     const existing = await tx`SELECT 1 FROM members WHERE tenant_id = ${tenant.id} LIMIT 1`
     if (existing.length) return false // already has members → not the first → no bootstrap
     await tx`
-      INSERT INTO members (tenant_id, sub, email, display_name, role)
-      VALUES (${tenant.id}, ${claims.sub}, ${claims.email ?? null}, ${claims.name ?? null}, 'admin')`
+      INSERT INTO members (tenant_id, sub, email, display_name, picture_url, role)
+      VALUES (${tenant.id}, ${claims.sub}, ${claims.email ?? null}, ${claims.name ?? null}, ${claims.picture ?? null}, 'admin')`
     await writeTuples(deps.fga, adminTuples(tenant.id, claims.sub)) // FGA last; throw → rollback
     return true
   })

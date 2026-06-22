@@ -91,6 +91,35 @@ describe('admin authz matrix', () => {
   })
 })
 
+// ── #3 avatar identity exposure: /auth/me is peer-visible identity → display name +
+// picture ONLY, never email. The admin /members list (admin-only) may include email
+// AND picture (for member-list avatars). This is a privacy boundary, so it gets a
+// dedicated test (the project design notes: authz/privacy boundaries must be tested).
+describe('avatar identity exposure (#3)', () => {
+  beforeAll(async () => {
+    await admin`SELECT set_config('app.tenant_id', ${tenantId}, false)`
+    await admin`UPDATE members SET display_name = 'Ada Lovelace', picture_url = 'https://idp.test/ada.png', email = 'ada@x.test' WHERE tenant_id = ${tenantId} AND sub = 'mem-admin'`
+  })
+
+  it('/auth/me returns sub + displayName + picture, but NEVER email', async () => {
+    const res = await app.inject({ method: 'GET', url: '/auth/me', headers: { host, cookie: cookie(adminSid) } })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.sub).toBe('mem-admin')
+    expect(body.displayName).toBe('Ada Lovelace')
+    expect(body.picture).toBe('https://idp.test/ada.png')
+    expect(body).not.toHaveProperty('email')
+    expect(JSON.stringify(body)).not.toContain('ada@x.test')
+  })
+
+  it('the admin /members list carries picture_url for avatars', async () => {
+    const res = await app.inject({ method: 'GET', url: '/members', headers: { host, cookie: cookie(adminSid) } })
+    expect(res.statusCode).toBe(200)
+    const me = (res.json().members as { sub: string; picture_url: string | null }[]).find((m) => m.sub === 'mem-admin')
+    expect(me?.picture_url).toBe('https://idp.test/ada.png')
+  })
+})
+
 // ── invites via the admin API ───────────────────────────────────────────────
 describe('invite admin API', () => {
   it('creates an invite (returns the link), lists it, then revokes it', async () => {

@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { EditorUser } from "../editor/Editor";
 import { apiFetch } from "../data/apiClient";
+import { colorFromString } from "../ui/avatar";
 
 // Auth modes (ADR-016 / P1.1):
 //  - DEV: VITE_DEV_TOKEN set (dev/e2e) → authenticated via the dev-token bypass;
@@ -18,7 +19,12 @@ export interface Session {
   // UI-convenience flag (tenant#admin) for menu/route gating ONLY. NOT a security
   // boundary — every admin action re-checks tenant#admin server-side.
   isAdmin: boolean;
-  user: EditorUser; // presence identity
+  // Peer-visible identity (#3): the member's display name and OIDC picture (null →
+  // initials avatar). NEVER includes email. Drives the header avatar and the collab
+  // cursor (#8). displayName falls back to sub for the dev/bootstrap case.
+  displayName: string | null;
+  picture: string | null;
+  user: EditorUser; // presence identity (name + deterministic colour + picture)
   logout: () => Promise<void>;
 }
 
@@ -30,19 +36,15 @@ export function useSession(): Session {
   return ctx;
 }
 
-const PALETTE = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4", "#008080"];
-
 export function SessionProvider({ children }: { children: ReactNode }) {
   const env = (import.meta as any).env ?? {};
   const devToken: string | undefined = env.VITE_DEV_TOKEN;
   const tenantId: string = env.VITE_TENANT ?? "tenant_dev";
 
-  const [presence] = useState<EditorUser>(() => ({
-    name: `anon-${Math.floor(Math.random() * 1000)}`,
-    color: PALETTE[Math.floor(Math.random() * PALETTE.length)],
-  }));
   const [status, setStatus] = useState<AuthStatus>(devToken ? "authed" : "loading");
   const [sub, setSub] = useState<string | null>(devToken ? "dev-user" : null);
+  const [displayName, setDisplayName] = useState<string | null>(null);
+  const [picture, setPicture] = useState<string | null>(null);
   // dev-token is god-mode (tenant admin) to match the server's dev bypass.
   const [isAdmin, setIsAdmin] = useState<boolean>(!!devToken);
   const [collabToken, setCollabToken] = useState<string>(devToken ?? "");
@@ -52,11 +54,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     void (async () => {
       try {
-        const me = await apiFetch<{ sub: string; isAdmin?: boolean }>("/auth/me", ""); // cookie
+        // /auth/me exposes ONLY sub + displayName + picture (never email) — #3.
+        const me = await apiFetch<{ sub: string; isAdmin?: boolean; displayName?: string | null; picture?: string | null }>("/auth/me", ""); // cookie
         if (cancelled) return;
         if (!me) return setStatus("anon");
         setSub(me.sub);
         setIsAdmin(!!me.isAdmin);
+        setDisplayName(me.displayName ?? null);
+        setPicture(me.picture ?? null);
         const ct = await apiFetch<{ token: string }>("/auth/collab-token", "", { method: "POST" });
         if (cancelled) return;
         setCollabToken(ct?.token ?? "");
@@ -68,10 +73,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [devToken]);
 
+  // Presence identity (#3 + #8): deterministic so the SAME member always gets the same
+  // colour across reloads and across peers, with no random churn that would thrash
+  // awareness. Colour is seeded from the stable `sub` (survives renames); the name is
+  // the display name, falling back to the sub when the IdP omits it.
+  const user = useMemo<EditorUser>(() => {
+    const seed = sub ?? "anon";
+    return { name: displayName ?? sub ?? "anon", color: colorFromString(seed), picture, seed };
+  }, [sub, displayName, picture]);
+
   const logout = async () => {
     await apiFetch("/auth/logout", "", { method: "POST" }).catch(() => {});
     setStatus("anon");
     setSub(null);
+    setDisplayName(null);
+    setPicture(null);
     setIsAdmin(false);
     setCollabToken("");
   };
@@ -83,7 +99,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     tenantId,
     sub,
     isAdmin,
-    user: presence,
+    displayName,
+    picture,
+    user,
     logout,
   };
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
