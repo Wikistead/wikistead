@@ -8,6 +8,7 @@ import { livePreview, livePreviewTheme, imageResolver, type ImageResolver } from
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { mountToolbar, type ImageUploader } from "./live-preview/toolbar";
 import { attachImageDrop } from "./live-preview/image-drop";
+import { cmTheme } from "../styles/cm-theme";
 
 // Non-technical surface: Obsidian-style live preview bound to the SAME canonical
 // Y.Text and SAME awareness as the vim surface. No vim, no CRDT bridge. Both
@@ -25,6 +26,7 @@ export function mountLivePreview(
     doc: ytext.toString(),
     extensions: [
       minimalSetup,
+      cmTheme,
       EditorView.lineWrapping,
       // GFM base (tables) + fenced-code highlighting. The doc stays plain markdown.
       markdownExtension(),
@@ -68,6 +70,7 @@ export function mountPublishedView(
     doc: markdown,
     extensions: [
       minimalSetup,
+      cmTheme,
       EditorView.lineWrapping,
       markdownExtension(),
       livePreviewTheme,
