@@ -80,8 +80,13 @@ export async function createPage(
       VALUES (${args.tenantId}, ${args.spaceId}, ${parentId}, ${args.title ?? ''}, ${position})
       RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
     `
+    // Visibility gate (Phase 4): a new page is a DRAFT — do NOT link it to its
+    // space (no `page#space`), so space members do NOT inherit access. Grant the
+    // CREATOR direct `manage` instead. publishPage writes `page#space` to release
+    // space inheritance. Until then the draft is visible only to the creator + any
+    // explicitly-granted users (page direct grants).
     await writeTuples(fga, [
-      { user: `space:${args.spaceId}`, relation: 'space', object: `page:${r.id}` },
+      { user: `user:${args.userId}`, relation: 'manage', object: `page:${r.id}` },
     ])
     outboxId = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: r.id, operation: 'upsert' })
     return r
@@ -174,8 +179,8 @@ export async function publishPage(
   const canEdit = await check(fga, args.subject, 'edit', { type: 'page', id: args.pageId }, args.context)
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
-  const [draft] = await db.sql<[{ tenant_id: string; ydoc: Buffer | null; title: string; published_md: string | null; published_at: Date | null; published_revision_id: string | null }]>`
-    SELECT tenant_id, ydoc, title, published_md, published_at, published_revision_id FROM pages WHERE id = ${args.pageId}
+  const [draft] = await db.sql<[{ tenant_id: string; space_id: string; ydoc: Buffer | null; title: string; published_md: string | null; published_at: Date | null; published_revision_id: string | null }]>`
+    SELECT tenant_id, space_id, ydoc, title, published_md, published_at, published_revision_id FROM pages WHERE id = ${args.pageId}
   `
   if (!draft) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const md = decodeYdocContent(draft.ydoc)
@@ -184,8 +189,15 @@ export async function publishPage(
   // already published, do NOT create a revision — that would be meaningless history.
   // The UI's enable/disable uses the cheap over-approximated flag; this is the exact
   // check. Reconcile the cheap flag to false so a spurious "unpublished" badge clears.
+  // Still RELEASE space inheritance (idempotent) — covers a re-publish and the
+  // repair case where a prior publish's page#space write failed; reindex if it wrote.
   if (md === draft.published_md) {
     await db.sql`UPDATE pages SET has_unpublished_changes = false WHERE id = ${args.pageId}`
+    const wrote = await ensurePageSpaceLink(fga, args.pageId, draft.space_id)
+    if (wrote) {
+      const oid = await db.tx(async (tx) => enqueueOutbox(tx, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' }))
+      processOutboxAsync(driver, oid, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' })
+    }
     return { publishedAt: draft.published_at, revisionId: draft.published_revision_id, noop: true }
   }
 
@@ -211,9 +223,24 @@ export async function publishPage(
     publishedAt = p.published_at
     outboxId = await enqueueOutbox(tx, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' })
   })
+  // AFTER the DB commit (fail-closed: a tx failure above leaves the page gated):
+  // release space inheritance, THEN reindex so buildSearchDoc sees the published
+  // state. If this FGA write fails, the page stays gated and a retry publish (no-op
+  // path) repairs it; the two-stage search guard keeps stage-2 FGA authoritative.
+  await ensurePageSpaceLink(fga, args.pageId, draft.space_id)
   processOutboxAsync(driver, outboxId, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' })
   emit({ type: 'page.published', tenantId: draft.tenant_id, pageId: args.pageId, revisionId, actorId: args.createdBy })
   return { publishedAt, revisionId, noop: false }
+}
+
+// Release space inheritance for a page: write `page#space` if absent (idempotent —
+// OpenFGA rejects duplicate writes, so we check first). Returns whether it wrote.
+async function ensurePageSpaceLink(fga: OpenFgaClient, pageId: string, spaceId: string): Promise<boolean> {
+  const { tuples } = await fga.read({ object: `page:${pageId}` })
+  const linked = (tuples ?? []).some((t) => t.key?.relation === 'space' && t.key?.user === `space:${spaceId}`)
+  if (linked) return false
+  await writeTuples(fga, [{ user: `space:${spaceId}`, relation: 'space', object: `page:${pageId}` }])
+  return true
 }
 
 // Read the published content (view-gated). hasUnpublishedChanges = the live shared
@@ -275,9 +302,13 @@ async function swapSpaceTuples(
   for (const id of pageIds) {
     const { tuples } = await fga.read({ object: `page:${id}` })
     const keys = (tuples ?? []).map((t) => t.key).filter((k): k is NonNullable<typeof k> => !!k)
-    if (keys.some((k) => k.relation === 'space' && k.user === `space:${oldSpace}`)) {
-      deletes.push({ user: `space:${oldSpace}`, relation: 'space', object: `page:${id}` })
-    }
+    const hadOld = keys.some((k) => k.relation === 'space' && k.user === `space:${oldSpace}`)
+    // Only swap pages that were LINKED to the old space (published). A DRAFT has no
+    // page#space (the visibility gate) — leave it unlinked so it stays gated; its
+    // next publish writes page#space for whatever space it then lives in. Writing a
+    // new link for a draft here would prematurely release the gate in the new space.
+    if (!hadOld) continue
+    deletes.push({ user: `space:${oldSpace}`, relation: 'space', object: `page:${id}` })
     if (!keys.some((k) => k.relation === 'space' && k.user === `space:${newSpace}`)) {
       writes.push({ user: `space:${newSpace}`, relation: 'space', object: `page:${id}` })
     }
