@@ -42,6 +42,7 @@ export function mountLivePreview(
 
   // View-capability guests get no insert toolbar.
   if (!opts.readOnly) mountToolbar(parent, () => view, { uploadImage: opts.uploadImage });
+  // (read-only published view is mounted via mountPublishedView, below)
   // Drag-and-drop image attach (editable surface only — needs an uploader).
   if (!opts.readOnly && opts.uploadImage) attachImageDrop(view, opts.uploadImage);
 
@@ -50,5 +51,35 @@ export function mountLivePreview(
   host.appendChild(view.dom);
   parent.appendChild(host);
 
+  return view;
+}
+
+// Read-only render of a page's PUBLISHED markdown (draft/publish model). Unlike
+// mountLivePreview this is NOT collab-bound — view-capability users (and view share
+// links) never join the collab room, so the live draft is never delivered to their
+// browser; they only ever receive the published snapshot over HTTP. Same live-
+// preview decorations + image resolver, no yCollab / comments / toolbar.
+export function mountPublishedView(
+  parent: HTMLElement,
+  markdown: string,
+  opts: { resolveImageUrl?: ImageResolver } = {},
+): EditorView {
+  const view = new EditorView({
+    doc: markdown,
+    extensions: [
+      minimalSetup,
+      EditorView.lineWrapping,
+      markdownExtension(),
+      livePreviewTheme,
+      livePreview,
+      ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
+      EditorState.readOnly.of(true),
+      EditorView.editable.of(false),
+    ],
+  });
+  const host = document.createElement("div");
+  host.className = "lp-editor-host";
+  host.appendChild(view.dom);
+  parent.appendChild(host);
   return view;
 }

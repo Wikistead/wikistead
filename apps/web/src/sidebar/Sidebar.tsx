@@ -30,6 +30,7 @@ interface Node {
   name: string;
   pageId: string;
   spaceId: string;
+  unpublished: boolean;
   children?: Node[];
 }
 
@@ -37,7 +38,7 @@ function buildPageNodes(pages: Page[], parentId: string | null): Node[] {
   return pages
     .filter((p) => p.parentId === parentId)
     .sort((a, b) => a.position - b.position)
-    .map((p) => ({ id: `page:${p.id}`, name: p.title || "Untitled", pageId: p.id, spaceId: p.spaceId, children: buildPageNodes(pages, p.id) }));
+    .map((p) => ({ id: `page:${p.id}`, name: p.title || "Untitled", pageId: p.id, spaceId: p.spaceId, unpublished: p.hasUnpublishedChanges ?? false, children: buildPageNodes(pages, p.id) }));
 }
 
 function useSize(ref: React.RefObject<HTMLElement | null>) {
@@ -106,7 +107,9 @@ export function Sidebar() {
 
   const newPage = (parentId: string | null) => {
     if (!current) return;
-    createPage.mutate({ spaceId: current, parentId, title: "Untitled" }, { onSuccess: (p) => p && navigate(`/p/${p.id}`) });
+    // A new page is created as a DRAFT and opens straight in the editor (?edit=1) —
+    // it has no published content yet, so view mode would just be empty.
+    createPage.mutate({ spaceId: current, parentId, title: "Untitled" }, { onSuccess: (p) => p && navigate(`/p/${p.id}?edit=1`) });
   };
 
   // DnD within the active space: reparent (drop onto a page) or reorder (drop at root).
@@ -149,6 +152,7 @@ export function Sidebar() {
         </span>
         <FileText size={14} className={styles.fileIcon} />
         <span className={styles.name}>{d.name}</span>
+        {d.unpublished && <span className={styles.unpublishedDot} data-testid="unpublished-dot" title="Unpublished changes" aria-label="Unpublished changes" />}
         {canEdit && (
           <span className={styles.actions} onClick={(e) => e.stopPropagation()}>
             <Menu.Root onSelect={(m) => onRowAction(m.value, d)}>

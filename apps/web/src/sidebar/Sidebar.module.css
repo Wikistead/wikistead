@@ -97,6 +97,8 @@
 
 .fileIcon { color: var(--fg-dim); flex: 0 0 auto; }
 .name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Unpublished-changes badge: a small accent dot after the page name. */
+.unpublishedDot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin: 0 4px; }
 
 .actions { display: none; gap: 2px; }
 .row:hover .actions,

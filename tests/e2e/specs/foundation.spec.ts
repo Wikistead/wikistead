@@ -15,6 +15,10 @@ test("editor isolation: typing doesn't re-render React; rapid page switch leaks 
   for (const p of [O, E]) await p.waitForSelector("[data-pane=preview] .cm-content");
   await sleep(1200);
 
+  // The observer must be on the COLLAB surface to see remote carets: view mode now
+  // renders the published snapshot (no collab), where awareness carets don't appear.
+  await enterEdit(O);
+
   // P3: reveal the editable surface (dev-token = edit capability). Capture the
   // render baseline AFTER this deliberate mode change, so we measure ONLY typing.
   await enterEdit(E);

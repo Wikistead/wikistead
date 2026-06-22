@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Navigate, Route, Routes, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { Editor, type AnchorGetter } from "../editor/Editor";
 import { CommentsPanel } from "../comments/CommentsPanel";
@@ -10,7 +10,7 @@ import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, type GuestToken } from "../data/apiClient";
-import { usePage } from "../data/queries";
+import { usePage, usePublished, usePublish } from "../data/queries";
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport } from "../data/exportApi";
 import { useActiveSpace } from "./ActiveSpace";
@@ -51,6 +51,8 @@ function LoginScreen() {
 // the same way the collab server expects ("t:<tenant>:p:<page>").
 function PageRoute() {
   const { pageId } = useParams<{ pageId: string }>();
+  const [searchParams] = useSearchParams();
+  const autoEdit = searchParams.get("edit") === "1"; // set by the create-page flow
   const { status, collabToken, tenantId, user, logout, token } = useSession();
   // Capability gates the Edit control (UI only — collab server is the fortress).
   // Defaults to view until resolved, so a page is never editable speculatively.
@@ -59,6 +61,11 @@ function PageRoute() {
   const devMode = token === "dev-token";
   const { data: page } = usePage(pageId ?? "");
   const capability = page?.capability ?? (devMode ? "edit" : "view");
+
+  // Draft/publish: view renders the PUBLISHED snapshot; edit-capable users get a
+  // Publish control + an "unpublished changes" indicator.
+  const { data: published } = usePublished(pageId ?? "");
+  const publish = usePublish(pageId ?? "");
 
   // Opening any page makes its space the active one, so the sidebar follows —
   // including when arriving from cross-space search or a share link.
@@ -130,9 +137,21 @@ function PageRoute() {
             <button type="button" data-testid="history-toggle" aria-pressed={historyOpen} onClick={toggleHistory}>
               History
             </button>
+            {capability === "edit" && (
+              <>
+                {published?.hasUnpublishedChanges && (
+                  <span data-testid="unpublished-badge" style={{ alignSelf: "center", marginLeft: 8, fontSize: 12, color: "var(--fg-dim)" }}>
+                    Unpublished changes
+                  </span>
+                )}
+                <button type="button" data-testid="publish-page" disabled={publish.isPending} onClick={() => publish.mutate()}>
+                  Publish
+                </button>
+              </>
+            )}
           </div>
           <div style={{ flex: 1, minHeight: 0 }}>
-            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} />
+            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} publishedView autoEdit={autoEdit} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} />
           </div>
           {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
         </div>

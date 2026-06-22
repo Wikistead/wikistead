@@ -210,10 +210,13 @@ test("view mode renders a first-line image (reveal-on-cursor is off when read-on
   await page.keyboard.type(`![hero](wks-attachment:${id})`);
   await page.keyboard.press("Enter");
   await page.keyboard.type("caption below");
-  await sleep(400);
+  await sleep(2800); // let the draft persist (collab debounce) before publishing
 
-  // leave edit mode → DEFAULT read-only view, then reload fresh (no prior caret)
-  await page.click("[data-testid=view-toggle]");
+  // PUBLISH so the view renders it (draft/publish model: view shows the published
+  // snapshot). Then reload fresh into view (no prior caret).
+  await page.evaluate(async ({ api, pageId }) => {
+    await fetch(`${api}/pages/${pageId}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+  }, { api: API, pageId });
   await page.reload();
   await page.waitForSelector("[data-pane=preview] .cm-content");
   await sleep(600);
