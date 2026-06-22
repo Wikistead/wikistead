@@ -72,6 +72,16 @@ describe('storeYdoc', () => {
     expect(stored).toBe(false)
   })
 
+  it('marks the page has_unpublished_changes on a draft save (cheap sidebar-badge flag)', async () => {
+    await adminPool`UPDATE pages SET has_unpublished_changes = false WHERE id = ${testPageId}`
+    const doc = new Y.Doc()
+    doc.getText('content').insert(0, 'edited draft')
+    await storeYdoc(TENANT, testPageId, Y.encodeStateAsUpdate(doc))
+    const [row] = await adminPool<[{ has_unpublished_changes: boolean }]>`
+      SELECT has_unpublished_changes FROM pages WHERE id = ${testPageId}`
+    expect(row.has_unpublished_changes).toBe(true)
+  })
+
   it('does NOT enqueue search_outbox on a draft save (publish reindexes, not the draft)', async () => {
     // Draft/publish model: storeYdoc only autosaves the draft. Search/export reflect
     // the PUBLISHED version, reindexed solely by POST /pages/:id/publish — a draft

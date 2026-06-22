@@ -7,10 +7,12 @@ import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import type { TenantDb } from '../db/index.js'
 
-interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date }
-export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit' }
+interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean }
+export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean }
 function toPage(r: PageRow): Page {
-  return { id: r.id, tenantId: r.tenant_id, spaceId: r.space_id, parentId: r.parent_id, title: r.title, position: r.position, createdAt: r.created_at, updatedAt: r.updated_at }
+  // hasUnpublishedChanges is only present when the SELECT included the column
+  // (listPages / getPage); the cheap denormalized flag drives the sidebar badge.
+  return { id: r.id, tenantId: r.tenant_id, spaceId: r.space_id, parentId: r.parent_id, title: r.title, position: r.position, createdAt: r.created_at, updatedAt: r.updated_at, hasUnpublishedChanges: r.has_unpublished_changes ?? false }
 }
 
 // Fractional sibling ordering: a new value between two neighbours, no renumber.
@@ -99,7 +101,7 @@ export async function listPages(
   args: { spaceId: string; userId: string },
 ): Promise<Page[]> {
   const rows = await db.sql<PageRow[]>`
-    SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
+    SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at, has_unpublished_changes
     FROM pages WHERE space_id = ${args.spaceId} ORDER BY position, created_at
   `
   const allowed = await filterAuthorized(fga, `user:${args.userId}`, 'view', rows.map((r) => r.id))
@@ -114,7 +116,7 @@ export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: 
   const access = await checkMemberAccess(fga, args.userId, { type: 'page', id: args.pageId })
   if (!access) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
   const [row] = await db.sql<PageRow[]>`
-    SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
+    SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at, has_unpublished_changes
     FROM pages WHERE id = ${args.pageId}
   `
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
@@ -185,7 +187,8 @@ export async function publishPage(
     `
     revisionId = rev.id
     const [p] = await tx<[{ published_at: Date }]>`
-      UPDATE pages SET published_md = ${md}, published_revision_id = ${rev.id}, published_at = now()
+      UPDATE pages SET published_md = ${md}, published_revision_id = ${rev.id}, published_at = now(),
+        has_unpublished_changes = false
       WHERE id = ${args.pageId}
       RETURNING published_at
     `
