@@ -14,7 +14,7 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient } from '@wikistead/authz'
 import { drainOutbox } from '../search/index.js'
 import { createSpace } from '../routes/spaces.js'
-import { createPage, publishPage, getPublished } from '../routes/pages.js'
+import { createPage, publishPage, getPublished, getPage } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -25,8 +25,10 @@ const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'free', isolatio
 // cross-match those), so a search for one never accidentally matches the other.
 const T1 = `wikipublishone${Date.now().toString(36)}`
 const T2 = `zebrarestoretwo${Date.now().toString(36)}`
+// Simulate a collab draft save: persist ydoc AND set the unpublished flag (the cheap
+// sidebar-badge flag that storeYdoc sets true on every draft save).
 const setDraft = (pageId: string, text: string) =>
-  admin`UPDATE pages SET ydoc = ${Buffer.from(Y.encodeStateAsUpdate((() => { const d = new Y.Doc(); d.getText('content').insert(0, text); return d })()))} WHERE id = ${pageId}`
+  admin`UPDATE pages SET ydoc = ${Buffer.from(Y.encodeStateAsUpdate((() => { const d = new Y.Doc(); d.getText('content').insert(0, text); return d })()))}, has_unpublished_changes = true WHERE id = ${pageId}`
 
 let app: FastifyInstance
 let db: TenantDb
@@ -67,6 +69,8 @@ describe('draft/publish editing model', () => {
     const pub = await getPublished(db, fgaClient, { pageId, userId: 'dev-user' })
     expect(pub.publishedMd).toBeNull()
     expect(pub.hasUnpublishedChanges).toBe(true) // draft has content, nothing published
+    // the cheap sidebar-badge flag agrees (set true by the draft save)
+    expect((await getPage(db, fgaClient, { pageId, userId: 'dev-user' })).hasUnpublishedChanges).toBe(true)
     expect(await drainAndSearch(T1)).not.toContain(pageId) // body not indexed pre-publish
   })
 
@@ -75,6 +79,8 @@ describe('draft/publish editing model', () => {
     const pub = await getPublished(db, fgaClient, { pageId, userId: 'dev-user' })
     expect(pub.publishedMd).toContain(T1)
     expect(pub.hasUnpublishedChanges).toBe(false) // draft == published
+    // publish cleared the cheap badge flag too
+    expect((await getPage(db, fgaClient, { pageId, userId: 'dev-user' })).hasUnpublishedChanges).toBe(false)
     expect(await drainAndSearch(T1)).toContain(pageId)
     const [{ n }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM revisions WHERE page_id = ${pageId}`
     expect(n).toBe(1) // history = the publish

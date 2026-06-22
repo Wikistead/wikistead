@@ -1,0 +1,11 @@
+-- Migration 017: cheap per-page "has unpublished changes" flag.
+--
+-- The accurate check (draft text != published_md) requires decoding the draft
+-- ydoc, which is too costly to run for every page in the sidebar tree. This
+-- denormalized boolean lets listPages return the badge state cheaply:
+--   collab draft save  → true   (edited; a SAFE over-approximation — set true even
+--                                 if the new text equals published, so the badge is
+--                                 never a false negative when changes do exist)
+--   publish / restore  → false  (draft == published again)
+-- The OPEN page still shows the accurate value via GET /pages/:id/published (decode).
+ALTER TABLE pages ADD COLUMN IF NOT EXISTS has_unpublished_changes BOOLEAN NOT NULL DEFAULT false;

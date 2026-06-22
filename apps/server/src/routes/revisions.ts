@@ -137,7 +137,8 @@ export async function restoreRevision(
     `
     await tx`
       UPDATE pages SET ydoc = ${newYdoc}, updated_at = now(),
-        published_md = ${restoredMd}, published_revision_id = ${newRev.id}, published_at = now()
+        published_md = ${restoredMd}, published_revision_id = ${newRev.id}, published_at = now(),
+        has_unpublished_changes = false
       WHERE id = ${args.pageId}
     `
     await tx`

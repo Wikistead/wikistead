@@ -40,7 +40,7 @@ export async function storeYdoc(
   await withTenant(tenantId, async (tx) => {
     const result = await tx`
       UPDATE pages
-      SET ydoc = ${Buffer.from(state)}, updated_at = now()
+      SET ydoc = ${Buffer.from(state)}, updated_at = now(), has_unpublished_changes = true
       WHERE id = ${pageId}
     `
     if (result.count === 0) {
