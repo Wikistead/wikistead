@@ -212,9 +212,11 @@ export function usePublished(pageId: string) {
     queryFn: () => apiFetch<Published>(`/pages/${encodeURIComponent(pageId)}/published`, token),
     enabled: pageId.length > 0,
     // The editor is isolated from React (typing never re-renders), so nothing
-    // invalidates this on a draft edit. Poll modestly so the "unpublished changes"
-    // indicator stays current; a publish invalidates immediately (clears it).
-    refetchInterval: 4000,
+    // invalidates this on a draft edit. Poll so the "unpublished changes" indicator
+    // and the Publish button enable promptly after an edit persists (#10); a publish
+    // invalidates immediately (clears it). Kept off the React render path on purpose
+    // — driving this from an editor signal regressed the presence/awareness e2e.
+    refetchInterval: 1500,
   });
 }
 
