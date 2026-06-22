@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
@@ -6,6 +6,7 @@ import { LoginScreen } from "./LoginScreen";
 import { AdminRoutes } from "../settings/AdminPage";
 import { SpaceSettingsRoutes } from "../settings/SpaceSettingsPage";
 import { Editor, type AnchorGetter, type EditorLayout } from "../editor/Editor";
+import { createDirtySignal } from "../editor/dirtySignal";
 import { PageToolbar } from "./PageToolbar";
 import { ShareDialog } from "../ui/ShareDialog";
 import { CommentsPanel } from "../comments/CommentsPanel";
@@ -79,10 +80,15 @@ function PageRoute() {
   // Inline threads (with anchors) become editor highlights; the panel builds inline
   // threads from the editor's current selection via this anchor getter.
   const anchorGetterRef = useRef<AnchorGetter | null>(null);
+  // External dirty store (instant Publish enable) — read only by PageToolbar, written
+  // only by the editor's Y.Text observer; never re-renders PageRoute/Editor.
+  const dirtySig = useRef(createDirtySignal()).current;
   const { data: threads } = useComments(pageId ?? "");
-  const inlineComments = (threads ?? [])
+  // Memoized so host re-renders (published poll, dirty signal) don't hand <Editor> a
+  // new array ref and defeat its memo — changes only when the thread set changes.
+  const inlineComments = useMemo(() => (threads ?? [])
     .filter((t) => t.kind === "inline" && t.anchorStart && t.anchorEnd)
-    .map((t) => ({ threadId: t.id, anchorStart: t.anchorStart!, anchorEnd: t.anchorEnd!, resolved: t.status === "resolved" }));
+    .map((t) => ({ threadId: t.id, anchorStart: t.anchorStart!, anchorEnd: t.anchorEnd!, resolved: t.status === "resolved" })), [threads]);
   const openComments = (threads ?? []).filter((t) => t.status === "open").length;
 
   // Comments panel is toggled (not always-on); the choice persists. Inline blue
@@ -117,7 +123,7 @@ function PageRoute() {
   const [editing, setEditing] = useState(autoEdit);
   // Navigating to another page opens it in READ mode (unless ?edit=1) — PageRoute is
   // not remounted on a param change, so reset editing when the page changes.
-  useEffect(() => { setEditing(autoEdit); }, [pageId, autoEdit]);
+  useEffect(() => { setEditing(autoEdit); dirtySig.set(false); }, [pageId, autoEdit, dirtySig]);
   const [layout, setLayout] = useState<EditorLayout>(() => {
     try { return localStorage.getItem("wks.editorLayout") === "split" ? "split" : "wysiwyg"; } catch { return "wysiwyg"; }
   });
@@ -145,7 +151,7 @@ function PageRoute() {
             publishState={publishState}
             canPublish={!!published?.hasUnpublishedChanges}
             onPublish={canEdit ? () => publish.mutate(undefined, {
-              onSuccess: () => notify.success(t("toast.published")),
+              onSuccess: () => { dirtySig.set(false); notify.success(t("toast.published")); },
               onError: () => notify.error(t("toast.publishFailed")),
             }) : undefined}
             publishing={publish.isPending}
@@ -163,9 +169,10 @@ function PageRoute() {
               onSuccess: () => notify.success(t("toast.saved")),
               onError: () => notify.error(t("toast.actionFailed")),
             }) : undefined}
+            dirtySignal={dirtySig}
           />
           <div style={{ flex: 1, minHeight: 0 }}>
-            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} layout={layout} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} />
+            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} layout={layout} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} />
           </div>
           {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
         </div>
