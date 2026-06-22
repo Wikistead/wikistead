@@ -80,17 +80,26 @@
     "confirmTitle": "確認"
   },
   "shareDialog": {
-    "title": "共有",
+    "title": "ページを共有",
     "capability": "権限",
+    "canView": "閲覧可",
+    "canEdit": "編集可",
+    "expiry": "有効期限",
+    "never": "なし",
+    "oneHour": "1 時間",
+    "oneDay": "1 日",
+    "sevenDays": "7 日",
+    "create": "リンクを作成",
+    "noLinks": "有効なリンクはありません。",
     "view": "閲覧",
     "edit": "編集",
-    "expiry": "有効期限",
-    "create": "リンクを作成",
+    "expires": "{{when}} に期限切れ",
+    "neverExpires": "無期限",
     "shareUrl": "共有 URL",
-    "copy": "コピー",
-    "copied": "コピーしました",
+    "copyUrl": "URL をコピー",
     "revoke": "取り消し",
-    "none": "共有リンクはまだありません。"
+    "copied": "リンクをクリップボードにコピーしました。",
+    "done": "完了"
   },
   "permissions": {
     "title": "権限",
@@ -127,10 +136,28 @@
     "restoreConfirm": "{{when}} のバージョンに復元しますか？ 現在の内容は履歴に残るので、元に戻せます。"
   },
   "attachments": {
-    "title": "添付ファイル",
+    "header": "添付ファイル ({{count}})",
     "upload": "アップロード",
+    "download": "ダウンロード",
     "delete": "削除",
-    "empty": "添付ファイルはありません。"
+    "empty": "添付ファイルはありません",
+    "uploading": "アップロード中…",
+    "failed": "失敗: {{msg}}",
+    "error": "エラー"
+  },
+  "search": {
+    "placeholder": "ページを検索…",
+    "placeholderKbd": "ページを検索…  (Ctrl-K)",
+    "searching": "検索中…",
+    "noResults": "結果なし"
+  },
+  "lpToolbar": {
+    "bold": "太字",
+    "heading": "見出し",
+    "bulletList": "箇条書き",
+    "inlineCode": "インラインコード",
+    "link": "リンク",
+    "image": "画像を挿入"
   },
   "members": {
     "title": "メンバー",

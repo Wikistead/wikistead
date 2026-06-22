@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Combobox, createListCollection } from "@ark-ui/react/combobox";
 import { Portal } from "@ark-ui/react/portal";
@@ -21,6 +22,7 @@ interface Item {
 // snippet only ever appears for a page the user is allowed to view. Cmd/Ctrl-K
 // focuses the input. Not rendered on guest routes.
 export function SearchBox() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [input, setInput] = useState("");
   const debounced = useDebouncedValue(input, 250);
@@ -74,20 +76,20 @@ export function SearchBox() {
       }}
       openOnClick={false}
       selectionBehavior="clear"
-      placeholder="Search pages…"
+      placeholder={t("search.placeholder")}
       className={styles.root}
     >
       <Combobox.Control className={styles.control}>
         <Search size={14} className={styles.icon} aria-hidden />
-        <Combobox.Input ref={inputRef} className={styles.input} data-testid="search-input" placeholder="Search pages…  (Ctrl-K)" />
+        <Combobox.Input ref={inputRef} className={styles.input} data-testid="search-input" placeholder={t("search.placeholderKbd")} />
       </Combobox.Control>
       <Portal>
         <Combobox.Positioner>
           <Combobox.Content className={styles.content} data-testid="search-results">
             {debounced.trim().length === 0 ? null : isFetching && (hits?.length ?? 0) === 0 ? (
-              <div className={styles.note}>Searching…</div>
+              <div className={styles.note}>{t("search.searching")}</div>
             ) : (hits?.length ?? 0) === 0 ? (
-              <Combobox.Empty className={styles.note}>No results</Combobox.Empty>
+              <Combobox.Empty className={styles.note}>{t("search.noResults")}</Combobox.Empty>
             ) : (
               collection.items.map((item) => (
                 <Combobox.Item key={item.value} item={item} className={styles.item} data-testid="search-item">

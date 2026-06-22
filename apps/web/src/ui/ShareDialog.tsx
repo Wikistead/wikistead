@@ -1,21 +1,23 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Dialog } from "@ark-ui/react/dialog";
 import { Portal } from "@ark-ui/react/portal";
 import { Copy, Trash2 } from "lucide-react";
 import { useShareLinks, useCreateShareLink, useRevokeShareLink } from "../data/queries";
 import styles from "./dialogs.module.css";
 
-const EXPIRY_OPTIONS: { label: string; seconds: number | null }[] = [
-  { label: "Never", seconds: null },
-  { label: "1 hour", seconds: 3600 },
-  { label: "1 day", seconds: 86400 },
-  { label: "7 days", seconds: 604800 },
+const EXPIRY_OPTIONS: { key: string; seconds: number | null }[] = [
+  { key: "shareDialog.never", seconds: null },
+  { key: "shareDialog.oneHour", seconds: 3600 },
+  { key: "shareDialog.oneDay", seconds: 86400 },
+  { key: "shareDialog.sevenDays", seconds: 604800 },
 ];
 
 // Member-facing share UI: create page links (view/edit, optional expiry), copy
 // the URL, and revoke. The URL carries only the unguessable link id; the guest
 // exchanges it for a short-lived token at the public landing endpoint.
 export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClose: () => void }) {
+  const { t } = useTranslation();
   const open = pageId !== null;
   const links = useShareLinks(pageId ?? "", open);
   const create = useCreateShareLink();
@@ -33,27 +35,27 @@ export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClos
         <Dialog.Backdrop className={styles.backdrop} />
         <Dialog.Positioner className={styles.positioner}>
           <Dialog.Content className={styles.content} data-testid="share-dialog">
-            <Dialog.Title className={styles.title}>Share page</Dialog.Title>
+            <Dialog.Title className={styles.title}>{t("shareDialog.title")}</Dialog.Title>
 
             <div className={styles.shareRow}>
               <select
-                aria-label="Capability"
+                aria-label={t("shareDialog.capability")}
                 className={styles.select}
                 value={capability}
                 onChange={(e) => setCapability(e.target.value as "view" | "edit")}
               >
-                <option value="view">Can view</option>
-                <option value="edit">Can edit</option>
+                <option value="view">{t("shareDialog.canView")}</option>
+                <option value="edit">{t("shareDialog.canEdit")}</option>
               </select>
               <select
-                aria-label="Expiry"
+                aria-label={t("shareDialog.expiry")}
                 className={styles.select}
                 value={String(expiry)}
                 onChange={(e) => setExpiry(e.target.value === "null" ? null : Number(e.target.value))}
               >
                 {EXPIRY_OPTIONS.map((o) => (
-                  <option key={o.label} value={String(o.seconds)}>
-                    {o.label}
+                  <option key={o.key} value={String(o.seconds)}>
+                    {t(o.key)}
                   </option>
                 ))}
               </select>
@@ -64,27 +66,27 @@ export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClos
                 disabled={pageId === null || create.isPending}
                 onClick={() => pageId && create.mutate({ pageId, capability, expiresInSeconds: expiry })}
               >
-                Create link
+                {t("shareDialog.create")}
               </button>
             </div>
 
             <div className={styles.linkList} data-testid="link-list">
               {links.isLoading ? (
-                <div className={styles.message}>Loading…</div>
+                <div className={styles.message}>{t("common.loading")}</div>
               ) : (links.data?.length ?? 0) === 0 ? (
-                <div className={styles.message}>No active links.</div>
+                <div className={styles.message}>{t("shareDialog.noLinks")}</div>
               ) : (
                 links.data!.map((l) => (
                   <div key={l.id} className={styles.linkItem}>
                     <span className={styles.linkMeta}>
-                      {l.capability === "edit" ? "Edit" : "View"}
-                      {l.expiresAt ? ` · expires ${new Date(l.expiresAt).toLocaleString()}` : " · never expires"}
+                      {l.capability === "edit" ? t("shareDialog.edit") : t("shareDialog.view")}
+                      {l.expiresAt ? ` · ${t("shareDialog.expires", { when: new Date(l.expiresAt).toLocaleString() })}` : ` · ${t("shareDialog.neverExpires")}`}
                     </span>
-                    <input className={styles.linkUrl} readOnly value={linkUrl(l.id)} aria-label="Share URL" />
+                    <input className={styles.linkUrl} readOnly value={linkUrl(l.id)} aria-label={t("shareDialog.shareUrl")} />
                     <button
                       type="button"
                       className={styles.iconBtn}
-                      title="Copy URL"
+                      title={t("shareDialog.copyUrl")}
                       onClick={() => {
                         navigator.clipboard?.writeText(linkUrl(l.id));
                         setCopied(l.id);
@@ -95,7 +97,7 @@ export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClos
                     <button
                       type="button"
                       className={styles.iconBtn}
-                      title="Revoke"
+                      title={t("shareDialog.revoke")}
                       data-testid="revoke-link"
                       onClick={() => pageId && revoke.mutate({ id: l.id, pageId })}
                     >
@@ -105,11 +107,11 @@ export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClos
                 ))
               )}
             </div>
-            {copied && <div className={styles.copied}>Copied link to clipboard.</div>}
+            {copied && <div className={styles.copied}>{t("shareDialog.copied")}</div>}
 
             <div className={styles.actions}>
               <button type="button" className={styles.btn} onClick={onClose}>
-                Done
+                {t("shareDialog.done")}
               </button>
             </div>
           </Dialog.Content>
