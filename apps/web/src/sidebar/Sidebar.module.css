@@ -2,6 +2,8 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-width: 0;
+  overflow: hidden;
   font-size: 13px;
 }
 
@@ -75,7 +77,11 @@
 .state button { color: var(--accent); background: none; border: none; cursor: pointer; }
 
 /* react-arborist fills this box; useSize feeds its width/height. */
-.treeBox { flex: 1 1 auto; min-height: 0; }
+.treeBox { flex: 1 1 auto; min-height: 0; min-width: 0; }
+/* react-arborist's scroll container sets inline `overflow: auto`. Force the
+   horizontal axis off so a vertical scrollbar (many pages) can't induce a
+   horizontal one (rows are full-width); vertical scrolling is unaffected. */
+.tree { overflow-x: hidden !important; }
 
 /* react-arborist passes positioning/indent via the row `style`; we add layout. */
 .row {

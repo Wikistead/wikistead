@@ -229,6 +229,7 @@ export function Sidebar() {
       ) : (
         <div ref={treeBox} className={styles.treeBox}>
           <Tree<Node>
+            className={styles.tree}
             data={data}
             idAccessor="id"
             childrenAccessor="children"

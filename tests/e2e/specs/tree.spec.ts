@@ -127,3 +127,11 @@ test("the page-actions … trigger stays laid out when unhovered (menu positioni
   const w = await page.locator("[data-testid=page-actions]").first().evaluate((el) => el.getBoundingClientRect().width);
   expect(w).toBeGreaterThan(0);
 });
+
+test("the sidebar has no horizontal scrollbar (overflow regression)", async ({ page }) => {
+  await openDemo(page);
+  await page.waitForSelector("[data-testid=tree-page]");
+  // the aside must not overflow horizontally (border-box + the tree's width chain).
+  const ok = await page.locator("aside").first().evaluate((el) => el.scrollWidth <= el.clientWidth);
+  expect(ok).toBe(true);
+});

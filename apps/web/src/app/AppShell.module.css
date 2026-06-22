@@ -103,7 +103,12 @@
   grid-area: sidebar;
   background: var(--panel);
   border-right: 1px solid var(--border);
-  overflow: auto;
+  /* border-box so the 1px border is inside the 260px track (else content is 1px
+     too wide → a stray horizontal scrollbar). The page tree scrolls internally,
+     so the aside itself never needs to scroll. */
+  box-sizing: border-box;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .slot {
