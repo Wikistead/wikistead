@@ -5,6 +5,7 @@ import { Editor, type AnchorGetter } from "../editor/Editor";
 import { CommentsPanel } from "../comments/CommentsPanel";
 import { HistoryPanel } from "../history/HistoryPanel";
 import { PermissionsDialog } from "../ui/PermissionsDialog";
+import { Button } from "../ui/Button";
 import { useComments } from "../data/comments";
 import { Sidebar } from "../sidebar/Sidebar";
 import { SearchBox } from "../search/SearchBox";
@@ -37,12 +38,12 @@ function LoginScreen() {
       <div style={{ padding: 24, maxWidth: 420 }}>
         <h2 style={{ marginTop: 0 }}>Sign in to wikistead</h2>
         <p style={{ color: "var(--fg-dim)" }}>Continue with your organization's identity provider.</p>
-        <button
-          type="button"
+        <Button
+          variant="primary"
           onClick={() => { window.location.href = `/auth/login?returnTo=${encodeURIComponent(returnTo)}`; }}
         >
           Sign in
-        </button>
+        </Button>
       </div>
     </AppShell>
   );
@@ -262,7 +263,7 @@ function JoinRoute() {
       <div style={{ padding: 24, maxWidth: 440 }}>
         <h2 style={{ marginTop: 0 }}>Create your wikistead workspace</h2>
         <p style={{ color: "var(--fg-dim)" }}>Sign up with your identity provider to get started.</p>
-        <button type="button" onClick={() => { window.location.href = "/signup/login"; }}>Sign up</button>
+        <Button variant="primary" onClick={() => { window.location.href = "/signup/login"; }}>Sign up</Button>
       </div>
     </AppShell>
   );
@@ -300,7 +301,7 @@ function WorkspaceRoute() {
         <p style={{ color: "var(--fg-dim)" }}>This becomes your subdomain. Lowercase letters, numbers and hyphens.</p>
         <input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="my-team" aria-label="Workspace name" />
         {err && <p style={{ color: "crimson" }}>{err}</p>}
-        <button type="button" disabled={busy || !slug} onClick={submit}>Create workspace</button>
+        <Button variant="primary" disabled={busy || !slug} onClick={submit}>Create workspace</Button>
       </div>
     </AppShell>
   );
@@ -319,7 +320,7 @@ function InviteRoute() {
       <div style={{ padding: 24, maxWidth: 440 }}>
         <h2 style={{ marginTop: 0 }}>You've been invited</h2>
         <p style={{ color: "var(--fg-dim)" }}>Sign in to accept your invitation and join the workspace.</p>
-        <button type="button" disabled={!token} onClick={accept}>Accept invite</button>
+        <Button variant="primary" disabled={!token} onClick={accept}>Accept invite</Button>
       </div>
     </AppShell>
   );

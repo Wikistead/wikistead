@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "../session/SessionProvider";
+import { Button } from "../ui/Button";
 import {
   listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember,
   ApiError, type Member, type Invite,
@@ -76,7 +77,7 @@ export function MembersPage() {
                 </select>
               </td>
               <td style={{ textAlign: "right" }}>
-                <button type="button" onClick={() => void guarded(() => removeMember(token, m.sub))()}>Remove</button>
+                <Button size="sm" onClick={() => void guarded(() => removeMember(token, m.sub))()}>Remove</Button>
               </td>
             </tr>
           ))}
@@ -90,7 +91,7 @@ export function MembersPage() {
           <option value="member">member</option>
           <option value="admin">admin</option>
         </select>
-        <button type="button" disabled={!email.trim()} onClick={() => void onInvite()}>Send invite</button>
+        <Button variant="primary" disabled={!email.trim()} onClick={() => void onInvite()}>Send invite</Button>
       </div>
       {lastLink && (
         <p style={{ marginTop: 12 }}>
@@ -106,7 +107,7 @@ export function MembersPage() {
             {invites.map((i) => (
               <li key={i.id} style={{ marginBottom: 4 }}>
                 {i.email || "(no email)"} — {i.role}{" "}
-                <button type="button" onClick={() => void guarded(() => revokeInvite(token, i.id))()}>Revoke</button>
+                <Button size="sm" onClick={() => void guarded(() => revokeInvite(token, i.id))()}>Revoke</Button>
               </li>
             ))}
           </ul>
