@@ -8,6 +8,7 @@
   padding: var(--space-3);
   overflow-y: auto;
   min-height: 0;
+  animation: wks-slide-in-right var(--dur-slow) var(--ease-out);
 }
 .header { display: flex; align-items: center; justify-content: space-between; }
 .hint { color: var(--fg-dim); font-size: 0.85em; margin: 0; }

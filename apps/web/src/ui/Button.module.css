@@ -15,11 +15,16 @@
   color: var(--fg);
   cursor: pointer;
   user-select: none;
+  transition: background var(--dur-fast) var(--ease-standard),
+              border-color var(--dur-fast) var(--ease-standard),
+              color var(--dur-fast) var(--ease-standard),
+              box-shadow var(--dur-fast) var(--ease-standard),
+              transform var(--dur-fast) var(--ease-standard);
 }
 .btn:hover { background: var(--panel-3); }
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .btn:disabled { opacity: 0.5; cursor: default; }
-/* Tactile press feedback (the smoothing transition is added in the motion phase). */
+/* Tactile press feedback. */
 .btn:not(:disabled):active { transform: translateY(0.5px); }
 
 /* sizes */

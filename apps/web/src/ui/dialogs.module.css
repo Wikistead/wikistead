@@ -17,6 +17,7 @@
   padding: var(--space-3);
   width: min(360px, 90vw);
   box-shadow: var(--shadow-lg);
+  animation: wks-pop var(--dur-base) var(--ease-out);
   outline: none; /* Ark focuses the container; suppress the browser focus ring that
                     otherwise reads as a thickened border. Inner controls keep theirs. */
 }

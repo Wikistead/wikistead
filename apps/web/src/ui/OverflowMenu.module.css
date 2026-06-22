@@ -14,13 +14,15 @@
 .content {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   padding: 4px;
   min-width: 160px;
   box-shadow: var(--shadow-md);
   z-index: 50;
   outline: none;        /* suppress the focused-container ring (looks like a thick border) */
   user-select: none;    /* menu is chrome — don't let a drag select the frame */
+  transform-origin: top;
+  animation: wks-pop var(--dur-base) var(--ease-out);
 }
 .item {
   display: flex;

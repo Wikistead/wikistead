@@ -22,12 +22,14 @@
 .content {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   padding: 4px;
   min-width: var(--reference-width); /* Ark sets this from the trigger (sameWidth) */
   box-shadow: var(--shadow-md);
   z-index: 60;
   outline: none;
+  transform-origin: top;
+  animation: wks-pop var(--dur-base) var(--ease-out);
   max-height: 260px;
   overflow-y: auto;
 }
