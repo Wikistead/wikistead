@@ -27,6 +27,11 @@
     "dark": "ダーク",
     "system": "システム"
   },
+  "language": {
+    "label": "言語",
+    "en": "English",
+    "ja": "日本語"
+  },
   "nav": {
     "toggleSidebar": "サイドバーを切り替え",
     "signOut": "サインアウト"

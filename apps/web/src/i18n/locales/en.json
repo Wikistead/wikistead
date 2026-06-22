@@ -27,6 +27,11 @@
     "dark": "Dark",
     "system": "System"
   },
+  "language": {
+    "label": "Language",
+    "en": "English",
+    "ja": "日本語"
+  },
   "nav": {
     "toggleSidebar": "Toggle sidebar",
     "signOut": "Sign out"
