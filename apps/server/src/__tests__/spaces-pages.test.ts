@@ -9,7 +9,7 @@ import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { fgaClient, check, checkRelation, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
-import { createSpace, listSpaces, deleteSpace, updateSpace } from '../routes/spaces.js'
+import { createSpace, listSpaces, deleteSpace, updateSpace, updateSpaceIcon } from '../routes/spaces.js'
 import { createPage, listPages, getPage, deletePage, movePage } from '../routes/pages.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -120,6 +120,27 @@ describe('space lifecycle', () => {
     const rows = await db.sql`SELECT id FROM spaces WHERE id = ${spaceId}`
     expect(rows).toHaveLength(0)
     expect(await check(fgaClient, 'user:dev-user', 'manage', { type: 'space', id: spaceId })).toBe(false)
+  })
+
+  it('updateSpaceIcon sets/clears the icon (manage-gated) and listSpaces returns it', async () => {
+    const space = await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'icon-space' })
+    // default: no override → icon is null (client auto-generates)
+    let mine = (await listSpaces(db, fgaClient, 'dev-user')).find((s) => s.id === space.id)
+    expect(mine?.icon ?? null).toBeNull()
+    // a manager sets an emoji override
+    await updateSpaceIcon(db, fgaClient, { spaceId: space.id, tenantId: tenant.id, userId: 'dev-user', icon: '📚' })
+    mine = (await listSpaces(db, fgaClient, 'dev-user')).find((s) => s.id === space.id)
+    expect(mine?.icon).toBe('📚')
+    // a non-manager is rejected (the fortress)
+    await expect(updateSpaceIcon(db, fgaClient, { spaceId: space.id, tenantId: tenant.id, userId: 'space-rando', icon: '💣' })).rejects.toMatchObject({ statusCode: 403 })
+    // too-long / empty values are rejected
+    await expect(updateSpaceIcon(db, fgaClient, { spaceId: space.id, tenantId: tenant.id, userId: 'dev-user', icon: 'x'.repeat(17) })).rejects.toMatchObject({ statusCode: 400 })
+    await expect(updateSpaceIcon(db, fgaClient, { spaceId: space.id, tenantId: tenant.id, userId: 'dev-user', icon: '   ' })).rejects.toMatchObject({ statusCode: 400 })
+    // clear → back to null
+    await updateSpaceIcon(db, fgaClient, { spaceId: space.id, tenantId: tenant.id, userId: 'dev-user', icon: null })
+    mine = (await listSpaces(db, fgaClient, 'dev-user')).find((s) => s.id === space.id)
+    expect(mine?.icon ?? null).toBeNull()
+    await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: space.id, userId: 'dev-user' })
   })
 
   it('FGA write failure rolls back DB INSERT (no ghost space)', async () => {

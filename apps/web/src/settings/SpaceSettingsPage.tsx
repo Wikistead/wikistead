@@ -5,8 +5,9 @@ import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useActiveSpace } from "../app/ActiveSpace";
 import { useSession } from "../session/SessionProvider";
-import { useSpaces, useRenameSpace, useDeleteSpace } from "../data/queries";
+import { useSpaces, useRenameSpace, useDeleteSpace, useUpdateSpaceIcon } from "../data/queries";
 import { Button } from "../ui/Button";
+import { SpaceIcon } from "../ui/SpaceIcon";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
 import { SettingsShell, SettingsDenied, type SettingsTab } from "./SettingsShell";
@@ -14,7 +15,7 @@ import { SpaceMembersTab } from "./SpaceMembersTab";
 import { SpacePagesTab } from "./SpacePagesTab";
 import { SpaceThemeTab } from "./SpaceThemeTab";
 
-interface SpaceCtx { spaceId: string; name: string; accentKey: string | null }
+interface SpaceCtx { spaceId: string; name: string; accentKey: string | null; icon: string | null }
 
 function useSpaceTabs(spaceId: string): SettingsTab[] {
   const { t } = useTranslation();
@@ -50,7 +51,7 @@ function SpaceSettingsLayout() {
   if (!space) return <AppShell onLogout={logout}><SettingsDenied kind="notFound" /></AppShell>;
   if (space.capability !== "manage") return <AppShell onLogout={logout}><SettingsDenied kind="forbidden" /></AppShell>;
 
-  const ctx: SpaceCtx = { spaceId: space.id, name: space.name, accentKey: space.accentKey ?? null };
+  const ctx: SpaceCtx = { spaceId: space.id, name: space.name, accentKey: space.accentKey ?? null, icon: space.icon ?? null };
   return (
     <AppShell onLogout={logout}>
       <SettingsShell title={t("spaceSettings.title", { name: space.name })} tabs={tabs}>
@@ -62,12 +63,21 @@ function SpaceSettingsLayout() {
 
 function SpaceGeneralTab() {
   const { t } = useTranslation();
-  const { spaceId, name } = useOutletContext<SpaceCtx>();
+  const { spaceId, name, icon } = useOutletContext<SpaceCtx>();
   const navigate = useNavigate();
   const rename = useRenameSpace();
   const del = useDeleteSpace();
+  const setIcon = useUpdateSpaceIcon(spaceId);
   const [draft, setDraft] = useState(name);
+  const [iconDraft, setIconDraft] = useState(icon ?? "");
   const [confirming, setConfirming] = useState(false);
+
+  const saveIcon = (next: string | null) => {
+    setIcon.mutate(next, {
+      onSuccess: () => notify.success(t("toast.saved")),
+      onError: () => notify.error(t("toast.actionFailed")),
+    });
+  };
 
   const save = () => {
     const next = draft.trim();
@@ -86,6 +96,24 @@ function SpaceGeneralTab() {
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 32 }}>
         <input value={draft} onChange={(e) => setDraft(e.target.value)} aria-label={t("spaceSettings.nameLabel")} data-testid="space-name-input" />
         <Button variant="primary" disabled={!draft.trim() || draft.trim() === name || rename.isPending} onClick={save} data-testid="space-name-save">{t("common.save")}</Button>
+      </div>
+
+      <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("spaceSettings.iconLabel")}</label>
+      <p style={{ color: "var(--fg-dim)", fontSize: 13, marginTop: 0 }}>{t("spaceSettings.iconHint")}</p>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 32 }}>
+        {/* Live preview of what the sidebar will show (override, else auto initials). */}
+        <SpaceIcon id={spaceId} name={name} icon={iconDraft.trim() || null} size={28} data-testid="space-icon-preview" />
+        <input
+          value={iconDraft}
+          onChange={(e) => setIconDraft(e.target.value)}
+          maxLength={16}
+          placeholder={t("spaceSettings.iconPlaceholder")}
+          aria-label={t("spaceSettings.iconLabel")}
+          data-testid="space-icon-input"
+          style={{ width: 96 }}
+        />
+        <Button variant="primary" disabled={setIcon.isPending || (iconDraft.trim() || null) === (icon ?? null)} onClick={() => saveIcon(iconDraft.trim() || null)} data-testid="space-icon-save">{t("common.save")}</Button>
+        {icon && <Button variant="ghost" disabled={setIcon.isPending} onClick={() => { setIconDraft(""); saveIcon(null); }} data-testid="space-icon-clear">{t("spaceSettings.iconClear")}</Button>}
       </div>
 
       <h3 style={{ color: "var(--danger)" }}>{t("spaceSettings.dangerZone")}</h3>

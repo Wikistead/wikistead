@@ -15,6 +15,9 @@ export interface Space {
   // Space branding accent preset key (Phase 5c), or null to inherit. Joined into
   // GET /spaces so the accent cascade applies without a per-space fetch.
   accentKey?: string | null;
+  // Space icon override glyph (#4), or null to auto-generate an initials chip from
+  // the name. Joined into GET /spaces so the sidebar renders it without a fetch.
+  icon?: string | null;
 }
 export interface Page {
   id: string;
@@ -419,6 +422,17 @@ export function useUpdateSpaceBranding(spaceId: string) {
   return useMutation({
     mutationFn: (accentKey: string | null) =>
       apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/branding`, token, { method: "PATCH", body: JSON.stringify({ accentKey }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
+  });
+}
+
+// Set/clear a space's icon override (#4). icon null = auto (initials chip).
+export function useUpdateSpaceIcon(spaceId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (icon: string | null) =>
+      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/icon`, token, { method: "PATCH", body: JSON.stringify({ icon }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
   });
 }
