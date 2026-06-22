@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import styles from "./Button.module.css";
 
-type Variant = "default" | "primary" | "ghost" | "danger";
+type Variant = "default" | "primary" | "ghost" | "danger" | "dangerGhost";
 type Size = "sm" | "md";
 
 // Shared, token-driven button (Phase 3b-2). Replaces raw <button> across the app so

@@ -31,4 +31,5 @@
   cursor: pointer;
 }
 .item[data-highlighted] { background: var(--panel-2); }
-.item[data-danger] { color: #e5534b; }
+.item[data-danger] { color: var(--danger); }
+.item[data-danger][data-highlighted] { background: color-mix(in srgb, var(--danger) 14%, transparent); }

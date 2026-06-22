@@ -63,11 +63,12 @@
   font-weight: 600;
 }
 .danger {
-  background: #b3261e;
-  border-color: #b3261e;
-  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--danger-fg);
   font-weight: 600;
 }
+.danger:hover { background: color-mix(in srgb, var(--danger) 85%, black); }
 
 .shareRow {
   display: flex;
@@ -125,6 +126,9 @@
   color: var(--fg);
   background: var(--panel-2);
 }
+/* Destructive icon button (revoke) — red. */
+.iconBtn[data-danger] { color: var(--danger); }
+.iconBtn[data-danger]:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); border-color: var(--danger); }
 .copied {
   margin-top: var(--space-2);
   font-size: 12px;
