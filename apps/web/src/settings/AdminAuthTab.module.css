@@ -1,0 +1,21 @@
+.wrap { padding: 24px; max-width: 560px; }
+.body { color: var(--fg-dim); font-size: 13px; margin-top: 0; }
+
+.warning {
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  border-left: 3px solid var(--danger);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 20px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.label { display: block; font-size: 13px; color: var(--fg-dim); margin: 14px 0 4px; }
+.input { width: 100%; box-sizing: border-box; }
+.checkbox { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 18px 0 4px; }
+
+.ok { margin-top: 14px; font-size: 13px; color: #2da44e; }
+.fail { margin-top: 14px; font-size: 13px; color: var(--danger); }
+
+.actions { display: flex; gap: 8px; margin-top: 20px; }

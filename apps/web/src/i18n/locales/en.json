@@ -58,6 +58,23 @@
     "api": "API",
     "billing": "Billing"
   },
+  "adminAuth": {
+    "title": "Authentication",
+    "body": "Configure your organization's identity provider (OIDC) for member sign-in.",
+    "warning": "Changing these settings affects how everyone signs in. Use Test connection and enable only a verified configuration — your current session stays active so you can fix mistakes.",
+    "issuer": "Issuer URL",
+    "clientId": "Client ID",
+    "clientSecret": "Client secret",
+    "clientSecretKeep": "Leave blank to keep the current secret",
+    "scopes": "Scopes",
+    "redirectUri": "Redirect URI",
+    "enabled": "Use this identity provider for sign-in",
+    "test": "Test connection",
+    "testing": "Testing…",
+    "testOk": "Discovery succeeded — this issuer looks reachable.",
+    "testFail": "Could not verify this issuer.",
+    "saveFailed": "Couldn't save — test the connection first."
+  },
   "adminSpaces": {
     "title": "Spaces",
     "name": "Name",

@@ -421,6 +421,33 @@ export function useUpdateSpaceBranding(spaceId: string) {
   });
 }
 
+// Tenant OIDC (members' SSO) settings (Phase 5e) — tenant#admin only. The secret is
+// never returned (write-only); hasSecret signals whether one is stored.
+export interface TenantOidcDTO { issuer: string; clientId: string; scopes: string; redirectUri: string; enabled: boolean; hasSecret: boolean }
+export interface TenantOidcInput { issuer: string; clientId: string; clientSecret?: string | null; scopes: string; redirectUri: string; enabled: boolean }
+export function useTenantOidc() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["tenant-oidc"],
+    queryFn: () => apiFetch<TenantOidcDTO | null>("/admin/oidc", token),
+    staleTime: 30_000,
+  });
+}
+export function useUpdateTenantOidc() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TenantOidcInput) => apiFetch<null>("/admin/oidc", token, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tenant-oidc"] }),
+  });
+}
+export function useTestTenantOidc() {
+  const { token } = useSession();
+  return useMutation({
+    mutationFn: (issuer: string) => apiFetch<{ ok: boolean; error: string | null }>("/admin/oidc/test", token, { method: "POST", body: JSON.stringify({ issuer }) }),
+  });
+}
+
 // Pages overview for a space (Phase 5 #5) — space#manage only.
 export interface PageOverview { id: string; title: string; published: boolean; hasUnpublishedChanges: boolean; grantCount: number; linkCount: number }
 export function useSpacePagesOverview(spaceId: string, enabled = true) {
