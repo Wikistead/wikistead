@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, Columns2, Check } from "lucide-react";
+import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, Columns2, Check, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button, IconButton } from "../ui/Button";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
@@ -122,7 +122,12 @@ export function PageToolbar(p: PageToolbarProps) {
               </Button>
             )}
             {p.onPublish && (
+              // While publishing, the server flushes the live draft, then publishes —
+              // a real save+publish round-trip. Show a spinner and keep the button
+              // disabled (also prevents a double publish; the server publish is
+              // idempotent via its no-op guard as a backstop).
               <Button size="sm" variant="primary" data-testid="publish-page" disabled={p.publishing || !canPublish} onClick={p.onPublish}>
+                {p.publishing ? <Loader2 size={14} className={styles.spin} data-testid="publish-spinner" /> : null}
                 {t("page.publish")}
               </Button>
             )}

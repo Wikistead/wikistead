@@ -3,9 +3,11 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
+import { docName } from '@wikistead/types'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import type { TenantDb } from '../db/index.js'
+import { flushDraft } from '../collab-flush.js'
 
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean }
 export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean }
@@ -657,6 +659,11 @@ export async function pagesPlugin(app: FastifyInstance) {
   // an edit-capable guest (share-link) — same FGA `edit` check either way.
   app.post<{ Params: { pageId: string } }>('/pages/:pageId/publish', { config: { guest: 'edit' } }, async (req) => {
     const p = principalForPage(req, req.params.pageId)
+    // Flush the live draft to pages.ydoc BEFORE snapshotting, so a publish issued
+    // right after typing (within the collab debounce window) includes those edits and
+    // does not leave them behind as "unpublished changes". Best-effort: never blocks
+    // longer than the timeout, and is a no-op when collab isn't running (e.g. tests).
+    await flushDraft(app.valkey, docName(req.tenant.id, req.params.pageId))
     return publishPage(req.db, app.fga, app.searchDriver, { pageId: req.params.pageId, ...p })
   })
 
