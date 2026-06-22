@@ -9,10 +9,10 @@
   color: var(--fg);
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 10px 12px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-  font-size: 13px;
+  box-shadow: var(--shadow-lg);
+  font-size: var(--text-ui);
 }
 .toast[data-type="success"] { border-left-color: #2da44e; }
 .toast[data-type="error"] { border-left-color: var(--danger); }

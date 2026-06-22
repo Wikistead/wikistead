@@ -25,7 +25,7 @@
   border-radius: 6px;
   padding: 4px;
   min-width: var(--reference-width); /* Ark sets this from the trigger (sameWidth) */
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-md);
   z-index: 60;
   outline: none;
   max-height: 260px;

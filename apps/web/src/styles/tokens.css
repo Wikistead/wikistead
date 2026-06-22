@@ -22,6 +22,14 @@
   --danger: #cf222e;    /* destructive actions (delete / remove / revoke) */
   --danger-fg: #ffffff;
   --selection: color-mix(in srgb, var(--accent) 22%, transparent);
+  /* Selected-row fill (sidebar): neutral, NOT an accent wash — the accent is carried
+     by a left indicator bar instead (Group C static refinement). */
+  --selected: var(--panel-3);
+  /* Elevation: light needs SOFT, layered shadows (a heavy black wash looks muddy on
+     a white surface) — see the dark override for stronger values. */
+  --shadow-sm: 0 1px 2px rgba(27, 31, 36, 0.08);
+  --shadow-md: 0 4px 12px rgba(27, 31, 36, 0.12);
+  --shadow-lg: 0 12px 32px rgba(27, 31, 36, 0.16);
 }
 
 /* Explicit dark, and system-dark (only when the OS prefers dark). */
@@ -38,6 +46,10 @@
   --danger: #f0584d;
   --danger-fg: #ffffff;
   --selection: color-mix(in srgb, var(--accent) 30%, transparent);
+  --selected: var(--panel-3);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
 }
 @media (prefers-color-scheme: dark) {
   :root[data-theme="system"] {
@@ -53,6 +65,10 @@
     --danger: #f0584d;
     --danger-fg: #ffffff;
     --selection: color-mix(in srgb, var(--accent) 30%, transparent);
+    --selected: var(--panel-3);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
   }
 }
 
@@ -60,10 +76,31 @@
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
   --header-h: 40px;
   --sidebar-w: 260px;
   --font: system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Type scale (Group C). Two tiers: reading/prose content is 16px (--text-body,
+     inherited by the editor), the operating surface (sidebar, buttons, toolbar,
+     menus) is 14px (--text-ui). Smaller steps are for meta / badges / labels. */
+  --text-xs: 11px;   /* badges, section labels (uppercase) */
+  --text-sm: 12px;   /* secondary/meta, small (sm) buttons */
+  --text-ui: 14px;   /* operating surface: sidebar items, buttons, toolbar, menus */
+  --text-body: 16px; /* reading/prose content */
+  --text-lg: 18px;
+  --text-xl: 22px;   /* headings in chrome */
+  --lh-tight: 1.25;
+  --lh-normal: 1.5;
+
+  /* Radius scale (replaces scattered 4/6/7/8 literals). */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 999px;
 }
 
 html,
