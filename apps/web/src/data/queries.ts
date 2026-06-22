@@ -421,6 +421,44 @@ export function useUpdateSpaceBranding(spaceId: string) {
   });
 }
 
+// API keys (Phase 5f). Per-member ownership; scope ('read'|'write') restricts a key
+// below its owner's authority. The tenant policy caps issuable scope.
+export type ApiScope = "read" | "write";
+export interface ApiKeySummary { id: string; name: string; keyPrefix: string; scope: ApiScope; createdAt: string; lastUsedAt: string | null }
+export interface ApiKeyCreated extends ApiKeySummary { plaintext: string }
+export function useApiKeys() {
+  const { token } = useSession();
+  return useQuery({ queryKey: ["api-keys"], queryFn: () => apiFetch<ApiKeySummary[]>("/api-keys", token).then((r) => r ?? []) });
+}
+export function useCreateApiKey() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { name: string; scope: ApiScope }) => apiFetch<ApiKeyCreated>("/api-keys", token, { method: "POST", body: JSON.stringify(args) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }),
+  });
+}
+export function useRevokeApiKey() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<null>(`/api-keys/${encodeURIComponent(id)}`, token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }),
+  });
+}
+export function useApiPolicy() {
+  const { token } = useSession();
+  return useQuery({ queryKey: ["api-policy"], queryFn: () => apiFetch<{ maxScope: ApiScope }>("/admin/api-policy", token) });
+}
+export function useUpdateApiPolicy() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (maxScope: ApiScope) => apiFetch<null>("/admin/api-policy", token, { method: "PATCH", body: JSON.stringify({ maxScope }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["api-policy"] }),
+  });
+}
+
 // Tenant OIDC (members' SSO) settings (Phase 5e) — tenant#admin only. The secret is
 // never returned (write-only); hasSecret signals whether one is stored.
 export interface TenantOidcDTO { issuer: string; clientId: string; scopes: string; redirectUri: string; enabled: boolean; hasSecret: boolean }

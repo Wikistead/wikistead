@@ -58,6 +58,24 @@
     "api": "API",
     "billing": "課金"
   },
+  "adminApi": {
+    "title": "API",
+    "body": "API キーはあなた自身の権限で動作します。read キーは読み取りのみ可能で、scope が権限以上を与えることはありません。",
+    "policy": "キーの最大スコープ（テナントポリシー）",
+    "policyWrite": "read・write キーを許可",
+    "policyRead": "read 専用キーのみ",
+    "createTitle": "API キーを作成",
+    "name": "キー名",
+    "namePlaceholder": "例: CI パイプライン",
+    "scope": "スコープ",
+    "scope_read": "読み取り",
+    "scope_write": "書き込み",
+    "create": "作成",
+    "copyOnce": "このキーを今コピーしてください — 再表示されません。",
+    "copy": "コピー",
+    "revoke": "取り消し",
+    "empty": "API キーはまだありません。"
+  },
   "adminAuth": {
     "title": "認証",
     "body": "メンバーのサインインに使う組織の ID プロバイダー（OIDC）を設定します。",

@@ -8,15 +8,16 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { pool } from './db/pool.js'
 
-interface ApiKeyRow { id: string; owner_user_id: string; key_hash: string }
+interface ApiKeyRow { id: string; owner_user_id: string; key_hash: string; scope: string | null }
 
-// Verify an API key and return the owner's user ID, or null if invalid/revoked.
-// Called from onRequest ONLY when token starts with 'wks_' — no OIDC fallback.
-// Key format: wks_{8-char prefix}_{32-char secret}
+// Verify an API key and return the owner's user ID + scope, or null if invalid/
+// revoked. Called from onRequest ONLY when token starts with 'wks_' — no OIDC
+// fallback. Key format: wks_{8-char prefix}_{32-char secret}.
+// scope NULL is treated as 'write' (backward compatible with pre-5f keys).
 export async function verifyApiKey(
   token: string,
   tenantId: string,
-): Promise<{ sub: string } | null> {
+): Promise<{ sub: string; scope: 'read' | 'write' } | null> {
   if (!token.startsWith('wks_')) return null
 
   // keyPrefix is always 'wks_' (4 chars) + 8 base64url chars = 12 chars total.
@@ -29,7 +30,7 @@ export async function verifyApiKey(
   const row = await (pool.begin(async (tx) => {
     await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
     const [r] = await tx<ApiKeyRow[]>`
-      SELECT id, owner_user_id, key_hash
+      SELECT id, owner_user_id, key_hash, scope
       FROM api_keys
       WHERE key_prefix    = ${keyPrefix}
         AND revoked_at IS NULL
@@ -47,5 +48,5 @@ export async function verifyApiKey(
   // Non-blocking last_used_at update — must not slow the auth hot path.
   void pool`UPDATE api_keys SET last_used_at = now() WHERE id = ${row.id}`
 
-  return { sub: row.owner_user_id }
+  return { sub: row.owner_user_id, scope: row.scope === 'read' ? 'read' : 'write' }
 }

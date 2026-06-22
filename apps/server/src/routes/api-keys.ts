@@ -1,14 +1,41 @@
 import { createHash, randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
+import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
 import type { TenantDb } from '../db/index.js'
 
+export type ApiScope = 'read' | 'write'
+
 interface ApiKeyRow {
   id: string; tenant_id: string; owner_user_id: string; name: string
-  key_prefix: string; created_at: Date; last_used_at: Date | null; revoked_at: Date | null
+  key_prefix: string; scope: string | null; created_at: Date; last_used_at: Date | null; revoked_at: Date | null
 }
 export interface ApiKeySummary {
-  id: string; name: string; keyPrefix: string; createdAt: Date; lastUsedAt: Date | null
+  id: string; name: string; keyPrefix: string; scope: ApiScope; createdAt: Date; lastUsedAt: Date | null
+}
+
+// The tenant policy cap on what scope keys may be issued with (admin-set). NULL =
+// 'write' (no cap). A key's scope may never EXCEED this.
+export async function getApiKeyMaxScope(db: TenantDb): Promise<ApiScope> {
+  const [row] = await db.sql<{ api_key_max_scope: string | null }[]>`
+    SELECT api_key_max_scope FROM tenant_settings LIMIT 1
+  `
+  return row?.api_key_max_scope === 'read' ? 'read' : 'write'
+}
+
+export async function setApiKeyMaxScope(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { tenantId: string; userId: string; maxScope: ApiScope },
+): Promise<void> {
+  const { allowed } = await fga.check({ user: `user:${args.userId}`, relation: 'admin', object: `tenant:${args.tenantId}` })
+  if (!allowed) throw Object.assign(new Error('admin only'), { statusCode: 403 })
+  if (args.maxScope !== 'read' && args.maxScope !== 'write') throw Object.assign(new Error('invalid scope'), { statusCode: 400 })
+  await db.sql`
+    INSERT INTO tenant_settings (tenant_id, api_key_max_scope, updated_at)
+    VALUES (${args.tenantId}, ${args.maxScope}, now())
+    ON CONFLICT (tenant_id) DO UPDATE SET api_key_max_scope = ${args.maxScope}, updated_at = now()
+  `
 }
 export interface ApiKeyCreated extends ApiKeySummary {
   // Plaintext is returned ONCE at creation and never stored.
@@ -24,12 +51,19 @@ export interface ApiKeyCreated extends ApiKeySummary {
 // key_prefix: used for O(1) DB lookup before hash comparison.
 // key_hash:   sha256(plaintext) hex — plaintext is discarded after this call.
 //
-// TODO(phase: api): add scope ('read' | 'write') column for per-key permission scoping.
+// scope (Phase 5f) restricts the key below the owner's authority; it is capped by
+// the tenant policy (getApiKeyMaxScope) — requesting 'write' when the cap is 'read'
+// is rejected (403). Defaults to 'write' (the owner's full authority, = pre-5f).
 // TODO(phase: billing): gate API key creation by entitlement (resolveEntitlements(plan).apiAccess).
 export async function createApiKey(
   db: TenantDb,
-  args: { tenantId: string; ownerUserId: string; name: string },
+  args: { tenantId: string; ownerUserId: string; name: string; scope?: ApiScope },
 ): Promise<ApiKeyCreated> {
+  const scope: ApiScope = args.scope === 'read' ? 'read' : 'write'
+  // Cap: a key may never exceed the tenant policy (deny write when capped to read).
+  if (scope === 'write' && (await getApiKeyMaxScope(db)) === 'read') {
+    throw Object.assign(new Error('this tenant allows read-only API keys only'), { statusCode: 403, code: 'scope_capped' })
+  }
   const prefix    = randomBytes(6).toString('base64url')   // exactly 8 chars (6 bytes → base64url)
   const secret    = randomBytes(24).toString('base64url')  // exactly 32 chars (24 bytes → base64url)
   const plaintext = `wks_${prefix}_${secret}`
@@ -37,11 +71,11 @@ export async function createApiKey(
   const keyHash   = createHash('sha256').update(plaintext).digest('hex')
 
   const [row] = await db.sql<ApiKeyRow[]>`
-    INSERT INTO api_keys (tenant_id, owner_user_id, name, key_prefix, key_hash)
-    VALUES (${args.tenantId}, ${args.ownerUserId}, ${args.name}, ${keyPrefix}, ${keyHash})
-    RETURNING id, tenant_id, owner_user_id, name, key_prefix, created_at, last_used_at, revoked_at
+    INSERT INTO api_keys (tenant_id, owner_user_id, name, key_prefix, key_hash, scope)
+    VALUES (${args.tenantId}, ${args.ownerUserId}, ${args.name}, ${keyPrefix}, ${keyHash}, ${scope})
+    RETURNING id, tenant_id, owner_user_id, name, key_prefix, scope, created_at, last_used_at, revoked_at
   `
-  const result: ApiKeyCreated = { id: row.id, name: row.name, keyPrefix: row.key_prefix, createdAt: row.created_at, lastUsedAt: null, plaintext }
+  const result: ApiKeyCreated = { id: row.id, name: row.name, keyPrefix: row.key_prefix, scope, createdAt: row.created_at, lastUsedAt: null, plaintext }
   emit({ type: 'api_key.created', tenantId: args.tenantId, keyId: row.id, actorId: args.ownerUserId })
   return result
 }
@@ -50,13 +84,14 @@ export async function createApiKey(
 // key_hash is never exposed.
 export async function listApiKeys(db: TenantDb): Promise<ApiKeySummary[]> {
   const rows = await db.sql<ApiKeyRow[]>`
-    SELECT id, name, key_prefix, created_at, last_used_at
+    SELECT id, name, key_prefix, scope, created_at, last_used_at
     FROM api_keys
     WHERE revoked_at IS NULL
     ORDER BY created_at DESC
   `
   return rows.map(r => ({
     id: r.id, name: r.name, keyPrefix: r.key_prefix,
+    scope: r.scope === 'read' ? 'read' : 'write',
     createdAt: r.created_at, lastUsedAt: r.last_used_at,
   }))
 }
@@ -85,11 +120,12 @@ export async function revokeApiKey(
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function apiKeysPlugin(app: FastifyInstance) {
-  app.post<{ Body: { name: string } }>('/api-keys', async (req, reply) => {
+  app.post<{ Body: { name: string; scope?: ApiScope } }>('/api-keys', async (req, reply) => {
     const created = await createApiKey(req.db, {
       tenantId: req.tenant.id,
       ownerUserId: req.user.sub,
       name: req.body.name,
+      scope: req.body?.scope,
     })
     return reply.code(201).send(created)
   })
@@ -99,6 +135,14 @@ export async function apiKeysPlugin(app: FastifyInstance) {
   app.delete<{ Params: { id: string } }>('/api-keys/:id', async (req, reply) => {
     const revoked = await revokeApiKey(req.db, { id: req.params.id, ownerUserId: req.user.sub })
     if (!revoked) return reply.code(404).send({ error: 'not found or not owned by caller' })
+    return reply.code(204).send()
+  })
+
+  // Tenant API policy: the max scope keys may be issued with (tenant#admin).
+  app.get('/admin/api-policy', async (req) => ({ maxScope: await getApiKeyMaxScope(req.db) }))
+
+  app.patch<{ Body: { maxScope: ApiScope } }>('/admin/api-policy', async (req, reply) => {
+    await setApiKeyMaxScope(req.db, app.fga, { tenantId: req.tenant.id, userId: req.user.sub, maxScope: req.body?.maxScope })
     return reply.code(204).send()
   })
 }

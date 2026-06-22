@@ -58,6 +58,24 @@
     "api": "API",
     "billing": "Billing"
   },
+  "adminApi": {
+    "title": "API",
+    "body": "API keys act with your own permissions. A read key can only read; the scope never grants more than you have.",
+    "policy": "Maximum key scope (tenant policy)",
+    "policyWrite": "Allow read & write keys",
+    "policyRead": "Read-only keys only",
+    "createTitle": "Create an API key",
+    "name": "Key name",
+    "namePlaceholder": "e.g. CI pipeline",
+    "scope": "Scope",
+    "scope_read": "Read",
+    "scope_write": "Write",
+    "create": "Create",
+    "copyOnce": "Copy this key now — it won't be shown again.",
+    "copy": "Copy",
+    "revoke": "Revoke",
+    "empty": "No API keys yet."
+  },
   "adminAuth": {
     "title": "Authentication",
     "body": "Configure your organization's identity provider (OIDC) for member sign-in.",

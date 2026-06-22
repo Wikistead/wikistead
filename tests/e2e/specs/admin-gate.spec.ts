@@ -65,6 +65,22 @@ test("space Pages overview lists the space's pages", async ({ page }) => {
   await expect(page.locator("[data-testid=space-page-row]").first()).toBeVisible();
 });
 
+test("admin API tab: create a key shows the plaintext once, then revoke", async ({ page }) => {
+  await openDemo(page);
+  await page.goto("/admin/api");
+  await expect(page.getByTestId("admin-api")).toBeVisible();
+
+  await page.getByTestId("api-key-name").fill("e2e key");
+  await page.getByTestId("api-key-create").click();
+  // Plaintext shown once + the key appears in the list.
+  await expect(page.getByTestId("api-key-plaintext")).toContainText("wks_");
+  const row = page.locator("[data-testid=api-key-item]", { hasText: "e2e key" });
+  await expect(row).toBeVisible();
+
+  await row.getByTestId("api-key-revoke").click();
+  await expect(page.locator("[data-testid=api-key-item]", { hasText: "e2e key" })).toHaveCount(0);
+});
+
 test("admin Auth tab renders OIDC settings and Test reports a bad issuer", async ({ page }) => {
   await openDemo(page);
   await page.goto("/admin/auth");
