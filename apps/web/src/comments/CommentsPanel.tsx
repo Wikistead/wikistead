@@ -1,5 +1,6 @@
 import { useRef, useState, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "../ui/Button";
 import { useSession } from "../session/SessionProvider";
 import { useComments, useCommentMutations, fetchMentionable } from "../data/comments";
 import type { Mentionable } from "../data/commentsApi";
@@ -61,9 +62,9 @@ function Composer({ pageId, onSubmit, placeholder }: { pageId: string; onSubmit:
           ))}
         </ul>
       )}
-      <button type="button" className={styles.submit} data-testid="comment-submit" disabled={!text.trim()} onClick={submit}>
+      <Button variant="primary" size="sm" style={{ alignSelf: "flex-start" }} data-testid="comment-submit" disabled={!text.trim()} onClick={submit}>
         {t("commentsPanel.submit")}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -93,16 +94,16 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef }: { pageId:
   return (
     <aside className={styles.panel} data-testid="comments-panel">
       <header className={styles.header}>
-        <strong>{tr("page.comments")}</strong>
+        <span className={styles.title}>{tr("page.comments")}</span>
         <div className={styles.tabs}>
-          <button type="button" data-testid="tab-open" aria-pressed={tab === "open"} onClick={() => setTab("open")}>{tr("commentsPanel.open")}</button>
-          <button type="button" data-testid="tab-resolved" aria-pressed={tab === "resolved"} onClick={() => setTab("resolved")}>{tr("commentsPanel.resolved")}</button>
+          <button type="button" className={styles.tab} data-testid="tab-open" aria-pressed={tab === "open"} onClick={() => setTab("open")}>{tr("commentsPanel.open")}</button>
+          <button type="button" className={styles.tab} data-testid="tab-resolved" aria-pressed={tab === "resolved"} onClick={() => setTab("resolved")}>{tr("commentsPanel.resolved")}</button>
         </div>
       </header>
 
       {canComment && (
         <div className={styles.section}>
-          <button type="button" data-testid="add-inline" onClick={addInline}>{tr("commentsPanel.addInline")}</button>
+          <Button size="sm" data-testid="add-inline" onClick={addInline}>{tr("commentsPanel.addInline")}</Button>
           {inlineHint && <p className={styles.hint}>{inlineHint}</p>}
         </div>
       )}
@@ -116,24 +117,28 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef }: { pageId:
             )}
             {t.comments.map((c) => (
               <div key={c.id} className={styles.comment} data-testid="comment-item">
-                <span className={styles.author}>{c.authorSub}</span>
+                <div className={styles.commentHead}>
+                  <span className={styles.author}>{c.authorSub}</span>
+                  {c.authorSub === me && (
+                    <button type="button" className={styles.link} data-testid="comment-delete" onClick={() => remove.mutate(c.id)}>{tr("commentsPanel.delete")}</button>
+                  )}
+                </div>
                 <span className={styles.body}>{c.body}</span>
-                {c.authorSub === me && (
-                  <button type="button" className={styles.link} data-testid="comment-delete" onClick={() => remove.mutate(c.id)}>{tr("commentsPanel.delete")}</button>
-                )}
               </div>
             ))}
             {canComment && (
               <>
                 <Composer pageId={pageId} placeholder={tr("commentsPanel.reply")} onSubmit={(body, mentions) => reply.mutate({ threadId: t.id, body, mentions })} />
-                <button
-                  type="button"
-                  className={styles.link}
-                  data-testid="thread-toggle"
-                  onClick={() => setStatus.mutate({ threadId: t.id, action: t.status === "open" ? "resolve" : "reopen" })}
-                >
-                  {t.status === "open" ? tr("commentsPanel.resolve") : tr("commentsPanel.reopen")}
-                </button>
+                <div className={styles.threadActions}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    data-testid="thread-toggle"
+                    onClick={() => setStatus.mutate({ threadId: t.id, action: t.status === "open" ? "resolve" : "reopen" })}
+                  >
+                    {t.status === "open" ? tr("commentsPanel.resolve") : tr("commentsPanel.reopen")}
+                  </Button>
+                </div>
               </>
             )}
           </div>
