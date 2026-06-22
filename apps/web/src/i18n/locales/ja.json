@@ -58,6 +58,23 @@
     "api": "API",
     "billing": "課金"
   },
+  "adminAuth": {
+    "title": "認証",
+    "body": "メンバーのサインインに使う組織の ID プロバイダー（OIDC）を設定します。",
+    "warning": "この設定は全員のサインイン方法に影響します。必ず「接続テスト」で検証した設定だけを有効化してください。現在のセッションは維持されるので、誤りがあれば修正できます。",
+    "issuer": "Issuer URL",
+    "clientId": "クライアント ID",
+    "clientSecret": "クライアントシークレット",
+    "clientSecretKeep": "空欄にすると現在のシークレットを維持",
+    "scopes": "スコープ",
+    "redirectUri": "リダイレクト URI",
+    "enabled": "この ID プロバイダーでサインインする",
+    "test": "接続テスト",
+    "testing": "テスト中…",
+    "testOk": "ディスカバリに成功しました — この issuer に到達できます。",
+    "testFail": "この issuer を検証できませんでした。",
+    "saveFailed": "保存できませんでした — 先に接続テストをしてください。"
+  },
   "adminSpaces": {
     "title": "スペース",
     "name": "名前",

@@ -22,6 +22,7 @@ export type DomainEvent =
   | { type: 'space.access_revoked'; tenantId: string; spaceId: string; grantee: string; relation: string; actorId: string }
   | { type: 'space.branding_updated'; tenantId: string; spaceId: string; actorId: string }
   | { type: 'tenant.branding_updated'; tenantId: string; actorId: string }
+  | { type: 'tenant.oidc_updated'; tenantId: string; actorId: string; enabled: boolean }
   // ── Attachments ──────────────────────────────────────────────────────
   | { type: 'attachment.confirmed'; tenantId: string; attachmentId: string; pageId: string; actorId: string }
   | { type: 'attachment.deleted';   tenantId: string; attachmentId: string; pageId: string; actorId: string }

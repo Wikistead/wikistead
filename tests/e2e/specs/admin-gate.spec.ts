@@ -65,6 +65,17 @@ test("space Pages overview lists the space's pages", async ({ page }) => {
   await expect(page.locator("[data-testid=space-page-row]").first()).toBeVisible();
 });
 
+test("admin Auth tab renders OIDC settings and Test reports a bad issuer", async ({ page }) => {
+  await openDemo(page);
+  await page.goto("/admin/auth");
+  await expect(page.getByTestId("admin-auth")).toBeVisible();
+  await expect(page.getByTestId("oidc-warning")).toBeVisible();
+  // Test connection against an unreachable issuer → a failure is reported (not enabled).
+  await page.getByTestId("oidc-issuer").fill("http://127.0.0.1:1/");
+  await page.getByTestId("oidc-test").click();
+  await expect(page.getByTestId("oidc-test-result")).toBeVisible();
+});
+
 test("admin Spaces tab lists tenant spaces with counts and links to settings", async ({ page }) => {
   await openDemo(page);
   await page.goto("/admin/spaces");
