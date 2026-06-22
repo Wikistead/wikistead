@@ -30,12 +30,16 @@ const ydoc = (text: string) => Buffer.from(Y.encodeStateAsUpdate((() => { const 
 let app: FastifyInstance
 let db: TenantDb
 let spaceId: string, pageA: string, pageB: string, viewLinkId: string, editLinkId: string, viewTok: string, editTok: string
+const attA = `gpatta${Date.now().toString(36)}` // attachment on pageA
+const attB = `gpattb${Date.now().toString(36)}` // attachment on pageB
 
 const dev = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'content-type': 'application/json' }
 const guestGet = (token: string, pageId: string) =>
   app.inject({ method: 'GET', url: `/pages/${pageId}/published`, headers: { host: 'dev.localhost', authorization: `Bearer ${token}` } })
 const guestPublish = (token: string, pageId: string) =>
   app.inject({ method: 'POST', url: `/pages/${pageId}/publish`, headers: { host: 'dev.localhost', authorization: `Bearer ${token}` } })
+const download = (token: string, attId: string) =>
+  app.inject({ method: 'GET', url: `/attachments/${attId}/download`, headers: { host: 'dev.localhost', authorization: `Bearer ${token}` } })
 
 beforeAll(async () => {
   app = await buildApp()
@@ -45,6 +49,12 @@ beforeAll(async () => {
   pageA = (await createPage(db, fgaClient, app.searchDriver, { tenantId: TENANT, spaceId, userId: 'dev-user', title: 'Guest A' })).id
   pageB = (await createPage(db, fgaClient, app.searchDriver, { tenantId: TENANT, spaceId, userId: 'dev-user', title: 'Guest B' })).id
   await admin`UPDATE pages SET ydoc = ${ydoc(`# A\n\n${WORD} body\n`)} WHERE id = ${pageA}`
+  // A confirmed attachment on each page (no bytes needed: presignGet returns a URL
+  // regardless; the test asserts the AUTHORIZATION before issuing it).
+  await admin`INSERT INTO attachments (id, tenant_id, page_id, filename, content_type, s3_key, status, size_bytes, confirmed_at) VALUES
+    (${attA}, ${TENANT}, ${pageA}, 'a.png', 'image/png', ${`${TENANT}/gp/${attA}.png`}, 'confirmed', 1, now()),
+    (${attB}, ${TENANT}, ${pageB}, 'b.png', 'image/png', ${`${TENANT}/gp/${attB}.png`}, 'confirmed', 1, now())
+    ON CONFLICT (id) DO NOTHING`
 
   const mk = async (capability: 'view' | 'edit') => {
     const r = await app.inject({ method: 'POST', url: '/share-links', headers: dev, payload: { resource: { type: 'page', id: pageA }, capability, expiresInSeconds: null } })
@@ -61,6 +71,7 @@ afterAll(async () => {
   await app.searchDriver.deleteDoc(pageB).catch(() => {})
   await deleteObjectTuples(fgaClient, `page:${pageA}`).catch(() => {})
   await deleteObjectTuples(fgaClient, `page:${pageB}`).catch(() => {})
+  await admin`DELETE FROM attachments WHERE id IN (${attA}, ${attB})`.catch(() => {})
   await admin`DELETE FROM share_links WHERE resource_id = ${pageA}`.catch(() => {})
   await admin`DELETE FROM revisions WHERE page_id = ${pageA}`.catch(() => {})
   await admin`DELETE FROM search_outbox WHERE page_id IN (${pageA}, ${pageB})`.catch(() => {})
@@ -98,12 +109,33 @@ describe('guest HTTP path: published read + publish authorization', () => {
     expect((await guestPublish(editTok, pageB)).statusCode).toBe(403)
   })
 
-  it('revoked link: published read AND publish are both denied (FGA authority)', async () => {
+  // ── internal-resource (image) resolution: page-view gated, guest principal ──
+  it('a VIEW token resolves an image on its OWN page (presign issued after FGA view)', async () => {
+    const r = await download(viewTok, attA)
+    expect(r.statusCode).toBe(200)
+    expect((r.json() as { downloadUrl: string }).downloadUrl).toMatch(/^https?:\/\//)
+  })
+
+  it('a guest token CANNOT resolve an image on a different page (FGA falls naturally — tuple is the bind)', async () => {
+    expect((await download(viewTok, attB)).statusCode).toBe(403)
+  })
+
+  it('a cross-tenant guest token is rejected for image download (401 at the hook)', async () => {
+    const forged = await mintGuestToken(guestCfg, { tenantId: 'tenant_acme', shareLinkId: 'x', resource: { type: 'page', id: pageA }, capability: 'view' })
+    expect((await download(forged, attA)).statusCode).toBe(401)
+  })
+
+  it('members resolve images unchanged', async () => {
+    expect((await download('dev-token', attA)).statusCode).toBe(200)
+  })
+
+  it('revoked link: published read, publish, AND image download are all denied (FGA authority)', async () => {
     const devNoBody = { host: 'dev.localhost', authorization: 'Bearer dev-token' } // no content-type (empty DELETE body)
     expect((await app.inject({ method: 'DELETE', url: `/share-links/${editLinkId}`, headers: devNoBody })).statusCode).toBe(204)
     expect((await app.inject({ method: 'DELETE', url: `/share-links/${viewLinkId}`, headers: devNoBody })).statusCode).toBe(204)
     expect((await guestPublish(editTok, pageA)).statusCode).toBe(403)
     expect((await guestGet(viewTok, pageA)).statusCode).toBe(403)
+    expect((await download(viewTok, attA)).statusCode).toBe(403) // a NEW download request after revoke is denied
   })
 
   it('a cross-tenant guest token is rejected (401)', async () => {
