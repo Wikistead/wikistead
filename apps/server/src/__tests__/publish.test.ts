@@ -86,6 +86,16 @@ describe('draft/publish editing model', () => {
     expect(n).toBe(1) // history = the publish
   })
 
+  it('publishing with no changes is a no-op — no meaningless revision', async () => {
+    // After the previous publish, draft == published. Publishing again must not add
+    // a revision (the server is the accurate gate; the UI only disables the button).
+    const [{ n: before }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM revisions WHERE page_id = ${pageId}`
+    const res = await publishPage(db, fgaClient, app.searchDriver, { pageId, userId: 'dev-user' })
+    expect(res.noop).toBe(true)
+    const [{ n: after }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM revisions WHERE page_id = ${pageId}`
+    expect(after).toBe(before)
+  })
+
   it('editing the draft again does NOT change the published version (nor search) until the next publish', async () => {
     await setDraft(pageId, `# Publish Test\n\n${T2} 新しい本文\n`) // new draft content
     const pub = await getPublished(db, fgaClient, { pageId, userId: 'dev-user' })

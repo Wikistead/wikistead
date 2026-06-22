@@ -139,12 +139,18 @@ function PageRoute() {
             </button>
             {capability === "edit" && (
               <>
-                {published?.hasUnpublishedChanges && (
+                {/* 3-state: Draft (never published) / Unpublished changes / (clean) */}
+                {published && published.publishedMd === null ? (
+                  <span data-testid="draft-badge" style={{ alignSelf: "center", marginLeft: 8, fontSize: 12, color: "var(--fg-dim)" }}>
+                    Draft
+                  </span>
+                ) : published?.hasUnpublishedChanges ? (
                   <span data-testid="unpublished-badge" style={{ alignSelf: "center", marginLeft: 8, fontSize: 12, color: "var(--fg-dim)" }}>
                     Unpublished changes
                   </span>
-                )}
-                <button type="button" data-testid="publish-page" disabled={publish.isPending} onClick={() => publish.mutate()}>
+                ) : null}
+                {/* Enable only when there's something to publish (accurate, open-page value). */}
+                <button type="button" data-testid="publish-page" disabled={publish.isPending || !published?.hasUnpublishedChanges} onClick={() => publish.mutate()}>
                   Publish
                 </button>
               </>

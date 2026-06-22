@@ -23,6 +23,9 @@ export interface Page {
   // approximated server-side (true on any draft save); the open page uses the
   // accurate usePublished() value.
   hasUnpublishedChanges?: boolean;
+  // Whether the page has ever been published (cheap: published_at IS NOT NULL).
+  // With hasUnpublishedChanges this gives the sidebar's 3-state badge.
+  published?: boolean;
 }
 
 export function useSpaces() {

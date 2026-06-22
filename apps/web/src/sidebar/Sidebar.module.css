@@ -99,6 +99,8 @@
 .name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Unpublished-changes badge: a small accent dot after the page name. */
 .unpublishedDot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin: 0 4px; }
+/* Draft badge: a muted "Draft" chip for never-published pages. */
+.draftBadge { flex: 0 0 auto; font-size: 10px; line-height: 1; padding: 2px 5px; margin: 0 4px; border-radius: 4px; color: var(--fg-dim); border: 1px solid var(--border); }
 
 .actions { display: none; gap: 2px; }
 .row:hover .actions,
