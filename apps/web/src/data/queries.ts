@@ -421,6 +421,17 @@ export function useUpdateSpaceBranding(spaceId: string) {
   });
 }
 
+// Tenant-wide spaces overview (Phase 5 #4) — tenant#admin only.
+export interface AdminSpace { id: string; name: string; pageCount: number; grantCount: number }
+export function useAdminSpaces(enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["admin-spaces"],
+    queryFn: () => apiFetch<AdminSpace[]>("/admin/spaces", token).then((r) => r ?? []),
+    enabled,
+  });
+}
+
 export function useMemberCandidates(spaceId: string, q: string) {
   const { token } = useSession();
   return useQuery({

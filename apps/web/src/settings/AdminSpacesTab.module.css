@@ -1,0 +1,24 @@
+.wrap { padding: 24px; max-width: 720px; }
+.dim { color: var(--fg-dim); font-size: 13px; }
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--fg-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.num { text-align: right; width: 72px; }
+.actions { text-align: right; width: 96px; }

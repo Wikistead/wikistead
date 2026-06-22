@@ -58,6 +58,14 @@
     "api": "API",
     "billing": "課金"
   },
+  "adminSpaces": {
+    "title": "スペース",
+    "name": "名前",
+    "pages": "ページ数",
+    "sharedWith": "共有先",
+    "manage": "管理",
+    "empty": "スペースがまだありません。"
+  },
   "spaceSettings": {
     "title": "{{name}} · 設定",
     "general": "一般",

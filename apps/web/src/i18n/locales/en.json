@@ -58,6 +58,14 @@
     "api": "API",
     "billing": "Billing"
   },
+  "adminSpaces": {
+    "title": "Spaces",
+    "name": "Name",
+    "pages": "Pages",
+    "sharedWith": "Shared with",
+    "manage": "Manage",
+    "empty": "No spaces yet."
+  },
   "spaceSettings": {
     "title": "{{name}} · Settings",
     "general": "General",
