@@ -16,9 +16,11 @@ const server = new Hocuspocus({
   port: Number(process.env.COLLAB_PORT ?? 4100),
 
   // Hocuspocus debounces onStoreDocument at the server level (default: 2000ms).
-  // Store fires 2s after the last document change — does not block the
-  // local-first <16ms edit target (Yjs handles local edits immediately).
-  debounce: 2000,
+  // Lowered to 800ms (#10): the persisted ydoc — and the has_unpublished_changes
+  // flag set on store — is what gates the Publish button, so a shorter debounce
+  // makes Publish responsive (and shrinks the crash-loss window). Does not block
+  // the local-first <16ms edit target (Yjs handles local edits immediately).
+  debounce: 800,
 
   extensions: [
     new Redis({ host: hostFromUrl(process.env.VALKEY_URL), port: portFromUrl(process.env.VALKEY_URL) }),
