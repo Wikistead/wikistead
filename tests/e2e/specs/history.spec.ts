@@ -28,7 +28,7 @@ test("history: a revision is listed and restoring it reverts the live editor", a
   // (1) author "ALPHA", let the draft persist (collab debounce), then PUBLISH it via
   // API (publish snapshots the persisted draft → creates the single revision).
   await page.keyboard.type("ALPHA");
-  await sleep(2800);
+  await sleep(3500);
   await page.evaluate(async ({ api, pageId }) => {
     await fetch(`${api}/pages/${pageId}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
   }, { api: API, pageId });
@@ -46,7 +46,7 @@ test("history: a revision is listed and restoring it reverts the live editor", a
   // (2) add " BETA" to the draft — diverges from the published revision (no new
   // publish). Wait past the 2s store debounce so restore's delta sees "ALPHA BETA".
   await page.keyboard.type(" BETA");
-  await sleep(2800);
+  await sleep(3500);
   expect(await paneText(page, "preview")).toContain("BETA");
 
   // (3) open History → the published revision is listed; restore it (confirm dialog).
