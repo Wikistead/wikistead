@@ -19,6 +19,10 @@ export interface Page {
   parentId: string | null;
   title: string;
   position: number;
+  // Cheap per-page flag (draft != published) for the sidebar badge. Over-
+  // approximated server-side (true on any draft save); the open page uses the
+  // accurate usePublished() value.
+  hasUnpublishedChanges?: boolean;
 }
 
 export function useSpaces() {
@@ -183,6 +187,43 @@ export interface Revision {
   createdAt: string;
 }
 
+// Published content of a page (draft/publish model). Viewers render this; editors
+// see it in view mode while the live draft is what they edit. hasUnpublishedChanges
+// is the ACCURATE (decoded) draft-vs-published state for the open page.
+export interface Published {
+  publishedMd: string | null;
+  publishedAt: string | null;
+  hasUnpublishedChanges: boolean;
+}
+export function usePublished(pageId: string) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["published", pageId],
+    queryFn: () => apiFetch<Published>(`/pages/${encodeURIComponent(pageId)}/published`, token),
+    enabled: pageId.length > 0,
+    // The editor is isolated from React (typing never re-renders), so nothing
+    // invalidates this on a draft edit. Poll modestly so the "unpublished changes"
+    // indicator stays current; a publish invalidates immediately (clears it).
+    refetchInterval: 4000,
+  });
+}
+
+// Publish the current draft as the new published version (edit-gated server-side).
+// Invalidates the published content, the revision list (a publish adds one), and
+// the page tree (the unpublished badge clears).
+export function usePublish(pageId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<{ publishedAt: string; revisionId: string }>(`/pages/${encodeURIComponent(pageId)}/publish`, token, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["published", pageId] });
+      qc.invalidateQueries({ queryKey: ["revisions", pageId] });
+      qc.invalidateQueries({ queryKey: ["pages"] });
+    },
+  });
+}
+
 export function usePageRevisions(pageId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({
@@ -229,6 +270,7 @@ export interface PageMeta {
   spaceId: string;
   title: string;
   capability: "view" | "edit";
+  hasUnpublishedChanges?: boolean;
 }
 export function usePage(pageId: string) {
   const { token } = useSession();
