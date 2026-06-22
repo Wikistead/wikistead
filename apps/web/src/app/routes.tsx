@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
-import { Editor, type AnchorGetter } from "../editor/Editor";
+import { Editor, type AnchorGetter, type EditorLayout } from "../editor/Editor";
+import { PageToolbar } from "./PageToolbar";
+import { ShareDialog } from "../ui/ShareDialog";
 import { CommentsPanel } from "../comments/CommentsPanel";
 import { HistoryPanel } from "../history/HistoryPanel";
 import { PermissionsDialog } from "../ui/PermissionsDialog";
@@ -121,6 +123,25 @@ function PageRoute() {
 
   // Per-page permissions (manage only). Also the invite-to-draft surface.
   const [permsOpen, setPermsOpen] = useState(false);
+  const [sharing, setSharing] = useState(false); // share dialog (current page)
+
+  // Edit mode + layout are owned here now (PageToolbar is the chrome). editing
+  // starts true for the create-page flow (?edit=1). layout (single/split) persists.
+  const canEdit = capability === "edit";
+  const [editing, setEditing] = useState(autoEdit);
+  // Navigating to another page opens it in READ mode (unless ?edit=1) — PageRoute is
+  // not remounted on a param change, so reset editing when the page changes.
+  useEffect(() => { setEditing(autoEdit); }, [pageId, autoEdit]);
+  const [layout, setLayout] = useState<EditorLayout>(() => {
+    try { return localStorage.getItem("wks.editorLayout") === "split" ? "split" : "wysiwyg"; } catch { return "wysiwyg"; }
+  });
+  const toggleLayout = () => setLayout((l) => {
+    const n = l === "split" ? "wysiwyg" : "split";
+    try { localStorage.setItem("wks.editorLayout", n); } catch { /* no storage */ }
+    return n;
+  });
+  // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
+  const publishState = !canEdit ? null : published?.publishedMd == null ? "draft" : published?.hasUnpublishedChanges ? "unpublished" : null;
 
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>Loading…</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
@@ -129,45 +150,29 @@ function PageRoute() {
     <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
       <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-          <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", borderBottom: "1px solid var(--border)" }}>
-            <button type="button" data-testid="export-page" onClick={() => { if (pageId) void downloadPageExport(token, pageId); }}>
-              Export
-            </button>
-            <button type="button" data-testid="print-page" onClick={() => window.print()}>
-              Print / PDF
-            </button>
-            <button type="button" data-testid="comments-toggle" aria-pressed={commentsOpen} onClick={toggleComments}>
-              Comments{openComments > 0 ? ` (${openComments})` : ""}
-            </button>
-            <button type="button" data-testid="history-toggle" aria-pressed={historyOpen} onClick={toggleHistory}>
-              History
-            </button>
-            {page?.canManage && (
-              <button type="button" data-testid="permissions-open" onClick={() => setPermsOpen(true)}>
-                Permissions
-              </button>
-            )}
-            {capability === "edit" && (
-              <>
-                {/* 3-state: Draft (never published) / Unpublished changes / (clean) */}
-                {published && published.publishedMd === null ? (
-                  <span data-testid="draft-badge" style={{ alignSelf: "center", marginLeft: 8, fontSize: 12, color: "var(--fg-dim)" }}>
-                    Draft
-                  </span>
-                ) : published?.hasUnpublishedChanges ? (
-                  <span data-testid="unpublished-badge" style={{ alignSelf: "center", marginLeft: 8, fontSize: 12, color: "var(--fg-dim)" }}>
-                    Unpublished changes
-                  </span>
-                ) : null}
-                {/* Enable only when there's something to publish (accurate, open-page value). */}
-                <button type="button" data-testid="publish-page" disabled={publish.isPending || !published?.hasUnpublishedChanges} onClick={() => publish.mutate()}>
-                  Publish
-                </button>
-              </>
-            )}
-          </div>
+          <PageToolbar
+            title={page?.title ?? ""}
+            canEdit={canEdit}
+            editing={editing}
+            onEdit={() => setEditing(true)}
+            onDone={() => setEditing(false)}
+            publishState={publishState}
+            canPublish={!!published?.hasUnpublishedChanges}
+            onPublish={canEdit ? () => publish.mutate() : undefined}
+            publishing={publish.isPending}
+            layout={layout}
+            onToggleLayout={toggleLayout}
+            onShare={() => setSharing(true)}
+            commentsOpen={commentsOpen}
+            onToggleComments={toggleComments}
+            openComments={openComments}
+            onHistory={toggleHistory}
+            onExport={() => { if (pageId) void downloadPageExport(token, pageId); }}
+            onPrint={() => window.print()}
+            onPermissions={page?.canManage ? () => setPermsOpen(true) : undefined}
+          />
           <div style={{ flex: 1, minHeight: 0 }}>
-            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} autoEdit={autoEdit} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} />
+            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} layout={layout} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} />
           </div>
           {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
         </div>
@@ -175,6 +180,7 @@ function PageRoute() {
         {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} />}
       </div>
       {pageId && <PermissionsDialog pageId={pageId} open={permsOpen} onClose={() => setPermsOpen(false)} />}
+      <ShareDialog pageId={sharing ? pageId ?? null : null} onClose={() => setSharing(false)} />
     </AppShell>
   );
 }
@@ -224,6 +230,16 @@ function GuestPage({ minted }: { minted: GuestToken }) {
   const [guest] = useState(() => ({ name: `guest-${Math.floor(Math.random() * 1000)}`, color: "#7d8590" }));
   const [publishedMd, setPublishedMd] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
+  const canEdit = capability === "edit";
+  const [editing, setEditing] = useState(false);
+  const [layout, setLayout] = useState<EditorLayout>(() => {
+    try { return localStorage.getItem("wks.editorLayout") === "split" ? "split" : "wysiwyg"; } catch { return "wysiwyg"; }
+  });
+  const toggleLayout = () => setLayout((l) => {
+    const n = l === "split" ? "wysiwyg" : "split";
+    try { localStorage.setItem("wks.editorLayout", n); } catch { /* no storage */ }
+    return n;
+  });
 
   const reloadPublished = useCallback(() => {
     apiFetch<{ publishedMd: string | null }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
@@ -242,13 +258,20 @@ function GuestPage({ minted }: { minted: GuestToken }) {
   return (
     <AppShell>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-        {capability === "edit" && (
-          <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", borderBottom: "1px solid var(--border)" }}>
-            <button type="button" data-testid="guest-publish" disabled={publishing} onClick={onPublish}>Publish</button>
-          </div>
-        )}
+        <PageToolbar
+          title=""
+          canEdit={canEdit}
+          editing={editing}
+          onEdit={() => setEditing(true)}
+          onDone={() => setEditing(false)}
+          layout={layout}
+          onToggleLayout={toggleLayout}
+          canPublish
+          onPublish={canEdit ? () => void onPublish() : undefined}
+          publishing={publishing}
+        />
         <div style={{ flex: 1, minHeight: 0 }}>
-          <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} />
+          <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} layout={layout} />
         </div>
       </div>
     </AppShell>

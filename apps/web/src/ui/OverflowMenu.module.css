@@ -1,0 +1,34 @@
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.trigger:hover { background: var(--panel-2); color: var(--fg); }
+
+.content {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  min-width: 160px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  z-index: 50;
+}
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--fg);
+  cursor: pointer;
+}
+.item[data-highlighted] { background: var(--panel-2); }
+.item[data-danger] { color: #e5534b; }

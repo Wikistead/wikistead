@@ -22,15 +22,17 @@ test("publish flow: create→edit, draft hidden in view until publish, then visi
   await page.keyboard.type("SECRETDRAFTXYZ visible only after publish");
   await sleep(2800);
 
-  // (2) BEFORE publish: never-published → "Draft" state; view shows the published
+  // (2) BEFORE publish: never-published → "Draft" chip; view shows the published
   // snapshot (empty) — NOT the draft.
-  await expect(page.locator("[data-testid=draft-badge]")).toBeVisible(); // header state
+  await expect(page.locator("[data-testid=draft-badge]")).toBeVisible();
   await page.click("[data-testid=view-toggle]"); // Done → view
   await sleep(500);
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("SECRETDRAFTXYZ");
 
-  // (3) publish → the content appears in view and the Draft badge is gone
-  await page.click("[data-testid=publish-page]");
+  // (3) publish from EDIT mode → back to view → the content now appears
+  await page.click("[data-testid=edit-toggle]");
+  await page.click("[data-testid=publish-page]"); // Playwright waits for it to be enabled
+  await page.click("[data-testid=view-toggle]"); // Done → view
   await expect
     .poll(async () => page.locator("[data-pane=preview] .cm-content").innerText(), { timeout: 8000 })
     .toContain("SECRETDRAFTXYZ");

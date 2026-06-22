@@ -1,0 +1,27 @@
+.bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  border-bottom: 1px solid var(--border);
+  min-height: 36px;
+}
+.title {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip {
+  font-size: 11px;
+  color: var(--fg-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  flex: 0 0 auto;
+}
+.chipDirty { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.spacer { flex: 1 1 auto; }
+.right { display: flex; align-items: center; gap: var(--space-2); }
+.commentBadge { margin-left: 2px; font-size: 11px; color: var(--fg-dim); }

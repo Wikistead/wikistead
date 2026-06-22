@@ -6,6 +6,7 @@ import { openDemo } from "../helpers";
 // this proves the button → server → browser-download wiring end to end.
 test("export button downloads the page as markdown", async ({ page }) => {
   await openDemo(page);
+  await page.click("[data-testid=page-overflow-trigger]"); // Export now lives in the ••• menu
   const [download] = await Promise.all([
     page.waitForEvent("download", { timeout: 15_000 }),
     page.click("[data-testid=export-page]"),
