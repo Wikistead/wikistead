@@ -63,6 +63,7 @@
 .switcherName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .menu {
+  composes: wks-pop from global;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -72,8 +73,6 @@
   z-index: 50;
   outline: none;
   user-select: none;
-  transform-origin: top;
-  animation: wks-pop var(--dur-base) var(--ease-out);
 }
 .menuItem {
   display: flex;

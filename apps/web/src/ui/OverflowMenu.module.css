@@ -12,6 +12,7 @@
 .trigger:hover { background: var(--panel-2); color: var(--fg); }
 
 .content {
+  composes: wks-pop from global;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -21,8 +22,6 @@
   z-index: 50;
   outline: none;        /* suppress the focused-container ring (looks like a thick border) */
   user-select: none;    /* menu is chrome — don't let a drag select the frame */
-  transform-origin: top;
-  animation: wks-pop var(--dur-base) var(--ease-out);
 }
 .item {
   display: flex;
