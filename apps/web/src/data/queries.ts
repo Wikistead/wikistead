@@ -12,6 +12,9 @@ export interface Space {
   // The caller's capability on the space (server-derived from FGA). Drives which
   // management actions the sidebar shows — UI convenience; the server is the gate.
   capability?: "view" | "edit" | "manage";
+  // Space branding accent preset key (Phase 5c), or null to inherit. Joined into
+  // GET /spaces so the accent cascade applies without a per-space fetch.
+  accentKey?: string | null;
 }
 export interface Page {
   id: string;
@@ -28,11 +31,12 @@ export interface Page {
   published?: boolean;
 }
 
-export function useSpaces() {
+export function useSpaces(enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["spaces"],
     queryFn: () => apiFetch<Space[]>("/spaces", token).then((r) => r ?? []),
+    enabled,
   });
 }
 
@@ -350,6 +354,29 @@ export function useRevokeSpaceAccess(spaceId: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["space-access", spaceId] }),
   });
 }
+// Tenant entitlements (plan feature flags). Used for UI gating (e.g. show an
+// upgrade state for branding on Cloud free); the server stays the fortress.
+export interface EntitlementsDTO { branding: boolean }
+export function useEntitlements() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["entitlements"],
+    queryFn: () => apiFetch<EntitlementsDTO>("/entitlements", token),
+    staleTime: 60_000,
+  });
+}
+
+// Set/clear a space's branding accent (Phase 5c). accentKey null = inherit.
+export function useUpdateSpaceBranding(spaceId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (accentKey: string | null) =>
+      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/branding`, token, { method: "PATCH", body: JSON.stringify({ accentKey }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
+  });
+}
+
 export function useMemberCandidates(spaceId: string, q: string) {
   const { token } = useSession();
   return useQuery({

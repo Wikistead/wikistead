@@ -1,0 +1,13 @@
+.wrap { padding: 24px; max-width: 560px; }
+.body { color: var(--fg-dim); font-size: 13px; margin-top: 0; margin-bottom: 20px; }
+
+.upgrade {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+  background: var(--panel);
+}
+.upgrade strong { font-size: 13px; }
+.upgrade p { margin: 4px 0 0; color: var(--fg-dim); font-size: 12px; }
