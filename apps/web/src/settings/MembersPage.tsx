@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../session/SessionProvider";
 import { Button } from "../ui/Button";
+import { Select } from "../ui/Select";
 import {
   listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember,
   ApiError, type Member, type Invite,
@@ -73,10 +74,16 @@ export function MembersPage() {
             <tr key={m.sub} style={{ borderBottom: "1px solid var(--border, #222)" }}>
               <td style={{ padding: "8px 4px" }}>{m.display_name || m.email || m.sub}{m.sub === me && t("members.you")}</td>
               <td>
-                <select aria-label={t("members.roleFor", { sub: m.sub })} value={m.role} onChange={(e) => void guarded(() => changeRole(token, m.sub, e.target.value as "admin" | "member"))()}>
-                  <option value="member">{t("members.roleMember")}</option>
-                  <option value="admin">{t("members.roleAdmin")}</option>
-                </select>
+                <Select
+                  value={m.role}
+                  onChange={(v) => void guarded(() => changeRole(token, m.sub, v as "admin" | "member"))()}
+                  ariaLabel={t("members.roleFor", { sub: m.sub })}
+                  size="sm"
+                  options={[
+                    { value: "member", label: t("members.roleMember") },
+                    { value: "admin", label: t("members.roleAdmin") },
+                  ]}
+                />
               </td>
               <td style={{ textAlign: "right" }}>
                 <Button variant="dangerGhost" size="sm" onClick={() => void guarded(() => removeMember(token, m.sub))()}>{t("members.remove")}</Button>
@@ -89,10 +96,16 @@ export function MembersPage() {
       <h3>{t("members.inviteTitle")}</h3>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("members.emailPlaceholder")} aria-label={t("members.inviteEmail")} type="email" />
-        <select aria-label={t("members.inviteRole")} value={role} onChange={(e) => setRole(e.target.value as "admin" | "member")}>
-          <option value="member">{t("members.roleMember")}</option>
-          <option value="admin">{t("members.roleAdmin")}</option>
-        </select>
+        <Select
+          value={role}
+          onChange={(v) => setRole(v as "admin" | "member")}
+          ariaLabel={t("members.inviteRole")}
+          size="sm"
+          options={[
+            { value: "member", label: t("members.roleMember") },
+            { value: "admin", label: t("members.roleAdmin") },
+          ]}
+        />
         <Button variant="primary" disabled={!email.trim()} onClick={() => void onInvite()}>{t("members.sendInvite")}</Button>
       </div>
       {lastLink && (

@@ -4,6 +4,7 @@ import { Dialog } from "@ark-ui/react/dialog";
 import { Portal } from "@ark-ui/react/portal";
 import { usePageAccess, useGrantAccess, useRevokeAccess, type PageRelation } from "../data/queries";
 import { notify } from "./toast";
+import { Select } from "./Select";
 import styles from "./dialogs.module.css";
 
 // Per-page permission management (Phase 4c). Shown only to managers (the open page's
@@ -40,11 +41,18 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
 
             <div className={styles.shareRow}>
               <input className={styles.linkUrl} data-testid="grant-sub" aria-label={t("permissions.member")} placeholder={t("permissions.memberPlaceholder")} value={sub} onChange={(e) => setSub(e.target.value)} />
-              <select className={styles.select} aria-label={t("permissions.relation")} data-testid="grant-relation" value={relation} onChange={(e) => setRelation(e.target.value as PageRelation)}>
-                <option value="view">{t("permissions.view")}</option>
-                <option value="edit">{t("permissions.edit")}</option>
-                <option value="manage">{t("permissions.manage")}</option>
-              </select>
+              <Select
+                value={relation}
+                onChange={(v) => setRelation(v as PageRelation)}
+                ariaLabel={t("permissions.relation")}
+                testId="grant-relation"
+                size="sm"
+                options={[
+                  { value: "view", label: t("permissions.view") },
+                  { value: "edit", label: t("permissions.edit") },
+                  { value: "manage", label: t("permissions.manage") },
+                ]}
+              />
               <button type="button" className={`${styles.btn} ${styles.primary}`} data-testid="grant-add" disabled={grant.isPending} onClick={add}>{t("permissions.add")}</button>
             </div>
 

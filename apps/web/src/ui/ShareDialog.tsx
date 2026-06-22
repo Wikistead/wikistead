@@ -5,6 +5,7 @@ import { Portal } from "@ark-ui/react/portal";
 import { Copy, Trash2 } from "lucide-react";
 import { useShareLinks, useCreateShareLink, useRevokeShareLink } from "../data/queries";
 import { notify } from "./toast";
+import { Select } from "./Select";
 import styles from "./dialogs.module.css";
 
 const EXPIRY_OPTIONS: { key: string; seconds: number | null }[] = [
@@ -39,27 +40,24 @@ export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClos
             <Dialog.Title className={styles.title}>{t("shareDialog.title")}</Dialog.Title>
 
             <div className={styles.shareRow}>
-              <select
-                aria-label={t("shareDialog.capability")}
-                className={styles.select}
+              <Select
                 value={capability}
-                onChange={(e) => setCapability(e.target.value as "view" | "edit")}
-              >
-                <option value="view">{t("shareDialog.canView")}</option>
-                <option value="edit">{t("shareDialog.canEdit")}</option>
-              </select>
-              <select
-                aria-label={t("shareDialog.expiry")}
-                className={styles.select}
+                onChange={(v) => setCapability(v as "view" | "edit")}
+                ariaLabel={t("shareDialog.capability")}
+                testId="share-capability"
+                size="sm"
+                options={[
+                  { value: "view", label: t("shareDialog.canView") },
+                  { value: "edit", label: t("shareDialog.canEdit") },
+                ]}
+              />
+              <Select
                 value={String(expiry)}
-                onChange={(e) => setExpiry(e.target.value === "null" ? null : Number(e.target.value))}
-              >
-                {EXPIRY_OPTIONS.map((o) => (
-                  <option key={o.key} value={String(o.seconds)}>
-                    {t(o.key)}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => setExpiry(v === "null" ? null : Number(v))}
+                ariaLabel={t("shareDialog.expiry")}
+                size="sm"
+                options={EXPIRY_OPTIONS.map((o) => ({ value: String(o.seconds), label: t(o.key) }))}
+              />
               <button
                 type="button"
                 className={`${styles.btn} ${styles.primary}`}

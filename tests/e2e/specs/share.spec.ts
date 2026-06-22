@@ -16,7 +16,10 @@ async function createLink(page: Page, capability: "view" | "edit"): Promise<stri
   await row.locator("[data-testid=page-actions]").click();
   await page.locator("[data-testid=page-menu][data-state=open]").getByText("Share").click();
   await page.waitForSelector("[data-testid=share-dialog]");
-  await page.selectOption('[data-testid=share-dialog] select[aria-label="Capability"]', capability);
+  // Two ShareDialog instances mount (sidebar + page route); only the open one is
+  // visible, so scope the Select to the visible trigger.
+  await page.locator("[data-testid=share-capability]:visible").click();
+  await page.locator(`[data-testid=share-capability-${capability}]:visible`).click();
   const before = await page.$$eval('[data-testid=share-dialog] input[aria-label="Share URL"]', (e) => e.length);
   await page.click("[data-testid=create-link]");
   await page.waitForFunction((n) => document.querySelectorAll('[data-testid=share-dialog] input[aria-label="Share URL"]').length > n, before, { timeout: 5000 });

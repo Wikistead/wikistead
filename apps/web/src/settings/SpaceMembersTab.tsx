@@ -7,6 +7,7 @@ import {
   type PageRelation,
 } from "../data/queries";
 import { Button } from "../ui/Button";
+import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
 import styles from "./SpaceMembersTab.module.css";
 
@@ -73,10 +74,14 @@ export function SpaceMembersTab() {
             </ul>
           )}
         </div>
-        <select className={styles.select} aria-label={t("spaceMembers.capability")} data-testid="space-grant-capability"
-          value={capability} onChange={(e) => setCapability(e.target.value as PageRelation)}>
-          {CAPS.map((c) => <option key={c} value={c}>{t(`spaceMembers.${c}`)}</option>)}
-        </select>
+        <Select
+          value={capability}
+          onChange={(v) => setCapability(v as PageRelation)}
+          ariaLabel={t("spaceMembers.capability")}
+          testId="space-grant-capability"
+          size="sm"
+          options={CAPS.map((c) => ({ value: c, label: t(`spaceMembers.${c}`) }))}
+        />
         <Button variant="primary" size="sm" disabled={!picked || grant.isPending} onClick={add} data-testid="space-grant-add">{t("spaceMembers.add")}</Button>
       </div>
 

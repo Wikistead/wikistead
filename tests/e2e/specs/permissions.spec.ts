@@ -28,7 +28,8 @@ test("manager grants and revokes page access via the Permissions dialog", async 
 
   // grant alice-perm view → appears in the list
   await page.fill("[data-testid=grant-sub]", "alice-perm");
-  await page.selectOption("[data-testid=grant-relation]", "view");
+  await page.getByTestId("grant-relation").click();
+  await page.getByTestId("grant-relation-view").click();
   await page.click("[data-testid=grant-add]");
   const row = page.locator("[data-testid=grant-item]", { hasText: "alice-perm" });
   await expect(row).toBeVisible();
