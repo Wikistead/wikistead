@@ -162,12 +162,39 @@
   "members": {
     "title": "Members",
     "adminOnly": "Admin only.",
+    "member": "Member",
     "role": "Role",
+    "roleMember": "member",
+    "roleAdmin": "admin",
+    "you": " (you)",
     "remove": "Remove",
-    "invitesTitle": "Invites",
-    "emailPlaceholder": "name@example.com",
+    "inviteTitle": "Invite a member",
+    "emailPlaceholder": "email@example.com",
+    "inviteEmail": "invite email",
+    "inviteRole": "invite role",
+    "roleFor": "role for {{sub}}",
     "sendInvite": "Send invite",
-    "revoke": "Revoke",
-    "pending": "pending"
+    "inviteLinkLabel": "Invite link (share if email is off):",
+    "emailed": "Emailed to recipient.",
+    "notEmailed": "Email not sent — copy the link above.",
+    "pendingTitle": "Pending invites",
+    "noEmail": "(no email)",
+    "revoke": "Revoke"
+  },
+  "commentsPanel": {
+    "open": "Open",
+    "resolved": "Resolved",
+    "submit": "Comment",
+    "addInline": "Add comment on selection",
+    "selectFirst": "Select text in the page first, then click Add comment.",
+    "promptInline": "Comment on \"{{quote}}\":",
+    "anchoredDeleted": "(anchored text deleted)",
+    "delete": "delete",
+    "reply": "Reply…",
+    "pagePlaceholder": "Comment on the page…",
+    "resolve": "Resolve",
+    "reopen": "Reopen",
+    "emptyOpen": "No open comments.",
+    "emptyResolved": "No resolved comments."
   }
 }
