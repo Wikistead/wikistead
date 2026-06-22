@@ -53,6 +53,9 @@ declare module 'fastify' {
     // (which read `user`) are never reachable by a guest. Authority is still derived
     // from OpenFGA per request (the token asserts intent, not authority).
     guest?: { shareLinkId: string; resource: ResourceRef; capability: Capability }
+    // Set when authenticated via an API key — the key's scope ceiling. 'read'
+    // restricts to GET/HEAD (mutations 403); 'write' is the owner's full authority.
+    apiScope?: 'read' | 'write'
   }
   interface FastifyContextConfig {
     // Marks a route as guest-accessible and the capability a guest token must assert
@@ -204,7 +207,17 @@ export async function buildApp(): Promise<FastifyInstance> {
         await reply.code(401).send({ error: 'invalid or revoked API key' })
         return
       }
+      // Scope ceiling (Phase 5f): a 'read' key may only GET/HEAD — any mutation is
+      // 403. This only RESTRICTS; FGA still checks the owner's authority, so a key
+      // can never exceed its owner. GET routes perform no business writes (audited),
+      // so method is a safe read/write proxy.
+      if (apiUser.scope === 'read' && req.method !== 'GET' && req.method !== 'HEAD') {
+        emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'read-only key on a write' })
+        await reply.code(403).send({ error: 'read-only API key' })
+        return
+      }
       req.user = { sub: apiUser.sub, groups: [] }
+      req.apiScope = apiUser.scope
       emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: apiUser.sub, method: 'apikey' })
       return
     }
