@@ -15,12 +15,9 @@ export interface Space {
   // Space branding accent preset key (Phase 5c), or null to inherit. Joined into
   // GET /spaces so the accent cascade applies without a per-space fetch.
   accentKey?: string | null;
-  // Space icon override glyph (#4), or null to auto-generate an initials chip from
-  // the name. Joined into GET /spaces so the sidebar renders it without a fetch.
-  icon?: string | null;
-  // Uploaded space icon image (#6), absolute URL ready for an <img> src, or null.
-  // Takes precedence over the glyph; both fall back to the initials chip. The server
-  // returns a relative API path; useSpaces prefixes it with the API base.
+  // Uploaded space icon image, absolute URL ready for an <img> src, or null → the
+  // sidebar renders a deterministic initials chip. The server returns a relative API
+  // path; useSpaces prefixes it with the API base. (The text-glyph override was removed.)
   iconImageUrl?: string | null;
 }
 export interface Page {
@@ -432,19 +429,8 @@ export function useUpdateSpaceBranding(spaceId: string) {
   });
 }
 
-// Set/clear a space's icon override (#4). icon null = auto (initials chip).
-export function useUpdateSpaceIcon(spaceId: string) {
-  const { token } = useSession();
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (icon: string | null) =>
-      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/icon`, token, { method: "PATCH", body: JSON.stringify({ icon }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
-  });
-}
-
-// Upload/remove a space icon IMAGE (#6). base64 in (no multipart); the server
-// validates magic bytes + size. The image takes precedence over the glyph.
+// Upload/remove a space icon IMAGE. base64 in (no multipart); the server validates
+// magic bytes + size. Unset → the sidebar shows the initials chip.
 export function useUploadSpaceIcon(spaceId: string) {
   const { token } = useSession();
   const qc = useQueryClient();
