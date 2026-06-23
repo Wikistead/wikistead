@@ -2,7 +2,6 @@ import { Sun, Moon, Monitor } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useTheme, type Theme } from "./ThemeProvider";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
-import styles from "./AppShell.module.css";
 
 const ICON = { light: Sun, dark: Moon, system: Monitor } as const;
 const ORDER: Theme[] = ["light", "dark", "system"];
@@ -16,7 +15,7 @@ export function ThemeToggle() {
   const Icon = ICON[theme];
   return (
     <DropdownMenu modal={false}>
-      <DropdownMenuTrigger className={styles.iconBtn} aria-label={t("theme.label")} title={t("theme.label")} data-testid="theme-toggle">
+      <DropdownMenuTrigger className="ml-2 flex cursor-pointer rounded p-1 text-fg-dim transition-colors hover:bg-panel-2 hover:text-foreground" aria-label={t("theme.label")} title={t("theme.label")} data-testid="theme-toggle">
         <Icon size={15} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" data-testid="theme-menu">

@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../session/SessionProvider";
 import { Avatar } from "../ui/Avatar";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
-import styles from "./AppShell.module.css";
 
 // Header user menu (member chrome only — rendered when onLogout is provided).
 // Hosts the tenant-admin entry (shown only when isAdmin — UI convenience; the
@@ -16,7 +15,7 @@ export function UserMenu({ onLogout }: { onLogout: () => void }) {
   const name = displayName ?? sub ?? t("userMenu.label");
   return (
     <DropdownMenu modal={false}>
-      <DropdownMenuTrigger className={styles.avatarBtn} aria-label={t("userMenu.label")} title={name} data-testid="user-menu">
+      <DropdownMenuTrigger className="ml-2 flex cursor-pointer rounded-full p-0 leading-none transition-shadow hover:shadow-[0_0_0_2px_var(--panel-2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" aria-label={t("userMenu.label")} title={name} data-testid="user-menu">
         <Avatar name={name} src={picture} seed={user.seed ?? sub ?? name} size={26} data-testid="user-avatar" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" data-testid="user-menu-content">

@@ -2,7 +2,6 @@ import { Languages } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { LANGS, setLang } from "../i18n";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
-import styles from "./AppShell.module.css";
 
 // Language switcher (Phase 5). Lives in the app header next to the theme switcher;
 // available to every user (members + guests) — Japanese is core to positioning, so
@@ -13,7 +12,7 @@ export function LanguageToggle() {
   const current = i18n.resolvedLanguage ?? i18n.language;
   return (
     <DropdownMenu modal={false}>
-      <DropdownMenuTrigger className={styles.iconBtn} aria-label={t("language.label")} title={t("language.label")} data-testid="language-toggle">
+      <DropdownMenuTrigger className="ml-2 flex cursor-pointer rounded p-1 text-fg-dim transition-colors hover:bg-panel-2 hover:text-foreground" aria-label={t("language.label")} title={t("language.label")} data-testid="language-toggle">
         <Languages size={15} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" data-testid="language-menu">
