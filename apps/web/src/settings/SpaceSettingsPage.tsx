@@ -7,6 +7,7 @@ import { useActiveSpace } from "../app/ActiveSpace";
 import { useSession } from "../session/SessionProvider";
 import { useSpaces, useRenameSpace, useDeleteSpace, useUpdateSpaceIcon } from "../data/queries";
 import { Button } from "../ui/Button";
+import { Input } from "../ui/Input";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
@@ -94,7 +95,7 @@ function SpaceGeneralTab() {
 
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("spaceSettings.nameLabel")}</label>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 32 }}>
-        <input value={draft} onChange={(e) => setDraft(e.target.value)} aria-label={t("spaceSettings.nameLabel")} data-testid="space-name-input" />
+        <Input className="max-w-xs" value={draft} onChange={(e) => setDraft(e.target.value)} aria-label={t("spaceSettings.nameLabel")} data-testid="space-name-input" />
         <Button variant="primary" disabled={!draft.trim() || draft.trim() === name || rename.isPending} onClick={save} data-testid="space-name-save">{t("common.save")}</Button>
       </div>
 
@@ -103,14 +104,14 @@ function SpaceGeneralTab() {
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 32 }}>
         {/* Live preview of what the sidebar will show (override, else auto initials). */}
         <SpaceIcon id={spaceId} name={name} icon={iconDraft.trim() || null} size={28} data-testid="space-icon-preview" />
-        <input
+        <Input
+          className="w-24"
           value={iconDraft}
           onChange={(e) => setIconDraft(e.target.value)}
           maxLength={16}
           placeholder={t("spaceSettings.iconPlaceholder")}
           aria-label={t("spaceSettings.iconLabel")}
           data-testid="space-icon-input"
-          style={{ width: 96 }}
         />
         <Button variant="primary" disabled={setIcon.isPending || (iconDraft.trim() || null) === (icon ?? null)} onClick={() => saveIcon(iconDraft.trim() || null)} data-testid="space-icon-save">{t("common.save")}</Button>
         {icon && <Button variant="ghost" disabled={setIcon.isPending} onClick={() => { setIconDraft(""); saveIcon(null); }} data-testid="space-icon-clear">{t("spaceSettings.iconClear")}</Button>}

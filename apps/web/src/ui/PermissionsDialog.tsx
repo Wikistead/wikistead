@@ -4,6 +4,7 @@ import { usePageAccess, useGrantAccess, useRevokeAccess, type PageRelation } fro
 import { notify } from "./toast";
 import { Select } from "./Select";
 import { Button, IconButton } from "./Button";
+import { Input } from "./Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 
 // Per-page permission management (Phase 4c). Shown only to managers (the open page's
@@ -38,7 +39,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
         </DialogHeader>
 
         <div className="flex items-center gap-2">
-          <input className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground outline-none focus:border-[var(--accent)]" data-testid="grant-sub" aria-label={t("permissions.member")} placeholder={t("permissions.memberPlaceholder")} value={sub} onChange={(e) => setSub(e.target.value)} />
+          <Input inputSize="sm" className="min-w-0 flex-1" data-testid="grant-sub" aria-label={t("permissions.member")} placeholder={t("permissions.memberPlaceholder")} value={sub} onChange={(e) => setSub(e.target.value)} />
           <Select
             value={relation}
             onChange={(v) => setRelation(v as PageRelation)}
