@@ -21,7 +21,7 @@ import { useActiveSpace } from "../app/ActiveSpace";
 import { RenameDialog, ConfirmDialog } from "../ui/dialogs";
 import { ShareDialog } from "../ui/ShareDialog";
 import { SpaceIcon } from "../ui/SpaceIcon";
-import styles from "./Sidebar.module.css";
+import { cn } from "../lib/utils";
 
 // One space at a time (Notion/Outline style): the sidebar shows ONLY the active
 // space's page tree; the space itself is chosen in the switcher, not a tree root.
@@ -154,26 +154,31 @@ export function Sidebar() {
       <div
         ref={dragHandle}
         style={style}
-        className={`${styles.row} ${selected ? styles.selected : ""}`}
+        className={cn(
+          "group flex cursor-pointer select-none items-center gap-1 rounded-sm pr-2 transition-colors duration-[120ms]",
+          selected
+            ? "bg-[color-mix(in_srgb,var(--accent)_10%,var(--panel-3))] font-medium shadow-[inset_3px_0_0_var(--accent)]"
+            : "hover:bg-panel-2",
+        )}
         data-testid="tree-page"
         data-selected={selected ? "" : undefined}
         onClick={() => navigate(`/p/${d.pageId}`)}
       >
-        <span className={styles.indicator} onClick={(e) => { e.stopPropagation(); node.toggle(); }}>
-          {hasChildren ? <ChevronRight size={14} className={node.isOpen ? styles.caretOpen : ""} /> : <span className={styles.caretSpace} />}
+        <span className="inline-flex flex-none items-center" onClick={(e) => { e.stopPropagation(); node.toggle(); }}>
+          {hasChildren ? <ChevronRight size={14} className={cn("transition-transform duration-[120ms]", node.isOpen && "rotate-90")} /> : <span className="inline-block w-[14px]" />}
         </span>
-        <FileText size={14} className={styles.fileIcon} />
-        <span className={styles.name}>{d.name || t("common.untitled")}</span>
+        <FileText size={14} className="flex-none text-fg-dim" />
+        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{d.name || t("common.untitled")}</span>
         {/* 3-state: Draft (never published) / Unpublished changes / clean (nothing). */}
         {!d.published ? (
-          <span className={styles.draftBadge} data-testid="tree-draft-badge" title={t("sidebar.draftTitle")}>{t("sidebar.draft")}</span>
+          <span className="mx-1 flex-none rounded border border-border px-[5px] py-0.5 text-[10px] leading-none text-fg-dim" data-testid="tree-draft-badge" title={t("sidebar.draftTitle")}>{t("sidebar.draft")}</span>
         ) : d.unpublished ? (
-          <span className={styles.unpublishedDot} data-testid="unpublished-dot" title={t("sidebar.unpublished")} aria-label={t("sidebar.unpublished")} />
+          <span className="mx-1 h-1.5 w-1.5 flex-none rounded-full bg-[var(--accent)]" data-testid="unpublished-dot" title={t("sidebar.unpublished")} aria-label={t("sidebar.unpublished")} />
         ) : null}
         {canEdit && (
-          <span className={styles.actions} onClick={(e) => e.stopPropagation()}>
+          <span className="flex gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 has-[[aria-expanded=true]]:pointer-events-auto has-[[aria-expanded=true]]:opacity-100" onClick={(e) => e.stopPropagation()}>
             <DropdownMenu modal={false}>
-              <DropdownMenuTrigger className={styles.rowMenuBtn} aria-label={t("sidebar.pageActions")} data-testid="page-actions"><MoreHorizontal size={14} /></DropdownMenuTrigger>
+              <DropdownMenuTrigger className="flex cursor-pointer rounded-sm p-0.5 text-fg-dim transition-colors duration-[120ms] hover:bg-border hover:text-foreground" aria-label={t("sidebar.pageActions")} data-testid="page-actions"><MoreHorizontal size={14} /></DropdownMenuTrigger>
               <DropdownMenuContent align="start" data-testid="page-menu">
                 <DropdownMenuItem onSelect={() => onRowActionRef.current("subpage", d)} data-testid="add-subpage"><FilePlus size={13} /> {t("sidebar.addSubpage")}</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onRowActionRef.current("share", d)}><Share2 size={13} /> {t("sidebar.share")}</DropdownMenuItem>
@@ -187,14 +192,15 @@ export function Sidebar() {
     );
   }, [pageId, canEdit, t, navigate]);
 
+  const headerBtn = "flex cursor-pointer rounded-sm p-1 text-fg-dim transition-colors duration-[120ms] hover:bg-panel-2 hover:text-foreground";
   return (
-    <div className={styles.sidebar} data-testid="sidebar">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden text-sm" data-testid="sidebar">
       {/* Space switcher — the space is a separate layer, not a tree root. */}
-      <div className={styles.header}>
+      <div className="flex items-center justify-between border-b border-border p-3">
         <DropdownMenu modal={false}>
-          <DropdownMenuTrigger className={styles.switcher} data-testid="space-switcher">
+          <DropdownMenuTrigger className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-sm px-1 py-0.5 font-semibold text-foreground transition-colors duration-[120ms] hover:bg-panel-2" data-testid="space-switcher">
             {currentSpace && <SpaceIcon id={currentSpace.id} name={currentSpace.name} icon={currentSpace.icon} size={20} data-testid="space-icon" />}
-            <span className={styles.switcherName}>{currentSpace?.name || t("sidebar.noSpace")}</span>
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap">{currentSpace?.name || t("sidebar.noSpace")}</span>
             <ChevronsUpDown size={14} />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" data-testid="space-menu">
@@ -210,25 +216,25 @@ export function Sidebar() {
           </DropdownMenuContent>
         </DropdownMenu>
         {current && (canEdit || canManage) && (
-          <div className={styles.headerActions}>
-            {canEdit && <button type="button" title={t("sidebar.newPage")} aria-label={t("sidebar.newPage")} data-testid="new-page" onClick={() => newPage(null)}><FilePlus size={15} /></button>}
-            {canManage && <button type="button" title={t("sidebar.spaceSettings")} aria-label={t("sidebar.spaceSettings")} data-testid="space-settings-open" onClick={() => current && navigate(`/spaces/${current}/settings`)}><Settings size={15} /></button>}
+          <div className="flex flex-none gap-0.5">
+            {canEdit && <button type="button" className={headerBtn} title={t("sidebar.newPage")} aria-label={t("sidebar.newPage")} data-testid="new-page" onClick={() => newPage(null)}><FilePlus size={15} /></button>}
+            {canManage && <button type="button" className={headerBtn} title={t("sidebar.spaceSettings")} aria-label={t("sidebar.spaceSettings")} data-testid="space-settings-open" onClick={() => current && navigate(`/spaces/${current}/settings`)}><Settings size={15} /></button>}
           </div>
         )}
       </div>
 
       {spacesQ.isLoading ? (
-        <div className={styles.state}>{t("common.loading")}</div>
+        <div className="p-3 text-fg-dim">{t("common.loading")}</div>
       ) : spacesQ.isError ? (
-        <div className={styles.state}>{t("sidebar.loadFailed")} <button type="button" onClick={() => spacesQ.refetch()}>{t("sidebar.retry")}</button></div>
+        <div className="p-3 text-fg-dim">{t("sidebar.loadFailed")} <button type="button" className="cursor-pointer text-[var(--accent)]" onClick={() => spacesQ.refetch()}>{t("sidebar.retry")}</button></div>
       ) : spaces.length === 0 ? (
-        <div className={styles.state}>{t("sidebar.noSpaces")}</div>
+        <div className="p-3 text-fg-dim">{t("sidebar.noSpaces")}</div>
       ) : pages.length === 0 ? (
-        <div className={styles.state}>{t("sidebar.noPages")}</div>
+        <div className="p-3 text-fg-dim">{t("sidebar.noPages")}</div>
       ) : (
-        <div ref={treeBox} className={styles.treeBox}>
+        <div ref={treeBox} className="min-h-0 min-w-0 flex-1">
           <Tree<Node>
-            className={styles.tree}
+            className="!overflow-x-hidden"
             data={data}
             idAccessor="id"
             childrenAccessor="children"
