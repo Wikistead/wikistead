@@ -7,10 +7,9 @@ import {
   useSpaceAccess, useGrantSpaceAccess, useRevokeSpaceAccess, useMemberCandidates,
   type PageRelation,
 } from "../data/queries";
-import { Button } from "../ui/Button";
+import { Button, IconButton } from "../ui/Button";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
-import styles from "./SpaceMembersTab.module.css";
 
 interface SpaceCtx { spaceId: string; name: string }
 const CAPS: PageRelation[] = ["view", "edit", "manage"];
@@ -47,12 +46,12 @@ export function SpaceMembersTab() {
     : g.replace(/^user:/, "");
 
   return (
-    <div className={styles.wrap} data-testid="space-members">
-      <h2 style={{ marginTop: 0 }}>{t("spaceMembers.title")}</h2>
-      <p className={styles.body}>{t("spaceMembers.body")}</p>
+    <div className="max-w-[640px] p-6" data-testid="space-members">
+      <h2 className="mt-0">{t("spaceMembers.title")}</h2>
+      <p className="mt-0 text-sm text-fg-dim">{t("spaceMembers.body")}</p>
 
-      <div className={styles.addRow}>
-        <div className={styles.typeahead}>
+      <div className="mb-6 flex items-start gap-2">
+        <div className="relative min-w-0 flex-1">
           <Input
             className="w-full"
             data-testid="space-grant-input"
@@ -62,13 +61,13 @@ export function SpaceMembersTab() {
             onChange={(e) => { setPicked(null); setQuery(e.target.value); }}
           />
           {!picked && query.trim().length > 0 && (candidates.data?.length ?? 0) > 0 && (
-            <ul className={styles.candidates} data-testid="space-grant-candidates">
+            <ul className="absolute left-0 right-0 top-[calc(100%+2px)] z-20 m-0 max-h-60 list-none overflow-y-auto rounded-md border border-border bg-panel p-1 shadow-md" data-testid="space-grant-candidates">
               {candidates.data!.map((c) => (
                 <li key={c.sub}>
-                  <button type="button" className={styles.candidate} data-testid="space-grant-candidate"
+                  <button type="button" className="flex w-full cursor-pointer flex-col gap-px rounded-sm border-none bg-transparent px-2 py-1.5 text-left text-foreground hover:bg-panel-2" data-testid="space-grant-candidate"
                     onClick={() => { setPicked({ grantee: `user:${c.sub}`, label: c.displayName || c.sub }); setQuery(""); }}>
-                    <span className={styles.candName}>{c.displayName || c.sub}</span>
-                    {c.displayName && <span className={styles.candSub}>{c.sub}</span>}
+                    <span className="text-sm">{c.displayName || c.sub}</span>
+                    {c.displayName && <span className="text-[11px] text-fg-dim">{c.sub}</span>}
                   </button>
                 </li>
               ))}
@@ -86,21 +85,21 @@ export function SpaceMembersTab() {
         <Button variant="primary" size="sm" disabled={!picked || grant.isPending} onClick={add} data-testid="space-grant-add">{t("spaceMembers.add")}</Button>
       </div>
 
-      <div className={styles.list} data-testid="space-grant-list">
+      <div className="flex flex-col gap-1" data-testid="space-grant-list">
         {grants.map((g) => (
-          <div key={`${g.grantee}:${g.capability}`} className={styles.item} data-testid="space-grant-item">
-            <span className={styles.cap} data-cap={g.capability}>{t(`spaceMembers.${g.capability}`)}</span>
-            <span className={styles.grantee}>{label(g.grantee)}</span>
-            <button type="button" className={styles.revoke} data-danger="" aria-label={t("spaceMembers.revoke")} data-testid="space-grant-revoke"
+          <div key={`${g.grantee}:${g.capability}`} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="space-grant-item">
+            <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={g.capability}>{t(`spaceMembers.${g.capability}`)}</span>
+            <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{label(g.grantee)}</span>
+            <IconButton aria-label={t("spaceMembers.revoke")} data-testid="space-grant-revoke" className="hover:text-destructive"
               onClick={() => revoke.mutate({ grantee: g.grantee, capability: g.capability }, {
                 onSuccess: () => notify.success(t("toast.accessRevoked")),
                 onError: () => notify.error(t("toast.actionFailed")),
               })}>
               <X size={14} />
-            </button>
+            </IconButton>
           </div>
         ))}
-        {grants.length === 0 && <p className={styles.empty}>{t("spaceMembers.empty")}</p>}
+        {grants.length === 0 && <p className="text-sm text-fg-dim">{t("spaceMembers.empty")}</p>}
       </div>
     </div>
   );

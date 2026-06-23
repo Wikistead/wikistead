@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react";
-import styles from "./SettingsShell.module.css";
+import { cn } from "../lib/utils";
 
 export interface SettingsTab {
   key: string;
@@ -12,6 +12,8 @@ export interface SettingsTab {
   // soon" placeholder, so the IA (vertical tab rail) stands before the contents do.
   soon?: boolean;
 }
+
+const backLink = "mb-2 inline-flex w-fit items-center gap-1.5 rounded px-2 py-1 text-xs text-fg-dim no-underline hover:bg-panel-2 hover:text-foreground";
 
 // Two-tier settings layout (Notion/Confluence style): a left vertical tab rail +
 // a content pane. Used by both the tenant admin console and the per-space settings
@@ -28,25 +30,28 @@ export function SettingsShell({
 }) {
   const { t } = useTranslation();
   return (
-    <div className={styles.wrap}>
-      <nav className={styles.rail} aria-label={title}>
-        <NavLink to="/" className={styles.back} data-testid="settings-back">
+    <div className="grid h-full min-h-0 grid-cols-[220px_1fr]">
+      <nav className="box-border flex flex-col gap-0.5 overflow-y-auto border-r border-border bg-panel p-3" aria-label={title}>
+        <NavLink to="/" className={backLink} data-testid="settings-back">
           <ArrowLeft size={14} /> {t("settings.back")}
         </NavLink>
-        <div className={styles.railTitle}>{title}</div>
+        <div className="mb-0.5 px-2 py-1 text-[11px] uppercase tracking-[0.04em] text-fg-dim">{title}</div>
         {tabs.map((tab) => (
           <NavLink
             key={tab.key}
             to={tab.to}
-            className={({ isActive }) => `${styles.tab} ${isActive ? styles.tabActive : ""}`}
+            className={({ isActive }) => cn(
+              "flex items-center justify-between gap-2 rounded-md px-2 py-[7px] text-sm text-foreground no-underline hover:bg-panel-2",
+              isActive && "bg-panel-2 font-semibold shadow-[inset_2px_0_0_var(--accent)]",
+            )}
             data-testid={`settings-tab-${tab.key}`}
           >
             <span>{tab.label}</span>
-            {tab.soon && <span className={styles.soon}>{t("settings.soon")}</span>}
+            {tab.soon && <span className="rounded-full border border-border px-1.5 text-[10px] leading-4 text-fg-dim">{t("settings.soon")}</span>}
           </NavLink>
         ))}
       </nav>
-      <section className={styles.content}>{children}</section>
+      <section className="min-h-0 min-w-0 overflow-y-auto">{children}</section>
     </div>
   );
 }
@@ -56,10 +61,10 @@ export function SettingsShell({
 export function SettingsDenied({ kind }: { kind: "forbidden" | "notFound" }) {
   const { t } = useTranslation();
   return (
-    <div className={styles.denied} data-testid={kind === "forbidden" ? "settings-forbidden" : "settings-notfound"}>
-      <h2>{t(kind === "forbidden" ? "settings.forbiddenTitle" : "settings.notFoundTitle")}</h2>
+    <div className="max-w-[560px] px-6 py-8 text-fg-dim" data-testid={kind === "forbidden" ? "settings-forbidden" : "settings-notfound"}>
+      <h2 className="mt-0 text-foreground">{t(kind === "forbidden" ? "settings.forbiddenTitle" : "settings.notFoundTitle")}</h2>
       <p>{t(kind === "forbidden" ? "settings.forbiddenBody" : "settings.notFoundBody")}</p>
-      <NavLink to="/" className={styles.back}><ArrowLeft size={14} /> {t("settings.back")}</NavLink>
+      <NavLink to="/" className={backLink}><ArrowLeft size={14} /> {t("settings.back")}</NavLink>
     </div>
   );
 }
@@ -68,8 +73,8 @@ export function SettingsDenied({ kind }: { kind: "forbidden" | "notFound" }) {
 export function SettingsPlaceholder({ label }: { label: string }) {
   const { t } = useTranslation();
   return (
-    <div className={styles.placeholder} data-testid="settings-placeholder">
-      <h2>{label}</h2>
+    <div className="max-w-[560px] px-6 py-8 text-fg-dim" data-testid="settings-placeholder">
+      <h2 className="mt-0 text-foreground">{label}</h2>
       <p>{t("settings.placeholder")}</p>
     </div>
   );

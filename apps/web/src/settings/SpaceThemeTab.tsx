@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { useEntitlements, useUpdateSpaceBranding } from "../data/queries";
 import { notify } from "../ui/toast";
 import { AccentPicker } from "./AccentPicker";
-import styles from "./SpaceThemeTab.module.css";
 
 interface SpaceCtx { spaceId: string; name: string; accentKey: string | null }
 
@@ -26,14 +25,14 @@ export function SpaceThemeTab() {
   };
 
   return (
-    <div className={styles.wrap} data-testid="space-theme">
-      <h2 style={{ marginTop: 0 }}>{t("spaceTheme.title")}</h2>
-      <p className={styles.body}>{t("spaceTheme.body")}</p>
+    <div className="max-w-[560px] p-6" data-testid="space-theme">
+      <h2 className="mt-0">{t("spaceTheme.title")}</h2>
+      <p className="mb-5 mt-0 text-sm text-fg-dim">{t("spaceTheme.body")}</p>
 
       {locked && (
-        <div className={styles.upgrade} data-testid="branding-upgrade">
-          <strong>{t("branding.upgradeTitle")}</strong>
-          <p>{t("branding.upgradeBody")}</p>
+        <div className="mb-5 rounded-lg border border-border border-l-[3px] border-l-[var(--accent)] bg-panel px-3.5 py-3" data-testid="branding-upgrade">
+          <strong className="text-sm">{t("branding.upgradeTitle")}</strong>
+          <p className="mb-0 mt-1 text-xs text-fg-dim">{t("branding.upgradeBody")}</p>
         </div>
       )}
 
