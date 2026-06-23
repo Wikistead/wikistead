@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
+import { Input } from "../ui/Input";
 import {
   useSpaceAccess, useGrantSpaceAccess, useRevokeSpaceAccess, useMemberCandidates,
   type PageRelation,
@@ -52,8 +53,8 @@ export function SpaceMembersTab() {
 
       <div className={styles.addRow}>
         <div className={styles.typeahead}>
-          <input
-            className={styles.input}
+          <Input
+            className="w-full"
             data-testid="space-grant-input"
             value={picked ? picked.label : query}
             placeholder={t("spaceMembers.addPlaceholder")}

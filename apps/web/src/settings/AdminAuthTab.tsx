@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTenantOidc, useUpdateTenantOidc, useTestTenantOidc } from "../data/queries";
 import { Button } from "../ui/Button";
+import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
 import styles from "./AdminAuthTab.module.css";
 
@@ -53,20 +54,20 @@ export function AdminAuthTab() {
       <div className={styles.warning} data-testid="oidc-warning">{t("adminAuth.warning")}</div>
 
       <label className={styles.label}>{t("adminAuth.issuer")}</label>
-      <input className={styles.input} value={issuer} onChange={(e) => setIssuer(e.target.value)} placeholder="https://idp.example.com/" data-testid="oidc-issuer" />
+      <Input value={issuer} onChange={(e) => setIssuer(e.target.value)} placeholder="https://idp.example.com/" data-testid="oidc-issuer" />
 
       <label className={styles.label}>{t("adminAuth.clientId")}</label>
-      <input className={styles.input} value={clientId} onChange={(e) => setClientId(e.target.value)} data-testid="oidc-client-id" />
+      <Input value={clientId} onChange={(e) => setClientId(e.target.value)} data-testid="oidc-client-id" />
 
       <label className={styles.label}>{t("adminAuth.clientSecret")}</label>
-      <input className={styles.input} type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)}
+      <Input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)}
         placeholder={data?.hasSecret ? t("adminAuth.clientSecretKeep") : ""} data-testid="oidc-client-secret" />
 
       <label className={styles.label}>{t("adminAuth.scopes")}</label>
-      <input className={styles.input} value={scopes} onChange={(e) => setScopes(e.target.value)} data-testid="oidc-scopes" />
+      <Input value={scopes} onChange={(e) => setScopes(e.target.value)} data-testid="oidc-scopes" />
 
       <label className={styles.label}>{t("adminAuth.redirectUri")}</label>
-      <input className={styles.input} value={redirectUri} onChange={(e) => setRedirectUri(e.target.value)} placeholder="https://your-tenant.example.com/auth/callback" data-testid="oidc-redirect" />
+      <Input value={redirectUri} onChange={(e) => setRedirectUri(e.target.value)} placeholder="https://your-tenant.example.com/auth/callback" data-testid="oidc-redirect" />
 
       <label className={styles.checkbox}>
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} data-testid="oidc-enabled" />

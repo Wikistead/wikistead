@@ -5,6 +5,7 @@ import { useShareLinks, useCreateShareLink, useRevokeShareLink } from "../data/q
 import { notify } from "./toast";
 import { Select } from "./Select";
 import { Button, IconButton } from "./Button";
+import { Input } from "./Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 
 const EXPIRY_OPTIONS: { key: string; seconds: number | null }[] = [
@@ -82,7 +83,7 @@ export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClos
                   {l.capability === "edit" ? t("shareDialog.edit") : t("shareDialog.view")}
                   {l.expiresAt ? ` · ${t("shareDialog.expires", { when: new Date(l.expiresAt).toLocaleString() })}` : ` · ${t("shareDialog.neverExpires")}`}
                 </span>
-                <input className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground" readOnly value={linkUrl(l.id)} aria-label={t("shareDialog.shareUrl")} />
+                <Input inputSize="sm" className="min-w-0 flex-1 text-xs" readOnly value={linkUrl(l.id)} aria-label={t("shareDialog.shareUrl")} />
                 <IconButton
                   aria-label={t("shareDialog.copyUrl")}
                   title={t("shareDialog.copyUrl")}

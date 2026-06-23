@@ -6,6 +6,7 @@ import {
   type ApiScope, type ApiKeyCreated,
 } from "../data/queries";
 import { Button } from "../ui/Button";
+import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
 import styles from "./AdminApiTab.module.css";
@@ -58,7 +59,7 @@ export function AdminApiTab() {
 
       <label className={styles.label}>{t("adminApi.createTitle")}</label>
       <div className={styles.row}>
-        <input className={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder={t("adminApi.namePlaceholder")} aria-label={t("adminApi.name")} data-testid="api-key-name" />
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("adminApi.namePlaceholder")} aria-label={t("adminApi.name")} data-testid="api-key-name" />
         <Select value={effScope} onChange={(v) => setScope(v as ApiScope)} ariaLabel={t("adminApi.scope")} testId="api-key-scope" size="sm" options={scopeOptions} />
         <Button variant="primary" size="sm" disabled={!name.trim() || create.isPending} onClick={onCreate} data-testid="api-key-create">{t("adminApi.create")}</Button>
       </div>

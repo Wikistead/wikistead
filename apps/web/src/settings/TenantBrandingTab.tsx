@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useBranding, useEntitlements, useUpdateTenantBranding, useUploadTenantLogo, useRemoveTenantLogo } from "../data/queries";
 import { Button } from "../ui/Button";
+import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
 import { AccentPicker } from "./AccentPicker";
 import styles from "./SpaceThemeTab.module.css";
@@ -74,7 +75,7 @@ export function TenantBrandingTab() {
 
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("tenantBranding.displayName")}</label>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 28 }}>
-        <input value={name} onChange={(e) => setName(e.target.value)} disabled={locked}
+        <Input className="max-w-xs" value={name} onChange={(e) => setName(e.target.value)} disabled={locked}
           placeholder={t("tenantBranding.displayNamePlaceholder")} aria-label={t("tenantBranding.displayName")} data-testid="tenant-name-input" />
         <Button variant="primary" size="sm" disabled={locked || update.isPending || name.trim() === (branding.data?.displayName ?? "")} onClick={saveName} data-testid="tenant-name-save">{t("common.save")}</Button>
       </div>

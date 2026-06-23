@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { Button } from "./Button";
+import { Input } from "./Input";
 
 // Rename/confirm flows on shadcn Dialog (Radix: focus trap, ESC, aria, overlay).
 // Controlled via `open`; testids preserved for e2e.
@@ -43,8 +44,7 @@ export function RenameDialog({
             if (v) onSubmit(v);
           }}
         >
-          <input
-            className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground outline-none focus:border-[var(--accent)]"
+          <Input
             value={value}
             autoFocus
             aria-label={label ?? t("dialogs.pageTitleLabel")}
