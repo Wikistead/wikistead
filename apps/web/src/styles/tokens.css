@@ -1,6 +1,47 @@
-/* Design tokens + global rules. Component styling lives in *.module.css; rules
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Tailwind v4 is the single styling system (Group C: CSS Modules are being removed).
+   shadcn/Tailwind utilities read their semantic colours from the @theme map below,
+   which points at the existing design tokens (--bg/--fg/--accent/…). So light/dark
+   (data-theme) and the tenant accent cascade (runtime --accent override) flow into
+   shadcn components for free, with the tokens here staying the single source of truth.
+   Only the CodeMirror-targeting rules (.cm-*, .lp-toolbar, the reading column) remain
+   plain CSS — an isolated region whose selectors never intersect Tailwind. */
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-card: var(--panel);
+  --color-card-foreground: var(--fg);
+  --color-popover: var(--panel);
+  --color-popover-foreground: var(--fg);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-fg);
+  --color-secondary: var(--panel-2);
+  --color-secondary-foreground: var(--fg);
+  --color-muted: var(--panel-2);
+  --color-muted-foreground: var(--fg-dim);
+  /* shadcn "accent" = the subtle hover/selected fill, NOT our brand accent (= primary). */
+  --color-accent: var(--panel-2);
+  --color-accent-foreground: var(--fg);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--danger-fg);
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--accent);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-panel-3: var(--panel-3);
+  --color-fg-dim: var(--fg-dim);
+}
+
+/* Explicit-dark variant for any shadcn `dark:` utility. Semantic-token utilities
+   (bg-card, …) already follow the var swap in :root below, including system-dark. */
+@custom-variant dark (&:is([data-theme="dark"] *));
+
+/* Design tokens + global rules. Component styling is Tailwind (utilities/shadcn); rules
    that must match imperatively-set class names (CodeMirror, the live-preview
-   toolbar) stay global here because CSS Modules would hash the selectors.
+   toolbar) stay global here because they target CodeMirror's own DOM.
 
    Theming (Phase 3a): semantic color tokens have a LIGHT base (:root) and a DARK
    override. ThemeProvider sets data-theme on <html> to 'light' | 'dark' | 'system'
