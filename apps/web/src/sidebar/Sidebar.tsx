@@ -3,8 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
-import { Menu } from "@ark-ui/react/menu";
-import { Portal } from "@ark-ui/react/portal";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "../components/ui/dropdown-menu";
 import { ChevronRight, ChevronsUpDown, FilePlus, FileText, MoreHorizontal, Pencil, Plus, Settings, Share2, Trash2 } from "lucide-react";
 import {
   useSpaces,
@@ -165,19 +164,15 @@ export function Sidebar() {
         ) : null}
         {canEdit && (
           <span className={styles.actions} onClick={(e) => e.stopPropagation()}>
-            <Menu.Root onSelect={(m) => onRowAction(m.value, d)}>
-              <Menu.Trigger className={styles.rowMenuBtn} aria-label={t("sidebar.pageActions")} data-testid="page-actions"><MoreHorizontal size={14} /></Menu.Trigger>
-              <Portal>
-                <Menu.Positioner>
-                  <Menu.Content className={styles.menu} data-testid="page-menu">
-                    <Menu.Item value="subpage" className={styles.menuItem} data-testid="add-subpage"><FilePlus size={13} /> {t("sidebar.addSubpage")}</Menu.Item>
-                    <Menu.Item value="share" className={styles.menuItem}><Share2 size={13} /> {t("sidebar.share")}</Menu.Item>
-                    <Menu.Item value="rename" className={styles.menuItem}><Pencil size={13} /> {t("sidebar.rename")}</Menu.Item>
-                    <Menu.Item value="delete" className={styles.menuItem} data-danger=""><Trash2 size={13} /> {t("sidebar.delete")}</Menu.Item>
-                  </Menu.Content>
-                </Menu.Positioner>
-              </Portal>
-            </Menu.Root>
+            <DropdownMenu>
+              <DropdownMenuTrigger className={styles.rowMenuBtn} aria-label={t("sidebar.pageActions")} data-testid="page-actions"><MoreHorizontal size={14} /></DropdownMenuTrigger>
+              <DropdownMenuContent align="start" data-testid="page-menu">
+                <DropdownMenuItem onSelect={() => onRowAction("subpage", d)} data-testid="add-subpage"><FilePlus size={13} /> {t("sidebar.addSubpage")}</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onRowAction("share", d)}><Share2 size={13} /> {t("sidebar.share")}</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onRowAction("rename", d)}><Pencil size={13} /> {t("sidebar.rename")}</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onRowAction("delete", d)} data-danger="" variant="destructive"><Trash2 size={13} /> {t("sidebar.delete")}</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </span>
         )}
       </div>
@@ -188,34 +183,24 @@ export function Sidebar() {
     <div className={styles.sidebar} data-testid="sidebar">
       {/* Space switcher — the space is a separate layer, not a tree root. */}
       <div className={styles.header}>
-        <Menu.Root
-          onSelect={(d) => {
-            if (d.value === "__new__") setCreatingSpace(true);
-            else if (d.value === "__rename__") { if (currentSpace) setRenamingSpace({ id: currentSpace.id, name: currentSpace.name }); }
-            else setActiveSpaceId(d.value);
-          }}
-        >
-          <Menu.Trigger className={styles.switcher} data-testid="space-switcher">
+        <DropdownMenu>
+          <DropdownMenuTrigger className={styles.switcher} data-testid="space-switcher">
             {currentSpace && <SpaceIcon id={currentSpace.id} name={currentSpace.name} icon={currentSpace.icon} size={20} data-testid="space-icon" />}
             <span className={styles.switcherName}>{currentSpace?.name || t("sidebar.noSpace")}</span>
             <ChevronsUpDown size={14} />
-          </Menu.Trigger>
-          <Portal>
-            <Menu.Positioner>
-              <Menu.Content className={styles.menu} data-testid="space-menu">
-                {spaces.map((s) => (
-                  <Menu.Item key={s.id} value={s.id} className={styles.menuItem} data-testid="space-option">
-                    <SpaceIcon id={s.id} name={s.name} icon={s.icon} size={18} />
-                    {s.name || t("sidebar.untitledSpace")}
-                  </Menu.Item>
-                ))}
-                <Menu.Separator className={styles.menuSep} />
-                {currentSpace && canManage && <Menu.Item value="__rename__" className={styles.menuItem}><Pencil size={13} /> {t("sidebar.renameSpace")}</Menu.Item>}
-                <Menu.Item value="__new__" className={styles.menuItem}><Plus size={13} /> {t("sidebar.newSpace")}</Menu.Item>
-              </Menu.Content>
-            </Menu.Positioner>
-          </Portal>
-        </Menu.Root>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" data-testid="space-menu">
+            {spaces.map((s) => (
+              <DropdownMenuItem key={s.id} onSelect={() => setActiveSpaceId(s.id)} data-testid="space-option">
+                <SpaceIcon id={s.id} name={s.name} icon={s.icon} size={18} />
+                {s.name || t("sidebar.untitledSpace")}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            {currentSpace && canManage && <DropdownMenuItem onSelect={() => { if (currentSpace) setRenamingSpace({ id: currentSpace.id, name: currentSpace.name }); }}><Pencil size={13} /> {t("sidebar.renameSpace")}</DropdownMenuItem>}
+            <DropdownMenuItem onSelect={() => setCreatingSpace(true)}><Plus size={13} /> {t("sidebar.newSpace")}</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         {current && (canEdit || canManage) && (
           <div className={styles.headerActions}>
             {canEdit && <button type="button" title={t("sidebar.newPage")} aria-label={t("sidebar.newPage")} data-testid="new-page" onClick={() => newPage(null)}><FilePlus size={15} /></button>}

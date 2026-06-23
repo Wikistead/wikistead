@@ -1,8 +1,7 @@
-import { Menu } from "@ark-ui/react/menu";
-import { Portal } from "@ark-ui/react/portal";
 import { Sun, Moon, Monitor } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useTheme, type Theme } from "./ThemeProvider";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
 import styles from "./AppShell.module.css";
 
 const ICON = { light: Sun, dark: Moon, system: Monitor } as const;
@@ -16,24 +15,20 @@ export function ThemeToggle() {
   const { t } = useTranslation();
   const Icon = ICON[theme];
   return (
-    <Menu.Root onSelect={(d) => setTheme(d.value as Theme)}>
-      <Menu.Trigger className={styles.iconBtn} aria-label={t("theme.label")} title={t("theme.label")} data-testid="theme-toggle">
+    <DropdownMenu>
+      <DropdownMenuTrigger className={styles.iconBtn} aria-label={t("theme.label")} title={t("theme.label")} data-testid="theme-toggle">
         <Icon size={15} />
-      </Menu.Trigger>
-      <Portal>
-        <Menu.Positioner>
-          <Menu.Content className={styles.menu} data-testid="theme-menu">
-            {ORDER.map((value) => {
-              const OptIcon = ICON[value];
-              return (
-                <Menu.Item key={value} value={value} className={styles.menuItem} data-active={theme === value ? "" : undefined}>
-                  <OptIcon size={14} /> {t(`theme.${value}`)}
-                </Menu.Item>
-              );
-            })}
-          </Menu.Content>
-        </Menu.Positioner>
-      </Portal>
-    </Menu.Root>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" data-testid="theme-menu">
+        {ORDER.map((value) => {
+          const OptIcon = ICON[value];
+          return (
+            <DropdownMenuItem key={value} onSelect={() => setTheme(value)} data-active={theme === value ? "" : undefined} className={theme === value ? "font-semibold" : undefined}>
+              <OptIcon size={14} /> {t(`theme.${value}`)}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
