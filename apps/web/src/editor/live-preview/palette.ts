@@ -1,49 +1,45 @@
 import { EditorView, showTooltip, keymap, type Tooltip, type TooltipView } from "@codemirror/view";
-import { StateField, StateEffect, Prec, type Extension } from "@codemirror/state";
+import { StateField, StateEffect, EditorSelection, Prec, type Extension } from "@codemirror/state";
 import i18n from "../../i18n";
-import {
-  setHeading,
-  toggleBulletList,
-  toggleNumberedList,
-  toggleQuote,
-  insertCodeBlock,
-  insertTable,
-  insertDivider,
-} from "./commands";
 
-// Slash command palette (Step I / M0-1 — see ADR-017). Triggered by `/` at the START
-// of a line while editing (insert mode for vim users). Lists block insert/toggle
-// commands (layer B/C); choosing one removes the typed "/query" token and runs the
-// command, which inserts plain Markdown into the canonical Y.Text — so it is offset-
-// invariant and presence-safe (ADR-008), never a special node. Built on CodeMirror's
-// tooltip layer (NOT React, NOT cmdk): the editor surface owns no React (ADR-013), and
-// CM reconciles away nodes injected into view.dom (see the floating toolbar), so the
-// palette lives in the managed tooltip layer.
+// Slash command palette (Step I / M0-1 — see ADR-017). Triggered by `/` at a line
+// start OR after whitespace while editing. Lists block insert/toggle commands (layer
+// B/C); choosing one removes the typed "/query" token and inserts a plain-Markdown
+// TEMPLATE into the canonical Y.Text, placing the caret at the template's content
+// position. Offset-invariant and presence-safe (ADR-008), never a special node. Built
+// on CodeMirror's tooltip layer (NOT React, NOT cmdk): the editor owns no React
+// (ADR-013), and CM reconciles away nodes injected into view.dom (see the floating
+// toolbar), so the palette lives in the managed tooltip layer.
 
 interface PaletteCommand {
   id: string;
-  label: () => string;
-  keywords: string; // lowercase, space-separated, for filtering
-  run: (v: EditorView) => void;
+  label: () => string; // JP display name
+  alias: string; // short English name shown small AND used for filtering (no IME switch)
+  keywords: string; // extra English filter terms (lowercase)
+  insert: string; // the Markdown template inserted in place of the "/query" token
+  caret: number | [number, number]; // caret offset (or selection range) within `insert`
 }
 
-// Layer B/C commands. (Inline decorations — layer A — are M0-2; image insert is M0-5.)
+// Layer B/C commands. Each template places the caret where you'd type the content next.
+// (Inline decorations — layer A — are M0-2; image insert is M0-5.)
 const COMMANDS: PaletteCommand[] = [
-  { id: "h1", label: () => i18n.t("palette.h1"), keywords: "heading title h1 #", run: (v) => setHeading(v, 1) },
-  { id: "h2", label: () => i18n.t("palette.h2"), keywords: "heading subtitle h2 ##", run: (v) => setHeading(v, 2) },
-  { id: "h3", label: () => i18n.t("palette.h3"), keywords: "heading h3 ###", run: (v) => setHeading(v, 3) },
-  { id: "ul", label: () => i18n.t("palette.bulletList"), keywords: "bullet list unordered ul dash", run: toggleBulletList },
-  { id: "ol", label: () => i18n.t("palette.numberedList"), keywords: "numbered ordered list ol", run: toggleNumberedList },
-  { id: "quote", label: () => i18n.t("palette.quote"), keywords: "quote blockquote citation", run: toggleQuote },
-  { id: "code", label: () => i18n.t("palette.codeBlock"), keywords: "code block fenced pre", run: insertCodeBlock },
-  { id: "table", label: () => i18n.t("palette.table"), keywords: "table grid", run: insertTable },
-  { id: "divider", label: () => i18n.t("palette.divider"), keywords: "divider rule hr separator line", run: insertDivider },
+  { id: "h1", label: () => i18n.t("palette.h1"), alias: "h1", keywords: "heading title #", insert: "# ", caret: 2 },
+  { id: "h2", label: () => i18n.t("palette.h2"), alias: "h2", keywords: "heading subtitle ##", insert: "## ", caret: 3 },
+  { id: "h3", label: () => i18n.t("palette.h3"), alias: "h3", keywords: "heading ###", insert: "### ", caret: 4 },
+  { id: "ul", label: () => i18n.t("palette.bulletList"), alias: "list", keywords: "bullet unordered dash", insert: "- ", caret: 2 },
+  { id: "ol", label: () => i18n.t("palette.numberedList"), alias: "1. list", keywords: "numbered ordered", insert: "1. ", caret: 3 },
+  { id: "quote", label: () => i18n.t("palette.quote"), alias: "quote", keywords: "blockquote citation", insert: "> ", caret: 2 },
+  { id: "code", label: () => i18n.t("palette.codeBlock"), alias: "code", keywords: "code block fenced pre", insert: "```\n\n```", caret: 4 },
+  { id: "table", label: () => i18n.t("palette.table"), alias: "table", keywords: "grid", insert: "| Column | Column |\n| --- | --- |\n| Cell | Cell |", caret: [2, 8] },
+  { id: "divider", label: () => i18n.t("palette.divider"), alias: "divider", keywords: "rule hr separator line", insert: "---\n", caret: 4 },
 ];
 
 function filterCommands(query: string): PaletteCommand[] {
   const q = query.trim().toLowerCase();
   if (!q) return COMMANDS;
-  return COMMANDS.filter((c) => c.label().toLowerCase().includes(q) || c.keywords.includes(q));
+  return COMMANDS.filter(
+    (c) => c.label().toLowerCase().includes(q) || c.alias.toLowerCase().includes(q) || c.keywords.includes(q),
+  );
 }
 
 interface PaletteState { from: number; query: string; index: number }
@@ -62,16 +58,18 @@ const dismissedField = StateField.define<boolean>({
   },
 });
 
-// Is the cursor right after a line-leading "/query" token (no spaces, empty selection)?
-function detect(state: { readOnly: boolean; doc: { lineAt: (n: number) => { from: number }; sliceString: (a: number, b: number) => string }; selection: { main: { empty: boolean; head: number } } }): { from: number; query: string } | null {
+// Is the cursor right after a "/query" token whose `/` is at line start OR preceded by
+// whitespace (so prose like "and/or" never fires, but "# heading /" and line-start do)?
+function detect(state: EditorView["state"]): { from: number; query: string } | null {
   if (state.readOnly) return null;
   const sel = state.selection.main;
   if (!sel.empty) return null; // decoration-on-selection is M0-2
   const line = state.doc.lineAt(sel.head);
   const before = state.doc.sliceString(line.from, sel.head);
-  const m = /^\/([\p{L}\p{N}-]*)$/u.exec(before);
+  const m = /(?:^|\s)\/([\p{L}\p{N}-]*)$/u.exec(before);
   if (!m) return null;
-  return { from: line.from, query: m[1] ?? "" };
+  const query = m[1] ?? "";
+  return { from: sel.head - query.length - 1, query }; // position of the "/"
 }
 
 const paletteField = StateField.define<PaletteState | null>({
@@ -98,9 +96,12 @@ function applyAt(view: EditorView, cmd: PaletteCommand): void {
   const v = view.state.field(paletteField);
   if (!v) return;
   const head = view.state.selection.main.head;
-  // remove the "/query" token, collapse to its start, then run the command there
-  view.dispatch({ changes: { from: v.from, to: head, insert: "" }, selection: { anchor: v.from } });
-  cmd.run(view);
+  const at = v.from; // template is inserted starting here (replacing "/query")
+  const selection = Array.isArray(cmd.caret)
+    ? EditorSelection.range(at + cmd.caret[0], at + cmd.caret[1])
+    : EditorSelection.cursor(at + cmd.caret);
+  view.dispatch({ changes: { from: v.from, to: head, insert: cmd.insert }, selection, scrollIntoView: true });
+  view.focus();
 }
 
 function paletteTooltip(field: StateField<PaletteState | null>, from: number): Tooltip {
@@ -122,9 +123,15 @@ function paletteTooltip(field: StateField<PaletteState | null>, from: number): T
           const row = document.createElement("button");
           row.type = "button";
           row.className = "lp-palette-row" + (i === v.index ? " is-selected" : "");
-          row.textContent = cmd.label();
           row.setAttribute("data-testid", `slash-item-${cmd.id}`);
           if (i === v.index) row.setAttribute("data-selected", "true");
+          const name = document.createElement("span");
+          name.className = "lp-palette-name";
+          name.textContent = cmd.label();
+          const alias = document.createElement("span");
+          alias.className = "lp-palette-alias";
+          alias.textContent = cmd.alias;
+          row.append(name, alias);
           // mousedown (not click) + preventDefault keeps editor focus/selection intact
           row.addEventListener("mousedown", (e) => { e.preventDefault(); applyAt(view, cmd); });
           dom.appendChild(row);
@@ -140,11 +147,14 @@ function paletteTooltip(field: StateField<PaletteState | null>, from: number): T
 }
 
 // Keymap active only while the palette is open (else the keys pass through to vim /
-// the editor). Highest precedence so Enter/Arrows/Esc are captured before defaults.
+// the editor). Highest precedence so the nav keys are captured before defaults. C-n/C-p
+// mirror vim's completion menu so vim users don't reach for the arrows.
 const paletteKeymap = Prec.highest(
   keymap.of([
     { key: "ArrowDown", run: (v) => move(v, +1) },
     { key: "ArrowUp", run: (v) => move(v, -1) },
+    { key: "Ctrl-n", run: (v) => move(v, +1) },
+    { key: "Ctrl-p", run: (v) => move(v, -1) },
     { key: "Tab", run: (v) => move(v, +1) },
     { key: "Shift-Tab", run: (v) => move(v, -1) },
     { key: "Enter", run: chooseSelected },
@@ -163,8 +173,7 @@ function move(view: EditorView, delta: number): boolean {
 function chooseSelected(view: EditorView): boolean {
   const v = view.state.field(paletteField, false);
   if (!v) return false;
-  const matches = filterCommands(v.query);
-  const cmd = matches[v.index];
+  const cmd = filterCommands(v.query)[v.index];
   if (cmd) applyAt(view, cmd);
   return true;
 }
