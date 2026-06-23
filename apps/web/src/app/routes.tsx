@@ -5,9 +5,23 @@ import { AppShell } from "./AppShell";
 import { LoginScreen } from "./LoginScreen";
 import { AdminRoutes } from "../settings/AdminPage";
 import { SpaceSettingsRoutes } from "../settings/SpaceSettingsPage";
-import { Editor, type AnchorGetter, type EditorLayout } from "../editor/Editor";
+import { Editor, type AnchorGetter } from "../editor/Editor";
 import { createDirtySignal } from "../editor/dirtySignal";
 import { colorFromString } from "../ui/avatar";
+
+// Persisted vim-keymap preference for the single edit surface (Step I). Replaces the
+// old single/split layout preference; vim is now a keymap toggle on the one surface.
+function useVimPref(): [boolean, () => void] {
+  const [vim, setVim] = useState(() => {
+    try { return localStorage.getItem("wks.editorVim") === "1"; } catch { return false; }
+  });
+  const toggle = () => setVim((v) => {
+    const n = !v;
+    try { localStorage.setItem("wks.editorVim", n ? "1" : "0"); } catch { /* no storage */ }
+    return n;
+  });
+  return [vim, toggle];
+}
 import { PageToolbar } from "./PageToolbar";
 import { PageTitle } from "./PageTitle";
 import { Input } from "../ui/Input";
@@ -127,14 +141,7 @@ function PageRoute() {
   // Navigating to another page opens it in READ mode (unless ?edit=1) — PageRoute is
   // not remounted on a param change, so reset editing when the page changes.
   useEffect(() => { setEditing(autoEdit); dirtySig.set(false); }, [pageId, autoEdit, dirtySig]);
-  const [layout, setLayout] = useState<EditorLayout>(() => {
-    try { return localStorage.getItem("wks.editorLayout") === "split" ? "split" : "wysiwyg"; } catch { return "wysiwyg"; }
-  });
-  const toggleLayout = () => setLayout((l) => {
-    const n = l === "split" ? "wysiwyg" : "split";
-    try { localStorage.setItem("wks.editorLayout", n); } catch { /* no storage */ }
-    return n;
-  });
+  const [vim, toggleVim] = useVimPref();
   // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
   const publishState = !canEdit ? null : published?.publishedMd == null ? "draft" : published?.hasUnpublishedChanges ? "unpublished" : null;
 
@@ -157,8 +164,8 @@ function PageRoute() {
               onError: () => notify.error(t("toast.publishFailed")),
             }) : undefined}
             publishing={publish.isPending}
-            layout={layout}
-            onToggleLayout={toggleLayout}
+            vim={vim}
+            onToggleVim={toggleVim}
             onShare={() => setSharing(true)}
             commentsOpen={commentsOpen}
             onToggleComments={toggleComments}
@@ -177,7 +184,7 @@ function PageRoute() {
             }) : undefined}
           />
           <div style={{ flex: 1, minHeight: 0 }}>
-            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} layout={layout} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} />
+            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} />
           </div>
           {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
         </div>
@@ -241,14 +248,7 @@ function GuestPage({ minted }: { minted: GuestToken }) {
   const [publishing, setPublishing] = useState(false);
   const canEdit = capability === "edit";
   const [editing, setEditing] = useState(false);
-  const [layout, setLayout] = useState<EditorLayout>(() => {
-    try { return localStorage.getItem("wks.editorLayout") === "split" ? "split" : "wysiwyg"; } catch { return "wysiwyg"; }
-  });
-  const toggleLayout = () => setLayout((l) => {
-    const n = l === "split" ? "wysiwyg" : "split";
-    try { localStorage.setItem("wks.editorLayout", n); } catch { /* no storage */ }
-    return n;
-  });
+  const [vim, toggleVim] = useVimPref();
 
   const reloadPublished = useCallback(() => {
     apiFetch<{ publishedMd: string | null }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
@@ -277,14 +277,14 @@ function GuestPage({ minted }: { minted: GuestToken }) {
           editing={editing}
           onEdit={() => setEditing(true)}
           onDone={() => setEditing(false)}
-          layout={layout}
-          onToggleLayout={toggleLayout}
+          vim={vim}
+          onToggleVim={toggleVim}
           canPublish
           onPublish={canEdit ? () => void onPublish() : undefined}
           publishing={publishing}
         />
         <div style={{ flex: 1, minHeight: 0 }}>
-          <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} layout={layout} />
+          <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} />
         </div>
       </div>
     </AppShell>

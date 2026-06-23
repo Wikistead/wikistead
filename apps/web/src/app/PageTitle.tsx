@@ -1,29 +1,30 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import styles from "./PageTitle.module.css";
 
-// Large page title at the top of the reading column (Group C-B, Notion/Outline style).
-// Replaces the small toolbar title — establishes a clear heading→body hierarchy.
-// Click-to-rename for edit-capable users (Phase 5 #6 logic, moved here); a read-only
-// heading otherwise. The server re-checks page#edit on the PATCH regardless. Testids
-// (page-title / page-title-input) are unchanged so the rename e2e still applies.
-export function PageTitle({ title, onRename }: { title: string; onRename?: (title: string) => void }) {
+// Large page title at the top of the reading column (Group C-B, Notion/Outline style),
+// aligned to the same ~740px column as the body. Click-to-rename for edit-capable
+// users; a read-only heading otherwise. The server re-checks page#edit on the PATCH.
+// Testids (page-title / page-title-input) are unchanged so the rename e2e still applies.
+const wrap = "mx-auto box-border w-full max-w-[740px] px-6 pt-6";
+const title = "m-0 block w-full text-[30px] font-bold leading-tight tracking-[-0.02em] text-foreground";
+
+export function PageTitle({ title: value, onRename }: { title: string; onRename?: (title: string) => void }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(title);
-  useEffect(() => { if (!editing) setDraft(title); }, [title, editing]);
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
 
   const commit = () => {
     const next = draft.trim();
     setEditing(false);
-    if (next && next !== title && onRename) onRename(next);
+    if (next && next !== value && onRename) onRename(next);
   };
 
   return (
-    <div className={styles.wrap}>
+    <div className={wrap}>
       {editing ? (
         <input
-          className={styles.input}
+          className={`${title} rounded-sm border border-border bg-background px-1.5 outline-none focus:border-[var(--accent)]`}
           data-testid="page-title-input"
           autoFocus
           value={draft}
@@ -31,17 +32,17 @@ export function PageTitle({ title, onRename }: { title: string; onRename?: (titl
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") { e.preventDefault(); commit(); }
-            else if (e.key === "Escape") { setDraft(title); setEditing(false); }
+            else if (e.key === "Escape") { setDraft(value); setEditing(false); }
           }}
           onBlur={commit}
         />
       ) : onRename ? (
-        <button type="button" className={styles.title} data-testid="page-title" title={t("dialogs.renamePageTitle")}
-          onClick={() => { setDraft(title); setEditing(true); }}>
-          {title || t("common.untitled")}
+        <button type="button" className={`${title} cursor-text text-left`} data-testid="page-title" title={t("dialogs.renamePageTitle")}
+          onClick={() => { setDraft(value); setEditing(true); }}>
+          {value || t("common.untitled")}
         </button>
       ) : (
-        <h1 className={styles.title} data-testid="page-title">{title || t("common.untitled")}</h1>
+        <h1 className={title} data-testid="page-title">{value || t("common.untitled")}</h1>
       )}
     </div>
   );
