@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Dialog } from "@ark-ui/react/dialog";
-import { Portal } from "@ark-ui/react/portal";
 import { usePageAccess, useGrantAccess, useRevokeAccess, type PageRelation } from "../data/queries";
 import { notify } from "./toast";
 import { Select } from "./Select";
-import styles from "./dialogs.module.css";
+import { Button, IconButton } from "./Button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 
 // Per-page permission management (Phase 4c). Shown only to managers (the open page's
 // canManage); the server re-checks `manage` on every access call. Granting view/edit
@@ -31,51 +30,48 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   const label = (g: string) => g.startsWith("group:") ? `${g.replace(/^group:/, "").replace(/#member$/, "")} (${t("permissions.group")})` : g.replace(/^user:/, "");
 
   return (
-    <Dialog.Root open={open} onOpenChange={(d) => !d.open && onClose()}>
-      <Portal>
-        <Dialog.Backdrop className={styles.backdrop} />
-        <Dialog.Positioner className={styles.positioner}>
-          <Dialog.Content className={styles.content} data-testid="permissions-dialog">
-            <Dialog.Title className={styles.title}>{t("permissions.title")}</Dialog.Title>
-            <Dialog.Description className={styles.message}>{t("permissions.body")}</Dialog.Description>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent data-testid="permissions-dialog" className="sm:max-w-[480px]">
+        <DialogHeader>
+          <DialogTitle>{t("permissions.title")}</DialogTitle>
+          <DialogDescription>{t("permissions.body")}</DialogDescription>
+        </DialogHeader>
 
-            <div className={styles.shareRow}>
-              <input className={styles.linkUrl} data-testid="grant-sub" aria-label={t("permissions.member")} placeholder={t("permissions.memberPlaceholder")} value={sub} onChange={(e) => setSub(e.target.value)} />
-              <Select
-                value={relation}
-                onChange={(v) => setRelation(v as PageRelation)}
-                ariaLabel={t("permissions.relation")}
-                testId="grant-relation"
-                size="sm"
-                options={[
-                  { value: "view", label: t("permissions.view") },
-                  { value: "edit", label: t("permissions.edit") },
-                  { value: "manage", label: t("permissions.manage") },
-                ]}
-              />
-              <button type="button" className={`${styles.btn} ${styles.primary}`} data-testid="grant-add" disabled={grant.isPending} onClick={add}>{t("permissions.add")}</button>
-            </div>
+        <div className="flex items-center gap-2">
+          <input className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground outline-none focus:border-[var(--accent)]" data-testid="grant-sub" aria-label={t("permissions.member")} placeholder={t("permissions.memberPlaceholder")} value={sub} onChange={(e) => setSub(e.target.value)} />
+          <Select
+            value={relation}
+            onChange={(v) => setRelation(v as PageRelation)}
+            ariaLabel={t("permissions.relation")}
+            testId="grant-relation"
+            size="sm"
+            options={[
+              { value: "view", label: t("permissions.view") },
+              { value: "edit", label: t("permissions.edit") },
+              { value: "manage", label: t("permissions.manage") },
+            ]}
+          />
+          <Button variant="primary" size="sm" data-testid="grant-add" disabled={grant.isPending} onClick={add}>{t("permissions.add")}</Button>
+        </div>
 
-            <div className={styles.linkList} data-testid="grant-list">
-              {(grants ?? []).map((g) => (
-                <div key={`${g.grantee}:${g.relation}`} className={styles.linkItem} data-testid="grant-item">
-                  <span className={styles.linkMeta}>{g.relation}</span>
-                  <span className={styles.linkUrl} style={{ border: "none" }}>{label(g.grantee)}</span>
-                  <button type="button" className={styles.iconBtn} data-danger="" aria-label={t("permissions.revoke")} data-testid="grant-revoke" onClick={() => revoke.mutate({ grantee: g.grantee, relation: g.relation }, {
-                    onSuccess: () => notify.success(t("toast.accessRevoked")),
-                    onError: () => notify.error(t("toast.actionFailed")),
-                  })}>×</button>
-                </div>
-              ))}
-              {(grants?.length ?? 0) === 0 && <p style={{ color: "var(--fg-dim)", fontSize: 12, margin: 0 }}>{t("permissions.empty")}</p>}
+        <div className="mt-3 flex max-h-[55vh] flex-col gap-2 overflow-y-auto" data-testid="grant-list">
+          {(grants ?? []).map((g) => (
+            <div key={`${g.grantee}:${g.relation}`} className="flex items-center gap-2" data-testid="grant-item">
+              <span className="whitespace-nowrap text-xs text-fg-dim">{g.relation}</span>
+              <span className="min-w-0 flex-1 truncate text-sm text-foreground">{label(g.grantee)}</span>
+              <IconButton aria-label={t("permissions.revoke")} data-testid="grant-revoke" className="text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:text-destructive" onClick={() => revoke.mutate({ grantee: g.grantee, relation: g.relation }, {
+                onSuccess: () => notify.success(t("toast.accessRevoked")),
+                onError: () => notify.error(t("toast.actionFailed")),
+              })}>×</IconButton>
             </div>
+          ))}
+          {(grants?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("permissions.empty")}</p>}
+        </div>
 
-            <div className={styles.actions}>
-              <button type="button" className={styles.btn} onClick={onClose}>{t("common.close")}</button>
-            </div>
-          </Dialog.Content>
-        </Dialog.Positioner>
-      </Portal>
-    </Dialog.Root>
+        <DialogFooter className="mt-4">
+          <Button variant="default" type="button" onClick={onClose}>{t("common.close")}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

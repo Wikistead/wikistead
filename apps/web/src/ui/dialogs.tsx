@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Dialog } from "@ark-ui/react/dialog";
-import { Portal } from "@ark-ui/react/portal";
-import styles from "./dialogs.module.css";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
+import { Button } from "./Button";
 
-// Thin Ark Dialog wrappers (accessible: focus trap, ESC, aria) for the tree's
-// rename and delete-confirm flows. Ark is the headless layer chosen in ADR-013.
+// Rename/confirm flows on shadcn Dialog (Radix: focus trap, ESC, aria, overlay).
+// Controlled via `open`; testids preserved for e2e.
 
 export function RenameDialog({
   open,
@@ -32,39 +31,36 @@ export function RenameDialog({
   }, [open, initial]);
 
   return (
-    <Dialog.Root open={open} onOpenChange={(d) => !d.open && onClose()}>
-      <Portal>
-        <Dialog.Backdrop className={styles.backdrop} />
-        <Dialog.Positioner className={styles.positioner}>
-          <Dialog.Content className={styles.content} data-testid="rename-dialog">
-            <Dialog.Title className={styles.title}>{title ?? t("dialogs.renamePageTitle")}</Dialog.Title>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const v = value.trim();
-                if (v) onSubmit(v);
-              }}
-            >
-              <input
-                className={styles.input}
-                value={value}
-                autoFocus
-                aria-label={label ?? t("dialogs.pageTitleLabel")}
-                onChange={(e) => setValue(e.target.value)}
-              />
-              <div className={styles.actions}>
-                <button type="button" className={styles.btn} onClick={onClose}>
-                  {t("common.cancel")}
-                </button>
-                <button type="submit" className={`${styles.btn} ${styles.primary}`}>
-                  {submitLabel ?? t("common.save")}
-                </button>
-              </div>
-            </form>
-          </Dialog.Content>
-        </Dialog.Positioner>
-      </Portal>
-    </Dialog.Root>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent data-testid="rename-dialog" className="sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle>{title ?? t("dialogs.renamePageTitle")}</DialogTitle>
+        </DialogHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const v = value.trim();
+            if (v) onSubmit(v);
+          }}
+        >
+          <input
+            className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground outline-none focus:border-[var(--accent)]"
+            value={value}
+            autoFocus
+            aria-label={label ?? t("dialogs.pageTitleLabel")}
+            onChange={(e) => setValue(e.target.value)}
+          />
+          <DialogFooter className="mt-4">
+            <Button variant="default" type="button" onClick={onClose}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="primary" type="submit">
+              {submitLabel ?? t("common.save")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -91,29 +87,21 @@ export function ConfirmDialog({
 }) {
   const { t } = useTranslation();
   return (
-    <Dialog.Root open={open} onOpenChange={(d) => !d.open && onClose()}>
-      <Portal>
-        <Dialog.Backdrop className={styles.backdrop} />
-        <Dialog.Positioner className={styles.positioner}>
-          <Dialog.Content className={styles.content} data-testid="confirm-dialog">
-            <Dialog.Title className={styles.title}>{title ?? t("dialogs.confirmTitle")}</Dialog.Title>
-            <Dialog.Description className={styles.message}>{message}</Dialog.Description>
-            <div className={styles.actions}>
-              <button type="button" className={styles.btn} onClick={onClose}>
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                className={`${styles.btn} ${tone === "primary" ? styles.primary : styles.danger}`}
-                data-testid={confirmTestId}
-                onClick={onConfirm}
-              >
-                {confirmLabel ?? t("common.delete")}
-              </button>
-            </div>
-          </Dialog.Content>
-        </Dialog.Positioner>
-      </Portal>
-    </Dialog.Root>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent data-testid="confirm-dialog" className="sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle>{title ?? t("dialogs.confirmTitle")}</DialogTitle>
+          <DialogDescription>{message}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="mt-4">
+          <Button variant="default" type="button" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <Button variant={tone === "primary" ? "primary" : "danger"} type="button" data-testid={confirmTestId} onClick={onConfirm}>
+            {confirmLabel ?? t("common.delete")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
