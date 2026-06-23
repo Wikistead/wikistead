@@ -237,13 +237,17 @@ body {
   padding: var(--space-3);
 }
 
-/* Live-preview insert toolbar (DOM built imperatively in editor/live-preview). */
-.lp-toolbar {
+/* Live-preview format toolbar: a FLOATING selection bubble rendered in CodeMirror's
+   tooltip layer (positioned by CM), not an always-on ribbon — appears above the
+   current selection. The compound selector overrides the default .cm-tooltip chrome. */
+.cm-tooltip.lp-toolbar {
   display: flex;
   gap: var(--space-1);
-  padding: var(--space-2);
-  border-bottom: 1px solid var(--border);
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3, 8px);
   background: var(--panel);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
 }
 .lp-toolbar-btn {
   font: inherit;
