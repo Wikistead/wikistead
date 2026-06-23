@@ -104,6 +104,24 @@ function splitTableRow(line: string): string[] {
 }
 const isDelimiterRow = (cells: string[]) => cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
 
+// Extract the destination from a markdown link source `[text](dest "title")` /
+// `[text](<dest>)`, then sanitize it. Only http(s)/mailto and scheme-less (relative)
+// URLs are allowed — javascript:/data:/vbscript: are rejected so a clickable link can
+// never execute script (these run in the user's authenticated session).
+function linkHref(src: string): string | null {
+  const m = /\]\(\s*(<[^>]*>|[^)\s]+)/.exec(src);
+  if (!m) return null;
+  let u = m[1]!.trim();
+  if (u.startsWith("<") && u.endsWith(">")) u = u.slice(1, -1);
+  if (!u) return null;
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(u);
+  if (scheme) {
+    const s = scheme[1]!.toLowerCase();
+    if (s !== "http" && s !== "https" && s !== "mailto") return null;
+  }
+  return u;
+}
+
 // Renders a GFM table block as an HTML <table>. Cells are set via textContent —
 // NEVER innerHTML — so user-authored content cannot inject markup (no XSS). This
 // is display-only: it replaces the markdown range visually; the canonical Y.Text
@@ -266,7 +284,16 @@ const RENDERERS: BlockRenderer[] = [
       if (list === "BulletList") ctx.hideMarker(node.from, node.to, bullet);
     },
   },
-  { match: (n) => n === "Link", enter: (node, ctx) => ctx.add(linkMark, node.from, node.to) },
+  {
+    // Style the link; carry its sanitized destination as data-href so a click can
+    // follow it (linkClicks handler). Falls back to the plain (non-clickable) mark
+    // when the destination is unsafe/absent.
+    match: (n) => n === "Link",
+    enter: (node, ctx) => {
+      const href = linkHref(ctx.state.doc.sliceString(node.from, node.to));
+      ctx.add(href ? Decoration.mark({ class: "cm-lp-link", attributes: { "data-href": href } }) : linkMark, node.from, node.to);
+    },
+  },
   { match: (n) => n === "LinkMark" || n === "URL", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
   {
     // GFM table → an HTML table (block replace). Reveals raw markdown — and stays
@@ -342,6 +369,22 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
   ],
 });
 
+// Follows a clickable link's data-href. In a READ-ONLY (view) surface a plain click
+// navigates; in the editable surface a plain click must still place the cursor (→
+// reveal raw markdown), so there only a modifier-click (Cmd/Ctrl) follows the link.
+// Opens in a new tab with noopener — never mutates the document (ADR-008 holds).
+export const linkClicks = EditorView.domEventHandlers({
+  click(e, view) {
+    const el = (e.target as HTMLElement | null)?.closest?.(".cm-lp-link") as HTMLElement | null;
+    const href = el?.getAttribute("data-href");
+    if (!href) return false;
+    if (!view.state.readOnly && !e.metaKey && !e.ctrlKey) return false;
+    window.open(href, "_blank", "noopener,noreferrer");
+    e.preventDefault();
+    return true;
+  },
+});
+
 export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-strong": { fontWeight: "700" },
   ".cm-lp-emphasis": { fontStyle: "italic" },
@@ -353,6 +396,8 @@ export const livePreviewTheme = EditorView.baseTheme({
     padding: "0 3px",
   },
   ".cm-lp-link": { color: "#4ea1ff", textDecoration: "underline" },
+  // In the read-only render links are click-to-open, so show the affordance there.
+  ".cm-content[contenteditable=false] .cm-lp-link[data-href]": { cursor: "pointer" },
   ".cm-lp-h": { fontWeight: "700", lineHeight: "1.3" },
   ".cm-lp-h1": { fontSize: "1.8em" },
   ".cm-lp-h2": { fontSize: "1.5em" },
