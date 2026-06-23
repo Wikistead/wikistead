@@ -8,6 +8,7 @@ import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { livePreview, livePreviewTheme, linkClicks, imageResolver, type ImageResolver } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { floatingToolbar, type ImageUploader } from "./live-preview/toolbar";
+import { slashPalette } from "./live-preview/palette";
 import { attachImageDrop } from "./live-preview/image-drop";
 import { cmTheme } from "../styles/cm-theme";
 import { remoteCursors } from "./remote-cursors";
@@ -45,9 +46,10 @@ export function mountLivePreview(
       ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
       yCollab(ytext, provider.awareness),
       remoteCursors, // #8: avatar+name flags (additive overlay; yCollab untouched)
-      // Floating selection toolbar (editable surface only; view guests get none).
-      // container = the host so the hidden file input survives CM's DOM reconcile.
-      ...(!opts.readOnly ? [floatingToolbar({ uploadImage: opts.uploadImage, container: parent })] : []),
+      // Floating selection toolbar + slash command palette (editable surface only;
+      // view guests get neither). container = the host so the hidden file input
+      // survives CM's DOM reconcile.
+      ...(!opts.readOnly ? [floatingToolbar({ uploadImage: opts.uploadImage, container: parent }), slashPalette()] : []),
       ...(opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
     ],
   });

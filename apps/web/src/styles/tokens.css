@@ -262,6 +262,33 @@ body {
 .lp-toolbar-btn:hover {
   background: var(--panel-3);
 }
+
+/* Slash command palette: a CM tooltip-layer menu opened by `/` at line start. */
+.cm-tooltip.lp-palette {
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3, 8px);
+  background: var(--panel);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+.lp-palette-row {
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.lp-palette-row:hover,
+.lp-palette-row.is-selected {
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel-2));
+}
 .lp-editor-host {
   flex: 1;
   min-height: 0;
