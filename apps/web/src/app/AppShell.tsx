@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { PanelLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "./ThemeToggle";
@@ -49,14 +50,20 @@ export function AppShell({
         ) : (
           <PanelLeft size={16} aria-hidden />
         )}
-        {/* Brand: tenant logo ▷ tenant display name ▷ the Wikistead lockup. */}
-        {branding.data?.logoUrl ? (
-          <img className="block h-[22px] max-w-[160px] object-contain" src={branding.data.logoUrl} alt={branding.data.displayName || "Wikistead"} data-testid="brand-logo" />
-        ) : branding.data?.displayName ? (
-          <span className="text-[15px] font-semibold" data-testid="brand">{branding.data.displayName}</span>
-        ) : (
-          <BrandLockup />
-        )}
+        {/* Brand: tenant logo ▷ tenant display name ▷ the Wikistead lockup. In member
+            chrome it links Home (→ default page); guests get a static brand (no home). */}
+        {(() => {
+          const brand = branding.data?.logoUrl ? (
+            <img className="block h-[22px] max-w-[160px] object-contain" src={branding.data.logoUrl} alt={branding.data.displayName || "Wikistead"} data-testid="brand-logo" />
+          ) : branding.data?.displayName ? (
+            <span className="text-[15px] font-semibold" data-testid="brand">{branding.data.displayName}</span>
+          ) : (
+            <BrandLockup />
+          );
+          return sidebar ? (
+            <Link to="/" className="flex items-center rounded outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("nav.home")} data-testid="brand-home">{brand}</Link>
+          ) : brand;
+        })()}
         <div className="flex-1" />
         {search && <div className="flex justify-end">{search}</div>}
         <LanguageToggle />

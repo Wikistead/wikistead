@@ -5,7 +5,9 @@
     "close": "閉じる",
     "delete": "削除",
     "loading": "読み込み中…",
-    "untitled": "無題"
+    "untitled": "無題",
+    "on": "ON",
+    "off": "OFF"
   },
   "collab": {
     "guest": "ゲスト"
@@ -37,6 +39,7 @@
   },
   "nav": {
     "toggleSidebar": "サイドバーを切り替え",
+    "home": "ホーム",
     "signOut": "サインアウト"
   },
   "userMenu": {

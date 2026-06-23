@@ -71,8 +71,10 @@ export function PageToolbar(p: PageToolbarProps) {
         {p.editing ? (
           <>
             {p.onToggleVim && (
-              <Button size="sm" variant="ghost" data-testid="vim-toggle" aria-pressed={p.vim} title={t("page.vimMode")} onClick={p.onToggleVim}>
-                <SquareTerminal size={14} /> Vim
+              // A stateful toggle, not a plain button: filled + "ON"/"OFF" so the vim
+              // state reads at a glance (chrome only — the keymap wiring is upstream).
+              <Button size="sm" variant={p.vim ? "primary" : "ghost"} data-testid="vim-toggle" role="switch" aria-checked={p.vim} aria-label={t("page.vimMode")} title={t("page.vimMode")} onClick={p.onToggleVim}>
+                <SquareTerminal size={14} /> Vim {p.vim ? t("common.on") : t("common.off")}
               </Button>
             )}
             {p.onPublish && (
