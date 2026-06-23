@@ -25,7 +25,7 @@ export function OverflowMenu({
   testId?: string;
 }) {
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <IconButton aria-label={label} title={label} data-testid={`${testId}-trigger`}>
           <MoreHorizontal size={16} />
