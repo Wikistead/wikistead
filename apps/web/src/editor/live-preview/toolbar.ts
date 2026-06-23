@@ -1,4 +1,5 @@
-import type { EditorView } from "@codemirror/view";
+import { EditorView, ViewPlugin, showTooltip, type Tooltip } from "@codemirror/view";
+import { StateField } from "@codemirror/state";
 import i18n from "../../i18n";
 import {
   insertImage,
@@ -14,10 +15,8 @@ import {
 // image button (e.g. guests, or surfaces without an uploader).
 export type ImageUploader = (file: File) => Promise<{ ref: string; alt: string } | null>;
 
-// Minimal insert toolbar for non-technical users. Framework-agnostic DOM so the
-// editor surface stands alone now; the React chrome (next stage) can replace this
-// with a <Toolbar/> calling the same command functions.
-// title is an i18n key resolved at mount time (i18n.t) — the labels are symbols.
+// Format buttons. title is an i18n key resolved at mount time — the labels are symbols.
+// The command functions are inviolable (Y.Text edits); this module is chrome only.
 const BUTTONS: { label: string; titleKey: string; run: (v: EditorView) => void }[] = [
   { label: "B", titleKey: "lpToolbar.bold", run: toggleBold },
   { label: "H", titleKey: "lpToolbar.heading", run: (v) => setHeading(v, 2) },
@@ -26,59 +25,85 @@ const BUTTONS: { label: string; titleKey: string; run: (v: EditorView) => void }
   { label: "Link", titleKey: "lpToolbar.link", run: insertLink },
 ];
 
-export function mountToolbar(
-  parent: HTMLElement,
-  getView: () => EditorView,
-  opts: { uploadImage?: ImageUploader } = {},
-): HTMLElement {
-  const bar = document.createElement("div");
-  bar.className = "lp-toolbar";
-  for (const { label, titleKey, run } of BUTTONS) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "lp-toolbar-btn";
-    button.textContent = label;
-    button.title = i18n.t(titleKey);
-    // mousedown + preventDefault keeps the editor selection/focus intact so the
-    // command applies to the user's current selection.
-    button.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      run(getView());
-    });
-    bar.appendChild(button);
-  }
+function mkButton(label: string, title: string, run: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "lp-toolbar-btn";
+  button.textContent = label;
+  button.title = title;
+  // mousedown + preventDefault keeps the editor selection/focus intact so the command
+  // applies to the user's current selection (and the selection bubble stays up).
+  button.addEventListener("mousedown", (e) => { e.preventDefault(); run(); });
+  return button;
+}
 
-  // Image button: opens a hidden file input; on pick, upload then insert the
-  // ![alt](wks-attachment:<id>) reference at the caret.
-  if (opts.uploadImage) {
-    const upload = opts.uploadImage;
-    const fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.accept = "image/*";
-    fileInput.style.display = "none";
-    fileInput.setAttribute("data-testid", "lp-image-input");
-    fileInput.addEventListener("change", () => {
-      const file = fileInput.files?.[0];
-      fileInput.value = ""; // allow re-picking the same file
-      if (!file) return;
-      void upload(file).then((res) => {
-        if (res) insertImage(getView(), res.alt, res.ref);
+// Notion/Medium-style FLOATING selection toolbar: a small bubble shown above the
+// current text selection (and hidden when there is none) — no always-on ribbon.
+//
+// Implemented as a CodeMirror TOOLTIP, not a DOM node we inject into the editor:
+// CM owns/positions its tooltip layer (scroll-safe, reconciled across updates),
+// whereas an element appended into view.dom is removed by CM on the next update.
+// Purely presentational — it reads the LOCAL selection and dispatches the same
+// command functions, never touching transactions/awareness, so collab + presence
+// are untouched.
+export function floatingToolbar(opts: { uploadImage?: ImageUploader; container?: HTMLElement } = {}) {
+  // A single hidden file input, kept in the React-owned host container (which CM
+  // never reconciles) so it persists across edits. The bubble's Image button — and
+  // tests — drive it. Created/destroyed with the editor view.
+  let fileInput: HTMLInputElement | null = null;
+  const triggerImage = () => fileInput?.click();
+
+  const inputPlugin = ViewPlugin.define((view) => {
+    if (opts.uploadImage) {
+      const upload = opts.uploadImage;
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "image/*";
+      input.style.display = "none";
+      input.setAttribute("data-testid", "lp-image-input");
+      input.addEventListener("change", () => {
+        const file = input.files?.[0];
+        input.value = ""; // allow re-picking the same file
+        if (!file) return;
+        void upload(file).then((res) => { if (res) insertImage(view, res.alt, res.ref); });
       });
-    });
-    const imgButton = document.createElement("button");
-    imgButton.type = "button";
-    imgButton.className = "lp-toolbar-btn";
-    imgButton.textContent = "Image";
-    imgButton.title = i18n.t("lpToolbar.image");
-    imgButton.setAttribute("data-testid", "lp-image-btn");
-    imgButton.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      fileInput.click();
-    });
-    bar.appendChild(imgButton);
-    bar.appendChild(fileInput);
+      (opts.container ?? document.body).appendChild(input);
+      fileInput = input;
+    }
+    return { destroy() { fileInput?.remove(); fileInput = null; } };
+  });
+
+  function bubble(from: number, to: number): Tooltip {
+    return {
+      pos: from,
+      end: to,
+      above: true,
+      strictSide: false,
+      arrow: false,
+      create: (view) => {
+        const dom = document.createElement("div");
+        dom.className = "lp-toolbar";
+        dom.setAttribute("data-testid", "format-bubble");
+        for (const { label, titleKey, run } of BUTTONS) dom.appendChild(mkButton(label, i18n.t(titleKey), () => run(view)));
+        if (opts.uploadImage) {
+          const imgBtn = mkButton("Image", i18n.t("lpToolbar.image"), triggerImage);
+          imgBtn.setAttribute("data-testid", "lp-image-btn");
+          dom.appendChild(imgBtn);
+        }
+        return { dom };
+      },
+    };
   }
 
-  parent.appendChild(bar);
-  return bar;
+  const bubbleField = StateField.define<readonly Tooltip[]>({
+    create: () => [],
+    update(value, tr) {
+      if (!tr.docChanged && !tr.selection) return value;
+      const sel = tr.state.selection.main;
+      return sel.empty ? [] : [bubble(sel.from, sel.to)];
+    },
+    provide: (f) => showTooltip.computeN([f], (state) => state.field(f)),
+  });
+
+  return [inputPlugin, bubbleField];
 }

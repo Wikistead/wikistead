@@ -7,7 +7,7 @@ import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { livePreview, livePreviewTheme, linkClicks, imageResolver, type ImageResolver } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
-import { mountToolbar, type ImageUploader } from "./live-preview/toolbar";
+import { floatingToolbar, type ImageUploader } from "./live-preview/toolbar";
 import { attachImageDrop } from "./live-preview/image-drop";
 import { cmTheme } from "../styles/cm-theme";
 import { remoteCursors } from "./remote-cursors";
@@ -45,13 +45,13 @@ export function mountLivePreview(
       ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
       yCollab(ytext, provider.awareness),
       remoteCursors, // #8: avatar+name flags (additive overlay; yCollab untouched)
+      // Floating selection toolbar (editable surface only; view guests get none).
+      // container = the host so the hidden file input survives CM's DOM reconcile.
+      ...(!opts.readOnly ? [floatingToolbar({ uploadImage: opts.uploadImage, container: parent })] : []),
       ...(opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
     ],
   });
 
-  // View-capability guests get no insert toolbar.
-  if (!opts.readOnly) mountToolbar(parent, () => view, { uploadImage: opts.uploadImage });
-  // (read-only published view is mounted via mountPublishedView, below)
   // Drag-and-drop image attach (editable surface only — needs an uploader).
   if (!opts.readOnly && opts.uploadImage) attachImageDrop(view, opts.uploadImage);
 
