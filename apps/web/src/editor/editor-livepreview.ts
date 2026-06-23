@@ -5,7 +5,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, imageResolver, type ImageResolver } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, imageResolver, type ImageResolver } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { mountToolbar, type ImageUploader } from "./live-preview/toolbar";
 import { attachImageDrop } from "./live-preview/image-drop";
@@ -37,6 +37,7 @@ export function mountLivePreview(
       markdownExtension(),
       livePreviewTheme,
       livePreview,
+      linkClicks,
       // Inline-comment anchor highlights (display-only; fed via setCommentRanges).
       commentHighlightTheme,
       commentHighlights,
@@ -81,6 +82,7 @@ export function mountPublishedView(
       markdownExtension(),
       livePreviewTheme,
       livePreview,
+      linkClicks,
       ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
       EditorState.readOnly.of(true),
       EditorView.editable.of(false),
