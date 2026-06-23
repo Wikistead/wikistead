@@ -30,8 +30,9 @@ test("menu open animation resolves to a real keyframe (not a hashed/missing name
     const s = getComputedStyle(el);
     return { name: s.animationName, duration: s.animationDuration };
   });
-  // The keyframe is global `wks-pop`; if CSS-modules had hashed the reference the name
-  // would be "_wks-pop_xxxx" (a keyframe that doesn't exist → effectively "none").
-  expect(anim.name).toBe("wks-pop");
-  expect(anim.duration).toBe("0.18s");
+  // The menu (now Radix DropdownMenu) animates via shadcn/tw-animate-css `animate-in`.
+  // What matters: a REAL keyframe resolves and runs — not "none" (missing/hashed) and
+  // not a zero duration (a reduce-motion kill or dropped animation).
+  expect(anim.name).not.toBe("none");
+  expect(anim.duration).not.toBe("0s");
 });

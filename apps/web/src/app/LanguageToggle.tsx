@@ -1,8 +1,7 @@
-import { Menu } from "@ark-ui/react/menu";
-import { Portal } from "@ark-ui/react/portal";
 import { Languages } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { LANGS, setLang, type Lang } from "../i18n";
+import { LANGS, setLang } from "../i18n";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
 import styles from "./AppShell.module.css";
 
 // Language switcher (Phase 5). Lives in the app header next to the theme switcher;
@@ -13,21 +12,17 @@ export function LanguageToggle() {
   const { t, i18n } = useTranslation();
   const current = i18n.resolvedLanguage ?? i18n.language;
   return (
-    <Menu.Root onSelect={(d) => setLang(d.value as Lang)}>
-      <Menu.Trigger className={styles.iconBtn} aria-label={t("language.label")} title={t("language.label")} data-testid="language-toggle">
+    <DropdownMenu>
+      <DropdownMenuTrigger className={styles.iconBtn} aria-label={t("language.label")} title={t("language.label")} data-testid="language-toggle">
         <Languages size={15} />
-      </Menu.Trigger>
-      <Portal>
-        <Menu.Positioner>
-          <Menu.Content className={styles.menu} data-testid="language-menu">
-            {LANGS.map((l) => (
-              <Menu.Item key={l} value={l} className={styles.menuItem} data-active={current === l ? "" : undefined} data-testid={`language-${l}`}>
-                {t(`language.${l}`)}
-              </Menu.Item>
-            ))}
-          </Menu.Content>
-        </Menu.Positioner>
-      </Portal>
-    </Menu.Root>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" data-testid="language-menu">
+        {LANGS.map((l) => (
+          <DropdownMenuItem key={l} onSelect={() => setLang(l)} data-active={current === l ? "" : undefined} data-testid={`language-${l}`} className={current === l ? "font-semibold" : undefined}>
+            {t(`language.${l}`)}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

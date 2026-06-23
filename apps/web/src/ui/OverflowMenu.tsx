@@ -1,11 +1,10 @@
-import { Menu } from "@ark-ui/react/menu";
-import { Portal } from "@ark-ui/react/portal";
 import { MoreHorizontal } from "lucide-react";
 import type { ReactNode } from "react";
-import styles from "./OverflowMenu.module.css";
+import { IconButton } from "./Button";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
 
-// A ••• overflow menu (Ark Menu) for secondary page actions — the IA pattern of
-// keeping the top bar minimal and folding occasional actions away (Phase 3b-3).
+// A ••• overflow menu (Radix DropdownMenu) for secondary page actions — the IA pattern
+// of keeping the top bar minimal and folding occasional actions away (Phase 3b-3).
 export interface OverflowItem {
   value: string;
   label: string;
@@ -26,22 +25,26 @@ export function OverflowMenu({
   testId?: string;
 }) {
   return (
-    <Menu.Root onSelect={(d) => onSelect(d.value)}>
-      <Menu.Trigger className={styles.trigger} aria-label={label} title={label} data-testid={`${testId}-trigger`}>
-        <MoreHorizontal size={16} />
-      </Menu.Trigger>
-      <Portal>
-        <Menu.Positioner>
-          <Menu.Content className={styles.content} data-testid={testId}>
-            {items.map((it) => (
-              <Menu.Item key={it.value} value={it.value} className={styles.item} data-testid={it.testId} data-danger={it.danger ? "" : undefined}>
-                {it.icon}
-                {it.label}
-              </Menu.Item>
-            ))}
-          </Menu.Content>
-        </Menu.Positioner>
-      </Portal>
-    </Menu.Root>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <IconButton aria-label={label} title={label} data-testid={`${testId}-trigger`}>
+          <MoreHorizontal size={16} />
+        </IconButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" data-testid={testId}>
+        {items.map((it) => (
+          <DropdownMenuItem
+            key={it.value}
+            onSelect={() => onSelect(it.value)}
+            data-testid={it.testId}
+            data-danger={it.danger ? "" : undefined}
+            variant={it.danger ? "destructive" : "default"}
+          >
+            {it.icon}
+            {it.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
