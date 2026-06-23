@@ -275,8 +275,11 @@ body {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
 }
 .lp-palette-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
   font: inherit;
-  font-size: 13px;
   text-align: left;
   padding: 4px 8px;
   border: 0;
@@ -288,6 +291,14 @@ body {
 .lp-palette-row:hover,
 .lp-palette-row.is-selected {
   background: color-mix(in srgb, var(--accent) 14%, var(--panel-2));
+}
+.lp-palette-name {
+  font-size: 13px;
+}
+.lp-palette-alias {
+  font-size: 11px;
+  color: var(--fg-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .lp-editor-host {
   flex: 1;

@@ -49,29 +49,9 @@ export const toggleInlineCode = (view: EditorView) => wrap(view, "`", "`");
 export const setHeading = (view: EditorView, level = 2) =>
   prefixLines(view, `${"#".repeat(level)} `);
 export const toggleBulletList = (view: EditorView) => prefixLines(view, "- ");
-export const toggleNumberedList = (view: EditorView) => prefixLines(view, "1. ");
-export const toggleQuote = (view: EditorView) => prefixLines(view, "> ");
-
-// Block inserts at the caret. Used by the command palette (slash) after it removes
-// the "/query" token, so they insert at the (now empty) line position. Plain Markdown
-// → propagates to the canonical Y.Text like any edit (offset-invariant, presence-safe).
-export function insertCodeBlock(view: EditorView): void {
-  const pos = view.state.selection.main.head;
-  view.dispatch({ changes: { from: pos, insert: "```\n\n```" }, selection: { anchor: pos + 4 }, scrollIntoView: true });
-  view.focus();
-}
-export function insertTable(view: EditorView): void {
-  const pos = view.state.selection.main.head;
-  const tpl = "| Column | Column |\n| --- | --- |\n| Cell | Cell |";
-  // select the first "Column" so it can be typed over
-  view.dispatch({ changes: { from: pos, insert: tpl }, selection: EditorSelection.range(pos + 2, pos + 8), scrollIntoView: true });
-  view.focus();
-}
-export function insertDivider(view: EditorView): void {
-  const pos = view.state.selection.main.head;
-  view.dispatch({ changes: { from: pos, insert: "---\n" }, selection: { anchor: pos + 4 }, scrollIntoView: true });
-  view.focus();
-}
+// (Block inserts — code block / table / divider — and the heading/list/quote toggles
+// for the slash palette are template-based in palette.ts, which controls the caret
+// position precisely; they don't go through these line-prefix helpers.)
 
 // Insert "[text](url)" and leave the caret selecting "url" so it can be typed
 // Insert an image reference at the caret: ![alt](wks-attachment:<id>). The ref is
