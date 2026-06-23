@@ -9,11 +9,26 @@ import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { fgaClient, check, checkRelation, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
-import { createSpace, listSpaces, deleteSpace, updateSpace, updateSpaceIcon } from '../routes/spaces.js'
+import { createSpace, listSpaces, deleteSpace, updateSpace, updateSpaceIcon, setSpaceIconImage, clearSpaceIconImage } from '../routes/spaces.js'
 import { createPage, listPages, getPage, deletePage, movePage } from '../routes/pages.js'
+import type { StorageDriver } from '../storage/index.js'
 import type { Tenant } from '@wikistead/types'
 
 const driver = new LogicalSearchDriver()
+
+// In-memory storage double for the icon-image tests (no SeaweedFS dependency).
+function fakeStorage() {
+  const objects = new Map<string, Uint8Array>()
+  const deleted: string[] = []
+  const storage = {
+    putObject: async (key: string, bytes: Uint8Array) => { objects.set(key, bytes) },
+    getObject: async (key: string) => objects.get(key) ?? new Uint8Array(),
+    deleteObject: async (key: string) => { objects.delete(key); deleted.push(key) },
+  } as unknown as StorageDriver
+  return { storage, objects, deleted }
+}
+// A minimal valid PNG (magic bytes are what sniffImage checks).
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]).toString('base64')
 
 // Phase 4 visibility gate: createPage no longer links a page to its space (drafts
 // are creator-only); publishing writes `page#space`. Tests that exercise SPACE-
@@ -140,6 +155,35 @@ describe('space lifecycle', () => {
     await updateSpaceIcon(db, fgaClient, { spaceId: space.id, tenantId: tenant.id, userId: 'dev-user', icon: null })
     mine = (await listSpaces(db, fgaClient, 'dev-user')).find((s) => s.id === space.id)
     expect(mine?.icon ?? null).toBeNull()
+    await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: space.id, userId: 'dev-user' })
+  })
+
+  it('setSpaceIconImage: manage-gated, sniffs type (SVG rejected), caps size; listSpaces exposes the URL', async () => {
+    const { storage, deleted } = fakeStorage()
+    const space = await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'img-space' })
+    // default: no image → null
+    let mine = (await listSpaces(db, fgaClient, 'dev-user')).find((s) => s.id === space.id)
+    expect(mine?.iconImageUrl ?? null).toBeNull()
+    // a manager uploads a PNG → stored + URL exposed (relative API path)
+    await setSpaceIconImage(db, fgaClient, storage, { spaceId: space.id, tenantId: tenant.id, userId: 'dev-user', dataBase64: PNG })
+    mine = (await listSpaces(db, fgaClient, 'dev-user')).find((s) => s.id === space.id)
+    expect(mine?.iconImageUrl).toBe(`/spaces/${space.id}/icon-image`)
+    // a non-manager is rejected (the fortress)
+    await expect(setSpaceIconImage(db, fgaClient, storage, { spaceId: space.id, tenantId: tenant.id, userId: 'space-rando', dataBase64: PNG })).rejects.toMatchObject({ statusCode: 403 })
+    // SVG is rejected (public asset → would be a stored-XSS vector)
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>').toString('base64')
+    await expect(setSpaceIconImage(db, fgaClient, storage, { spaceId: space.id, tenantId: tenant.id, userId: 'dev-user', dataBase64: svg })).rejects.toMatchObject({ statusCode: 400 })
+    // empty → 400, oversized (>512KB) → 413
+    await expect(setSpaceIconImage(db, fgaClient, storage, { spaceId: space.id, tenantId: tenant.id, userId: 'dev-user', dataBase64: '' })).rejects.toMatchObject({ statusCode: 400 })
+    const huge = Buffer.alloc(512 * 1024 + 16).toString('base64')
+    await expect(setSpaceIconImage(db, fgaClient, storage, { spaceId: space.id, tenantId: tenant.id, userId: 'dev-user', dataBase64: huge })).rejects.toMatchObject({ statusCode: 413 })
+    // clear → URL null + the stored object is deleted
+    await clearSpaceIconImage(db, fgaClient, storage, { spaceId: space.id, tenantId: tenant.id, userId: 'dev-user' })
+    mine = (await listSpaces(db, fgaClient, 'dev-user')).find((s) => s.id === space.id)
+    expect(mine?.iconImageUrl ?? null).toBeNull()
+    expect(deleted.length).toBeGreaterThanOrEqual(1)
+    // a non-manager cannot clear either
+    await expect(clearSpaceIconImage(db, fgaClient, storage, { spaceId: space.id, tenantId: tenant.id, userId: 'space-rando' })).rejects.toMatchObject({ statusCode: 403 })
     await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: space.id, userId: 'dev-user' })
   })
 

@@ -7,6 +7,11 @@
 // session cookie is sent. Absolute URLs are still honored if explicitly set.
 const API_URL = (import.meta as any).env?.VITE_API_URL ?? "/api";
 
+// Absolute URL for a server-served asset path (e.g. a public space icon), for use as
+// an <img> src. The API is reachable only under the API base — a bare path would hit
+// the SPA origin and resolve to index.html — so asset paths must be prefixed too.
+export const assetUrl = (path: string) => `${API_URL}${path}`;
+
 export class ApiError extends Error {
   constructor(public status: number, public path: string, message: string) {
     super(message);

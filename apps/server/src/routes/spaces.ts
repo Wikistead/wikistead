@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
@@ -6,12 +7,28 @@ import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
+import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
 
 interface SpaceRow { id: string; tenant_id: string; name: string; created_at: Date }
-export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage'; accentKey?: string | null; icon?: string | null }
+export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage'; accentKey?: string | null; icon?: string | null; iconImageUrl?: string | null }
 function toSpace(r: SpaceRow): Space {
   return { id: r.id, tenantId: r.tenant_id, name: r.name, createdAt: r.created_at }
+}
+
+// Space icon image (#6). Mirrors the tenant logo: a server-generated key + magic-byte
+// sniff (NEVER the client content-type). SVG is excluded — the icon is a PUBLIC asset,
+// so an SVG could carry <script> = stored XSS. png/jpeg/webp only.
+const ICON_MAX_BYTES = 512 * 1024
+// Bound the raw JSON body BEFORE parse so a huge base64 string can't exhaust memory
+// (base64 ≈ 1.34x the bytes; this fits a ≤512KB image with JSON overhead).
+const ICON_BODY_LIMIT = 1_000_000
+function sniffImage(b: Uint8Array): { mime: string; ext: string } | null {
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return { mime: 'image/png', ext: 'png' }
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return { mime: 'image/jpeg', ext: 'jpg' }
+  if (b.length >= 12 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+      b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return { mime: 'image/webp', ext: 'webp' }
+  return null
 }
 
 // ── Service functions ─────────────────────────────────────────────────────
@@ -58,8 +75,8 @@ export async function createSpace(
 export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: string): Promise<Space[]> {
   // accent_key (space branding, Phase 5c) joined in so the client can apply the
   // space ▷ tenant ▷ default accent cascade without a per-space fetch.
-  const rows = await db.sql<(SpaceRow & { accent_key: string | null; icon: string | null })[]>`
-    SELECT s.id, s.tenant_id, s.name, s.created_at, ss.accent_key, ss.icon
+  const rows = await db.sql<(SpaceRow & { accent_key: string | null; icon: string | null; icon_image_key: string | null })[]>`
+    SELECT s.id, s.tenant_id, s.name, s.created_at, ss.accent_key, ss.icon, ss.icon_image_key
     FROM spaces s LEFT JOIN space_settings ss ON ss.space_id = s.id
     ORDER BY s.created_at
   `
@@ -80,7 +97,12 @@ export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: strin
     }),
   )
   const capById = new Map(caps)
-  return rows.filter((r) => capById.get(r.id) != null).map((r) => ({ ...toSpace(r), capability: capById.get(r.id)!, accentKey: r.accent_key, icon: r.icon }))
+  // iconImageUrl is a relative API path (the client prefixes it with the API base for
+  // the <img> src). Public bytes are served by GET /spaces/:id/icon-image.
+  return rows.filter((r) => capById.get(r.id) != null).map((r) => ({
+    ...toSpace(r), capability: capById.get(r.id)!, accentKey: r.accent_key, icon: r.icon,
+    iconImageUrl: r.icon_image_key ? `/spaces/${r.id}/icon-image` : null,
+  }))
 }
 
 // Set/clear a space's branding accent (Phase 5c). manage-gated AND entitlement-
@@ -127,6 +149,49 @@ export async function updateSpaceIcon(
     VALUES (${args.spaceId}, ${args.tenantId}, ${icon}, now())
     ON CONFLICT (space_id) DO UPDATE SET icon = ${icon}, updated_at = now()
   `
+  emit({ type: 'space.updated', tenantId: args.tenantId, spaceId: args.spaceId, actorId: args.userId })
+}
+
+// Upload a space icon IMAGE (#6). manage-gated, NOT entitlement-gated. base64 in (no
+// multipart dependency): the raw body is bounded by the route bodyLimit AND the decoded
+// size is checked here, so a giant base64 string can't exhaust memory. The content type
+// is derived from magic bytes (SVG rejected), the key is server-generated + space-
+// scoped (no user filename), and the previous object is deleted. Mirrors setTenantLogo.
+export async function setSpaceIconImage(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  storage: StorageDriver,
+  args: { spaceId: string; tenantId: string; userId: string; dataBase64: string },
+): Promise<void> {
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  const bytes = Buffer.from(args.dataBase64 ?? '', 'base64')
+  if (bytes.length === 0) throw Object.assign(new Error('empty image'), { statusCode: 400 })
+  if (bytes.length > ICON_MAX_BYTES) throw Object.assign(new Error('image too large'), { statusCode: 413 })
+  const kind = sniffImage(bytes)
+  if (!kind) throw Object.assign(new Error('unsupported image (png, jpeg, webp only)'), { statusCode: 400 })
+
+  const key = `spaces/${args.spaceId}/icon-${randomUUID()}.${kind.ext}`
+  await storage.putObject(key, bytes, kind.mime)
+  const [old] = await db.sql<{ icon_image_key: string | null }[]>`SELECT icon_image_key FROM space_settings WHERE space_id = ${args.spaceId}`
+  await db.sql`
+    INSERT INTO space_settings (space_id, tenant_id, icon_image_key, icon_image_content_type, updated_at)
+    VALUES (${args.spaceId}, ${args.tenantId}, ${key}, ${kind.mime}, now())
+    ON CONFLICT (space_id) DO UPDATE SET icon_image_key = ${key}, icon_image_content_type = ${kind.mime}, updated_at = now()
+  `
+  if (old?.icon_image_key && old.icon_image_key !== key) await storage.deleteObject(old.icon_image_key).catch(() => {})
+  emit({ type: 'space.updated', tenantId: args.tenantId, spaceId: args.spaceId, actorId: args.userId })
+}
+
+export async function clearSpaceIconImage(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  storage: StorageDriver,
+  args: { spaceId: string; tenantId: string; userId: string },
+): Promise<void> {
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  const [old] = await db.sql<{ icon_image_key: string | null }[]>`SELECT icon_image_key FROM space_settings WHERE space_id = ${args.spaceId}`
+  await db.sql`UPDATE space_settings SET icon_image_key = NULL, icon_image_content_type = NULL, updated_at = now() WHERE space_id = ${args.spaceId}`
+  if (old?.icon_image_key) await storage.deleteObject(old.icon_image_key).catch(() => {})
   emit({ type: 'space.updated', tenantId: args.tenantId, spaceId: args.spaceId, actorId: args.userId })
 }
 
@@ -403,5 +468,36 @@ export async function spacesPlugin(app: FastifyInstance) {
       icon: req.body?.icon ?? null,
     })
     return reply.code(204).send()
+  })
+
+  // Space icon IMAGE (#6) — manage-gated write (base64; bodyLimit bounds the raw body).
+  app.post<{ Params: { spaceId: string }; Body: { data?: string } }>('/spaces/:spaceId/icon-image', { bodyLimit: ICON_BODY_LIMIT }, async (req, reply) => {
+    await setSpaceIconImage(req.db, app.fga, app.storageDriver, {
+      spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub, dataBase64: req.body?.data ?? '',
+    })
+    return reply.code(204).send()
+  })
+
+  app.delete<{ Params: { spaceId: string } }>('/spaces/:spaceId/icon-image', async (req, reply) => {
+    await clearSpaceIconImage(req.db, app.fga, app.storageDriver, {
+      spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
+    })
+    return reply.code(204).send()
+  })
+
+  // PUBLIC icon bytes (read public, write strict — mirrors the tenant logo). The query
+  // is RLS-scoped to the Host-resolved tenant, so a space id from another tenant yields
+  // no row (404) — no cross-tenant read. Icons are not secret; serving them unauthed
+  // lets <img> tags (which can't send a bearer) render them. 404 when unset.
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/icon-image', { config: { public: true } }, async (req, reply) => {
+    const [row] = await req.db.sql<{ icon_image_key: string | null; icon_image_content_type: string | null }[]>`
+      SELECT icon_image_key, icon_image_content_type FROM space_settings WHERE space_id = ${req.params.spaceId}
+    `
+    if (!row?.icon_image_key) return reply.code(404).send()
+    const bytes = await app.storageDriver.getObject(row.icon_image_key)
+    return reply
+      .header('Content-Type', row.icon_image_content_type ?? 'application/octet-stream')
+      .header('Cache-Control', 'public, max-age=300')
+      .send(Buffer.from(bytes))
   })
 }

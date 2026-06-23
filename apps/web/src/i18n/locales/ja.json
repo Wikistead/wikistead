@@ -133,6 +133,8 @@
     "iconHint": "スペース名の隣に表示する絵文字または短い文字。空欄にすると名前から自動生成します。",
     "iconPlaceholder": "📚",
     "iconClear": "自動に戻す",
+    "iconImageUpload": "画像をアップロード",
+    "iconImageRemove": "画像を削除",
     "dangerZone": "危険な操作",
     "deleteHint": "スペースを削除すると、配下のすべてのページも完全に削除されます。",
     "deleteSpace": "スペースを削除",

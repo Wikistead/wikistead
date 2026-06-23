@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "./apiClient";
+import { apiFetch, assetUrl } from "./apiClient";
 import { useSession } from "../session/SessionProvider";
 
 // Shapes mirror the server DTOs (apps/server/src/routes/{spaces,pages}.ts).
@@ -18,6 +18,10 @@ export interface Space {
   // Space icon override glyph (#4), or null to auto-generate an initials chip from
   // the name. Joined into GET /spaces so the sidebar renders it without a fetch.
   icon?: string | null;
+  // Uploaded space icon image (#6), absolute URL ready for an <img> src, or null.
+  // Takes precedence over the glyph; both fall back to the initials chip. The server
+  // returns a relative API path; useSpaces prefixes it with the API base.
+  iconImageUrl?: string | null;
 }
 export interface Page {
   id: string;
@@ -38,7 +42,9 @@ export function useSpaces(enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["spaces"],
-    queryFn: () => apiFetch<Space[]>("/spaces", token).then((r) => r ?? []),
+    queryFn: () => apiFetch<Space[]>("/spaces", token).then((r) =>
+      (r ?? []).map((s) => ({ ...s, iconImageUrl: s.iconImageUrl ? assetUrl(s.iconImageUrl) : null })),
+    ),
     enabled,
   });
 }
@@ -433,6 +439,26 @@ export function useUpdateSpaceIcon(spaceId: string) {
   return useMutation({
     mutationFn: (icon: string | null) =>
       apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/icon`, token, { method: "PATCH", body: JSON.stringify({ icon }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
+  });
+}
+
+// Upload/remove a space icon IMAGE (#6). base64 in (no multipart); the server
+// validates magic bytes + size. The image takes precedence over the glyph.
+export function useUploadSpaceIcon(spaceId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (dataBase64: string) =>
+      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/icon-image`, token, { method: "POST", body: JSON.stringify({ data: dataBase64 }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
+  });
+}
+export function useRemoveSpaceIcon(spaceId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/icon-image`, token, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
   });
 }

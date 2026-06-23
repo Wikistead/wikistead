@@ -199,14 +199,14 @@ export function Sidebar() {
       <div className="flex items-center justify-between border-b border-border p-3">
         <DropdownMenu modal={false}>
           <DropdownMenuTrigger className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-sm px-1 py-0.5 font-semibold text-foreground transition-colors duration-[120ms] hover:bg-panel-2" data-testid="space-switcher">
-            {currentSpace && <SpaceIcon id={currentSpace.id} name={currentSpace.name} icon={currentSpace.icon} size={20} data-testid="space-icon" />}
+            {currentSpace && <SpaceIcon id={currentSpace.id} name={currentSpace.name} icon={currentSpace.icon} image={currentSpace.iconImageUrl} size={20} data-testid="space-icon" />}
             <span className="overflow-hidden text-ellipsis whitespace-nowrap">{currentSpace?.name || t("sidebar.noSpace")}</span>
             <ChevronsUpDown size={14} />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" data-testid="space-menu">
             {spaces.map((s) => (
               <DropdownMenuItem key={s.id} onSelect={() => setActiveSpaceId(s.id)} data-testid="space-option">
-                <SpaceIcon id={s.id} name={s.name} icon={s.icon} size={18} />
+                <SpaceIcon id={s.id} name={s.name} icon={s.icon} image={s.iconImageUrl} size={18} />
                 {s.name || t("sidebar.untitledSpace")}
               </DropdownMenuItem>
             ))}

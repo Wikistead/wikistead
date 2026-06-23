@@ -133,6 +133,8 @@
     "iconHint": "An emoji or a couple of letters shown next to the space. Leave empty to auto-generate one from the name.",
     "iconPlaceholder": "📚",
     "iconClear": "Reset to auto",
+    "iconImageUpload": "Upload image",
+    "iconImageRemove": "Remove image",
     "dangerZone": "Danger zone",
     "deleteHint": "Deleting a space permanently removes it and all of its pages.",
     "deleteSpace": "Delete space",
