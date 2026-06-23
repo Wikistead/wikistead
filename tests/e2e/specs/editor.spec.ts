@@ -16,7 +16,7 @@ test("decorations, sync, and cross-client presence", async ({ browser }: { brows
 
   // (1) real editor + markdown decorations (cursor parked off the construct lines)
   await A.click("[data-pane=preview] .cm-content");
-  for (const line of ["# Heading", "a **bold** b", "`code`", "[text](url)", "- item", "> quote", ""]) {
+  for (const line of ["# Heading", "a **bold** b", "`code`", "[text](url)", "- item", "> quote", "~~struck~~", ""]) {
     await A.keyboard.type(line);
     await A.keyboard.press("Enter");
   }
@@ -31,6 +31,10 @@ test("decorations, sync, and cross-client presence", async ({ browser }: { brows
       bullet: !!q("[data-pane=preview] .cm-lp-bullet"),
       link: q("[data-pane=preview] .cm-lp-link")?.textContent,
       quote: !!q("[data-pane=preview] .cm-lp-quote"), // blockquote renderer (Step I bug #2)
+      strike: q("[data-pane=preview] .cm-lp-strike")?.textContent,
+      // .trim(): markdown list/quote auto-continuation from the preceding lines leaves
+      // a literal indent on this line — unrelated to the strike render under test.
+      strikeLine: line("struck")?.innerText.replace(/[​⁠]/g, "").trim(),
       boldLine: line("bold")?.innerText.replace(/[​⁠]/g, ""),
     };
   });
@@ -41,6 +45,8 @@ test("decorations, sync, and cross-client presence", async ({ browser }: { brows
   expect(deco.bullet).toBe(true);
   expect(deco.link).toContain("text");
   expect(deco.quote).toBe(true);
+  expect(deco.strike).toBe("struck");
+  expect(deco.strikeLine).toBe("struck"); // '~~' hidden
 
   // (2) cross-client sync: B's surface renders A's content (the bold word). Checked
   // BEFORE the reveal click below — once A's caret moves onto the bold line, yCollab

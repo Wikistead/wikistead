@@ -22,6 +22,7 @@ import {
 
 const strongMark = Decoration.mark({ class: "cm-lp-strong" });
 const emphasisMark = Decoration.mark({ class: "cm-lp-emphasis" });
+const strikeMark = Decoration.mark({ class: "cm-lp-strike" });
 const inlineCodeMark = Decoration.mark({ class: "cm-lp-inline-code" });
 const linkMark = Decoration.mark({ class: "cm-lp-link" });
 const hide = Decoration.replace({});
@@ -216,13 +217,24 @@ const RENDERERS: BlockRenderer[] = [
   { match: (n) => n === "StrongEmphasis", enter: (node, ctx) => ctx.add(strongMark, node.from, node.to) },
   { match: (n) => n === "Emphasis", enter: (node, ctx) => ctx.add(emphasisMark, node.from, node.to) },
   { match: (n) => n === "EmphasisMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
+  // GFM strikethrough: style the run, hide the "~~" delimiters (reveal on cursor line).
+  { match: (n) => n === "Strikethrough", enter: (node, ctx) => ctx.add(strikeMark, node.from, node.to) },
+  { match: (n) => n === "StrikethroughMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
   { match: (n) => n === "InlineCode", enter: (node, ctx) => ctx.add(inlineCodeMark, node.from, node.to) },
   {
     match: (n) => n === "FencedCode",
     enter: (node, ctx) => {
-      const first = ctx.state.doc.lineAt(node.from).number;
-      const last = ctx.state.doc.lineAt(node.to).number;
-      for (let n = first; n <= last; n++) ctx.add(codeBlockLine, ctx.state.doc.line(n).from);
+      const doc = ctx.state.doc;
+      const first = doc.lineAt(node.from).number;
+      const last = doc.lineAt(Math.min(node.to, doc.length)).number;
+      // Tint only the CODE lines, not the ``` / ~~~ fence lines (those would render
+      // as empty tinted bars once their CodeMark hides — visually redundant).
+      for (let n = first; n <= last; n++) {
+        const line = doc.line(n);
+        const t = line.text.trimStart();
+        if (t.startsWith("```") || t.startsWith("~~~")) continue;
+        ctx.add(codeBlockLine, line.from);
+      }
     },
   },
   { match: (n) => n === "CodeMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
@@ -333,6 +345,7 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
 export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-strong": { fontWeight: "700" },
   ".cm-lp-emphasis": { fontStyle: "italic" },
+  ".cm-lp-strike": { textDecoration: "line-through", opacity: "0.75" },
   ".cm-lp-inline-code": {
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
     background: "rgba(127,127,127,0.18)",
