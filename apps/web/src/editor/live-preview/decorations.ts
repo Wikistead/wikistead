@@ -29,6 +29,7 @@ const hide = Decoration.replace({});
 const headingLine = (level: number) =>
   Decoration.line({ attributes: { class: `cm-lp-h cm-lp-h${level}` } });
 const codeBlockLine = Decoration.line({ attributes: { class: "cm-lp-code-line" } });
+const quoteLine = Decoration.line({ attributes: { class: "cm-lp-quote" } });
 
 class BulletWidget extends WidgetType {
   toDOM() {
@@ -226,6 +227,26 @@ const RENDERERS: BlockRenderer[] = [
   },
   { match: (n) => n === "CodeMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
   {
+    // Blockquote → a left-bar + muted block. Each line gets the quote line style; the
+    // ">" markers hide (revealing on the cursor's line, like every other marker), so
+    // it reads as a quote but stays raw-editable under the cursor.
+    match: (n) => n === "Blockquote",
+    enter: (node, ctx) => {
+      const first = ctx.state.doc.lineAt(node.from).number;
+      const last = ctx.state.doc.lineAt(Math.min(node.to, ctx.state.doc.length)).number;
+      for (let i = first; i <= last; i++) ctx.add(quoteLine, ctx.state.doc.line(i).from);
+    },
+  },
+  {
+    match: (n) => n === "QuoteMark",
+    enter: (node, ctx) => {
+      // Include the trailing space so the quoted text isn't indented by it.
+      let to = node.to;
+      if (ctx.state.doc.sliceString(to, to + 1) === " ") to += 1;
+      ctx.hideMarker(node.from, to);
+    },
+  },
+  {
     match: (n) => n === "ListMark",
     enter: (node, ctx) => {
       const list = node.node.parent?.parent?.name; // ListItem -> Bullet/OrderedList
@@ -329,6 +350,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-code-line": {
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
     background: "rgba(127,127,127,0.12)",
+  },
+  ".cm-lp-quote": {
+    borderLeft: "3px solid var(--border, #888)",
+    paddingLeft: "0.8em",
+    color: "var(--fg-dim, #888)",
   },
   ".cm-lp-bullet": { paddingRight: "0.25em" },
   ".cm-lp-table": { borderCollapse: "collapse", margin: "0.4em 0", fontSize: "0.95em" },

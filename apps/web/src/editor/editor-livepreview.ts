@@ -1,5 +1,6 @@
 import { EditorView, minimalSetup } from "codemirror";
-import { EditorState } from "@codemirror/state";
+import { EditorState, type Compartment } from "@codemirror/state";
+import { vim } from "@replit/codemirror-vim";
 import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
@@ -11,21 +12,24 @@ import { attachImageDrop } from "./live-preview/image-drop";
 import { cmTheme } from "../styles/cm-theme";
 import { remoteCursors } from "./remote-cursors";
 
-// Non-technical surface: Obsidian-style live preview bound to the SAME canonical
-// Y.Text and SAME awareness as the vim surface. No vim, no CRDT bridge. Both
-// surfaces share one Y.Text, so edits flow both ways and cross-surface presence
-// (a collaborator's caret showing on both panes) works for free — see
-// live-preview/decorations.ts for the display-only / offset-invariant invariant.
+// The single editing surface (Group C / Step I): Obsidian-style live preview bound to
+// the canonical Y.Text. Rendered by default; the line/block under the cursor reveals
+// raw markdown (reveal-on-cursor in decorations.ts) so it's editable in place. vim is
+// an OPTIONAL keymap toggled via a Compartment owned by the caller — toggling it
+// reconfigures in place (never remounts), so collab/presence are never dropped (#8
+// invariant). vim() goes FIRST so its keymap takes precedence; with vim OFF the
+// compartment is empty (pure live preview).
 export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; uploadImage?: ImageUploader } = {},
+  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
     doc: ytext.toString(),
     extensions: [
+      ...(opts.vimCompartment ? [opts.vimCompartment.of(opts.vim ? vim() : [])] : []),
       minimalSetup,
       cmTheme,
       EditorView.lineWrapping,

@@ -9,23 +9,16 @@ export async function openDemo(page: Page) {
   await sleep(800);
 }
 
-// The editor opens rendered (read-only). Edit reveals the editable surface in the
-// user's persisted layout (default: single WYSIWYG preview). enterSplit also flips
-// the layout preference to the vim source+preview split. Requires an edit-capable
-// user (the dev-token bypass qualifies).
+// The editor opens rendered (read-only). Edit reveals the single live-preview surface
+// (Step I — split / separate source pane removed). Requires an edit-capable user (the
+// dev-token bypass qualifies).
 export async function enterEdit(page: Page) {
   await page.click("[data-testid=edit-toggle]");
+  await page.waitForSelector("[data-pane=preview] .cm-content");
   await sleep(150);
 }
-export async function enterSplit(page: Page) {
-  await page.click("[data-testid=edit-toggle]");
-  // Default layout is single (wysiwyg) in a fresh context; flip to split.
-  if ((await page.locator("[data-pane=source] .cm-content").count()) === 0) {
-    await page.click("[data-testid=layout-toggle]");
-  }
-  await page.waitForSelector("[data-pane=source] .cm-content");
-  await sleep(150);
-}
+// Back-compat alias: there is no split anymore — entering edit IS the single surface.
+export const enterSplit = enterEdit;
 
 export async function resetDoc(page: Page) {
   await page.click("[data-pane=preview] .cm-content");

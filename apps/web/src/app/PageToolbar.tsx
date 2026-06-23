@@ -1,21 +1,16 @@
-import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, Columns2, Check, Loader2 } from "lucide-react";
+import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, Check, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button, IconButton } from "../ui/Button";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
-import type { EditorLayout } from "../editor/Editor";
 import { useDirty, type DirtySignal } from "../editor/dirtySignal";
-import styles from "./PageToolbar.module.css";
 
-// The page title moved to a large heading at the top of the reading column (Group
-// C-B, see PageTitle.tsx) — the toolbar now carries only the publish chips + actions.
-
-// Mode-aware page top bar (Phase 3b-3). One component for members AND guests, driven
-// by `editing`. READ mode = title + Edit/Share/Comments + ••• (Export/Print/History/
-// Permissions). EDIT mode = title + layout(split)/Publish/Done. Secondary actions are
-// folded into ••• to keep the bar minimal (IA). Each control is rendered only when its
-// handler/capability is provided, so the same component serves the member page (all
-// actions) and the guest share page (edit/publish only). Authz gating is the caller's
-// (canEdit/canManage/canPublish) — the server stays the fortress.
+// The page title is a large heading at the top of the reading column (PageTitle.tsx);
+// this thin top bar carries only the publish chips + actions.
+//
+// Mode-aware (driven by `editing`). READ = Edit/Share/Comments + ••• (Export/Print/
+// History/Permissions). EDIT = Vim toggle/Publish/Done. Each control renders only when
+// its handler/capability is provided, so the same component serves the member page and
+// the guest share page. Authz gating is the caller's; the server stays the fortress.
 export interface PageToolbarProps {
   canEdit: boolean;
   editing: boolean;
@@ -26,9 +21,9 @@ export interface PageToolbarProps {
   canPublish?: boolean;
   onPublish?: () => void;
   publishing?: boolean;
-  // edit-mode layout
-  layout?: EditorLayout;
-  onToggleLayout?: () => void;
+  // edit-mode: vim keymap toggle (the single-view replacement for the split toggle)
+  vim?: boolean;
+  onToggleVim?: () => void;
   // read-mode actions (only those provided are shown)
   onShare?: () => void;
   commentsOpen?: boolean;
@@ -62,31 +57,31 @@ export function PageToolbar(p: PageToolbarProps) {
   };
 
   return (
-    <div className={styles.bar} data-testid="page-toolbar">
-      {p.publishState === "draft" && <span className={styles.chip} data-testid="draft-badge">{t("page.draft")}</span>}
-      {p.publishState === "unpublished" && <span className={`${styles.chip} ${styles.chipDirty}`} data-testid="unpublished-badge">{t("page.unpublishedChanges")}</span>}
-      <div className={styles.spacer} />
-      <div className={styles.right}>
+    <div className="flex items-center gap-2 border-b border-border px-3 py-1" data-testid="page-toolbar">
+      {p.publishState === "draft" && <span className="rounded-full border border-border px-2 py-px text-xs text-fg-dim" data-testid="draft-badge">{t("page.draft")}</span>}
+      {p.publishState === "unpublished" && <span className="rounded-full border border-[color-mix(in_srgb,var(--accent)_50%,var(--border))] px-2 py-px text-xs text-[var(--accent)]" data-testid="unpublished-badge">{t("page.unpublishedChanges")}</span>}
+      <div className="flex-1" />
+      <div className="flex items-center gap-2">
         {/* Comments is useful in both modes (read + while editing). */}
         {p.onToggleComments && (
           <IconButton aria-label={t("page.comments")} data-testid="comments-toggle" aria-pressed={p.commentsOpen} onClick={p.onToggleComments}>
-            <MessageSquare size={15} />{p.openComments ? <span className={styles.commentBadge}>{p.openComments}</span> : null}
+            <MessageSquare size={15} />{p.openComments ? <span className="ml-0.5 text-[11px] text-fg-dim">{p.openComments}</span> : null}
           </IconButton>
         )}
         {p.editing ? (
           <>
-            {p.onToggleLayout && (
-              <Button size="sm" variant="ghost" data-testid="layout-toggle" aria-pressed={p.layout === "split"} onClick={p.onToggleLayout}>
-                <Columns2 size={14} /> {p.layout === "split" ? t("page.single") : t("page.split")}
+            {p.onToggleVim && (
+              <Button size="sm" variant="ghost" data-testid="vim-toggle" aria-pressed={p.vim} title={t("page.vimMode")} onClick={p.onToggleVim}>
+                <SquareTerminal size={14} /> Vim
               </Button>
             )}
             {p.onPublish && (
               // While publishing, the server flushes the live draft, then publishes —
               // a real save+publish round-trip. Show a spinner and keep the button
-              // disabled (also prevents a double publish; the server publish is
-              // idempotent via its no-op guard as a backstop).
+              // disabled (also prevents a double publish; the server no-op guard is
+              // the idempotency backstop).
               <Button size="sm" variant="primary" data-testid="publish-page" disabled={p.publishing || !canPublish} onClick={p.onPublish}>
-                {p.publishing ? <Loader2 size={14} className={styles.spin} data-testid="publish-spinner" /> : null}
+                {p.publishing ? <Loader2 size={14} className="animate-spin" data-testid="publish-spinner" /> : null}
                 {t("page.publish")}
               </Button>
             )}

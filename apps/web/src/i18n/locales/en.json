@@ -185,6 +185,7 @@
     "share": "Share",
     "done": "Close",
     "publish": "Publish",
+    "vimMode": "Vim mode",
     "split": "Vim mode",
     "single": "Normal mode",
     "comments": "Comments",

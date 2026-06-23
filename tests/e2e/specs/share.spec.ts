@@ -57,7 +57,7 @@ test("anonymous share: create -> open -> co-edit -> read-only -> revoke denied",
   await guest.click("[data-pane=preview] .cm-content");
   await guest.keyboard.type("from-guest");
   await sleep(600);
-  expect(await paneText(member, "source")).toContain("from-guest");
+  expect(await paneText(member, "preview")).toContain("from-guest");
 
   // a VIEW link is read-only
   await member.bringToFront();

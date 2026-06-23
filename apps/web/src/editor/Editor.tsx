@@ -1,13 +1,13 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, type MutableRefObject } from "react";
+import { Compartment } from "@codemirror/state";
+import { vim as vimKeymap } from "@replit/codemirror-vim";
 import type { EditorView } from "@codemirror/view";
 import { connect } from "./collab";
-import { mountSource } from "./editor-source";
 import { mountLivePreview, mountPublishedView } from "./editor-livepreview";
 import { makeImageResolver } from "./image-resolver";
 import { createAnchor, resolveAnchor } from "./comment-anchors";
 import { setCommentRanges, type CommentRange } from "./live-preview/comment-highlights";
 import type { DirtySignal } from "./dirtySignal";
-import styles from "./Editor.module.css";
 
 // Inline-comment integration surface for the host (CommentsPanel via PageRoute).
 export interface InlineAnchorInput { anchorStart: string; anchorEnd: string; quotedText: string }
@@ -31,16 +31,15 @@ export interface EditorUser {
 
 export type EditorCapability = "view" | "edit";
 
-// Two orthogonal concerns, both now CONTROLLED by the host (PageToolbar owns the
-// chrome since 3b-3):
+// Single-view editing model (Step I). Two states, both host-controlled:
 //   - editing: the page opens RENDERED (published, read-only) for everyone; an
-//     edit-capable user enters edit via the host's Edit control.
-//   - layout: when editing, which editor — single WYSIWYG preview, or vim source +
-//     preview split. The host persists the preference.
-export type EditorLayout = "wysiwyg" | "split";
-// The mounted surface: 'view' (read-only preview) | 'wysiwyg' (editable preview) |
-// 'split' (source + editable preview).
-type SurfaceKey = "view" | EditorLayout;
+//     edit-capable user enters edit via the host's Edit control → ONE live-preview
+//     surface (no split, no separate source pane).
+//   - vim: an optional keymap on that surface (cursor line/block reveals raw markdown,
+//     reveal-on-cursor). Toggled via a Compartment in place — never remounts, so
+//     collab/presence are never dropped.
+// The mounted surface: 'view' (read-only published) | 'edit' (live collab draft).
+type SurfaceKey = "view" | "edit";
 
 export interface EditorProps {
   docName: string;
@@ -57,9 +56,9 @@ export interface EditorProps {
   // draft (collab) is only ever shown in EDIT mode; view shows this snapshot.
   publishedMd?: string | null;
   // Controlled by the host (PageToolbar): whether the editable draft surface is
-  // shown (only honored for edit-capable users) and which editor layout.
+  // shown (only honored for edit-capable users), and whether vim keymap is on.
   editing?: boolean;
-  layout?: EditorLayout;
+  vim?: boolean;
   // Uploads a picked image and returns the ref+alt to insert. Omit to hide the
   // image button (e.g. guests, or a view-only surface).
   onUploadImage?: (file: File) => Promise<{ ref: string; alt: string } | null>;
@@ -87,37 +86,27 @@ function tint(color: string): string {
   return color.startsWith("hsl(") ? color.replace(/\)\s*$/, " / 0.2)") : `${color}33`;
 }
 
-// React wrapper around the CodeMirror surfaces. TWO independent lifecycles
-// (ADR-013 isolation invariant, extended for P3):
+// React wrapper around the CodeMirror surface. TWO independent lifecycles (ADR-013):
+//   1. COLLAB connection — keyed on (docName, token, collabUrl). Owns the provider /
+//      Y.Doc / WebSocket / awareness. Mode + vim toggles do NOT touch it, so
+//      view↔edit and vim on/off never reconnect, never drop presence, never leave a
+//      ghost cursor. Only a page (docName) switch rebuilds it.
+//   2. SURFACE view — keyed additionally on the surface. Mounts/destroys the CM view
+//      onto the SAME canonical Y.Text. vim is a Compartment reconfigure (no remount).
 //
-//   1. COLLAB connection — keyed on (docName, token, collabUrl). Owns the
-//      provider / Y.Doc / WebSocket / awareness. Mode changes do NOT touch it, so
-//      toggling view↔edit↔split never reconnects, never drops presence, never
-//      leaves a ghost cursor. Only a page (docName) switch rebuilds it.
-//   2. SURFACE views — keyed additionally on the mode. Mounts/destroys the CM
-//      view(s) onto the SAME canonical Y.Text. Effects run in declaration order
-//      within a commit, so on a docName switch the collab effect reconnects first
-//      and the surface effect then mounts against the fresh connection.
-//
-// The two-layer edit defense: this component hides the editable surfaces for a
-// view-only capability, but that is convenience. The collab server re-derives
-// readOnly from OpenFGA per document, so a forged edit button still cannot write.
 // memo: the host (PageRoute) re-renders on its own state and on the published poll;
-// without memo those re-render <Editor> too, which (a) the tree-move e2e forbids
-// (rendersAfter===rendersBefore) and (b) churns the editor needlessly. Props are
-// referentially stable across host re-renders (inlineComments memoized; the dirty
-// signal is an external store, not a prop value), so memo skips them. A page switch
-// changes docName (the key) and remounts regardless.
-export const Editor = memo(function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, layout = "wysiwyg", onUploadImage, inlineComments, anchorGetterRef, dirtySignal }: EditorProps) {
-  const sourceRef = useRef<HTMLDivElement>(null);
+// without memo those re-render <Editor> too, which the tree-move e2e forbids and
+// churns the editor. Props are referentially stable across host re-renders.
+export const Editor = memo(function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, onUploadImage, inlineComments, anchorGetterRef, dirtySignal }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
   const previewViewRef = useRef<EditorView | null>(null);
   const awarenessRef = useRef<Awareness | null>(null);
+  // Owned here so the vim toggle reconfigures the SAME compartment in place.
+  const vimCompartment = useRef(new Compartment()).current;
 
   // Resolve inline-comment anchors against the live doc and push the ranges to the
-  // preview's highlight field. The field maps marks through edits between pushes, so
-  // highlights track text live; we re-resolve when the comment set changes.
+  // preview's highlight field.
   const pushHighlights = (view: EditorView | null) => {
     const c = collabRef.current;
     if (!view || !c) return;
@@ -131,13 +120,10 @@ export const Editor = memo(function Editor({ docName, token, collabUrl, user, ca
   };
 
   const canEdit = capability === "edit";
-  // editing + layout are controlled by the host (PageToolbar). A view-only
-  // capability can never edit (surface stays "view" even if editing is forced) —
-  // the collab server is the fortress regardless.
-  const surfaceKey: SurfaceKey = canEdit && editing ? layout : "view";
+  // editing is controlled by the host (PageToolbar). A view-only capability can never
+  // edit (surface stays "view") — the collab server is the fortress regardless.
+  const surfaceKey: SurfaceKey = canEdit && editing ? "edit" : "view";
 
-  // Resolves wks-attachment image ids to fresh presigned URLs (TTL-cached). Bound
-  // to the API token (cookie/dev-token), rebuilt only when it changes.
   const resolveImageUrl = useMemo(() => makeImageResolver(apiToken), [apiToken]);
 
   // Dev-only probe for the isolation invariant (ADR-013): editor content is not in
@@ -147,17 +133,10 @@ export const Editor = memo(function Editor({ docName, token, collabUrl, user, ca
       ((window as unknown as { __editorRenders?: number }).__editorRenders ?? 0) + 1;
   }
 
-  // (1) Collab connection — ONLY for edit-capable users (security, not just UI):
-  // a view-only user / view share-link never joins the collab room, so the live
-  // draft is never delivered to their browser. They render the published snapshot
-  // instead (mountPublishedView). For an edit-capable user the connection survives
-  // view↔edit toggles (keyed on docName/token, not the surface), so toggling never
-  // reconnects or drops presence (ADR-013).
+  // (1) Collab connection — ONLY for edit-capable users (security, not just UI): a
+  // view-only user / view share-link never joins the collab room. Survives view↔edit
+  // and vim toggles (keyed on docName/token), so toggling never drops presence.
   useLayoutEffect(() => {
-    // Only edit-capable principals (members or edit share-link guests) join the
-    // collab room. View-only users never receive the live draft — they render the
-    // published snapshot over HTTP. Edit-capable users keep the connection across
-    // view↔edit toggles (ADR-013), so toggling never reconnects or drops presence.
     if (!canEdit) return;
     const c = connect({ url: collabUrl, docName, token });
     collabRef.current = c;
@@ -172,42 +151,38 @@ export const Editor = memo(function Editor({ docName, token, collabUrl, user, ca
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docName, token, collabUrl, canEdit]);
 
-  // (2) Surfaces — remount when the surface changes (same connection) or after a
-  // reconnect. The collab connection above is untouched, so editing/layout toggles
-  // never reconnect or drop presence.
+  // (2) Surface — remount when the surface changes (same connection) or after a
+  // reconnect. vim is NOT in the deps (a Compartment reconfigure, below).
   useLayoutEffect(() => {
-    const sourceHost = sourceRef.current;
     const previewHost = previewRef.current!;
     const views: { destroy(): void }[] = [];
 
-    // VIEW mode: render the PUBLISHED snapshot read-only — NOT collab-bound, so the
-    // live draft is never shown here (and a view-only user has no collab at all).
+    // VIEW mode: render the PUBLISHED snapshot read-only — NOT collab-bound.
     if (surfaceKey === "view") {
       const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl });
       views.push(v);
       previewViewRef.current = v;
-      if (anchorGetterRef) anchorGetterRef.current = null; // no selection-anchoring in view
+      if (anchorGetterRef) anchorGetterRef.current = null;
       return () => {
         views.forEach((x) => x.destroy());
         previewViewRef.current = null;
-        sourceHost?.replaceChildren();
         previewHost.replaceChildren();
       };
     }
 
-    // EDIT surfaces use the live collab doc.
+    // EDIT: the single live-preview surface on the live collab doc.
     const c = collabRef.current;
     if (!c) return;
-    const editable = true;
-    if (surfaceKey === "split" && sourceHost) {
-      views.push(mountSource(sourceHost, c.ytext, c.provider, { readOnly: false }));
-    }
-    const previewView = mountLivePreview(previewHost, c.ytext, c.provider, { readOnly: !editable, resolveImageUrl, uploadImage: onUploadImage });
+    const previewView = mountLivePreview(previewHost, c.ytext, c.provider, {
+      readOnly: false,
+      resolveImageUrl,
+      uploadImage: onUploadImage,
+      vim,
+      vimCompartment,
+    });
     views.push(previewView);
     previewViewRef.current = previewView;
 
-    // Expose an anchor getter built from the preview's current selection (works in
-    // any mode — read-only CM still has a selection). Null when nothing is selected.
     if (anchorGetterRef) {
       anchorGetterRef.current = () => {
         const sel = previewView.state.selection.main;
@@ -216,24 +191,29 @@ export const Editor = memo(function Editor({ docName, token, collabUrl, user, ca
         return { anchorStart: start, anchorEnd: end, quotedText: previewView.state.doc.sliceString(sel.from, sel.to) };
       };
     }
-    pushHighlights(previewView); // initial highlights for this freshly-mounted view
+    pushHighlights(previewView);
 
     return () => {
       views.forEach((v) => v.destroy());
       previewViewRef.current = null;
       if (anchorGetterRef) anchorGetterRef.current = null;
-      sourceHost?.replaceChildren();
       previewHost.replaceChildren();
     };
+    // vim excluded (Compartment reconfigure, not a remount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, onUploadImage]);
 
-  // Keep the published view in sync when publishedMd changes (e.g. after a publish,
-  // or a remote publish) WITHOUT remounting — a plain doc replace on the read-only
-  // view. Edit mode is untouched (publishedMd is not in the surface effect's deps,
-  // so a publish never rebuilds the live editor / drops the caret).
+  // vim on/off: reconfigure the Compartment IN PLACE (no remount → collab/presence
+  // untouched). Only meaningful on the edit surface.
   useEffect(() => {
-    if (surfaceKey !== "view") return; // only the published view (not a collab CM)
+    const v = previewViewRef.current;
+    if (!v || surfaceKey !== "edit") return;
+    v.dispatch({ effects: vimCompartment.reconfigure(vim ? vimKeymap() : []) });
+  }, [vim, surfaceKey, vimCompartment]);
+
+  // Keep the published view in sync when publishedMd changes WITHOUT remounting.
+  useEffect(() => {
+    if (surfaceKey !== "view") return;
     const v = previewViewRef.current;
     if (!v) return;
     const next = publishedMd ?? "";
@@ -242,48 +222,31 @@ export const Editor = memo(function Editor({ docName, token, collabUrl, user, ca
     }
   }, [publishedMd, surfaceKey]);
 
-  // Re-resolve + push highlights when the comment set changes (the StateField keeps
-  // them aligned through edits in between).
   useEffect(() => { pushHighlights(previewViewRef.current); // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inlineComments]);
 
-  // Optimistic "unpublished changes" signal (edit mode): a passive DOM `input`
-  // listener on the edit surface flips the external store to true the instant the
-  // user types/pastes/deletes — enabling Publish with no perceptible delay. This is
-  // deliberately NOT a Yjs/CM observer: a Y.Text observe (even writing an external
-  // store, not React state) destabilized the presence/awareness e2e under load
-  // (see editor-dirty-presence-constraint). A DOM input listener is orthogonal to
-  // the collab/awareness machinery. It over-approximates (any input → dirty); the
-  // server is the fortress (publish no-ops if unchanged) and the published poll
-  // reconciles the real state (incl. pre-existing dirt and remote edits). Reset to
-  // false on publish/page-change happens in the host.
+  // Optimistic "unpublished changes" signal: a passive DOM `input` listener on the
+  // edit surface flips the external store to true the instant the user edits. NOT a
+  // Yjs/CM observer (that destabilized presence e2e — see editor-dirty-presence-
+  // constraint); a DOM input listener is orthogonal to the collab/awareness path.
   useEffect(() => {
     if (!dirtySignal || !(canEdit && editing)) return;
     const host = previewRef.current;
-    const src = sourceRef.current;
     const onInput = () => dirtySignal.set(true);
     host?.addEventListener("input", onInput);
-    src?.addEventListener("input", onInput);
-    return () => {
-      host?.removeEventListener("input", onInput);
-      src?.removeEventListener("input", onInput);
-    };
+    return () => host?.removeEventListener("input", onInput);
   }, [canEdit, editing, surfaceKey, dirtySignal]);
 
-  // Presence label changes must NOT rebuild the editors — just update awareness.
+  // Presence label changes must NOT rebuild the editor — just update awareness.
   useEffect(() => {
     awarenessRef.current?.setLocalStateField("user", userField(user));
   }, [user.name, user.color, user.picture]);
 
   return (
-    <div className={styles.editor} data-mode={surfaceKey}>
-      <section className={styles.pane} data-pane="source" hidden={surfaceKey !== "split"}>
-        <h2 className={styles.paneTitle}>source (vim)</h2>
-        <div ref={sourceRef} className={styles.host} />
-      </section>
-      <section className={styles.pane} data-pane="preview">
-        {/* Edit/Done/layout controls live in the host PageToolbar (3b-3). */}
-        <div ref={previewRef} className={styles.host} />
+    <div className="h-full" data-mode={surfaceKey}>
+      <section className="flex h-full min-h-0 min-w-0 flex-col" data-pane="preview">
+        {/* Edit/Done/vim controls live in the host PageToolbar. */}
+        <div ref={previewRef} className="flex min-h-0 flex-1 flex-col" />
       </section>
     </div>
   );

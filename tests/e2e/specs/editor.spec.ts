@@ -1,22 +1,22 @@
 import { test, expect, type Browser } from "@playwright/test";
-import { openDemo, resetDoc, paneText, charAfterCaret, enterSplit, sleep } from "../helpers";
+import { openDemo, resetDoc, paneText, charAfterCaret, enterEdit, sleep } from "../helpers";
 
-// Core two-surface editor + the locked invariant: a collaborator's caret lands on
-// the SAME logical char in the raw source pane and the decorated preview pane.
-test("decorations, sync, and cross-surface presence", async ({ browser }: { browser: Browser }) => {
+// Single-view editor (Step I): one live-preview surface. Covers markdown decorations,
+// reveal-on-cursor, cross-CLIENT sync, and the presence invariant — a remote
+// collaborator's caret lands on the SAME logical char on the other client's surface,
+// even though the preview hides the '**' markers (offset-invariant decorations).
+test("decorations, sync, and cross-client presence", async ({ browser }: { browser: Browser }) => {
   const A = await (await browser.newContext()).newPage();
   const B = await (await browser.newContext()).newPage();
   await openDemo(A);
   await openDemo(B);
-  // P3: the editor defaults to read-only view; this test drives both surfaces, so
-  // open the editable source+preview split on each.
-  await enterSplit(A);
-  await enterSplit(B);
+  await enterEdit(A);
+  await enterEdit(B);
   await resetDoc(A);
 
   // (1) real editor + markdown decorations (cursor parked off the construct lines)
   await A.click("[data-pane=preview] .cm-content");
-  for (const line of ["# Heading", "a **bold** b", "`code`", "[text](url)", "- item", ""]) {
+  for (const line of ["# Heading", "a **bold** b", "`code`", "[text](url)", "- item", "> quote", ""]) {
     await A.keyboard.type(line);
     await A.keyboard.press("Enter");
   }
@@ -30,6 +30,7 @@ test("decorations, sync, and cross-surface presence", async ({ browser }: { brow
       code: q("[data-pane=preview] .cm-lp-inline-code")?.textContent,
       bullet: !!q("[data-pane=preview] .cm-lp-bullet"),
       link: q("[data-pane=preview] .cm-lp-link")?.textContent,
+      quote: !!q("[data-pane=preview] .cm-lp-quote"), // blockquote renderer (Step I bug #2)
       boldLine: line("bold")?.innerText.replace(/[​⁠]/g, ""),
     };
   });
@@ -39,74 +40,52 @@ test("decorations, sync, and cross-surface presence", async ({ browser }: { brow
   expect(deco.code).toBe("code");
   expect(deco.bullet).toBe(true);
   expect(deco.link).toContain("text");
+  expect(deco.quote).toBe(true);
 
-  // (2) reveal-on-cursor
+  // (2) cross-client sync: B's surface renders A's content (the bold word). Checked
+  // BEFORE the reveal click below — once A's caret moves onto the bold line, yCollab
+  // draws A's remote caret label inline on B, splitting the "bold" text node.
+  await B.waitForFunction(() => (document.querySelector("[data-pane=preview] .cm-content")?.textContent ?? "").includes("bold"), undefined, { timeout: 5000 });
+  expect(await paneText(B, "preview")).toContain("bold");
+
+  // (3) reveal-on-cursor: clicking the bold construct reveals its raw '**'
   await A.locator("[data-pane=preview] .cm-lp-strong").first().click();
   await sleep(200);
   const revealed = await A.evaluate(() => [...document.querySelectorAll("[data-pane=preview] .cm-line")].find((l) => (l as HTMLElement).innerText.includes("bold"))?.textContent ?? "");
   expect(revealed).toContain("**");
 
-  // (3) cross-client sync
-  await B.waitForFunction(() => document.querySelector("[data-pane=source] .cm-content")!.textContent!.includes("Heading"), undefined, { timeout: 5000 });
-  expect(await paneText(B, "source")).toContain("**bold**");
-
-  // (4) cross-surface presence: reset to one line, A caret at offset 5 ('o')
+  // (4) cross-client presence: one line, A's caret at offset 5 ('o' of "bold").
   await resetDoc(A);
   await A.keyboard.type("a **bold** b");
   await A.keyboard.press("Enter");
   await A.keyboard.type("second line");
   await sleep(250);
-  await B.waitForFunction(() => document.querySelector("[data-pane=source] .cm-content")!.textContent!.includes("**bold**"), undefined, { timeout: 5000 });
+  await B.waitForFunction(() => (document.querySelector("[data-pane=preview] .cm-content")?.textContent ?? "").includes("second"), undefined, { timeout: 5000 });
 
-  // B parks on line 2 so B's preview HIDES line-1 '**'
+  // B parks on line 2 → B's line-1 RENDERS (its '**' hidden), so the remote caret
+  // must map through the hidden markers to still land on the same logical char.
   await B.evaluate(() => {
     const l = [...document.querySelectorAll("[data-pane=preview] .cm-line")].find((x) => (x as HTMLElement).innerText.includes("second")) as HTMLElement;
     const r = l.getBoundingClientRect();
     (document.elementFromPoint(r.x + 6, r.y + r.height / 2) as HTMLElement)?.click();
   });
-  // A places a collapsed caret at offset 5 (the 'o' of "bold") in the source pane.
-  // The source pane is used because it hides nothing, so its glyphs map 1:1 to doc
-  // offsets (the preview's atomic markers would not). A typed into the PREVIEW pane
-  // above; the source is a separate CM view on the same Y.Text, so first wait until
-  // it has synced the text. We place via a precise click on the glyph (DOM Range →
-  // coordinates) rather than vim keystrokes — keystroke timing is dropped under
-  // full-suite load, but the click is deterministic, and the offset-invariance of
-  // the caret across surfaces is what this test actually proves.
-  await A.waitForFunction(
-    () => (document.querySelector("[data-pane=source] .cm-content")?.textContent ?? "").includes("bold"),
-    undefined,
-    { timeout: 6000 },
-  );
-  const caretXY = await A.evaluate(() => {
-    const content = document.querySelector("[data-pane=source] .cm-content")!;
-    // Walk text nodes to find document offset 5 (CM may split the line into spans).
-    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
-    let remaining = 5;
-    let node: Node | null;
-    while ((node = walker.nextNode())) {
-      const len = node.nodeValue!.length;
-      if (remaining <= len) {
-        const range = document.createRange();
-        range.setStart(node, remaining);
-        range.collapse(true);
-        const r = range.getBoundingClientRect();
-        return { x: r.x, y: r.y + r.height / 2 };
-      }
-      remaining -= len;
-    }
-    return null;
-  });
-  await A.mouse.click(caretXY!.x, caretXY!.y);
+
+  // A places a collapsed caret at doc offset 5 ('o'). A real-clicks line 1 (a genuine
+  // pointer event, so CM moves the cursor → the line REVEALS its raw markdown and the
+  // hidden markers stop being atomic), then Home + 5×ArrowRight steps 1:1 to offset 5.
+  await A.locator("[data-pane=preview] .cm-line").filter({ hasText: "bold" }).first().click();
+  await sleep(150);
+  await A.keyboard.press("Home");
+  for (let i = 0; i < 5; i++) await A.keyboard.press("ArrowRight");
   await A.bringToFront();
   await sleep(450);
 
   await B.waitForFunction(
-    () => !!document.querySelector("[data-pane=source] .cm-ySelectionCaret") && !!document.querySelector("[data-pane=preview] .cm-ySelectionCaret"),
+    () => !!document.querySelector("[data-pane=preview] .cm-ySelectionCaret"),
     undefined,
     { timeout: 6000 },
   );
-  // KEY: same logical char in BOTH surfaces despite the preview hiding '**'. Poll
-  // to absorb cross-client awareness propagation latency.
+  // KEY: the same logical char on B despite B's preview hiding line-1 '**'. Poll to
+  // absorb cross-client awareness latency.
   await expect.poll(async () => (await B.evaluate(charAfterCaret(), "[data-pane=preview]")).char, { timeout: 6000 }).toBe("o");
-  expect((await B.evaluate(charAfterCaret(), "[data-pane=source]")).char).toBe("o");
 });
