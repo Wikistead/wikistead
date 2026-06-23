@@ -5,7 +5,6 @@ import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
 import { AccentPicker } from "./AccentPicker";
-import styles from "./SpaceThemeTab.module.css";
 
 const LOGO_MAX_BYTES = 512 * 1024;
 const LOGO_TYPES = /^image\/(png|jpeg|webp)$/;
@@ -62,14 +61,14 @@ export function TenantBrandingTab() {
   };
 
   return (
-    <div className={styles.wrap} data-testid="tenant-branding">
+    <div className="max-w-[560px] p-6" data-testid="tenant-branding">
       <h2 style={{ marginTop: 0 }}>{t("tenantBranding.title")}</h2>
-      <p className={styles.body}>{t("tenantBranding.body")}</p>
+      <p className="mt-0 text-sm text-fg-dim">{t("tenantBranding.body")}</p>
 
       {locked && (
-        <div className={styles.upgrade} data-testid="branding-upgrade">
-          <strong>{t("branding.upgradeTitle")}</strong>
-          <p>{t("branding.upgradeBody")}</p>
+        <div className="mb-5 rounded-lg border border-border border-l-[3px] border-l-[var(--accent)] bg-panel px-3.5 py-3" data-testid="branding-upgrade">
+          <strong className="text-sm">{t("branding.upgradeTitle")}</strong>
+          <p className="mb-0 mt-1 text-xs text-fg-dim">{t("branding.upgradeBody")}</p>
         </div>
       )}
 
@@ -84,7 +83,7 @@ export function TenantBrandingTab() {
       <AccentPicker value={accentKey} onChange={chooseAccent} disabled={locked || update.isPending} inheritLabel={t("tenantBranding.default")} />
 
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", margin: "28px 0 6px" }}>{t("tenantBranding.logo")}</label>
-      <p className={styles.body} style={{ marginTop: 0 }}>{t("tenantBranding.logoHint")}</p>
+      <p className="mt-0 text-sm text-fg-dim" style={{ marginTop: 0 }}>{t("tenantBranding.logoHint")}</p>
       <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
         {branding.data?.logoUrl && (
           <img src={branding.data.logoUrl} alt="logo" data-testid="tenant-logo-preview" style={{ height: 28, maxWidth: 160, objectFit: "contain", border: "1px solid var(--border)", borderRadius: 4, padding: 2 }} />

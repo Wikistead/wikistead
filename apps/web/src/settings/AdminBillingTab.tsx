@@ -2,7 +2,6 @@ import { useTranslation } from "react-i18next";
 import { useBillingStatus, useEntitlements, useCheckout, usePortal } from "../data/queries";
 import { Button } from "../ui/Button";
 import { notify } from "../ui/toast";
-import styles from "./SpaceThemeTab.module.css";
 
 // Billing (Phase 5g, /admin/billing, tenant#admin). On self-host (billing disabled)
 // it shows the "all features included" state. On Cloud it shows the current plan +
@@ -26,23 +25,23 @@ export function AdminBillingTab() {
     onError: () => notify.error(t("billing.portalUnavailable")),
   });
 
-  if (status.isLoading) return <div className={styles.wrap}><p className={styles.body}>{t("common.loading")}</p></div>;
+  if (status.isLoading) return <div className="max-w-[560px] p-6"><p className="mt-0 text-sm text-fg-dim">{t("common.loading")}</p></div>;
 
   // Self-host / CE: no billing.
   if (!status.data?.billingEnabled) {
     return (
-      <div className={styles.wrap} data-testid="admin-billing">
+      <div className="max-w-[560px] p-6" data-testid="admin-billing">
         <h2 style={{ marginTop: 0 }}>{t("billing.title")}</h2>
-        <p className={styles.body} data-testid="billing-selfhosted">{t("billing.selfHosted")}</p>
+        <p className="mt-0 text-sm text-fg-dim" data-testid="billing-selfhosted">{t("billing.selfHosted")}</p>
       </div>
     );
   }
 
   return (
-    <div className={styles.wrap} data-testid="admin-billing">
+    <div className="max-w-[560px] p-6" data-testid="admin-billing">
       <h2 style={{ marginTop: 0 }}>{t("billing.title")}</h2>
-      <p className={styles.body}>{t("billing.currentPlan")} <strong data-testid="billing-plan">{planLabel}</strong></p>
-      <p className={styles.body}>{t("billing.branding")}: {ent.data?.branding ? t("billing.included") : t("billing.notIncluded")}</p>
+      <p className="mt-0 text-sm text-fg-dim">{t("billing.currentPlan")} <strong data-testid="billing-plan">{planLabel}</strong></p>
+      <p className="mt-0 text-sm text-fg-dim">{t("billing.branding")}: {ent.data?.branding ? t("billing.included") : t("billing.notIncluded")}</p>
 
       <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
         {plan !== "pro" && plan !== "team" && (
@@ -50,7 +49,7 @@ export function AdminBillingTab() {
         )}
         <Button variant="default" size="sm" disabled={portal.isPending} onClick={goPortal} data-testid="billing-manage">{t("billing.manage")}</Button>
       </div>
-      <p className={styles.body} style={{ marginTop: 16 }}>{t("billing.teamNote")}</p>
+      <p className="mt-0 text-sm text-fg-dim" style={{ marginTop: 16 }}>{t("billing.teamNote")}</p>
     </div>
   );
 }
