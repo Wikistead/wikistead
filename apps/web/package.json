@@ -11,7 +11,6 @@
     "lint": "echo 'noop'"
   },
   "dependencies": {
-    "@ark-ui/react": "^5.37.2",
     "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lang-markdown": "^6.3.0",
