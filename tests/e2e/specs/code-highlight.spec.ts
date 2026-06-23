@@ -25,4 +25,8 @@ test("fenced code block is syntax-highlighted (token spans appear)", async ({ br
   // lines. Plain (un-highlighted) text would have none.
   const tokenSpans = await page.locator("[data-pane=preview] .cm-lp-code-line span").count();
   expect(tokenSpans).toBeGreaterThanOrEqual(3);
+
+  // The ``` fence lines are NOT tinted — only the 2 content lines carry the code
+  // background (a fence line would otherwise render as an empty tinted bar).
+  expect(await page.locator("[data-pane=preview] .cm-lp-code-line").count()).toBe(2);
 });
