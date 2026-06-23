@@ -160,7 +160,9 @@ function PageRoute() {
             publishState={publishState}
             canPublish={!!published?.hasUnpublishedChanges}
             onPublish={canEdit ? () => publish.mutate(undefined, {
-              onSuccess: () => { dirtySig.set(false); notify.success(t("toast.published")); },
+              // Publish = done: drop the dirty flag and return to the rendered view
+              // (no separate "Done" click needed — publishing implies completion).
+              onSuccess: () => { dirtySig.set(false); setEditing(false); notify.success(t("toast.published")); },
               onError: () => notify.error(t("toast.publishFailed")),
             }) : undefined}
             publishing={publish.isPending}
@@ -262,6 +264,7 @@ function GuestPage({ minted }: { minted: GuestToken }) {
     try {
       await apiFetch(`/pages/${encodeURIComponent(pageId)}/publish`, token, { method: "POST" });
       notify.success(t("toast.published"));
+      setEditing(false); // publish = done → back to the rendered view
     } catch {
       notify.error(t("toast.publishFailed"));
     }

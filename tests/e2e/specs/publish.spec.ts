@@ -29,10 +29,10 @@ test("publish flow: create→edit, draft hidden in view until publish, then visi
   await sleep(500);
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("SECRETDRAFTXYZ");
 
-  // (3) publish from EDIT mode → back to view → the content now appears
+  // (3) publish from EDIT mode → publishing auto-returns to view → the content appears
   await page.click("[data-testid=edit-toggle]");
   await page.click("[data-testid=publish-page]"); // Playwright waits for it to be enabled
-  await page.click("[data-testid=view-toggle]"); // Done → view
+  await expect(page.locator("[data-testid=edit-toggle]")).toBeVisible({ timeout: 8000 }); // auto-view
   await expect
     .poll(async () => page.locator("[data-pane=preview] .cm-content").innerText(), { timeout: 8000 })
     .toContain("SECRETDRAFTXYZ");

@@ -5,7 +5,9 @@
     "close": "Close",
     "delete": "Delete",
     "loading": "Loading…",
-    "untitled": "Untitled"
+    "untitled": "Untitled",
+    "on": "ON",
+    "off": "OFF"
   },
   "collab": {
     "guest": "Guest"
@@ -37,6 +39,7 @@
   },
   "nav": {
     "toggleSidebar": "Toggle sidebar",
+    "home": "Home",
     "signOut": "Sign out"
   },
   "userMenu": {

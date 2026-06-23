@@ -28,13 +28,13 @@ test("publish flushes the live draft — no unpublished changes remain", async (
   await expect(page.getByTestId("publish-page")).toBeEnabled();
   await page.getByTestId("publish-page").click();
 
-  // After the save+publish round-trip the button settles back to disabled (nothing
-  // left to publish). Wait past BOTH the persist debounce (800ms) and a published
-  // poll cycle (1500ms) so a trailing debounced store would have re-raised the flag
-  // if the bug were present.
-  await expect(page.getByTestId("publish-page")).toBeDisabled({ timeout: 6000 });
+  // Publish = done: the editor auto-returns to the rendered view, so the edit-only
+  // publish control disappears (its absence == the round-trip completed). Then wait
+  // past BOTH the persist debounce (800ms) and a published poll cycle (1500ms) so a
+  // trailing debounced store would have re-raised the flag if the bug were present —
+  // the server fetch below is the source of truth that catches it.
+  await expect(page.getByTestId("edit-toggle")).toBeVisible({ timeout: 6000 });
   await sleep(2500);
-  await expect(page.getByTestId("publish-page")).toBeDisabled();
 
   // Source of truth: the server has no unpublished changes AND the published content
   // includes everything that was typed before publishing.

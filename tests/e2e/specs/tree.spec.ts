@@ -150,3 +150,13 @@ test("the sidebar has no horizontal scrollbar (overflow regression)", async ({ p
   const ok = await page.locator("aside").first().evaluate((el) => el.scrollWidth <= el.clientWidth);
   expect(ok).toBe(true);
 });
+
+test("the brand lockup links home (member chrome)", async ({ page }) => {
+  await openDemo(page);
+  // navigate off the home page first
+  await page.getByTestId("new-page").click();
+  await page.waitForURL(/\/p\/.+edit=1/);
+  // clicking the brand returns to home (catch-all "/" → /p/demo)
+  await page.getByTestId("brand-home").click();
+  await page.waitForURL(/\/p\/demo$/);
+});
