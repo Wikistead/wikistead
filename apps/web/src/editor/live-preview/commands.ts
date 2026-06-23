@@ -44,10 +44,34 @@ function prefixLines(view: EditorView, prefix: string): void {
 
 export const toggleBold = (view: EditorView) => wrap(view, "**", "**");
 export const toggleItalic = (view: EditorView) => wrap(view, "*", "*");
+export const toggleStrikethrough = (view: EditorView) => wrap(view, "~~", "~~");
 export const toggleInlineCode = (view: EditorView) => wrap(view, "`", "`");
 export const setHeading = (view: EditorView, level = 2) =>
   prefixLines(view, `${"#".repeat(level)} `);
 export const toggleBulletList = (view: EditorView) => prefixLines(view, "- ");
+export const toggleNumberedList = (view: EditorView) => prefixLines(view, "1. ");
+export const toggleQuote = (view: EditorView) => prefixLines(view, "> ");
+
+// Block inserts at the caret. Used by the command palette (slash) after it removes
+// the "/query" token, so they insert at the (now empty) line position. Plain Markdown
+// → propagates to the canonical Y.Text like any edit (offset-invariant, presence-safe).
+export function insertCodeBlock(view: EditorView): void {
+  const pos = view.state.selection.main.head;
+  view.dispatch({ changes: { from: pos, insert: "```\n\n```" }, selection: { anchor: pos + 4 }, scrollIntoView: true });
+  view.focus();
+}
+export function insertTable(view: EditorView): void {
+  const pos = view.state.selection.main.head;
+  const tpl = "| Column | Column |\n| --- | --- |\n| Cell | Cell |";
+  // select the first "Column" so it can be typed over
+  view.dispatch({ changes: { from: pos, insert: tpl }, selection: EditorSelection.range(pos + 2, pos + 8), scrollIntoView: true });
+  view.focus();
+}
+export function insertDivider(view: EditorView): void {
+  const pos = view.state.selection.main.head;
+  view.dispatch({ changes: { from: pos, insert: "---\n" }, selection: { anchor: pos + 4 }, scrollIntoView: true });
+  view.focus();
+}
 
 // Insert "[text](url)" and leave the caret selecting "url" so it can be typed
 // Insert an image reference at the caret: ![alt](wks-attachment:<id>). The ref is
