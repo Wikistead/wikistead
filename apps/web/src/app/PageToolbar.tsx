@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, Columns2, Check, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button, IconButton } from "../ui/Button";
@@ -7,43 +6,8 @@ import type { EditorLayout } from "../editor/Editor";
 import { useDirty, type DirtySignal } from "../editor/dirtySignal";
 import styles from "./PageToolbar.module.css";
 
-// Inline-editable page title (Phase 5 #6). Click to rename (Notion/Outline style);
-// shown editable only to edit-capable users — the server re-checks page#edit on the
-// PATCH regardless. Enter/blur commits (if changed & non-empty), Escape cancels.
-function EditableTitle({ title, onRename }: { title: string; onRename: (title: string) => void }) {
-  const { t } = useTranslation();
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(title);
-  useEffect(() => { if (!editing) setDraft(title); }, [title, editing]);
-  const commit = () => {
-    const next = draft.trim();
-    setEditing(false);
-    if (next && next !== title) onRename(next);
-  };
-  if (editing) {
-    return (
-      <input
-        className={styles.titleInput}
-        data-testid="page-title-input"
-        autoFocus
-        value={draft}
-        aria-label={t("dialogs.renamePageTitle")}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") { e.preventDefault(); commit(); }
-          else if (e.key === "Escape") { setDraft(title); setEditing(false); }
-        }}
-        onBlur={commit}
-      />
-    );
-  }
-  return (
-    <button type="button" className={styles.titleBtn} data-testid="page-title" title={t("dialogs.renamePageTitle")}
-      onClick={() => { setDraft(title); setEditing(true); }}>
-      {title || t("common.untitled")}
-    </button>
-  );
-}
+// The page title moved to a large heading at the top of the reading column (Group
+// C-B, see PageTitle.tsx) — the toolbar now carries only the publish chips + actions.
 
 // Mode-aware page top bar (Phase 3b-3). One component for members AND guests, driven
 // by `editing`. READ mode = title + Edit/Share/Comments + ••• (Export/Print/History/
@@ -53,7 +17,6 @@ function EditableTitle({ title, onRename }: { title: string; onRename: (title: s
 // actions) and the guest share page (edit/publish only). Authz gating is the caller's
 // (canEdit/canManage/canPublish) — the server stays the fortress.
 export interface PageToolbarProps {
-  title: string;
   canEdit: boolean;
   editing: boolean;
   onEdit: () => void;
@@ -75,7 +38,6 @@ export interface PageToolbarProps {
   onExport?: () => void;
   onPrint?: () => void;
   onPermissions?: () => void; // implies canManage (caller gates)
-  onRename?: (title: string) => void; // present ⇒ title is click-to-rename (edit-capable)
   // Optimistic "unpublished changes" signal: enables Publish the instant an edit
   // diverges, without re-rendering the editor. ORed with canPublish (server poll).
   dirtySignal?: DirtySignal;
@@ -101,9 +63,6 @@ export function PageToolbar(p: PageToolbarProps) {
 
   return (
     <div className={styles.bar} data-testid="page-toolbar">
-      {p.onRename
-        ? <EditableTitle title={p.title} onRename={p.onRename} />
-        : <span className={styles.title}>{p.title || t("common.untitled")}</span>}
       {p.publishState === "draft" && <span className={styles.chip} data-testid="draft-badge">{t("page.draft")}</span>}
       {p.publishState === "unpublished" && <span className={`${styles.chip} ${styles.chipDirty}`} data-testid="unpublished-badge">{t("page.unpublishedChanges")}</span>}
       <div className={styles.spacer} />
