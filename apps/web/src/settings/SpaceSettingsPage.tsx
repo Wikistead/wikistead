@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Navigate, Outlet, Route, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useActiveSpace } from "../app/ActiveSpace";
 import { useSession } from "../session/SessionProvider";
-import { useSpaces, useRenameSpace, useDeleteSpace, useUpdateSpaceIcon } from "../data/queries";
+import { useSpaces, useRenameSpace, useDeleteSpace, useUpdateSpaceIcon, useUploadSpaceIcon, useRemoveSpaceIcon } from "../data/queries";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { SpaceIcon } from "../ui/SpaceIcon";
@@ -16,7 +16,10 @@ import { SpaceMembersTab } from "./SpaceMembersTab";
 import { SpacePagesTab } from "./SpacePagesTab";
 import { SpaceThemeTab } from "./SpaceThemeTab";
 
-interface SpaceCtx { spaceId: string; name: string; accentKey: string | null; icon: string | null }
+interface SpaceCtx { spaceId: string; name: string; accentKey: string | null; icon: string | null; iconImageUrl: string | null }
+
+const ICON_MAX_BYTES = 512 * 1024;
+const ICON_TYPES = /^image\/(png|jpeg|webp)$/;
 
 function useSpaceTabs(spaceId: string): SettingsTab[] {
   const { t } = useTranslation();
@@ -52,7 +55,7 @@ function SpaceSettingsLayout() {
   if (!space) return <AppShell onLogout={logout}><SettingsDenied kind="notFound" /></AppShell>;
   if (space.capability !== "manage") return <AppShell onLogout={logout}><SettingsDenied kind="forbidden" /></AppShell>;
 
-  const ctx: SpaceCtx = { spaceId: space.id, name: space.name, accentKey: space.accentKey ?? null, icon: space.icon ?? null };
+  const ctx: SpaceCtx = { spaceId: space.id, name: space.name, accentKey: space.accentKey ?? null, icon: space.icon ?? null, iconImageUrl: space.iconImageUrl ?? null };
   return (
     <AppShell onLogout={logout}>
       <SettingsShell title={t("spaceSettings.title", { name: space.name })} tabs={tabs}>
@@ -64,11 +67,14 @@ function SpaceSettingsLayout() {
 
 function SpaceGeneralTab() {
   const { t } = useTranslation();
-  const { spaceId, name, icon } = useOutletContext<SpaceCtx>();
+  const { spaceId, name, icon, iconImageUrl } = useOutletContext<SpaceCtx>();
   const navigate = useNavigate();
   const rename = useRenameSpace();
   const del = useDeleteSpace();
   const setIcon = useUpdateSpaceIcon(spaceId);
+  const uploadIcon = useUploadSpaceIcon(spaceId);
+  const removeIcon = useRemoveSpaceIcon(spaceId);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(name);
   const [iconDraft, setIconDraft] = useState(icon ?? "");
   const [confirming, setConfirming] = useState(false);
@@ -78,6 +84,27 @@ function SpaceGeneralTab() {
       onSuccess: () => notify.success(t("toast.saved")),
       onError: () => notify.error(t("toast.actionFailed")),
     });
+  };
+
+  // Image upload mirrors the tenant logo: base64 in, server re-validates magic bytes
+  // + size. The image takes precedence over the glyph; clearing it reverts to glyph
+  // ▷ auto initials.
+  const onPickIcon = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+    if (!ICON_TYPES.test(file.type)) { notify.error(t("tenantBranding.logoType")); return; }
+    if (file.size > ICON_MAX_BYTES) { notify.error(t("tenantBranding.logoSize")); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const res = String(reader.result);
+      const b64 = res.slice(res.indexOf(",") + 1); // strip the data: URL prefix
+      uploadIcon.mutate(b64, {
+        onSuccess: () => notify.success(t("toast.saved")),
+        onError: () => notify.error(t("toast.actionFailed")),
+      });
+    };
+    reader.readAsDataURL(file);
   };
 
   const save = () => {
@@ -101,9 +128,9 @@ function SpaceGeneralTab() {
 
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("spaceSettings.iconLabel")}</label>
       <p style={{ color: "var(--fg-dim)", fontSize: 13, marginTop: 0 }}>{t("spaceSettings.iconHint")}</p>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 32 }}>
-        {/* Live preview of what the sidebar will show (override, else auto initials). */}
-        <SpaceIcon id={spaceId} name={name} icon={iconDraft.trim() || null} size={28} data-testid="space-icon-preview" />
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+        {/* Live preview of what the sidebar will show: image ▷ glyph ▷ auto initials. */}
+        <SpaceIcon id={spaceId} name={name} icon={iconDraft.trim() || null} image={iconImageUrl} size={28} data-testid="space-icon-preview" />
         <Input
           className="w-24"
           value={iconDraft}
@@ -115,6 +142,16 @@ function SpaceGeneralTab() {
         />
         <Button variant="primary" disabled={setIcon.isPending || (iconDraft.trim() || null) === (icon ?? null)} onClick={() => saveIcon(iconDraft.trim() || null)} data-testid="space-icon-save">{t("common.save")}</Button>
         {icon && <Button variant="ghost" disabled={setIcon.isPending} onClick={() => { setIconDraft(""); saveIcon(null); }} data-testid="space-icon-clear">{t("spaceSettings.iconClear")}</Button>}
+      </div>
+
+      {/* Image upload (#6): takes precedence over the glyph. Default stays the initial. */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 32 }}>
+        <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" hidden data-testid="space-icon-image-input" onChange={onPickIcon} />
+        <Button variant="default" disabled={uploadIcon.isPending} onClick={() => fileRef.current?.click()} data-testid="space-icon-image-upload">{t("spaceSettings.iconImageUpload")}</Button>
+        {iconImageUrl && (
+          <Button variant="dangerGhost" disabled={removeIcon.isPending} data-testid="space-icon-image-remove"
+            onClick={() => removeIcon.mutate(undefined, { onSuccess: () => notify.success(t("toast.saved")), onError: () => notify.error(t("toast.actionFailed")) })}>{t("spaceSettings.iconImageRemove")}</Button>
+        )}
       </div>
 
       <h3 style={{ color: "var(--danger)" }}>{t("spaceSettings.dangerZone")}</h3>
