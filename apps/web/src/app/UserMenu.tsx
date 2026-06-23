@@ -15,7 +15,7 @@ export function UserMenu({ onLogout }: { onLogout: () => void }) {
   const navigate = useNavigate();
   const name = displayName ?? sub ?? t("userMenu.label");
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger className={styles.avatarBtn} aria-label={t("userMenu.label")} title={name} data-testid="user-menu">
         <Avatar name={name} src={picture} seed={user.seed ?? sub ?? name} size={26} data-testid="user-avatar" />
       </DropdownMenuTrigger>

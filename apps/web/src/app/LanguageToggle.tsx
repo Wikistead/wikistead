@@ -12,7 +12,7 @@ export function LanguageToggle() {
   const { t, i18n } = useTranslation();
   const current = i18n.resolvedLanguage ?? i18n.language;
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger className={styles.iconBtn} aria-label={t("language.label")} title={t("language.label")} data-testid="language-toggle">
         <Languages size={15} />
       </DropdownMenuTrigger>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -137,8 +137,16 @@ export function Sidebar() {
     else if (value === "rename") setRenaming({ pageId: d.pageId, spaceId: d.spaceId, title: d.name });
     else if (value === "delete") setDeleting({ id: d.pageId, name: d.name });
   };
+  // Route the row action through a ref so NodeRow's identity does NOT depend on it.
+  // NodeRow is the react-arborist row renderer: if its identity changes on a Sidebar
+  // re-render, react-arborist REMOUNTS every row — which detaches an open row menu's
+  // trigger (Radix then closes the menu mid-click). Keeping NodeRow stable (memoised
+  // on only render-affecting values) keeps tree rows — and any open menu — alive
+  // across background re-renders.
+  const onRowActionRef = useRef(onRowAction);
+  onRowActionRef.current = onRowAction;
 
-  const NodeRow = ({ node, style, dragHandle }: NodeRendererProps<Node>) => {
+  const NodeRow = useCallback(({ node, style, dragHandle }: NodeRendererProps<Node>) => {
     const d = node.data;
     const selected = d.pageId === pageId;
     const hasChildren = (d.children?.length ?? 0) > 0;
@@ -164,26 +172,26 @@ export function Sidebar() {
         ) : null}
         {canEdit && (
           <span className={styles.actions} onClick={(e) => e.stopPropagation()}>
-            <DropdownMenu>
+            <DropdownMenu modal={false}>
               <DropdownMenuTrigger className={styles.rowMenuBtn} aria-label={t("sidebar.pageActions")} data-testid="page-actions"><MoreHorizontal size={14} /></DropdownMenuTrigger>
               <DropdownMenuContent align="start" data-testid="page-menu">
-                <DropdownMenuItem onSelect={() => onRowAction("subpage", d)} data-testid="add-subpage"><FilePlus size={13} /> {t("sidebar.addSubpage")}</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onRowAction("share", d)}><Share2 size={13} /> {t("sidebar.share")}</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onRowAction("rename", d)}><Pencil size={13} /> {t("sidebar.rename")}</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onRowAction("delete", d)} data-danger="" variant="destructive"><Trash2 size={13} /> {t("sidebar.delete")}</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onRowActionRef.current("subpage", d)} data-testid="add-subpage"><FilePlus size={13} /> {t("sidebar.addSubpage")}</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onRowActionRef.current("share", d)}><Share2 size={13} /> {t("sidebar.share")}</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onRowActionRef.current("rename", d)}><Pencil size={13} /> {t("sidebar.rename")}</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onRowActionRef.current("delete", d)} data-danger="" variant="destructive"><Trash2 size={13} /> {t("sidebar.delete")}</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </span>
         )}
       </div>
     );
-  };
+  }, [pageId, canEdit, t, navigate]);
 
   return (
     <div className={styles.sidebar} data-testid="sidebar">
       {/* Space switcher — the space is a separate layer, not a tree root. */}
       <div className={styles.header}>
-        <DropdownMenu>
+        <DropdownMenu modal={false}>
           <DropdownMenuTrigger className={styles.switcher} data-testid="space-switcher">
             {currentSpace && <SpaceIcon id={currentSpace.id} name={currentSpace.name} icon={currentSpace.icon} size={20} data-testid="space-icon" />}
             <span className={styles.switcherName}>{currentSpace?.name || t("sidebar.noSpace")}</span>

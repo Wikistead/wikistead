@@ -15,7 +15,7 @@ export function ThemeToggle() {
   const { t } = useTranslation();
   const Icon = ICON[theme];
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger className={styles.iconBtn} aria-label={t("theme.label")} title={t("theme.label")} data-testid="theme-toggle">
         <Icon size={15} />
       </DropdownMenuTrigger>
