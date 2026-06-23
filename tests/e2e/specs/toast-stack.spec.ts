@@ -23,7 +23,8 @@ test("toasts stack visibly instead of fully overlapping", async ({ page }) => {
   await sleep(150);
   await rename("Stack Two");
 
-  const toasts = page.locator("[data-scope=toast][data-part=root]");
+  // Sonner renders each toast as [data-sonner-toast]; it stacks natively.
+  const toasts = page.locator("[data-sonner-toast]");
   await expect(toasts).toHaveCount(2, { timeout: 2000 });
   // Stacked → their top positions differ. A full overlap (the bug) would be identical.
   const tops = await toasts.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
