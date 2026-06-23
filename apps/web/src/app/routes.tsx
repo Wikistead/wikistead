@@ -9,6 +9,7 @@ import { Editor, type AnchorGetter, type EditorLayout } from "../editor/Editor";
 import { createDirtySignal } from "../editor/dirtySignal";
 import { colorFromString } from "../ui/avatar";
 import { PageToolbar } from "./PageToolbar";
+import { PageTitle } from "./PageTitle";
 import { ShareDialog } from "../ui/ShareDialog";
 import { CommentsPanel } from "../comments/CommentsPanel";
 import { HistoryPanel } from "../history/HistoryPanel";
@@ -144,7 +145,6 @@ function PageRoute() {
       <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
           <PageToolbar
-            title={page?.title ?? ""}
             canEdit={canEdit}
             editing={editing}
             onEdit={() => setEditing(true)}
@@ -166,11 +166,14 @@ function PageRoute() {
             onExport={() => { if (pageId) void downloadPageExport(token, pageId); }}
             onPrint={() => window.print()}
             onPermissions={page?.canManage ? () => setPermsOpen(true) : undefined}
+            dirtySignal={dirtySig}
+          />
+          <PageTitle
+            title={page?.title ?? ""}
             onRename={canEdit && spaceId ? (title) => renamePage.mutate({ pageId: pageId!, spaceId, title }, {
               onSuccess: () => notify.success(t("toast.saved")),
               onError: () => notify.error(t("toast.actionFailed")),
             }) : undefined}
-            dirtySignal={dirtySig}
           />
           <div style={{ flex: 1, minHeight: 0 }}>
             <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} layout={layout} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} />
@@ -269,7 +272,6 @@ function GuestPage({ minted }: { minted: GuestToken }) {
     <AppShell>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         <PageToolbar
-          title=""
           canEdit={canEdit}
           editing={editing}
           onEdit={() => setEditing(true)}
