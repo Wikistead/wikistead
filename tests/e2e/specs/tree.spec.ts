@@ -159,4 +159,10 @@ test("the brand lockup links home (member chrome)", async ({ page }) => {
   // clicking the brand returns to home (catch-all "/" → /p/demo)
   await page.getByTestId("brand-home").click();
   await page.waitForURL(/\/p\/demo$/);
+
+  // the SETTINGS shell has no sidebar but is still member chrome → brand still links home
+  await page.goto("/spaces/demo_space/settings/general");
+  await page.waitForSelector("[data-testid=space-general]");
+  await page.getByTestId("brand-home").click();
+  await page.waitForURL(/\/p\/demo$/);
 });

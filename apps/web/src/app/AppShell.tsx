@@ -51,7 +51,9 @@ export function AppShell({
           <PanelLeft size={16} aria-hidden />
         )}
         {/* Brand: tenant logo ▷ tenant display name ▷ the Wikistead lockup. In member
-            chrome it links Home (→ default page); guests get a static brand (no home). */}
+            chrome (any page WITH a logout control — page route AND settings) it links
+            Home (→ default page); guests/pre-login get a static brand (no home). Gate
+            on onLogout, NOT sidebar: the settings shell has no sidebar but is a member. */}
         {(() => {
           const brand = branding.data?.logoUrl ? (
             <img className="block h-[22px] max-w-[160px] object-contain" src={branding.data.logoUrl} alt={branding.data.displayName || "Wikistead"} data-testid="brand-logo" />
@@ -60,7 +62,7 @@ export function AppShell({
           ) : (
             <BrandLockup />
           );
-          return sidebar ? (
+          return onLogout ? (
             <Link to="/" className="flex items-center rounded outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("nav.home")} data-testid="brand-home">{brand}</Link>
           ) : brand;
         })()}
