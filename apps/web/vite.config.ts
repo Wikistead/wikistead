@@ -1,8 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    // `@/…` → src/… (shadcn convention). Existing relative imports keep working.
+    alias: { "@": new URL("./src", import.meta.url).pathname },
+  },
   // Same-origin model (ADR-016): the browser only talks to the web origin; /api and
   // /collab are proxied to the API and collab services so the BFF session cookie
   // (host-only) is sent to them. changeOrigin:false PRESERVES the Host header so the
