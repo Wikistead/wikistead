@@ -39,8 +39,44 @@ export function lineDiff(oldText: string, newText: string): DiffLine[] {
   return out;
 }
 
-// True when the two texts are identical (no add/del lines) — lets the UI show a
-// "no changes" hint instead of an all-context wall.
-export function hasChanges(lines: DiffLine[]): boolean {
-  return lines.some((l) => l.type !== "same");
+// ── Split (side-by-side) view ───────────────────────────────────────────────
+// Reuse the SAME line-LCS alignment, laid out in two columns: left = the revision
+// (old), right = the current published (new). A maximal run of deletions followed by
+// additions is zipped index-wise into paired rows (so a one-line edit — e.g. a checkbox
+// flip `- [ ] x` → `- [x] x` — becomes a single "change" row with old on the left and
+// new on the right); surplus deletions/additions become left-only / right-only rows.
+// No new dependency — purely a transform over lineDiff's output.
+export type DiffSide = { lineNo: number; text: string } | null;
+export type DiffRow = { left: DiffSide; right: DiffSide; type: "same" | "add" | "del" | "change" };
+
+export function sideBySide(oldText: string, newText: string): DiffRow[] {
+  const rows: DiffRow[] = [];
+  let oldNo = 0;
+  let newNo = 0;
+  let dels: DiffSide[] = [];
+  let adds: DiffSide[] = [];
+  const flush = () => {
+    const n = Math.max(dels.length, adds.length);
+    for (let k = 0; k < n; k++) {
+      const left = dels[k] ?? null;
+      const right = adds[k] ?? null;
+      rows.push({ left, right, type: left && right ? "change" : left ? "del" : "add" });
+    }
+    dels = [];
+    adds = [];
+  };
+  for (const l of lineDiff(oldText, newText)) {
+    if (l.type === "del") dels.push({ lineNo: ++oldNo, text: l.text });
+    else if (l.type === "add") adds.push({ lineNo: ++newNo, text: l.text });
+    else {
+      flush();
+      rows.push({ left: { lineNo: ++oldNo, text: l.text }, right: { lineNo: ++newNo, text: l.text }, type: "same" });
+    }
+  }
+  flush();
+  return rows;
+}
+
+export function rowsHaveChanges(rows: DiffRow[]): boolean {
+  return rows.some((r) => r.type !== "same");
 }
