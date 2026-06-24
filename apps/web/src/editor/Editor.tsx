@@ -76,6 +76,12 @@ export interface EditorProps {
   // STABLE callbacks (useCallback) — captured at mount, not in the surface-effect deps.
   onExitEdit?: () => void;
   onPublish?: () => void;
+  // Persist a view-mode task-checkbox toggle (ADR-019): the host POSTs the no-revision
+  // endpoint for task `index` and refetches the published snapshot. Provided only for an
+  // edit-capable viewer; absent → checkboxes render disabled. Editor flips the live draft
+  // over its collab connection, then calls this; a rejection (409 dirty/mixed, 403)
+  // reverts the optimistic draft flip. Pass a STABLE callback (captured at mount).
+  onToggleTask?: (index: number) => Promise<void>;
 }
 
 function userField(user: EditorUser) {
@@ -101,7 +107,7 @@ function tint(color: string): string {
 // memo: the host (PageRoute) re-renders on its own state and on the published poll;
 // without memo those re-render <Editor> too, which the tree-move e2e forbids and
 // churns the editor. Props are referentially stable across host re-renders.
-export const Editor = memo(function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, onUploadImage, inlineComments, anchorGetterRef, dirtySignal, onExitEdit, onPublish }: EditorProps) {
+export const Editor = memo(function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, onUploadImage, inlineComments, anchorGetterRef, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
   const previewViewRef = useRef<EditorView | null>(null);
@@ -163,7 +169,20 @@ export const Editor = memo(function Editor({ docName, token, collabUrl, user, ca
 
     // VIEW mode: render the PUBLISHED snapshot read-only — NOT collab-bound.
     if (surfaceKey === "view") {
-      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl });
+      // Edit-capable viewers get interactive task checkboxes (ADR-019). A click flips
+      // the LIVE draft over the existing collab connection (canEdit ⇒ effect 1 has
+      // opened it), then persists via the no-revision endpoint; a rejection (409
+      // dirty/mixed, 403) reverts our single flip so the draft is left untouched.
+      const onToggleTaskInView = canEdit && onToggleTask
+        ? (index: number, from: number, checked: boolean) => {
+            const c = collabRef.current;
+            if (!c) return;
+            const set = (ch: string) => { c.ytext.delete(from + 1, 1); c.ytext.insert(from + 1, ch); };
+            set(checked ? " " : "x"); // optimistic draft flip
+            onToggleTask(index).catch(() => set(checked ? "x" : " ")); // revert on failure
+          }
+        : undefined;
+      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, onToggleTask: onToggleTaskInView });
       views.push(v);
       previewViewRef.current = v;
       if (anchorGetterRef) anchorGetterRef.current = null;
