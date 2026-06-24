@@ -81,7 +81,7 @@ test("wks-attachment image renders as <img>; the doc holds only the id", async (
   expect(raw).not.toContain(src.split("?")[0]!);
 });
 
-test("the toolbar Image button uploads and inserts a wks-attachment reference", async ({ page }) => {
+test("the / image command uploads and inserts a wks-attachment reference", async ({ page }) => {
   await openDemo(page);
   const pageId = await page.evaluate(async (api) => {
     const r = await fetch(`${api}/spaces/demo_space/pages`, {
@@ -98,13 +98,16 @@ test("the toolbar Image button uploads and inserts a wks-attachment reference", 
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content"); // caret in the (empty) doc
 
-  // The image button opens a hidden file input; set the file directly to upload +
-  // insert (presign → PUT → confirm → ![alt](wks-attachment:<id>) at the caret).
-  await page.setInputFiles("[data-testid=lp-image-input]", {
-    name: "shot.png",
-    mimeType: "image/png",
-    buffer: Buffer.from(PNG_1x1, "base64"),
-  });
+  // Image is layer P (insert) and now lives in the `/` palette, NOT the selection bubble.
+  // Selecting it removes the "/image" token and opens the host file picker; choosing a
+  // file uploads + inserts ![alt](wks-attachment:<id>) at the caret. Handle the native
+  // file chooser the picker opens (Playwright intercepts input.click()).
+  page.once("filechooser", (fc) =>
+    fc.setFiles({ name: "shot.png", mimeType: "image/png", buffer: Buffer.from(PNG_1x1, "base64") }),
+  );
+  await page.keyboard.type("/image");
+  await expect(page.getByTestId("slash-item-image")).toBeVisible();
+  await page.keyboard.press("Enter");
 
   // The caret lands on the inserted image line → raw is revealed; it references the
   // attachment by id with the filename as alt text.

@@ -1,6 +1,5 @@
 import type { EditorView } from "@codemirror/view";
-import { insertImage } from "./commands";
-import type { ImageUploader } from "./toolbar";
+import { insertImage, type ImageUploader } from "./commands";
 
 // Drag-and-drop image attach: dropping image file(s) onto the editable preview
 // uploads each via the host's uploader (presign → PUT → confirm) and inserts the

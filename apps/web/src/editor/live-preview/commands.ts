@@ -68,6 +68,12 @@ export const INLINE_FORMATS: InlineFormat[] = [
   { id: "link", symbol: "Link", labelKey: "lpToolbar.link", mnemonic: "l", run: insertLink },
 ];
 
+// Uploads a chosen image file and returns the reference + alt to insert (or null
+// to cancel/fail). Provided by the host (it knows the page + auth); omitted = no
+// image entry (e.g. guests, or surfaces without an uploader). Lives here with
+// insertImage so both the `/` insert palette and drag-drop import it from one place.
+export type ImageUploader = (file: File) => Promise<{ ref: string; alt: string } | null>;
+
 // Insert "[text](url)" and leave the caret selecting "url" so it can be typed
 // Insert an image reference at the caret: ![alt](wks-attachment:<id>). The ref is
 // the stable attachment id (resolved to a presigned URL at render time — never

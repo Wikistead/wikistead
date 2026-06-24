@@ -26,6 +26,10 @@ test("format toolbar floats on selection and bolds", async ({ page }) => {
   await expect(bubble.getByText("S", { exact: true })).toBeVisible();
   expect(await bubble.getByText("H", { exact: true }).count()).toBe(0); // heading → palette
   expect(await bubble.getByText("• List", { exact: true }).count()).toBe(0); // list → palette
+  // image (P, insert) is NOT in the on-selection bubble — it lives in the `/` palette, so
+  // the on-selection menu is decoration-only and identical across vim (`\`) and non-vim.
+  expect(await bubble.getByText("Image", { exact: true }).count()).toBe(0);
+  expect(await page.getByTestId("lp-image-btn").count()).toBe(0);
 
   // clicking B wraps the selection (same command as before — chrome only)
   await bubble.getByText("B", { exact: true }).click();

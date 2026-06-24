@@ -356,7 +356,8 @@
     "quote": "Quote",
     "codeBlock": "Code block",
     "table": "Table",
-    "divider": "Divider"
+    "divider": "Divider",
+    "image": "Image"
   },
   "members": {
     "title": "Members",
