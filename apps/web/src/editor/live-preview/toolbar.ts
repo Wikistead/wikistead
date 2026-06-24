@@ -4,9 +4,9 @@ import i18n from "../../i18n";
 import {
   insertImage,
   insertLink,
-  setHeading,
   toggleBold,
-  toggleBulletList,
+  toggleItalic,
+  toggleStrikethrough,
   toggleInlineCode,
 } from "./commands";
 
@@ -15,12 +15,14 @@ import {
 // image button (e.g. guests, or surfaces without an uploader).
 export type ImageUploader = (file: File) => Promise<{ ref: string; alt: string } | null>;
 
-// Format buttons. title is an i18n key resolved at mount time — the labels are symbols.
-// The command functions are inviolable (Y.Text edits); this module is chrome only.
+// Layer-A (inline-span) format buttons ONLY — the selection bubble is the decoration
+// entry for mouse/any-selection users. Block-level constructs (heading, list, table,
+// divider) live in the slash palette, not here. title is an i18n key; labels are
+// symbols. The command functions are inviolable (Y.Text edits) — this is chrome only.
 const BUTTONS: { label: string; titleKey: string; run: (v: EditorView) => void }[] = [
   { label: "B", titleKey: "lpToolbar.bold", run: toggleBold },
-  { label: "H", titleKey: "lpToolbar.heading", run: (v) => setHeading(v, 2) },
-  { label: "• List", titleKey: "lpToolbar.bulletList", run: toggleBulletList },
+  { label: "I", titleKey: "palette.italic", run: toggleItalic },
+  { label: "S", titleKey: "palette.strikethrough", run: toggleStrikethrough },
   { label: "</>", titleKey: "lpToolbar.inlineCode", run: toggleInlineCode },
   { label: "Link", titleKey: "lpToolbar.link", run: insertLink },
 ];
