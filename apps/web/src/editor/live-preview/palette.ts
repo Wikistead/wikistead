@@ -31,7 +31,9 @@ const COMMANDS: PaletteCommand[] = [
   { id: "quote", label: () => i18n.t("palette.quote"), alias: "quote", keywords: "blockquote citation", insert: "> ", caret: 2 },
   { id: "code", label: () => i18n.t("palette.codeBlock"), alias: "code", keywords: "code block fenced pre", insert: "```\n\n```", caret: 4 },
   { id: "table", label: () => i18n.t("palette.table"), alias: "table", keywords: "grid", insert: "| Column | Column |\n| --- | --- |\n| Cell | Cell |", caret: [2, 8] },
-  { id: "divider", label: () => i18n.t("palette.divider"), alias: "divider", keywords: "rule hr separator line", insert: "---\n", caret: 4 },
+  // `***` (not `---`): `---` under a line of text is a setext H2 underline, so it would
+  // turn the line above into a heading. `***` is always a thematic break (hr).
+  { id: "divider", label: () => i18n.t("palette.divider"), alias: "divider", keywords: "rule hr separator line", insert: "***\n", caret: 4 },
 ];
 
 function filterCommands(query: string): PaletteCommand[] {
@@ -150,15 +152,18 @@ function paletteTooltip(field: StateField<PaletteState | null>, from: number): T
 // the editor). Highest precedence so the nav keys are captured before defaults.
 //
 // vim-style nav uses Ctrl-j/Ctrl-k, NOT Ctrl-n/Ctrl-p: Ctrl+N (and Ctrl+T/Ctrl+W) are
-// browser-reserved shortcuts that the page cannot intercept (Ctrl+N opened a new window
-// — preventDefault can't stop it). Ctrl+J/Ctrl+K reach the page and ARE cancellable, and
-// j/k match vim's down/up. Arrow/Tab remain as always-safe fallbacks.
+// browser-reserved shortcuts the page cannot intercept (Ctrl+N opened a new window).
+// Ctrl+J/Ctrl+K reach the page and ARE cancellable, and j/k match vim's down/up.
+// IMPORTANT: NO preventDefault flag — the handlers only consume the key (via returning
+// true → CM preventDefaults) WHEN the palette is open. When closed they return false,
+// so Ctrl-k stays the global page-search shortcut (SearchBox bails on defaultPrevented).
+// Arrow/Tab remain as always-safe fallbacks.
 const paletteKeymap = Prec.highest(
   keymap.of([
     { key: "ArrowDown", run: (v) => move(v, +1) },
     { key: "ArrowUp", run: (v) => move(v, -1) },
-    { key: "Ctrl-j", run: (v) => move(v, +1), preventDefault: true },
-    { key: "Ctrl-k", run: (v) => move(v, -1), preventDefault: true },
+    { key: "Ctrl-j", run: (v) => move(v, +1) },
+    { key: "Ctrl-k", run: (v) => move(v, -1) },
     { key: "Tab", run: (v) => move(v, +1) },
     { key: "Shift-Tab", run: (v) => move(v, -1) },
     { key: "Enter", run: chooseSelected },

@@ -76,3 +76,37 @@ test("slash palette: fires at line start or after whitespace, not mid-word", asy
   await page.keyboard.type("ab /");
   await expect(page.getByTestId("slash-palette")).toBeVisible();
 });
+
+test("divider inserts a thematic break, not a setext heading", async ({ page }) => {
+  await openDemo(page);
+  await enterEdit(page);
+  await resetDoc(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("a title");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("/divider");
+  await page.keyboard.press("Enter");
+  await sleep(200);
+  // the line above must NOT become a heading (the `---` setext bug), and a rule renders
+  expect(await page.locator("[data-pane=preview] .cm-lp-h").count()).toBe(0);
+  expect(await page.locator("[data-pane=preview] .cm-lp-hr").count()).toBeGreaterThan(0);
+});
+
+test("Ctrl-k navigates the palette when open, opens page search when closed", async ({ page }) => {
+  await openDemo(page);
+  await enterEdit(page);
+  await resetDoc(page);
+  await page.click("[data-pane=preview] .cm-content");
+
+  // palette CLOSED → Ctrl-k focuses page search (the global shortcut still works)
+  await page.keyboard.press("Control+k");
+  await expect(page.getByTestId("search-input")).toBeFocused();
+
+  // palette OPEN → Ctrl-k navigates (wraps up from first to last) and does NOT open search
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("/");
+  await expect(page.getByTestId("slash-item-h1")).toHaveAttribute("data-selected", "true");
+  await page.keyboard.press("Control+k");
+  await expect(page.getByTestId("slash-item-divider")).toHaveAttribute("data-selected", "true");
+  await expect(page.getByTestId("search-input")).not.toBeFocused();
+});

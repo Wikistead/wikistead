@@ -37,6 +37,9 @@ export function SearchBox() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // If something already handled Ctrl/Cmd+K (e.g. the editor's slash palette uses
+      // it for nav while open, calling preventDefault), don't also open search.
+      if (e.defaultPrevented) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         document.querySelector<HTMLInputElement>("[data-testid=search-input]")?.focus();
