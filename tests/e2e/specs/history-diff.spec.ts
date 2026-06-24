@@ -1,10 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
 import { openScratch, enterEdit, sleep } from "../helpers";
 
-// Design-5 (ADR-019 D6/D7): the history panel can diff a revision against the current
-// published snapshot. Because checkbox state is text (D7), a view-mode toggle — which
-// updates published_md WITHOUT a revision (D1/D2) — shows up in the diff as a changed
-// line, and a restore rewinds the checkbox with the body.
+// Design-5 (ADR-019 D6/D7): the history panel's "Compare" opens a near-fullscreen
+// SPLIT diff (DiffModal) — left = revision, right = current published. It is an overlay,
+// so the editor stays mounted and presence/collab are untouched. Because checkbox state
+// is text (D7), a view-mode toggle (updates published_md, NO revision per D1/D2) shows
+// up as a "change" row with old on the left and new on the right; restore rewinds it.
 const API = "http://dev.localhost:4010";
 const publishedMd = (p: Page, id: string) =>
   p.evaluate(async ({ api, id }) => {
@@ -21,13 +22,13 @@ const publish = (p: Page, id: string) =>
     await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
   }, { api: API, id });
 
-test("history diff surfaces a checkbox change; the toggle made no revision; restore rewinds it", async ({ browser }) => {
+test("history split diff: a checkbox flip shows as a left/right change row; overlay keeps the editor mounted; restore rewinds it", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   const pageId = await openScratch(page, "hist-diff");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.type("- [ ] task one");
-  await sleep(3500); // collab debounce, so the publish snapshots this draft
+  await sleep(3500); // collab debounce so the publish snapshots this draft
   await publish(page, pageId); // revision 1 holds "- [ ] task one"
   await expect.poll(() => revisionCount(page, pageId), { timeout: 15_000 }).toBe(1);
 
@@ -38,21 +39,25 @@ test("history diff surfaces a checkbox change; the toggle made no revision; rest
   await expect.poll(() => publishedMd(page, pageId), { timeout: 5000 }).toContain("- [x] task one");
   expect(await revisionCount(page, pageId)).toBe(1); // the tick created no revision
 
-  // open History → Compare the revision against the current published snapshot
+  // open History → Compare → the split modal
   await page.click("[data-testid=page-overflow-trigger]");
   await page.click("[data-testid=history-toggle]");
-  await expect(page.getByTestId("history-panel")).toBeVisible();
   await page.getByTestId("revision-diff").first().click();
-  await expect(page.getByTestId("history-diff")).toBeVisible();
+  await expect(page.getByTestId("diff-modal")).toBeVisible();
 
-  // the checkbox flip shows as a removed `[ ]` line and an added `[x]` line
-  const del = page.locator("[data-testid=diff-body] [data-difftype=del]");
-  const add = page.locator("[data-testid=diff-body] [data-difftype=add]");
-  await expect(del).toContainText("- [ ] task one");
-  await expect(add).toContainText("- [x] task one");
+  // split view: the checkbox flip is one "change" row — old `[ ]` on the left, new `[x]`
+  // on the right (side-by-side, not inline)
+  const changeRow = page.locator("[data-testid=diff-row][data-difftype=change]");
+  await expect(changeRow.locator("[data-side=left]")).toContainText("- [ ] task one");
+  await expect(changeRow.locator("[data-side=right]")).toContainText("- [x] task one");
 
-  // restore the revision → published rewinds to the unchecked state (D7)
-  await page.getByTestId("diff-back").click();
+  // collab-safety proxy: the modal is an OVERLAY — the editor surface is still mounted
+  // underneath (not unmounted/replaced), so the collab connection is never dropped.
+  await expect(page.locator("[data-pane=preview] .cm-content")).toBeAttached();
+
+  // close the overlay, then restore the revision → published rewinds to unchecked (D7)
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("diff-modal")).toHaveCount(0);
   await page.getByTestId("revision-restore").first().click();
   await page.locator("[data-testid=confirm-dialog] [data-testid=confirm-restore]").click();
   await expect.poll(() => publishedMd(page, pageId), { timeout: 10_000 }).toContain("- [ ] task one");

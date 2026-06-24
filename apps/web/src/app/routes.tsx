@@ -28,6 +28,7 @@ import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
 import { CommentsPanel } from "../comments/CommentsPanel";
 import { HistoryPanel } from "../history/HistoryPanel";
+import { DiffModal } from "../history/DiffModal";
 import { PermissionsDialog } from "../ui/PermissionsDialog";
 import { Button } from "../ui/Button";
 import { notify } from "../ui/toast";
@@ -58,8 +59,14 @@ const COLLAB_URL = resolveCollabUrl();
 function PageRoute() {
   const { t } = useTranslation();
   const { pageId } = useParams<{ pageId: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const autoEdit = searchParams.get("edit") === "1"; // set by the create-page flow
+  // Diff modal is URL-driven (?diff=<revId>): a shallow deep-link (no route added) that
+  // restores the open diff on reload, while keeping the editor mounted underneath so
+  // presence/collab are untouched (ADR-019).
+  const diffRevId = searchParams.get("diff");
+  const openDiff = useCallback((revId: string) => setSearchParams((p) => { p.set("diff", revId); return p; }), [setSearchParams]);
+  const closeDiff = useCallback(() => setSearchParams((p) => { p.delete("diff"); return p; }), [setSearchParams]);
   const { status, collabToken, tenantId, user, logout, token } = useSession();
   // Capability gates the Edit control (UI only — collab server is the fortress).
   // Defaults to view until resolved, so a page is never editable speculatively. A page
@@ -234,8 +241,9 @@ function PageRoute() {
           {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
         </div>
         {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} />}
-        {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} onClose={closeHistory} />}
+        {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} onCompare={openDiff} onClose={closeHistory} />}
       </div>
+      {pageId && diffRevId && <DiffModal pageId={pageId} revId={diffRevId} onClose={closeDiff} />}
       {pageId && <PermissionsDialog pageId={pageId} open={permsOpen} onClose={() => setPermsOpen(false)} />}
       <ShareDialog pageId={sharing ? pageId ?? null : null} onClose={() => setSharing(false)} />
     </AppShell>
