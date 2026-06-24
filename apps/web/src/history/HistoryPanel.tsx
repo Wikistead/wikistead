@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, X } from "lucide-react";
 import { usePageRevisions, useRestoreRevision, type Revision } from "../data/queries";
 import { ConfirmDialog } from "../ui/dialogs";
+import { useEscClose } from "../ui/useEscClose";
 import { notify } from "../ui/toast";
 import styles from "./HistoryPanel.module.css";
 
@@ -21,16 +22,20 @@ function author(createdBy: string | null, unknown: string): string {
   return createdBy.replace(/^(user|guest):/, "");
 }
 
-export function HistoryPanel({ pageId, canRestore }: { pageId: string; canRestore: boolean }) {
+export function HistoryPanel({ pageId, canRestore, onClose }: { pageId: string; canRestore: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   const { data: revisions, isLoading } = usePageRevisions(pageId);
   const restore = useRestoreRevision(pageId);
   const [confirming, setConfirming] = useState<Revision | null>(null);
+  useEscClose(onClose);
 
   return (
     <aside className={styles.panel} data-testid="history-panel">
       <div className={styles.header}>
         <strong>{t("history.title")}</strong>
+        <button type="button" className={styles.close} data-testid="history-close" aria-label={t("common.close")} onClick={onClose}>
+          <X size={16} aria-hidden />
+        </button>
       </div>
 
       {isLoading && <p className={styles.hint}>{t("common.loading")}</p>}

@@ -120,6 +120,10 @@ function PageRoute() {
     try { localStorage.setItem("wks.commentsOpen", n ? "1" : "0"); } catch { /* no storage */ }
     return n;
   });
+  const closeComments = useCallback(() => {
+    setCommentsOpen(false);
+    try { localStorage.setItem("wks.commentsOpen", "0"); } catch { /* no storage */ }
+  }, []);
 
   // History panel is toggled the same way (persisted). Listing needs view; restore
   // is offered only to edit-capable users (the server re-checks both).
@@ -131,6 +135,10 @@ function PageRoute() {
     try { localStorage.setItem("wks.historyOpen", n ? "1" : "0"); } catch { /* no storage */ }
     return n;
   });
+  const closeHistory = useCallback(() => {
+    setHistoryOpen(false);
+    try { localStorage.setItem("wks.historyOpen", "0"); } catch { /* no storage */ }
+  }, []);
 
   // Per-page permissions (manage only). Also the invite-to-draft surface.
   const [permsOpen, setPermsOpen] = useState(false);
@@ -205,8 +213,8 @@ function PageRoute() {
           </div>
           {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
         </div>
-        {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={capability === "edit"} anchorGetterRef={anchorGetterRef} />}
-        {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} />}
+        {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} />}
+        {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} onClose={closeHistory} />}
       </div>
       {pageId && <PermissionsDialog pageId={pageId} open={permsOpen} onClose={() => setPermsOpen(false)} />}
       <ShareDialog pageId={sharing ? pageId ?? null : null} onClose={() => setSharing(false)} />

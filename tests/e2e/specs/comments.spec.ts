@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, enterEdit, sleep } from "../helpers";
+import { openDemo, openScratch, enterEdit, sleep } from "../helpers";
 
 // P4 UX in a REAL browser: page comments + resolve/tabs, inline comment anchored to
 // a selection (blue underline) that FOLLOWS a live edit, and @mention autocomplete
@@ -63,4 +63,36 @@ test("comments: page comment + resolve/tabs, inline highlight that follows edits
   await pageInput.fill("@dev");
   await expect(panel.locator("[data-testid=mention-suggest]")).toBeVisible({ timeout: 6000 });
   await expect(panel.locator("[data-testid=mention-option]").first()).toContainText("dev-user");
+});
+
+// Light-1: the panel closes in place via × or Esc, but NOT on an outside click (it is
+// used while reading the body). The toggle still works. Esc is deferred to the editor
+// when the editor is focused (it owns Esc for vim/palette).
+test("comments panel: × and Esc close it; outside-click and editor-Esc do not", async ({ page }) => {
+  await openScratch(page, "comments-close");
+  await enterEdit(page);
+  await page.click("[data-testid=comments-toggle]");
+  const panel = page.getByTestId("comments-panel");
+  await expect(panel).toBeVisible();
+
+  // outside-click in the editor does NOT close the panel
+  await page.click("[data-pane=preview] .cm-content");
+  await sleep(100);
+  await expect(panel).toBeVisible();
+
+  // Esc while the EDITOR is focused does NOT close it (the editor owns Esc)
+  await page.keyboard.press("Escape");
+  await sleep(100);
+  await expect(panel).toBeVisible();
+
+  // × closes it
+  await page.getByTestId("comments-close").click();
+  await expect(panel).toHaveCount(0);
+
+  // re-open; Esc with focus in the panel closes it
+  await page.click("[data-testid=comments-toggle]");
+  await expect(panel).toBeVisible();
+  await page.getByTestId("comments-close").focus();
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
 });

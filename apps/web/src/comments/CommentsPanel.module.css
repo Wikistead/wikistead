@@ -13,6 +13,19 @@
 }
 .header { display: flex; align-items: center; justify-content: space-between; }
 .title { font-size: 14px; font-weight: 600; }
+.headerRight { display: inline-flex; align-items: center; gap: 8px; }
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.close:hover { background: var(--panel-2); color: var(--fg); }
 
 /* Segmented Open/Resolved control. */
 .tabs { display: inline-flex; gap: 2px; padding: 2px; background: var(--panel-2); border-radius: 7px; }
