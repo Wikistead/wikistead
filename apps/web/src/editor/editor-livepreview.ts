@@ -1,4 +1,5 @@
 import { EditorView, minimalSetup } from "codemirror";
+import { tooltips } from "@codemirror/view";
 import { EditorState, type Compartment } from "@codemirror/state";
 import { vim } from "@replit/codemirror-vim";
 import { markdownExtension } from "./markdown-config";
@@ -38,6 +39,9 @@ export function mountLivePreview(
     extensions: [
       ...(opts.vimCompartment ? [opts.vimCompartment.of(opts.vim ? vim() : [])] : []),
       minimalSetup,
+      // position:fixed so the palette/bubble/hint escape overflow:hidden ancestors and
+      // CM flips them above/below + shifts horizontally to stay within the viewport.
+      tooltips({ position: "fixed" }),
       cmTheme,
       EditorView.lineWrapping,
       // GFM base (tables) + fenced-code highlighting. The doc stays plain markdown.
@@ -61,7 +65,9 @@ export function mountLivePreview(
       // Floating selection toolbar + slash command palette (editable surface only;
       // view guests get neither). container = the host so the hidden file input
       // survives CM's DOM reconcile.
-      ...(!opts.readOnly ? [floatingToolbar({ uploadImage: opts.uploadImage, container: parent }), slashPalette({ container: parent })] : []),
+      // slashPalette FIRST so its vimVisualField precedes the toolbar's bubble (which
+      // reads it to suppress itself in vim visual).
+      ...(!opts.readOnly ? [slashPalette(), floatingToolbar({ uploadImage: opts.uploadImage, container: parent })] : []),
       ...(opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
     ],
   });

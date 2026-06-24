@@ -62,6 +62,8 @@ test("vim visual hint: shown only in visual mode, display-only (no doc/offset ch
   await sleep(120);
   const lineBefore = await head(page);
   await expect(hint).toBeVisible();
+  // the hint takes the ribbon spot: the full toolbar bubble is suppressed in vim visual
+  await expect(page.getByTestId("format-bubble")).toHaveCount(0);
 
   // display-only: it adds no text and is NOT inside the editable content (so it cannot
   // affect document offsets / presence); the caret line is unchanged.

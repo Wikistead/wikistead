@@ -1,6 +1,7 @@
 import { EditorView, ViewPlugin, showTooltip, type Tooltip } from "@codemirror/view";
 import { StateField } from "@codemirror/state";
 import i18n from "../../i18n";
+import { vimVisualField } from "./palette";
 import {
   insertImage,
   insertLink,
@@ -100,9 +101,12 @@ export function floatingToolbar(opts: { uploadImage?: ImageUploader; container?:
   const bubbleField = StateField.define<readonly Tooltip[]>({
     create: () => [],
     update(value, tr) {
-      if (!tr.docChanged && !tr.selection) return value;
+      if (!tr.docChanged && !tr.selection && !tr.effects.length) return value;
       const sel = tr.state.selection.main;
-      return sel.empty ? [] : [bubble(sel.from, sel.to)];
+      // In vim VISUAL mode the small "\" hint takes the ribbon spot instead of this full
+      // bubble (the bubble is the mouse/non-vim entry) — suppress it there.
+      if (sel.empty || tr.state.field(vimVisualField, false)) return [];
+      return [bubble(sel.from, sel.to)];
     },
     provide: (f) => showTooltip.computeN([f], (state) => state.field(f)),
   });

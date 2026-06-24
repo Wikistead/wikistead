@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, enterEdit, resetDoc, sleep } from "../helpers";
+import { openDemo, openScratch, enterEdit, resetDoc, sleep } from "../helpers";
 
 const content = (p: Page) => p.locator("[data-pane=preview] .cm-content").innerText();
 
@@ -110,6 +110,27 @@ test("selection + / is a normal slash command (insert), NOT decorate", async ({ 
   await expect(page.getByTestId("decorate-palette")).toHaveCount(0); // NOT decorate
   await expect(page.getByTestId("slash-palette")).toBeVisible(); // normal insert palette
   expect(await content(page)).toContain("/ world"); // selection replaced by the typed "/"
+});
+
+test("the palette stays within the viewport when opened near the bottom", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "palette-vp");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  // fill enough lines that the caret sits near the bottom of the viewport
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.type(`line ${i}`);
+    await page.keyboard.press("Enter");
+  }
+  await page.keyboard.type("/");
+  const palette = page.getByTestId("slash-palette");
+  await expect(palette).toBeVisible();
+  const box = await palette.boundingBox();
+  const vh = page.viewportSize()!.height;
+  // fully on-screen: not clipped at the top, not running off the bottom (CM flips it
+  // above the caret near the bottom edge; position:fixed escapes overflow clipping)
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(vh + 1);
 });
 
 test("Ctrl-k navigates the palette when open, opens page search when closed", async ({ page }) => {

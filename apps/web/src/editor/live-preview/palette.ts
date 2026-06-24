@@ -1,4 +1,4 @@
-import { EditorView, ViewPlugin, showTooltip, keymap, type Tooltip, type TooltipView } from "@codemirror/view";
+import { EditorView, showTooltip, keymap, type Tooltip, type TooltipView } from "@codemirror/view";
 import { StateField, StateEffect, EditorSelection, Prec, type Extension } from "@codemirror/state";
 import { getCM } from "@replit/codemirror-vim";
 import i18n from "../../i18n";
@@ -318,30 +318,56 @@ const backslashDecorate = Prec.highest(
   }),
 );
 
-// A small, unobtrusive hint shown ONLY during a vim VISUAL selection: tells the user
-// `\` opens the format/macro palette (matching backslashDecorate). Display-only DOM in
-// the React-owned host container (NOT view.dom — CM reconciles that away, #8); it adds
-// no text and no decoration, so document offsets / presence are untouched. Hidden in
-// normal/insert/non-vim, and while the palette is already open.
-function vimVisualHint(container?: HTMLElement): Extension {
-  return ViewPlugin.define((view) => {
-    const el = document.createElement("div");
-    el.className = "lp-vim-hint";
-    el.setAttribute("data-testid", "vim-decorate-hint");
-    el.textContent = i18n.t("palette.vimHint");
-    el.style.display = "none";
-    const host = container ?? view.dom;
-    if (getComputedStyle(host).position === "static") host.style.position = "relative";
-    host.appendChild(el);
-    const sync = () => {
-      const show = isVimVisual(view) && !view.state.selection.main.empty && view.state.field(decorateField, false) == null;
-      el.style.display = show ? "" : "none";
-    };
-    sync();
-    return { update: sync, destroy: () => el.remove() };
-  });
-}
+// Shared "vim visual mode with a selection" flag. vim's mode isn't in EditorState
+// (only reachable via getCM(view)), so an updateListener syncs it into a StateField
+// that StateField-level consumers (the hint tooltip here, the bubble in toolbar.ts) can
+// read. Exported so the floating toolbar can suppress itself in vim visual (the hint
+// takes the ribbon spot instead).
+const setVimVisual = StateEffect.define<boolean>();
+export const vimVisualField = StateField.define<boolean>({
+  create: () => false,
+  update(value, tr) {
+    for (const e of tr.effects) if (e.is(setVimVisual)) return e.value;
+    return value;
+  },
+});
+const vimVisualSync = EditorView.updateListener.of((u) => {
+  const want = isVimVisual(u.view) && !u.view.state.selection.main.empty;
+  if (u.view.state.field(vimVisualField) !== want) u.view.dispatch({ effects: setVimVisual.of(want) });
+});
 
-export function slashPalette(opts: { container?: HTMLElement } = {}): Extension {
-  return [dismissedField, paletteField, decorateField, paletteKeymap, backslashDecorate, vimVisualHint(opts.container)];
+// A small, unobtrusive hint shown ONLY during a vim VISUAL selection, at the format
+// toolbar's spot (a tooltip above the selection): tells the user `\` opens the format/
+// macro palette (matching backslashDecorate). Display-only — a CM tooltip (NOT a node in
+// view.dom, #8), no text/decoration, so document offsets / presence are untouched.
+// Hidden in normal/insert/non-vim and while the palette is already open (and the full
+// toolbar bubble is suppressed in vim visual, so the hint replaces it — no overlap).
+function vimHintTooltip(from: number): Tooltip {
+  return {
+    pos: from,
+    above: true,
+    strictSide: false,
+    arrow: false,
+    create: () => {
+      const dom = document.createElement("div");
+      dom.className = "lp-vim-hint";
+      dom.setAttribute("data-testid", "vim-decorate-hint");
+      dom.textContent = i18n.t("palette.vimHint");
+      return { dom };
+    },
+  };
+}
+const vimHintField = StateField.define<readonly Tooltip[]>({
+  create: () => [],
+  update(_value, tr) {
+    const show = tr.state.field(vimVisualField) && tr.state.field(decorateField, false) == null;
+    return show ? [vimHintTooltip(tr.state.selection.main.from)] : [];
+  },
+  provide: (f) => showTooltip.computeN([f], (state) => state.field(f)),
+});
+
+export function slashPalette(): Extension {
+  // Order matters: vimVisualField before vimHintField (the field reads it); both before
+  // the floating toolbar's bubble (added after slashPalette) so the bubble can read it.
+  return [dismissedField, paletteField, decorateField, vimVisualField, vimHintField, paletteKeymap, backslashDecorate, vimVisualSync];
 }
