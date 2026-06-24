@@ -147,14 +147,18 @@ function paletteTooltip(field: StateField<PaletteState | null>, from: number): T
 }
 
 // Keymap active only while the palette is open (else the keys pass through to vim /
-// the editor). Highest precedence so the nav keys are captured before defaults. C-n/C-p
-// mirror vim's completion menu so vim users don't reach for the arrows.
+// the editor). Highest precedence so the nav keys are captured before defaults.
+//
+// vim-style nav uses Ctrl-j/Ctrl-k, NOT Ctrl-n/Ctrl-p: Ctrl+N (and Ctrl+T/Ctrl+W) are
+// browser-reserved shortcuts that the page cannot intercept (Ctrl+N opened a new window
+// — preventDefault can't stop it). Ctrl+J/Ctrl+K reach the page and ARE cancellable, and
+// j/k match vim's down/up. Arrow/Tab remain as always-safe fallbacks.
 const paletteKeymap = Prec.highest(
   keymap.of([
     { key: "ArrowDown", run: (v) => move(v, +1) },
     { key: "ArrowUp", run: (v) => move(v, -1) },
-    { key: "Ctrl-n", run: (v) => move(v, +1) },
-    { key: "Ctrl-p", run: (v) => move(v, -1) },
+    { key: "Ctrl-j", run: (v) => move(v, +1), preventDefault: true },
+    { key: "Ctrl-k", run: (v) => move(v, -1), preventDefault: true },
     { key: "Tab", run: (v) => move(v, +1) },
     { key: "Shift-Tab", run: (v) => move(v, -1) },
     { key: "Enter", run: chooseSelected },
