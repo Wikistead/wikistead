@@ -1,5 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import { Facet, StateField, type EditorState, type Range } from "@codemirror/state";
+import { Facet, StateField, EditorState, EditorSelection, type Range, type Extension } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -178,24 +178,6 @@ function lineRevealed(state: EditorState, pos: number): boolean {
   return rangeRevealed(state, line.from, line.to);
 }
 
-// Reveal check for a COLLAPSED MULTI-LINE BLOCK (table, and future container macros).
-// A `block: true` replace widget swallows its lines, so the cursor can't land INSIDE it
-// by vertical motion — it skips over. So a block reveals when the cursor is on any of
-// its lines OR on an immediately adjacent line: arrowing / `j` / `k` toward the block
-// then reveals its raw source (enterable from either side), and moving a line away
-// re-renders it. This is what makes "macros are editable Markdown text under the cursor"
-// (ADR-017) hold for multi-line blocks, not just inline/single-line constructs.
-function blockRevealed(state: EditorState, from: number, to: number): boolean {
-  if (state.readOnly) return false;
-  const first = state.doc.lineAt(from).number;
-  const last = state.doc.lineAt(to).number;
-  return state.selection.ranges.some((r) => {
-    const a = state.doc.lineAt(r.from).number;
-    const b = state.doc.lineAt(r.to).number;
-    return b >= first - 1 && a <= last + 1; // overlaps [first-1 .. last+1]
-  });
-}
-
 // ── Extensible block-render registry (P3) ──────────────────────────────────
 // Each renderer maps markdown syntax-tree nodes to DECORATIONS. The builder it
 // receives (RenderCtx) can ONLY push decorations — it exposes no way to dispatch a
@@ -320,12 +302,14 @@ const RENDERERS: BlockRenderer[] = [
   },
   { match: (n) => n === "LinkMark" || n === "URL", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
   {
-    // Thematic break (`***` / `---` / `___`) → a divider rule. The glyph hides (revealing
-    // on the cursor's line like other markers), leaving an empty line styled as a rule.
+    // Thematic break (`***` / `---` / `___`) → a divider rule. The whole line content is
+    // the glyph, so hiding it atomically would make the line un-landable (the caret skips
+    // it). Treat it as a 1-line BLOCK (addAtomic records it for blockEntry): the caret is
+    // redirected onto the line, which reveals the `***` for editing.
     match: (n) => n === "HorizontalRule",
     enter: (node, ctx) => {
       ctx.add(hrLine, ctx.state.doc.lineAt(node.from).from);
-      ctx.hideMarker(node.from, node.to);
+      if (!lineRevealed(ctx.state, node.from)) ctx.addAtomic(hide, node.from, node.to);
     },
   },
   {
@@ -338,9 +322,11 @@ const RENDERERS: BlockRenderer[] = [
       const doc = ctx.state.doc;
       const from = doc.lineAt(node.from).from;
       const to = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1)).to;
-      // Block reveal (inside OR adjacent line) so the cursor can enter the source — a
-      // block widget can't be entered by vertical motion otherwise (see blockRevealed).
-      if (blockRevealed(ctx.state, from, to)) return;
+      // Reveal raw source while the cursor is anywhere in the block's range. The block
+      // can't be ENTERED by vertical motion (it's a collapsed widget) — the blockEntry
+      // transaction filter redirects motion that would skip it INTO it, then these lines
+      // are real and j/k/arrows traverse them one at a time.
+      if (rangeRevealed(ctx.state, from, to)) return;
       ctx.addAtomic(Decoration.replace({ widget: new TableWidget(doc.sliceString(from, to)), block: true }), from, to);
     },
   },
@@ -362,9 +348,14 @@ const RENDERERS: BlockRenderer[] = [
 function buildDecorations(state: EditorState): {
   decorations: DecorationSet;
   atomic: DecorationSet;
+  blocks: { from: number; to: number }[];
 } {
   const all: Range<Decoration>[] = [];
   const hidden: Range<Decoration>[] = [];
+  // Currently-collapsed full replaces (table / image / hr) — ranges the caret cannot
+  // land on. blockEntry redirects vertical motion that would skip one INTO it (which
+  // reveals it). Inline hideMarker ranges are NOT blocks (their line stays landable).
+  const blocks: { from: number; to: number }[] = [];
   const ctx: RenderCtx = {
     state,
     add: (deco, from, to = from) => all.push(deco.range(from, to)),
@@ -378,6 +369,7 @@ function buildDecorations(state: EditorState): {
       if (from >= to) return;
       all.push(deco.range(from, to));
       hidden.push(hide.range(from, to));
+      blocks.push({ from, to });
     },
   };
 
@@ -392,21 +384,57 @@ function buildDecorations(state: EditorState): {
   return {
     decorations: Decoration.set(all, true),
     atomic: Decoration.set(hidden, true),
+    blocks,
   };
 }
 
 // A StateField (NOT a ViewPlugin): block decorations — the table render uses one —
 // may only be provided by a state field, not a plugin. Rebuilds on any doc change
 // (covers local edits AND remote Yjs updates applied by yCollab) and any selection
-// change (reveal-on-cursor). Provides both the decoration set and the atomicRanges
-// (so local cursor motion skips hidden markers).
-export const livePreview = StateField.define<{ decorations: DecorationSet; atomic: DecorationSet }>({
+// change (reveal-on-cursor). Provides the decoration set, the atomicRanges (so local
+// cursor motion skips hidden markers), and the collapsed-block ranges (for blockEntry).
+export const livePreview = StateField.define<{ decorations: DecorationSet; atomic: DecorationSet; blocks: { from: number; to: number }[] }>({
   create: (state) => buildDecorations(state),
   update: (value, tr) => (tr.docChanged || tr.selection ? buildDecorations(tr.state) : value),
   provide: (f) => [
     EditorView.decorations.from(f, (v) => v.decorations),
     EditorView.atomicRanges.of((view) => view.state.field(f).atomic),
   ],
+});
+
+// Block entry: a collapsed block (table / image / hr) is a replace widget the caret
+// cannot land INSIDE by vertical motion — it skips over (the bug: tables/hr were
+// un-enterable, the caret overtook them). This filter watches caret-only moves: if the
+// move would skip a still-collapsed block, it redirects the caret to the block's near
+// edge instead. Landing there reveals the block (rangeRevealed), so its source lines
+// become real and j/k/arrows then traverse them one at a time; moving out re-collapses
+// it. Operates on the selection, so it covers BOTH arrow keys AND vim j/k uniformly —
+// the single principle for every block (and every future container macro), not a
+// per-block hack. Display-only: never changes the document (ADR-008; presence intact).
+export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
+  if (tr.docChanged || !tr.selection) return tr;
+  const blocks = tr.startState.field(livePreview, false)?.blocks;
+  if (!blocks?.length) return tr;
+  const oldSel = tr.startState.selection.main;
+  const newSel = tr.newSelection.main;
+  // Only a caret/block MOTION, not a selection expansion: an empty caret, or vim's
+  // normal-mode block cursor (a 1-char selection that RELOCATES — its anchor moves with
+  // its head). A shift/visual selection keeps its anchor fixed → leave it alone.
+  if (!newSel.empty && newSel.anchor === oldSel.anchor) return tr;
+  const oldHead = oldSel.head;
+  const newHead = newSel.head;
+  if (newHead === oldHead) return tr;
+  const lo = Math.min(oldHead, newHead);
+  const hi = Math.max(oldHead, newHead);
+  for (const b of blocks) {
+    if (oldHead >= b.from && oldHead <= b.to) continue; // caret was inside this block
+    if (b.from >= lo && b.to <= hi) {
+      // the move jumped clear over a collapsed block → land on its near edge instead
+      const target = newHead < oldHead ? b.to : b.from;
+      if (target !== newHead) return { selection: EditorSelection.cursor(target), scrollIntoView: true };
+    }
+  }
+  return tr;
 });
 
 // Follows a clickable link's data-href. In a READ-ONLY (view) surface a plain click
