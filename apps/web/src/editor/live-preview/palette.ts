@@ -1,5 +1,6 @@
-import { EditorView, showTooltip, keymap, type Tooltip, type TooltipView } from "@codemirror/view";
+import { EditorView, ViewPlugin, showTooltip, keymap, type Tooltip, type TooltipView } from "@codemirror/view";
 import { StateField, StateEffect, EditorSelection, Prec, type Extension } from "@codemirror/state";
+import { getCM } from "@replit/codemirror-vim";
 import i18n from "../../i18n";
 import { toggleBold, toggleItalic, toggleStrikethrough, toggleInlineCode, insertLink } from "./commands";
 
@@ -285,8 +286,7 @@ function decorateTooltip(field: StateField<{ from: number; index: number } | nul
 }
 
 // The decorate (selection) palette is opened by vim visual `\` (M0-3), the bubble's
-// "⋯ more", and right-click (M0-4) — NOT by `/`. Its open effect (openDecorate) is
-// dispatched by those entries; the field/tooltip/nav below stay ready for them.
+// "⋯ more", and right-click (M0-4) — NOT by `/`.
 function chooseDecorate(view: EditorView): boolean {
   const v = view.state.field(decorateField, false);
   if (!v) return false;
@@ -295,6 +295,53 @@ function chooseDecorate(view: EditorView): boolean {
   return true;
 }
 
-export function slashPalette(): Extension {
-  return [dismissedField, paletteField, decorateField, paletteKeymap];
+const isVimVisual = (view: EditorView): boolean => !!getCM(view)?.state.vim?.visualMode;
+
+// M0-3: vim VISUAL-mode `\` opens the selection palette. Matched by physical KEY CODE
+// (Backslash on US; IntlRo / IntlYen on JIS), NOT by character — codemirror-vim's
+// char-based key handling mangles `¥` on JIS, so a keycode intercept is the only robust
+// way (ADR-017/018). Highest precedence + preventDefault so vim never sees it; only
+// fires in vim visual mode with a selection, so normal/visual `/`-search and everything
+// else are untouched.
+const backslashDecorate = Prec.highest(
+  EditorView.domEventHandlers({
+    keydown(e, view) {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return false;
+      if (e.code !== "Backslash" && e.code !== "IntlRo" && e.code !== "IntlYen") return false;
+      if (!isVimVisual(view)) return false;
+      const sel = view.state.selection.main;
+      if (sel.empty) return false;
+      view.dispatch({ effects: openDecorate.of({ from: sel.from }) });
+      e.preventDefault();
+      return true;
+    },
+  }),
+);
+
+// A small, unobtrusive hint shown ONLY during a vim VISUAL selection: tells the user
+// `\` opens the format/macro palette (matching backslashDecorate). Display-only DOM in
+// the React-owned host container (NOT view.dom — CM reconciles that away, #8); it adds
+// no text and no decoration, so document offsets / presence are untouched. Hidden in
+// normal/insert/non-vim, and while the palette is already open.
+function vimVisualHint(container?: HTMLElement): Extension {
+  return ViewPlugin.define((view) => {
+    const el = document.createElement("div");
+    el.className = "lp-vim-hint";
+    el.setAttribute("data-testid", "vim-decorate-hint");
+    el.textContent = i18n.t("palette.vimHint");
+    el.style.display = "none";
+    const host = container ?? view.dom;
+    if (getComputedStyle(host).position === "static") host.style.position = "relative";
+    host.appendChild(el);
+    const sync = () => {
+      const show = isVimVisual(view) && !view.state.selection.main.empty && view.state.field(decorateField, false) == null;
+      el.style.display = show ? "" : "none";
+    };
+    sync();
+    return { update: sync, destroy: () => el.remove() };
+  });
+}
+
+export function slashPalette(opts: { container?: HTMLElement } = {}): Extension {
+  return [dismissedField, paletteField, decorateField, paletteKeymap, backslashDecorate, vimVisualHint(opts.container)];
 }

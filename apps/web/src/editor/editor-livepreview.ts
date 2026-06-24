@@ -61,7 +61,7 @@ export function mountLivePreview(
       // Floating selection toolbar + slash command palette (editable surface only;
       // view guests get neither). container = the host so the hidden file input
       // survives CM's DOM reconcile.
-      ...(!opts.readOnly ? [floatingToolbar({ uploadImage: opts.uploadImage, container: parent }), slashPalette()] : []),
+      ...(!opts.readOnly ? [floatingToolbar({ uploadImage: opts.uploadImage, container: parent }), slashPalette({ container: parent })] : []),
       ...(opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
     ],
   });
