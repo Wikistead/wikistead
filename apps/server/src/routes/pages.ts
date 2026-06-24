@@ -47,6 +47,29 @@ function decodeYdocContent(buf: Buffer | null): string {
   return doc.getText('content').toString()
 }
 
+// ── GFM task-checkbox helpers (ADR-019) ─────────────────────────────────────
+//
+// A task checkbox is a GFM task-list marker: a list item whose first token is
+// `[ ]` / `[x]` / `[X]`. These helpers let the no-revision toggle endpoint prove a
+// draft differs from the published snapshot by EXACTLY one checkbox flip and nothing
+// else — the structural guard that stops the path being used to publish real content.
+const TASK_MARKER = /^([ \t]*(?:[-*+]|\d+[.)])[ \t]+)\[([ xX])\](?=[ \t])/gm
+
+// The "skeleton": the markdown with every checkbox state normalized to unchecked.
+// Two documents with equal skeletons differ ONLY in checkbox states (their prose and
+// their set/positions of task items are identical).
+function taskSkeleton(md: string): string {
+  return md.replace(TASK_MARKER, (_m, lead: string) => `${lead}[ ]`)
+}
+
+// The ordered list of checkbox states (true = checked). Aligned 1:1 across two docs
+// iff their skeletons are equal.
+function taskStates(md: string): boolean[] {
+  const states: boolean[] = []
+  for (const m of md.matchAll(TASK_MARKER)) states.push(m[2] !== ' ')
+  return states
+}
+
 // ── Service functions ─────────────────────────────────────────────────────
 
 // Create a page. Outbox entry is written in the same DB transaction as the
@@ -235,6 +258,68 @@ export async function publishPage(
   processOutboxAsync(driver, outboxId, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' })
   emit({ type: 'page.published', tenantId: draft.tenant_id, pageId: args.pageId, revisionId, actorId: args.createdBy })
   return { publishedAt, revisionId, noop: false }
+}
+
+// Toggle a single GFM task checkbox on the PUBLISHED page without creating a revision
+// (ADR-019). A checkbox tick is a state update, not content history — snapshotting it
+// would flood the revision log and make history/diff useless.
+//
+// Flow: the edit-capable client has already flipped the checkbox in the live draft
+// (a normal offset-invariant Y.Text edit over its existing collab connection — the
+// server never operates Yjs directly). The route flushes that draft to pages.ydoc,
+// then this folds the flip into published_md.
+//
+// Security (D3/D4): server is the bastion — requires FGA `edit`. The "checkbox-only
+// diff" guard makes it structurally impossible to publish real content through this
+// no-revision path: if the draft differs from the published snapshot by anything other
+// than the single expected checkbox flip, it is rejected (409) and the change must go
+// through publish (which DOES snapshot).
+export async function toggleTask(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; subject: string; index: number; context?: { current_time: string } },
+): Promise<{ publishedAt: Date | null }> {
+  const canEdit = await check(fga, args.subject, 'edit', { type: 'page', id: args.pageId }, args.context)
+  if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+
+  const [page] = await db.sql<[{ tenant_id: string; ydoc: Buffer | null; published_md: string | null; published_at: Date | null }]>`
+    SELECT tenant_id, ydoc, published_md, published_at FROM pages WHERE id = ${args.pageId}
+  `
+  if (!page) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  if (page.published_md == null) throw Object.assign(new Error('not published'), { statusCode: 409 })
+
+  const draftMd = decodeYdocContent(page.ydoc)
+  const publishedMd = page.published_md
+
+  // Structural guard: the ONLY difference may be a single checkbox flip at `index`.
+  // Equal skeletons ⇒ identical prose AND identically-positioned task items; then the
+  // state arrays align 1:1 and exactly one must differ, at the claimed index.
+  if (taskSkeleton(draftMd) !== taskSkeleton(publishedMd)) {
+    throw Object.assign(new Error('draft has non-checkbox changes; publish them first'), { statusCode: 409 })
+  }
+  const draftStates = taskStates(draftMd)
+  const pubStates = taskStates(publishedMd)
+  const diff = draftStates.reduce<number[]>((acc, s, i) => (s !== pubStates[i] ? [...acc, i] : acc), [])
+  if (diff.length !== 1 || diff[0] !== args.index) {
+    throw Object.assign(new Error('expected exactly one checkbox flip at the given index'), { statusCode: 409 })
+  }
+
+  // Fold the flip into the published snapshot. NO revision insert (the whole point);
+  // draft == published again ⇒ not dirty. Reindex like publish (published text changed).
+  let outboxId!: string
+  let publishedAt!: Date
+  await db.tx(async (tx) => {
+    const [p] = await tx<[{ published_at: Date }]>`
+      UPDATE pages SET published_md = ${draftMd}, has_unpublished_changes = false
+      WHERE id = ${args.pageId}
+      RETURNING published_at
+    `
+    publishedAt = p.published_at
+    outboxId = await enqueueOutbox(tx, { tenantId: page.tenant_id, pageId: args.pageId, operation: 'upsert' })
+  })
+  processOutboxAsync(driver, outboxId, { tenantId: page.tenant_id, pageId: args.pageId, operation: 'upsert' })
+  return { publishedAt }
 }
 
 // Release space inheritance for a page: write `page#space` if absent (idempotent —
@@ -666,6 +751,19 @@ export async function pagesPlugin(app: FastifyInstance) {
     await flushDraft(app.valkey, docName(req.tenant.id, req.params.pageId))
     return publishPage(req.db, app.fga, app.searchDriver, { pageId: req.params.pageId, ...p })
   })
+
+  // Toggle a single task checkbox on the published page WITHOUT creating a revision
+  // (ADR-019). Edit-gated (FGA bastion) like publish; the client has already flipped
+  // the live draft, so flush it first, then fold the one flip into published_md.
+  app.post<{ Params: { pageId: string }; Body: { index: number } }>(
+    '/pages/:pageId/tasks/toggle', { config: { guest: 'edit' } }, async (req) => {
+      const p = principalForPage(req, req.params.pageId)
+      await flushDraft(app.valkey, docName(req.tenant.id, req.params.pageId))
+      return toggleTask(req.db, app.fga, app.searchDriver, {
+        pageId: req.params.pageId, subject: p.subject, index: req.body.index, context: p.context,
+      })
+    },
+  )
 
   // Read the published content + draft-vs-published state (view-gated). Members or a
   // view-capable guest. The web view surface and guest share routes render this.
