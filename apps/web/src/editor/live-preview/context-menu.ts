@@ -1,0 +1,212 @@
+import { EditorView, showTooltip, type Tooltip, type TooltipView } from "@codemirror/view";
+import { StateField, StateEffect, EditorSelection, Prec, type EditorState, type Extension } from "@codemirror/state";
+import { syntaxTree } from "@codemirror/language";
+import i18n from "../../i18n";
+import { INLINE_FORMATS } from "./commands";
+
+// M0-4 (ADR-018): the right-click context menu — the superset entry for mouse users.
+// On a selection it offers layer-A decoration (the SAME INLINE_FORMATS as the bubble /
+// `\` / `/` palettes) PLUS clipboard + edit-link + clear-format; on a link it offers
+// edit-link; with no selection it offers paste + "Insert…" (→ the `/` palette). It is an
+// EDITABLE-surface feature only: read-only / view surfaces keep the native menu (the menu
+// edits the doc, which view users cannot). Built on the CM tooltip layer (NOT a node in
+// view.dom — CM reconciles those away, #8), anchored at the clicked document position.
+// Purely an entry point: every action dispatches normal transactions on the canonical
+// Y.Text (offset-invariant, presence-safe) — same commands, another door.
+
+type MenuKind = "selection" | "link" | "plain";
+interface LinkRange { from: number; to: number; urlFrom: number; urlTo: number }
+interface MenuState { pos: number; kind: MenuKind; link?: LinkRange }
+
+const openMenu = StateEffect.define<MenuState>();
+const closeMenu = StateEffect.define<null>();
+
+const menuField = StateField.define<MenuState | null>({
+  create: () => null,
+  update(value, tr) {
+    for (const e of tr.effects) {
+      if (e.is(openMenu)) return e.value;
+      if (e.is(closeMenu)) return null;
+    }
+    // A document edit dismisses the menu (its anchor would be stale). We do NOT close on
+    // selection changes: the right-click's own mouseup/selection would self-close it.
+    // Dismissal is via the explicit closeMenu effect (item actions), outside-click, Esc.
+    if (value && tr.docChanged) return null;
+    return value;
+  },
+  provide: (f) =>
+    showTooltip.computeN([f], (state) => {
+      const v = state.field(f);
+      return v ? [menuTooltip(v)] : [];
+    }),
+});
+
+// Find the markdown Link node enclosing `pos` (and its URL child), or null. Used to offer
+// "Edit link" and to decide whether a no-selection right-click overrides the native menu.
+function linkAt(state: EditorState, pos: number): LinkRange | null {
+  const tree = syntaxTree(state);
+  let node: ReturnType<typeof tree.resolveInner> | null = tree.resolveInner(pos, 0);
+  while (node && node.name !== "Link") node = node.parent;
+  if (!node) return null;
+  let urlFrom = node.from;
+  let urlTo = node.to;
+  const cur = node.cursor();
+  if (cur.firstChild()) {
+    do {
+      if (cur.name === "URL") { urlFrom = cur.from; urlTo = cur.to; }
+    } while (cur.nextSibling());
+  }
+  return { from: node.from, to: node.to, urlFrom, urlTo };
+}
+
+function close(view: EditorView): void {
+  view.dispatch({ effects: closeMenu.of(null) });
+  view.focus();
+}
+
+// ── Item actions ─────────────────────────────────────────────────────────────
+function selectedText(view: EditorView): string {
+  const { from, to } = view.state.selection.main;
+  return view.state.doc.sliceString(from, to);
+}
+function doCopy(view: EditorView): void {
+  const text = selectedText(view);
+  if (text) void navigator.clipboard?.writeText(text);
+  close(view);
+}
+function doCut(view: EditorView): void {
+  const { from, to } = view.state.selection.main;
+  const text = view.state.doc.sliceString(from, to);
+  if (text) void navigator.clipboard?.writeText(text);
+  view.dispatch({ changes: { from, to, insert: "" }, selection: EditorSelection.cursor(from) });
+  view.dispatch({ effects: closeMenu.of(null) });
+  view.focus();
+}
+function doPaste(view: EditorView): void {
+  close(view);
+  void navigator.clipboard?.readText().then((text) => {
+    if (text) view.dispatch(view.state.replaceSelection(text));
+    view.focus();
+  });
+}
+// Clear inline formatting from the selection: strip the common emphasis markers. A simple
+// strip (not an AST unwrap) — adequate for the bubble's layer-A set; leaves text intact.
+function doClearFormat(view: EditorView): void {
+  const { from, to } = view.state.selection.main;
+  const text = view.state.doc.sliceString(from, to);
+  const cleaned = text.replace(/\*\*|__|~~|[*_`]/g, "");
+  view.dispatch({ changes: { from, to, insert: cleaned }, selection: EditorSelection.range(from, from + cleaned.length) });
+  view.focus();
+}
+// Edit link: select the URL inside (...) so the user types the replacement. Selecting puts
+// the caret on the link line, revealing the raw `[text](url)` for editing (live-preview).
+function doEditLink(view: EditorView, link: LinkRange): void {
+  view.dispatch({ selection: EditorSelection.range(link.urlFrom, link.urlTo), scrollIntoView: true });
+  view.focus();
+  view.dispatch({ effects: closeMenu.of(null) });
+}
+// "Insert…": open the `/` insert palette by typing a `/` at the caret (the palette detects
+// it). Works at a line start / after whitespace — the usual no-selection right-click spot.
+function doInsert(view: EditorView): void {
+  view.dispatch({ effects: closeMenu.of(null) });
+  view.dispatch(view.state.replaceSelection("/"));
+  view.focus();
+}
+
+function menuTooltip(v: MenuState): Tooltip {
+  return {
+    pos: v.pos,
+    above: false,
+    strictSide: false,
+    arrow: false,
+    create: (view): TooltipView => {
+      const dom = document.createElement("div");
+      dom.className = "lp-context-menu";
+      dom.setAttribute("data-testid", "context-menu");
+      const item = (id: string, label: string, run: () => void) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "lp-context-item";
+        b.textContent = label;
+        b.setAttribute("data-testid", `ctx-item-${id}`);
+        b.addEventListener("mousedown", (e) => { e.preventDefault(); run(); });
+        dom.appendChild(b);
+      };
+      const sep = () => {
+        const s = document.createElement("div");
+        s.className = "lp-context-sep";
+        dom.appendChild(s);
+      };
+
+      if (v.kind === "selection") {
+        for (const f of INLINE_FORMATS) item(f.id, i18n.t(f.labelKey), () => { f.run(view); close(view); });
+        sep();
+        item("copy", i18n.t("contextMenu.copy"), () => doCopy(view));
+        item("cut", i18n.t("contextMenu.cut"), () => doCut(view));
+        item("paste", i18n.t("contextMenu.paste"), () => doPaste(view));
+        if (v.link) { sep(); item("editlink", i18n.t("contextMenu.editLink"), () => doEditLink(view, v.link!)); }
+        sep();
+        item("clearformat", i18n.t("contextMenu.clearFormat"), () => doClearFormat(view));
+      } else if (v.kind === "link" && v.link) {
+        item("editlink", i18n.t("contextMenu.editLink"), () => doEditLink(view, v.link!));
+        item("paste", i18n.t("contextMenu.paste"), () => doPaste(view));
+      } else {
+        item("paste", i18n.t("contextMenu.paste"), () => doPaste(view));
+        item("insert", i18n.t("contextMenu.insert"), () => doInsert(view));
+      }
+
+      // Outside-click dismissal via a document listener (the menu lives in the fixed
+      // tooltip layer, so editor-level handlers don't see clicks elsewhere on the page).
+      // Deferred a tick so the opening right-click's own mouseup/down doesn't close it.
+      const onDocMouseDown = (ev: MouseEvent) => {
+        if (!dom.contains(ev.target as Node)) view.dispatch({ effects: closeMenu.of(null) });
+      };
+      const t = window.setTimeout(() => document.addEventListener("mousedown", onDocMouseDown), 0);
+      return { dom, destroy() { window.clearTimeout(t); document.removeEventListener("mousedown", onDocMouseDown); } };
+    },
+  };
+}
+
+// Opens the menu on right-click in the EDITABLE surface (read-only keeps native). Esc
+// closes it. Highest precedence so we preventDefault the native menu before anything else.
+const menuEvents = Prec.highest(
+  EditorView.domEventHandlers({
+    // Keep the current selection/caret when right-clicking (the browser would otherwise
+    // collapse a selection / move the caret on mousedown, before contextmenu fires) so the
+    // menu reflects what the user has selected. Editable surface only.
+    mousedown(e, view) {
+      if (e.button === 2 && !view.state.readOnly) { e.preventDefault(); return true; }
+      return false;
+    },
+    contextmenu(e, view) {
+      if (view.state.readOnly) return false; // view / read-only → native browser menu
+      const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+      if (pos == null) return false;
+      const sel = view.state.selection.main;
+      let kind: MenuKind;
+      let link: LinkRange | undefined;
+      if (!sel.empty) {
+        kind = "selection";
+        link = linkAt(view.state, sel.from) ?? linkAt(view.state, pos) ?? undefined;
+      } else {
+        const l = linkAt(view.state, pos);
+        if (l) { kind = "link"; link = l; } else { kind = "plain"; }
+      }
+      view.dispatch({ effects: openMenu.of({ pos, kind, link }) });
+      e.preventDefault();
+      return true;
+    },
+    keydown(e, view) {
+      if (e.key === "Escape" && view.state.field(menuField, false)) {
+        view.dispatch({ effects: closeMenu.of(null) });
+        e.preventDefault();
+        return true;
+      }
+      return false;
+    },
+  }),
+);
+
+export function contextMenu(): Extension {
+  return [menuField, menuEvents];
+}

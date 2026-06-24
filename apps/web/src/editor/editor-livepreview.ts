@@ -10,6 +10,7 @@ import { livePreview, livePreviewTheme, linkClicks, blockEntry, imageResolver, t
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette } from "./live-preview/palette";
+import { contextMenu } from "./live-preview/context-menu";
 import type { ImageUploader } from "./live-preview/commands";
 import { attachImageDrop } from "./live-preview/image-drop";
 import { cmTheme } from "../styles/cm-theme";
@@ -74,7 +75,7 @@ export function mountLivePreview(
       // container (the host, so the hidden file input survives CM's DOM reconcile) go
       // here. The bubble is decoration-only (A). slashPalette FIRST so its vimVisualField
       // precedes the toolbar's bubble (which reads it to suppress itself in vim visual).
-      ...(!opts.readOnly ? [slashPalette({ uploadImage: opts.uploadImage, container: parent }), floatingToolbar()] : []),
+      ...(!opts.readOnly ? [slashPalette({ uploadImage: opts.uploadImage, container: parent }), floatingToolbar(), contextMenu()] : []),
       ...(opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
     ],
   });

@@ -359,6 +359,14 @@
     "divider": "Divider",
     "image": "Image"
   },
+  "contextMenu": {
+    "copy": "Copy",
+    "cut": "Cut",
+    "paste": "Paste",
+    "editLink": "Edit link",
+    "clearFormat": "Clear formatting",
+    "insert": "Insert…"
+  },
   "members": {
     "title": "Members",
     "adminOnly": "Admin only.",
