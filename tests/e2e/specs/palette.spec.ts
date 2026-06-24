@@ -7,7 +7,7 @@ const content = (p: Page) => p.locator("[data-pane=preview] .cm-content").innerT
 // opens a filterable insert/toggle menu in the CM tooltip layer; choosing a command
 // removes the typed token, inserts a Markdown template, and places the caret at the
 // content position.
-test("slash palette: open, filter, Ctrl-n nav, Enter applies with caret at content", async ({ page }) => {
+test("slash palette: open, filter, Ctrl-j nav, Enter applies with caret at content", async ({ page }) => {
   await openDemo(page);
   await enterEdit(page);
   await resetDoc(page);
@@ -16,9 +16,9 @@ test("slash palette: open, filter, Ctrl-n nav, Enter applies with caret at conte
   await page.keyboard.type("/");
   await expect(page.getByTestId("slash-palette")).toBeVisible();
   expect(await page.locator("[data-testid=slash-palette] .lp-palette-row").count()).toBeGreaterThan(3);
-  // first item selected; Ctrl-n moves to the next (vim-style)
+  // first item selected; Ctrl-j moves to the next (vim-style; Ctrl-n is browser-reserved)
   await expect(page.getByTestId("slash-item-h1")).toHaveAttribute("data-selected", "true");
-  await page.keyboard.press("Control+n");
+  await page.keyboard.press("Control+j");
   await expect(page.getByTestId("slash-item-h2")).toHaveAttribute("data-selected", "true");
   await expect(page.getByTestId("slash-item-h1")).not.toHaveAttribute("data-selected", "true");
 
