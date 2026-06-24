@@ -149,11 +149,12 @@ test("Ctrl-k navigates the palette when open, opens page search when closed", as
   await page.keyboard.press("Control+k");
   await expect(page.getByTestId("search-input")).toBeFocused();
 
-  // palette OPEN → Ctrl-k navigates (wraps up from first to last) and does NOT open search
+  // palette OPEN → Ctrl-k navigates (wraps up from first to last) and does NOT open search.
+  // With an uploader present, "image" (P) is the last item — wrap-up lands there.
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.type("/");
   await expect(page.getByTestId("slash-item-h1")).toHaveAttribute("data-selected", "true");
   await page.keyboard.press("Control+k");
-  await expect(page.getByTestId("slash-item-divider")).toHaveAttribute("data-selected", "true");
+  await expect(page.getByTestId("slash-item-image")).toHaveAttribute("data-selected", "true");
   await expect(page.getByTestId("search-input")).not.toBeFocused();
 });

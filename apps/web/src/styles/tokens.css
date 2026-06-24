@@ -269,8 +269,10 @@ body {
   flex-direction: column;
   min-width: 200px;
   /* Cap the height so a long list scrolls instead of running off-screen (CM flips it
-     above/below for vertical space; this bounds an over-tall list). */
-  max-height: min(50vh, 320px);
+     above/below for vertical space; this bounds an over-tall list). Kept compact enough
+     that even flipped above a caret near the viewport bottom the palette stays on-screen
+     (the `/` list grew to ~10 items incl. image). The selected row scrolls into view. */
+  max-height: min(45vh, 280px);
   overflow-y: auto;
   padding: var(--space-1);
   border: 1px solid var(--border);

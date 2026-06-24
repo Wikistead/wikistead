@@ -1,18 +1,15 @@
-import { EditorView, ViewPlugin, showTooltip, type Tooltip } from "@codemirror/view";
+import { EditorView, showTooltip, type Tooltip } from "@codemirror/view";
 import { StateField } from "@codemirror/state";
 import i18n from "../../i18n";
 import { vimVisualField } from "./palette";
-import { insertImage, INLINE_FORMATS } from "./commands";
-
-// Uploads a chosen image file and returns the reference + alt to insert (or null
-// to cancel/fail). Provided by the host (it knows the page + auth); omitted = no
-// image button (e.g. guests, or surfaces without an uploader).
-export type ImageUploader = (file: File) => Promise<{ ref: string; alt: string } | null>;
+import { INLINE_FORMATS } from "./commands";
 
 // The selection bubble is the layer-A decoration entry for mouse/any-selection users.
 // Its buttons come from the SHARED INLINE_FORMATS (ADR-018 #3) so they never drift from
-// the `\` / `/` palettes — same commands, rendered here as symbols. Block constructs
-// (heading, list, table, …) live in the slash palette, not here. Chrome only.
+// the `\` / `/` palettes — same commands, rendered here as symbols. It is A-ONLY: block
+// constructs (heading, list, table, …) and inserts (image, P) are NOT here — they live
+// in the `/` insert palette. This makes the on-selection menu identical across vim (`\`
+// palette) and non-vim (this bubble): decoration only. Chrome only.
 function mkButton(label: string, title: string, run: () => void): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
@@ -34,33 +31,7 @@ function mkButton(label: string, title: string, run: () => void): HTMLButtonElem
 // Purely presentational — it reads the LOCAL selection and dispatches the same
 // command functions, never touching transactions/awareness, so collab + presence
 // are untouched.
-export function floatingToolbar(opts: { uploadImage?: ImageUploader; container?: HTMLElement } = {}) {
-  // A single hidden file input, kept in the React-owned host container (which CM
-  // never reconciles) so it persists across edits. The bubble's Image button — and
-  // tests — drive it. Created/destroyed with the editor view.
-  let fileInput: HTMLInputElement | null = null;
-  const triggerImage = () => fileInput?.click();
-
-  const inputPlugin = ViewPlugin.define((view) => {
-    if (opts.uploadImage) {
-      const upload = opts.uploadImage;
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = "image/*";
-      input.style.display = "none";
-      input.setAttribute("data-testid", "lp-image-input");
-      input.addEventListener("change", () => {
-        const file = input.files?.[0];
-        input.value = ""; // allow re-picking the same file
-        if (!file) return;
-        void upload(file).then((res) => { if (res) insertImage(view, res.alt, res.ref); });
-      });
-      (opts.container ?? document.body).appendChild(input);
-      fileInput = input;
-    }
-    return { destroy() { fileInput?.remove(); fileInput = null; } };
-  });
-
+export function floatingToolbar() {
   function bubble(from: number, to: number): Tooltip {
     return {
       pos: from,
@@ -73,11 +44,6 @@ export function floatingToolbar(opts: { uploadImage?: ImageUploader; container?:
         dom.className = "lp-toolbar";
         dom.setAttribute("data-testid", "format-bubble");
         for (const fmt of INLINE_FORMATS) dom.appendChild(mkButton(fmt.symbol, i18n.t(fmt.labelKey), () => fmt.run(view)));
-        if (opts.uploadImage) {
-          const imgBtn = mkButton("Image", i18n.t("lpToolbar.image"), triggerImage);
-          imgBtn.setAttribute("data-testid", "lp-image-btn");
-          dom.appendChild(imgBtn);
-        }
         return { dom };
       },
     };
@@ -96,5 +62,5 @@ export function floatingToolbar(opts: { uploadImage?: ImageUploader; container?:
     provide: (f) => showTooltip.computeN([f], (state) => state.field(f)),
   });
 
-  return [inputPlugin, bubbleField];
+  return [bubbleField];
 }

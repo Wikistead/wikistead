@@ -356,7 +356,8 @@
     "quote": "引用",
     "codeBlock": "コードブロック",
     "table": "テーブル",
-    "divider": "区切り線"
+    "divider": "区切り線",
+    "image": "画像"
   },
   "members": {
     "title": "メンバー",

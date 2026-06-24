@@ -1,8 +1,8 @@
-import { EditorView, showTooltip, keymap, type Tooltip, type TooltipView } from "@codemirror/view";
-import { StateField, StateEffect, EditorSelection, Prec, type Extension } from "@codemirror/state";
+import { EditorView, ViewPlugin, showTooltip, keymap, type Tooltip, type TooltipView } from "@codemirror/view";
+import { StateField, StateEffect, EditorSelection, Facet, Prec, type EditorState, type Extension } from "@codemirror/state";
 import { getCM } from "@replit/codemirror-vim";
 import i18n from "../../i18n";
-import { INLINE_FORMATS, type InlineFormat } from "./commands";
+import { INLINE_FORMATS, insertImage, type InlineFormat, type ImageUploader } from "./commands";
 
 // Slash command palette (Step I / M0-1 — see ADR-017). Triggered by `/` at a line
 // start OR after whitespace while editing. Lists block insert/toggle commands (layer
@@ -20,10 +20,21 @@ interface PaletteCommand {
   keywords: string; // extra English filter terms (lowercase)
   insert: string; // the Markdown template inserted in place of the "/query" token
   caret: number | [number, number]; // caret offset (or selection range) within `insert`
+  action?: (view: EditorView) => void; // custom action instead of a template insert (e.g. image picker)
 }
 
-// Layer B/C commands. Each template places the caret where you'd type the content next.
-// (Inline decorations — layer A — are M0-2; image insert is M0-5.)
+// Holds the image-insert trigger (opening the host's file picker), supplied by
+// slashPalette when an uploader is available. The `/image` command reads it, and its
+// presence GATES the command's visibility — guests / uploader-less surfaces never see
+// it. Image is layer P (insert, selection-independent), so it lives ONLY here, never in
+// the on-selection menus (ADR-018: selection menu = decoration A only).
+const imageUploader = Facet.define<(() => void) | null, (() => void) | null>({
+  combine: (vals) => vals.find((v) => v != null) ?? null,
+});
+
+// Layer B/C/P commands. Template commands place the caret where you'd type the content
+// next; the image command (P) runs an action (open the file picker) instead. (Inline
+// decorations — layer A — are the decorate palette below.)
 const COMMANDS: PaletteCommand[] = [
   { id: "h1", label: () => i18n.t("palette.h1"), alias: "h1", keywords: "heading title #", insert: "# ", caret: 2 },
   { id: "h2", label: () => i18n.t("palette.h2"), alias: "h2", keywords: "heading subtitle ##", insert: "## ", caret: 3 },
@@ -38,10 +49,31 @@ const COMMANDS: PaletteCommand[] = [
   { id: "divider", label: () => i18n.t("palette.divider"), alias: "divider", keywords: "rule hr separator line", insert: "***\n", caret: 4 },
 ];
 
-function filterCommands(query: string): PaletteCommand[] {
+// Image insert (layer P). Moved here from the selection bubble (was M0-5, pulled forward)
+// so the on-selection menu is decoration-only and identical across vim/non-vim. The token
+// is removed, then the action opens the host's file picker; the upload → ![alt](ref) lands
+// at the caret (see imageInsert).
+const IMAGE_COMMAND: PaletteCommand = {
+  id: "image",
+  label: () => i18n.t("palette.image"),
+  alias: "image",
+  keywords: "img picture photo attachment upload",
+  insert: "",
+  caret: 0,
+  action: (view) => view.state.facet(imageUploader)?.(),
+};
+
+// The effective command list for a state: the image command is appended only when an
+// uploader is wired (the facet is set), so it never appears for uploader-less surfaces.
+function commandList(state: EditorState): PaletteCommand[] {
+  return state.facet(imageUploader) ? [...COMMANDS, IMAGE_COMMAND] : COMMANDS;
+}
+
+function filterCommands(state: EditorState, query: string): PaletteCommand[] {
   const q = query.trim().toLowerCase();
-  if (!q) return COMMANDS;
-  return COMMANDS.filter(
+  const list = commandList(state);
+  if (!q) return list;
+  return list.filter(
     (c) => c.label().toLowerCase().includes(q) || c.alias.toLowerCase().includes(q) || c.keywords.includes(q),
   );
 }
@@ -82,7 +114,7 @@ const paletteField = StateField.define<PaletteState | null>({
     if (tr.state.field(dismissedField)) return null;
     const d = detect(tr.state);
     if (!d) return null;
-    const matches = filterCommands(d.query);
+    const matches = filterCommands(tr.state, d.query);
     if (matches.length === 0) return null; // no command → behave as plain text
     let index = value && value.query === d.query ? value.index : 0;
     for (const e of tr.effects) if (e.is(moveSelection)) index += e.value;
@@ -100,6 +132,14 @@ function applyAt(view: EditorView, cmd: PaletteCommand): void {
   const v = view.state.field(paletteField);
   if (!v) return;
   const head = view.state.selection.main.head;
+  if (cmd.action) {
+    // Action command (e.g. image): remove the "/query" token, place the caret where it
+    // was, then run the action — its async result (the upload) inserts at that caret.
+    view.dispatch({ changes: { from: v.from, to: head, insert: "" }, selection: EditorSelection.cursor(v.from) });
+    view.focus();
+    cmd.action(view);
+    return;
+  }
   const at = v.from; // template is inserted starting here (replacing "/query")
   const selection = Array.isArray(cmd.caret)
     ? EditorSelection.range(at + cmd.caret[0], at + cmd.caret[1])
@@ -121,14 +161,15 @@ function paletteTooltip(field: StateField<PaletteState | null>, from: number): T
       const render = () => {
         const v = view.state.field(field);
         if (!v) return;
-        const matches = filterCommands(v.query);
+        const matches = filterCommands(view.state, v.query);
         dom.replaceChildren();
+        let selectedRow: HTMLElement | null = null;
         matches.forEach((cmd, i) => {
           const row = document.createElement("button");
           row.type = "button";
           row.className = "lp-palette-row" + (i === v.index ? " is-selected" : "");
           row.setAttribute("data-testid", `slash-item-${cmd.id}`);
-          if (i === v.index) row.setAttribute("data-selected", "true");
+          if (i === v.index) { row.setAttribute("data-selected", "true"); selectedRow = row; }
           const name = document.createElement("span");
           name.className = "lp-palette-name";
           name.textContent = cmd.label();
@@ -140,6 +181,9 @@ function paletteTooltip(field: StateField<PaletteState | null>, from: number): T
           row.addEventListener("mousedown", (e) => { e.preventDefault(); applyAt(view, cmd); });
           dom.appendChild(row);
         });
+        // Keep the selected row visible when the capped list scrolls (e.g. nav to image,
+        // the last item). block:"nearest" only scrolls the palette, never the page.
+        (selectedRow as HTMLElement | null)?.scrollIntoView({ block: "nearest" });
       };
       render();
       return {
@@ -189,7 +233,7 @@ function move(view: EditorView, delta: number): boolean {
 }
 function chooseSelected(view: EditorView): boolean {
   const v = view.state.field(paletteField, false);
-  if (v) { const cmd = filterCommands(v.query)[v.index]; if (cmd) applyAt(view, cmd); return true; }
+  if (v) { const cmd = filterCommands(view.state, v.query)[v.index]; if (cmd) applyAt(view, cmd); return true; }
   return chooseDecorate(view);
 }
 function dismiss(view: EditorView): boolean {
@@ -397,8 +441,34 @@ const vimHintField = StateField.define<readonly Tooltip[]>({
   provide: (f) => showTooltip.computeN([f], (state) => state.field(f)),
 });
 
-export function slashPalette(): Extension {
+// Wires the host's uploader into the `/image` command: a hidden file input (kept in the
+// React-owned host container, which CM never reconciles, so it survives edits) plus the
+// trigger exposed via the imageUploader facet. On a chosen file it uploads and inserts
+// ![alt](ref) at the CURRENT caret — so it works whether opened via the `/image` command
+// or driven directly (e.g. tests setting the input). Same path as the old toolbar button.
+function imageInsert(upload: ImageUploader, container?: HTMLElement): Extension {
+  let view: EditorView | null = null;
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.style.display = "none";
+  input.setAttribute("data-testid", "lp-image-input");
+  input.addEventListener("change", () => {
+    const file = input.files?.[0];
+    input.value = ""; // allow re-picking the same file
+    if (!file || !view) return;
+    const v = view;
+    void upload(file).then((res) => { if (res) insertImage(v, res.alt, res.ref); });
+  });
+  (container ?? document.body).appendChild(input);
+  // Capture the view (for insertImage) + clean up the input when the editor is destroyed.
+  const lifecycle = ViewPlugin.define((v) => { view = v; return { destroy() { input.remove(); view = null; } }; });
+  return [imageUploader.of(() => input.click()), lifecycle];
+}
+
+export function slashPalette(opts: { uploadImage?: ImageUploader; container?: HTMLElement } = {}): Extension {
   // Order matters: vimVisualField before vimHintField (the field reads it); both before
   // the floating toolbar's bubble (added after slashPalette) so the bubble can read it.
-  return [dismissedField, paletteField, decorateField, vimVisualField, vimHintField, paletteKeymap, decorateKeys, backslashDecorate, vimVisualSync];
+  const core = [dismissedField, paletteField, decorateField, vimVisualField, vimHintField, paletteKeymap, decorateKeys, backslashDecorate, vimVisualSync];
+  return opts.uploadImage ? [...core, imageInsert(opts.uploadImage, opts.container)] : core;
 }
