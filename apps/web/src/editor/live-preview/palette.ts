@@ -1,6 +1,5 @@
 import { EditorView, showTooltip, keymap, type Tooltip, type TooltipView } from "@codemirror/view";
 import { StateField, StateEffect, EditorSelection, Prec, type Extension } from "@codemirror/state";
-import { getCM } from "@replit/codemirror-vim";
 import i18n from "../../i18n";
 import { toggleBold, toggleItalic, toggleStrikethrough, toggleInlineCode, insertLink } from "./commands";
 
@@ -162,7 +161,10 @@ function paletteTooltip(field: StateField<PaletteState | null>, from: number): T
 // Arrow/Tab remain as always-safe fallbacks.
 const paletteKeymap = Prec.highest(
   keymap.of([
-    { key: "/", run: openDecorateOnSlash }, // selection + / → decorate mode (M0-2)
+    // `/` is INSERT-only (P): no decorate trigger. With a selection it behaves as a
+    // normal slash command (types `/`, replacing the selection → the insert palette).
+    // Decoration (A) is reached via the auto-toolbar / vim visual `\` (M0-3) / right-
+    // click — never `/`. (ADR-018.)
     { key: "ArrowDown", run: (v) => move(v, +1) },
     { key: "ArrowUp", run: (v) => move(v, -1) },
     { key: "Ctrl-j", run: (v) => move(v, +1) },
@@ -282,17 +284,9 @@ function decorateTooltip(field: StateField<{ from: number; index: number } | nul
   };
 }
 
-// `/` opens decorate mode when there's a selection — EXCEPT in vim normal/visual mode,
-// where `/` is vim search (vim's selection-decoration entry is the visual-mode `\`, M0-3).
-function openDecorateOnSlash(view: EditorView): boolean {
-  if (view.state.readOnly) return false;
-  const sel = view.state.selection.main;
-  if (sel.empty) return false; // no selection → let `/` type (insert palette via doc)
-  const cm = getCM(view);
-  if (cm && !cm.state.vim?.insertMode) return false; // vim normal/visual → `/` is search
-  view.dispatch({ effects: openDecorate.of({ from: sel.from }) });
-  return true;
-}
+// The decorate (selection) palette is opened by vim visual `\` (M0-3), the bubble's
+// "⋯ more", and right-click (M0-4) — NOT by `/`. Its open effect (openDecorate) is
+// dispatched by those entries; the field/tooltip/nav below stay ready for them.
 function chooseDecorate(view: EditorView): boolean {
   const v = view.state.field(decorateField, false);
   if (!v) return false;

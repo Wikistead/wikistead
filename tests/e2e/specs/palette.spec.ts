@@ -92,7 +92,10 @@ test("divider inserts a thematic break, not a setext heading", async ({ page }) 
   expect(await page.locator("[data-pane=preview] .cm-lp-hr").count()).toBeGreaterThan(0);
 });
 
-test("selection + / opens decorate mode and applies to the selection (/ not typed)", async ({ page }) => {
+test("selection + / is a normal slash command (insert), NOT decorate", async ({ page }) => {
+  // Non-vim decoration is the auto-toolbar; `/` stays insert-only (P). With a selection,
+  // `/` behaves normally — types `/`, replacing the selection — and opens the insert
+  // palette (it lands at line start). The decorate palette is NOT opened by `/`. (ADR-018.)
   await openDemo(page);
   await enterEdit(page);
   await resetDoc(page);
@@ -103,19 +106,10 @@ test("selection + / opens decorate mode and applies to the selection (/ not type
   await page.keyboard.press("Home");
   for (let i = 0; i < 5; i++) await page.keyboard.press("Shift+ArrowRight");
 
-  // `/` with a selection → DECORATE palette (the `/` is intercepted, not typed, so the
-  // selection survives), not the insert palette
   await page.keyboard.press("/");
-  await expect(page.getByTestId("decorate-palette")).toBeVisible();
-  await expect(page.getByTestId("slash-palette")).toHaveCount(0);
-  expect(await content(page)).not.toContain("/"); // selection preserved, nothing typed
-
-  // first item is Bold → Enter wraps the selection
-  await expect(page.getByTestId("decorate-item-bold")).toHaveAttribute("data-selected", "true");
-  await page.keyboard.press("Enter");
-  await sleep(150);
-  await expect(page.getByTestId("decorate-palette")).toHaveCount(0);
-  expect(await content(page)).toContain("**hello**");
+  await expect(page.getByTestId("decorate-palette")).toHaveCount(0); // NOT decorate
+  await expect(page.getByTestId("slash-palette")).toBeVisible(); // normal insert palette
+  expect(await content(page)).toContain("/ world"); // selection replaced by the typed "/"
 });
 
 test("Ctrl-k navigates the palette when open, opens page search when closed", async ({ page }) => {
