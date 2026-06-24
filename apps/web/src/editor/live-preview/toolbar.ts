@@ -2,32 +2,17 @@ import { EditorView, ViewPlugin, showTooltip, type Tooltip } from "@codemirror/v
 import { StateField } from "@codemirror/state";
 import i18n from "../../i18n";
 import { vimVisualField } from "./palette";
-import {
-  insertImage,
-  insertLink,
-  toggleBold,
-  toggleItalic,
-  toggleStrikethrough,
-  toggleInlineCode,
-} from "./commands";
+import { insertImage, INLINE_FORMATS } from "./commands";
 
 // Uploads a chosen image file and returns the reference + alt to insert (or null
 // to cancel/fail). Provided by the host (it knows the page + auth); omitted = no
 // image button (e.g. guests, or surfaces without an uploader).
 export type ImageUploader = (file: File) => Promise<{ ref: string; alt: string } | null>;
 
-// Layer-A (inline-span) format buttons ONLY — the selection bubble is the decoration
-// entry for mouse/any-selection users. Block-level constructs (heading, list, table,
-// divider) live in the slash palette, not here. title is an i18n key; labels are
-// symbols. The command functions are inviolable (Y.Text edits) — this is chrome only.
-const BUTTONS: { label: string; titleKey: string; run: (v: EditorView) => void }[] = [
-  { label: "B", titleKey: "lpToolbar.bold", run: toggleBold },
-  { label: "I", titleKey: "palette.italic", run: toggleItalic },
-  { label: "S", titleKey: "palette.strikethrough", run: toggleStrikethrough },
-  { label: "</>", titleKey: "lpToolbar.inlineCode", run: toggleInlineCode },
-  { label: "Link", titleKey: "lpToolbar.link", run: insertLink },
-];
-
+// The selection bubble is the layer-A decoration entry for mouse/any-selection users.
+// Its buttons come from the SHARED INLINE_FORMATS (ADR-018 #3) so they never drift from
+// the `\` / `/` palettes — same commands, rendered here as symbols. Block constructs
+// (heading, list, table, …) live in the slash palette, not here. Chrome only.
 function mkButton(label: string, title: string, run: () => void): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
@@ -87,7 +72,7 @@ export function floatingToolbar(opts: { uploadImage?: ImageUploader; container?:
         const dom = document.createElement("div");
         dom.className = "lp-toolbar";
         dom.setAttribute("data-testid", "format-bubble");
-        for (const { label, titleKey, run } of BUTTONS) dom.appendChild(mkButton(label, i18n.t(titleKey), () => run(view)));
+        for (const fmt of INLINE_FORMATS) dom.appendChild(mkButton(fmt.symbol, i18n.t(fmt.labelKey), () => fmt.run(view)));
         if (opts.uploadImage) {
           const imgBtn = mkButton("Image", i18n.t("lpToolbar.image"), triggerImage);
           imgBtn.setAttribute("data-testid", "lp-image-btn");

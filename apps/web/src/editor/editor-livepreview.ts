@@ -48,9 +48,15 @@ export function mountLivePreview(
       markdownExtension(),
       livePreviewTheme,
       livePreview,
-      // DEV-only probe: expose the caret's doc line so e2e can assert line-by-line
-      // motion through collapsed blocks (no skip/overtake). Stripped from prod builds.
-      ...(import.meta.env.DEV ? [EditorView.updateListener.of((u) => { if (u.selectionSet) (window as Window & { __lpHeadLine?: number }).__lpHeadLine = u.state.doc.lineAt(u.state.selection.main.head).number; })] : []),
+      // DEV-only probe: expose the caret's doc line + selection offsets so e2e can
+      // assert motion / selection extent. Stripped from prod builds.
+      ...(import.meta.env.DEV ? [EditorView.updateListener.of((u) => {
+        if (!u.selectionSet) return;
+        const s = u.state.selection.main;
+        const w = window as Window & { __lpHeadLine?: number; __lpSel?: { from: number; to: number; head: number; anchor: number } };
+        w.__lpHeadLine = u.state.doc.lineAt(s.head).number;
+        w.__lpSel = { from: s.from, to: s.to, head: s.head, anchor: s.anchor };
+      })] : []),
       linkClicks,
       // Redirect vertical motion into collapsed blocks so their source is reachable
       // line-by-line (editable surface only; read-only never edits source).

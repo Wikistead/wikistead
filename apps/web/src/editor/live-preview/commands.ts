@@ -53,6 +53,21 @@ export const toggleBulletList = (view: EditorView) => prefixLines(view, "- ");
 // for the slash palette are template-based in palette.ts, which controls the caret
 // position precisely; they don't go through these line-prefix helpers.)
 
+// The SINGLE source of the layer-A (inline) format set, shared by every decoration
+// door so they can't drift (ADR-018 #3): the selection toolbar (mouse), the `\`
+// selection palette (vim), and selection-`/` (keyboard). Each entry renders the same
+// command differently (toolbar = symbol; palette = label + mnemonic) but runs the SAME
+// function on the SAME selection — same target, many doors. `mnemonic` is the
+// single-key fast-path inside the palette (ADR-018 #2).
+export interface InlineFormat { id: string; symbol: string; labelKey: string; mnemonic: string; run: (v: EditorView) => void }
+export const INLINE_FORMATS: InlineFormat[] = [
+  { id: "bold", symbol: "B", labelKey: "lpToolbar.bold", mnemonic: "b", run: toggleBold },
+  { id: "italic", symbol: "I", labelKey: "palette.italic", mnemonic: "i", run: toggleItalic },
+  { id: "strike", symbol: "S", labelKey: "palette.strikethrough", mnemonic: "s", run: toggleStrikethrough },
+  { id: "code", symbol: "</>", labelKey: "lpToolbar.inlineCode", mnemonic: "c", run: toggleInlineCode },
+  { id: "link", symbol: "Link", labelKey: "lpToolbar.link", mnemonic: "l", run: insertLink },
+];
+
 // Insert "[text](url)" and leave the caret selecting "url" so it can be typed
 // Insert an image reference at the caret: ![alt](wks-attachment:<id>). The ref is
 // the stable attachment id (resolved to a presigned URL at render time — never
