@@ -298,12 +298,13 @@ function decorateTooltip(field: StateField<{ from: number; index: number } | nul
         const v = view.state.field(field);
         if (!v) return;
         dom.replaceChildren();
+        let selectedRow: HTMLElement | null = null;
         DECORATE.forEach((cmd, i) => {
           const row = document.createElement("button");
           row.type = "button";
           row.className = "lp-palette-row" + (i === v.index ? " is-selected" : "");
           row.setAttribute("data-testid", `decorate-item-${cmd.id}`);
-          if (i === v.index) row.setAttribute("data-selected", "true");
+          if (i === v.index) { row.setAttribute("data-selected", "true"); selectedRow = row; }
           const name = document.createElement("span");
           name.className = "lp-palette-name";
           name.textContent = i18n.t(cmd.labelKey);
@@ -314,6 +315,9 @@ function decorateTooltip(field: StateField<{ from: number; index: number } | nul
           row.addEventListener("mousedown", (e) => { e.preventDefault(); applyDecorate(view, cmd); });
           dom.appendChild(row);
         });
+        // Keep the selected row visible when the list scrolls (parity with the insert
+        // palette). block:"nearest" scrolls only the palette, never the page.
+        (selectedRow as HTMLElement | null)?.scrollIntoView({ block: "nearest" });
       };
       render();
       return {
