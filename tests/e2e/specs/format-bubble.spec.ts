@@ -15,13 +15,20 @@ test("format toolbar floats on selection and bolds", async ({ page }) => {
   // no selection → no ribbon
   await expect(page.getByTestId("format-bubble")).toBeHidden();
 
-  // select "hello" → the bubble appears
+  // select "hello" → the bubble appears (auto, no key — the mouse/selection entry)
   await page.keyboard.press("Home");
   for (let i = 0; i < 5; i++) await page.keyboard.press("Shift+ArrowRight");
-  await expect(page.getByTestId("format-bubble")).toBeVisible();
+  const bubble = page.getByTestId("format-bubble");
+  await expect(bubble).toBeVisible();
+
+  // layer-A (inline) only: bold/italic/strike/code/link — NOT block constructs
+  await expect(bubble.getByText("I", { exact: true })).toBeVisible();
+  await expect(bubble.getByText("S", { exact: true })).toBeVisible();
+  expect(await bubble.getByText("H", { exact: true }).count()).toBe(0); // heading → palette
+  expect(await bubble.getByText("• List", { exact: true }).count()).toBe(0); // list → palette
 
   // clicking B wraps the selection (same command as before — chrome only)
-  await page.getByTestId("format-bubble").getByText("B", { exact: true }).click();
+  await bubble.getByText("B", { exact: true }).click();
   await sleep(200);
   await expect
     .poll(async () => page.locator("[data-pane=preview] .cm-content").innerText(), { timeout: 4000 })
