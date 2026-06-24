@@ -224,3 +224,53 @@ test("Ctrl-k navigates the palette when open, opens page search when closed", as
   await expect(page.getByTestId("slash-item-image")).toHaveAttribute("data-selected", "true");
   await expect(page.getByTestId("search-input")).not.toBeFocused();
 });
+
+// Light-2: the palette learns recently-used commands and floats them to the top. A fresh
+// context starts with empty recency (so the existing tests keep the default order).
+test("insert palette surfaces recently-used commands first (Light-2)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "recency-insert");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+
+  // default order: h1 is first
+  await page.keyboard.type("/");
+  await expect(page.getByTestId("slash-item-h1")).toHaveAttribute("data-selected", "true");
+
+  // use "quote" (filter → Enter) → recorded as most-recent
+  await page.keyboard.type("quote");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("slash-palette")).toHaveCount(0);
+
+  // reopen on a fresh line → quote now floats to the top (selected by default)
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("/");
+  await expect(page.getByTestId("slash-item-quote")).toHaveAttribute("data-selected", "true");
+});
+
+test("decorate palette surfaces recently-used formats first (Light-2)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "recency-decorate");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("hello");
+
+  // select "hello", open the decorate palette via `/`; default first item is bold
+  await page.keyboard.press("Home");
+  for (let i = 0; i < 5; i++) await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press("/");
+  await expect(page.getByTestId("decorate-palette")).toBeVisible();
+  await expect(page.getByTestId("decorate-item-bold")).toHaveAttribute("data-selected", "true");
+
+  // apply strike (mnemonic) → recorded as most-recent
+  await page.keyboard.press("s");
+  await sleep(150);
+  expect(await content(page)).toContain("~~hello~~");
+
+  // re-select and reopen → strike now floats to the top (selected by default)
+  await page.keyboard.press("Home");
+  for (let i = 0; i < 9; i++) await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press("/");
+  await expect(page.getByTestId("decorate-palette")).toBeVisible();
+  await expect(page.getByTestId("decorate-item-strike")).toHaveAttribute("data-selected", "true");
+});
