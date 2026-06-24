@@ -2,7 +2,7 @@ import { EditorView, showTooltip, keymap, type Tooltip, type TooltipView } from 
 import { StateField, StateEffect, EditorSelection, Prec, type Extension } from "@codemirror/state";
 import { getCM } from "@replit/codemirror-vim";
 import i18n from "../../i18n";
-import { toggleBold, toggleItalic, toggleStrikethrough, toggleInlineCode, insertLink } from "./commands";
+import { INLINE_FORMATS, type InlineFormat } from "./commands";
 
 // Slash command palette (Step I / M0-1 — see ADR-017). Triggered by `/` at a line
 // start OR after whitespace while editing. Lists block insert/toggle commands (layer
@@ -162,10 +162,10 @@ function paletteTooltip(field: StateField<PaletteState | null>, from: number): T
 // Arrow/Tab remain as always-safe fallbacks.
 const paletteKeymap = Prec.highest(
   keymap.of([
-    // `/` is INSERT-only (P): no decorate trigger. With a selection it behaves as a
-    // normal slash command (types `/`, replacing the selection → the insert palette).
-    // Decoration (A) is reached via the auto-toolbar / vim visual `\` (M0-3) / right-
-    // click — never `/`. (ADR-018.)
+    // `/` with a SELECTION opens the decorate palette (ADR-018 #4: `/` is insert-primary
+    // but also offers decoration on a selection); with no selection it types normally →
+    // the insert palette. Gated off in vim normal/visual (there `/` is vim search).
+    { key: "/", run: openDecorateOnSlash },
     { key: "ArrowDown", run: (v) => move(v, +1) },
     { key: "ArrowUp", run: (v) => move(v, -1) },
     { key: "Ctrl-j", run: (v) => move(v, +1) },
@@ -174,6 +174,8 @@ const paletteKeymap = Prec.highest(
     { key: "Shift-Tab", run: (v) => move(v, -1) },
     { key: "Enter", run: chooseSelected },
     { key: "Escape", run: dismiss },
+    // (The decorate palette's nav / mnemonic / Enter / Escape are handled by the
+    // decorateKeys dom handler, not here — it must beat vim's keymap. See below.)
   ]),
 );
 
@@ -196,20 +198,13 @@ function dismiss(view: EditorView): boolean {
   return false;
 }
 
-// ── Decorate mode (M0-2): `/` with a SELECTION ─────────────────────────────
-// When there is a selection, `/` opens the palette in DECORATE mode — inline-span
-// (layer A) commands applied to the selection. The `/` keypress is INTERCEPTED (a
-// keymap, not typed text) so it never replaces the selection. The menu is a short fixed
-// list, navigated by Arrow / Ctrl-j/k / Enter / click; the running command (toggleBold
-// etc.) wraps the still-intact selection, so it stays presence-safe (a normal edit).
-interface DecorateCommand { id: string; label: () => string; alias: string; run: (v: EditorView) => void }
-const DECORATE: DecorateCommand[] = [
-  { id: "bold", label: () => i18n.t("lpToolbar.bold"), alias: "b", run: toggleBold },
-  { id: "italic", label: () => i18n.t("palette.italic"), alias: "i", run: toggleItalic },
-  { id: "strike", label: () => i18n.t("palette.strikethrough"), alias: "s", run: toggleStrikethrough },
-  { id: "code", label: () => i18n.t("lpToolbar.inlineCode"), alias: "`", run: toggleInlineCode },
-  { id: "link", label: () => i18n.t("lpToolbar.link"), alias: "[]", run: insertLink },
-];
+// ── Selection (decorate) palette ───────────────────────────────────────────
+// Layer-A formats applied to the selection. Opened by vim visual `\`, selection-`/`
+// (non-vim / vim-insert), and (later) the bubble's "⋯". Items come from the SHARED
+// INLINE_FORMATS (ADR-018 #3) so they match the toolbar exactly. Navigated by Arrow /
+// Ctrl-j/k / Enter / click, OR a one-key mnemonic (ADR-018 #2): the running command
+// wraps the still-intact selection (a normal edit → presence-safe).
+const DECORATE = INLINE_FORMATS;
 
 const openDecorate = StateEffect.define<{ from: number }>();
 const moveDecorate = StateEffect.define<number>();
@@ -240,7 +235,7 @@ const decorateField = StateField.define<{ from: number; index: number } | null>(
 function isDecorateOpen(view: EditorView): boolean {
   return view.state.field(decorateField, false) != null;
 }
-function applyDecorate(view: EditorView, cmd: DecorateCommand): void {
+function applyDecorate(view: EditorView, cmd: InlineFormat): void {
   if (!isDecorateOpen(view)) return;
   cmd.run(view); // wraps the (still-intact) selection; the doc change closes the field
 }
@@ -267,10 +262,10 @@ function decorateTooltip(field: StateField<{ from: number; index: number } | nul
           if (i === v.index) row.setAttribute("data-selected", "true");
           const name = document.createElement("span");
           name.className = "lp-palette-name";
-          name.textContent = cmd.label();
+          name.textContent = i18n.t(cmd.labelKey);
           const alias = document.createElement("span");
           alias.className = "lp-palette-alias";
-          alias.textContent = cmd.alias;
+          alias.textContent = cmd.mnemonic;
           row.append(name, alias);
           row.addEventListener("mousedown", (e) => { e.preventDefault(); applyDecorate(view, cmd); });
           dom.appendChild(row);
@@ -285,8 +280,8 @@ function decorateTooltip(field: StateField<{ from: number; index: number } | nul
   };
 }
 
-// The decorate (selection) palette is opened by vim visual `\` (M0-3), the bubble's
-// "⋯ more", and right-click (M0-4) — NOT by `/`.
+// The decorate (selection) palette is opened by vim visual `\` (M0-3), selection-`/`
+// (ADR-018 #4), the bubble's "⋯ more", and right-click (M0-4).
 function chooseDecorate(view: EditorView): boolean {
   const v = view.state.field(decorateField, false);
   if (!v) return false;
@@ -296,6 +291,42 @@ function chooseDecorate(view: EditorView): boolean {
 }
 
 const isVimVisual = (view: EditorView): boolean => !!getCM(view)?.state.vim?.visualMode;
+
+// `/` with a selection opens the decorate palette (ADR-018 #4). Gated off in vim
+// normal/visual mode, where `/` is vim search (vim's selection-decoration door is `\`).
+// With no selection this returns false → `/` types normally → the insert palette.
+function openDecorateOnSlash(view: EditorView): boolean {
+  if (view.state.readOnly) return false;
+  const sel = view.state.selection.main;
+  if (sel.empty) return false;
+  const cm = getCM(view);
+  if (cm && !cm.state.vim?.insertMode) return false; // vim normal/visual → `/` is search
+  view.dispatch({ effects: openDecorate.of({ from: sel.from }) });
+  return true;
+}
+
+// Key handling WHILE the decorate palette is open. A domEventHandlers (NOT a keymap)
+// at highest precedence — same reason as backslashDecorate: in vim VISUAL mode the vim
+// keymap consumes plain keys (`b` = back-word, `j/k` = motion, Enter, Escape) before any
+// CM keymap runs, so the mnemonic fast-path (#2) and nav must intercept at the dom layer
+// to beat vim. Only fires when the decorate palette is open (else passes through, so the
+// insert palette's keymap and normal typing/vim are untouched).
+const decorateKeys = Prec.highest(
+  EditorView.domEventHandlers({
+    keydown(e, view) {
+      if (!isDecorateOpen(view)) return false;
+      if (e.altKey || e.metaKey) return false;
+      if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "j")) { view.dispatch({ effects: moveDecorate.of(+1) }); e.preventDefault(); return true; }
+      if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "k")) { view.dispatch({ effects: moveDecorate.of(-1) }); e.preventDefault(); return true; }
+      if (e.ctrlKey) return false;
+      if (e.key === "Enter") { chooseDecorate(view); e.preventDefault(); return true; }
+      if (e.key === "Escape") { view.dispatch({ effects: closeDecorate.of(null) }); e.preventDefault(); return true; }
+      const fmt = INLINE_FORMATS.find((f) => f.mnemonic === e.key);
+      if (fmt) { applyDecorate(view, fmt); e.preventDefault(); return true; }
+      return false;
+    },
+  }),
+);
 
 // M0-3: vim VISUAL-mode `\` opens the selection palette. Matched by physical KEY CODE
 // (Backslash on US; IntlRo / IntlYen on JIS), NOT by character — codemirror-vim's
@@ -369,5 +400,5 @@ const vimHintField = StateField.define<readonly Tooltip[]>({
 export function slashPalette(): Extension {
   // Order matters: vimVisualField before vimHintField (the field reads it); both before
   // the floating toolbar's bubble (added after slashPalette) so the bubble can read it.
-  return [dismissedField, paletteField, decorateField, vimVisualField, vimHintField, paletteKeymap, backslashDecorate, vimVisualSync];
+  return [dismissedField, paletteField, decorateField, vimVisualField, vimHintField, paletteKeymap, decorateKeys, backslashDecorate, vimVisualSync];
 }

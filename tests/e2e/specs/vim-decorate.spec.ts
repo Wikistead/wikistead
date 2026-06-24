@@ -29,8 +29,13 @@ test("vim visual \\ opens the decorate palette (\\ not typed) and applies a form
   await expect(page.getByTestId("decorate-palette")).toBeVisible();
   expect(await content(page)).toBe(before); // `\` was NOT typed → document/offsets intact
 
-  // apply bold from the palette
-  await page.getByTestId("decorate-item-bold").click();
+  // shared layer-A item set (same as the toolbar): bold/italic/strike/code/link
+  for (const id of ["bold", "italic", "strike", "code", "link"]) {
+    await expect(page.getByTestId(`decorate-item-${id}`)).toBeVisible();
+  }
+
+  // mnemonic fast-path: "b" applies bold directly (no arrow-nav)
+  await page.keyboard.press("b");
   await sleep(150);
   expect(await content(page)).toContain("**"); // the visual selection was wrapped
 });
