@@ -13,6 +13,12 @@ import { attachImageDrop } from "./live-preview/image-drop";
 import { cmTheme } from "../styles/cm-theme";
 import { remoteCursors } from "./remote-cursors";
 
+// The CodeMirror EditorView is built ONCE (a React effect that doesn't re-run on HMR),
+// so hot-swapping this module would leave a STALE view running the old extensions (a
+// fix to editor behaviour wouldn't take effect until a manual reload). Self-accept +
+// reload so the running editor always reflects the latest code. Dev-only (stripped prod).
+if (import.meta.hot) import.meta.hot.accept(() => window.location.reload());
+
 // The single editing surface (Group C / Step I): Obsidian-style live preview bound to
 // the canonical Y.Text. Rendered by default; the line/block under the cursor reveals
 // raw markdown (reveal-on-cursor in decorations.ts) so it's editable in place. vim is
