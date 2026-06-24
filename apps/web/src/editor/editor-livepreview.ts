@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, imageResolver, type ImageResolver } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, blockEntry, imageResolver, checkboxControl, type ImageResolver } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette } from "./live-preview/palette";
@@ -51,6 +51,10 @@ export function mountLivePreview(
       markdownExtension(),
       livePreviewTheme,
       livePreview,
+      // Task checkboxes are interactive on the editable surface: a click flips the
+      // `[ ]`/`[x]` char directly in the Y.Text (a normal draft edit). (Read-only →
+      // disabled; the view surface wires its own no-revision persist below.)
+      ...(opts.readOnly ? [] : [checkboxControl.of({ mode: "edit" })]),
       // DEV-only probe: expose the caret's doc line + selection offsets so e2e can
       // assert motion / selection extent. Stripped from prod builds.
       ...(import.meta.env.DEV ? [EditorView.updateListener.of((u) => {
@@ -100,7 +104,11 @@ export function mountLivePreview(
 export function mountPublishedView(
   parent: HTMLElement,
   markdown: string,
-  opts: { resolveImageUrl?: ImageResolver } = {},
+  // onToggleTask (ADR-019): present only for an edit-capable viewer on a non-dirty page.
+  // A checkbox click calls it; the host flips the live draft over its collab connection
+  // and folds the flip into published_md via the no-revision endpoint. Absent → the
+  // checkboxes render DISABLED (display only; the server is the bastion regardless).
+  opts: { resolveImageUrl?: ImageResolver; onToggleTask?: (index: number, from: number, checked: boolean) => void } = {},
 ): EditorView {
   const view = new EditorView({
     doc: markdown,
@@ -112,6 +120,7 @@ export function mountPublishedView(
       livePreviewTheme,
       livePreview,
       linkClicks,
+      checkboxControl.of(opts.onToggleTask ? { mode: "view", onToggle: opts.onToggleTask } : null),
       ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
       EditorState.readOnly.of(true),
       EditorView.editable.of(false),

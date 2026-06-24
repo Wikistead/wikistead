@@ -53,6 +53,85 @@ class BulletWidget extends WidgetType {
 }
 const bullet = Decoration.replace({ widget: new BulletWidget() });
 
+// GFM task checkbox (ADR-019). The `[ ]`/`[x]` TaskMarker renders as a real checkbox
+// (reveal-on-cursor still shows the raw markers for editing). How a click is handled
+// depends on the surface, supplied via this facet:
+//   - { mode: "edit" }            editable draft surface → flip the char in the doc
+//                                 directly (a normal offset-invariant Y.Text edit).
+//   - { mode: "view", onToggle }  read-only published surface → the host persists it
+//                                 (flip the live draft over its collab connection +
+//                                 the no-revision endpoint). See Editor.tsx.
+//   - null                        no edit permission → rendered DISABLED (display only;
+//                                 the server is the bastion regardless — D3).
+export type CheckboxControl =
+  | { mode: "edit" }
+  | { mode: "view"; onToggle: (index: number, from: number, checked: boolean) => void }
+  | null;
+export const checkboxControl = Facet.define<CheckboxControl, CheckboxControl>({
+  combine: (values) => (values.length ? values[values.length - 1] : null),
+});
+
+// MUST match the server's TASK_MARKER (apps/server/src/routes/pages.ts) so the ordinal
+// index the client sends lines up 1:1 with the server's task enumeration. The server's
+// "checkbox-only diff" guard is the safety net if they ever disagree (→ 409, never
+// corruption).
+const TASK_RE = /^([ \t]*(?:[-*+]|\d+[.)])[ \t]+)\[([ xX])\](?=[ \t])/gm;
+// Ordinal of the task marker whose `[` is at `markerFrom`, counting all task markers
+// before it in document order (matches the server's matchAll ordering).
+function taskIndexAt(docText: string, markerFrom: number): number {
+  let i = 0;
+  for (const m of docText.matchAll(TASK_RE)) {
+    const bracket = m.index + m[1].length; // offset of "["
+    if (bracket < markerFrom) i++;
+    else break;
+  }
+  return i;
+}
+
+class CheckboxWidget extends WidgetType {
+  constructor(readonly checked: boolean, readonly from: number) {
+    super();
+  }
+  eq(other: CheckboxWidget) {
+    return other.checked === this.checked && other.from === this.from;
+  }
+  toDOM(view: EditorView) {
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = this.checked;
+    box.className = "cm-lp-checkbox";
+    box.setAttribute("data-testid", "task-checkbox");
+    const ctl = view.state.facet(checkboxControl);
+    box.disabled = !ctl;
+    if (ctl) {
+      // mousedown + preventDefault: keep editor focus/selection and drive the toggle
+      // ourselves (so the rendered state always follows the document, never the native
+      // input). The doc/host update re-renders the widget with the new checked state.
+      box.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        if (ctl.mode === "edit") {
+          // editable surface: flipping the doc re-renders the widget immediately.
+          view.dispatch({ changes: { from: this.from + 1, to: this.from + 2, insert: this.checked ? " " : "x" } });
+        } else {
+          // read-only published surface: the doc here is NOT the draft, so it won't
+          // re-render until the host refetches the published snapshot — show the new
+          // state at once for responsiveness (the refetch makes it authoritative).
+          box.checked = !this.checked;
+          const index = taskIndexAt(view.state.doc.toString(), this.from);
+          ctl.onToggle(index, this.from, this.checked);
+        }
+      });
+    }
+    return box;
+  }
+  // Let the widget receive its own pointer events (it is interactive, unlike the bullet).
+  ignoreEvent() {
+    return false;
+  }
+}
+const checkbox = (checked: boolean, from: number) =>
+  Decoration.replace({ widget: new CheckboxWidget(checked, from) });
+
 // Image attachments are referenced in the canonical Y.Text by a STABLE id —
 // ![alt](wks-attachment:<id>) — never by a presigned URL (those are short-lived
 // bearer tokens; persisting one in the CRDT/its revision history would both break
@@ -290,6 +369,15 @@ const RENDERERS: BlockRenderer[] = [
     },
   },
   {
+    // GFM task checkbox: replace `[ ]`/`[x]` with a real checkbox (reveal-on-cursor
+    // shows the raw markers for editing). hideMarker makes it reveal-gated + atomic.
+    match: (n) => n === "TaskMarker",
+    enter: (node, ctx) => {
+      const checked = ctx.state.doc.sliceString(node.from + 1, node.from + 2).toLowerCase() === "x";
+      ctx.hideMarker(node.from, node.to, checkbox(checked, node.from));
+    },
+  },
+  {
     match: (n) => n === "ListMark",
     enter: (node, ctx) => {
       const list = node.node.parent?.parent?.name; // ListItem -> Bullet/OrderedList
@@ -512,6 +600,10 @@ export const livePreviewTheme = EditorView.baseTheme({
     borderTop: "2px solid var(--border, #888)",
   },
   ".cm-lp-bullet": { paddingRight: "0.25em" },
+  // Task checkbox: replaces the raw `[ ]`/`[x]`. Sits inline with the list text; the
+  // accent cursor signals it is clickable (disabled = read-only, no edit permission).
+  ".cm-lp-checkbox": { verticalAlign: "middle", margin: "0 0.35em 0 0", cursor: "pointer", accentColor: "var(--accent)" },
+  ".cm-lp-checkbox:disabled": { cursor: "default", opacity: "0.7" },
   ".cm-lp-table": { borderCollapse: "collapse", margin: "0.4em 0", fontSize: "0.95em" },
   ".cm-lp-table th, .cm-lp-table td": {
     border: "1px solid var(--border, #444)",

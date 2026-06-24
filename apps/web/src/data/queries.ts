@@ -242,6 +242,27 @@ export function usePublish(pageId: string) {
   });
 }
 
+// Toggle a single task checkbox on the PUBLISHED page WITHOUT creating a revision
+// (ADR-019). Edit-gated server-side (the bastion); rejects 409 if the draft has any
+// non-checkbox change (so it can't smuggle a real edit past history). On success the
+// published snapshot changed — refetch it (and the tree badge), but NOT the revision
+// list (the whole point: a checkbox tick is not history).
+export function useToggleTask(pageId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (index: number) =>
+      apiFetch<{ publishedAt: string | null }>(`/pages/${encodeURIComponent(pageId)}/tasks/toggle`, token, {
+        method: "POST",
+        body: JSON.stringify({ index }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["published", pageId] });
+      qc.invalidateQueries({ queryKey: ["pages"] });
+    },
+  });
+}
+
 export function usePageRevisions(pageId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({

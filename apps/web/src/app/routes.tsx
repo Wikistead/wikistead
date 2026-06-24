@@ -37,7 +37,7 @@ import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, ApiError, type GuestToken } from "../data/apiClient";
-import { usePage, usePublished, usePublish, useRenamePage } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage, useToggleTask } from "../data/queries";
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport } from "../data/exportApi";
 import { useActiveSpace } from "./ActiveSpace";
@@ -166,6 +166,20 @@ function PageRoute() {
   }, [canEdit, publish, dirtySig, t]);
   const exitEdit = useCallback(() => setEditing(false), []); // vim :q
 
+  // View-mode task-checkbox toggle (ADR-019). Edit-capable only (D3 UI layer; the
+  // server is the bastion). Returns the mutation promise so the editor can revert its
+  // optimistic draft flip on failure (409 dirty/mixed, 403); a content edit mixed into
+  // the draft is rejected, never silently published. Stable so <Editor>'s memo holds.
+  const toggleTask = useToggleTask(pageId ?? "");
+  const onToggleTask = useCallback(
+    (index: number) =>
+      toggleTask.mutateAsync(index).then(() => undefined).catch((e) => {
+        notify.error(t("toast.actionFailed"));
+        throw e; // let the editor revert the optimistic flip
+      }),
+    [toggleTask, t],
+  );
+
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
   // A page that doesn't exist (404) or isn't accessible (403) must NOT present an
@@ -215,7 +229,7 @@ function PageRoute() {
             }) : undefined}
           />
           <div style={{ flex: 1, minHeight: 0 }}>
-            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} />
+            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
           </div>
           {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
         </div>
