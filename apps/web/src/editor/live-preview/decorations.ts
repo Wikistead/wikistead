@@ -431,17 +431,30 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   // normal-mode block cursor (a 1-char selection that RELOCATES — its anchor moves with
   // its head). A shift/visual selection keeps its anchor fixed → leave it alone.
   if (!newSel.empty && newSel.anchor === oldSel.anchor) return tr;
+  const doc = tr.startState.doc;
   const oldHead = oldSel.head;
   const newHead = newSel.head;
   if (newHead === oldHead) return tr;
-  const lo = Math.min(oldHead, newHead);
-  const hi = Math.max(oldHead, newHead);
+  // Only handle a ONE-LINE step (j/k/arrow): the immediately-adjacent document line in
+  // the motion's direction. A big jump (gg/G/}/click) whose adjacent line is NOT a
+  // collapsed block is left alone — it lands at its target (which reveals the block if
+  // the target is inside one). This is what keeps `gg` going to the top, not the table
+  // edge, while a single k/j still steps INTO the block instead of skipping over it.
+  const oldLine = doc.lineAt(oldHead).number;
+  const dir = newHead < oldHead ? -1 : 1;
+  const adj = oldLine + dir;
+  if (adj < 1 || adj > doc.lines) return tr;
   for (const b of blocks) {
-    if (oldHead >= b.from && oldHead <= b.to) continue; // caret was inside this block
-    if (b.from >= lo && b.to <= hi) {
-      // the move jumped clear over a collapsed block → land on its near edge instead
-      const target = newHead < oldHead ? b.to : b.from;
-      if (target !== newHead) return { selection: EditorSelection.cursor(target), scrollIntoView: true };
+    const first = doc.lineAt(b.from).number;
+    const last = doc.lineAt(b.to).number;
+    if (oldLine >= first && oldLine <= last) break; // caret was inside this block
+    if (adj >= first && adj <= last) {
+      // a one-line step lands on this collapsed block's near edge → put the caret on
+      // that source line (revealing it) instead of letting CM skip the whole block
+      if (doc.lineAt(newHead).number !== adj) {
+        return { selection: EditorSelection.cursor(doc.line(adj).from), scrollIntoView: true };
+      }
+      return tr;
     }
   }
   return tr;
@@ -492,12 +505,11 @@ export const livePreviewTheme = EditorView.baseTheme({
     paddingLeft: "0.8em",
     color: "var(--fg-dim, #888)",
   },
-  // Thematic break: the glyph is hidden, so the empty line shows a centered rule.
+  // Thematic break: the glyph is hidden, so the empty line shows a rule. NOTE: never
+  // zero the line height — a 0-height .cm-line corrupts CodeMirror's vertical-motion
+  // geometry (caret jumps over lines). Draw the rule with a centered border instead.
   ".cm-lp-hr": {
     borderTop: "2px solid var(--border, #888)",
-    margin: "0.6em 0",
-    height: "0",
-    lineHeight: "0",
   },
   ".cm-lp-bullet": { paddingRight: "0.25em" },
   ".cm-lp-table": { borderCollapse: "collapse", margin: "0.4em 0", fontSize: "0.95em" },

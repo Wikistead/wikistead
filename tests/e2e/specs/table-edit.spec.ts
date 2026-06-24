@@ -65,6 +65,32 @@ test("vim k traverses a table's source line-by-line (no skip / overtake)", async
   expect(heads).toEqual([8, 7, 6, 5, 4, 3, 2, 1]); // one line per k, through the table
 });
 
+test("vim gg/G jumps land correctly (not the table edge), then j/k step row-by-row", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tbl-jump");
+  await enterEdit(page);
+  await buildTable(page); // A0 / blank / table(3-5) / blank / B0 / B1 / B2(9)
+  await page.getByTestId("vim-toggle").click();
+  await sleep(300);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+
+  // gg must go to the TOP (line 1) — NOT be hijacked to a table edge (the reported bug:
+  // a jump landed on the last table row, so the next j immediately exited the table).
+  await page.keyboard.type("gg");
+  await sleep(200);
+  expect(await head(page)).toBe(1);
+
+  // from the top, j steps line-by-line down THROUGH the table rows (3,4,5) and out
+  const down: (number | undefined)[] = [];
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("j");
+    await sleep(110);
+    down.push(await head(page));
+  }
+  expect(down).toEqual([2, 3, 4, 5, 6, 7]); // every line, including each table row
+});
+
 test("table source is editable in place, and re-renders on leave", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "tbl-edit");
