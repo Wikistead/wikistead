@@ -207,6 +207,15 @@ describe('page lifecycle', () => {
     await deletePage(db, fgaClient, driver, { pageId: page.id, userId: 'dev-user' })
   })
 
+  it('createPage refuses a non-existent / non-edit-capable space (no spaceless page — fortress)', async () => {
+    // Every page belongs to a space (page#space premise); the server gates creation on
+    // FGA `edit` for the target space, so a bogus/unauthorized space can never produce a
+    // page. (The API is /spaces/:spaceId/pages — there is no spaceless-create path.)
+    await expect(
+      createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId: 'no_such_space_xyz', userId: 'dev-user', title: 'x' }),
+    ).rejects.toMatchObject({ statusCode: 403 })
+  })
+
   it('deletePage removes DB row and FGA tuples including share_link grants', async () => {
     const page = await createPage(db, fgaClient, driver, {
       tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'ToDelete',

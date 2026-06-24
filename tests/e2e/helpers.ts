@@ -2,11 +2,41 @@ import type { Page } from "@playwright/test";
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const API = "http://dev.localhost:4010";
+
 export async function openDemo(page: Page) {
   await page.goto("/p/demo");
   await page.waitForSelector("[data-pane=preview] .cm-content");
   await page.waitForSelector("[data-testid=sidebar]");
   await sleep(800);
+}
+
+// Create a REAL throwaway page in demo_space and return its id. Editor specs that need
+// an isolated doc (no shared-demo presence ghosts) use this instead of navigating to a
+// made-up /p/<id>: a non-existent page is no longer an editable phantom (every page
+// belongs to a space — the page#space premise), so tests must edit real pages. The
+// caller's page must already be at the app origin (so the cross-origin POST is allowed).
+export async function createScratchPage(page: Page, title = "Scratch"): Promise<string> {
+  return page.evaluate(async ({ api, title }) => {
+    const r = await fetch(`${api}/spaces/demo_space/pages`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    return ((await r.json()) as { id: string }).id;
+  }, { api: API, title });
+}
+
+// Convenience for single-client editor specs: load the app, create a scratch page, open
+// it, and wait for the surface. Returns the page id.
+export async function openScratch(page: Page, title = "Scratch"): Promise<string> {
+  await page.goto("/p/demo");
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  const id = await createScratchPage(page, title);
+  await page.goto(`/p/${id}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(400);
+  return id;
 }
 
 // The editor opens rendered (read-only). Edit reveals the single live-preview surface

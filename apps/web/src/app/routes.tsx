@@ -36,7 +36,7 @@ import { Sidebar } from "../sidebar/Sidebar";
 import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
-import { fetchGuestToken, apiFetch, type GuestToken } from "../data/apiClient";
+import { fetchGuestToken, apiFetch, ApiError, type GuestToken } from "../data/apiClient";
 import { usePage, usePublished, usePublish, useRenamePage } from "../data/queries";
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport } from "../data/exportApi";
@@ -62,12 +62,14 @@ function PageRoute() {
   const autoEdit = searchParams.get("edit") === "1"; // set by the create-page flow
   const { status, collabToken, tenantId, user, logout, token } = useSession();
   // Capability gates the Edit control (UI only — collab server is the fortress).
-  // Defaults to view until resolved, so a page is never editable speculatively.
-  // The dev-token bypass is god-mode (matches collab's dev-token = readOnly:false),
-  // so it defaults to edit — and works for not-yet-persisted pages getPage 404s on.
-  const devMode = token === "dev-token";
-  const { data: page } = usePage(pageId ?? "");
-  const capability = page?.capability ?? (devMode ? "edit" : "view");
+  // Defaults to view until resolved, so a page is never editable speculatively. A page
+  // that does NOT exist (getPage 404) must never become editable — every page belongs
+  // to a space (the page#space premise); a spaceless phantom can be typed into via
+  // collab but never published. So we do NOT fall back to edit, and a 404 renders a
+  // not-found state (below) rather than an empty editable surface.
+  const pageQ = usePage(pageId ?? "");
+  const page = pageQ.data;
+  const capability = page?.capability ?? "view";
 
   // Draft/publish: view renders the PUBLISHED snapshot; edit-capable users get a
   // Publish control + an "unpublished changes" indicator.
@@ -147,6 +149,19 @@ function PageRoute() {
 
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
+  // A page that doesn't exist (404) or isn't accessible (403) must NOT present an
+  // editable phantom surface (it would have no space → unpublishable). Show a clear
+  // state inside the member chrome instead.
+  if (pageId && pageQ.isError) {
+    const code = (pageQ.error as ApiError | undefined)?.status;
+    return (
+      <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
+        <div style={{ padding: 24 }} data-testid={code === 403 ? "page-forbidden" : "page-not-found"}>
+          {t(code === 403 ? "page.forbidden" : "page.notFound")}
+        </div>
+      </AppShell>
+    );
+  }
   const docName = `t:${tenantId}:p:${pageId}`;
   return (
     <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
