@@ -4,6 +4,7 @@ import { Navigate, Route, Routes, useParams, useSearchParams } from "react-route
 import { AppShell } from "./AppShell";
 import { LoginScreen } from "./LoginScreen";
 import { AdminRoutes } from "../settings/AdminPage";
+import { AccountRoutes } from "../settings/AccountPage";
 import { SpaceSettingsRoutes } from "../settings/SpaceSettingsPage";
 import { Editor, type AnchorGetter } from "../editor/Editor";
 import { createDirtySignal } from "../editor/dirtySignal";
@@ -11,6 +12,8 @@ import { colorFromString } from "../ui/avatar";
 
 // Persisted vim-keymap preference for the single edit surface (Step I). Replaces the
 // old single/split layout preference; vim is now a keymap toggle on the one surface.
+// Guest editor keymap (share-link, no member row): localStorage only — there is no
+// server profile to sync to.
 function useVimPref(): [boolean, () => void] {
   const [vim, setVim] = useState(() => {
     try { return localStorage.getItem("wks.editorVim") === "1"; } catch { return false; }
@@ -18,6 +21,31 @@ function useVimPref(): [boolean, () => void] {
   const toggle = () => setVim((v) => {
     const n = !v;
     try { localStorage.setItem("wks.editorVim", n ? "1" : "0"); } catch { /* no storage */ }
+    return n;
+  });
+  return [vim, toggle];
+}
+
+// Member editor keymap (ADR-020 D4). The cross-device DEFAULT is the server pref
+// (set on the Account → Editor page); the toolbar toggle here is a DEVICE-LOCAL quick
+// switch (localStorage) — a quick flip on one machine must not silently change the
+// user's other devices, and it keeps the toggle instant + offline-safe. Effective on
+// load = localStorage (this device's choice, if any) ?? server default ?? default.
+const KEYMAP_LS = "wks.editorVim";
+const hasLocalKeymap = () => { try { return localStorage.getItem(KEYMAP_LS) != null; } catch { return false; } };
+function useEditorKeymap(): [boolean, () => void] {
+  const settings = useAccountSettings();
+  const [vim, setVim] = useState(() => { try { return localStorage.getItem(KEYMAP_LS) === "1"; } catch { return false; } });
+  const serverKeymap = settings.data?.editorKeymap;
+  useEffect(() => {
+    // Adopt the server default only when this device has no local choice yet (so a new
+    // device picks up the synced pref; a device the user already toggled keeps its choice).
+    if (!serverKeymap || hasLocalKeymap()) return;
+    setVim(serverKeymap === "vim");
+  }, [serverKeymap]);
+  const toggle = () => setVim((v) => {
+    const n = !v;
+    try { localStorage.setItem(KEYMAP_LS, n ? "1" : "0"); } catch { /* no storage */ }
     return n;
   });
   return [vim, toggle];
@@ -38,7 +66,7 @@ import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, ApiError, type GuestToken } from "../data/apiClient";
-import { usePage, usePublished, usePublish, useRenamePage, useToggleTask } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings } from "../data/queries";
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport } from "../data/exportApi";
 import { useActiveSpace } from "./ActiveSpace";
@@ -158,7 +186,7 @@ function PageRoute() {
   // Navigating to another page opens it in READ mode (unless ?edit=1) — PageRoute is
   // not remounted on a param change, so reset editing when the page changes.
   useEffect(() => { setEditing(autoEdit); dirtySig.set(false); }, [pageId, autoEdit, dirtySig]);
-  const [vim, toggleVim] = useVimPref();
+  const [vim, toggleVim] = useEditorKeymap(); // member: server-synced, localStorage-hydrated
   // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
   const publishState = !canEdit ? null : published?.publishedMd == null ? "draft" : published?.hasUnpublishedChanges ? "unpublished" : null;
 
@@ -426,6 +454,7 @@ export function AppRoutes() {
       <Route path="/share/:linkId" element={<ShareRoute />} />
       <Route path="/invite" element={<InviteRoute />} />
       {AdminRoutes()}
+      {AccountRoutes()}
       {SpaceSettingsRoutes()}
       {/* Back-compat: the old members URL now lives under the admin console. */}
       <Route path="/settings/members" element={<Navigate to="/admin/members" replace />} />

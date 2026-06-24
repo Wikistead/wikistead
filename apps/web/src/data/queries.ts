@@ -242,6 +242,49 @@ export function usePublish(pageId: string) {
   });
 }
 
+// Personal account settings (ADR-020). Self-scope server-side (WHERE sub = req.user.sub).
+export interface AccountSettings {
+  displayName: string | null;         // effective: override ?? OIDC ?? null
+  oidcDisplayName: string | null;     // IdP value (for the "reset to IdP name" affordance)
+  displayNameOverride: string | null; // null = using the OIDC name
+  editorKeymap: "default" | "vim";
+  hasAvatar: boolean;
+}
+export function useAccountSettings() {
+  const { token, status } = useSession();
+  return useQuery({
+    queryKey: ["account-settings"],
+    queryFn: () => apiFetch<AccountSettings>("/me/settings", token),
+    enabled: status === "authed",
+    staleTime: 30_000,
+  });
+}
+export function useUpdateAccountSettings() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { displayNameOverride?: string | null; editorKeymap?: "default" | "vim" }) =>
+      apiFetch<AccountSettings>("/me/settings", token, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["account-settings"] }),
+  });
+}
+export function useUploadAvatar() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (dataBase64: string) => apiFetch("/me/avatar", token, { method: "PUT", body: JSON.stringify({ data: dataBase64 }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["account-settings"] }),
+  });
+}
+export function useRemoveAvatar() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch("/me/avatar", token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["account-settings"] }),
+  });
+}
+
 // Toggle a single task checkbox on the PUBLISHED page WITHOUT creating a revision
 // (ADR-019). Edit-gated server-side (the bastion); rejects 409 if the draft has any
 // non-checkbox change (so it can't smuggle a real edit past history). On success the

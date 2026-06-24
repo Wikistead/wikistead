@@ -44,7 +44,31 @@
   },
   "userMenu": {
     "label": "Account",
+    "accountSettings": "Account settings",
     "tenantAdmin": "Tenant admin"
+  },
+  "accountNav": {
+    "title": "Account",
+    "profile": "Profile",
+    "editor": "Editor",
+    "theme": "Theme"
+  },
+  "account": {
+    "displayName": "Display name",
+    "displayNameHint": "Overrides the name from your identity provider. It is shown to collaborators.",
+    "resetToIdp": "Reset to \"{{name}}\"",
+    "avatar": "Avatar",
+    "avatarHint": "PNG, JPEG, WebP or GIF, up to 512KB. Shown on your cursor and in member lists.",
+    "uploadAvatar": "Upload",
+    "removeAvatar": "Remove",
+    "keymap": "Keymap",
+    "keymapHint": "Synced across your devices.",
+    "keymap_default": "Default",
+    "keymap_vim": "Vim",
+    "themeHint": "Stored on this device.",
+    "theme_light": "Light",
+    "theme_dark": "Dark",
+    "theme_system": "System"
   },
   "settings": {
     "back": "Back to app",
