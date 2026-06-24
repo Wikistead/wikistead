@@ -307,6 +307,39 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+/* M0-4 right-click context menu: a small vertical menu in the (fixed) tooltip layer. */
+.cm-tooltip.lp-context-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3, 8px);
+  background: var(--panel);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+.lp-context-item {
+  display: block;
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.lp-context-item:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel-2));
+}
+.lp-context-sep {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--border);
+}
+
 /* M0-3 vim visual hint: a tiny tooltip at the format-toolbar spot (above the selection),
    shown only in vim visual mode. Display-only — pointer-events:none so it never
    intercepts clicks; adds no document text/decoration. */

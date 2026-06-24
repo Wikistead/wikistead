@@ -359,6 +359,14 @@
     "divider": "区切り線",
     "image": "画像"
   },
+  "contextMenu": {
+    "copy": "コピー",
+    "cut": "切り取り",
+    "paste": "貼り付け",
+    "editLink": "リンクを編集",
+    "clearFormat": "書式をクリア",
+    "insert": "挿入…"
+  },
   "members": {
     "title": "メンバー",
     "adminOnly": "管理者のみ。",
