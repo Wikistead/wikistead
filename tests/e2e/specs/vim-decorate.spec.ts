@@ -3,6 +3,8 @@ import { openScratch, enterEdit, sleep } from "../helpers";
 
 const content = (p: Page) => p.locator("[data-pane=preview] .cm-content").innerText();
 const head = (p: Page) => p.evaluate(() => (window as Window & { __lpHeadLine?: number }).__lpHeadLine);
+const lpSel = (p: Page) =>
+  p.evaluate(() => (window as Window & { __lpSel?: { from: number; to: number } }).__lpSel);
 
 // M0-3 (ADR-018): vim VISUAL `\` opens the selection (decorate) palette — matched by
 // key CODE (Backslash/IntlRo/IntlYen) so JIS `¥` doesn't mangle it. `\` is not typed
@@ -38,6 +40,46 @@ test("vim visual \\ opens the decorate palette (\\ not typed) and applies a form
   await page.keyboard.press("b");
   await sleep(150);
   expect(await content(page)).toContain("**"); // the visual selection was wrapped
+});
+
+// Regression guard for the "l skips the last char" report. The SELECTION must reach the
+// last character: in "Hello world" the trailing `d` is offset 10, so an inclusive visual
+// selection ending on it has to=11. We assert the offset extent (NOT the vim block-cursor
+// pixel position): codemirror-vim draws the forward-visual block cursor at the head, so at
+// end-of-line it sits one char-width right of `d` — a cosmetic quirk of the vim/drawSelection
+// core (left untouched). What matters is that no character is skipped and `l` clamps at EOL.
+test("vim visual l reaches the last char (to=11) and clamps at EOL — no skip", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "vim-l-eol");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("Hello world"); // H e l l o _ w o r l d → offsets 0..10, `d` at 10
+
+  await page.getByTestId("vim-toggle").click();
+  await sleep(300);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape"); // normal mode
+  await page.keyboard.press("0"); // line start (offset 0)
+  for (let i = 0; i < 9; i++) await page.keyboard.press("l"); // land on the last `l` (offset 9)
+
+  await page.keyboard.press("v"); // visual: selects offset 9 → to=10
+  await sleep(80);
+  expect((await lpSel(page))?.to).toBe(10);
+
+  await page.keyboard.press("l"); // extend right: must include `d` → to=11 (not skipped)
+  await sleep(80);
+  expect(await lpSel(page)).toMatchObject({ from: 9, to: 11 });
+
+  await page.keyboard.press("l"); // at EOL vim clamps: the selection must not overrun
+  await sleep(80);
+  expect(await lpSel(page)).toMatchObject({ from: 9, to: 11 });
+
+  // applying a format wraps through the last char (proves the range, not just the offset)
+  await page.keyboard.press("\\");
+  await expect(page.getByTestId("decorate-palette")).toBeVisible();
+  await page.keyboard.press("b");
+  await sleep(150);
+  expect(await content(page)).toContain("wor**ld**");
 });
 
 test("vim visual hint: shown only in visual mode, display-only (no doc/offset change)", async ({ browser }) => {
