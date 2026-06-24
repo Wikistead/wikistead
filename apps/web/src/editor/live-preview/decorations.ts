@@ -31,6 +31,7 @@ const headingLine = (level: number) =>
   Decoration.line({ attributes: { class: `cm-lp-h cm-lp-h${level}` } });
 const codeBlockLine = Decoration.line({ attributes: { class: "cm-lp-code-line" } });
 const quoteLine = Decoration.line({ attributes: { class: "cm-lp-quote" } });
+const hrLine = Decoration.line({ attributes: { class: "cm-lp-hr" } });
 
 class BulletWidget extends WidgetType {
   toDOM() {
@@ -177,6 +178,24 @@ function lineRevealed(state: EditorState, pos: number): boolean {
   return rangeRevealed(state, line.from, line.to);
 }
 
+// Reveal check for a COLLAPSED MULTI-LINE BLOCK (table, and future container macros).
+// A `block: true` replace widget swallows its lines, so the cursor can't land INSIDE it
+// by vertical motion — it skips over. So a block reveals when the cursor is on any of
+// its lines OR on an immediately adjacent line: arrowing / `j` / `k` toward the block
+// then reveals its raw source (enterable from either side), and moving a line away
+// re-renders it. This is what makes "macros are editable Markdown text under the cursor"
+// (ADR-017) hold for multi-line blocks, not just inline/single-line constructs.
+function blockRevealed(state: EditorState, from: number, to: number): boolean {
+  if (state.readOnly) return false;
+  const first = state.doc.lineAt(from).number;
+  const last = state.doc.lineAt(to).number;
+  return state.selection.ranges.some((r) => {
+    const a = state.doc.lineAt(r.from).number;
+    const b = state.doc.lineAt(r.to).number;
+    return b >= first - 1 && a <= last + 1; // overlaps [first-1 .. last+1]
+  });
+}
+
 // ── Extensible block-render registry (P3) ──────────────────────────────────
 // Each renderer maps markdown syntax-tree nodes to DECORATIONS. The builder it
 // receives (RenderCtx) can ONLY push decorations — it exposes no way to dispatch a
@@ -197,6 +216,11 @@ export interface RenderCtx {
   // Hide a syntax marker unless the cursor is on its line; also feeds atomicRanges
   // so local cursor motion skips it cleanly. Display-only (never mutates the doc).
   hideMarker(from: number, to: number, deco?: Decoration): void;
+  // Add a decoration AND mark its range atomic (fed to EditorView.atomicRanges). Used
+  // for collapsed BLOCK widgets (table, image, future macros) so cursor motion snaps to
+  // the block's boundary — which the reveal-on-cursor check treats as overlapping, so
+  // arrowing/`j`/`k` into the block reveals its raw source instead of skipping it.
+  addAtomic(deco: Decoration, from: number, to: number): void;
 }
 
 // Minimal structural view of a syntax-tree node — what renderers need. A real
@@ -296,6 +320,15 @@ const RENDERERS: BlockRenderer[] = [
   },
   { match: (n) => n === "LinkMark" || n === "URL", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
   {
+    // Thematic break (`***` / `---` / `___`) → a divider rule. The glyph hides (revealing
+    // on the cursor's line like other markers), leaving an empty line styled as a rule.
+    match: (n) => n === "HorizontalRule",
+    enter: (node, ctx) => {
+      ctx.add(hrLine, ctx.state.doc.lineAt(node.from).from);
+      ctx.hideMarker(node.from, node.to);
+    },
+  },
+  {
     // GFM table → an HTML table (block replace). Reveals raw markdown — and stays
     // editable — when the cursor is anywhere in the table. Offset-invariant: the
     // replace hides the range but never shifts offsets, so remote carets outside
@@ -305,8 +338,10 @@ const RENDERERS: BlockRenderer[] = [
       const doc = ctx.state.doc;
       const from = doc.lineAt(node.from).from;
       const to = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1)).to;
-      if (rangeRevealed(ctx.state, from, to)) return;
-      ctx.add(Decoration.replace({ widget: new TableWidget(doc.sliceString(from, to)), block: true }), from, to);
+      // Block reveal (inside OR adjacent line) so the cursor can enter the source — a
+      // block widget can't be entered by vertical motion otherwise (see blockRevealed).
+      if (blockRevealed(ctx.state, from, to)) return;
+      ctx.addAtomic(Decoration.replace({ widget: new TableWidget(doc.sliceString(from, to)), block: true }), from, to);
     },
   },
   {
@@ -319,7 +354,7 @@ const RENDERERS: BlockRenderer[] = [
       const m = ATTACHMENT_REF.exec(ctx.state.doc.sliceString(node.from, node.to));
       if (!m) return;
       if (lineRevealed(ctx.state, node.from)) return;
-      ctx.add(Decoration.replace({ widget: new ImageWidget(m[2]!, m[1]!) }), node.from, node.to);
+      ctx.addAtomic(Decoration.replace({ widget: new ImageWidget(m[2]!, m[1]!) }), node.from, node.to);
     },
   },
 ];
@@ -336,6 +371,11 @@ function buildDecorations(state: EditorState): {
     hideMarker: (from, to, deco = hide) => {
       if (from >= to) return;
       if (lineRevealed(state, from)) return;
+      all.push(deco.range(from, to));
+      hidden.push(hide.range(from, to));
+    },
+    addAtomic: (deco, from, to) => {
+      if (from >= to) return;
       all.push(deco.range(from, to));
       hidden.push(hide.range(from, to));
     },
@@ -413,6 +453,13 @@ export const livePreviewTheme = EditorView.baseTheme({
     borderLeft: "3px solid var(--border, #888)",
     paddingLeft: "0.8em",
     color: "var(--fg-dim, #888)",
+  },
+  // Thematic break: the glyph is hidden, so the empty line shows a centered rule.
+  ".cm-lp-hr": {
+    borderTop: "2px solid var(--border, #888)",
+    margin: "0.6em 0",
+    height: "0",
+    lineHeight: "0",
   },
   ".cm-lp-bullet": { paddingRight: "0.25em" },
   ".cm-lp-table": { borderCollapse: "collapse", margin: "0.4em 0", fontSize: "0.95em" },

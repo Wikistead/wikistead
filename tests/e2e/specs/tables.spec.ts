@@ -13,11 +13,13 @@ test("GFM table renders as an HTML table; cursor reveals raw markdown", async ({
   await enterEdit(page);
 
   await page.click("[data-pane=preview] .cm-content");
-  for (const line of ["| Name | Age |", "| --- | --- |", "| Alice | 30 |", "below the table"]) {
+  // Blank line after the rows so the paragraph is NOT absorbed as a single-cell table
+  // row (GFM), and so the caret ends 2+ lines below → the block is not adjacent-revealed.
+  for (const line of ["| Name | Age |", "| --- | --- |", "| Alice | 30 |", "", "below the table"]) {
     await page.keyboard.type(line);
     await page.keyboard.press("Enter");
   }
-  // Cursor is now on the line after the table → the table is not revealed.
+  // Cursor is now well below the table → it renders (not revealed).
   await sleep(400);
 
   const table = page.locator("[data-pane=preview] table.cm-lp-table");
