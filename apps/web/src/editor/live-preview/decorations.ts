@@ -305,11 +305,14 @@ const RENDERERS: BlockRenderer[] = [
     // Thematic break (`***` / `---` / `___`) → a divider rule. The whole line content is
     // the glyph, so hiding it atomically would make the line un-landable (the caret skips
     // it). Treat it as a 1-line BLOCK (addAtomic records it for blockEntry): the caret is
-    // redirected onto the line, which reveals the `***` for editing.
+    // redirected onto the line, which reveals the `***` for editing. When revealed, show
+    // ONLY the raw `***` (no rule line) so the source is clear; the rule is the rendered
+    // (not-revealed) state.
     match: (n) => n === "HorizontalRule",
     enter: (node, ctx) => {
+      if (lineRevealed(ctx.state, node.from)) return; // editing → raw ***, no rule
       ctx.add(hrLine, ctx.state.doc.lineAt(node.from).from);
-      if (!lineRevealed(ctx.state, node.from)) ctx.addAtomic(hide, node.from, node.to);
+      ctx.addAtomic(hide, node.from, node.to);
     },
   },
   {
