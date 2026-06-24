@@ -39,6 +39,21 @@
    (bg-card, …) already follow the var swap in :root below, including system-dark. */
 @custom-variant dark (&:is([data-theme="dark"] *));
 
+/* Pin the DEFAULT border colour to the shared --border token (the shadcn base layer).
+   Tailwind v4's bare `border` utility falls back to currentColor — which made shadcn
+   popups (Dialog / Popover / DropdownMenu) render a high-contrast, too-prominent edge,
+   unlike the CodeMirror command palette that sets `1px solid var(--border)` explicitly.
+   Setting it here in @layer base keeps it below the utilities, so an explicit
+   `border-<color>` still wins, while every plain `border` matches the palette's subtle
+   edge in BOTH themes (--border swaps with the theme). Display-only. */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+}
+
 /* Design tokens + global rules. Component styling is Tailwind (utilities/shadcn); rules
    that must match imperatively-set class names (CodeMirror, the live-preview
    toolbar) stay global here because they target CodeMirror's own DOM.
