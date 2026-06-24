@@ -72,6 +72,10 @@ export interface EditorProps {
   // or its host (keeps it off the presence path). The canonical Y.Text IS the
   // markdown, so `ytext !== publishedMd` is exactly the server's check, but instant.
   dirtySignal?: DirtySignal;
+  // vim ex-command entry points (Light-3): :q → onExitEdit, :w/:wq → onPublish. Pass
+  // STABLE callbacks (useCallback) — captured at mount, not in the surface-effect deps.
+  onExitEdit?: () => void;
+  onPublish?: () => void;
 }
 
 function userField(user: EditorUser) {
@@ -97,7 +101,7 @@ function tint(color: string): string {
 // memo: the host (PageRoute) re-renders on its own state and on the published poll;
 // without memo those re-render <Editor> too, which the tree-move e2e forbids and
 // churns the editor. Props are referentially stable across host re-renders.
-export const Editor = memo(function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, onUploadImage, inlineComments, anchorGetterRef, dirtySignal }: EditorProps) {
+export const Editor = memo(function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, onUploadImage, inlineComments, anchorGetterRef, dirtySignal, onExitEdit, onPublish }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
   const previewViewRef = useRef<EditorView | null>(null);
@@ -179,6 +183,8 @@ export const Editor = memo(function Editor({ docName, token, collabUrl, user, ca
       uploadImage: onUploadImage,
       vim,
       vimCompartment,
+      onExitEdit,
+      onPublish,
     });
     views.push(previewView);
     previewViewRef.current = previewView;

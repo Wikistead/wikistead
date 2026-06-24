@@ -155,6 +155,17 @@ function PageRoute() {
   // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
   const publishState = !canEdit ? null : published?.publishedMd == null ? "draft" : published?.hasUnpublishedChanges ? "unpublished" : null;
 
+  // Publish = done: flush the draft (server), drop the dirty flag, return to the rendered
+  // view. Shared by the toolbar Publish button and the vim :w/:wq ex commands (Light-3).
+  const publishPage = useCallback(() => {
+    if (!canEdit) return;
+    publish.mutate(undefined, {
+      onSuccess: () => { dirtySig.set(false); setEditing(false); notify.success(t("toast.published")); },
+      onError: () => notify.error(t("toast.publishFailed")),
+    });
+  }, [canEdit, publish, dirtySig, t]);
+  const exitEdit = useCallback(() => setEditing(false), []); // vim :q
+
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
   // A page that doesn't exist (404) or isn't accessible (403) must NOT present an
@@ -182,12 +193,7 @@ function PageRoute() {
             onDone={() => setEditing(false)}
             publishState={publishState}
             canPublish={!!published?.hasUnpublishedChanges}
-            onPublish={canEdit ? () => publish.mutate(undefined, {
-              // Publish = done: drop the dirty flag and return to the rendered view
-              // (no separate "Done" click needed — publishing implies completion).
-              onSuccess: () => { dirtySig.set(false); setEditing(false); notify.success(t("toast.published")); },
-              onError: () => notify.error(t("toast.publishFailed")),
-            }) : undefined}
+            onPublish={canEdit ? publishPage : undefined}
             publishing={publish.isPending}
             vim={vim}
             onToggleVim={toggleVim}
@@ -209,7 +215,7 @@ function PageRoute() {
             }) : undefined}
           />
           <div style={{ flex: 1, minHeight: 0 }}>
-            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} />
+            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} />
           </div>
           {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
         </div>
