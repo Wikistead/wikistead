@@ -53,3 +53,24 @@
 }
 .restoreBtn:hover { background: var(--border); }
 .restoreBtn:disabled { opacity: 0.5; cursor: default; }
+.rowActions { display: flex; gap: 6px; flex: 0 0 auto; }
+
+/* Diff view */
+.diffHead { display: flex; align-items: center; gap: 6px; }
+.backBtn {
+  display: inline-flex; align-items: center; gap: 4px;
+  font: inherit; font-size: 12px; padding: 3px 8px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--panel-2); color: var(--fg); cursor: pointer;
+}
+.backBtn:hover { background: var(--border); }
+.diffTitle { font-size: 0.85em; font-weight: 600; margin: 0; }
+.diff {
+  margin: 0; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px;
+  line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+  border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+}
+.diffLine { display: block; padding: 0 8px; }
+.diffAdd { background: color-mix(in srgb, #2ea043 18%, transparent); }
+.diffDel { background: color-mix(in srgb, #f85149 18%, transparent); }
+.diffSame { color: var(--fg-dim); }

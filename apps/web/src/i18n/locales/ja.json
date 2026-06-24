@@ -318,7 +318,12 @@
     "empty": "保存されたバージョンはまだありません。ページの編集に伴い自動的に記録されます。",
     "unknown": "不明",
     "restoreConfirmTitle": "このバージョンを復元",
-    "restoreConfirm": "{{when}} のバージョンに復元しますか？ 現在の内容は履歴に残るので、元に戻せます。"
+    "restoreConfirm": "{{when}} のバージョンに復元しますか？ 現在の内容は履歴に残るので、元に戻せます。",
+    "diff": "差分",
+    "diffTitle": "{{when}} からの変更",
+    "diffHint": "現在の公開バージョンとの比較です。",
+    "noChanges": "このバージョンからの変更はありません。",
+    "backToList": "履歴に戻る"
   },
   "attachments": {
     "header": "添付ファイル ({{count}})",
