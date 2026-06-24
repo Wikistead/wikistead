@@ -272,6 +272,19 @@ export function usePageRevisions(pageId: string, enabled = true) {
   });
 }
 
+// Decoded Markdown of one revision (Design-5 diff). view-gated server-side. Fetched
+// lazily (only when a diff is open). The client diffs it against the current published
+// snapshot; the revision set is immutable, so cache it indefinitely.
+export function useRevisionContent(pageId: string, revId: string | null) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["revision-content", pageId, revId],
+    queryFn: () => apiFetch<{ content: string }>(`/pages/${encodeURIComponent(pageId)}/revisions/${encodeURIComponent(revId!)}/content`, token).then((r) => r?.content ?? ""),
+    enabled: pageId.length > 0 && !!revId,
+    staleTime: Infinity,
+  });
+}
+
 // Restore is non-destructive: the server appends a CRDT delta (delete+insert) and
 // inserts a fresh revision, then publishes to Valkey so the open editor updates
 // live (no reload). We invalidate the list so the new revision appears.

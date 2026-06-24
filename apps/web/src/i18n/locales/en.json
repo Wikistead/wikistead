@@ -318,7 +318,12 @@
     "empty": "No saved versions yet. Versions are captured automatically as the page is edited.",
     "unknown": "unknown",
     "restoreConfirmTitle": "Restore this version",
-    "restoreConfirm": "Restore the page to the version from {{when}}? Current content is kept in history, so you can undo this."
+    "restoreConfirm": "Restore the page to the version from {{when}}? Current content is kept in history, so you can undo this.",
+    "diff": "Compare",
+    "diffTitle": "Changes since {{when}}",
+    "diffHint": "Compared with the current published version.",
+    "noChanges": "No changes since this version.",
+    "backToList": "Back to history"
   },
   "attachments": {
     "header": "Attachments ({{count}})",
