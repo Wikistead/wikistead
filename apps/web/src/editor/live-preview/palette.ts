@@ -2,7 +2,7 @@ import { EditorView, ViewPlugin, showTooltip, keymap, type Tooltip, type Tooltip
 import { StateField, StateEffect, EditorSelection, Facet, Prec, type EditorState, type Extension } from "@codemirror/state";
 import { getCM } from "@replit/codemirror-vim";
 import i18n from "../../i18n";
-import { INLINE_FORMATS, insertImage, type InlineFormat, type ImageUploader } from "./commands";
+import { INLINE_FORMATS, insertImage, insertLink, type InlineFormat, type ImageUploader } from "./commands";
 
 // Slash command palette (Step I / M0-1 — see ADR-017). Triggered by `/` at a line
 // start OR after whitespace while editing. Lists block insert/toggle commands (layer
@@ -47,6 +47,10 @@ const COMMANDS: PaletteCommand[] = [
   // `***` (not `---`): `---` under a line of text is a setext H2 underline, so it would
   // turn the line above into a heading. `***` is always a thematic break (hr).
   { id: "divider", label: () => i18n.t("palette.divider"), alias: "divider", keywords: "rule hr separator line", insert: "***\n", caret: 4 },
+  // Link (M0-5): the no-selection door for the dual-behaviour link command. insertLink on
+  // an empty selection inserts "[](url)" with "url" selected (URL insert); with a selection
+  // it link-ifies it — reached via the bubble / `\` / `/`-on-selection / right-click.
+  { id: "link", label: () => i18n.t("palette.link"), alias: "link", keywords: "url href anchor hyperlink", insert: "", caret: 0, action: (view) => insertLink(view) },
 ];
 
 // Image insert (layer P). Moved here from the selection bubble (was M0-5, pulled forward)
@@ -76,6 +80,21 @@ function filterCommands(state: EditorState, query: string): PaletteCommand[] {
   return list.filter(
     (c) => c.label().toLowerCase().includes(q) || c.alias.toLowerCase().includes(q) || c.keywords.includes(q),
   );
+}
+
+// Scroll the capped palette so the selected row is visible. Manual scrollTop (not
+// scrollIntoView): the palette is a position:fixed CM tooltip, where scrollIntoView's
+// scrollable-ancestor walk doesn't reliably pick it. offsetTop is relative to the
+// (positioned) tooltip, so this is deterministic. Deferred to the next frame because CM
+// applies the tooltip's capped height AFTER our render runs — measuring clientHeight then.
+function keepInView(container: HTMLElement, row: HTMLElement | null): void {
+  if (!row) return;
+  requestAnimationFrame(() => {
+    const top = row.offsetTop;
+    const bottom = top + row.offsetHeight;
+    if (top < container.scrollTop) container.scrollTop = top;
+    else if (bottom > container.scrollTop + container.clientHeight) container.scrollTop = bottom - container.clientHeight;
+  });
 }
 
 interface PaletteState { from: number; query: string; index: number }
@@ -182,8 +201,8 @@ function paletteTooltip(field: StateField<PaletteState | null>, from: number): T
           dom.appendChild(row);
         });
         // Keep the selected row visible when the capped list scrolls (e.g. nav to image,
-        // the last item). block:"nearest" only scrolls the palette, never the page.
-        (selectedRow as HTMLElement | null)?.scrollIntoView({ block: "nearest" });
+        // the last item).
+        keepInView(dom, selectedRow as HTMLElement | null);
       };
       render();
       return {
@@ -315,9 +334,8 @@ function decorateTooltip(field: StateField<{ from: number; index: number } | nul
           row.addEventListener("mousedown", (e) => { e.preventDefault(); applyDecorate(view, cmd); });
           dom.appendChild(row);
         });
-        // Keep the selected row visible when the list scrolls (parity with the insert
-        // palette). block:"nearest" scrolls only the palette, never the page.
-        (selectedRow as HTMLElement | null)?.scrollIntoView({ block: "nearest" });
+        // Keep the selected row visible when the list scrolls (parity with the insert palette).
+        keepInView(dom, selectedRow as HTMLElement | null);
       };
       render();
       return {
