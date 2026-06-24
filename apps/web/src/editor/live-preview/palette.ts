@@ -3,6 +3,7 @@ import { StateField, StateEffect, EditorSelection, Facet, Prec, type EditorState
 import { getCM } from "@replit/codemirror-vim";
 import i18n from "../../i18n";
 import { INLINE_FORMATS, insertImage, insertLink, type InlineFormat, type ImageUploader } from "./commands";
+import { orderByRecency, recordUse } from "./palette-recency";
 
 // Slash command palette (Step I / M0-1 — see ADR-017). Triggered by `/` at a line
 // start OR after whitespace while editing. Lists block insert/toggle commands (layer
@@ -76,10 +77,13 @@ function commandList(state: EditorState): PaletteCommand[] {
 function filterCommands(state: EditorState, query: string): PaletteCommand[] {
   const q = query.trim().toLowerCase();
   const list = commandList(state);
-  if (!q) return list;
-  return list.filter(
-    (c) => c.label().toLowerCase().includes(q) || c.alias.toLowerCase().includes(q) || c.keywords.includes(q),
-  );
+  const matched = !q
+    ? list
+    : list.filter(
+        (c) => c.label().toLowerCase().includes(q) || c.alias.toLowerCase().includes(q) || c.keywords.includes(q),
+      );
+  // Float recently-used commands to the top (Light-2); stable for everything else.
+  return orderByRecency("insert", matched, (c) => c.id);
 }
 
 // Scroll the capped palette so the selected row is visible. Manual scrollTop (not
@@ -150,6 +154,7 @@ const paletteField = StateField.define<PaletteState | null>({
 function applyAt(view: EditorView, cmd: PaletteCommand): void {
   const v = view.state.field(paletteField);
   if (!v) return;
+  recordUse("insert", cmd.id); // Light-2: learn recently-used commands
   const head = view.state.selection.main.head;
   if (cmd.action) {
     // Action command (e.g. image): remove the "/query" token, place the caret where it
@@ -268,6 +273,12 @@ function dismiss(view: EditorView): boolean {
 // Ctrl-j/k / Enter / click, OR a one-key mnemonic (ADR-018 #2): the running command
 // wraps the still-intact selection (a normal edit → presence-safe).
 const DECORATE = INLINE_FORMATS;
+// The decorate items, recently-used first (Light-2). Stable within an open session
+// (recency only changes on apply, which closes the palette), so the index used by
+// render / nav / chooseDecorate stays consistent.
+function decorateList(): InlineFormat[] {
+  return orderByRecency("decorate", DECORATE, (f) => f.id);
+}
 
 const openDecorate = StateEffect.define<{ from: number }>();
 const moveDecorate = StateEffect.define<number>();
@@ -300,6 +311,7 @@ function isDecorateOpen(view: EditorView): boolean {
 }
 function applyDecorate(view: EditorView, cmd: InlineFormat): void {
   if (!isDecorateOpen(view)) return;
+  recordUse("decorate", cmd.id); // Light-2: learn recently-used formats
   cmd.run(view); // wraps the (still-intact) selection; the doc change closes the field
 }
 
@@ -318,7 +330,7 @@ function decorateTooltip(field: StateField<{ from: number; index: number } | nul
         if (!v) return;
         dom.replaceChildren();
         let selectedRow: HTMLElement | null = null;
-        DECORATE.forEach((cmd, i) => {
+        decorateList().forEach((cmd, i) => {
           const row = document.createElement("button");
           row.type = "button";
           row.className = "lp-palette-row" + (i === v.index ? " is-selected" : "");
@@ -351,7 +363,7 @@ function decorateTooltip(field: StateField<{ from: number; index: number } | nul
 function chooseDecorate(view: EditorView): boolean {
   const v = view.state.field(decorateField, false);
   if (!v) return false;
-  const cmd = DECORATE[v.index];
+  const cmd = decorateList()[v.index];
   if (cmd) applyDecorate(view, cmd);
   return true;
 }
