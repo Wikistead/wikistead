@@ -357,7 +357,8 @@
     "codeBlock": "コードブロック",
     "table": "テーブル",
     "divider": "区切り線",
-    "image": "画像"
+    "image": "画像",
+    "link": "リンク"
   },
   "contextMenu": {
     "copy": "コピー",

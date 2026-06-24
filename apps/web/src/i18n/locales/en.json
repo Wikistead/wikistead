@@ -357,7 +357,8 @@
     "codeBlock": "Code block",
     "table": "Table",
     "divider": "Divider",
-    "image": "Image"
+    "image": "Image",
+    "link": "Link"
   },
   "contextMenu": {
     "copy": "Copy",

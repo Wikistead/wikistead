@@ -118,6 +118,35 @@ test("selection + / opens the decorate palette; a mnemonic applies (ADR-018 #4/#
   expect(await content(page)).toContain("**hello**");
 });
 
+test("link dual-behaviour: /link inserts a URL template; a selection link-ifies (M0-5)", async ({ page }) => {
+  await openDemo(page);
+  await enterEdit(page);
+  await resetDoc(page);
+  await page.click("[data-pane=preview] .cm-content");
+
+  // NO selection → `/link` inserts "[](url)" with "url" pre-selected (URL insert): typing
+  // replaces the url.
+  await page.keyboard.type("/link");
+  await expect(page.getByTestId("slash-item-link")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("slash-palette")).toHaveCount(0);
+  await page.keyboard.type("https://x");
+  expect(await content(page)).toContain("[](https://x)");
+
+  // WITH a selection → link-ify: select text, `/` opens the decorate palette, mnemonic `l`
+  // wraps it as a link.
+  await resetDoc(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("click");
+  await page.keyboard.press("Home");
+  for (let i = 0; i < 5; i++) await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press("/");
+  await expect(page.getByTestId("decorate-palette")).toBeVisible();
+  await page.keyboard.press("l");
+  await sleep(150);
+  expect(await content(page)).toContain("[click](url)");
+});
+
 test("the palette scrolls to keep the selected item visible (Ctrl-j/k follow)", async ({ page }) => {
   await openDemo(page);
   await enterEdit(page);
@@ -127,30 +156,29 @@ test("the palette scrolls to keep the selected item visible (Ctrl-j/k follow)", 
   const palette = page.getByTestId("slash-palette");
   await expect(palette).toBeVisible();
 
+  // The selected row sits within the palette's scrollport ([scrollTop, scrollTop+
+  // clientHeight]) — i.e. it followed the selection into view rather than being scrolled
+  // off. Measured in the container's own scroll coordinates (offsetTop), immune to
+  // viewport clipping.
+  const inScrollport = (el: HTMLElement) => {
+    const sel = el.querySelector("[data-selected=true]") as HTMLElement | null;
+    if (!sel) return false;
+    const top = sel.offsetTop;
+    const bottom = top + sel.offsetHeight;
+    return top >= el.scrollTop - 2 && bottom <= el.scrollTop + el.clientHeight + 2;
+  };
+
   // wrap UP from the first item to the LAST (image) — it can start below the fold
   await page.keyboard.press("Control+k");
   await expect(page.getByTestId("slash-item-image")).toHaveAttribute("data-selected", "true");
-  // the selected row is scrolled within the palette's visible box (not clipped)
-  const lastVisible = await palette.evaluate((el) => {
-    const sel = el.querySelector("[data-selected=true]") as HTMLElement | null;
-    if (!sel) return false;
-    const e = el.getBoundingClientRect();
-    const s = sel.getBoundingClientRect();
-    return s.top >= e.top - 1 && s.bottom <= e.bottom + 1;
-  });
-  expect(lastVisible).toBe(true);
+  await sleep(80); // let the rAF scroll adjustment run
+  expect(await palette.evaluate(inScrollport)).toBe(true);
 
   // wrap back DOWN to the first item — it must scroll back into view too
   await page.keyboard.press("Control+j");
   await expect(page.getByTestId("slash-item-h1")).toHaveAttribute("data-selected", "true");
-  const firstVisible = await palette.evaluate((el) => {
-    const sel = el.querySelector("[data-selected=true]") as HTMLElement | null;
-    if (!sel) return false;
-    const e = el.getBoundingClientRect();
-    const s = sel.getBoundingClientRect();
-    return s.top >= e.top - 1 && s.bottom <= e.bottom + 1;
-  });
-  expect(firstVisible).toBe(true);
+  await sleep(80);
+  expect(await palette.evaluate(inScrollport)).toBe(true);
 });
 
 test("the palette stays within the viewport when opened near the bottom", async ({ browser }) => {
@@ -166,6 +194,9 @@ test("the palette stays within the viewport when opened near the bottom", async 
   await page.keyboard.type("/");
   const palette = page.getByTestId("slash-palette");
   await expect(palette).toBeVisible();
+  // Wait for CM to finalize the tooltip position — it parks tooltips off-screen at
+  // y≈-10000 while measuring, so reading boundingBox too early gives a false negative.
+  await expect.poll(async () => (await palette.boundingBox())?.y ?? -1e9).toBeGreaterThan(-1000);
   const box = await palette.boundingBox();
   const vh = page.viewportSize()!.height;
   // fully on-screen: not clipped at the top, not running off the bottom (CM flips it
