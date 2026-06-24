@@ -7,6 +7,13 @@ import {
   WidgetType,
 } from "@codemirror/view";
 
+// Force a full reload on HMR: this module's decorations/state are baked into the
+// EditorView at creation (built once, not re-run on hot-swap), so a hot update would
+// leave a STALE editor running old behaviour (a fix wouldn't take effect until a manual
+// reload). Self-accept + reload so the running editor always reflects the latest code.
+// Dev-only (stripped from prod builds).
+if (import.meta.hot) import.meta.hot.accept(() => window.location.reload());
+
 // Obsidian-style live preview: hide/style markdown syntax via CodeMirror
 // decorations.
 //
