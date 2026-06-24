@@ -118,6 +118,41 @@ test("selection + / opens the decorate palette; a mnemonic applies (ADR-018 #4/#
   expect(await content(page)).toContain("**hello**");
 });
 
+test("the palette scrolls to keep the selected item visible (Ctrl-j/k follow)", async ({ page }) => {
+  await openDemo(page);
+  await enterEdit(page);
+  await resetDoc(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("/"); // full list (incl. image) — capped height can scroll
+  const palette = page.getByTestId("slash-palette");
+  await expect(palette).toBeVisible();
+
+  // wrap UP from the first item to the LAST (image) — it can start below the fold
+  await page.keyboard.press("Control+k");
+  await expect(page.getByTestId("slash-item-image")).toHaveAttribute("data-selected", "true");
+  // the selected row is scrolled within the palette's visible box (not clipped)
+  const lastVisible = await palette.evaluate((el) => {
+    const sel = el.querySelector("[data-selected=true]") as HTMLElement | null;
+    if (!sel) return false;
+    const e = el.getBoundingClientRect();
+    const s = sel.getBoundingClientRect();
+    return s.top >= e.top - 1 && s.bottom <= e.bottom + 1;
+  });
+  expect(lastVisible).toBe(true);
+
+  // wrap back DOWN to the first item — it must scroll back into view too
+  await page.keyboard.press("Control+j");
+  await expect(page.getByTestId("slash-item-h1")).toHaveAttribute("data-selected", "true");
+  const firstVisible = await palette.evaluate((el) => {
+    const sel = el.querySelector("[data-selected=true]") as HTMLElement | null;
+    if (!sel) return false;
+    const e = el.getBoundingClientRect();
+    const s = sel.getBoundingClientRect();
+    return s.top >= e.top - 1 && s.bottom <= e.bottom + 1;
+  });
+  expect(firstVisible).toBe(true);
+});
+
 test("the palette stays within the viewport when opened near the bottom", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "palette-vp");
