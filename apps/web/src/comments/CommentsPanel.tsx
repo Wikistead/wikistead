@@ -1,6 +1,8 @@
 import { useRef, useState, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
+import { X } from "lucide-react";
 import { Button } from "../ui/Button";
+import { useEscClose } from "../ui/useEscClose";
 import { useSession } from "../session/SessionProvider";
 import { useComments, useCommentMutations, fetchMentionable } from "../data/comments";
 import type { Mentionable } from "../data/commentsApi";
@@ -69,9 +71,10 @@ function Composer({ pageId, onSubmit, placeholder }: { pageId: string; onSubmit:
   );
 }
 
-export function CommentsPanel({ pageId, canComment, anchorGetterRef }: { pageId: string; canComment: boolean; anchorGetterRef: MutableRefObject<AnchorGetter | null> }) {
+export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose }: { pageId: string; canComment: boolean; anchorGetterRef: MutableRefObject<AnchorGetter | null>; onClose: () => void }) {
   const { t: tr } = useTranslation(); // `t` is used as the thread loop var below
   const { sub: me } = useSession();
+  useEscClose(onClose);
   const { data: threads } = useComments(pageId);
   const { createThread, reply, setStatus, remove } = useCommentMutations(pageId);
   const [tab, setTab] = useState<"open" | "resolved">("open");
@@ -95,9 +98,14 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef }: { pageId:
     <aside className={styles.panel} data-testid="comments-panel">
       <header className={styles.header}>
         <span className={styles.title}>{tr("page.comments")}</span>
-        <div className={styles.tabs}>
-          <button type="button" className={styles.tab} data-testid="tab-open" aria-pressed={tab === "open"} onClick={() => setTab("open")}>{tr("commentsPanel.open")}</button>
-          <button type="button" className={styles.tab} data-testid="tab-resolved" aria-pressed={tab === "resolved"} onClick={() => setTab("resolved")}>{tr("commentsPanel.resolved")}</button>
+        <div className={styles.headerRight}>
+          <div className={styles.tabs}>
+            <button type="button" className={styles.tab} data-testid="tab-open" aria-pressed={tab === "open"} onClick={() => setTab("open")}>{tr("commentsPanel.open")}</button>
+            <button type="button" className={styles.tab} data-testid="tab-resolved" aria-pressed={tab === "resolved"} onClick={() => setTab("resolved")}>{tr("commentsPanel.resolved")}</button>
+          </div>
+          <button type="button" className={styles.close} data-testid="comments-close" aria-label={tr("common.close")} onClick={onClose}>
+            <X size={16} aria-hidden />
+          </button>
         </div>
       </header>
 

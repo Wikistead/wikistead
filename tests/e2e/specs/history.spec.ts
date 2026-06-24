@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, enterEdit, paneText, sleep } from "../helpers";
+import { openDemo, openScratch, enterEdit, paneText, sleep } from "../helpers";
 
 // 2e-2 + 2f-1: page history & restore. In the draft/publish model a revision is
 // created by an explicit PUBLISH (the auto-snapshot was removed); history IS the
@@ -61,4 +61,34 @@ test("history: a revision is listed and restoring it reverts the live editor", a
   // REMOVAL (the async Valkey restore lands shortly after "ALPHA" is already present).
   await expect.poll(async () => paneText(page, "preview"), { timeout: 10_000 }).not.toContain("BETA");
   expect(await paneText(page, "preview")).toContain("ALPHA");
+});
+
+// Light-1: the history panel closes in place via × or Esc, but NOT on an outside click.
+test("history panel: × and Esc close it; outside-click does not", async ({ page }) => {
+  await openScratch(page, "history-close");
+  await enterEdit(page);
+  // History lives in the ••• overflow menu.
+  await page.click("[data-testid=page-overflow-trigger]");
+  await page.click("[data-testid=history-toggle]");
+  const panel = page.getByTestId("history-panel");
+  await expect(panel).toBeVisible();
+
+  // outside-click in the editor does NOT close it
+  await page.click("[data-pane=preview] .cm-content");
+  await sleep(100);
+  await expect(panel).toBeVisible();
+
+  // × closes it
+  await page.getByTestId("history-close").click();
+  await expect(panel).toHaveCount(0);
+
+  // re-open; Esc with focus in the panel closes it. Let the Radix overflow menu fully
+  // dismiss first (its closing layer briefly owns Escape).
+  await page.click("[data-testid=page-overflow-trigger]");
+  await page.click("[data-testid=history-toggle]");
+  await expect(panel).toBeVisible();
+  await sleep(300);
+  await page.getByTestId("history-close").focus();
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
 });
