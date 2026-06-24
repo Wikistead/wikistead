@@ -1,7 +1,13 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { EditorUser } from "../editor/Editor";
-import { apiFetch } from "../data/apiClient";
+import { apiFetch, assetUrl } from "../data/apiClient";
 import { colorFromString } from "../ui/avatar";
+
+// An uploaded avatar comes back as a relative API path (/members/:sub/avatar-image) that
+// must go through the API base to load as an <img>; an OIDC picture is an absolute URL —
+// leave it untouched. (ADR-020 + the asset-URL /api-prefix rule.)
+const normPicture = (p: string | null | undefined): string | null =>
+  p ? (p.startsWith("/") ? assetUrl(p) : p) : null;
 
 // Auth modes (ADR-016 / P1.1):
 //  - DEV: VITE_DEV_TOKEN set (dev/e2e) → authenticated via the dev-token bypass;
@@ -26,6 +32,9 @@ export interface Session {
   picture: string | null;
   user: EditorUser; // presence identity (name + deterministic colour + picture)
   logout: () => Promise<void>;
+  // Re-pull /auth/me so the header avatar / name / collab identity reflect a just-saved
+  // account-settings change live (no reload). Account settings call this on success.
+  refresh: () => Promise<void>;
 }
 
 const SessionContext = createContext<Session | null>(null);
@@ -61,7 +70,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setSub(me.sub);
         setIsAdmin(!!me.isAdmin);
         setDisplayName(me.displayName ?? null);
-        setPicture(me.picture ?? null);
+        setPicture(normPicture(me.picture));
         const ct = await apiFetch<{ token: string }>("/auth/collab-token", "", { method: "POST" });
         if (cancelled) return;
         setCollabToken(ct?.token ?? "");
@@ -92,6 +101,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setCollabToken("");
   };
 
+  const refresh = useCallback(async () => {
+    try {
+      const me = await apiFetch<{ displayName?: string | null; picture?: string | null }>("/auth/me", devToken ?? "");
+      if (!me) return;
+      setDisplayName(me.displayName ?? null);
+      setPicture(normPicture(me.picture));
+    } catch { /* keep the current identity on a transient error */ }
+  }, [devToken]);
+
   const value: Session = {
     status,
     token: devToken ?? "",
@@ -103,6 +121,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     picture,
     user,
     logout,
+    refresh,
   };
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

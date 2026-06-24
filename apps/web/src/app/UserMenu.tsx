@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Shield, LogOut } from "lucide-react";
+import { Shield, LogOut, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../session/SessionProvider";
 import { Avatar } from "../ui/Avatar";
@@ -19,6 +19,9 @@ export function UserMenu({ onLogout }: { onLogout: () => void }) {
         <Avatar name={name} src={picture} seed={user.seed ?? sub ?? name} size={26} data-testid="user-avatar" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" data-testid="user-menu-content">
+        <DropdownMenuItem onSelect={() => navigate("/settings/account")} data-testid="user-menu-account">
+          <Settings size={14} /> {t("userMenu.accountSettings")}
+        </DropdownMenuItem>
         {isAdmin && (
           <DropdownMenuItem onSelect={() => navigate("/admin")} data-testid="user-menu-admin">
             <Shield size={14} /> {t("userMenu.tenantAdmin")}

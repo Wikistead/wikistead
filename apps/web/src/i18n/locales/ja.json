@@ -44,7 +44,31 @@
   },
   "userMenu": {
     "label": "アカウント",
+    "accountSettings": "アカウント設定",
     "tenantAdmin": "テナント管理"
+  },
+  "accountNav": {
+    "title": "アカウント",
+    "profile": "プロフィール",
+    "editor": "エディタ",
+    "theme": "テーマ"
+  },
+  "account": {
+    "displayName": "表示名",
+    "displayNameHint": "ID プロバイダの名前を上書きします。共同編集者に表示されます。",
+    "resetToIdp": "「{{name}}」に戻す",
+    "avatar": "アバター",
+    "avatarHint": "PNG / JPEG / WebP / GIF、512KB まで。カーソルやメンバー一覧に表示されます。",
+    "uploadAvatar": "アップロード",
+    "removeAvatar": "削除",
+    "keymap": "キーマップ",
+    "keymapHint": "デバイス間で同期されます。",
+    "keymap_default": "デフォルト",
+    "keymap_vim": "Vim",
+    "themeHint": "このデバイスに保存されます。",
+    "theme_light": "ライト",
+    "theme_dark": "ダーク",
+    "theme_system": "システム"
   },
   "settings": {
     "back": "アプリに戻る",
