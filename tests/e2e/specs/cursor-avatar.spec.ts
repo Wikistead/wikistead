@@ -1,5 +1,5 @@
 import { test, expect, type Browser } from "@playwright/test";
-import { enterEdit, sleep } from "../helpers";
+import { enterEdit, createScratchPage, sleep } from "../helpers";
 
 // #8 the presence showcase: a remote collaborator's caret carries an avatar + name
 // flag. This is an ADDITIVE overlay on yCollab — foundation.spec (ghost cursor) and
@@ -14,8 +14,13 @@ test("a remote caret shows an avatar + name flag", async ({ browser }: { browser
   const A = await ctxA.newPage();
   const B = await ctxB.newPage(); // observer
   try {
+    // a REAL throwaway page (unique doc → no shared-demo ghost; non-existent pages are
+    // no longer editable phantoms, so the test edits a real page in a space)
+    await A.goto("/p/demo");
+    await A.waitForSelector("[data-pane=preview] .cm-content");
+    const id = await createScratchPage(A, "curav");
     for (const p of [A, B]) {
-      await p.goto("/p/curav1");
+      await p.goto(`/p/${id}`);
       await p.waitForSelector("[data-pane=preview] .cm-content");
     }
     await sleep(600);

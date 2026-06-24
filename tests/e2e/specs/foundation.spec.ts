@@ -1,17 +1,24 @@
 import { test, expect, type Browser } from "@playwright/test";
-import { enterEdit, sleep } from "../helpers";
+import { enterEdit, createScratchPage, sleep } from "../helpers";
 
 // The <Editor/> isolation invariant + lifecycle robustness.
 test("editor isolation: typing doesn't re-render React; rapid page switch leaks nothing", async ({ browser }: { browser: Browser }) => {
   const O = await (await browser.newContext()).newPage(); // observer, stays put
   const E = await (await browser.newContext()).newPage(); // editor, switches pages
 
-  // unique pages so no other client shares the doc (dev-token authorizes any page)
+  // client-side route switch (no full reload)
   const nav = (page: typeof E, path: string) =>
     page.evaluate((p) => { history.pushState({}, "", p); window.dispatchEvent(new PopStateEvent("popstate")); }, path);
 
-  await O.goto("/p/fdn1");
-  await E.goto("/p/fdn1");
+  // Two REAL throwaway pages (unique docs → no shared-demo ghost). A non-existent page
+  // is no longer an editable phantom, so the test edits real pages in a space.
+  await O.goto("/p/demo");
+  await O.waitForSelector("[data-pane=preview] .cm-content");
+  const a = await createScratchPage(O, "fdn-a");
+  const b = await createScratchPage(O, "fdn-b");
+
+  await O.goto(`/p/${a}`);
+  await E.goto(`/p/${a}`);
   for (const p of [O, E]) await p.waitForSelector("[data-pane=preview] .cm-content");
   await sleep(1200);
 
@@ -33,9 +40,9 @@ test("editor isolation: typing doesn't re-render React; rapid page switch leaks 
   // rapid A->B->A switching: observer must see exactly ONE remote caret (a leaked
   // provider / ghost cursor would push this above 1).
   for (let i = 0; i < 5; i++) {
-    await nav(E, "/p/fdn2");
+    await nav(E, `/p/${b}`);
     await sleep(250);
-    await nav(E, "/p/fdn1");
+    await nav(E, `/p/${a}`);
     await E.waitForSelector("[data-pane=preview] .cm-content");
     // Each page switch remounts <Editor> (new docName key) → mode resets to view;
     // re-enter edit so the caret/selection is published to the observer.

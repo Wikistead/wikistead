@@ -198,7 +198,9 @@
     "export": "エクスポート",
     "print": "印刷 / PDF",
     "history": "履歴",
-    "permissions": "権限"
+    "permissions": "権限",
+    "notFound": "このページは存在しません。削除されたか、リンクが誤っている可能性があります。",
+    "forbidden": "このページにアクセスする権限がありません。"
   },
   "sidebar": {
     "newSpace": "新しいスペース",
