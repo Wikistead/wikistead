@@ -145,16 +145,20 @@ export async function authPlugin(app: FastifyInstance) {
       object: `tenant:${req.tenant.id}`,
     })
     // Peer-visible identity for the avatar (#3): displayName + picture, NEVER email.
-    // Read from the members row (kept fresh by the login upsert). The dev bypass user
-    // ('dev-user') has no row → both null → client falls back to an initials avatar.
-    const [m] = await req.db.sql<[{ display_name: string | null; picture_url: string | null }?]>`
-      SELECT display_name, picture_url FROM members WHERE sub = ${req.user.sub} LIMIT 1`
+    // EFFECTIVE values (ADR-020): a user's override wins over the OIDC display_name, and an
+    // uploaded avatar wins over the OIDC picture — so cursors / header / @mentions all
+    // reflect the user's account settings (a read-path change only; no collab reconfigure).
+    // editorKeymap rides along so the editor can reconcile its localStorage-hydrated pref.
+    const [m] = await req.db.sql<[{ display_name: string | null; display_name_override: string | null; picture_url: string | null; avatar_image_key: string | null; editor_keymap: string | null }?]>`
+      SELECT display_name, display_name_override, picture_url, avatar_image_key, editor_keymap
+      FROM members WHERE sub = ${req.user.sub} LIMIT 1`
     return {
       sub: req.user.sub,
       groups: req.user.groups,
       isAdmin: Boolean(allowed),
-      displayName: m?.display_name ?? null,
-      picture: m?.picture_url ?? null,
+      displayName: m?.display_name_override ?? m?.display_name ?? null,
+      picture: m?.avatar_image_key ? `/members/${encodeURIComponent(req.user.sub)}/avatar-image` : (m?.picture_url ?? null),
+      editorKeymap: m?.editor_keymap === 'vim' ? 'vim' : 'default',
     }
   })
 

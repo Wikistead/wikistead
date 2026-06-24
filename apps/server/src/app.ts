@@ -29,6 +29,7 @@ import { publicPlugin } from './routes/public.js'
 import { apiKeysPlugin } from './routes/api-keys.js'
 import { shareLinksPlugin } from './routes/share-links.js'
 import { authPlugin } from './routes/auth.js'
+import { accountPlugin } from './routes/account.js'
 import { signupPlugin } from './routes/signup.js'
 import { membersPlugin } from './routes/members.js'
 import { commentsPlugin } from './routes/comments.js'
@@ -237,6 +238,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.addHook('onError',    async (req) => { await req.db?.release() })
 
   await app.register(authPlugin)
+  await app.register(accountPlugin)
   await app.register(signupPlugin)
   await app.register(membersPlugin)
   await app.register(commentsPlugin)
