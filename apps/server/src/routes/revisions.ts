@@ -76,6 +76,27 @@ export async function listRevisions(
 
 // Restore a page to a specific revision.
 //
+// Decoded Markdown body of one revision snapshot (Design-5 diff). view-gated like the
+// list; retention-gated so an out-of-window revision is "not found" (matches listRevisions).
+// Returns plain text — the client diffs it against the current published snapshot
+// (hand-rolled line LCS, ADR-019 D6); checkbox `[x]`/`[ ]` changes appear as line diffs.
+export async function getRevisionContent(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { pageId: string; revId: string; userId: string; plan: string },
+): Promise<{ content: string }> {
+  const canView = await check(fga, `user:${args.userId}`, 'view', { type: 'page', id: args.pageId })
+  if (!canView) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  const [rev] = await db.sql<[{ ydoc: Buffer }]>`
+    SELECT ydoc FROM revisions
+    WHERE id = ${args.revId} AND page_id = ${args.pageId} AND created_at >= ${retentionCutoff(args.plan)}
+  `
+  if (!rev) throw Object.assign(new Error('revision not found'), { statusCode: 404 })
+  const doc = new Y.Doc()
+  Y.applyUpdate(doc, new Uint8Array(rev.ydoc))
+  return { content: doc.getText('content').toString() }
+}
+
 // CRDT-safe: computes a delete+insert update on top of current state.
 // Does NOT overwrite in-place; appends new operations so connected clients
 // can apply the delta without losing concurrent edits.
@@ -167,6 +188,10 @@ export async function restoreRevision(
 export async function revisionsPlugin(app: FastifyInstance) {
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/revisions', async (req) => {
     return listRevisions(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub, plan: req.tenant.plan })
+  })
+
+  app.get<{ Params: { pageId: string; revId: string } }>('/pages/:pageId/revisions/:revId/content', async (req) => {
+    return getRevisionContent(req.db, app.fga, { pageId: req.params.pageId, revId: req.params.revId, userId: req.user.sub, plan: req.tenant.plan })
   })
 
   app.post<{ Params: { pageId: string; revId: string } }>(
