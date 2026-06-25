@@ -41,3 +41,38 @@ test(":::table renders the HTML table (merged cell) and reveals raw source in vi
   expect(raw).toContain(":::table");
   expect(raw).toContain("colspan");
 });
+
+// #5 (the real toggle path): a rich-editable macro revealed under the caret in vim must
+// RE-RENDER when you switch to non-vim — WITHOUT moving the caret. Toggling vim is a
+// Compartment reconfigure (no doc/selection change), so the livePreview field has to
+// rebuild on the vimEnabled facet change. (Earlier this regressed: the macro stayed raw.)
+test("vim→non-vim re-renders the cursor-under rich macro without moving the caret", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "modeswitch");
+  await enterEdit(page);
+  await page.getByTestId("vim-toggle").click();
+  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "true");
+
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("i");
+  for (const line of [
+    ":::table",
+    "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>",
+    ":::",
+  ]) {
+    await page.keyboard.type(line);
+    await page.keyboard.press("Enter");
+  }
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("g");
+  await page.keyboard.press("g"); // caret onto the block → vim reveals raw source
+  await sleep(250);
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-table]")).toHaveCount(0);
+
+  // Toggle vim OFF — do NOT touch the caret. The macro must render (non-vim = always render).
+  await page.getByTestId("vim-toggle").click();
+  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "false");
+  await sleep(250);
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-table]")).toBeVisible();
+});
