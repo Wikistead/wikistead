@@ -203,3 +203,32 @@ test("a :::table widget is reused (not recreated) across selection changes", asy
   const reused = await page.evaluate(() => (document.querySelector("[data-pane=preview] [data-testid=macro-table]") as any)?.__mark === "KEEP");
   expect(reused).toBe(true);
 });
+
+// ADR-024 1b (cumulative drift): block-widget roots used `margin`, which CM EXCLUDES from
+// its measured height (getBoundingClientRect), so each widget's heightMap entry was short by
+// the margin — invisible for one widget (< a line) but ADDITIVE across stacked widgets, so
+// motion below 2+ macros drifted a line. Roots now use padding (counted). Guard: below TWO
+// stacked tall mermaids, every key advances exactly one doc line.
+test("motion below TWO stacked tall macros is one doc line per key (no cumulative drift)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "atom-stacked");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("top\n```mermaid\nflowchart TD\n  A --> B\n  B --> C\n```\n```mermaid\nflowchart TD\n  D --> E\n  E --> F\n```\nB0\nB1\nB2\nB3\n");
+  await sleep(3000); // both SVGs mount (each ~tall)
+  expect(await page.locator("[data-pane=preview] [data-testid=macro-mermaid] svg").count()).toBe(2);
+  await page.getByTestId("vim-toggle").click();
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  const head = async () => page.evaluate(() => (window as any).__lpHeadLine);
+  await page.getByText("B0", { exact: true }).click();
+  await sleep(120);
+  let prev = await head();
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press("j");
+    await sleep(80);
+    const cur = await head();
+    expect(cur).toBe(prev + 1); // no cumulative 2-line drift below the stack
+    prev = cur;
+  }
+});

@@ -921,7 +921,10 @@ export const livePreviewTheme = EditorView.baseTheme({
   // accent cursor signals it is clickable (disabled = read-only, no edit permission).
   ".cm-lp-checkbox": { verticalAlign: "middle", margin: "0 0.35em 0 0", cursor: "pointer", accentColor: "var(--accent)" },
   ".cm-lp-checkbox:disabled": { cursor: "default", opacity: "0.7" },
-  ".cm-lp-table": { borderCollapse: "collapse", margin: "0.4em 0", fontSize: "0.95em" },
+  // padding NOT margin (see cm-lp-macro-wrap): a pipe TableWidget's root IS this <table>,
+  // so its margin would be uncounted in CM's heightMap and accumulate across stacked
+  // tables. Table padding is inside the table box → included in getBoundingClientRect.
+  ".cm-lp-table": { borderCollapse: "collapse", padding: "0.4em 0", fontSize: "0.95em" },
   ".cm-lp-table th, .cm-lp-table td": {
     border: "1px solid var(--border, #444)",
     padding: "3px 8px",
@@ -931,7 +934,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-image": { maxWidth: "100%", height: "auto", borderRadius: "4px", verticalAlign: "bottom" },
   // Macro block (e.g. ```mermaid). The wrap is relative so the fold button can sit in
   // a corner; the rendered DOM is whatever the macro's liveRender returns.
-  ".cm-lp-macro-wrap": { position: "relative", margin: "0.4em 0" },
+  // padding NOT margin: CM measures a block widget's height via getBoundingClientRect /
+  // offsetHeight, which EXCLUDE margin. Margin on the widget root is therefore uncounted in
+  // the heightMap and accumulates across stacked widgets → vim/arrow motion below 2+ macros
+  // drifts by a line. Padding is included in the measured height, so the heightMap matches.
+  ".cm-lp-macro-wrap": { position: "relative", padding: "0.4em 0" },
   // ADR-024 atom selection: the caret resting on the atom rings it (selected as a unit).
   ".cm-lp-atom-sel": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "1px", borderRadius: "4px" },
   ".cm-lp-macro": { display: "block", overflowX: "auto" },
@@ -993,7 +1000,10 @@ export const livePreviewTheme = EditorView.baseTheme({
     paddingLeft: "0.8em",
   },
   // Table cell-merge edit mode (render-active): a toolbar + selectable cells.
-  ".cm-lp-table-edit": { position: "relative", margin: "0.4em 0", border: "1px solid var(--accent, #4ea1ff)", borderRadius: "4px", padding: "4px" },
+  // margin 0 (see cm-lp-macro-wrap): the edit widget's root margin would be uncounted in
+  // CM's heightMap. The accent border + inner padding give it presence without an outer
+  // (uncounted) margin gap.
+  ".cm-lp-table-edit": { position: "relative", border: "1px solid var(--accent, #4ea1ff)", borderRadius: "4px", padding: "4px" },
   // Floating contextual toolbar — positioned above the selected cell, over the table.
   ".cm-lp-table-edit-bar": {
     position: "absolute",
