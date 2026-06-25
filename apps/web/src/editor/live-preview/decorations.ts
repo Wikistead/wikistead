@@ -6,7 +6,7 @@ import {
   EditorView,
   WidgetType,
 } from "@codemirror/view";
-import { findFenceMacro, findDirectiveMacro, type FenceMacro } from "../macros/registry";
+import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme } from "../macros/registry";
 import { fenceLang, fenceBody, macroFenceAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
@@ -266,12 +266,15 @@ function isFolded(state: EditorState, from: number, to: number): boolean {
 // macro never sees CodeMirror; this widget bridges its DOM into the live preview. On
 // the editable surface a corner button collapses the block to the folded summary.
 // Display-only / offset-invariant like every other block widget (ADR-008).
+// A renderable macro = anything with a liveRender (fence macros, and block-form
+// directive macros like :::table). foldable is fence-only (large data bodies).
+type RenderableMacro = { liveRender: (body: string, ctx: { theme: MacroTheme }) => HTMLElement; richEditUI?: import("../macros/registry").RichEditUI };
 class MacroWidget extends WidgetType {
-  constructor(readonly macro: FenceMacro, readonly body: string) {
+  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean) {
     super();
   }
   eq(other: MacroWidget) {
-    return other.macro === this.macro && other.body === this.body;
+    return other.macro === this.macro && other.body === this.body && other.foldable === this.foldable;
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
@@ -298,10 +301,11 @@ class MacroWidget extends WidgetType {
         edit.addEventListener("mousedown", (e) => {
           e.preventDefault();
           e.stopPropagation();
-          openMacroModal(view, this.macro, () => view.posAtDOM(wrap), currentMacroTheme());
+          openMacroModal(view, this.macro as FenceMacro, () => view.posAtDOM(wrap), currentMacroTheme());
         });
         wrap.appendChild(edit);
       }
+      if (this.foldable) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "cm-lp-macro-fold";
@@ -320,6 +324,7 @@ class MacroWidget extends WidgetType {
         if (fence) view.dispatch({ effects: foldEffect.of({ from: fence.from, to: fence.to }) });
       });
       wrap.appendChild(btn);
+      }
     }
     return wrap;
   }
@@ -428,7 +433,7 @@ const RENDERERS: BlockRenderer[] = [
         // entered via blockEntry like table/image).
         if (isFolded(ctx.state, from, to)) return;
         if (rangeRevealed(ctx.state, from, to)) return;
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to)), block: true }), from, to);
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), true), block: true }), from, to);
         return;
       }
       const first = doc.lineAt(node.from).number;
@@ -455,10 +460,24 @@ const RENDERERS: BlockRenderer[] = [
       const open = parseDirectiveOpen(doc.lineAt(node.from).text);
       const macro = open ? findDirectiveMacro(open.name) : undefined;
       if (!macro) return;
-      const box = Decoration.line({ attributes: { class: macro.containerClass } });
-      const first = doc.lineAt(node.from).number;
-      const last = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1)).number;
-      for (let n = first; n <= last; n++) ctx.add(box, doc.line(n).from);
+      const first = doc.lineAt(node.from);
+      const lastLine = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1));
+      if (macro.liveRender) {
+        // BLOCK directive (table): render the body as a widget, reveal raw on cursor —
+        // like a fence macro (not foldable). Body = lines between the ::: fences.
+        const from = first.from;
+        const to = lastLine.to;
+        if (rangeRevealed(ctx.state, from, to)) return;
+        const parts: string[] = [];
+        for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI }, parts.join("\n"), false), block: true }), from, to);
+        return;
+      }
+      if (macro.containerClass) {
+        // CONTAINER directive (callout): a CSS box over every line; content stays markdown.
+        const box = Decoration.line({ attributes: { class: macro.containerClass } });
+        for (let n = first.number; n <= lastLine.number; n++) ctx.add(box, doc.line(n).from);
+      }
     },
   },
   // The :::name / ::: fence lines: hide (reveal raw on the cursor's line, like every

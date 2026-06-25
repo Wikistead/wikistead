@@ -64,9 +64,13 @@ export interface FenceMacro {
 export interface DirectiveMacro {
   readonly kind: "directive";
   readonly name: string; // :::name
-  // CSS class applied to the directive's lines to draw the box (the content lines stay
-  // Markdown; the ::: fence markers are hidden, reveal-on-cursor).
-  readonly containerClass: string;
+  // A directive renders one of two ways (mutually exclusive):
+  //  - containerClass: a CONTAINER (callout) — a CSS box over its lines; the content
+  //    stays Markdown (nested), the ::: markers hide (reveal-on-cursor); OR
+  //  - liveRender: a BLOCK (table) — render the body (e.g. an HTML <table>) as a
+  //    display widget (reveal-on-cursor shows the raw source), like a fence macro.
+  readonly containerClass?: string;
+  readonly liveRender?: (body: string, ctx: MacroContext) => HTMLElement;
   // Static HTML for export / SSR (M3): wrap the rendered body. The inner Markdown is
   // rendered by the server pipeline; this supplies the wrapper. MUST be XSS-safe.
   htmlRender(body: string): string;
