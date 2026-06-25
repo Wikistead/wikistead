@@ -305,15 +305,18 @@ function isFolded(state: EditorState, from: number, to: number): boolean {
 // directive macros like :::table). foldable is fence-only (large data bodies).
 type RenderableMacro = { liveRender: (body: string, ctx: { theme: MacroTheme }) => HTMLElement; richEditUI?: import("../macros/registry").RichEditUI };
 class MacroWidget extends WidgetType {
-  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string) {
+  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string, readonly selected: boolean) {
     super();
   }
   eq(other: MacroWidget) {
-    return other.macro === this.macro && other.body === this.body && other.foldable === this.foldable && other.name === this.name;
+    return other.macro === this.macro && other.body === this.body && other.foldable === this.foldable && other.name === this.name && other.selected === this.selected;
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
     wrap.className = "cm-lp-macro-wrap";
+    // ADR-024: the caret resting ON the atom selects it (no separate key) — a ring shows
+    // it's selected as a unit (dd/yy operate on it; Ctrl+Enter enters).
+    if (this.selected) wrap.classList.add("cm-lp-atom-sel");
     // #3: an empty macro renders NOTHING from some liveRenders (e.g. mermaid) → it looks
     // like blank space even though a block widget occupies it (so vertical caret motion
     // "jumps" past invisible content). Render a common, visible placeholder for ALL macros
@@ -380,6 +383,12 @@ function rangeRevealed(state: EditorState, from: number, to: number): boolean {
 function lineRevealed(state: EditorState, pos: number): boolean {
   const line = state.doc.lineAt(pos);
   return rangeRevealed(state, line.from, line.to);
+}
+// ADR-024: an empty-caret head resting within a block atom's range = the atom is selected
+// (highlight + dd/yy target). Atom motion lands the caret on the atom's near edge.
+function atomSelected(state: EditorState, from: number, to: number): boolean {
+  const s = state.selection.main;
+  return !state.readOnly && s.empty && s.head >= from && s.head <= to;
 }
 
 // ── Extensible block-render registry (P3) ──────────────────────────────────
@@ -471,7 +480,7 @@ const RENDERERS: BlockRenderer[] = [
         // reveals — entering opens its modal. Otherwise the atom renders.
         const active = ctx.state.field(macroRenderActiveField, false);
         if (active && !macro.richEditUI && active.from <= from && active.to >= to) return; // entered → source
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), true, lang!), block: true }), from, to);
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), true, lang!, atomSelected(ctx.state, from, to)), block: true }), from, to);
         return;
       }
       const first = doc.lineAt(node.from).number;
@@ -509,7 +518,7 @@ const RENDERERS: BlockRenderer[] = [
         // ADR-024: no auto-reveal-on-cursor — the table atom is entered explicitly.
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI }, parts.join("\n"), false, open!.name), block: true }), from, to);
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to)), block: true }), from, to);
         return;
       }
       if (macro.containerClass) {
@@ -768,6 +777,39 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   return tr;
 });
 
+// ADR-024 dd-on-atom (Q3): a macro is one unit, so a linewise delete that starts at a macro
+// atom's first line (vim `dd` while the caret is ON the atom — atom motion lands it there)
+// is EXPANDED to remove the WHOLE macro source verbatim (fence/::: open→close), instead of
+// vim's default of deleting just the first line (which would leave a broken half-macro).
+// Surrounding blank lines are left untouched (delete, not reformat). Only a SINGLE pure
+// deletion that begins exactly at a block's start and removes at least its first line is
+// touched — a big jump-delete (dG) or an edit elsewhere is left alone. This keeps vim's
+// register/undo intact for every normal line; it only rounds a macro delete up to the atom.
+export const atomDelete: Extension = EditorState.transactionFilter.of((tr) => {
+  if (!tr.docChanged) return tr;
+  let del: { fromA: number; toA: number } | null = null;
+  let other = false;
+  tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+    if (inserted.length === 0 && !del) del = { fromA, toA };
+    else other = true;
+  });
+  if (!del || other) return tr;
+  const d = del as { fromA: number; toA: number };
+  const blocks = tr.startState.field(livePreview, false)?.blocks;
+  if (!blocks?.length) return tr;
+  const doc = tr.startState.doc;
+  for (const b of blocks) {
+    const firstLine = doc.lineAt(b.from);
+    // delete begins at the atom's first line AND removes at least that whole line, but does
+    // not extend beyond the atom (so dG / multi-block deletes pass through untouched).
+    if (d.fromA === b.from && d.toA >= firstLine.to && d.toA <= b.to + 1) {
+      const end = Math.min(b.to + 1, doc.length); // include the trailing newline
+      return { changes: { from: b.from, to: end }, selection: EditorSelection.cursor(Math.min(b.from, end)) };
+    }
+  }
+  return tr;
+});
+
 // ADR-024: "enter" a macro atom at a position — the explicit way to start editing a macro
 // (Ctrl+Enter in vim, click with the mouse). A modal macro (Excalidraw) opens its modal;
 // an inline/source macro becomes render-active (table → the cell-edit widget; mermaid /
@@ -867,6 +909,8 @@ export const livePreviewTheme = EditorView.baseTheme({
   // Macro block (e.g. ```mermaid). The wrap is relative so the fold button can sit in
   // a corner; the rendered DOM is whatever the macro's liveRender returns.
   ".cm-lp-macro-wrap": { position: "relative", margin: "0.4em 0" },
+  // ADR-024 atom selection: the caret resting on the atom rings it (selected as a unit).
+  ".cm-lp-atom-sel": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "1px", borderRadius: "4px" },
   ".cm-lp-macro": { display: "block", overflowX: "auto" },
   // pointer-events:none on the SVG so a click on the diagram falls through to the macro
   // container (CM then places the caret → reveal-on-cursor shows the raw source). An

@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, imageResolver, checkboxControl, enterMacroCommand, type ImageResolver } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, blockEntry, atomDelete, motionKeyTracker, vimEnabled, imageResolver, checkboxControl, enterMacroCommand, type ImageResolver } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette } from "./live-preview/palette";
@@ -95,7 +95,7 @@ export function mountLivePreview(
       // ADR-024 atom motion: every block decoration is a single motion-stop — a one-line
       // key lands ON the atom, the next steps past it (macros stay rendered; non-macro
       // blocks reveal on landing). motionKeyTracker gates the overshoot clamp. Editable only.
-      ...(opts.readOnly ? [] : [motionKeyTracker, blockEntry]),
+      ...(opts.readOnly ? [] : [motionKeyTracker, blockEntry, atomDelete]),
       // Inline-comment anchor highlights (display-only; fed via setCommentRanges).
       commentHighlightTheme,
       commentHighlights,
