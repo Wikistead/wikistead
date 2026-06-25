@@ -29,8 +29,10 @@ test("wks-attachment image renders as <img>; the doc holds only the id", async (
   await sleep(400);
 
   // Upload an image through the attachments panel (the proven presign→PUT→confirm path).
-  await page.click("[data-testid=attachments-panel] [aria-expanded]");
-  await sleep(300);
+  await page.click("[data-testid=page-overflow-trigger]");
+  await page.click("[data-testid=attachments-toggle]");
+  await page.waitForSelector("[data-testid=attachments-panel]");
+  await sleep(200);
   await page.setInputFiles("[data-testid=attachments-panel] input[type=file]", {
     name: "pic.png",
     mimeType: "image/png",
@@ -194,8 +196,10 @@ test("view mode renders a first-line image (reveal-on-cursor is off when read-on
   await sleep(400);
 
   // upload an image via the proven attachments path
-  await page.click("[data-testid=attachments-panel] [aria-expanded]");
-  await sleep(300);
+  await page.click("[data-testid=page-overflow-trigger]");
+  await page.click("[data-testid=attachments-toggle]");
+  await page.waitForSelector("[data-testid=attachments-panel]");
+  await sleep(200);
   await page.setInputFiles("[data-testid=attachments-panel] input[type=file]", {
     name: "hero.png", mimeType: "image/png", buffer: Buffer.from(PNG_1x1, "base64"),
   });

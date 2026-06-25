@@ -223,6 +223,7 @@
     "export": "Export",
     "print": "Print / PDF",
     "history": "History",
+    "attachments": "Attachments",
     "permissions": "Permissions",
     "notFound": "This page doesn't exist. It may have been deleted, or the link is wrong.",
     "forbidden": "You don't have access to this page."

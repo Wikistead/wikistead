@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal } from "lucide-react";
+import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui/Button";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
@@ -29,6 +29,7 @@ export interface PageControlsProps {
   onToggleComments?: () => void;
   openComments?: number;
   onHistory?: () => void;
+  onAttachments?: () => void;
   onExport?: () => void;
   onPrint?: () => void;
   onPermissions?: () => void;
@@ -69,6 +70,7 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string): Overflow
   const items: OverflowItem[] = [];
   if (p.onExport) items.push({ value: "export", label: t("page.export"), icon: <Download size={14} />, testId: "export-page" });
   if (p.onPrint) items.push({ value: "print", label: t("page.print"), icon: <Printer size={14} />, testId: "print-page" });
+  if (p.onAttachments) items.push({ value: "attachments", label: t("page.attachments"), icon: <Paperclip size={14} />, testId: "attachments-toggle" });
   if (p.onHistory) items.push({ value: "history", label: t("page.history"), icon: <History size={14} />, testId: "history-toggle" });
   if (p.onPermissions) items.push({ value: "permissions", label: t("page.permissions"), icon: <Shield size={14} />, testId: "permissions-open" });
   return items;
@@ -77,6 +79,7 @@ function runOverflow(p: PageControlsProps, v: string) {
   if (v === "export") p.onExport?.();
   else if (v === "print") p.onPrint?.();
   else if (v === "history") p.onHistory?.();
+  else if (v === "attachments") p.onAttachments?.();
   else if (v === "permissions") p.onPermissions?.();
 }
 
