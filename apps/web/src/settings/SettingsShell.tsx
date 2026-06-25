@@ -34,7 +34,10 @@ export function SettingsShell({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="grid h-full min-h-0 grid-cols-[220px_1fr]">
+    // Center the whole settings block (rail + content) with a max width, so it doesn't
+    // hug the left edge / shift by viewport width and stays consistent across every
+    // settings screen (Account / Admin / Space) — Notion/Confluence-style centered panel.
+    <div className="mx-auto grid h-full min-h-0 w-full max-w-[1100px] grid-cols-[220px_1fr]">
       <nav className="box-border flex flex-col gap-0.5 overflow-y-auto border-r border-border bg-panel p-3" aria-label={title}>
         <NavLink to="/" className={backLink} data-testid="settings-back">
           <ArrowLeft size={14} /> {t("settings.back")}
@@ -46,7 +49,7 @@ export function SettingsShell({
             to={tab.to}
             end={tab.end}
             className={({ isActive }) => cn(
-              "flex items-center justify-between gap-2 rounded-md px-2 py-[7px] text-sm text-foreground no-underline hover:bg-panel-2",
+              "flex items-center justify-between gap-2 rounded-md px-2 py-[7px] text-[length:var(--text-ui)] text-foreground no-underline hover:bg-panel-2",
               isActive && "bg-panel-2 font-semibold shadow-[inset_2px_0_0_var(--accent)]",
             )}
             data-testid={`settings-tab-${tab.key}`}
