@@ -45,6 +45,18 @@ export type RichEditUI =
   | { readonly present: "modal"; readonly editor: MacroModalEditor }
   | { readonly present: "inline" };
 
+// ADR-025: the narrow host an INLINE rich-editor (e.g. table) talks to. Like MacroContext
+// it exposes NO editor / Yjs / app internals — only the macro's own source + theme + a
+// commit/exit. The editor edits its own model and commits via replaceSource (per-op, ADR-025
+// Q1); the host turns that into ONE offset-invariant Y.Text range edit (block-level LWW) and
+// owns enter/exit. Keeps the ADR-023 trust boundary for inline editing (incl. future plugins).
+export interface InnerEditHost {
+  readonly theme: MacroTheme;
+  getSource(): string; // the macro's current body (source text)
+  replaceSource(next: string): void; // commit a new body
+  exit(): void; // leave inline edit (Done / Esc)
+}
+
 export interface FenceMacro {
   readonly kind: "fence";
   // The fenced-code info string this macro claims, e.g. "mermaid" (```mermaid …).
