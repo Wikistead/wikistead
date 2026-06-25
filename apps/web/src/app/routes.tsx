@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
@@ -130,13 +131,18 @@ function PageRoute() {
   // Upload a picked image to this page's space, returning the ref to insert. Bound
   // to the resolved spaceId; null (no image button) until the page meta loads.
   const spaceId = page?.spaceId;
+  const qc = useQueryClient();
   const onUploadImage = useCallback(
     async (file: File) => {
       if (!spaceId || !pageId) return null;
       const { id, filename } = await uploadAttachment(spaceId, pageId, token, file);
+      // An image inserted/dropped into the doc IS an attachment — refresh the list so it
+      // shows in the Attachments panel without a reload (this path uses the bare upload
+      // helper, not the mutation, so invalidate explicitly).
+      qc.invalidateQueries({ queryKey: ["attachments", pageId] });
       return { ref: `wks-attachment:${id}`, alt: filename };
     },
-    [spaceId, pageId, token],
+    [spaceId, pageId, token, qc],
   );
 
   // Inline-comment integration: the panel and the editor share one comments query.
