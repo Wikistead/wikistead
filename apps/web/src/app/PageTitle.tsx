@@ -7,8 +7,12 @@ import { useTranslation } from "react-i18next";
 // Testids (page-title / page-title-input) are unchanged so the rename e2e still applies.
 const wrap = "mx-auto box-border w-full max-w-[740px] px-6 pt-6";
 const title = "m-0 block w-full text-[30px] font-bold leading-tight tracking-[-0.02em] text-foreground";
+// view mode: wrap to 2 lines then ellipsise (no infinite horizontal overflow / marquee).
+const clamp = "[display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden";
 
-export function PageTitle({ title: value, onRename }: { title: string; onRename?: (title: string) => void }) {
+// `pageEditing` = the PAGE edit mode (not the rename input): view mode clamps a long
+// title to 2 lines; edit mode shows it in full (you must see all of it to edit it).
+export function PageTitle({ title: value, onRename, editing: pageEditing = false }: { title: string; onRename?: (title: string) => void; editing?: boolean }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -37,12 +41,12 @@ export function PageTitle({ title: value, onRename }: { title: string; onRename?
           onBlur={commit}
         />
       ) : onRename ? (
-        <button type="button" className={`${title} cursor-text text-left`} data-testid="page-title" title={t("dialogs.renamePageTitle")}
+        <button type="button" className={`${title} cursor-text text-left ${pageEditing ? "" : clamp}`} data-testid="page-title" title={value || t("dialogs.renamePageTitle")}
           onClick={() => { setDraft(value); setEditing(true); }}>
           {value || t("common.untitled")}
         </button>
       ) : (
-        <h1 className={title} data-testid="page-title">{value || t("common.untitled")}</h1>
+        <h1 className={`${title} ${pageEditing ? "" : clamp}`} data-testid="page-title" title={value}>{value || t("common.untitled")}</h1>
       )}
     </div>
   );
