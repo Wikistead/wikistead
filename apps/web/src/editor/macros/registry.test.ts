@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { Text } from "@codemirror/state";
-import { findFenceMacro, registeredFenceLangs } from "./index"; // importing index registers first-party macros
+import { findFenceMacro, findDirectiveMacro, registeredFenceLangs, registeredDirectiveNames } from "./index"; // importing index registers first-party macros
 import { registerMacro } from "./registry";
 import { mermaidMacro } from "./mermaid";
+import { calloutMacro } from "./callout";
 import { fenceLang, fenceBody } from "./fence";
 
 describe("macro registry", () => {
@@ -31,6 +32,25 @@ describe("macro registry", () => {
 
   it("mermaid summary is a one-line label", () => {
     expect(mermaidMacro.summary("graph TD; A-->B;")).toBe("Mermaid diagram");
+  });
+
+  it("registers the first-party callout directive macro", () => {
+    const m = findDirectiveMacro("callout");
+    expect(m).toBeDefined();
+    expect(m!.kind).toBe("directive");
+    expect(m!.containerClass).toBe("cm-lp-callout");
+    expect(m!.exportFidelity).toBe("preserve"); // ::: stays plain text → round-trips
+    expect(registeredDirectiveNames()).toContain("callout");
+    expect(findDirectiveMacro("CALLOUT")).toBe(m); // case-insensitive
+    expect(findDirectiveMacro("nope")).toBeUndefined();
+  });
+
+  it("rejects a duplicate directive registration", () => {
+    expect(() => registerMacro(calloutMacro)).toThrow(/duplicate/);
+  });
+
+  it("callout htmlRender escapes its body (XSS-safe wrapper)", () => {
+    expect(calloutMacro.htmlRender("<img src=x onerror=1>")).not.toContain("<img");
   });
 });
 

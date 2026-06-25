@@ -3,6 +3,7 @@ import { LanguageDescription } from "@codemirror/language";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
 import { python } from "@codemirror/lang-python";
+import { directiveExtension } from "./macros/directive-parser";
 
 // Curated, SYNCHRONOUS language set for fenced-code syntax highlighting. Using
 // `support` (not the async `load`) keeps highlighting instant — no flash of
@@ -22,5 +23,6 @@ const codeLanguages = [
 // Shared markdown language extension for BOTH editor surfaces:
 //   - base markdownLanguage = GFM (tables, etc.)
 //   - codeLanguages = per-language highlighting inside fenced code blocks
+//   - directiveExtension = in-house ::: container directives (macros, ADR-022)
 // Keeping it in one place means the source and live-preview parsers stay identical.
-export const markdownExtension = () => markdown({ base: markdownLanguage, codeLanguages });
+export const markdownExtension = () => markdown({ base: markdownLanguage, codeLanguages, extensions: [directiveExtension] });
