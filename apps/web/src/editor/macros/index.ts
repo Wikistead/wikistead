@@ -8,6 +8,6 @@ import { calloutMacro } from "./callout";
 registerMacro(mermaidMacro);
 registerMacro(calloutMacro);
 
-export { macroFold } from "./fold";
+export { macroFold, autoFoldLargeFenceMacros } from "./fold";
 export { findFenceMacro, findDirectiveMacro, registeredFenceLangs, registeredDirectiveNames } from "./registry";
 export type { Macro, FenceMacro, DirectiveMacro, MacroContext, MacroTheme } from "./registry";
