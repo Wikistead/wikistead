@@ -12,7 +12,7 @@ import { setMacroRenderActive } from "./macro-edit";
 
 // Render-active table EDIT mode (ADR-022 Part 10/11). Cells select on click; the toolbar
 // merges the selected rectangle or un-merges a span. Each op rewrites the block source
-// via the grid model and serialize() → pipes (Tier 1) or :::table HTML (Tier 2): that is
+// via the grid model and serialize → pipes (Tier 1) or :::table HTML (Tier 2): that is
 // the auto promote/demote. Display-only until the user acts; the rewrite is one
 // offset-invariant range edit on the shared Y.Text.
 // Controlled background palette: undefined = clear; var(--accent) stays on theme; the
@@ -194,14 +194,6 @@ export class TableEditWidget extends WidgetType {
       ch.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); selectCol(c); });
       htr.appendChild(ch);
     }
-    // Trailing "+" → append a column at the end (#1).
-    const addCol = document.createElement("th");
-    addCol.className = "cm-lp-table-handle cm-lp-table-addcol";
-    addCol.textContent = "+";
-    addCol.title = "Add column";
-    addCol.setAttribute("data-testid", "table-add-col");
-    addCol.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertColAt(this.grid, ncols)); });
-    htr.appendChild(addCol);
     table.appendChild(htr);
 
     this.grid.forEach((row, r) => {
@@ -241,16 +233,6 @@ export class TableEditWidget extends WidgetType {
       });
       table.appendChild(trow);
     });
-    // Trailing "+" row → append a row at the end (#1).
-    const addRowTr = document.createElement("tr");
-    const addRow = document.createElement("th");
-    addRow.className = "cm-lp-table-handle cm-lp-table-addrow";
-    addRow.textContent = "+";
-    addRow.title = "Add row";
-    addRow.setAttribute("data-testid", "table-add-row");
-    addRow.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertRowAt(this.grid, this.grid.length)); });
-    addRowTr.appendChild(addRow);
-    table.appendChild(addRowTr);
     table.addEventListener("pointermove", (e) => {
       if (!dragging) return;
       const t = (e.target as HTMLElement)?.closest?.("[data-cellkey]") as HTMLElement | null;
@@ -357,7 +339,24 @@ export class TableEditWidget extends WidgetType {
       view.focus();
     });
 
-    wrap.append(bar, table);
+    // Persistent, ALWAYS-VISIBLE action bar (#1). The earlier add affordance was a 10px
+    // "+" cell in the handle band — easy to miss and scrolled off-screen on wide tables.
+    // This labeled bar sits below the table, left-aligned (never clipped by table width),
+    // and is visible the whole time you're in edit mode — no selection required.
+    const actions = document.createElement("div");
+    actions.className = "cm-lp-table-actions";
+    const addColBtn = btn("＋ Column", "table-add-col");
+    addColBtn.title = "Add a column on the right";
+    addColBtn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertColAt(this.grid, ncols)); });
+    const addRowBtn = btn("＋ Row", "table-add-row");
+    addRowBtn.title = "Add a row at the bottom";
+    addRowBtn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertRowAt(this.grid, this.grid.length)); });
+    const hint = document.createElement("span");
+    hint.className = "cm-lp-table-actions-hint";
+    hint.textContent = "Click a row/column header (1/A) to insert beside or delete it";
+    actions.append(addColBtn, addRowBtn, hint);
+
+    wrap.append(bar, table, actions);
     return wrap;
   }
   ignoreEvent() {
