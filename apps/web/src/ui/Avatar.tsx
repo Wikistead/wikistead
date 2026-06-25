@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from "react";
 import { colorFromString, initials } from "./avatar";
-import styles from "./Avatar.module.css";
+import { cn } from "../lib/utils";
 
 // Shared avatar used by #3 (user), #4 (space icon), #8 (collab cursor). Renders the
 // `src` picture when present, else a deterministic initials chip. The picture is
@@ -36,12 +36,16 @@ export function Avatar({ name, src, seed, glyph, size = 24, shape = "circle", ti
     fontSize: Math.round(size * (glyph ? 0.55 : 0.42)),
     background: showImg ? undefined : colorFromString(seed ?? name),
   };
-  const cls = [styles.avatar, shape === "rounded" ? styles.rounded : styles.circle, className].filter(Boolean).join(" ");
+  const cls = cn(
+    "inline-flex flex-none select-none items-center justify-center overflow-hidden font-semibold uppercase leading-none text-white",
+    shape === "rounded" ? "rounded-[24%]" : "rounded-full", // rounded square = object/space; circle = person
+    className,
+  );
   return (
     <span className={cls} style={style} title={title ?? name} aria-label={title ?? name} role="img" data-testid={rest["data-testid"]}>
       {showImg ? (
         // referrerPolicy: don't leak the app URL to the IdP/CDN serving the picture.
-        <img className={styles.img} src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+        <img className="block h-full w-full object-cover" src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
       ) : (
         glyph || initials(name)
       )}

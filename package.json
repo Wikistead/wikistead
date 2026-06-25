@@ -11,6 +11,7 @@
     "test": "turbo run test",
     "license:check": "node scripts/check-licenses.mjs",
     "lint:no-ee-imports": "node scripts/check-ce-imports.mjs",
+    "lint:no-css-modules": "node scripts/check-no-css-modules.mjs",
     "build:ee": "turbo run build",
     "compose:up": "docker compose up -d",
     "compose:down": "docker compose down",
