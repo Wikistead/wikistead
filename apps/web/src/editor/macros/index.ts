@@ -3,9 +3,11 @@
 // `macroFold` from here, so registration runs before any editor mounts.
 import { registerMacro } from "./registry";
 import { mermaidMacro } from "./mermaid";
+import { calloutMacro } from "./callout";
 
 registerMacro(mermaidMacro);
+registerMacro(calloutMacro);
 
 export { macroFold } from "./fold";
-export { findFenceMacro, registeredFenceLangs } from "./registry";
-export type { Macro, FenceMacro, MacroContext, MacroTheme } from "./registry";
+export { findFenceMacro, findDirectiveMacro, registeredFenceLangs, registeredDirectiveNames } from "./registry";
+export type { Macro, FenceMacro, DirectiveMacro, MacroContext, MacroTheme } from "./registry";

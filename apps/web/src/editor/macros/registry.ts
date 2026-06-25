@@ -42,19 +42,39 @@ export interface FenceMacro {
   readonly richEditUI?: { readonly present: "modal" | "inline" };
 }
 
-// Directive macros (kind: "directive") arrive in M1 slice 2 with the in-house lezer
-// ::: parser. The union is ready for them.
-export type Macro = FenceMacro;
+// A container directive (:::name … :::). Unlike a fence macro, its body stays
+// Markdown (parsed as nested nodes, decorated by the existing live-preview renderers),
+// so a directive macro does NOT return a widget — it styles the CONTAINER. M1 needs
+// only a CSS class for the box; a leading label / custom header comes later.
+export interface DirectiveMacro {
+  readonly kind: "directive";
+  readonly name: string; // :::name
+  // CSS class applied to the directive's lines to draw the box (the content lines stay
+  // Markdown; the ::: fence markers are hidden, reveal-on-cursor).
+  readonly containerClass: string;
+  // Static HTML for export / SSR (M3): wrap the rendered body. The inner Markdown is
+  // rendered by the server pipeline; this supplies the wrapper. MUST be XSS-safe.
+  htmlRender(body: string): string;
+  readonly exportFidelity: "preserve" | "degrade";
+  readonly richEditUI?: { readonly present: "modal" | "inline" };
+}
+
+export type Macro = FenceMacro | DirectiveMacro;
 
 const FENCE_MACROS = new Map<string, FenceMacro>();
+const DIRECTIVE_MACROS = new Map<string, DirectiveMacro>();
 
-// Register a macro. Throws on a duplicate claim so a real collision (two macros for
-// the same fence language) fails loud at startup rather than silently shadowing.
+// Register a macro. Throws on a duplicate claim so a real collision (two macros for the
+// same fence language / directive name) fails loud at startup rather than shadowing.
 export function registerMacro(macro: Macro): void {
   if (macro.kind === "fence") {
     const lang = macro.lang.toLowerCase();
     if (FENCE_MACROS.has(lang)) throw new Error(`duplicate fence macro for language: ${lang}`);
     FENCE_MACROS.set(lang, macro);
+  } else {
+    const name = macro.name.toLowerCase();
+    if (DIRECTIVE_MACROS.has(name)) throw new Error(`duplicate directive macro for name: ${name}`);
+    DIRECTIVE_MACROS.set(name, macro);
   }
 }
 
@@ -64,6 +84,15 @@ export function findFenceMacro(lang: string): FenceMacro | undefined {
   return FENCE_MACROS.get(lang.toLowerCase());
 }
 
+// Look up the macro for a :::name directive. Undefined → leave the raw ::: as text.
+export function findDirectiveMacro(name: string): DirectiveMacro | undefined {
+  return DIRECTIVE_MACROS.get(name.toLowerCase());
+}
+
 export function registeredFenceLangs(): string[] {
   return [...FENCE_MACROS.keys()];
+}
+
+export function registeredDirectiveNames(): string[] {
+  return [...DIRECTIVE_MACROS.keys()];
 }

@@ -6,8 +6,9 @@ import {
   EditorView,
   WidgetType,
 } from "@codemirror/view";
-import { findFenceMacro, type FenceMacro, type MacroTheme } from "../macros/registry";
+import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme } from "../macros/registry";
 import { fenceLang, fenceBody, macroFenceAt } from "../macros/fence";
+import { parseDirectiveOpen } from "../macros/directive-parser";
 
 // Force a full reload on HMR: this module's decorations/state are baked into the
 // EditorView at creation (built once, not re-run on hot-swap), so a hot update would
@@ -436,6 +437,26 @@ const RENDERERS: BlockRenderer[] = [
   },
   { match: (n) => n === "CodeMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
   {
+    // ::: container directive (macro). The body stays Markdown — its nested nodes are
+    // decorated by the other renderers — so here we only draw the box (the macro's
+    // containerClass on every line of the block). The ::: fence markers are hidden by
+    // the DirectiveMark renderer (reveal-on-cursor). Unknown name → leave raw text.
+    match: (n) => n === "Directive",
+    enter: (node, ctx) => {
+      const doc = ctx.state.doc;
+      const open = parseDirectiveOpen(doc.lineAt(node.from).text);
+      const macro = open ? findDirectiveMacro(open.name) : undefined;
+      if (!macro) return;
+      const box = Decoration.line({ attributes: { class: macro.containerClass } });
+      const first = doc.lineAt(node.from).number;
+      const last = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1)).number;
+      for (let n = first; n <= last; n++) ctx.add(box, doc.line(n).from);
+    },
+  },
+  // The :::name / ::: fence lines: hide (reveal raw on the cursor's line, like every
+  // other marker). hideMarker also makes the range atomic for clean cursor motion.
+  { match: (n) => n === "DirectiveMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
+  {
     // Blockquote → a left-bar + muted block. Each line gets the quote line style; the
     // ">" markers hide (revealing on the cursor's line, like every other marker), so
     // it reads as a quote but stays raw-editable under the cursor.
@@ -746,5 +767,13 @@ export const livePreviewTheme = EditorView.baseTheme({
     color: "var(--fg-dim, #888)",
     fontStyle: "italic",
     fontSize: "0.95em",
+  },
+  // ::: callout directive: a tinted box with an accent left bar. Applied per line
+  // (the fence lines are hidden → empty padding rows inside the box). The content
+  // stays live-preview Markdown.
+  ".cm-lp-callout": {
+    borderLeft: "3px solid var(--accent, #4ea1ff)",
+    background: "rgba(127,127,127,0.08)",
+    paddingLeft: "0.8em",
   },
 });
