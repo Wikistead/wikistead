@@ -19,11 +19,13 @@ import { TableEditWidget } from "./table-edit";
 // rich-editable macros always (never reveal-on-cursor); vim keeps reveal-on-cursor.
 export const vimEnabled = Facet.define<boolean, boolean>({ combine: (v) => (v.length ? v[v.length - 1]! : false) });
 
-// Reveal-on-cursor is allowed for a macro/table only when it is NOT rich-editable, OR vim
-// is on. So in non-vim, rich-editable blocks (table / :::table / Excalidraw) always render
-// and are edited by clicking; mermaid/callout (no rich editor) still reveal for source.
-function revealAllowed(state: EditorState, richEditable: boolean): boolean {
-  return !richEditable || state.facet(vimEnabled);
+// Reveal-on-cursor for MACROS is vim-only — non-vim renders EVERY macro, always (the
+// user's invariant: " vim render"). This applies to non-rich macros too
+// (mermaid/callout): in non-vim they render and are read-only there; edit their source in
+// vim. (An earlier version kept `!richEditable || vim`, which let mermaid reveal in non-vim
+// — so vim→non-vim left a mermaid under the caret as raw source. That was the #5 hole.)
+function revealAllowed(state: EditorState): boolean {
+  return state.facet(vimEnabled);
 }
 
 // Mode-based rich edit (ADR-022 Part 11): a CLICK on a table enters edit mode in BOTH
@@ -47,7 +49,7 @@ if (import.meta.hot) import.meta.hot.accept(() => window.location.reload());
 // Obsidian-style live preview: hide/style markdown syntax via CodeMirror
 // decorations.
 //
-// INVARIANT (ADR-008 — the one non-obvious interaction in this surface):
+// INVARIANT (ADR-008 — the one non-obvious interaction in this surface)
 // decorations are DISPLAY-ONLY and OFFSET-INVARIANT. `Decoration.replace` hides
 // glyphs but never mutates the document; the CM doc stays 1:1 with the canonical
 // Y.Text (kept in sync by yCollab). Remote collaborators' carets are drawn at
@@ -85,14 +87,14 @@ const bullet = Decoration.replace({ widget: new BulletWidget() });
 
 // GFM task checkbox (ADR-019). The `[ ]`/`[x]` TaskMarker renders as a real checkbox
 // (reveal-on-cursor still shows the raw markers for editing). How a click is handled
-// depends on the surface, supplied via this facet:
-//   - { mode: "edit" }            editable draft surface → flip the char in the doc
-//                                 directly (a normal offset-invariant Y.Text edit).
-//   - { mode: "view", onToggle }  read-only published surface → the host persists it
-//                                 (flip the live draft over its collab connection +
-//                                 the no-revision endpoint). See Editor.tsx.
-//   - null                        no edit permission → rendered DISABLED (display only;
-//                                 the server is the bastion regardless — D3).
+// depends on the surface, supplied via this facet
+// - { mode: "edit" } editable draft surface → flip the char in the doc
+// directly (a normal offset-invariant Y.Text edit).
+// - { mode: "view", onToggle } read-only published surface → the host persists it
+// (flip the live draft over its collab connection +
+// the no-revision endpoint). See Editor.tsx.
+// - null no edit permission → rendered DISABLED (display only;
+// the server is the bastion regardless — D3).
 export type CheckboxControl =
   | { mode: "edit" }
   | { mode: "view"; onToggle: (index: number, from: number, checked: boolean) => void }
@@ -162,7 +164,7 @@ class CheckboxWidget extends WidgetType {
 const checkbox = (checked: boolean, from: number) =>
   Decoration.replace({ widget: new CheckboxWidget(checked, from) });
 
-// Image attachments are referenced in the canonical Y.Text by a STABLE id —
+// Image attachments are referenced in the canonical Y.Text by a STABLE id
 // ![alt](wks-attachment:<id>) — never by a presigned URL (those are short-lived
 // bearer tokens; persisting one in the CRDT/its revision history would both break
 // on expiry and leak a credential). The widget resolves the id to a fresh
@@ -239,7 +241,7 @@ function linkHref(src: string): string | null {
   return u;
 }
 
-// Renders a GFM table block as an HTML <table>. Cells are set via textContent —
+// Renders a GFM table block as an HTML <table>. Cells are set via textContent
 // NEVER innerHTML — so user-authored content cannot inject markup (no XSS). This
 // is display-only: it replaces the markdown range visually; the canonical Y.Text
 // is unchanged, and putting the cursor in the table reveals the raw markdown.
@@ -464,9 +466,8 @@ const RENDERERS: BlockRenderer[] = [
         // source (editable). Otherwise → the rendered macro (a collapsed block widget,
         // entered via blockEntry like table/image).
         if (isFolded(ctx.state, from, to)) return;
-        // Reveal source on the caret only when allowed (vim, or a macro with no rich
-        // editor); a rich-editable macro in non-vim always renders (#5 — click to edit).
-        if (revealAllowed(ctx.state, !!macro.richEditUI) && rangeRevealed(ctx.state, from, to)) return;
+        // Reveal source on the caret only in vim; non-vim always renders the macro (#5).
+        if (revealAllowed(ctx.state) && rangeRevealed(ctx.state, from, to)) return;
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), true), block: true }), from, to);
         return;
       }
@@ -497,12 +498,12 @@ const RENDERERS: BlockRenderer[] = [
       const first = doc.lineAt(node.from);
       const lastLine = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1));
       if (macro.liveRender) {
-        // BLOCK directive (table): render the body as a widget, reveal raw on cursor —
+        // BLOCK directive (table): render the body as a widget, reveal raw on cursor
         // like a fence macro (not foldable). Body = lines between the ::: fences.
         const from = first.from;
         const to = lastLine.to;
         if (tryTableEdit(ctx, from, to)) return; // render-active → cell-merge edit mode
-        if (revealAllowed(ctx.state, !!macro.richEditUI) && rangeRevealed(ctx.state, from, to)) return; // vim-only reveal for rich macros (#5)
+        if (revealAllowed(ctx.state) && rangeRevealed(ctx.state, from, to)) return; // vim-only reveal (#5)
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI }, parts.join("\n"), false), block: true }), from, to);
@@ -660,7 +661,7 @@ function buildDecorations(state: EditorState): {
   };
 }
 
-// A StateField (NOT a ViewPlugin): block decorations — the table render uses one —
+// A StateField (NOT a ViewPlugin): block decorations — the table render uses one
 // may only be provided by a state field, not a plugin. Rebuilds on any doc change
 // (covers local edits AND remote Yjs updates applied by yCollab) and any selection
 // change (reveal-on-cursor). Provides the decoration set, the atomicRanges (so local
@@ -675,7 +676,7 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
     if (tr.startState.facet(vimEnabled) !== tr.state.facet(vimEnabled)) return buildDecorations(tr.state);
     // A fold toggle changes WHICH macro blocks render (folded → CM's placeholder owns
     // the range, so the macro widget must drop) but is neither a doc nor selection
-    // change — rebuild so isFolded() is re-evaluated and the stale widget is removed.
+    // change — rebuild so isFolded is re-evaluated and the stale widget is removed.
     for (const e of tr.effects) if (e.is(foldEffect) || e.is(unfoldEffect) || e.is(setMacroRenderActive)) return buildDecorations(tr.state);
     return value;
   },
@@ -691,7 +692,7 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
 // move would skip a still-collapsed block, it redirects the caret to the block's near
 // edge instead. Landing there reveals the block (rangeRevealed), so its source lines
 // become real and j/k/arrows then traverse them one at a time; moving out re-collapses
-// it. Operates on the selection, so it covers BOTH arrow keys AND vim j/k uniformly —
+// it. Operates on the selection, so it covers BOTH arrow keys AND vim j/k uniformly
 // the single principle for every block (and every future container macro), not a
 // per-block hack. Display-only: never changes the document (ADR-008; presence intact).
 // A block widget taller than one line can make CM's vertical motion (and vim j/k)
@@ -739,7 +740,7 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   // Redirect ONLY a one-line step that skipped EXACTLY one block: the caret started on
   // the block's near edge and CM landed it on the block's FAR edge (it jumped over the
   // collapsed widget). Then put the caret on the block's near source line so it reveals
-  // and j/k traverse it line-by-line. A multi-line jump (gg/G/}/click) does NOT match —
+  // and j/k traverse it line-by-line. A multi-line jump (gg/G/}/click) does NOT match
   // its newHead isn't the block's far edge — so it lands at its real target (gg/G are no
   // longer hijacked when a macro happens to sit one line away). Entry from below lands on
   // the block's last line; from above, its first line.
