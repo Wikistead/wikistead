@@ -22,9 +22,8 @@ test("```excalidraw: modal mounts Excalidraw, save writes back, source round-tri
   const macro = page.locator("[data-pane=preview] [data-testid=macro-excalidraw]");
   await expect(macro).toBeVisible();
 
-  // Edit button → modal mounts the Excalidraw React component (React 19 runtime check).
-  await macro.hover();
-  await page.locator("[data-pane=preview] [data-testid=macro-edit]").click();
+  // Clicking the macro opens the modal (mode-based, Part 11) — mounts Excalidraw (React 19).
+  await macro.click();
   await expect(page.getByTestId("macro-modal")).toBeVisible();
   await expect(page.locator(".wks-macro-modal .excalidraw")).toBeVisible({ timeout: 20000 });
 
@@ -33,8 +32,7 @@ test("```excalidraw: modal mounts Excalidraw, save writes back, source round-tri
   await expect(page.getByTestId("macro-modal")).toHaveCount(0);
   await sleep(200);
 
-  // Round-trip: the ```excalidraw fence survives in the canonical source.
-  await page.locator("[data-pane=preview] [data-testid=macro-excalidraw]").click();
-  await sleep(250);
-  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("```excalidraw");
+  // Round-trip: the ```excalidraw fence survives — it still renders as the macro after
+  // the edit cycle (the canonical source was preserved, written back as the fence).
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-excalidraw]")).toBeVisible();
 });

@@ -14,12 +14,10 @@ test("slash palette inserts a macro (excalidraw) from its registration", async (
   await expect(page.getByTestId("slash-palette")).toBeVisible();
   expect(await page.locator("[data-testid=slash-palette] .lp-palette-row").count()).toBeGreaterThan(0);
   await page.keyboard.press("Enter");
-  await sleep(150);
-  // Caret to the fence's opening line so the ``` markers reveal (per-line), confirming a
-  // ```excalidraw fence was inserted (not just the literal query text).
-  await page.keyboard.press("Control+Home");
-  await sleep(120);
-  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("```excalidraw");
+  await sleep(200);
+  // The inserted ```excalidraw fence renders as the macro (non-vim always renders it),
+  // confirming /excalidraw inserted a working fence — not just literal text.
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-excalidraw]")).toBeVisible();
 });
 
 // Fix #3 (ADR-017): vim G (jump to last line) must clear a macro that sits one line below

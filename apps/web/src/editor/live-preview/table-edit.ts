@@ -124,7 +124,12 @@ export class TableEditWidget extends WidgetType {
       const start = axis === "x" ? e.clientX : e.clientY;
       const startSize = axis === "x" ? ref.getBoundingClientRect().width : ref.getBoundingClientRect().height;
       target.setPointerCapture(e.pointerId);
-      const size = (ev: PointerEvent) => Math.max(axis === "x" ? 40 : 24, Math.round(startSize + ((axis === "x" ? ev.clientX : ev.clientY) - start)));
+      // #3: cap a column at the editor's visible width (no growing past the viewport).
+      const maxW = Math.max(80, view.scrollDOM.clientWidth - 24);
+      const size = (ev: PointerEvent) => {
+        const raw = Math.round(startSize + ((axis === "x" ? ev.clientX : ev.clientY) - start));
+        return axis === "x" ? Math.min(maxW, Math.max(40, raw)) : Math.max(24, raw);
+      };
       const move = (ev: PointerEvent) => { ref.style[axis === "x" ? "width" : "height"] = size(ev) + "px"; };
       const up = (ev: PointerEvent) => { target.removeEventListener("pointermove", move); target.removeEventListener("pointerup", up); commit(size(ev)); };
       target.addEventListener("pointermove", move);

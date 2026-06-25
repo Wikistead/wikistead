@@ -32,7 +32,7 @@ const KEYMAP_MODES: KeymapMode[] = ['default', 'vim', 'local']
 
 // Remappable chord commands (ADR-021) — ONLY these may be rebound; structural/contextual
 // keys (`/` `\` Enter/Esc/Tab, mnemonics, ex-commands) and vim's own keymap are fixed.
-const REMAPPABLE_COMMANDS = ['editor.toggleVim', 'search.focus', 'palette.next', 'palette.prev', 'editor.toggleMacroEdit']
+const REMAPPABLE_COMMANDS = ['editor.toggleVim', 'search.focus', 'palette.next', 'palette.prev']
 // Keys the browser owns — a page can't intercept them, so never allow binding to them
 // (defence-in-depth; the UI also blocks these). Normalized "Mod-"/"Ctrl-" chord strings.
 const RESERVED_KEYS = ['Mod-w', 'Mod-n', 'Mod-t', 'Ctrl-w', 'Ctrl-n', 'Ctrl-t']

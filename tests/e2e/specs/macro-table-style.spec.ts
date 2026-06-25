@@ -117,6 +117,9 @@ test("column handle selects the whole column; color applies to all its cells", a
   await pipeTableInEdit(page);
 
   await page.getByTestId("table-col-select-0").click(); // select column 0 (A + 1)
+  // #1: the selected column's cells show the blue selection highlight + outer border.
+  expect(await page.locator("[data-testid=table-edit] .cm-lp-cell-sel").count()).toBe(2);
+  expect(await page.locator("[data-testid=table-edit] .cm-lp-sel-l").count()).toBeGreaterThan(0);
   await page.getByTestId("table-bg-blue").click();
   await sleep(200);
 
