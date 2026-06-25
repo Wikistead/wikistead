@@ -1,5 +1,13 @@
 import { EditorView, WidgetType } from "@codemirror/view";
-import { mergeRect, unmergeAt, serialize, styleToCss, type Grid, type CellStyle } from "../macros/table-model";
+import { mergeRect, unmergeAt, serialize, styleToCss, insertColAt, insertRowAt, deleteColAt, deleteRowAt, type Grid, type CellStyle } from "../macros/table-model";
+
+// Spreadsheet-style column label: A, B … Z, AA, AB … (so the handle band reads like a
+// spreadsheet header — unmistakably NOT a data cell, #2).
+function colLabel(n: number): string {
+  let s = "";
+  for (let i = n; i >= 0; i = Math.floor(i / 26) - 1) s = String.fromCharCode(65 + (i % 26)) + s;
+  return s;
+}
 import { setMacroRenderActive } from "./macro-edit";
 
 // Render-active table EDIT mode (ADR-022 Part 10/11). Cells select on click; the toolbar
@@ -72,7 +80,21 @@ export class TableEditWidget extends WidgetType {
     const headerBtn = btn("H", "table-header");
     headerBtn.title = "Toggle header cells";
     const doneBtn = btn("Done", "table-done");
-    bar.append(mergeBtn, unmergeBtn, alignL, alignC, alignR, headerBtn);
+    // Structural ops (#1): insert/delete the selected column or row. Each group is shown
+    // only when its kind is selected (via the column/row handle), so before/after is clear.
+    const colOps = document.createElement("span");
+    colOps.className = "cm-lp-table-ops";
+    const colInsL = btn("⊞←", "table-col-insert-before"); colInsL.title = "Insert column before";
+    const colInsR = btn("⊞→", "table-col-insert-after"); colInsR.title = "Insert column after";
+    const colDel = btn("✕", "table-col-delete"); colDel.title = "Delete column";
+    colOps.append(colInsL, colInsR, colDel);
+    const rowOps = document.createElement("span");
+    rowOps.className = "cm-lp-table-ops";
+    const rowInsT = btn("⊞↑", "table-row-insert-above"); rowInsT.title = "Insert row above";
+    const rowInsB = btn("⊞↓", "table-row-insert-below"); rowInsB.title = "Insert row below";
+    const rowDel = btn("✕", "table-row-delete"); rowDel.title = "Delete row";
+    rowOps.append(rowInsT, rowInsB, rowDel);
+    bar.append(mergeBtn, unmergeBtn, alignL, alignC, alignR, headerBtn, colOps, rowOps);
     // Background-color presets (ADR-022 review #2): a controlled palette (theme accent +
     // soft tints), NOT a free picker — keeps tables on-theme, accessible, round-trip-safe.
     for (const p of BG_PRESETS) {
@@ -93,6 +115,11 @@ export class TableEditWidget extends WidgetType {
     const ncols = this.grid.reduce((m, row) => Math.max(m, row.length), 0);
     let dragging = false;
     let anchor: [number, number] = [0, 0];
+    // Whole-column / whole-row selection drives the structural-op group in the toolbar (so
+    // "insert before/after" has an unambiguous target). -1 = not a single col/row select.
+    let selMode: "cells" | "col" | "row" = "cells";
+    let selCol = -1;
+    let selRow = -1;
 
     const applySel = () => {
       // Light fill on every selected cell; a thick accent border ONLY on the selection's
@@ -110,13 +137,14 @@ export class TableEditWidget extends WidgetType {
     };
     const setRect = (r1: number, c1: number, r2: number, c2: number) => {
       selected.clear();
+      selMode = "cells"; selCol = -1; selRow = -1;
       const lr = Math.min(r1, r2), hr = Math.max(r1, r2), lc = Math.min(c1, c2), hc = Math.max(c1, c2);
       for (let r = lr; r <= hr; r++) for (let c = lc; c <= hc; c++) if (this.grid[r]?.[c]) selected.add(`${r},${c}`);
       applySel();
     };
-    const selectCol = (c: number) => { selected.clear(); this.grid.forEach((row, r) => { if (row[c]) selected.add(`${r},${c}`); }); applySel(); };
-    const selectRow = (r: number) => { selected.clear(); (this.grid[r] ?? []).forEach((cell, c) => { if (cell) selected.add(`${r},${c}`); }); applySel(); };
-    const selectAll = () => { selected.clear(); this.grid.forEach((row, r) => row.forEach((cell, c) => { if (cell) selected.add(`${r},${c}`); })); applySel(); };
+    const selectCol = (c: number) => { selected.clear(); selMode = "col"; selCol = c; selRow = -1; this.grid.forEach((row, r) => { if (row[c]) selected.add(`${r},${c}`); }); applySel(); };
+    const selectRow = (r: number) => { selected.clear(); selMode = "row"; selRow = r; selCol = -1; (this.grid[r] ?? []).forEach((cell, c) => { if (cell) selected.add(`${r},${c}`); }); applySel(); };
+    const selectAll = () => { selected.clear(); selMode = "cells"; selCol = -1; selRow = -1; this.grid.forEach((row, r) => row.forEach((cell, c) => { if (cell) selected.add(`${r},${c}`); })); applySel(); };
 
     // A border drag handle: tracks the pointer, previews the size, commits on release.
     const dragSize = (e: PointerEvent, axis: "x" | "y", ref: HTMLElement, commit: (px: number) => void) => {
@@ -161,16 +189,26 @@ export class TableEditWidget extends WidgetType {
     for (let c = 0; c < ncols; c++) {
       const ch = document.createElement("th");
       ch.className = "cm-lp-table-handle cm-lp-table-colhandle";
+      ch.textContent = colLabel(c); // spreadsheet column letter (#2 — reads as a header)
       ch.setAttribute("data-testid", "table-col-select-" + c);
       ch.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); selectCol(c); });
       htr.appendChild(ch);
     }
+    // Trailing "+" → append a column at the end (#1).
+    const addCol = document.createElement("th");
+    addCol.className = "cm-lp-table-handle cm-lp-table-addcol";
+    addCol.textContent = "+";
+    addCol.title = "Add column";
+    addCol.setAttribute("data-testid", "table-add-col");
+    addCol.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertColAt(this.grid, ncols)); });
+    htr.appendChild(addCol);
     table.appendChild(htr);
 
     this.grid.forEach((row, r) => {
       const trow = document.createElement("tr");
       const rh = document.createElement("th");
       rh.className = "cm-lp-table-handle cm-lp-table-rowhandle";
+      rh.textContent = String(r + 1); // spreadsheet row number (#2 — reads as a header)
       rh.setAttribute("data-testid", "table-row-select-" + r);
       rh.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); selectRow(r); });
       trow.appendChild(rh);
@@ -203,6 +241,16 @@ export class TableEditWidget extends WidgetType {
       });
       table.appendChild(trow);
     });
+    // Trailing "+" row → append a row at the end (#1).
+    const addRowTr = document.createElement("tr");
+    const addRow = document.createElement("th");
+    addRow.className = "cm-lp-table-handle cm-lp-table-addrow";
+    addRow.textContent = "+";
+    addRow.title = "Add row";
+    addRow.setAttribute("data-testid", "table-add-row");
+    addRow.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertRowAt(this.grid, this.grid.length)); });
+    addRowTr.appendChild(addRow);
+    table.appendChild(addRowTr);
     table.addEventListener("pointermove", (e) => {
       if (!dragging) return;
       const t = (e.target as HTMLElement)?.closest?.("[data-cellkey]") as HTMLElement | null;
@@ -223,6 +271,9 @@ export class TableEditWidget extends WidgetType {
     const updateToolbar = () => {
       if (!selected.size) { bar.style.display = "none"; return; }
       bar.style.display = "flex";
+      // Structural ops only make sense for a whole column / whole row selection.
+      colOps.style.display = selMode === "col" ? "inline-flex" : "none";
+      rowOps.style.display = selMode === "row" ? "inline-flex" : "none";
       const cellEl = cellEls.get([...selected][0]!);
       if (!cellEl) return;
       const wrapRect = wrap.getBoundingClientRect();
@@ -273,6 +324,13 @@ export class TableEditWidget extends WidgetType {
       for (const [r, c] of cs) { const cell = next[r]?.[c]; if (cell) cell.header = !allHeader; }
       apply(next);
     });
+    // Structural ops (#1) — operate on the selected column / row (selCol / selRow).
+    colInsL.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selCol >= 0) apply(insertColAt(this.grid, selCol)); });
+    colInsR.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selCol >= 0) apply(insertColAt(this.grid, selCol + 1)); });
+    colDel.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selCol >= 0) apply(deleteColAt(this.grid, selCol)); });
+    rowInsT.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selRow >= 0) apply(insertRowAt(this.grid, selRow)); });
+    rowInsB.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selRow >= 0) apply(insertRowAt(this.grid, selRow + 1)); });
+    rowDel.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selRow >= 0) apply(deleteRowAt(this.grid, selRow)); });
     alignL.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ align: "left" }); });
     alignC.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ align: "center" }); });
     alignR.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ align: "right" }); });

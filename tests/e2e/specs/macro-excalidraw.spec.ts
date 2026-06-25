@@ -18,7 +18,8 @@ test("```excalidraw: modal mounts Excalidraw, save writes back, source round-tri
   }
   await sleep(400);
 
-  // liveRender placeholder (empty scene) renders.
+  // liveRender placeholder (empty scene) renders. (The common empty-macro placeholder for
+  // a CLEAN empty fence is covered by macro-fixes' slash-insert test.)
   const macro = page.locator("[data-pane=preview] [data-testid=macro-excalidraw]");
   await expect(macro).toBeVisible();
 

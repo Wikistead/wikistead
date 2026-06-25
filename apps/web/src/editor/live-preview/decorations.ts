@@ -313,16 +313,28 @@ function isFolded(state: EditorState, from: number, to: number): boolean {
 // directive macros like :::table). foldable is fence-only (large data bodies).
 type RenderableMacro = { liveRender: (body: string, ctx: { theme: MacroTheme }) => HTMLElement; richEditUI?: import("../macros/registry").RichEditUI };
 class MacroWidget extends WidgetType {
-  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean) {
+  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string) {
     super();
   }
   eq(other: MacroWidget) {
-    return other.macro === this.macro && other.body === this.body && other.foldable === this.foldable;
+    return other.macro === this.macro && other.body === this.body && other.foldable === this.foldable && other.name === this.name;
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
     wrap.className = "cm-lp-macro-wrap";
-    wrap.appendChild(this.macro.liveRender(this.body, { theme: currentMacroTheme() }));
+    // #3: an empty macro renders NOTHING from some liveRenders (e.g. mermaid) → it looks
+    // like blank space even though a block widget occupies it (so vertical caret motion
+    // "jumps" past invisible content). Render a common, visible placeholder for ALL macros
+    // when the body is empty, so the block is obviously present and obviously editable.
+    if (this.body.trim() === "") {
+      const ph = document.createElement("div");
+      ph.className = "cm-lp-macro cm-lp-macro-empty";
+      ph.setAttribute("data-testid", "macro-empty");
+      ph.textContent = `Empty ${this.name} — click to edit`;
+      wrap.appendChild(ph);
+    } else {
+      wrap.appendChild(this.macro.liveRender(this.body, { theme: currentMacroTheme() }));
+    }
     if (!view.state.readOnly) {
       // Click the rendered macro → put the caret at the block start, which reveals the
       // raw source for editing. (CM maps a click on an opaque block widget to the
@@ -468,7 +480,7 @@ const RENDERERS: BlockRenderer[] = [
         if (isFolded(ctx.state, from, to)) return;
         // Reveal source on the caret only in vim; non-vim always renders the macro (#5).
         if (revealAllowed(ctx.state) && rangeRevealed(ctx.state, from, to)) return;
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), true), block: true }), from, to);
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), true, lang!), block: true }), from, to);
         return;
       }
       const first = doc.lineAt(node.from).number;
@@ -506,7 +518,7 @@ const RENDERERS: BlockRenderer[] = [
         if (revealAllowed(ctx.state) && rangeRevealed(ctx.state, from, to)) return; // vim-only reveal (#5)
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI }, parts.join("\n"), false), block: true }), from, to);
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI }, parts.join("\n"), false, open!.name), block: true }), from, to);
         return;
       }
       if (macro.containerClass) {
@@ -872,7 +884,16 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-macro-edit": { right: "30px" }, // sits left of the fold button
   ".cm-lp-macro-wrap:hover .cm-lp-macro-fold, .cm-lp-macro-wrap:hover .cm-lp-macro-edit": { opacity: "1" },
   ".cm-lp-excalidraw svg": { maxWidth: "100%", height: "auto", pointerEvents: "none" },
-  ".cm-lp-macro-empty": { color: "var(--fg-dim, #888)", fontStyle: "italic", padding: "0.6em" },
+  // Empty-macro placeholder (#3): a clearly-bounded dashed block so the user SEES that a
+  // macro widget occupies the line (matches the caret's block-motion behavior).
+  ".cm-lp-macro-empty": {
+    color: "var(--fg-dim, #888)",
+    fontStyle: "italic",
+    padding: "0.6em",
+    border: "1px dashed var(--border, #888)",
+    borderRadius: "4px",
+    cursor: "pointer",
+  },
   // Folded summary line ("▶ Mermaid diagram"). One landable line; click to expand
   // (vim za/zo also toggle it — CM native folding).
   ".cm-lp-macro-folded": {
@@ -942,17 +963,33 @@ export const livePreviewTheme = EditorView.baseTheme({
   // — the band would inherit the faint `th` background and look like a header cell. The
   // prefixed selectors (0,2,1 / 0,2,0) win, so the styling actually paints on device.
   ".cm-lp-table-grid th.cm-lp-table-handle": {
-    background: "var(--fg-dim, #9aa0a6)",
+    background: "var(--panel-2, rgba(127,127,127,0.28))", // header-band tint, distinct from cells
     border: "1px solid var(--border, #888)",
-    padding: "0",
-    lineHeight: "0",
+    padding: "1px 2px",
+    textAlign: "center",
+    verticalAlign: "middle",
+    fontSize: "10px",
+    fontWeight: "600",
+    lineHeight: "1.2",
+    color: "var(--fg-dim, #777)",
     cursor: "pointer",
-    opacity: "0.65",
+    userSelect: "none",
   },
-  ".cm-lp-table-grid th.cm-lp-table-handle:hover": { background: "var(--accent, #4ea1ff)", opacity: "1" },
-  ".cm-lp-table-grid .cm-lp-table-colhandle": { height: "10px", minWidth: "0" },
-  ".cm-lp-table-grid .cm-lp-table-rowhandle": { width: "12px" },
-  ".cm-lp-table-grid .cm-lp-table-corner": { width: "12px", height: "10px" },
+  ".cm-lp-table-grid th.cm-lp-table-handle:hover": { background: "var(--accent, #4ea1ff)", color: "#fff" },
+  ".cm-lp-table-grid .cm-lp-table-colhandle": { minWidth: "16px", height: "16px" },
+  ".cm-lp-table-grid .cm-lp-table-rowhandle": { width: "22px" },
+  ".cm-lp-table-grid .cm-lp-table-corner": { width: "22px", height: "16px", borderTopLeftRadius: "5px" },
+  // The trailing "+" add-column / add-row handles read as actions (dashed, accent hint).
+  ".cm-lp-table-grid .cm-lp-table-addcol, .cm-lp-table-grid .cm-lp-table-addrow": {
+    background: "transparent",
+    border: "1px dashed var(--border, #888)",
+    color: "var(--fg-dim, #777)",
+    fontSize: "12px",
+    fontWeight: "700",
+  },
+  ".cm-lp-table-grid .cm-lp-table-addcol:hover, .cm-lp-table-grid .cm-lp-table-addrow:hover": { background: "var(--accent, #4ea1ff)", color: "#fff", borderStyle: "solid" },
+  // Structural-op group in the toolbar (insert/delete col/row) — visually separated.
+  ".cm-lp-table-ops": { display: "inline-flex", gap: "2px", alignItems: "center", borderLeft: "1px solid var(--border, #888)", paddingLeft: "4px", marginLeft: "2px" },
   // Selection: a translucent THEME-accent fill on each cell (#1 — must read as selected,
   // in the active theme color, not a fixed blue); a thick accent border only on the OUTER
   // edges (per-side classes) — the spreadsheet look. Prefixed to beat the base cell rules.

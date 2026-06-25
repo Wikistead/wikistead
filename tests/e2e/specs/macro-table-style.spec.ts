@@ -137,3 +137,57 @@ test("column handle selects the whole column; color applies to all its cells", a
   // both cells of column 0 (the th + the td) got a background.
   expect(await macroTable.locator('[style*="background"]').count()).toBe(2);
 });
+
+// #2: the select handles read as a spreadsheet header (A/B/C across the top, 1/2/3 down
+// the side) — unmistakably not data cells.
+test("select handles show spreadsheet labels (A/B/C, 1/2/3)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tablelabels");
+  await enterEdit(page);
+  await pipeTableInEdit(page);
+  expect((await page.getByTestId("table-col-select-0").textContent())?.trim()).toBe("A");
+  expect((await page.getByTestId("table-col-select-1").textContent())?.trim()).toBe("B");
+  expect((await page.getByTestId("table-row-select-0").textContent())?.trim()).toBe("1");
+});
+
+// #1: append a column / row at the end via the trailing "+" handles; stays a pipe table.
+test("the trailing + adds a column and a row (stays Tier-1 pipe)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tableadd");
+  await enterEdit(page);
+  await pipeTableInEdit(page); // 2 cols × (header + 1 body row)
+
+  await page.getByTestId("table-add-col").click();
+  await sleep(150);
+  await expect(page.getByTestId("table-col-select-2")).toBeVisible(); // 3rd column now exists
+  await page.getByTestId("table-add-row").click();
+  await sleep(150);
+  await expect(page.getByTestId("table-row-select-2")).toBeVisible(); // 3rd row now exists
+
+  await page.getByText("below", { exact: true }).click();
+  await sleep(200);
+  // Span-free + style-free → still a GFM pipe table (no :::table promotion).
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-table]")).toHaveCount(0);
+  const tbl = page.locator("[data-pane=preview] table.cm-lp-table");
+  await expect(tbl).toBeVisible();
+  expect(await tbl.locator("tr").first().locator("th,td").count()).toBe(3); // 3 columns
+});
+
+// #1: insert before/after the selected column, and delete a column, from the toolbar.
+test("insert-after and delete a column via the contextual toolbar", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tableinsdel");
+  await enterEdit(page);
+  await pipeTableInEdit(page);
+
+  await page.getByTestId("table-col-select-1").click(); // select column B → column ops show
+  await expect(page.getByTestId("table-col-insert-after")).toBeVisible();
+  await page.getByTestId("table-col-insert-after").click();
+  await sleep(150);
+  expect(await page.locator('[data-testid=table-edit] [data-testid^="table-col-select-"]').count()).toBe(3);
+
+  await page.getByTestId("table-col-select-0").click();
+  await page.getByTestId("table-col-delete").click();
+  await sleep(150);
+  expect(await page.locator('[data-testid=table-edit] [data-testid^="table-col-select-"]').count()).toBe(2);
+});
