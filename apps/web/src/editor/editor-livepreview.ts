@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, imageResolver, checkboxControl, type ImageResolver } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, imageResolver, checkboxControl, type ImageResolver } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette } from "./live-preview/palette";
@@ -79,8 +79,8 @@ export function mountLivePreview(
       })] : []),
       linkClicks,
       // Redirect vertical motion into collapsed blocks so their source is reachable
-      // line-by-line (editable surface only; read-only never edits source).
-      ...(opts.readOnly ? [] : [blockEntry]),
+      // line-by-line, and clamp overshoot past tall block widgets (editable only).
+      ...(opts.readOnly ? [] : [motionKeyTracker, blockEntry]),
       // Inline-comment anchor highlights (display-only; fed via setCommentRanges).
       commentHighlightTheme,
       commentHighlights,

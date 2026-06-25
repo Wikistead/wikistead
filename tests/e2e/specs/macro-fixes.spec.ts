@@ -48,3 +48,28 @@ test("vim G jumps past a macro to the last line", async ({ browser }) => {
   const line = await head(page);
   expect(line).toBeGreaterThanOrEqual(6); // reached the bottom (lastline/empty), NOT the macro (line 3)
 });
+
+// Fix #4 (ADR-017): a single-line vertical step from BELOW a tall block widget must move
+// one line (to lastline), not warp past the block to the top.
+test("ArrowUp / vim k from below a macro step one line (no warp)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "kstep");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  for (const l of ["line1", "line2", "```mermaid", "graph TD; A-->B;", "```", "lastline"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
+  await sleep(300);
+  await page.locator("[data-pane=preview] [data-testid=macro-mermaid] svg").first().waitFor({ timeout: 15000 }).catch(() => {});
+  await sleep(200);
+  // NON-VIM ArrowUp from the very bottom → lastline (6), not a warp to line 1/2.
+  await page.keyboard.press("Control+End"); await sleep(80);
+  await page.keyboard.press("ArrowUp"); await sleep(100);
+  expect(await head(page)).toBe(6);
+  // VIM k from the bottom → also one line.
+  await page.getByTestId("vim-toggle").click();
+  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "true");
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Shift+G"); await sleep(100); // to last line
+  await page.keyboard.press("k"); await sleep(100);
+  expect(await head(page)).toBeGreaterThanOrEqual(6); // stepped to lastline/empty, not warped up
+});
