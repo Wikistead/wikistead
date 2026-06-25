@@ -79,6 +79,29 @@ test("Ctrl+Enter enters the atom (reveals the macro source)", async ({ browser }
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("```mermaid");
 });
 
+// ADR-024: entering a source macro lands in the vim NORMAL world — Ctrl+Enter must NOT
+// force insert mode (a vim user moves with hjkl; `i` first enters insert). A stale-HMR
+// device report claimed forced-insert; this locks in the verified contract so a real
+// regression (something dispatching insert on entry) fails here.
+const vimInsert = (page: any) => page.evaluate(() => (window as any).__lpVimInsert);
+test("Ctrl+Enter into a source macro stays in vim NORMAL (no forced insert)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "atom-enter-normal");
+  await enterEdit(page);
+  await insertTallMermaid(page);
+  await vimOn(page);
+  await page.keyboard.press("g"); await page.keyboard.press("g"); await page.keyboard.press("j"); await sleep(110);
+  await page.keyboard.press("Control+Enter"); await sleep(200);
+  expect(await vimInsert(page)).toBe(false); // entered → NORMAL, not insert
+  // j is normal-mode motion (caret moves) — proof keys reach vim as commands, not typing.
+  const head0 = await headLine(page);
+  await page.keyboard.press("j"); await sleep(80);
+  expect(await headLine(page)).not.toBe(head0); // moved
+  // i NOW enters insert (insert is reached explicitly, not forced on entry)
+  await page.keyboard.press("i"); await sleep(80);
+  expect(await vimInsert(page)).toBe(true);
+});
+
 test("dd on a TALL macro atom deletes the whole macro verbatim", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "atom-dd");
