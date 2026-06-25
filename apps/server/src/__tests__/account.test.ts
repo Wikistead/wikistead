@@ -75,9 +75,20 @@ describe('account settings (ADR-020)', () => {
     await expect(updateAccountSettings(db, { subject: SUB_A, editorKeymap: 'emacs' })).rejects.toMatchObject({ statusCode: 400 })
   })
 
+  it('keybindings round-trip; reject unknown command / duplicate key / reserved key (ADR-021)', async () => {
+    expect((await getAccountSettings(db, { subject: SUB_B })).keybindings).toEqual({}) // null → {}
+    const ok = await updateAccountSettings(db, { subject: SUB_A, keybindings: { "editor.toggleVim": "Ctrl-Alt-v", "search.focus": "Mod-k" } })
+    expect(ok.keybindings).toEqual({ "editor.toggleVim": "Ctrl-Alt-v", "search.focus": "Mod-k" })
+    expect((await getAccountSettings(db, { subject: SUB_A })).keybindings["editor.toggleVim"]).toBe("Ctrl-Alt-v")
+    await expect(updateAccountSettings(db, { subject: SUB_A, keybindings: { "bogus.cmd": "F2" } })).rejects.toMatchObject({ statusCode: 400 }) // unknown command
+    await expect(updateAccountSettings(db, { subject: SUB_A, keybindings: { "editor.toggleVim": "Ctrl-x", "search.focus": "Ctrl-x" } })).rejects.toMatchObject({ statusCode: 400 }) // duplicate
+    await expect(updateAccountSettings(db, { subject: SUB_A, keybindings: { "search.focus": "Mod-w" } })).rejects.toMatchObject({ statusCode: 400 }) // browser-reserved
+  })
+
   it('SELF-SCOPE: updating A never touches B', async () => {
-    await updateAccountSettings(db, { subject: SUB_A, displayNameOverride: 'Only A', editorKeymap: 'vim' })
+    await updateAccountSettings(db, { subject: SUB_A, displayNameOverride: 'Only A', editorKeymap: 'vim', keybindings: { "editor.toggleVim": "Ctrl-Alt-b" } })
     const b = await getAccountSettings(db, { subject: SUB_B })
+    expect(b.keybindings).toEqual({}) // B's keybindings untouched
     expect(b.displayNameOverride).toBeNull() // B untouched
     expect(b.editorKeymap).toBe('local')
   })
