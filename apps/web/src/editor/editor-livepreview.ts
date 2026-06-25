@@ -92,8 +92,9 @@ export function mountLivePreview(
         w.__lpSel = { from: s.from, to: s.to, head: s.head, anchor: s.anchor };
       })] : []),
       linkClicks,
-      // Redirect vertical motion into collapsed blocks so their source is reachable
-      // line-by-line, and clamp overshoot past tall block widgets (editable only).
+      // ADR-024 atom motion: every block decoration is a single motion-stop — a one-line
+      // key lands ON the atom, the next steps past it (macros stay rendered; non-macro
+      // blocks reveal on landing). motionKeyTracker gates the overshoot clamp. Editable only.
       ...(opts.readOnly ? [] : [motionKeyTracker, blockEntry]),
       // Inline-comment anchor highlights (display-only; fed via setCommentRanges).
       commentHighlightTheme,
