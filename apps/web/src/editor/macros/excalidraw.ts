@@ -30,6 +30,7 @@ export const excalidrawMacro: FenceMacro = {
   lang: "excalidraw",
   exportFidelity: "preserve", // the JSON is a standard code fence → lossless round-trip
   summary: () => "Excalidraw drawing",
+  slash: { labelKey: "palette.excalidraw", keywords: "diagram draw whiteboard sketch excalidraw", insert: "```excalidraw\n\n```", caret: 14 },
   liveRender(body) {
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-excalidraw";

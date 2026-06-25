@@ -32,6 +32,7 @@ export const mermaidMacro: FenceMacro = {
   lang: "mermaid",
   exportFidelity: "preserve", // declarative text body → round-trips verbatim
   summary: () => "Mermaid diagram",
+  slash: { labelKey: "palette.mermaid", keywords: "diagram flowchart graph chart mermaid", insert: "```mermaid\n\n```", caret: 11 },
   liveRender(body, ctx) {
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-mermaid";

@@ -687,20 +687,24 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   // the target is inside one). This is what keeps `gg` going to the top, not the table
   // edge, while a single k/j still steps INTO the block instead of skipping over it.
   const oldLine = doc.lineAt(oldHead).number;
+  const newLine = doc.lineAt(newHead).number;
   const dir = newHead < oldHead ? -1 : 1;
-  const adj = oldLine + dir;
-  if (adj < 1 || adj > doc.lines) return tr;
+  // Redirect ONLY a one-line step that skipped EXACTLY one block: the caret started on
+  // the block's near edge and CM landed it on the block's FAR edge (it jumped over the
+  // collapsed widget). Then put the caret on the block's near source line so it reveals
+  // and j/k traverse it line-by-line. A multi-line jump (gg/G/}/click) does NOT match —
+  // its newHead isn't the block's far edge — so it lands at its real target (gg/G are no
+  // longer hijacked when a macro happens to sit one line away). Entry from below lands on
+  // the block's last line; from above, its first line.
   for (const b of blocks) {
     const first = doc.lineAt(b.from).number;
     const last = doc.lineAt(b.to).number;
     if (oldLine >= first && oldLine <= last) break; // caret was inside this block
-    if (adj >= first && adj <= last) {
-      // a one-line step lands on this collapsed block's near edge → put the caret on
-      // that source line (revealing it) instead of letting CM skip the whole block
-      if (doc.lineAt(newHead).number !== adj) {
-        return { selection: EditorSelection.cursor(doc.line(adj).from), scrollIntoView: true };
-      }
-      return tr;
+    if (dir === 1 && oldLine === first - 1 && newLine === last + 1 && newLine !== first) {
+      return { selection: EditorSelection.cursor(doc.line(first).from), scrollIntoView: true };
+    }
+    if (dir === -1 && oldLine === last + 1 && newLine === first - 1 && newLine !== last) {
+      return { selection: EditorSelection.cursor(doc.line(last).from), scrollIntoView: true };
     }
   }
   return tr;
