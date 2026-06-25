@@ -200,6 +200,16 @@ export const tableInlineEditor: InlineEditor = {
       ch.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); selectCol(c); });
       htr.appendChild(ch);
     }
+    // Trailing "+" attached to the right of the header band: append a column at the end
+    // (#3 — a table-attached affordance, like Notion/Docmost; replaces the disconnected
+    // labeled " Column" bottom button that read as unrelated to the table).
+    const addColCell = document.createElement("th");
+    addColCell.className = "cm-lp-table-handle cm-lp-table-addcol";
+    addColCell.textContent = "+";
+    addColCell.title = "Add a column";
+    addColCell.setAttribute("data-testid", "table-add-col");
+    addColCell.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertColAt(grid, ncols)); });
+    htr.appendChild(addColCell);
     table.appendChild(htr);
 
     grid.forEach((row, r) => {
@@ -239,6 +249,18 @@ export const tableInlineEditor: InlineEditor = {
       });
       table.appendChild(trow);
     });
+    // Trailing "+" attached below the last row: append a row at the end (#3 — table-attached,
+    // mirrors the column "+"; replaces the disconnected " Row" bottom button).
+    const addRowTr = document.createElement("tr");
+    const addRowCell = document.createElement("th");
+    addRowCell.className = "cm-lp-table-handle cm-lp-table-addrow";
+    addRowCell.textContent = "+";
+    addRowCell.title = "Add a row";
+    addRowCell.setAttribute("data-testid", "table-add-row");
+    addRowCell.colSpan = ncols + 1; // span the rowhandle + every data column
+    addRowCell.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertRowAt(grid, grid.length)); });
+    addRowTr.appendChild(addRowCell);
+    table.appendChild(addRowTr);
     table.addEventListener("pointermove", (e) => {
       if (!dragging) return;
       const t = (e.target as HTMLElement)?.closest?.("[data-cellkey]") as HTMLElement | null;
@@ -268,7 +290,15 @@ export const tableInlineEditor: InlineEditor = {
       // clip the top / cover the cell), flip BELOW it (#2: never overlap the cell).
       const above = cellRect.top - wrapRect.top - bar.offsetHeight - 6;
       bar.style.top = (above >= 0 ? above : cellRect.bottom - wrapRect.top + 6) + "px";
-      bar.style.left = Math.max(0, cellRect.left - wrapRect.left) + "px";
+      // Horizontal: left-align to the cell, but NEVER let the bar clip off the right edge
+      // (a rightmost cell would push it off-screen). Clamp the left so the bar stays inside
+      // BOTH the editor container and the viewport — so it flips to hug the right edge for a
+      // right-side cell instead of overflowing (#2).
+      const barW = bar.offsetWidth;
+      const containerMax = container.clientWidth - barW - 2; // 2px for the container border
+      const viewportMax = window.innerWidth - 4 - barW - wrapRect.left; // bar.left is relative to wrap
+      const maxLeft = Math.max(0, Math.min(containerMax, viewportMax));
+      bar.style.left = Math.max(0, Math.min(cellRect.left - wrapRect.left, maxLeft)) + "px";
     };
     const coords = () => [...selected].map((s) => s.split(",").map(Number) as [number, number]);
     // Apply a style patch to the selected cells (a key set to undefined clears it). An
@@ -342,24 +372,7 @@ export const tableInlineEditor: InlineEditor = {
       host.exit();
     });
 
-    // Persistent, ALWAYS-VISIBLE action bar (#1). The earlier add affordance was a 10px
-    // "+" cell in the handle band — easy to miss and scrolled off-screen on wide tables.
-    // This labeled bar sits below the table, left-aligned (never clipped by table width),
-    // and is visible the whole time you're in edit mode — no selection required.
-    const actions = document.createElement("div");
-    actions.className = "cm-lp-table-actions";
-    const addColBtn = btn("＋ Column", "table-add-col");
-    addColBtn.title = "Add a column on the right";
-    addColBtn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertColAt(grid, ncols)); });
-    const addRowBtn = btn("＋ Row", "table-add-row");
-    addRowBtn.title = "Add a row at the bottom";
-    addRowBtn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertRowAt(grid, grid.length)); });
-    const hint = document.createElement("span");
-    hint.className = "cm-lp-table-actions-hint";
-    hint.textContent = "Click a row/column header (1/A) to insert beside or delete it";
-    actions.append(addColBtn, addRowBtn, hint);
-
-    container.append(bar, table, actions);
+    container.append(bar, table);
     return { destroy() { /* no resources beyond the DOM, which the host removes */ } };
   },
 };

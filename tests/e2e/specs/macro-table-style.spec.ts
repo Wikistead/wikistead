@@ -191,3 +191,62 @@ test("insert-after and delete a column via the contextual toolbar", async ({ bro
   await sleep(150);
   expect(await page.locator('[data-testid=table-edit] [data-testid^="table-col-select-"]').count()).toBe(2);
 });
+
+// #3: insert before/after the selected ROW, and delete a row, from the contextual toolbar.
+test("insert-below and delete a row via the contextual toolbar", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tablerowinsdel");
+  await enterEdit(page);
+  await pipeTableInEdit(page); // header row + 1 body row = 2 rows
+
+  await page.getByTestId("table-row-select-1").click(); // select row 2 → row ops show
+  await expect(page.getByTestId("table-row-insert-below")).toBeVisible();
+  await expect(page.getByTestId("table-row-delete")).toBeVisible(); // delete is discoverable (#3)
+  await page.getByTestId("table-row-insert-below").click();
+  await sleep(150);
+  expect(await page.locator('[data-testid=table-edit] [data-testid^="table-row-select-"]').count()).toBe(3);
+
+  await page.getByTestId("table-row-select-0").click();
+  await page.getByTestId("table-row-delete").click();
+  await sleep(150);
+  expect(await page.locator('[data-testid=table-edit] [data-testid^="table-row-select-"]').count()).toBe(2);
+});
+
+// #3: the add affordances are now ATTACHED to the table (a "+" in the header band / below
+// the last row), not a disconnected labeled bottom bar.
+test("the add-column/add-row + handles are attached to the table grid", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tableaddattached");
+  await enterEdit(page);
+  await pipeTableInEdit(page);
+  // both "+" handles live INSIDE the grid table (not a sibling actions bar)
+  expect(await page.locator("[data-testid=table-edit] table.cm-lp-table-grid [data-testid=table-add-col]").count()).toBe(1);
+  expect(await page.locator("[data-testid=table-edit] table.cm-lp-table-grid [data-testid=table-add-row]").count()).toBe(1);
+  // the old disconnected actions bar is gone
+  expect(await page.locator(".cm-lp-table-actions").count()).toBe(0);
+});
+
+// #2: the contextual toolbar must NOT clip off the right edge when a RIGHTMOST cell is
+// selected — its left is clamped so the whole bar stays inside the editor container.
+test("toolbar stays inside the container for a rightmost cell (no clip)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tablebarclip");
+  await enterEdit(page);
+  // a wide table so the rightmost cell sits near the right edge
+  await page.click("[data-pane=preview] .cm-content");
+  for (const l of ["| A | B | C | D | E |", "| - | - | - | - | - |", "| 1 | 2 | 3 | 4 | 5 |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
+  await sleep(250);
+  await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await expect(page.getByTestId("table-edit")).toBeVisible();
+
+  // select the rightmost body cell (column E)
+  await page.getByTestId("table-edit").locator("td").last().click();
+  await sleep(150);
+  const bar = page.locator("[data-testid=table-edit] .cm-lp-table-edit-bar");
+  await expect(bar).toBeVisible();
+  const barBox = (await bar.boundingBox())!;
+  const contBox = (await page.getByTestId("table-edit").boundingBox())!;
+  // the toolbar's right edge stays within the container's right edge (allow 2px border)
+  expect(barBox.x + barBox.width).toBeLessThanOrEqual(contBox.x + contBox.width + 2);
+  expect(barBox.x).toBeGreaterThanOrEqual(contBox.x - 2);
+});
