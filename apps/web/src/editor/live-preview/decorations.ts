@@ -1,5 +1,5 @@
 import { syntaxTree, foldedRanges, foldEffect, unfoldEffect } from "@codemirror/language";
-import { Facet, StateField, EditorState, EditorSelection, type Range, type Extension } from "@codemirror/state";
+import { Facet, StateField, EditorState, EditorSelection, Prec, type Range, type Extension } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -667,6 +667,26 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
 // it. Operates on the selection, so it covers BOTH arrow keys AND vim j/k uniformly —
 // the single principle for every block (and every future container macro), not a
 // per-block hack. Display-only: never changes the document (ADR-008; presence intact).
+// A block widget taller than one line can make CM's vertical motion (and vim j/k)
+// OVERSHOOT from a line below it — moving up one line lands the caret inside/before the
+// widget's atomic range and gets bumped past it, skipping the real adjacent line (the
+// "tall block breaks vertical geometry" class of bug). blockEntry clamps that, but only
+// for a genuine ONE-LINE key — a jump (gg/G/5G) or a wrapped-line step must be left
+// alone. We record whether the last key was a single-line vertical motion here.
+let lastVerticalStep = false;
+export const motionKeyTracker: Extension = Prec.highest(
+  EditorView.domEventHandlers({
+    keydown(e) {
+      lastVerticalStep = e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "j" || e.key === "k";
+      return false; // never consume — vim/CM still handle the key
+    },
+    mousedown() {
+      lastVerticalStep = false;
+      return false;
+    },
+  }),
+);
+
 export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   if (tr.docChanged || !tr.selection) return tr;
   const blocks = tr.startState.field(livePreview, false)?.blocks;
@@ -705,6 +725,21 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
     }
     if (dir === -1 && oldLine === last + 1 && newLine === first - 1 && newLine !== last) {
       return { selection: EditorSelection.cursor(doc.line(last).from), scrollIntoView: true };
+    }
+  }
+  // Overshoot clamp (#4): a single-line vertical KEY that skipped a tall block (a block
+  // lies strictly between oldLine and newLine) must move exactly one line — clamp to the
+  // adjacent line (revealing the block if that line IS the block). Gated on a real motion
+  // key so jumps and wrapped-line steps are untouched.
+  if (lastVerticalStep) {
+    const adj = oldLine + dir;
+    if (adj >= 1 && adj <= doc.lines && newLine !== adj) {
+      const lo = Math.min(oldLine, newLine), hi = Math.max(oldLine, newLine);
+      const skipped = blocks.some((b) => {
+        const f = doc.lineAt(b.from).number, l = doc.lineAt(b.to).number;
+        return f >= lo && l <= hi && !(oldLine >= f && oldLine <= l);
+      });
+      if (skipped) return { selection: EditorSelection.cursor(doc.line(adj).from), scrollIntoView: true };
     }
   }
   return tr;
