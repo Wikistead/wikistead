@@ -338,7 +338,13 @@ class MacroWidget extends WidgetType {
     super();
   }
   eq(other: MacroWidget) {
-    return other.macro === this.macro && other.body === this.body && other.foldable === this.foldable && other.name === this.name && other.selected === this.selected;
+    // Compare by `name` (the registry key), NOT the `macro` object: the directive renderer
+    // passes a FRESH { liveRender, richEditUI } literal every render, so a `macro` identity
+    // check is ALWAYS false → CM would recreate the :::table widget on every update (each
+    // j/k). That DOM churn re-measures the table async while vim computes motion sync from
+    // the previous (stale) geometry → persistent 1-line drift below the table. `name` is
+    // stable per macro, so the widget is reused and its geometry/ResizeObserver settle.
+    return other.name === this.name && other.body === this.body && other.foldable === this.foldable && other.selected === this.selected;
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");

@@ -168,3 +168,38 @@ test("motion below a TALL table is one doc line per key (no drift)", async ({ br
     prev = cur;
   }
 });
+
+// ADR-024 1b (Tier2 churn fix): MacroWidget.eq compares the registry `name`, not the
+// per-render `macro` object (the directive renderer passes a fresh { liveRender } literal
+// each time). Otherwise the :::table widget is recreated on EVERY selection change, which
+// re-measures the table async while vim computes motion sync from stale geometry → drift
+// below the table. Guard: the rendered :::table DOM node is REUSED across selection changes.
+test("a :::table widget is reused (not recreated) across selection changes", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "atom-table-reuse");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("| A | B |\n| - | - |\n| 1 | 2 |\n\nL0\nL1\nL2\n");
+  await sleep(300);
+  // promote the pipe table to a :::table (a cell colour → Tier2 HTML)
+  await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await sleep(250);
+  await page.getByTestId("table-edit").locator("td").first().click();
+  await sleep(150);
+  await page.getByTestId("table-bg-green").click();
+  await sleep(250);
+  await page.keyboard.press("Escape");
+  await sleep(300);
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-table]")).toBeVisible();
+  // tag the node, then change the selection repeatedly below the table
+  await page.evaluate(() => { (document.querySelector("[data-pane=preview] [data-testid=macro-table]") as any).__mark = "KEEP"; });
+  await page.getByTestId("vim-toggle").click();
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  await page.getByText("L0", { exact: true }).click();
+  await sleep(120);
+  for (let i = 0; i < 4; i++) { await page.keyboard.press("j"); await sleep(60); await page.keyboard.press("k"); await sleep(60); }
+  // SAME node still present (a recreated widget would lose the JS property)
+  const reused = await page.evaluate(() => (document.querySelector("[data-pane=preview] [data-testid=macro-table]") as any)?.__mark === "KEEP");
+  expect(reused).toBe(true);
+});
