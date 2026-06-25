@@ -24,3 +24,15 @@ test("floating controls + title clamp (view) / full (edit)", async ({ browser })
   await expect(page.getByTestId("view-toggle")).toBeVisible();
   expect(await lineClamp(page)).toBe("none"); // full title while editing it
 });
+
+test("narrow viewport collapses the groups into one bottom-right ⋯", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 600, height: 800 } })).newPage();
+  await openScratch(page, "narrow");
+  // the three floating groups collapse to a single ⋯; the spread edit/vim buttons are gone
+  await expect(page.getByTestId("page-controls-mobile")).toBeVisible();
+  await expect(page.getByTestId("edit-toggle")).toHaveCount(0);
+  await expect(page.getByTestId("vim-toggle")).toHaveCount(0);
+  // opening it reveals the labelled actions
+  await page.getByTestId("page-controls-mobile").click();
+  await expect(page.getByTestId("m-edit-toggle")).toBeVisible();
+});
