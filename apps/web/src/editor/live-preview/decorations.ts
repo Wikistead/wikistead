@@ -873,7 +873,16 @@ export const livePreviewTheme = EditorView.baseTheme({
     fontSize: "0.8em",
     padding: "2px 8px",
   },
-  ".cm-lp-table-edit th, .cm-lp-table-edit td": { cursor: "pointer" },
+  ".cm-lp-table-edit th, .cm-lp-table-edit td": { cursor: "pointer", position: "relative" },
+  ".cm-lp-col-resize": {
+    position: "absolute",
+    top: "0",
+    right: "-3px",
+    width: "7px",
+    height: "100%",
+    cursor: "col-resize",
+    zIndex: "2",
+  },
   ".cm-lp-cell-sel": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "-2px", background: "rgba(78,161,255,0.15)" },
   ".cm-lp-table-swatch": {
     width: "18px",
