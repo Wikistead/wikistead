@@ -30,3 +30,20 @@ test("align: select a cell, Align Center → promotes to :::table with text-alig
   await expect(macroTable).toBeVisible(); // promoted to :::table
   expect(await macroTable.locator('td[style*="center"]').count()).toBe(1);
 });
+
+test("color: select a cell, pick a background preset → promotes with background", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tablecolor");
+  await enterEdit(page);
+  await pipeTableInEdit(page);
+
+  await page.getByTestId("table-edit").locator("td").first().click();
+  await page.getByTestId("table-bg-green").click();
+  await sleep(200);
+
+  await page.getByText("below", { exact: true }).click();
+  await sleep(200);
+  const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
+  await expect(macroTable).toBeVisible();
+  expect(await macroTable.locator('td[style*="background"]').count()).toBe(1);
+});

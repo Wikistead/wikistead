@@ -7,6 +7,17 @@ import { setMacroRenderActive } from "./macro-edit";
 // via the grid model and serialize() → pipes (Tier 1) or :::table HTML (Tier 2): that is
 // the auto promote/demote. Display-only until the user acts; the rewrite is one
 // offset-invariant range edit on the shared Y.Text.
+// Controlled background palette: undefined = clear; var(--accent) stays on theme; the
+// tints are safe hex (pass the style allowlist). Not a free color picker (ADR-022 #2).
+const BG_PRESETS: { id: string; value: string | undefined; title: string }[] = [
+  { id: "clear", value: undefined, title: "No fill" },
+  { id: "accent", value: "var(--accent)", title: "Accent" },
+  { id: "red", value: "#fde8e8", title: "Red" },
+  { id: "yellow", value: "#fef3c7", title: "Yellow" },
+  { id: "green", value: "#e7f6e7", title: "Green" },
+  { id: "blue", value: "#e6f0fb", title: "Blue" },
+];
+
 function btn(label: string, testid: string): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
@@ -37,7 +48,21 @@ export class TableEditWidget extends WidgetType {
     const alignR = btn("⌦", "table-align-right");
     alignL.title = "Align left"; alignC.title = "Align center"; alignR.title = "Align right";
     const doneBtn = btn("Done", "table-done");
-    bar.append(mergeBtn, unmergeBtn, alignL, alignC, alignR, doneBtn);
+    bar.append(mergeBtn, unmergeBtn, alignL, alignC, alignR);
+    // Background-color presets (ADR-022 review #2): a controlled palette (theme accent +
+    // soft tints), NOT a free picker — keeps tables on-theme, accessible, round-trip-safe.
+    for (const p of BG_PRESETS) {
+      const sw = document.createElement("button");
+      sw.type = "button";
+      sw.className = "cm-lp-table-swatch";
+      sw.title = p.title;
+      sw.setAttribute("data-testid", "table-bg-" + p.id);
+      sw.style.background = p.value ?? "transparent";
+      if (!p.value) sw.textContent = "⌀"; // "no fill"
+      sw.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ bg: p.value }); });
+      bar.appendChild(sw);
+    }
+    bar.appendChild(doneBtn);
 
     const selected = new Set<string>(); // "r,c" of selected origin cells
     const table = document.createElement("table");

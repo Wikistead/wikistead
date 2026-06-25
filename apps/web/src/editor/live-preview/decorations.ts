@@ -875,4 +875,15 @@ export const livePreviewTheme = EditorView.baseTheme({
   },
   ".cm-lp-table-edit th, .cm-lp-table-edit td": { cursor: "pointer" },
   ".cm-lp-cell-sel": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "-2px", background: "rgba(78,161,255,0.15)" },
+  ".cm-lp-table-swatch": {
+    width: "18px",
+    height: "18px",
+    border: "1px solid var(--border, #888)",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontSize: "10px",
+    lineHeight: "16px",
+    padding: "0",
+    color: "var(--fg-dim, #888)",
+  },
 });
