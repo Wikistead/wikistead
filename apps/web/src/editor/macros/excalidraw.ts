@@ -10,7 +10,11 @@ import type { FenceMacro, MacroContext, MacroModalController } from "./registry"
 type Scene = { elements: any[]; appState: any; files: any };
 
 let modP: Promise<typeof import("@excalidraw/excalidraw")> | null = null;
-const loadExcalidraw = () => (modP ??= import("@excalidraw/excalidraw"));
+// Load the component AND its stylesheet (0.17+ requires it — without it the UI renders
+// unstyled, e.g. a giant padlock/toolbar icon). Both are lazy so they stay out of the
+// main bundle. The CSS import is a side effect (Vite injects it).
+const loadExcalidraw = () =>
+  (modP ??= Promise.all([import("@excalidraw/excalidraw"), import("@excalidraw/excalidraw/index.css")]).then(([m]) => m));
 
 let reactP: Promise<{ React: typeof import("react"); createRoot: (typeof import("react-dom/client"))["createRoot"] }> | null = null;
 const loadReact = () =>
