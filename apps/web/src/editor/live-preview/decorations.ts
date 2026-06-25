@@ -6,8 +6,9 @@ import {
   EditorView,
   WidgetType,
 } from "@codemirror/view";
-import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme } from "../macros/registry";
+import { findFenceMacro, findDirectiveMacro, type FenceMacro } from "../macros/registry";
 import { fenceLang, fenceBody, macroFenceAt } from "../macros/fence";
+import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
 import { openMacroModal } from "./macro-modal";
 
@@ -249,15 +250,6 @@ class TableWidget extends WidgetType {
   ignoreEvent() {
     return false; // let clicks through so the cursor can enter (→ reveal raw)
   }
-}
-
-// Resolve the active theme for a macro's render. Read from <html data-theme> (set by
-// ThemeProvider); "system" (or unset) falls back to the OS preference.
-function currentMacroTheme(): MacroTheme {
-  const t = document.documentElement.dataset.theme;
-  if (t === "dark") return "dark";
-  if (t === "light") return "light";
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 // True if a folded range (CodeMirror's native folding) covers [from, to). When folded

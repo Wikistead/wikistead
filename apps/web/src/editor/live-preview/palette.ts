@@ -4,6 +4,7 @@ import { getCM } from "@replit/codemirror-vim";
 import i18n from "../../i18n";
 import { INLINE_FORMATS, insertImage, insertLink, type InlineFormat, type ImageUploader } from "./commands";
 import { orderByRecency, recordUse } from "./palette-recency";
+import { contextHintTooltip } from "./hint";
 
 // Slash command palette (Step I / M0-1 — see ADR-017). Triggered by `/` at a line
 // start OR after whitespace while editing. Lists block insert/toggle commands (layer
@@ -284,6 +285,12 @@ const openDecorate = StateEffect.define<{ from: number }>();
 const moveDecorate = StateEffect.define<number>();
 const closeDecorate = StateEffect.define<null>();
 
+// Is the slash palette or the decorate palette currently open? Used to suppress the
+// macro reveal↔render hint while a palette is showing (no overlapping tooltips).
+export function isPaletteOpen(state: EditorState): boolean {
+  return state.field(paletteField, false) != null || state.field(decorateField, false) != null;
+}
+
 const decorateField = StateField.define<{ from: number; index: number } | null>({
   create: () => null,
   update(value, tr) {
@@ -451,26 +458,11 @@ const vimVisualSync = EditorView.updateListener.of((u) => {
 // view.dom, #8), no text/decoration, so document offsets / presence are untouched.
 // Hidden in normal/insert/non-vim and while the palette is already open (and the full
 // toolbar bubble is suppressed in vim visual, so the hint replaces it — no overlap).
-function vimHintTooltip(from: number): Tooltip {
-  return {
-    pos: from,
-    above: true,
-    strictSide: false,
-    arrow: false,
-    create: () => {
-      const dom = document.createElement("div");
-      dom.className = "lp-vim-hint";
-      dom.setAttribute("data-testid", "vim-decorate-hint");
-      dom.textContent = i18n.t("palette.vimHint");
-      return { dom };
-    },
-  };
-}
 const vimHintField = StateField.define<readonly Tooltip[]>({
   create: () => [],
   update(_value, tr) {
     const show = tr.state.field(vimVisualField) && tr.state.field(decorateField, false) == null;
-    return show ? [vimHintTooltip(tr.state.selection.main.from)] : [];
+    return show ? [contextHintTooltip(tr.state.selection.main.from, i18n.t("palette.vimHint"), "vim-decorate-hint")] : [];
   },
   provide: (f) => showTooltip.computeN([f], (state) => state.field(f)),
 });
