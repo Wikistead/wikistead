@@ -785,38 +785,10 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   return tr;
 });
 
-// ADR-024 dd-on-atom (Q3): a macro is one unit, so a linewise delete that starts at a macro
-// atom's first line (vim `dd` while the caret is ON the atom — atom motion lands it there)
-// is EXPANDED to remove the WHOLE macro source verbatim (fence/::: open→close), instead of
-// vim's default of deleting just the first line (which would leave a broken half-macro).
-// Surrounding blank lines are left untouched (delete, not reformat). Only a SINGLE pure
-// deletion that begins exactly at a block's start and removes at least its first line is
-// touched — a big jump-delete (dG) or an edit elsewhere is left alone. This keeps vim's
-// register/undo intact for every normal line; it only rounds a macro delete up to the atom.
-export const atomDelete: Extension = EditorState.transactionFilter.of((tr) => {
-  if (!tr.docChanged) return tr;
-  let del: { fromA: number; toA: number } | null = null;
-  let other = false;
-  tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-    if (inserted.length === 0 && !del) del = { fromA, toA };
-    else other = true;
-  });
-  if (!del || other) return tr;
-  const d = del as { fromA: number; toA: number };
-  const blocks = tr.startState.field(livePreview, false)?.blocks;
-  if (!blocks?.length) return tr;
-  const doc = tr.startState.doc;
-  for (const b of blocks) {
-    const firstLine = doc.lineAt(b.from);
-    // delete begins at the atom's first line AND removes at least that whole line, but does
-    // not extend beyond the atom (so dG / multi-block deletes pass through untouched).
-    if (d.fromA === b.from && d.toA >= firstLine.to && d.toA <= b.to + 1) {
-      const end = Math.min(b.to + 1, doc.length); // include the trailing newline
-      return { changes: { from: b.from, to: end }, selection: EditorSelection.cursor(Math.min(b.from, end)) };
-    }
-  }
-  return tr;
-});
+// ADR-024 dd/yy on an atom (Q3, Mode A) live in live-preview/vim-atom.ts — they remap the
+// vim dd/yy *actions* to target the whole macro (register + delete), keeping the register
+// correct so `p` pastes the whole macro. (Earlier a transactionFilter expanded the delete
+// but couldn't set the register or handle yy; the vim-action approach does both.)
 
 // ADR-024: "enter" a macro atom at a position — the explicit way to start editing a macro
 // (Ctrl+Enter in vim, click with the mouse). A modal macro (Excalidraw) opens its modal;
