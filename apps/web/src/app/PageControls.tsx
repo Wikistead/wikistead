@@ -1,17 +1,18 @@
-import { useEffect, useState } from "react";
-import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, Check, Loader2, MoreHorizontal } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Button, IconButton } from "../ui/Button";
+import { IconButton } from "../ui/Button";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel } from "../components/ui/dropdown-menu";
 import { useDirty, type DirtySignal } from "../editor/dirtySignal";
 
-// The old full-width top bar is gone. Its controls float, frameless, in role-based
-// groups placed at natural spots (ADR — Group C chrome): page STATUS under the title,
-// ACTIONS bottom-right, the VIM toggle bottom-left. On a narrow screen the three groups
-// collapse into a single bottom-right "⋯". Chrome only — every handler/behaviour
-// (publish flush, post-publish view, dirty guard, share/comments) is unchanged; this
-// only relocates the controls. Testids are preserved so the existing e2e still applies.
+// The old full-width top bar is gone. Its controls float, FRAMELESS, as individual round
+// icon buttons (no group panel/board — that ate body width) at natural spots: page STATUS
+// under the title, ACTIONS bottom-right, the VIM toggle bottom-left. Narrow screens
+// (<768px) collapse the three into one bottom-right "⋯". Chrome only — every handler
+// (publish flush, post-publish view, dirty guard, share/comments) is unchanged; this only
+// relocates + restyles. Testids preserved so the existing e2e still applies. Desktop
+// labels are hover tooltips (title=); the mobile ⋯ menu carries text labels.
 export interface PageControlsProps {
   canEdit: boolean;
   editing: boolean;
@@ -46,8 +47,23 @@ export function useMediaQuery(query: string): boolean {
   return matches;
 }
 
-// Frameless floating cluster: translucent, soft shadow, no border — .
-const cluster = "pointer-events-auto flex items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,var(--panel)_85%,transparent)] px-1.5 py-1 shadow-md backdrop-blur";
+// A single round, frameless, floating icon button (translucent surface + soft shadow so
+// it reads over body text — but no group panel). Label is a hover tooltip (title/aria).
+const ROUND = "pointer-events-auto inline-flex h-9 w-9 items-center justify-center rounded-full text-foreground shadow-md backdrop-blur transition-colors duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] disabled:opacity-50 disabled:cursor-default";
+const ROUND_BG = "bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] hover:bg-panel-2";
+const ROUND_PRIMARY = "bg-primary text-primary-foreground hover:bg-[color-mix(in_srgb,var(--accent)_88%,black)]";
+
+function RoundBtn({ label, icon, onClick, testId, primary, disabled, badge }: {
+  label: string; icon: ReactNode; onClick?: () => void; testId: string; primary?: boolean; disabled?: boolean; badge?: ReactNode;
+}) {
+  return (
+    <button type="button" title={label} aria-label={label} data-testid={testId} disabled={disabled} onClick={onClick}
+      className={`relative ${ROUND} ${primary ? ROUND_PRIMARY : ROUND_BG}`}>
+      {icon}
+      {badge}
+    </button>
+  );
+}
 
 function overflowItems(p: PageControlsProps, t: (k: string) => string): OverflowItem[] {
   const items: OverflowItem[] = [];
@@ -64,70 +80,79 @@ function runOverflow(p: PageControlsProps, v: string) {
   else if (v === "permissions") p.onPermissions?.();
 }
 
-// ── STATUS: under the title, right-aligned (draft / unpublished / comments) ──────────
+// ── STATUS: under the title, right-aligned (draft / unpublished text + comments btn) ──
 export function PageStatus(p: PageControlsProps) {
   const { t } = useTranslation();
   if (!p.publishState && !p.onToggleComments) return null;
   return (
     <div className="pointer-events-auto flex items-center gap-2" data-testid="page-status">
-      {p.publishState === "draft" && <span className="rounded-full px-2 py-px text-xs text-fg-dim" data-testid="draft-badge">{t("page.draft")}</span>}
-      {p.publishState === "unpublished" && <span className="rounded-full px-2 py-px text-xs text-[var(--accent)]" data-testid="unpublished-badge">{t("page.unpublishedChanges")}</span>}
+      {p.publishState === "draft" && <span className="text-xs text-fg-dim" data-testid="draft-badge">{t("page.draft")}</span>}
+      {p.publishState === "unpublished" && <span className="text-xs text-[var(--accent)]" data-testid="unpublished-badge">{t("page.unpublishedChanges")}</span>}
       {p.onToggleComments && (
-        <IconButton aria-label={t("page.comments")} data-testid="comments-toggle" aria-pressed={p.commentsOpen} onClick={p.onToggleComments}>
-          <MessageSquare size={15} />{p.openComments ? <span className="ml-0.5 text-[11px] text-fg-dim">{p.openComments}</span> : null}
-        </IconButton>
+        <RoundBtn
+          label={t("page.comments")}
+          testId="comments-toggle"
+          onClick={p.onToggleComments}
+          icon={<MessageSquare size={16} />}
+          badge={p.openComments ? <span className="absolute -top-0.5 -right-0.5 min-w-[15px] rounded-full bg-[var(--accent)] px-1 text-[10px] leading-[15px] text-primary-foreground">{p.openComments}</span> : null}
+        />
       )}
     </div>
   );
 }
 
-// ── VIM: bottom-left of the editor area ─────────────────────────────────────────────
+// ── VIM: bottom-left — a toggle SWITCH (#4). The official Vim logo is trademarked / not
+// freely licensed, so we use a terminal glyph + "Vim" label + an on/off switch track
+// (state reads at a glance). ──────────────────────────────────────────────────────────
 export function PageVim(p: PageControlsProps) {
   const { t } = useTranslation();
   if (!p.editing || !p.onToggleVim) return null;
   return (
     <div className="pointer-events-none absolute bottom-4 left-4 z-10">
-      <div className={cluster}>
-        <Button size="sm" variant={p.vim ? "primary" : "ghost"} data-testid="vim-toggle" role="switch" aria-checked={p.vim} aria-label={t("page.vimMode")} title={t("page.vimMode")} onClick={p.onToggleVim}>
-          <SquareTerminal size={14} /> Vim {p.vim ? t("common.on") : t("common.off")}
-        </Button>
-      </div>
+      <button type="button" role="switch" aria-checked={p.vim} data-testid="vim-toggle"
+        title={t("page.vimMode")} aria-label={t("page.vimMode")} onClick={p.onToggleVim}
+        className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] px-3 py-1.5 text-xs font-medium shadow-md backdrop-blur transition-colors hover:bg-panel-2">
+        <SquareTerminal size={14} className={p.vim ? "text-[var(--accent)]" : "text-fg-dim"} />
+        <span>Vim</span>
+        <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${p.vim ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}>
+          <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${p.vim ? "left-[14px]" : "left-0.5"}`} />
+        </span>
+      </button>
     </div>
   );
 }
 
-// ── ACTIONS: bottom-right of the editor area (edit/done/publish/share + ⋯) ───────────
+// ── ACTIONS: bottom-right — round icon buttons (edit/done/publish/share + ⋯) ──────────
 export function PageActions(p: PageControlsProps) {
   const { t } = useTranslation();
   const dirty = useDirty(p.dirtySignal);
   const canPublish = p.canPublish || dirty;
   const overflow = overflowItems(p, t);
   return (
-    <div className="pointer-events-none absolute right-4 bottom-4 z-10">
-      <div className={cluster}>
-        {p.editing ? (
-          <>
-            {p.onPublish && (
-              <Button size="sm" variant="primary" data-testid="publish-page" disabled={p.publishing || !canPublish} onClick={p.onPublish}>
-                {p.publishing ? <Loader2 size={14} className="animate-spin" data-testid="publish-spinner" /> : null}
-                {t("page.publish")}
-              </Button>
-            )}
-            <Button size="sm" data-testid="view-toggle" onClick={p.onDone}><Check size={14} /> {t("page.done")}</Button>
-          </>
-        ) : (
-          <>
-            {p.canEdit && <Button size="sm" data-testid="edit-toggle" onClick={p.onEdit}><Pencil size={14} /> {t("page.edit")}</Button>}
-            {p.onShare && <Button size="sm" variant="ghost" data-testid="share-open" onClick={p.onShare}><Share2 size={14} /> {t("page.share")}</Button>}
-          </>
-        )}
-        {overflow.length > 0 && <OverflowMenu items={overflow} onSelect={(v) => runOverflow(p, v)} label={t("page.moreActions")} />}
-      </div>
+    <div className="pointer-events-none absolute right-4 bottom-4 z-10 flex items-center gap-2">
+      {p.editing ? (
+        <>
+          {p.onPublish && (
+            <RoundBtn label={t("page.publish")} testId="publish-page" primary disabled={p.publishing || !canPublish} onClick={p.onPublish}
+              icon={p.publishing ? <span data-testid="publish-spinner"><UploadCloud size={16} className="animate-pulse" /></span> : <UploadCloud size={16} />} />
+          )}
+          {/* Done = close the edit surface → X (not a check) reads as "close". */}
+          <RoundBtn label={t("page.done")} testId="view-toggle" onClick={p.onDone} icon={<X size={16} />} />
+        </>
+      ) : (
+        <>
+          {p.canEdit && <RoundBtn label={t("page.edit")} testId="edit-toggle" onClick={p.onEdit} icon={<Pencil size={16} />} />}
+          {p.onShare && <RoundBtn label={t("page.share")} testId="share-open" onClick={p.onShare} icon={<Share2 size={16} />} />}
+        </>
+      )}
+      {overflow.length > 0 && (
+        <OverflowMenu items={overflow} onSelect={(v) => runOverflow(p, v)} label={t("page.moreActions")} triggerClassName={`${ROUND} ${ROUND_BG}`} />
+      )}
     </div>
   );
 }
 
-// ── MOBILE: one "⋯" bottom-right that opens everything in a menu ─────────────────────
+// ── MOBILE: one "⋯" bottom-right opening everything (text labels in the menu) ─────────
 export function PageControlsMobile(p: PageControlsProps) {
   const { t } = useTranslation();
   const dirty = useDirty(p.dirtySignal);
@@ -137,7 +162,7 @@ export function PageControlsMobile(p: PageControlsProps) {
     <div className="absolute right-4 bottom-4 z-10">
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
-          <IconButton aria-label={t("page.moreActions")} title={t("page.moreActions")} data-testid="page-controls-mobile" className={cluster}>
+          <IconButton aria-label={t("page.moreActions")} title={t("page.moreActions")} data-testid="page-controls-mobile" className={`${ROUND} ${ROUND_BG}`}>
             <MoreHorizontal size={18} />
           </IconButton>
         </DropdownMenuTrigger>
@@ -149,8 +174,8 @@ export function PageControlsMobile(p: PageControlsProps) {
           )}
           {p.editing ? (
             <>
-              {p.onPublish && <DropdownMenuItem disabled={p.publishing || !canPublish} onSelect={() => p.onPublish?.()} data-testid="m-publish-page">{t("page.publish")}</DropdownMenuItem>}
-              <DropdownMenuItem onSelect={p.onDone} data-testid="m-view-toggle"><Check size={14} /> {t("page.done")}</DropdownMenuItem>
+              {p.onPublish && <DropdownMenuItem disabled={p.publishing || !canPublish} onSelect={() => p.onPublish?.()} data-testid="m-publish-page"><UploadCloud size={14} /> {t("page.publish")}</DropdownMenuItem>}
+              <DropdownMenuItem onSelect={p.onDone} data-testid="m-view-toggle"><X size={14} /> {t("page.done")}</DropdownMenuItem>
               {p.onToggleVim && <DropdownMenuItem onSelect={p.onToggleVim} data-testid="m-vim-toggle"><SquareTerminal size={14} /> Vim {p.vim ? t("common.on") : t("common.off")}</DropdownMenuItem>}
             </>
           ) : (

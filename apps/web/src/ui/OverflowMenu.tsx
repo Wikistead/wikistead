@@ -18,16 +18,18 @@ export function OverflowMenu({
   onSelect,
   label = "More actions",
   testId = "page-overflow",
+  triggerClassName,
 }: {
   items: OverflowItem[];
   onSelect: (value: string) => void;
   label?: string;
   testId?: string;
+  triggerClassName?: string;
 }) {
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
-        <IconButton aria-label={label} title={label} data-testid={`${testId}-trigger`}>
+        <IconButton aria-label={label} title={label} data-testid={`${testId}-trigger`} className={triggerClassName}>
           <MoreHorizontal size={16} />
         </IconButton>
       </DropdownMenuTrigger>

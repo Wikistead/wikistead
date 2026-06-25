@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 // Large page title at the top of the reading column (Group C-B, Notion/Outline style),
@@ -6,17 +6,26 @@ import { useTranslation } from "react-i18next";
 // users; a read-only heading otherwise. The server re-checks page#edit on the PATCH.
 // Testids (page-title / page-title-input) are unchanged so the rename e2e still applies.
 const wrap = "mx-auto box-border w-full max-w-[740px] px-6 pt-6";
-const title = "m-0 block w-full text-[30px] font-bold leading-tight tracking-[-0.02em] text-foreground";
+// break-words so a long unbroken token (or CJK without spaces) wraps inside the column
+// instead of overflowing to the right.
+const title = "m-0 block w-full text-[30px] font-bold leading-tight tracking-[-0.02em] text-foreground break-words [overflow-wrap:anywhere]";
 // view mode: wrap to 2 lines then ellipsise (no infinite horizontal overflow / marquee).
 const clamp = "[display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden";
 
 // `pageEditing` = the PAGE edit mode (not the rename input): view mode clamps a long
-// title to 2 lines; edit mode shows it in full (you must see all of it to edit it).
+// title to 2 lines; edit mode shows it in full, WRAPPING within the column (you must see
+// every line to edit it — no ellipsis, no right overflow). The rename field is a textarea
+// (not an input) so editing a long title wraps too.
 export function PageTitle({ title: value, onRename, editing: pageEditing = false }: { title: string; onRename?: (title: string) => void; editing?: boolean }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const taRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+
+  // Auto-grow the rename textarea to fit its wrapped content (no inner scroll).
+  const grow = (el: HTMLTextAreaElement | null) => { if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; } };
+  useEffect(() => { if (editing) grow(taRef.current); }, [editing, draft]);
 
   const commit = () => {
     const next = draft.trim();
@@ -27,13 +36,15 @@ export function PageTitle({ title: value, onRename, editing: pageEditing = false
   return (
     <div className={wrap}>
       {editing ? (
-        <input
-          className={`${title} rounded-sm border border-border bg-background px-1.5 outline-none focus:border-[var(--accent)]`}
+        <textarea
+          ref={taRef}
+          className={`${title} resize-none overflow-hidden rounded-sm border border-border bg-background px-1.5 outline-none focus:border-[var(--accent)]`}
           data-testid="page-title-input"
+          rows={1}
           autoFocus
           value={draft}
           aria-label={t("dialogs.renamePageTitle")}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => setDraft(e.target.value.replace(/\n/g, ""))} // a title has no newlines; Enter commits
           onKeyDown={(e) => {
             if (e.key === "Enter") { e.preventDefault(); commit(); }
             else if (e.key === "Escape") { setDraft(value); setEditing(false); }
