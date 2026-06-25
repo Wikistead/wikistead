@@ -14,19 +14,11 @@ import { openMacroModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive } from "./macro-edit";
 import { TableEditWidget } from "./table-edit";
 
-// Whether the vim keymap is active. Set from the vim Compartment (Editor.tsx) so the
-// state-only decoration builder can be mode-aware (ADR-022 Part 11): non-vim renders
-// rich-editable macros always (never reveal-on-cursor); vim keeps reveal-on-cursor.
+// Whether the vim keymap is active. Set from the vim Compartment (Editor.tsx). Macros no
+// longer reveal-on-cursor (ADR-024: atoms are entered explicitly), so this no longer gates
+// macro reveal; kept for vim-aware interaction (e.g. enter-key vs click) and so the
+// decoration field can still rebuild on a mode change if needed.
 export const vimEnabled = Facet.define<boolean, boolean>({ combine: (v) => (v.length ? v[v.length - 1]! : false) });
-
-// Reveal-on-cursor for MACROS is vim-only — non-vim renders EVERY macro, always (the
-// user's invariant: " vim render"). This applies to non-rich macros too
-// (mermaid/callout): in non-vim they render and are read-only there; edit their source in
-// vim. (An earlier version kept `!richEditable || vim`, which let mermaid reveal in non-vim
-// — so vim→non-vim left a mermaid under the caret as raw source. That was the #5 hole.)
-function revealAllowed(state: EditorState): boolean {
-  return state.facet(vimEnabled);
-}
 
 // Mode-based rich edit (ADR-022 Part 11): a CLICK on a table enters edit mode in BOTH
 // modes (the mouse is independent of vim; vim still reveals on the keyboard). Returns true
@@ -49,7 +41,7 @@ if (import.meta.hot) import.meta.hot.accept(() => window.location.reload());
 // Obsidian-style live preview: hide/style markdown syntax via CodeMirror
 // decorations.
 //
-// INVARIANT (ADR-008 — the one non-obvious interaction in this surface)
+// INVARIANT (ADR-008 — the one non-obvious interaction in this surface):
 // decorations are DISPLAY-ONLY and OFFSET-INVARIANT. `Decoration.replace` hides
 // glyphs but never mutates the document; the CM doc stays 1:1 with the canonical
 // Y.Text (kept in sync by yCollab). Remote collaborators' carets are drawn at
@@ -87,14 +79,14 @@ const bullet = Decoration.replace({ widget: new BulletWidget() });
 
 // GFM task checkbox (ADR-019). The `[ ]`/`[x]` TaskMarker renders as a real checkbox
 // (reveal-on-cursor still shows the raw markers for editing). How a click is handled
-// depends on the surface, supplied via this facet
-// - { mode: "edit" } editable draft surface → flip the char in the doc
-// directly (a normal offset-invariant Y.Text edit).
-// - { mode: "view", onToggle } read-only published surface → the host persists it
-// (flip the live draft over its collab connection +
-// the no-revision endpoint). See Editor.tsx.
-// - null no edit permission → rendered DISABLED (display only;
-// the server is the bastion regardless — D3).
+// depends on the surface, supplied via this facet:
+//   - { mode: "edit" }            editable draft surface → flip the char in the doc
+//                                 directly (a normal offset-invariant Y.Text edit).
+//   - { mode: "view", onToggle }  read-only published surface → the host persists it
+//                                 (flip the live draft over its collab connection +
+//                                 the no-revision endpoint). See Editor.tsx.
+//   - null                        no edit permission → rendered DISABLED (display only;
+//                                 the server is the bastion regardless — D3).
 export type CheckboxControl =
   | { mode: "edit" }
   | { mode: "view"; onToggle: (index: number, from: number, checked: boolean) => void }
@@ -164,7 +156,7 @@ class CheckboxWidget extends WidgetType {
 const checkbox = (checked: boolean, from: number) =>
   Decoration.replace({ widget: new CheckboxWidget(checked, from) });
 
-// Image attachments are referenced in the canonical Y.Text by a STABLE id
+// Image attachments are referenced in the canonical Y.Text by a STABLE id —
 // ![alt](wks-attachment:<id>) — never by a presigned URL (those are short-lived
 // bearer tokens; persisting one in the CRDT/its revision history would both break
 // on expiry and leak a credential). The widget resolves the id to a fresh
@@ -241,7 +233,7 @@ function linkHref(src: string): string | null {
   return u;
 }
 
-// Renders a GFM table block as an HTML <table>. Cells are set via textContent
+// Renders a GFM table block as an HTML <table>. Cells are set via textContent —
 // NEVER innerHTML — so user-authored content cannot inject markup (no XSS). This
 // is display-only: it replaces the markdown range visually; the canonical Y.Text
 // is unchanged, and putting the cursor in the table reveals the raw markdown.
@@ -336,18 +328,12 @@ class MacroWidget extends WidgetType {
       wrap.appendChild(this.macro.liveRender(this.body, { theme: currentMacroTheme() }));
     }
     if (!view.state.readOnly) {
-      // Click the rendered macro → put the caret at the block start, which reveals the
-      // raw source for editing. (CM maps a click on an opaque block widget to the
-      // position AFTER it, which wouldn't reveal; we place it explicitly.) The fold
-      // button stops propagation so its clicks don't reveal. Offset-invariant.
-      // Mode-based click launch (ADR-022 Part 11): clicking a rich-editable macro opens
-      // its editor in BOTH modes — inline (table) enters cell-edit, modal (Excalidraw)
-      // opens the modal. A macro without a richEditUI places the caret (reveal raw source).
+      // ADR-024: a click ENTERS the macro atom (the mouse path, same as Ctrl+Enter) —
+      // modal (Excalidraw) / inline cell-edit (table) / source reveal (mermaid). The fold
+      // button stops propagation so its clicks don't enter. Offset-invariant.
       wrap.addEventListener("mousedown", (e) => {
         e.preventDefault();
-        const present = this.macro.richEditUI?.present;
-        if (present === "modal") { openMacroModal(view, this.macro as FenceMacro, () => view.posAtDOM(wrap), currentMacroTheme()); return; }
-        if (present === "inline" && tryEnterTableEdit(view, view.posAtDOM(wrap))) return;
+        if (enterMacroAt(view, view.posAtDOM(wrap))) return;
         view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)) });
         view.focus();
       });
@@ -478,8 +464,13 @@ const RENDERERS: BlockRenderer[] = [
         // source (editable). Otherwise → the rendered macro (a collapsed block widget,
         // entered via blockEntry like table/image).
         if (isFolded(ctx.state, from, to)) return;
-        // Reveal source on the caret only in vim; non-vim always renders the macro (#5).
-        if (revealAllowed(ctx.state) && rangeRevealed(ctx.state, from, to)) return;
+        // ADR-024: a macro is an ATOM — it never auto-reveals on the cursor (that caused
+        // the height-change / cursor-through / overshoot class of bugs). A source macro
+        // (mermaid, no richEditUI) reveals its raw source ONLY when ENTERED
+        // (Ctrl+Enter / click → macroRenderActiveField). A modal macro (Excalidraw) never
+        // reveals — entering opens its modal. Otherwise the atom renders.
+        const active = ctx.state.field(macroRenderActiveField, false);
+        if (active && !macro.richEditUI && active.from <= from && active.to >= to) return; // entered → source
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), true, lang!), block: true }), from, to);
         return;
       }
@@ -510,12 +501,12 @@ const RENDERERS: BlockRenderer[] = [
       const first = doc.lineAt(node.from);
       const lastLine = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1));
       if (macro.liveRender) {
-        // BLOCK directive (table): render the body as a widget, reveal raw on cursor
+        // BLOCK directive (table): render the body as a widget, reveal raw on cursor —
         // like a fence macro (not foldable). Body = lines between the ::: fences.
         const from = first.from;
         const to = lastLine.to;
-        if (tryTableEdit(ctx, from, to)) return; // render-active → cell-merge edit mode
-        if (revealAllowed(ctx.state) && rangeRevealed(ctx.state, from, to)) return; // vim-only reveal (#5)
+        if (tryTableEdit(ctx, from, to)) return; // ENTERED (Ctrl+Enter/click) → cell-edit widget
+        // ADR-024: no auto-reveal-on-cursor — the table atom is entered explicitly.
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI }, parts.join("\n"), false, open!.name), block: true }), from, to);
@@ -673,7 +664,7 @@ function buildDecorations(state: EditorState): {
   };
 }
 
-// A StateField (NOT a ViewPlugin): block decorations — the table render uses one
+// A StateField (NOT a ViewPlugin): block decorations — the table render uses one —
 // may only be provided by a state field, not a plugin. Rebuilds on any doc change
 // (covers local edits AND remote Yjs updates applied by yCollab) and any selection
 // change (reveal-on-cursor). Provides the decoration set, the atomicRanges (so local
@@ -688,7 +679,7 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
     if (tr.startState.facet(vimEnabled) !== tr.state.facet(vimEnabled)) return buildDecorations(tr.state);
     // A fold toggle changes WHICH macro blocks render (folded → CM's placeholder owns
     // the range, so the macro widget must drop) but is neither a doc nor selection
-    // change — rebuild so isFolded is re-evaluated and the stale widget is removed.
+    // change — rebuild so isFolded() is re-evaluated and the stale widget is removed.
     for (const e of tr.effects) if (e.is(foldEffect) || e.is(unfoldEffect) || e.is(setMacroRenderActive)) return buildDecorations(tr.state);
     return value;
   },
@@ -698,21 +689,19 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
   ],
 });
 
-// Block entry: a collapsed block (table / image / hr) is a replace widget the caret
-// cannot land INSIDE by vertical motion — it skips over (the bug: tables/hr were
-// un-enterable, the caret overtook them). This filter watches caret-only moves: if the
-// move would skip a still-collapsed block, it redirects the caret to the block's near
-// edge instead. Landing there reveals the block (rangeRevealed), so its source lines
-// become real and j/k/arrows then traverse them one at a time; moving out re-collapses
-// it. Operates on the selection, so it covers BOTH arrow keys AND vim j/k uniformly
-// the single principle for every block (and every future container macro), not a
-// per-block hack. Display-only: never changes the document (ADR-008; presence intact).
-// A block widget taller than one line can make CM's vertical motion (and vim j/k)
-// OVERSHOOT from a line below it — moving up one line lands the caret inside/before the
-// widget's atomic range and gets bumped past it, skipping the real adjacent line (the
-// "tall block breaks vertical geometry" class of bug). blockEntry clamps that, but only
-// for a genuine ONE-LINE key — a jump (gg/G/5G) or a wrapped-line step must be left
-// alone. We record whether the last key was a single-line vertical motion here.
+// ADR-024 atom motion. Every block decoration (macro / table / image / hr) is an ATOM —
+// a single motion stop. The caret cannot land INSIDE the replace widget's atomic range, so
+// a one-line vertical key (j/k/arrow) that would step from the line BEFORE the block to the
+// line AFTER it (CM's atomicRanges skip the whole widget in one key) is redirected to land
+// ON the block's near edge — its single stop. Combined with ADR-024 1b (macros no longer
+// auto-reveal), landing there keeps a macro rendered (the atom is selected, not expanded),
+// so the next same-direction key steps off PAST it: j/k treat the macro as one stop and
+// step over it. Non-macro blocks (pipe table / image) still reveal on landing
+// (rangeRevealed/lineRevealed) and drop out of `blocks`, so the caret edits their source
+// line-by-line as before. A multi-line jump (gg/G/}) whose target is OUTSIDE the block is
+// left alone — it lands at its real target (gg/G are never hijacked). The overshoot clamp
+// handles a tall block that makes a single key OVERSHOOT the adjacent line. The whole class
+// (#3 / overshoot / G-stop / k-warp) is handled here, uniformly. Display-only; doc untouched.
 let lastVerticalStep = false;
 export const motionKeyTracker: Extension = Prec.highest(
   EditorView.domEventHandlers({
@@ -733,44 +722,38 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   if (!blocks?.length) return tr;
   const oldSel = tr.startState.selection.main;
   const newSel = tr.newSelection.main;
-  // Only a caret/block MOTION, not a selection expansion: an empty caret, or vim's
-  // normal-mode block cursor (a 1-char selection that RELOCATES — its anchor moves with
-  // its head). A shift/visual selection keeps its anchor fixed → leave it alone.
+  // Only a caret MOTION, not a shift/visual selection expansion (anchor stays put).
   if (!newSel.empty && newSel.anchor === oldSel.anchor) return tr;
   const doc = tr.startState.doc;
   const oldHead = oldSel.head;
   const newHead = newSel.head;
   if (newHead === oldHead) return tr;
-  // Only handle a ONE-LINE step (j/k/arrow): the immediately-adjacent document line in
-  // the motion's direction. A big jump (gg/G/}/click) whose adjacent line is NOT a
-  // collapsed block is left alone — it lands at its target (which reveals the block if
-  // the target is inside one). This is what keeps `gg` going to the top, not the table
-  // edge, while a single k/j still steps INTO the block instead of skipping over it.
   const oldLine = doc.lineAt(oldHead).number;
   const newLine = doc.lineAt(newHead).number;
   const dir = newHead < oldHead ? -1 : 1;
-  // Redirect ONLY a one-line step that skipped EXACTLY one block: the caret started on
-  // the block's near edge and CM landed it on the block's FAR edge (it jumped over the
-  // collapsed widget). Then put the caret on the block's near source line so it reveals
-  // and j/k traverse it line-by-line. A multi-line jump (gg/G/}/click) does NOT match
-  // its newHead isn't the block's far edge — so it lands at its real target (gg/G are no
-  // longer hijacked when a macro happens to sit one line away). Entry from below lands on
-  // the block's last line; from above, its first line.
-  for (const b of blocks) {
-    const first = doc.lineAt(b.from).number;
-    const last = doc.lineAt(b.to).number;
-    if (oldLine >= first && oldLine <= last) break; // caret was inside this block
-    if (dir === 1 && oldLine === first - 1 && newLine === last + 1 && newLine !== first) {
-      return { selection: EditorSelection.cursor(doc.line(first).from), scrollIntoView: true };
-    }
-    if (dir === -1 && oldLine === last + 1 && newLine === first - 1 && newLine !== last) {
-      return { selection: EditorSelection.cursor(doc.line(last).from), scrollIntoView: true };
+  // A one-line KEY (j/k/arrow) that skipped EXACTLY one block (from the line before to the
+  // line after) → land ON the block's near edge: its single atom stop. From above → first
+  // line; from below → last line. GATED on a real vertical key: a jump (gg/G/}) is NOT a
+  // one-line step even when its endpoints happen to be first-1/last+1 (the caret sitting
+  // right beside the block), so without this gate gg/G get hijacked onto the atom. When the
+  // caret is already ON the atom (oldLine within the block), the loop breaks → the next
+  // same-direction key steps off past it.
+  if (lastVerticalStep) {
+    for (const b of blocks) {
+      const first = doc.lineAt(b.from).number;
+      const last = doc.lineAt(b.to).number;
+      if (oldLine >= first && oldLine <= last) break; // caret was ON this atom → step off
+      if (dir === 1 && oldLine === first - 1 && newLine === last + 1 && newLine !== first) {
+        return { selection: EditorSelection.cursor(doc.line(first).from), scrollIntoView: true };
+      }
+      if (dir === -1 && oldLine === last + 1 && newLine === first - 1 && newLine !== last) {
+        return { selection: EditorSelection.cursor(doc.line(last).from), scrollIntoView: true };
+      }
     }
   }
-  // Overshoot clamp (#4): a single-line vertical KEY that skipped a tall block (a block
-  // lies strictly between oldLine and newLine) must move exactly one line — clamp to the
-  // adjacent line (revealing the block if that line IS the block). Gated on a real motion
-  // key so jumps and wrapped-line steps are untouched.
+  // Overshoot clamp: a single-line vertical KEY that skipped a tall block (a block lies
+  // strictly between oldLine and newLine) must move exactly one line — clamp to the
+  // adjacent line. Gated on a real motion key so jumps / wrapped-line steps are untouched.
   if (lastVerticalStep) {
     const adj = oldLine + dir;
     if (adj >= 1 && adj <= doc.lines && newLine !== adj) {
