@@ -12,7 +12,12 @@ import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette } from "./live-preview/palette";
 import { contextMenu } from "./live-preview/context-menu";
 import { vimExCommands } from "./live-preview/vim-ex";
-import { macroFold } from "./macros";
+import { macroFold, autoFoldLargeFenceMacros } from "./macros";
+import { registerVimFold } from "./live-preview/vim-fold";
+
+// Map vim za/zo/zc onto CodeMirror fold commands (codemirror-vim omits them) so vim
+// users can fold macro blocks. Idempotent; runs once at module load.
+registerVimFold();
 import type { ImageUploader } from "./live-preview/commands";
 import { attachImageDrop } from "./live-preview/image-drop";
 import { cmTheme } from "../styles/cm-theme";
@@ -92,6 +97,16 @@ export function mountLivePreview(
 
   // Drag-and-drop image attach (editable surface only — needs an uploader).
   if (!opts.readOnly && opts.uploadImage) attachImageDrop(view, opts.uploadImage);
+
+  // Default large macro blocks to folded — ONCE, after the initial collab sync (the
+  // doc is empty at mount; the content arrives over the provider). rAF so yCollab has
+  // applied the synced doc to CM before we measure block sizes.
+  if (!opts.readOnly) {
+    let folded = false;
+    const runAutoFold = () => { if (folded) return; folded = true; requestAnimationFrame(() => autoFoldLargeFenceMacros(view)); };
+    if (provider.synced) runAutoFold();
+    else provider.on("synced", runAutoFold);
+  }
 
   const host = document.createElement("div");
   host.className = "lp-editor-host";
