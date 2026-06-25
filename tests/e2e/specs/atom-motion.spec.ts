@@ -80,3 +80,37 @@ test("Ctrl+Enter enters a macro atom (mermaid → its source is revealed)", asyn
   // Entered → the atom's raw source is revealed (the rendered placeholder is gone).
   await expect(page.locator("[data-pane=preview] [data-testid=macro-empty]")).toHaveCount(0);
 });
+
+// ADR-024 1b: the atom is highlighted (selected) when the caret rests on it; not otherwise.
+test("the atom shows a selection highlight when the caret is on it", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "atom-hl");
+  await enterEdit(page);
+  await insertMermaidAtom(page);
+  await page.getByTestId("vim-toggle").click();
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("g"); await page.keyboard.press("g"); await sleep(110);
+  expect(await page.locator("[data-pane=preview] .cm-lp-atom-sel").count()).toBe(0); // on "top"
+  await page.keyboard.press("j"); await sleep(110);
+  expect(await page.locator("[data-pane=preview] .cm-lp-atom-sel").count()).toBe(1); // on the atom
+});
+
+// ADR-024 1b (Q3): dd on the atom deletes the WHOLE macro source verbatim; surrounding
+// lines are left untouched.
+test("dd on a macro atom deletes the whole macro (not just one line)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "atom-dd");
+  await enterEdit(page);
+  await insertMermaidAtom(page);
+  await page.getByTestId("vim-toggle").click();
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("g"); await page.keyboard.press("g");
+  await page.keyboard.press("j"); await sleep(110); // land on the atom
+  expect(await page.locator("[data-pane=preview] [data-testid=macro-empty]").count()).toBe(1);
+  await page.keyboard.press("d"); await page.keyboard.press("d"); await sleep(200);
+  expect(await page.locator("[data-pane=preview] [data-testid=macro-empty]").count()).toBe(0); // macro gone
+  const text = (await page.locator("[data-pane=preview] .cm-content").innerText()).replace(/\n/g, "|");
+  expect(text).toBe("top|mid|bot"); // whole macro removed verbatim; surrounding lines intact
+});
