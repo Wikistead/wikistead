@@ -1,0 +1,88 @@
+import type { FenceMacro, MacroContext, MacroModalController } from "./registry";
+
+// ```excalidraw — body is an Excalidraw scene JSON. The PREVIEW (liveRender) uses
+// Excalidraw's NON-React exportToSvg, so no React enters CodeMirror (ADR-013). The
+// mouse EDITOR (richEditUI: modal) mounts the real <Excalidraw> React component in a
+// plain-DOM overlay (a separate React tree, outside CM). Both are lazy-loaded (the
+// library is large). Excalidraw + its deps are MIT/permissive (license:check gate).
+
+// eslint-disable: scene JSON is external/dynamic; we keep it loosely typed.
+type Scene = { elements: any[]; appState: any; files: any };
+
+let modP: Promise<typeof import("@excalidraw/excalidraw")> | null = null;
+const loadExcalidraw = () => (modP ??= import("@excalidraw/excalidraw"));
+
+let reactP: Promise<{ React: typeof import("react"); createRoot: (typeof import("react-dom/client"))["createRoot"] }> | null = null;
+const loadReact = () =>
+  (reactP ??= Promise.all([import("react"), import("react-dom/client")]).then(([React, rd]) => ({ React, createRoot: rd.createRoot })));
+
+function parseScene(body: string): Scene {
+  try {
+    const d = JSON.parse(body);
+    return { elements: Array.isArray(d.elements) ? d.elements : [], appState: d.appState ?? {}, files: d.files ?? {} };
+  } catch {
+    return { elements: [], appState: {}, files: {} };
+  }
+}
+
+export const excalidrawMacro: FenceMacro = {
+  kind: "fence",
+  lang: "excalidraw",
+  exportFidelity: "preserve", // the JSON is a standard code fence → lossless round-trip
+  summary: () => "Excalidraw drawing",
+  liveRender(body) {
+    const el = document.createElement("div");
+    el.className = "cm-lp-macro cm-lp-excalidraw";
+    el.setAttribute("data-testid", "macro-excalidraw");
+    const scene = parseScene(body);
+    if (!scene.elements.length) {
+      el.classList.add("cm-lp-macro-empty");
+      el.textContent = "Empty drawing — click to edit";
+      return el;
+    }
+    void loadExcalidraw().then(async ({ exportToSvg }) => {
+      try {
+        const svg = await exportToSvg({
+          elements: scene.elements,
+          appState: { ...scene.appState, exportBackground: false },
+          files: scene.files,
+        } as any);
+        el.appendChild(svg);
+      } catch {
+        el.classList.add("cm-lp-macro-error");
+        el.textContent = "Invalid Excalidraw drawing";
+      }
+    });
+    return el;
+  },
+  // M3 wires HTML export. Excalidraw renders in the browser; the static form is a
+  // placeholder (a server-side SVG pre-render is an M3 option). The JSON round-trips in
+  // .md regardless (it's a code fence).
+  htmlRender: () => `<div class="excalidraw-drawing">[Excalidraw drawing]</div>`,
+  richEditUI: {
+    present: "modal",
+    editor: {
+      async mount(container: HTMLElement, body: string, ctx: MacroContext): Promise<MacroModalController> {
+        const [{ React, createRoot }, excal] = await Promise.all([loadReact(), loadExcalidraw()]);
+        const scene = parseScene(body);
+        let current = body; // latest serialized scene (written back on save)
+        const root = createRoot(container);
+        const onChange = (elements: any, appState: any, files: any) => {
+          try {
+            current = excal.serializeAsJSON(elements, appState, files, "local");
+          } catch {
+            /* keep the last good serialization */
+          }
+        };
+        root.render(
+          React.createElement(excal.Excalidraw as any, {
+            initialData: { elements: scene.elements, appState: { ...scene.appState, theme: ctx.theme }, files: scene.files, scrollToContent: true },
+            onChange,
+            theme: ctx.theme,
+          }),
+        );
+        return { getBody: () => current, destroy: () => root.unmount() };
+      },
+    },
+  },
+};

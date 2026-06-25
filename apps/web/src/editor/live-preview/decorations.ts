@@ -9,6 +9,7 @@ import {
 import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme } from "../macros/registry";
 import { fenceLang, fenceBody, macroFenceAt } from "../macros/fence";
 import { parseDirectiveOpen } from "../macros/directive-parser";
+import { openMacroModal } from "./macro-modal";
 
 // Force a full reload on HMR: this module's decorations/state are baked into the
 // EditorView at creation (built once, not re-run on hot-swap), so a hot update would
@@ -294,6 +295,21 @@ class MacroWidget extends WidgetType {
         view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)) });
         view.focus();
       });
+      // Rich-edit (modal) button — only for macros that declare one (e.g. Excalidraw).
+      if (this.macro.richEditUI?.present === "modal") {
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.className = "cm-lp-macro-edit";
+        edit.title = "Edit";
+        edit.textContent = "✎";
+        edit.setAttribute("data-testid", "macro-edit");
+        edit.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openMacroModal(view, this.macro, () => view.posAtDOM(wrap), currentMacroTheme());
+        });
+        wrap.appendChild(edit);
+      }
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "cm-lp-macro-fold";
@@ -744,10 +760,9 @@ export const livePreviewTheme = EditorView.baseTheme({
     borderRadius: "4px",
     padding: "0.4em 0.6em",
   },
-  ".cm-lp-macro-fold": {
+  ".cm-lp-macro-fold, .cm-lp-macro-edit": {
     position: "absolute",
     top: "4px",
-    right: "4px",
     border: "1px solid var(--border, #888)",
     borderRadius: "4px",
     background: "var(--panel, #fff)",
@@ -759,7 +774,11 @@ export const livePreviewTheme = EditorView.baseTheme({
     opacity: "0",
     transition: "opacity 120ms",
   },
-  ".cm-lp-macro-wrap:hover .cm-lp-macro-fold": { opacity: "1" },
+  ".cm-lp-macro-fold": { right: "4px" },
+  ".cm-lp-macro-edit": { right: "30px" }, // sits left of the fold button
+  ".cm-lp-macro-wrap:hover .cm-lp-macro-fold, .cm-lp-macro-wrap:hover .cm-lp-macro-edit": { opacity: "1" },
+  ".cm-lp-excalidraw svg": { maxWidth: "100%", height: "auto", pointerEvents: "none" },
+  ".cm-lp-macro-empty": { color: "var(--fg-dim, #888)", fontStyle: "italic", padding: "0.6em" },
   // Folded summary line ("▶ Mermaid diagram"). One landable line; click to expand
   // (vim za/zo also toggle it — CM native folding).
   ".cm-lp-macro-folded": {

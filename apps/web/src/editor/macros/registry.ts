@@ -20,6 +20,21 @@ export interface MacroContext {
   readonly theme: MacroTheme;
 }
 
+// Mouse rich-edit (ADR-022 Part 3). A "modal" editor mounts in a plain-DOM overlay
+// OUTSIDE CodeMirror (so an embedded React editor like Excalidraw never enters CM —
+// ADR-013) and returns the edited body to write back to the macro's source range.
+export interface MacroModalController {
+  getBody(): string; // current serialized body, written back on save
+  destroy(): void; // unmount / cleanup
+}
+export interface MacroModalEditor {
+  // May be async — the editor (e.g. Excalidraw) is lazy-loaded.
+  mount(container: HTMLElement, body: string, ctx: MacroContext): Promise<MacroModalController>;
+}
+export type RichEditUI =
+  | { readonly present: "modal"; readonly editor: MacroModalEditor }
+  | { readonly present: "inline" };
+
 export interface FenceMacro {
   readonly kind: "fence";
   // The fenced-code info string this macro claims, e.g. "mermaid" (```mermaid …).
@@ -37,9 +52,9 @@ export interface FenceMacro {
   // the source round-trips verbatim in Markdown (a code fence always does);
   // "degrade" = lossy, export emits a placeholder + warning (M3).
   readonly exportFidelity: "preserve" | "degrade";
-  // M2: mouse rich-edit surface (modal for embedded React editors — keeps React out
-  // of CodeMirror, ADR-013). Slot only in M1.
-  readonly richEditUI?: { readonly present: "modal" | "inline" };
+  // Mouse rich-edit surface (modal for embedded React editors — keeps React out of
+  // CodeMirror, ADR-013).
+  readonly richEditUI?: RichEditUI;
 }
 
 // A container directive (:::name … :::). Unlike a fence macro, its body stays
@@ -56,7 +71,7 @@ export interface DirectiveMacro {
   // rendered by the server pipeline; this supplies the wrapper. MUST be XSS-safe.
   htmlRender(body: string): string;
   readonly exportFidelity: "preserve" | "degrade";
-  readonly richEditUI?: { readonly present: "modal" | "inline" };
+  readonly richEditUI?: RichEditUI;
 }
 
 export type Macro = FenceMacro | DirectiveMacro;

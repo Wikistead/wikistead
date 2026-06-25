@@ -23,6 +23,10 @@ const ALLOW = new Set([
   "MPL-2.0",
   "BlueOak-1.0.0",
   "Python-2.0",
+  // The zlib license — OSI-approved, FSF-free, permissive (BSD/MIT-class: no copyleft,
+  // allows commercial/closed-source distribution and sale, attribution-on-source only).
+  // Added 2026-06-25 for pako (MIT AND Zlib), pulled in by @excalidraw/excalidraw.
+  "Zlib",
 ]);
 
 // Our own workspace packages are private (no published license) and are not a
