@@ -25,9 +25,13 @@ test("pipe table → merge promotes to :::table → unmerge demotes back", async
   const edit = page.getByTestId("table-edit");
   await expect(edit).toBeVisible();
 
-  // Select the two body cells and Merge → promote.
-  await edit.locator("td").nth(0).click();
-  await edit.locator("td").nth(1).click();
+  // Rectangular drag-select across the two body cells, then Merge → promote.
+  const c0 = (await edit.locator("td").nth(0).boundingBox())!;
+  const c1 = (await edit.locator("td").nth(1).boundingBox())!;
+  await page.mouse.move(c0.x + c0.width / 2, c0.y + c0.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(c1.x + c1.width / 2, c1.y + c1.height / 2, { steps: 6 });
+  await page.mouse.up();
   await page.getByTestId("table-merge").click();
   await sleep(200);
 

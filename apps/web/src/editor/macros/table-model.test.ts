@@ -34,6 +34,8 @@ describe("table-model: style sanitization (XSS boundary)", () => {
     expect(sanitizeStyle("position:fixed;top:0;z-index:9999")).toBeUndefined();
     expect(sanitizeStyle("text-align:right;behavior:url(x.htc)")).toEqual({ align: "right" }); // keep good, drop bad
     expect(sanitizeStyle("width:100vw")).toBeUndefined(); // only px/% allowed
+    expect(sanitizeStyle("height:40px")).toEqual({ height: "40px" }); // row height allowed
+    expect(sanitizeStyle("height:100vh")).toBeUndefined(); // only px/% allowed
     expect(sanitizeStyle("color:red")).toBeUndefined(); // only hex/var() allowed
   });
   it("parseHtml routes cell style through the allowlist (drops malicious style + ignores other attrs/tags)", () => {

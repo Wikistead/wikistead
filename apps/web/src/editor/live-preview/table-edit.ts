@@ -1,5 +1,5 @@
 import { EditorView, WidgetType } from "@codemirror/view";
-import { mergeRect, unmergeAt, serialize, type Grid, type CellStyle } from "../macros/table-model";
+import { mergeRect, unmergeAt, serialize, styleToCss, type Grid, type CellStyle } from "../macros/table-model";
 import { setMacroRenderActive } from "./macro-edit";
 
 // Render-active table EDIT mode (ADR-022 Part 10/11). Cells select on click; the toolbar
@@ -89,51 +89,103 @@ export class TableEditWidget extends WidgetType {
     bar.appendChild(doneBtn);
 
     const selected = new Set<string>(); // "r,c" of selected origin cells
+    const cellEls = new Map<string, HTMLElement>();
+    const ncols = this.grid.reduce((m, row) => Math.max(m, row.length), 0);
+    let dragging = false;
+    let anchor: [number, number] = [0, 0];
+
+    const applySel = () => {
+      for (const [k, el] of cellEls) el.classList.toggle("cm-lp-cell-sel", selected.has(k));
+      updateToolbar();
+    };
+    const setRect = (r1: number, c1: number, r2: number, c2: number) => {
+      selected.clear();
+      const lr = Math.min(r1, r2), hr = Math.max(r1, r2), lc = Math.min(c1, c2), hc = Math.max(c1, c2);
+      for (let r = lr; r <= hr; r++) for (let c = lc; c <= hc; c++) if (this.grid[r]?.[c]) selected.add(`${r},${c}`);
+      applySel();
+    };
+    const selectCol = (c: number) => { selected.clear(); this.grid.forEach((row, r) => { if (row[c]) selected.add(`${r},${c}`); }); applySel(); };
+    const selectRow = (r: number) => { selected.clear(); (this.grid[r] ?? []).forEach((cell, c) => { if (cell) selected.add(`${r},${c}`); }); applySel(); };
+    const selectAll = () => { selected.clear(); this.grid.forEach((row, r) => row.forEach((cell, c) => { if (cell) selected.add(`${r},${c}`); })); applySel(); };
+
+    // A border drag handle: tracks the pointer, previews the size, commits on release.
+    const dragSize = (e: PointerEvent, axis: "x" | "y", ref: HTMLElement, commit: (px: number) => void) => {
+      const target = e.target as HTMLElement;
+      const start = axis === "x" ? e.clientX : e.clientY;
+      const startSize = axis === "x" ? ref.getBoundingClientRect().width : ref.getBoundingClientRect().height;
+      target.setPointerCapture(e.pointerId);
+      const size = (ev: PointerEvent) => Math.max(axis === "x" ? 40 : 24, Math.round(startSize + ((axis === "x" ? ev.clientX : ev.clientY) - start)));
+      const move = (ev: PointerEvent) => { ref.style[axis === "x" ? "width" : "height"] = size(ev) + "px"; };
+      const up = (ev: PointerEvent) => { target.removeEventListener("pointermove", move); target.removeEventListener("pointerup", up); commit(size(ev)); };
+      target.addEventListener("pointermove", move);
+      target.addEventListener("pointerup", up);
+    };
+    const resizeHandle = (cls: string, testid: string, start: (e: PointerEvent) => void) => {
+      const h = document.createElement("span");
+      h.className = cls;
+      h.setAttribute("data-testid", testid);
+      h.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); start(e); });
+      return h;
+    };
+
     const table = document.createElement("table");
-    table.className = "cm-lp-table cm-lp-table-merged";
+    table.className = "cm-lp-table cm-lp-table-merged cm-lp-table-grid";
+
+    // Spreadsheet-style handle row: corner (select all) + one handle per column (click =
+    // select column; right border = drag column width).
+    const htr = document.createElement("tr");
+    const corner = document.createElement("th");
+    corner.className = "cm-lp-table-handle cm-lp-table-corner";
+    corner.setAttribute("data-testid", "table-select-all");
+    corner.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); selectAll(); });
+    htr.appendChild(corner);
+    for (let c = 0; c < ncols; c++) {
+      const ch = document.createElement("th");
+      ch.className = "cm-lp-table-handle";
+      ch.setAttribute("data-testid", "table-col-select-" + c);
+      ch.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); selectCol(c); });
+      ch.appendChild(resizeHandle("cm-lp-col-resize", "table-col-resize-" + c, (e) => dragSize(e, "x", cellEls.get(`0,${c}`) ?? ch, (px) => applyColWidth(c, px + "px"))));
+      htr.appendChild(ch);
+    }
+    table.appendChild(htr);
+
     this.grid.forEach((row, r) => {
-      const tr = document.createElement("tr");
+      const trow = document.createElement("tr");
+      // Row handle: click = select row; bottom border = drag row height.
+      const rh = document.createElement("th");
+      rh.className = "cm-lp-table-handle";
+      rh.setAttribute("data-testid", "table-row-select-" + r);
+      rh.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); selectRow(r); });
+      rh.appendChild(resizeHandle("cm-lp-row-resize", "table-row-resize-" + r, (e) => dragSize(e, "y", cellEls.get(`${r},0`) ?? rh, (px) => applyRowHeight(r, px + "px"))));
+      trow.appendChild(rh);
       row.forEach((cell, c) => {
         if (!cell) return; // covered position
         const el = document.createElement(cell.header ? "th" : "td");
         el.textContent = cell.text || " ";
         if (cell.colspan > 1) el.colSpan = cell.colspan;
         if (cell.rowspan > 1) el.rowSpan = cell.rowspan;
+        if (cell.style) el.setAttribute("style", styleToCss(cell.style)); // #1: render style live (allowlisted)
         const key = `${r},${c}`;
         el.dataset.cellkey = key;
-        el.addEventListener("mousedown", (e) => {
+        cellEls.set(key, el);
+        // Rectangular drag-select: pointerdown anchors here; moving extends the rectangle.
+        el.addEventListener("pointerdown", (e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (selected.has(key)) { selected.delete(key); el.classList.remove("cm-lp-cell-sel"); }
-          else { selected.add(key); el.classList.add("cm-lp-cell-sel"); }
-          updateToolbar();
+          dragging = true;
+          anchor = [r, c];
+          setRect(r, c, r, c);
+          const end = () => { dragging = false; window.removeEventListener("pointerup", end); };
+          window.addEventListener("pointerup", end);
         });
-        // Column width: a drag handle on the right edge of the header row's cells.
-        if (r === 0) {
-          const handle = document.createElement("span");
-          handle.className = "cm-lp-col-resize";
-          handle.setAttribute("data-testid", "table-col-resize-" + c);
-          handle.addEventListener("pointerdown", (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const startX = e.clientX;
-            const startW = el.getBoundingClientRect().width;
-            handle.setPointerCapture(e.pointerId);
-            const width = (ev: PointerEvent) => Math.max(40, Math.round(startW + (ev.clientX - startX)));
-            const onMove = (ev: PointerEvent) => { el.style.width = width(ev) + "px"; };
-            const onUp = (ev: PointerEvent) => {
-              handle.removeEventListener("pointermove", onMove);
-              handle.removeEventListener("pointerup", onUp);
-              applyColWidth(c, width(ev) + "px");
-            };
-            handle.addEventListener("pointermove", onMove);
-            handle.addEventListener("pointerup", onUp);
-          });
-          el.appendChild(handle);
-        }
-        tr.appendChild(el);
+        trow.appendChild(el);
       });
-      table.appendChild(tr);
+      table.appendChild(trow);
+    });
+    table.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      const t = (e.target as HTMLElement)?.closest?.("[data-cellkey]") as HTMLElement | null;
+      if (t?.dataset.cellkey) { const [r, c] = t.dataset.cellkey.split(",").map(Number) as [number, number]; setRect(anchor[0], anchor[1], r, c); }
     });
 
     const apply = (next: Grid) => {
@@ -150,11 +202,14 @@ export class TableEditWidget extends WidgetType {
     const updateToolbar = () => {
       if (!selected.size) { bar.style.display = "none"; return; }
       bar.style.display = "flex";
-      const cellEl = table.querySelector(`[data-cellkey="${[...selected][0]}"]`) as HTMLElement | null;
+      const cellEl = cellEls.get([...selected][0]!);
       if (!cellEl) return;
       const wrapRect = wrap.getBoundingClientRect();
       const cellRect = cellEl.getBoundingClientRect();
-      bar.style.top = Math.max(0, cellRect.top - wrapRect.top - bar.offsetHeight - 4) + "px";
+      // Place the toolbar ABOVE the first selected cell; if there's no room (it would
+      // clip the top / cover the cell), flip BELOW it (#2: never overlap the cell).
+      const above = cellRect.top - wrapRect.top - bar.offsetHeight - 6;
+      bar.style.top = (above >= 0 ? above : cellRect.bottom - wrapRect.top + 6) + "px";
       bar.style.left = Math.max(0, cellRect.left - wrapRect.left) + "px";
     };
     const coords = () => [...selected].map((s) => s.split(",").map(Number) as [number, number]);
@@ -178,6 +233,13 @@ export class TableEditWidget extends WidgetType {
       const next: Grid = this.grid.map((row) => row.map((cell) => (cell ? { ...cell, style: cell.style ? { ...cell.style } : undefined } : null)));
       const head = next[0]?.[c];
       if (head) head.style = { ...(head.style ?? {}), width };
+      apply(next);
+    };
+    // Set a row's height on its first cell (browsers apply it to the row).
+    const applyRowHeight = (r: number, height: string) => {
+      const next: Grid = this.grid.map((row) => row.map((cell) => (cell ? { ...cell, style: cell.style ? { ...cell.style } : undefined } : null)));
+      const first = (next[r] ?? []).find((cell): cell is NonNullable<typeof cell> => !!cell);
+      if (first) first.style = { ...(first.style ?? {}), height };
       apply(next);
     };
     // Toggle the selected cells between header (<th>) and data (<td>). A header in a body

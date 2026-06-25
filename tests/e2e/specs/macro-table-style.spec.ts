@@ -108,3 +108,22 @@ test("non-vim click enters edit; edit mode persists across ops; Esc exits", asyn
   await sleep(150);
   await expect(page.getByTestId("table-edit")).toHaveCount(0);
 });
+
+// #5: row/column header handles select a whole column/row (then an op applies to all).
+test("column handle selects the whole column; color applies to all its cells", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tablecolsel");
+  await enterEdit(page);
+  await pipeTableInEdit(page);
+
+  await page.getByTestId("table-col-select-0").click(); // select column 0 (A + 1)
+  await page.getByTestId("table-bg-blue").click();
+  await sleep(200);
+
+  await page.getByText("below", { exact: true }).click();
+  await sleep(200);
+  const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
+  await expect(macroTable).toBeVisible();
+  // both cells of column 0 (the th + the td) got a background.
+  expect(await macroTable.locator('[style*="background"]').count()).toBe(2);
+});
