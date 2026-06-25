@@ -1104,21 +1104,18 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-table-grid .cm-lp-table-colhandle": { minWidth: "16px", height: "16px" },
   ".cm-lp-table-grid .cm-lp-table-rowhandle": { width: "22px" },
   ".cm-lp-table-grid .cm-lp-table-corner": { width: "22px", height: "16px", borderTopLeftRadius: "5px" },
-  // Persistent always-visible add-row/add-column bar (#1) — labeled, never clipped by
-  // table width, no selection required. Replaces the easy-to-miss 10px corner "+".
-  ".cm-lp-table-actions": { display: "flex", alignItems: "center", gap: "6px", marginTop: "6px", flexWrap: "wrap" },
-  ".cm-lp-table-actions button": {
-    border: "1px dashed var(--border, #888)",
-    borderRadius: "6px",
-    background: "var(--panel, transparent)",
-    color: "var(--fg, inherit)",
-    cursor: "pointer",
-    fontSize: "0.8em",
-    fontWeight: "600",
-    padding: "3px 10px",
+  // Trailing "+" append handles (#3): table-attached add-column ("+" at the right of the
+  // header band) and add-row ("+" below the last row, spanning the table). A dashed accent
+  // border + bold "+" reads as "add here", like Notion/Docmost — replaces the disconnected
+  // labeled bottom bar. They share the handle band tint and the accent hover.
+  ".cm-lp-table-grid .cm-lp-table-addcol, .cm-lp-table-grid .cm-lp-table-addrow": {
+    color: "var(--accent, #4ea1ff)",
+    fontSize: "13px",
+    fontWeight: "700",
+    border: "1px dashed var(--accent, #4ea1ff)",
   },
-  ".cm-lp-table-actions button:hover": { background: "var(--accent, #4ea1ff)", color: "#fff", borderStyle: "solid" },
-  ".cm-lp-table-actions-hint": { color: "var(--fg-dim, #888)", fontSize: "0.72em", fontStyle: "italic" },
+  ".cm-lp-table-grid .cm-lp-table-addcol": { minWidth: "16px", height: "16px" },
+  ".cm-lp-table-grid .cm-lp-table-addrow": { height: "16px" },
   // Structural-op group in the toolbar (insert/delete col/row) — visually separated.
   ".cm-lp-table-ops": { display: "inline-flex", gap: "2px", alignItems: "center", borderLeft: "1px solid var(--border, #888)", paddingLeft: "4px", marginLeft: "2px" },
   // Selection: a translucent THEME-accent fill on each cell (#1 — must read as selected,
