@@ -16,6 +16,13 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
+      // Bottom-center so toasts don't sit under the bottom-right floating action buttons
+      // (where they blocked the Edit/Publish group). A close button lets them be dismissed
+      // regardless. richColors tints each toast + icon by type (success green / error red /
+      // warning amber / info blue) so the kind reads at a glance.
+      position="bottom-center"
+      closeButton
+      richColors
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,
@@ -25,8 +32,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }}
       style={
         {
-          "--normal-bg": "var(--popover)",
-          "--normal-text": "var(--popover-foreground)",
+          // This project's tokens are --panel / --fg / --border (NOT shadcn's bare
+          // --popover*, which are undefined here → that made the toast transparent).
+          "--normal-bg": "var(--panel)",
+          "--normal-text": "var(--fg)",
           "--normal-border": "var(--border)",
           "--border-radius": "var(--radius)",
         } as React.CSSProperties
