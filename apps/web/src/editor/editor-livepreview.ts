@@ -85,11 +85,16 @@ export function mountLivePreview(
       // DEV-only probe: expose the caret's doc line + selection offsets so e2e can
       // assert motion / selection extent. Stripped from prod builds.
       ...(import.meta.env.DEV ? [EditorView.updateListener.of((u) => {
-        if (!u.selectionSet) return;
-        const s = u.state.selection.main;
-        const w = window as Window & { __lpHeadLine?: number; __lpSel?: { from: number; to: number; head: number; anchor: number } };
-        w.__lpHeadLine = u.state.doc.lineAt(s.head).number;
-        w.__lpSel = { from: s.from, to: s.to, head: s.head, anchor: s.anchor };
+        const w = window as Window & { __lpHeadLine?: number; __lpSel?: { from: number; to: number; head: number; anchor: number }; __lpBlocks?: { fromLine: number; toLine: number }[] };
+        if (u.selectionSet) {
+          const s = u.state.selection.main;
+          w.__lpHeadLine = u.state.doc.lineAt(s.head).number;
+          w.__lpSel = { from: s.from, to: s.to, head: s.head, anchor: s.anchor };
+        }
+        // Expose the atom block ranges (in LINE numbers) so a trace can verify a macro's
+        // atom covers its WHOLE fence, not just one line.
+        const bs = u.state.field(livePreview, false)?.blocks ?? [];
+        w.__lpBlocks = bs.map((b) => ({ fromLine: u.state.doc.lineAt(b.from).number, toLine: u.state.doc.lineAt(b.to).number }));
       })] : []),
       linkClicks,
       // ADR-024 atom motion: every block decoration is a single motion-stop — a one-line
