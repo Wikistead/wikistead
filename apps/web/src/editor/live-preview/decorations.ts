@@ -11,8 +11,9 @@ import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, tableBlockAt } fr
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
 import { openMacroModal } from "./macro-modal";
-import { macroRenderActiveField, setMacroRenderActive } from "./macro-edit";
-import { TableEditWidget } from "./table-edit";
+import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost } from "./macro-edit";
+import { tableInlineEditor } from "./table-edit";
+import type { InlineEditor, InlineController } from "../macros/registry";
 
 // Whether the vim keymap is active. Set from the vim Compartment (Editor.tsx). Macros no
 // longer reveal-on-cursor (ADR-024: atoms are entered explicitly), so this no longer gates
@@ -303,6 +304,37 @@ class TableWidget extends WidgetType {
   }
 }
 
+// ADR-025 step 2: the host-layer BRIDGE for an inline macro editor. It is the only piece
+// that touches the EditorView — it builds the narrow InnerEditHost and mounts the macro's
+// view-free InlineEditor into a container. Generic: any inline macro (table today, plugins
+// later) rides this. eq compares from/to/source so it's stable across selection changes (no
+// churn) but rebuilds when the block content changes.
+class InlineEditWidget extends WidgetType {
+  private ro?: ResizeObserver;
+  private ctrl?: InlineController;
+  constructor(readonly from: number, readonly to: number, readonly source: string, readonly editor: InlineEditor) {
+    super();
+  }
+  eq(o: InlineEditWidget) {
+    return o.from === this.from && o.to === this.to && o.source === this.source && o.editor === this.editor;
+  }
+  destroy() {
+    this.ctrl?.destroy();
+    this.ctrl = undefined;
+    this.ro?.disconnect();
+    this.ro = undefined;
+  }
+  toDOM(view: EditorView) {
+    const container = document.createElement("div");
+    this.ctrl = this.editor.mount(container, makeInnerEditHost(view, this.from, this.to));
+    this.ro = observeBlockResize(view, container);
+    return container;
+  }
+  ignoreEvent() {
+    return true; // the editor handles its own events; clicks don't move the caret
+  }
+}
+
 // If the table block at [from, to] is render-active (toggled into edit mode, ADR-022
 // Part 11), emit the editable table widget (cell-merge UI) and return true so the caller
 // skips its read render. Safe when the field is absent (read-only surface).
@@ -311,7 +343,8 @@ function tryTableEdit(ctx: RenderCtx, from: number, to: number): boolean {
   if (!active || active.from > to || active.to < from) return false;
   const tb = tableBlockAt(ctx.state, from);
   if (!tb) return false;
-  ctx.addAtomic(Decoration.replace({ widget: new TableEditWidget(tb.grid, tb.from, tb.to), block: true }), tb.from, tb.to);
+  const source = ctx.state.doc.sliceString(tb.from, Math.min(tb.to, ctx.state.doc.length));
+  ctx.addAtomic(Decoration.replace({ widget: new InlineEditWidget(tb.from, tb.to, source, tableInlineEditor), block: true }), tb.from, tb.to);
   return true;
 }
 

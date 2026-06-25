@@ -1,5 +1,6 @@
 import type { DirectiveMacro } from "./registry";
 import { parseHtml, styleToCss, type Grid } from "./table-model";
+import { tableInlineEditor } from "../live-preview/table-edit";
 
 // :::table — the Tier-2 table macro. Body is an HTML <table> (rowspan/colspan), which
 // a GFM pipe table promotes to when a merge is added (ADR-022 Part 10). The cell-merge
@@ -35,7 +36,7 @@ export const tableMacro: DirectiveMacro = {
   kind: "directive",
   name: "table",
   exportFidelity: "preserve", // HTML is standard Markdown; round-trips verbatim
-  richEditUI: { present: "inline" },
+  richEditUI: { present: "inline", editor: tableInlineEditor }, // ADR-025: the view-free table InlineEditor
   liveRender: (body) => {
     const el = renderHtmlTable(body);
     el.setAttribute("data-testid", "macro-table");

@@ -1,5 +1,5 @@
-import { EditorView, WidgetType } from "@codemirror/view";
-import { mergeRect, unmergeAt, serialize, styleToCss, insertColAt, insertRowAt, deleteColAt, deleteRowAt, type Grid, type CellStyle } from "../macros/table-model";
+import { mergeRect, unmergeAt, serialize, styleToCss, insertColAt, insertRowAt, deleteColAt, deleteRowAt, parseTableSource, type Grid, type CellStyle } from "../macros/table-model";
+import type { InnerEditHost, InlineEditor, InlineController } from "../macros/registry";
 
 // Spreadsheet-style column label: A, B … Z, AA, AB … (so the handle band reads like a
 // spreadsheet header — unmistakably NOT a data cell, #2).
@@ -8,14 +8,14 @@ function colLabel(n: number): string {
   for (let i = n; i >= 0; i = Math.floor(i / 26) - 1) s = String.fromCharCode(65 + (i % 26)) + s;
   return s;
 }
-import { makeInnerEditHost } from "./macro-edit";
-import { observeBlockResize } from "./decorations";
 
-// Render-active table EDIT mode (ADR-022 Part 10/11). Cells select on click; the toolbar
-// merges the selected rectangle or un-merges a span. Each op rewrites the block source
-// via the grid model and serialize → pipes (Tier 1) or :::table HTML (Tier 2): that is
-// the auto promote/demote. Display-only until the user acts; the rewrite is one
-// offset-invariant range edit on the shared Y.Text.
+// ADR-025 step 2: the table's INLINE rich-editor — VIEW-FREE. It mounts its DOM into
+// `container` and talks ONLY to InnerEditHost (theme/getSource/replaceSource/exit); it never
+// touches the EditorView/Yjs (a host-layer bridge widget wires it in). Cells select on click;
+// the toolbar merges/unmerges/aligns/colours/sizes/header-toggles/insert-deletes. Each op
+// rewrites the block source via the grid model + serialize → pipes (Tier 1) or :::table
+// HTML (Tier 2) — the auto promote/demote — committed via host.replaceSource (one
+// offset-invariant Y.Text edit, per-op). The grid is parsed from host.getSource at mount.
 // Controlled background palette: undefined = clear; var(--accent) stays on theme; the
 // tints are safe hex (pass the style allowlist). Not a free color picker (ADR-022 #2).
 const BG_PRESETS: { id: string; value: string | undefined; title: string }[] = [
@@ -56,25 +56,11 @@ function svgBtn(svg: string, testid: string, title: string): HTMLButtonElement {
   return b;
 }
 
-export class TableEditWidget extends WidgetType {
-  private ro?: ResizeObserver;
-  constructor(readonly grid: Grid, readonly from: number, readonly to: number) {
-    super();
-  }
-  eq(o: TableEditWidget) {
-    return o.from === this.from && o.to === this.to && JSON.stringify(o.grid) === JSON.stringify(this.grid);
-  }
-  destroy() {
-    this.ro?.disconnect();
-    this.ro = undefined;
-  }
-  toDOM(view: EditorView) {
-    // ADR-025 step 1: write-back / exit go through the narrow InnerEditHost, not view
-    // directly (re-homing onto the common inline-edit contract). UI mechanics still use view.
-    const host = makeInnerEditHost(view, this.from, this.to);
-    const wrap = document.createElement("div");
-    wrap.className = "cm-lp-table-edit";
-    wrap.setAttribute("data-testid", "table-edit");
+export const tableInlineEditor: InlineEditor = {
+  mount(container: HTMLElement, host: InnerEditHost): InlineController {
+    const grid: Grid = parseTableSource(host.getSource());
+    container.className = "cm-lp-table-edit";
+    container.setAttribute("data-testid", "table-edit");
 
     // Floating contextual toolbar (ADR-022 review #1): shown near the selected cells,
     // not as an always-on bar. Hidden until something is selected.
@@ -121,7 +107,7 @@ export class TableEditWidget extends WidgetType {
 
     const selected = new Set<string>(); // "r,c" of selected origin cells
     const cellEls = new Map<string, HTMLElement>();
-    const ncols = this.grid.reduce((m, row) => Math.max(m, row.length), 0);
+    const ncols = grid.reduce((m, row) => Math.max(m, row.length), 0);
     let dragging = false;
     let anchor: [number, number] = [0, 0];
     // Whole-column / whole-row selection drives the structural-op group in the toolbar (so
@@ -148,12 +134,12 @@ export class TableEditWidget extends WidgetType {
       selected.clear();
       selMode = "cells"; selCol = -1; selRow = -1;
       const lr = Math.min(r1, r2), hr = Math.max(r1, r2), lc = Math.min(c1, c2), hc = Math.max(c1, c2);
-      for (let r = lr; r <= hr; r++) for (let c = lc; c <= hc; c++) if (this.grid[r]?.[c]) selected.add(`${r},${c}`);
+      for (let r = lr; r <= hr; r++) for (let c = lc; c <= hc; c++) if (grid[r]?.[c]) selected.add(`${r},${c}`);
       applySel();
     };
-    const selectCol = (c: number) => { selected.clear(); selMode = "col"; selCol = c; selRow = -1; this.grid.forEach((row, r) => { if (row[c]) selected.add(`${r},${c}`); }); applySel(); };
-    const selectRow = (r: number) => { selected.clear(); selMode = "row"; selRow = r; selCol = -1; (this.grid[r] ?? []).forEach((cell, c) => { if (cell) selected.add(`${r},${c}`); }); applySel(); };
-    const selectAll = () => { selected.clear(); selMode = "cells"; selCol = -1; selRow = -1; this.grid.forEach((row, r) => row.forEach((cell, c) => { if (cell) selected.add(`${r},${c}`); })); applySel(); };
+    const selectCol = (c: number) => { selected.clear(); selMode = "col"; selCol = c; selRow = -1; grid.forEach((row, r) => { if (row[c]) selected.add(`${r},${c}`); }); applySel(); };
+    const selectRow = (r: number) => { selected.clear(); selMode = "row"; selRow = r; selCol = -1; (grid[r] ?? []).forEach((cell, c) => { if (cell) selected.add(`${r},${c}`); }); applySel(); };
+    const selectAll = () => { selected.clear(); selMode = "cells"; selCol = -1; selRow = -1; grid.forEach((row, r) => row.forEach((cell, c) => { if (cell) selected.add(`${r},${c}`); })); applySel(); };
 
     // A border drag handle: tracks the pointer, previews the size, commits on release.
     const dragSize = (e: PointerEvent, axis: "x" | "y", ref: HTMLElement, commit: (px: number) => void) => {
@@ -162,10 +148,10 @@ export class TableEditWidget extends WidgetType {
       const startSize = axis === "x" ? ref.getBoundingClientRect().width : ref.getBoundingClientRect().height;
       target.setPointerCapture(e.pointerId);
       // #5: a column grows only until the TABLE fills the visible width, then it STOPS — it
-      // never steals width from the neighbouring columns. maxW = this column's start width
-      // plus the slack between the current table width and the viewport.
+      // never steals width from the neighbouring columns. The visible width is the editor
+      // container's width (VIEW-FREE — no EditorView.scrollDOM).
       const tableEl = ref.closest("table");
-      const slackX = tableEl ? Math.max(0, view.scrollDOM.clientWidth - 24 - tableEl.getBoundingClientRect().width) : 0;
+      const slackX = tableEl ? Math.max(0, container.clientWidth - 24 - tableEl.getBoundingClientRect().width) : 0;
       const maxW = startSize + slackX;
       // #4: shrinking a row only follows live if EVERY cell in the row follows — one cell
       // can't pull the row shorter than its siblings. Apply the live height to all of them.
@@ -216,7 +202,7 @@ export class TableEditWidget extends WidgetType {
     }
     table.appendChild(htr);
 
-    this.grid.forEach((row, r) => {
+    grid.forEach((row, r) => {
       const trow = document.createElement("tr");
       const rh = document.createElement("th");
       rh.className = "cm-lp-table-handle cm-lp-table-rowhandle";
@@ -227,7 +213,7 @@ export class TableEditWidget extends WidgetType {
       row.forEach((cell, c) => {
         if (!cell) return; // covered position
         const el = document.createElement(cell.header ? "th" : "td");
-        el.textContent = cell.text || " ";
+        el.textContent = cell.text || " ";
         if (cell.colspan > 1) el.colSpan = cell.colspan;
         if (cell.rowspan > 1) el.rowSpan = cell.rowspan;
         if (cell.style) el.setAttribute("style", styleToCss(cell.style)); // #1: render style live (allowlisted)
@@ -262,9 +248,8 @@ export class TableEditWidget extends WidgetType {
     const apply = (next: Grid) => {
       const { tier, text } = serialize(next);
       const src = tier === "html" ? ":::table\n" + text + "\n:::" : text;
-      // STAY in edit mode: re-point render-active at the rewritten block's new range
-      // (don't clear it). The user exits only via Done/Esc — editing operations never
-      // kick them back to reveal (ADR-022 review #2: edit mode persists until exit).
+      // STAY in edit mode: host.replaceSource re-points render-active at the rewritten range
+      // (per-op LWW; the user exits only via Done/Esc — ADR-022 review #2).
       host.replaceSource(src);
     };
     // Show/position the floating toolbar above the first selected cell; hide when nothing
@@ -277,7 +262,7 @@ export class TableEditWidget extends WidgetType {
       rowOps.style.display = selMode === "row" ? "inline-flex" : "none";
       const cellEl = cellEls.get([...selected][0]!);
       if (!cellEl) return;
-      const wrapRect = wrap.getBoundingClientRect();
+      const wrapRect = container.getBoundingClientRect();
       const cellRect = cellEl.getBoundingClientRect();
       // Place the toolbar ABOVE the first selected cell; if there's no room (it would
       // clip the top / cover the cell), flip BELOW it (#2: never overlap the cell).
@@ -291,7 +276,7 @@ export class TableEditWidget extends WidgetType {
     const patchStyle = (patch: Partial<CellStyle>) => {
       const cs = coords();
       if (!cs.length) return;
-      const next: Grid = this.grid.map((row) => row.map((c) => (c ? { ...c, style: c.style ? { ...c.style } : undefined } : null)));
+      const next: Grid = grid.map((row) => row.map((c) => (c ? { ...c, style: c.style ? { ...c.style } : undefined } : null)));
       for (const [r, c] of cs) {
         const cell = next[r]?.[c];
         if (!cell) continue;
@@ -303,13 +288,13 @@ export class TableEditWidget extends WidgetType {
     };
     // Set width on each given column's header cell (browsers apply it to the column).
     const applyColWidths = (cols: number[], width: string) => {
-      const next: Grid = this.grid.map((row) => row.map((cell) => (cell ? { ...cell, style: cell.style ? { ...cell.style } : undefined } : null)));
+      const next: Grid = grid.map((row) => row.map((cell) => (cell ? { ...cell, style: cell.style ? { ...cell.style } : undefined } : null)));
       for (const c of cols) { const head = next[0]?.[c]; if (head) head.style = { ...(head.style ?? {}), width }; }
       apply(next);
     };
     // Set height on each given row's first cell (browsers apply it to the row).
     const applyRowHeights = (rows: number[], height: string) => {
-      const next: Grid = this.grid.map((row) => row.map((cell) => (cell ? { ...cell, style: cell.style ? { ...cell.style } : undefined } : null)));
+      const next: Grid = grid.map((row) => row.map((cell) => (cell ? { ...cell, style: cell.style ? { ...cell.style } : undefined } : null)));
       for (const r of rows) { const first = (next[r] ?? []).find((cell): cell is NonNullable<typeof cell> => !!cell); if (first) first.style = { ...(first.style ?? {}), height }; }
       apply(next);
     };
@@ -320,18 +305,18 @@ export class TableEditWidget extends WidgetType {
       e.stopPropagation();
       const cs = coords();
       if (!cs.length) return;
-      const allHeader = cs.every(([r, c]) => this.grid[r]?.[c]?.header);
-      const next: Grid = this.grid.map((row) => row.map((cell) => (cell ? { ...cell } : null)));
+      const allHeader = cs.every(([r, c]) => grid[r]?.[c]?.header);
+      const next: Grid = grid.map((row) => row.map((cell) => (cell ? { ...cell } : null)));
       for (const [r, c] of cs) { const cell = next[r]?.[c]; if (cell) cell.header = !allHeader; }
       apply(next);
     });
     // Structural ops (#1) — operate on the selected column / row (selCol / selRow).
-    colInsL.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selCol >= 0) apply(insertColAt(this.grid, selCol)); });
-    colInsR.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selCol >= 0) apply(insertColAt(this.grid, selCol + 1)); });
-    colDel.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selCol >= 0) apply(deleteColAt(this.grid, selCol)); });
-    rowInsT.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selRow >= 0) apply(insertRowAt(this.grid, selRow)); });
-    rowInsB.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selRow >= 0) apply(insertRowAt(this.grid, selRow + 1)); });
-    rowDel.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selRow >= 0) apply(deleteRowAt(this.grid, selRow)); });
+    colInsL.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selCol >= 0) apply(insertColAt(grid, selCol)); });
+    colInsR.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selCol >= 0) apply(insertColAt(grid, selCol + 1)); });
+    colDel.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selCol >= 0) apply(deleteColAt(grid, selCol)); });
+    rowInsT.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selRow >= 0) apply(insertRowAt(grid, selRow)); });
+    rowInsB.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selRow >= 0) apply(insertRowAt(grid, selRow + 1)); });
+    rowDel.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selRow >= 0) apply(deleteRowAt(grid, selRow)); });
     alignL.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ align: "left" }); });
     alignC.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ align: "center" }); });
     alignR.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ align: "right" }); });
@@ -342,14 +327,14 @@ export class TableEditWidget extends WidgetType {
       if (cs.length < 2) return;
       const rs = cs.map((x) => x[0]);
       const colsS = cs.map((x) => x[1]);
-      apply(mergeRect(this.grid, Math.min(...rs), Math.min(...colsS), Math.max(...rs), Math.max(...colsS)));
+      apply(mergeRect(grid, Math.min(...rs), Math.min(...colsS), Math.max(...rs), Math.max(...colsS)));
     });
     unmergeBtn.addEventListener("mousedown", (e) => {
       e.preventDefault();
       e.stopPropagation();
       const cs = coords();
       if (cs.length !== 1) return;
-      apply(unmergeAt(this.grid, cs[0]![0], cs[0]![1]));
+      apply(unmergeAt(grid, cs[0]![0], cs[0]![1]));
     });
     doneBtn.addEventListener("mousedown", (e) => {
       e.preventDefault();
@@ -365,23 +350,16 @@ export class TableEditWidget extends WidgetType {
     actions.className = "cm-lp-table-actions";
     const addColBtn = btn("＋ Column", "table-add-col");
     addColBtn.title = "Add a column on the right";
-    addColBtn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertColAt(this.grid, ncols)); });
+    addColBtn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertColAt(grid, ncols)); });
     const addRowBtn = btn("＋ Row", "table-add-row");
     addRowBtn.title = "Add a row at the bottom";
-    addRowBtn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertRowAt(this.grid, this.grid.length)); });
+    addRowBtn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertRowAt(grid, grid.length)); });
     const hint = document.createElement("span");
     hint.className = "cm-lp-table-actions-hint";
     hint.textContent = "Click a row/column header (1/A) to insert beside or delete it";
     actions.append(addColBtn, addRowBtn, hint);
 
-    wrap.append(bar, table, actions);
-    // The edit chrome (toolbar / handle band / action bar) and any cell-size changes shift
-    // the widget height after first measure → re-measure so lines below don't drift (#1b,
-    // common path with every other block widget).
-    this.ro = observeBlockResize(view, wrap);
-    return wrap;
-  }
-  ignoreEvent() {
-    return true; // the widget handles its own events; clicks don't move the caret
-  }
-}
+    container.append(bar, table, actions);
+    return { destroy() { /* no resources beyond the DOM, which the host removes */ } };
+  },
+};
