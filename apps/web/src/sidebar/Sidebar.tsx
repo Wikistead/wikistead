@@ -155,9 +155,11 @@ export function Sidebar() {
         ref={dragHandle}
         style={style}
         className={cn(
-          "group flex cursor-pointer select-none items-center gap-1 rounded-sm pr-2 transition-colors duration-[120ms]",
+          // Inset, rounded highlight (mx) with inner padding so the selected/hover fill
+          // isn't edge-to-edge cramped (Notion/Outline-style). px gives the label room.
+          "group mx-1.5 flex cursor-pointer select-none items-center gap-1.5 rounded-md px-2 transition-colors duration-[120ms]",
           selected
-            ? "bg-[color-mix(in_srgb,var(--accent)_10%,var(--panel-3))] font-medium shadow-[inset_3px_0_0_var(--accent)]"
+            ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium"
             : "hover:bg-panel-2",
         )}
         data-testid="tree-page"
@@ -194,9 +196,9 @@ export function Sidebar() {
 
   const headerBtn = "flex cursor-pointer rounded-sm p-1 text-fg-dim transition-colors duration-[120ms] hover:bg-panel-2 hover:text-foreground";
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden text-[length:var(--text-ui)]" data-testid="sidebar">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden text-[15px]" data-testid="sidebar">
       {/* Space switcher — the space is a separate layer, not a tree root. */}
-      <div className="flex items-center justify-between border-b border-border p-3">
+      <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
         <DropdownMenu modal={false}>
           <DropdownMenuTrigger className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-sm px-1 py-0.5 font-semibold text-foreground transition-colors duration-[120ms] hover:bg-panel-2" data-testid="space-switcher">
             {currentSpace && <SpaceIcon id={currentSpace.id} name={currentSpace.name} image={currentSpace.iconImageUrl} size={20} data-testid="space-icon" />}
@@ -242,7 +244,7 @@ export function Sidebar() {
             width={size.width || 260}
             height={size.height || 400}
             indent={14}
-            rowHeight={28}
+            rowHeight={32}
             selection={pageId ? `page:${pageId}` : undefined}
             disableMultiSelection
             disableDrop={({ parentNode, dragNodes }) => {
