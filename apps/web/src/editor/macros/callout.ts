@@ -14,6 +14,7 @@ export const calloutMacro: DirectiveMacro = {
   name: "callout",
   containerClass: "cm-lp-callout",
   exportFidelity: "preserve", // ::: stays plain text → lossless round-trip
+  slash: { labelKey: "palette.callout", keywords: "callout note info aside admonition tip warning", insert: ":::callout\n\n:::", caret: 11 },
   // M3 wires HTML export server-side, where the inner Markdown is rendered and wrapped
   // by this. For now it supplies the wrapper; escaping keeps it XSS-safe as a fallback.
   htmlRender: (body) => `<div class="callout">\n\n${escapeHtml(body)}\n\n</div>`,

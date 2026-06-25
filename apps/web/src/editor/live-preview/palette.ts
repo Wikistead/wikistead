@@ -5,6 +5,7 @@ import i18n from "../../i18n";
 import { INLINE_FORMATS, insertImage, insertLink, type InlineFormat, type ImageUploader } from "./commands";
 import { orderByRecency, recordUse } from "./palette-recency";
 import { contextHintTooltip } from "./hint";
+import { registeredMacros } from "../macros";
 
 // Slash command palette (Step I / M0-1 — see ADR-017). Triggered by `/` at a line
 // start OR after whitespace while editing. Lists block insert/toggle commands (layer
@@ -69,10 +70,27 @@ const IMAGE_COMMAND: PaletteCommand = {
   action: (view) => view.state.facet(imageUploader)?.(),
 };
 
+// Macro slash commands, derived from the registry so ONE registration makes a macro
+// insertable (ADR-017/018). Built lazily (at call time, not module-init) so it never
+// races macro registration order. A macro with a `slash` field becomes a `/` entry.
+function macroCommands(): PaletteCommand[] {
+  return registeredMacros()
+    .filter((m) => m.slash)
+    .map((m) => ({
+      id: "macro:" + (m.kind === "fence" ? m.lang : m.name),
+      label: () => i18n.t(m.slash!.labelKey),
+      alias: m.kind === "fence" ? m.lang : m.name,
+      keywords: m.slash!.keywords,
+      insert: m.slash!.insert,
+      caret: m.slash!.caret ?? m.slash!.insert.length,
+    }));
+}
+
 // The effective command list for a state: the image command is appended only when an
 // uploader is wired (the facet is set), so it never appears for uploader-less surfaces.
 function commandList(state: EditorState): PaletteCommand[] {
-  return state.facet(imageUploader) ? [...COMMANDS, IMAGE_COMMAND] : COMMANDS;
+  const base = [...COMMANDS, ...macroCommands()];
+  return state.facet(imageUploader) ? [...base, IMAGE_COMMAND] : base;
 }
 
 function filterCommands(state: EditorState, query: string): PaletteCommand[] {

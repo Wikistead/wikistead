@@ -14,6 +14,16 @@
 
 export type MacroTheme = "light" | "dark";
 
+// How a macro appears in the `/` slash palette (ADR-017/018): one registration ⇒ the
+// macro is insertable. labelKey is an i18n key; insert is the template; caret is the
+// offset within it to place the cursor after insert.
+export interface MacroSlash {
+  readonly labelKey: string;
+  readonly keywords: string;
+  readonly insert: string;
+  readonly caret?: number;
+}
+
 // The entire host surface a macro may touch. Keep this minimal — every field added
 // here widens the eventual sandbox's attack surface.
 export interface MacroContext {
@@ -55,6 +65,7 @@ export interface FenceMacro {
   // Mouse rich-edit surface (modal for embedded React editors — keeps React out of
   // CodeMirror, ADR-013).
   readonly richEditUI?: RichEditUI;
+  readonly slash?: MacroSlash; // appears in the `/` palette
 }
 
 // A container directive (:::name … :::). Unlike a fence macro, its body stays
@@ -76,6 +87,7 @@ export interface DirectiveMacro {
   htmlRender(body: string): string;
   readonly exportFidelity: "preserve" | "degrade";
   readonly richEditUI?: RichEditUI;
+  readonly slash?: MacroSlash; // appears in the `/` palette
 }
 
 export type Macro = FenceMacro | DirectiveMacro;
@@ -114,4 +126,10 @@ export function registeredFenceLangs(): string[] {
 
 export function registeredDirectiveNames(): string[] {
   return [...DIRECTIVE_MACROS.keys()];
+}
+
+// All registered macros (fence + directive) — used to build the `/` slash palette so a
+// single registration makes a macro insertable (ADR-017/018).
+export function registeredMacros(): Macro[] {
+  return [...FENCE_MACROS.values(), ...DIRECTIVE_MACROS.values()];
 }
