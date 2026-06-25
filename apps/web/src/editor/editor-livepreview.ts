@@ -58,6 +58,12 @@ export function mountLivePreview(
       tooltips({ position: "fixed" }),
       cmTheme,
       EditorView.lineWrapping,
+      // #6: the editing chrome floats OVER the editor's bottom (VIM toggle bottom-left,
+      // ACTIONS bottom-right — PageControls, at `bottom-4`). This bottom scroll-margin keeps
+      // the caret above that ~52px band: CM scrolls BEFORE the caret reaches it. The room to
+      // lift the LAST line comes from `.lp-editor-host .cm-content { padding-bottom: 4.5rem }`
+      // (tokens.css) — the two MUST stay in sync (72px ≈ 4.5rem).
+      EditorView.scrollMargins.of(() => ({ bottom: 72 })),
       // GFM base (tables) + fenced-code highlighting. The doc stays plain markdown.
       markdownExtension(),
       livePreviewTheme,
