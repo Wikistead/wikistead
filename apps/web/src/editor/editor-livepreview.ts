@@ -1,7 +1,7 @@
 import { EditorView, minimalSetup } from "codemirror";
 import { tooltips, keymap } from "@codemirror/view";
 import { EditorState, Prec, type Compartment } from "@codemirror/state";
-import { vim } from "@replit/codemirror-vim";
+import { vim, getCM } from "@replit/codemirror-vim";
 import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
@@ -86,12 +86,15 @@ export function mountLivePreview(
       // DEV-only probe: expose the caret's doc line + selection offsets so e2e can
       // assert motion / selection extent. Stripped from prod builds.
       ...(import.meta.env.DEV ? [EditorView.updateListener.of((u) => {
-        const w = window as Window & { __lpHeadLine?: number; __lpSel?: { from: number; to: number; head: number; anchor: number }; __lpBlocks?: { fromLine: number; toLine: number }[] };
+        const w = window as Window & { __lpHeadLine?: number; __lpSel?: { from: number; to: number; head: number; anchor: number }; __lpBlocks?: { fromLine: number; toLine: number }[]; __lpVimInsert?: boolean };
         if (u.selectionSet) {
           const s = u.state.selection.main;
           w.__lpHeadLine = u.state.doc.lineAt(s.head).number;
           w.__lpSel = { from: s.from, to: s.to, head: s.head, anchor: s.anchor };
         }
+        // vim mode (insert/normal): macro entry must land in vim NORMAL (ADR-024 — entering
+        // a macro = the vim normal world; `i` then inserts). Lets a spec assert no forced insert.
+        w.__lpVimInsert = !!getCM(u.view)?.state.vim?.insertMode;
         // Expose the atom block ranges (in LINE numbers) so a trace can verify a macro's
         // atom covers its WHOLE fence, not just one line.
         const bs = u.state.field(livePreview, false)?.blocks ?? [];
