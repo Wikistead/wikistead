@@ -10,7 +10,14 @@ import {
   useUploadAttachment,
   fetchDownloadUrl,
 } from "./useAttachments";
-import styles from "./AttachmentsPanel.module.css";
+
+// Right-side panel chrome (shared look with Comments/History; wks-slide-right = the
+// global slide-in keyframe).
+const panel = "wks-slide-right flex min-h-0 w-[300px] flex-none flex-col gap-2 overflow-y-auto border-l border-border p-3";
+const closeBtn = "inline-flex items-center justify-center rounded-md p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground";
+const iconBtn = "flex flex-none rounded border border-border p-[3px] text-fg-dim hover:bg-panel-2 hover:text-foreground";
+const row = "flex items-center gap-2 py-1 text-[13px]";
+const dim = "flex-none text-xs text-fg-dim";
 
 function fmtSize(n: number | null): string {
   if (n == null) return "";
@@ -64,18 +71,18 @@ export function AttachmentsPanel({ pageId, readOnly, onClose }: { pageId: string
   const count = list.data?.length ?? 0;
 
   return (
-    <aside className={styles.panel} data-testid="attachments-panel">
-      <div className={styles.header}>
-        <strong className={styles.title}><Paperclip size={14} /> {t("attachments.header", { count })}</strong>
-        <button type="button" className={styles.close} data-testid="attachments-close" aria-label={t("common.close")} onClick={onClose}>
+    <aside className={panel} data-testid="attachments-panel">
+      <div className="flex items-center justify-between">
+        <strong className="inline-flex items-center gap-1"><Paperclip size={14} /> {t("attachments.header", { count })}</strong>
+        <button type="button" className={closeBtn} data-testid="attachments-close" aria-label={t("common.close")} onClick={onClose}>
           <X size={16} aria-hidden />
         </button>
       </div>
 
-      <div className={styles.body}>
+      <div className="flex flex-col">
           {!readOnly && (
-            <div className={styles.uploadRow}>
-              <button type="button" className={styles.uploadBtn} data-testid="attach-upload" onClick={() => fileRef.current?.click()}>
+            <div className="py-1">
+              <button type="button" className="inline-flex items-center gap-1 rounded border border-border bg-panel-2 px-2.5 py-1 text-[13px] text-foreground hover:bg-border" data-testid="attach-upload" onClick={() => fileRef.current?.click()}>
                 <Upload size={14} /> {t("attachments.upload")}
               </button>
               <input ref={fileRef} type="file" multiple hidden onChange={(e) => onFiles(e.target.files)} />
@@ -83,28 +90,28 @@ export function AttachmentsPanel({ pageId, readOnly, onClose }: { pageId: string
           )}
 
           {uploads.map((u) => (
-            <div key={u.name} className={styles.item}>
-              <span className={styles.name}>{u.name}</span>
-              <span className={u.status === "error" ? styles.error : styles.dim}>
+            <div key={u.name} className={row}>
+              <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{u.name}</span>
+              <span className={u.status === "error" ? "flex-none text-xs text-[var(--danger)]" : dim}>
                 {u.status === "uploading" ? t("attachments.uploading") : t("attachments.failed", { msg: u.message ?? t("attachments.error") })}
               </span>
             </div>
           ))}
 
           {list.isLoading ? (
-            <div className={styles.dim}>{t("common.loading")}</div>
+            <div className={dim}>{t("common.loading")}</div>
           ) : count === 0 && uploads.length === 0 ? (
-            <div className={styles.dim}>{t("attachments.empty")}</div>
+            <div className={dim}>{t("attachments.empty")}</div>
           ) : (
             list.data!.map((a) => (
-              <div key={a.id} className={styles.item} data-testid="attach-item">
-                <span className={styles.name} title={a.filename}>{a.filename}</span>
-                <span className={styles.dim}>{fmtSize(a.sizeBytes)}</span>
-                <button type="button" className={styles.iconBtn} title={t("attachments.download")} data-testid="attach-download" onClick={() => onDownload(a.id)}>
+              <div key={a.id} className={row} data-testid="attach-item">
+                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" title={a.filename}>{a.filename}</span>
+                <span className={dim}>{fmtSize(a.sizeBytes)}</span>
+                <button type="button" className={iconBtn} title={t("attachments.download")} data-testid="attach-download" onClick={() => onDownload(a.id)}>
                   <Download size={14} />
                 </button>
                 {!readOnly && (
-                  <button type="button" className={styles.iconBtn} title={t("attachments.delete")} onClick={() => del.mutate(a.id)}>
+                  <button type="button" className={iconBtn} title={t("attachments.delete")} onClick={() => del.mutate(a.id)}>
                     <Trash2 size={14} />
                   </button>
                 )}
