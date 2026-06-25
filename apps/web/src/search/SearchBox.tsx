@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { useSearch, useSpaces } from "../data/queries";
+import { useSearch, useSpaces, useAccountSettings } from "../data/queries";
+import { resolveKey, eventMatches } from "../app/keybindings";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from "../components/ui/command";
 
@@ -18,6 +19,7 @@ export function SearchBox() {
   const debounced = useDebouncedValue(input, 250);
   const { data: hits, isFetching } = useSearch(debounced);
   const spaces = useSpaces();
+  const focusChord = resolveKey("search.focus", useAccountSettings().data?.keybindings); // ADR-021 (default Mod-k)
 
   const spaceName = useMemo(() => {
     const m = new Map<string, string>();
@@ -37,17 +39,17 @@ export function SearchBox() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // If something already handled Ctrl/Cmd+K (e.g. the editor's slash palette uses
+      // If something already handled the chord (e.g. the editor's slash palette consumes
       // it for nav while open, calling preventDefault), don't also open search.
       if (e.defaultPrevented) return;
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if (eventMatches(e, focusChord)) {
         e.preventDefault();
         document.querySelector<HTMLInputElement>("[data-testid=search-input]")?.focus();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [focusChord]);
 
   const open = input.trim().length > 0;
 

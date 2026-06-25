@@ -10,6 +10,7 @@ import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
 import { useAccountSettings, useUpdateAccountSettings, useUploadAvatar, useRemoveAvatar } from "../data/queries";
+import { COMMANDS, resolveKey, chordFromEvent, displayChord, validateAssignment, type Keybindings, type CommandDef } from "../app/keybindings";
 import { SettingsShell, type SettingsTab } from "./SettingsShell";
 
 // Personal account settings (ADR-020, Design-6). Self-scope: the server keys every
@@ -116,15 +117,62 @@ function ProfileTab() {
   );
 }
 
+// One remappable shortcut (ADR-021). "Change" captures the next chord via event.code
+// (capture phase, so it beats the app's own handlers + vim); validates client-side
+// (mirrors the server bastion) and saves the override; "Reset" clears it.
+function ShortcutRow({ cmd, keybindings, onSave, onReset }: { cmd: CommandDef; keybindings: Keybindings; onSave: (id: string, chord: string) => void; onReset: (id: string) => void }) {
+  const { t } = useTranslation();
+  const [capturing, setCapturing] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const current = resolveKey(cmd.id, keybindings);
+  const overridden = keybindings[cmd.id] != null;
+
+  useEffect(() => {
+    if (!capturing) return;
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") { setCapturing(false); setErr(null); return; }
+      const chord = chordFromEvent(e);
+      if (!chord) return; // modifier-only — keep waiting for a real key
+      const error = validateAssignment(cmd.id, chord, keybindings);
+      if (error) { setErr(error); return; }
+      setCapturing(false);
+      setErr(null);
+      onSave(cmd.id, chord);
+    };
+    window.addEventListener("keydown", onKey, true); // capture phase: beat app/vim handlers
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [capturing, cmd.id, keybindings, onSave]);
+
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2" data-testid={`kb-row-${cmd.id}`}>
+      <span className="text-sm">{t(cmd.labelKey)}</span>
+      <div className="flex items-center gap-2">
+        {capturing ? (
+          <span className={`text-xs ${err ? "text-[var(--danger)]" : "text-fg-dim"}`} data-testid="kb-capturing">{err ? t(err) : t("account.kbPress")}</span>
+        ) : (
+          <kbd className="rounded border border-border bg-panel-2 px-1.5 py-0.5 text-xs" data-testid={`kb-current-${cmd.id}`}>{displayChord(current)}</kbd>
+        )}
+        <Button size="sm" onClick={() => { setErr(null); setCapturing((c) => !c); }} data-testid={`kb-change-${cmd.id}`}>{capturing ? t("common.cancel") : t("account.kbChange")}</Button>
+        {overridden && !capturing && <Button size="sm" variant="ghost" onClick={() => onReset(cmd.id)} data-testid={`kb-reset-${cmd.id}`}>{t("account.kbReset")}</Button>}
+      </div>
+    </div>
+  );
+}
+
 function EditorTab() {
   const { t } = useTranslation();
   const settings = useAccountSettings();
   const update = useUpdateAccountSettings();
   const mode = settings.data?.editorKeymap ?? "local";
+  const kb = settings.data?.keybindings ?? {};
   // Startup-mode preference (cross-device, server). 'local' follows this device's last
   // toolbar toggle; 'vim'/'default' force the startup state. The toolbar toggle
   // (Ctrl+Alt+V) still switches within a session regardless.
   const choose = (m: "local" | "vim" | "default") => update.mutate({ editorKeymap: m });
+  const saveKb = (id: string, chord: string) => update.mutate({ keybindings: { ...kb, [id]: chord } });
+  const resetKb = (id: string) => { const next = { ...kb }; delete next[id]; update.mutate({ keybindings: next }); };
   return (
     <div className="max-w-[560px] px-6 py-8" data-testid="account-editor">
       <h2 className="mt-0 text-foreground">{t("accountNav.editor")}</h2>
@@ -144,6 +192,14 @@ function EditorTab() {
           </Button>
         ))}
       </div>
+
+      <section className="mt-8">
+        <label className="mb-1 block text-sm font-medium">{t("account.shortcuts")}</label>
+        <p className="mb-2 text-xs text-fg-dim">{t("account.shortcutsHint")}</p>
+        <div className="flex flex-col gap-2">
+          {COMMANDS.map((c) => <ShortcutRow key={c.id} cmd={c} keybindings={kb} onSave={saveKb} onReset={resetKb} />)}
+        </div>
+      </section>
     </div>
   );
 }
