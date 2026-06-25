@@ -1,0 +1,57 @@
+/* Macro rich-edit modal (ADR-022). A plain-DOM overlay appended to <body> — OUTSIDE
+   CodeMirror — into which a macro mounts its own editor (React for Excalidraw). Kept
+   here (global) rather than the CM base theme because it is not a CM-managed element. */
+.wks-macro-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+.wks-macro-modal-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 92vw);
+  height: min(760px, 88vh);
+  background: var(--panel, #fff);
+  color: var(--fg, #111);
+  border: 1px solid var(--border, #ccc);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.wks-macro-modal-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border, #eee);
+}
+.wks-macro-modal-title {
+  font-weight: 600;
+  font-size: 0.95em;
+}
+.wks-macro-modal-btn {
+  border: 1px solid var(--border, #ccc);
+  border-radius: 6px;
+  background: var(--panel-2, #f4f4f5);
+  color: inherit;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+.wks-macro-modal-save {
+  background: var(--accent, #4ea1ff);
+  border-color: var(--accent, #4ea1ff);
+  color: #fff;
+}
+.wks-macro-modal-content {
+  flex: 1;
+  min-height: 0;
+  position: relative; /* Excalidraw fills its sized container */
+}
+.wks-macro-modal-content .excalidraw {
+  height: 100%;
+}

@@ -45,6 +45,13 @@ describe("macro registry", () => {
     expect(findDirectiveMacro("nope")).toBeUndefined();
   });
 
+  it("registers the excalidraw fence macro with a modal richEditUI", () => {
+    const m = findFenceMacro("excalidraw");
+    expect(m).toBeDefined();
+    expect(m!.exportFidelity).toBe("preserve");
+    expect(m!.richEditUI?.present).toBe("modal"); // mouse edit = modal (React out of CM)
+  });
+
   it("rejects a duplicate directive registration", () => {
     expect(() => registerMacro(calloutMacro)).toThrow(/duplicate/);
   });

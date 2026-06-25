@@ -5,6 +5,7 @@ import "./i18n"; // initialize i18next before the app renders
 import "@fontsource/plus-jakarta-sans/600.css"; // brand wordmark (OFL); self-hosted
 import "./styles/tokens.css";
 import "./styles/print.css";
+import "./styles/macro-modal.css";
 
 // StrictMode is intentional: it double-invokes effects in dev, which exercises
 // the <Editor/> connect/destroy/reconnect path and surfaces any WS leak or ghost
