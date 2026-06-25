@@ -928,17 +928,23 @@ export const livePreviewTheme = EditorView.baseTheme({
     cursor: "row-resize",
     zIndex: "3",
   },
-  // Spreadsheet-style select handles (top row / left column).
+  // Spreadsheet select-handle band (top row / left column) — visually distinct from cells.
   ".cm-lp-table-handle": {
-    background: "var(--panel-2, rgba(127,127,127,0.18))",
+    background: "var(--panel-2, rgba(127,127,127,0.22))",
     border: "1px solid var(--border, #888)",
-    padding: "2px",
-    minWidth: "10px",
+    padding: "0",
     cursor: "pointer",
-    position: "relative",
   },
   ".cm-lp-table-handle:hover": { background: "var(--accent, #4ea1ff)" },
-  ".cm-lp-cell-sel": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "-2px", background: "rgba(78,161,255,0.15)" },
+  ".cm-lp-table-colhandle": { height: "12px" },
+  ".cm-lp-table-rowhandle": { width: "14px" },
+  ".cm-lp-table-corner": { width: "14px", height: "12px" },
+  // Selection: light fill on each cell; a thick accent border only on the OUTER edges.
+  ".cm-lp-cell-sel": { background: "rgba(78,161,255,0.15)" },
+  ".cm-lp-sel-t": { borderTop: "2px solid var(--accent, #4ea1ff)" },
+  ".cm-lp-sel-b": { borderBottom: "2px solid var(--accent, #4ea1ff)" },
+  ".cm-lp-sel-l": { borderLeft: "2px solid var(--accent, #4ea1ff)" },
+  ".cm-lp-sel-r": { borderRight: "2px solid var(--accent, #4ea1ff)" },
   ".cm-lp-table-swatch": {
     flex: "0 0 auto",
     width: "18px",

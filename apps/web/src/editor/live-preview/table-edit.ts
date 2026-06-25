@@ -95,7 +95,17 @@ export class TableEditWidget extends WidgetType {
     let anchor: [number, number] = [0, 0];
 
     const applySel = () => {
-      for (const [k, el] of cellEls) el.classList.toggle("cm-lp-cell-sel", selected.has(k));
+      // Light fill on every selected cell; a thick accent border ONLY on the selection's
+      // OUTER edges (a side whose neighbor isn't selected) — the spreadsheet look (#3).
+      for (const [k, el] of cellEls) {
+        const sel = selected.has(k);
+        el.classList.toggle("cm-lp-cell-sel", sel);
+        const [r, c] = k.split(",").map(Number) as [number, number];
+        el.classList.toggle("cm-lp-sel-t", sel && !selected.has(`${r - 1},${c}`));
+        el.classList.toggle("cm-lp-sel-b", sel && !selected.has(`${r + 1},${c}`));
+        el.classList.toggle("cm-lp-sel-l", sel && !selected.has(`${r},${c - 1}`));
+        el.classList.toggle("cm-lp-sel-r", sel && !selected.has(`${r},${c + 1}`));
+      }
       updateToolbar();
     };
     const setRect = (r1: number, c1: number, r2: number, c2: number) => {
@@ -131,8 +141,12 @@ export class TableEditWidget extends WidgetType {
     const table = document.createElement("table");
     table.className = "cm-lp-table cm-lp-table-merged cm-lp-table-grid";
 
-    // Spreadsheet-style handle row: corner (select all) + one handle per column (click =
-    // select column; right border = drag column width).
+    // Columns/rows affected by a border drag: if the dragged cell is part of a multi-cell
+    // selection, resize ALL selected columns/rows uniformly; otherwise just this one.
+    const dragCols = (c: number) => { const sset = new Set(coords().map(([, cc]) => cc)); return selected.has(`${anchor[0]},${c}`) && sset.size > 1 ? [...sset] : [c]; };
+    const dragRows = (r: number) => { const sset = new Set(coords().map(([rr]) => rr)); return selected.has(`${r},${anchor[1]}`) && sset.size > 1 ? [...sset] : [r]; };
+
+    // Spreadsheet handle band: corner (select all) + a select handle per column.
     const htr = document.createElement("tr");
     const corner = document.createElement("th");
     corner.className = "cm-lp-table-handle cm-lp-table-corner";
@@ -141,22 +155,19 @@ export class TableEditWidget extends WidgetType {
     htr.appendChild(corner);
     for (let c = 0; c < ncols; c++) {
       const ch = document.createElement("th");
-      ch.className = "cm-lp-table-handle";
+      ch.className = "cm-lp-table-handle cm-lp-table-colhandle";
       ch.setAttribute("data-testid", "table-col-select-" + c);
       ch.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); selectCol(c); });
-      ch.appendChild(resizeHandle("cm-lp-col-resize", "table-col-resize-" + c, (e) => dragSize(e, "x", cellEls.get(`0,${c}`) ?? ch, (px) => applyColWidth(c, px + "px"))));
       htr.appendChild(ch);
     }
     table.appendChild(htr);
 
     this.grid.forEach((row, r) => {
       const trow = document.createElement("tr");
-      // Row handle: click = select row; bottom border = drag row height.
       const rh = document.createElement("th");
-      rh.className = "cm-lp-table-handle";
+      rh.className = "cm-lp-table-handle cm-lp-table-rowhandle";
       rh.setAttribute("data-testid", "table-row-select-" + r);
       rh.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); selectRow(r); });
-      rh.appendChild(resizeHandle("cm-lp-row-resize", "table-row-resize-" + r, (e) => dragSize(e, "y", cellEls.get(`${r},0`) ?? rh, (px) => applyRowHeight(r, px + "px"))));
       trow.appendChild(rh);
       row.forEach((cell, c) => {
         if (!cell) return; // covered position
@@ -168,6 +179,11 @@ export class TableEditWidget extends WidgetType {
         const key = `${r},${c}`;
         el.dataset.cellkey = key;
         cellEls.set(key, el);
+        // Resize on the cell BORDERS (#1): right edge = column width, bottom edge = row
+        // height. The interior is for drag-select. Border handles stopPropagation so they
+        // never start a selection. testid only on the representative cell per col/row.
+        el.appendChild(resizeHandle("cm-lp-col-resize", r === 0 ? "table-col-resize-" + c : "", (e) => dragSize(e, "x", el, (px) => applyColWidths(dragCols(c), px + "px"))));
+        el.appendChild(resizeHandle("cm-lp-row-resize", c === 0 ? "table-row-resize-" + r : "", (e) => dragSize(e, "y", el, (px) => applyRowHeights(dragRows(r), px + "px"))));
         // Rectangular drag-select: pointerdown anchors here; moving extends the rectangle.
         el.addEventListener("pointerdown", (e) => {
           e.preventDefault();
@@ -228,18 +244,16 @@ export class TableEditWidget extends WidgetType {
       }
       apply(next);
     };
-    // Set a column's width on its header cell (browsers apply it to the column).
-    const applyColWidth = (c: number, width: string) => {
+    // Set width on each given column's header cell (browsers apply it to the column).
+    const applyColWidths = (cols: number[], width: string) => {
       const next: Grid = this.grid.map((row) => row.map((cell) => (cell ? { ...cell, style: cell.style ? { ...cell.style } : undefined } : null)));
-      const head = next[0]?.[c];
-      if (head) head.style = { ...(head.style ?? {}), width };
+      for (const c of cols) { const head = next[0]?.[c]; if (head) head.style = { ...(head.style ?? {}), width }; }
       apply(next);
     };
-    // Set a row's height on its first cell (browsers apply it to the row).
-    const applyRowHeight = (r: number, height: string) => {
+    // Set height on each given row's first cell (browsers apply it to the row).
+    const applyRowHeights = (rows: number[], height: string) => {
       const next: Grid = this.grid.map((row) => row.map((cell) => (cell ? { ...cell, style: cell.style ? { ...cell.style } : undefined } : null)));
-      const first = (next[r] ?? []).find((cell): cell is NonNullable<typeof cell> => !!cell);
-      if (first) first.style = { ...(first.style ?? {}), height };
+      for (const r of rows) { const first = (next[r] ?? []).find((cell): cell is NonNullable<typeof cell> => !!cell); if (first) first.style = { ...(first.style ?? {}), height }; }
       apply(next);
     };
     // Toggle the selected cells between header (<th>) and data (<td>). A header in a body
