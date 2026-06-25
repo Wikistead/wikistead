@@ -12,43 +12,52 @@ import { colorFromString } from "../ui/avatar";
 
 // Persisted vim-keymap preference for the single edit surface (Step I). Replaces the
 // old single/split layout preference; vim is now a keymap toggle on the one surface.
+const KEYMAP_LS = "wks.editorVim";
+const readLocalVim = () => { try { return localStorage.getItem(KEYMAP_LS) === "1"; } catch { return false; } };
+const writeLocalVim = (on: boolean) => { try { localStorage.setItem(KEYMAP_LS, on ? "1" : "0"); } catch { /* no storage */ } };
+
 // Guest editor keymap (share-link, no member row): localStorage only — there is no
 // server profile to sync to.
 function useVimPref(): [boolean, () => void] {
-  const [vim, setVim] = useState(() => {
-    try { return localStorage.getItem("wks.editorVim") === "1"; } catch { return false; }
-  });
-  const toggle = () => setVim((v) => {
-    const n = !v;
-    try { localStorage.setItem("wks.editorVim", n ? "1" : "0"); } catch { /* no storage */ }
-    return n;
-  });
+  const [vim, setVim] = useState(readLocalVim);
+  const toggle = useCallback(() => setVim((v) => { writeLocalVim(!v); return !v; }), []);
   return [vim, toggle];
 }
 
-// Member editor keymap (ADR-020 D4). The cross-device DEFAULT is the server pref
-// (set on the Account → Editor page); the toolbar toggle here is a DEVICE-LOCAL quick
-// switch (localStorage) — a quick flip on one machine must not silently change the
-// user's other devices, and it keeps the toggle instant + offline-safe. Effective on
-// load = localStorage (this device's choice, if any) ?? server default ?? default.
-const KEYMAP_LS = "wks.editorVim";
-const hasLocalKeymap = () => { try { return localStorage.getItem(KEYMAP_LS) != null; } catch { return false; } };
+// Member editor keymap (ADR-020 D4 + the startup-mode setting). The cross-device pref is
+// a MODE chosen on Account → Editor: 'vim' (always start vim) / 'default' (always start
+// off) / 'local' (follow this device's last toolbar toggle, via localStorage). The
+// toolbar toggle is always a DEVICE-LOCAL session switch (writes localStorage); for the
+// 'vim'/'default' modes startup ignores it (the mode wins), for 'local' it is the source.
 function useEditorKeymap(): [boolean, () => void] {
   const settings = useAccountSettings();
-  const [vim, setVim] = useState(() => { try { return localStorage.getItem(KEYMAP_LS) === "1"; } catch { return false; } });
-  const serverKeymap = settings.data?.editorKeymap;
+  const [vim, setVim] = useState(readLocalVim);
+  const mode = settings.data?.editorKeymap; // 'vim' | 'default' | 'local' | undefined (loading)
   useEffect(() => {
-    // Adopt the server default only when this device has no local choice yet (so a new
-    // device picks up the synced pref; a device the user already toggled keeps its choice).
-    if (!serverKeymap || hasLocalKeymap()) return;
-    setVim(serverKeymap === "vim");
-  }, [serverKeymap]);
-  const toggle = () => setVim((v) => {
-    const n = !v;
-    try { localStorage.setItem(KEYMAP_LS, n ? "1" : "0"); } catch { /* no storage */ }
-    return n;
-  });
+    if (!mode) return;
+    if (mode === "vim") setVim(true);
+    else if (mode === "default") setVim(false);
+    else setVim(readLocalVim()); // 'local'
+  }, [mode]);
+  const toggle = useCallback(() => setVim((v) => { writeLocalVim(!v); return !v; }), []);
   return [vim, toggle];
+}
+
+// Ctrl+Alt+V toggles vim for the current session (#2). A modifier combo vim/the browser
+// don't claim, and it doesn't collide with the app's `/` `\` Ctrl-j/k Ctrl-k bindings.
+// Window-level so it works whatever has focus while editing; display/editor-core safe.
+function useVimToggleShortcut(toggle: () => void, enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey && (e.code === "KeyV" || e.key.toLowerCase() === "v")) {
+        e.preventDefault();
+        toggle();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggle, enabled]);
 }
 import { PageToolbar } from "./PageToolbar";
 import { PageTitle } from "./PageTitle";
@@ -186,7 +195,8 @@ function PageRoute() {
   // Navigating to another page opens it in READ mode (unless ?edit=1) — PageRoute is
   // not remounted on a param change, so reset editing when the page changes.
   useEffect(() => { setEditing(autoEdit); dirtySig.set(false); }, [pageId, autoEdit, dirtySig]);
-  const [vim, toggleVim] = useEditorKeymap(); // member: server-synced, localStorage-hydrated
+  const [vim, toggleVim] = useEditorKeymap(); // member: startup-mode pref + device-local toggle
+  useVimToggleShortcut(toggleVim, editing); // Ctrl+Alt+V (#2), only while editing
   // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
   const publishState = !canEdit ? null : published?.publishedMd == null ? "draft" : published?.hasUnpublishedChanges ? "unpublished" : null;
 
@@ -330,6 +340,7 @@ function GuestPage({ minted }: { minted: GuestToken }) {
   const canEdit = capability === "edit";
   const [editing, setEditing] = useState(false);
   const [vim, toggleVim] = useVimPref();
+  useVimToggleShortcut(toggleVim, editing); // Ctrl+Alt+V (#2)
 
   const reloadPublished = useCallback(() => {
     apiFetch<{ publishedMd: string | null }>(`/pages/${encodeURIComponent(pageId)}/published`, token)

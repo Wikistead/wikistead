@@ -20,7 +20,7 @@ import { SettingsShell, type SettingsTab } from "./SettingsShell";
 function useAccountTabs(): SettingsTab[] {
   const { t } = useTranslation();
   return [
-    { key: "profile", label: t("accountNav.profile"), to: "/settings/account" },
+    { key: "profile", label: t("accountNav.profile"), to: "/settings/account", end: true },
     { key: "editor", label: t("accountNav.editor"), to: "/settings/account/editor" },
     { key: "theme", label: t("accountNav.theme"), to: "/settings/account/theme" },
   ];
@@ -120,29 +120,27 @@ function EditorTab() {
   const { t } = useTranslation();
   const settings = useAccountSettings();
   const update = useUpdateAccountSettings();
-  const keymap = settings.data?.editorKeymap ?? "default";
-  // Writes the cross-device default (server) AND this device's local cache, so the editor
-  // on this device reflects the choice on its next mount (the toolbar toggle is otherwise
-  // device-local — ADR-020 D4).
-  const choose = (km: "default" | "vim") => {
-    try { localStorage.setItem("wks.editorVim", km === "vim" ? "1" : "0"); } catch { /* no storage */ }
-    update.mutate({ editorKeymap: km });
-  };
+  const mode = settings.data?.editorKeymap ?? "local";
+  // Startup-mode preference (cross-device, server). 'local' follows this device's last
+  // toolbar toggle; 'vim'/'default' force the startup state. The toolbar toggle
+  // (Ctrl+Alt+V) still switches within a session regardless.
+  const choose = (m: "local" | "vim" | "default") => update.mutate({ editorKeymap: m });
   return (
     <div className="max-w-[560px] px-6 py-8" data-testid="account-editor">
       <h2 className="mt-0 text-foreground">{t("accountNav.editor")}</h2>
       <label className="mb-1 block text-sm font-medium">{t("account.keymap")}</label>
       <p className="mb-2 text-xs text-fg-dim">{t("account.keymapHint")}</p>
-      <div className="flex gap-2">
-        {(["default", "vim"] as const).map((km) => (
+      <div className="flex flex-col gap-2">
+        {(["local", "vim", "default"] as const).map((m) => (
           <Button
-            key={km}
-            variant={keymap === km ? "primary" : "default"}
-            onClick={() => choose(km)}
-            data-testid={`account-keymap-${km}`}
-            aria-pressed={keymap === km}
+            key={m}
+            variant={mode === m ? "primary" : "default"}
+            onClick={() => choose(m)}
+            data-testid={`account-keymap-${m}`}
+            aria-pressed={mode === m}
+            className="justify-start"
           >
-            {t(`account.keymap_${km}`)}
+            {t(`account.keymap_${m}`)}
           </Button>
         ))}
       </div>

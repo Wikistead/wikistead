@@ -67,9 +67,11 @@ describe('account settings (ADR-020)', () => {
     expect(after.oidcDisplayName).toBe('New IdP Name')
   })
 
-  it('keymap round-trips and rejects an invalid value', async () => {
-    expect((await updateAccountSettings(db, { subject: SUB_A, editorKeymap: 'vim' })).editorKeymap).toBe('vim')
-    expect((await getAccountSettings(db, { subject: SUB_A })).editorKeymap).toBe('vim')
+  it('keymap mode round-trips (default/vim/local), defaults to local, rejects invalid', async () => {
+    expect((await getAccountSettings(db, { subject: SUB_B })).editorKeymap).toBe('local') // null → 'local'
+    for (const m of ['vim', 'default', 'local'] as const) {
+      expect((await updateAccountSettings(db, { subject: SUB_A, editorKeymap: m })).editorKeymap).toBe(m)
+    }
     await expect(updateAccountSettings(db, { subject: SUB_A, editorKeymap: 'emacs' })).rejects.toMatchObject({ statusCode: 400 })
   })
 
@@ -77,7 +79,7 @@ describe('account settings (ADR-020)', () => {
     await updateAccountSettings(db, { subject: SUB_A, displayNameOverride: 'Only A', editorKeymap: 'vim' })
     const b = await getAccountSettings(db, { subject: SUB_B })
     expect(b.displayNameOverride).toBeNull() // B untouched
-    expect(b.editorKeymap).toBe('default')
+    expect(b.editorKeymap).toBe('local')
   })
 
   it('avatar: a PNG is accepted; SVG and oversize are rejected; clear removes it', async () => {
