@@ -407,8 +407,9 @@ body {
   min-height: 0;
   overflow: auto;
 }
-/* Small clearance ONLY at the very end of the document so the last line can scroll just
-   clear of the bottom-corner floating controls — small enough not to read as an empty
-   band that shrinks the page. The controls are translucent, so minor overlap mid-scroll
-   is fine. */
-.lp-editor-host .cm-content { padding-bottom: 1.5rem; }
+/* Clearance at the very end of the document so the LAST line can scroll clear of the
+   bottom-corner floating controls (VIM toggle / ACTIONS, ~52px band). This must match the
+   editor's bottom scrollMargin (72px) — the margin lifts the caret above the band, and
+   this padding gives the scroll room to do so on the last line (scrollMargin alone can't,
+   as there's nothing below the last line to scroll into view). #6. */
+.lp-editor-host .cm-content { padding-bottom: 4.5rem; }
