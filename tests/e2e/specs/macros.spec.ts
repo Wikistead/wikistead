@@ -13,12 +13,12 @@ test("```mermaid macro: renders, folds/expands, round-trips raw source", async (
   await enterEdit(page);
 
   await page.click("[data-pane=preview] .cm-content");
-  // A mermaid fence, then a line below so the caret ends off the block (→ it renders,
-  // not revealed).
-  for (const line of ["```mermaid", "graph TD; A-->B;", "```", "", "below the diagram"]) {
-    await page.keyboard.type(line);
-    await page.keyboard.press("Enter");
-  }
+  // A mermaid fence, then a line below so the caret ends off the block (→ it renders).
+  // `flowchart TD` (multi-line) renders in mermaid 11.15.0; the old one-liner
+  // `graph TD; A-->B;` is rejected by this version as a syntax error (→ error block, no
+  // <svg>), which made this spec perennially flaky — NOT a real macro regression. Built via
+  // insertText (paste-like): per-char typing mangles the body (auto-pairs on `-->`/indent).
+  await page.keyboard.insertText("```mermaid\nflowchart TD\n  A --> B\n```\n\nbelow the diagram\n");
   await sleep(400);
 
   // liveRender: the macro widget mounts and mermaid (lazy-loaded) draws an <svg>.
@@ -47,7 +47,7 @@ test("```mermaid macro: renders, folds/expands, round-trips raw source", async (
   expect(await page.locator("[data-pane=preview] [data-testid=macro-mermaid]").count()).toBe(0);
   const text = await page.locator("[data-pane=preview] .cm-content").innerText();
   expect(text).toContain("```mermaid");
-  expect(text).toContain("graph TD; A-->B;");
+  expect(text).toContain("flowchart TD");
 });
 
 // #3: an EMPTY macro (mermaid renders nothing for an empty body) must still show a
