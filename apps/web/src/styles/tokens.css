@@ -373,4 +373,7 @@ body {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* Clearance so a long document's last lines scroll ABOVE the bottom-corner floating
+     controls (actions / vim) instead of hiding behind them (the FAB-overlap problem). */
+  padding-bottom: 4.5rem;
 }

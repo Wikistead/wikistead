@@ -59,7 +59,7 @@ function useVimToggleShortcut(toggle: () => void, enabled: boolean) {
     return () => window.removeEventListener("keydown", onKey);
   }, [toggle, enabled]);
 }
-import { PageToolbar } from "./PageToolbar";
+import { PageStatus, PageVim, PageActions, PageControlsMobile, useMediaQuery, type PageControlsProps } from "./PageControls";
 import { PageTitle } from "./PageTitle";
 import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
@@ -197,6 +197,7 @@ function PageRoute() {
   useEffect(() => { setEditing(autoEdit); dirtySig.set(false); }, [pageId, autoEdit, dirtySig]);
   const [vim, toggleVim] = useEditorKeymap(); // member: startup-mode pref + device-local toggle
   useVimToggleShortcut(toggleVim, editing); // Ctrl+Alt+V (#2), only while editing
+  const isDesktop = useMediaQuery("(min-width: 768px)"); // 3 floating groups vs one ⋯
   // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
   const publishState = !canEdit ? null : published?.publishedMd == null ? "draft" : published?.hasUnpublishedChanges ? "unpublished" : null;
 
@@ -241,40 +242,47 @@ function PageRoute() {
     );
   }
   const docName = `t:${tenantId}:p:${pageId}`;
+  // One props bag drives the floating control groups (status / actions / vim) and the
+  // mobile ⋯ — same handlers as the old toolbar, only relocated (behaviour unchanged).
+  const controls: PageControlsProps = {
+    canEdit,
+    editing,
+    onEdit: () => setEditing(true),
+    onDone: () => setEditing(false),
+    publishState,
+    canPublish: !!published?.hasUnpublishedChanges,
+    onPublish: canEdit ? publishPage : undefined,
+    publishing: publish.isPending,
+    vim,
+    onToggleVim: toggleVim,
+    onShare: () => setSharing(true),
+    commentsOpen,
+    onToggleComments: toggleComments,
+    openComments,
+    onHistory: toggleHistory,
+    onExport: () => { if (pageId) void downloadPageExport(token, pageId); },
+    onPrint: () => window.print(),
+    onPermissions: page?.canManage ? () => setPermsOpen(true) : undefined,
+    dirtySignal: dirtySig,
+  };
   return (
     <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
       <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-          <PageToolbar
-            canEdit={canEdit}
-            editing={editing}
-            onEdit={() => setEditing(true)}
-            onDone={() => setEditing(false)}
-            publishState={publishState}
-            canPublish={!!published?.hasUnpublishedChanges}
-            onPublish={canEdit ? publishPage : undefined}
-            publishing={publish.isPending}
-            vim={vim}
-            onToggleVim={toggleVim}
-            onShare={() => setSharing(true)}
-            commentsOpen={commentsOpen}
-            onToggleComments={toggleComments}
-            openComments={openComments}
-            onHistory={toggleHistory}
-            onExport={() => { if (pageId) void downloadPageExport(token, pageId); }}
-            onPrint={() => window.print()}
-            onPermissions={page?.canManage ? () => setPermsOpen(true) : undefined}
-            dirtySignal={dirtySig}
-          />
           <PageTitle
+            editing={editing}
             title={page?.title ?? ""}
             onRename={canEdit && spaceId ? (title) => renamePage.mutate({ pageId: pageId!, spaceId, title }, {
               onSuccess: () => notify.success(t("toast.saved")),
               onError: () => notify.error(t("toast.actionFailed")),
             }) : undefined}
           />
-          <div style={{ flex: 1, minHeight: 0 }}>
+          {/* STATUS group floats under the title, right-aligned (same 740 column). */}
+          {isDesktop && <div className="mx-auto flex w-full max-w-[740px] justify-end px-6"><PageStatus {...controls} /></div>}
+          {/* Editor area is the positioning context for the floating ACTIONS/VIM groups. */}
+          <div className="relative" style={{ flex: 1, minHeight: 0 }}>
             <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
+            {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
           </div>
           {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
         </div>
@@ -341,6 +349,7 @@ function GuestPage({ minted }: { minted: GuestToken }) {
   const [editing, setEditing] = useState(false);
   const [vim, toggleVim] = useVimPref();
   useVimToggleShortcut(toggleVim, editing); // Ctrl+Alt+V (#2)
+  const isDesktop = useMediaQuery("(min-width: 768px)");
 
   const reloadPublished = useCallback(() => {
     apiFetch<{ publishedMd: string | null }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
@@ -362,22 +371,23 @@ function GuestPage({ minted }: { minted: GuestToken }) {
     reloadPublished();
   };
 
+  const controls: PageControlsProps = {
+    canEdit,
+    editing,
+    onEdit: () => setEditing(true),
+    onDone: () => setEditing(false),
+    vim,
+    onToggleVim: toggleVim,
+    canPublish: true,
+    onPublish: canEdit ? () => void onPublish() : undefined,
+    publishing,
+  };
   return (
     <AppShell>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-        <PageToolbar
-          canEdit={canEdit}
-          editing={editing}
-          onEdit={() => setEditing(true)}
-          onDone={() => setEditing(false)}
-          vim={vim}
-          onToggleVim={toggleVim}
-          canPublish
-          onPublish={canEdit ? () => void onPublish() : undefined}
-          publishing={publishing}
-        />
-        <div style={{ flex: 1, minHeight: 0 }}>
+        <div className="relative" style={{ flex: 1, minHeight: 0 }}>
           <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} />
+          {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
         </div>
       </div>
     </AppShell>
