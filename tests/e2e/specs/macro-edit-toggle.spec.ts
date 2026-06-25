@@ -55,3 +55,30 @@ test("vim→non-vim renders a non-rich (mermaid) macro under the caret, no caret
   await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "false");
   await expect(page.locator("[data-pane=preview] [data-testid=macro-mermaid]")).toBeVisible({ timeout: 15000 });
 });
+
+// ADR-024 Q1: Ctrl+Enter "enters" the macro atom at the caret (the keyboard path; vim
+// users never need the mouse). For an inline macro (table) entering opens the cell-edit
+// widget. (Additive first brick of the atom model — auto-reveal removal comes later.)
+test("vim Ctrl+Enter enters the macro atom at the caret (table → cell edit)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "ctrlenter");
+  await enterEdit(page);
+  await page.getByTestId("vim-toggle").click();
+  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "true");
+
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("i");
+  for (const line of [":::table", "<table><tr><td>1</td><td>2</td></tr></table>", ":::", "", "tail"]) {
+    await page.keyboard.type(line);
+    await page.keyboard.press("Enter");
+  }
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("g");
+  await page.keyboard.press("g"); // caret onto the table atom
+  await sleep(250);
+  expect(await page.getByTestId("table-edit").count()).toBe(0); // not yet entered
+  await page.keyboard.press("Control+Enter");
+  await sleep(250);
+  await expect(page.getByTestId("table-edit")).toBeVisible(); // entered → cell-edit widget
+});

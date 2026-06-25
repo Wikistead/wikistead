@@ -7,7 +7,7 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme } from "../macros/registry";
-import { fenceLang, fenceBody, macroFenceAt, tableBlockAt } from "../macros/fence";
+import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
 import { openMacroModal } from "./macro-modal";
@@ -784,6 +784,38 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   }
   return tr;
 });
+
+// ADR-024: "enter" a macro atom at a position — the explicit way to start editing a macro
+// (Ctrl+Enter in vim, click with the mouse). A modal macro (Excalidraw) opens its modal;
+// an inline/source macro becomes render-active (table → the cell-edit widget; mermaid /
+// callout → revealed source via macroRenderActiveField). Returns true if a macro was
+// entered. Display-only: the document is untouched; presence/collab unaffected.
+export function enterMacroAt(view: EditorView, pos: number): boolean {
+  if (view.state.readOnly) return false;
+  const fence = macroFenceAt(view.state, pos);
+  if (fence) {
+    if (fence.macro.richEditUI?.present === "modal") {
+      openMacroModal(view, fence.macro, () => fence.from, currentMacroTheme());
+    } else {
+      view.dispatch({ selection: EditorSelection.cursor(fence.from), effects: setMacroRenderActive.of({ from: fence.from, to: fence.to }) });
+      view.focus();
+    }
+    return true;
+  }
+  const dir = directiveMacroAt(view.state, pos);
+  if (dir) {
+    view.dispatch({ selection: EditorSelection.cursor(dir.from), effects: setMacroRenderActive.of({ from: dir.from, to: dir.to }) });
+    view.focus();
+    return true;
+  }
+  return false;
+}
+
+// Ctrl+Enter (ADR-024 Q1): enter the macro atom at the caret. event.key "Enter" is
+// layout/JIS-safe. Bound via the editor keymap; remappable later (#4).
+export function enterMacroCommand(view: EditorView): boolean {
+  return enterMacroAt(view, view.state.selection.main.head);
+}
 
 // Follows a clickable link's data-href. In a READ-ONLY (view) surface a plain click
 // navigates; in the editable surface a plain click must still place the cursor (→

@@ -1,12 +1,12 @@
 import { EditorView, minimalSetup } from "codemirror";
-import { tooltips } from "@codemirror/view";
-import { EditorState, type Compartment } from "@codemirror/state";
+import { tooltips, keymap } from "@codemirror/view";
+import { EditorState, Prec, type Compartment } from "@codemirror/state";
 import { vim } from "@replit/codemirror-vim";
 import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, imageResolver, checkboxControl, type ImageResolver } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, imageResolver, checkboxControl, enterMacroCommand, type ImageResolver } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette } from "./live-preview/palette";
@@ -74,6 +74,10 @@ export function mountLivePreview(
       macroFold,
       // Inline macro edit state + Esc-exit (entered by clicking a macro — Part 11).
       macroEdit,
+      // ADR-024: Ctrl+Enter "enters" the macro atom at the caret (modal / inline cell-edit
+      // / source reveal). High prec so it beats vim's default Enter handling. event.key
+      // "Enter" is JIS-safe. Mouse users enter by clicking (decorations MacroWidget).
+      Prec.high(keymap.of([{ key: "Ctrl-Enter", run: enterMacroCommand }])),
       // Task checkboxes are interactive on the editable surface: a click flips the
       // `[ ]`/`[x]` char directly in the Y.Text (a normal draft edit). (Read-only →
       // disabled; the view surface wires its own no-revision persist below.)
