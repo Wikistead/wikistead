@@ -11,6 +11,10 @@ export interface SettingsTab {
   // A tab whose feature ships in a later subphase: shown but routed to a "coming
   // soon" placeholder, so the IA (vertical tab rail) stands before the contents do.
   soon?: boolean;
+  // Exact-match the active state. Needed for an INDEX tab whose path is a prefix of its
+  // siblings (e.g. /settings/account vs /settings/account/editor) — without it the parent
+  // tab stays highlighted on every child route.
+  end?: boolean;
 }
 
 const backLink = "mb-2 inline-flex w-fit items-center gap-1.5 rounded px-2 py-1 text-xs text-fg-dim no-underline hover:bg-panel-2 hover:text-foreground";
@@ -40,6 +44,7 @@ export function SettingsShell({
           <NavLink
             key={tab.key}
             to={tab.to}
+            end={tab.end}
             className={({ isActive }) => cn(
               "flex items-center justify-between gap-2 rounded-md px-2 py-[7px] text-sm text-foreground no-underline hover:bg-panel-2",
               isActive && "bg-panel-2 font-semibold shadow-[inset_2px_0_0_var(--accent)]",

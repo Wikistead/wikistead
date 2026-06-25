@@ -23,11 +23,17 @@ function sniffImage(b: Uint8Array): { mime: string; ext: string } | null {
   return null
 }
 
+// editorKeymap is the STARTUP-MODE preference (cross-device): how the editor opens.
+//   'vim'     — always start in vim (the toolbar toggle still switches for the session)
+//   'default' — always start in non-vim
+//   'local'   — follow this device's last toolbar choice (localStorage). Default.
+export type KeymapMode = 'default' | 'vim' | 'local'
+const KEYMAP_MODES: KeymapMode[] = ['default', 'vim', 'local']
 export interface AccountSettings {
   displayName: string | null          // effective: override ?? OIDC ?? null
   oidcDisplayName: string | null      // the IdP value (for the "reset to IdP name" label)
   displayNameOverride: string | null  // the user's override (null = using OIDC)
-  editorKeymap: 'default' | 'vim'
+  editorKeymap: KeymapMode            // startup-mode preference
   hasAvatar: boolean                  // an uploaded avatar exists (else OIDC/initials)
 }
 
@@ -40,7 +46,7 @@ export async function getAccountSettings(db: TenantDb, args: { subject: string }
     displayName: m.display_name_override ?? m.display_name ?? null,
     oidcDisplayName: m.display_name ?? null,
     displayNameOverride: m.display_name_override ?? null,
-    editorKeymap: m.editor_keymap === 'vim' ? 'vim' : 'default',
+    editorKeymap: (KEYMAP_MODES as string[]).includes(m.editor_keymap ?? '') ? (m.editor_keymap as KeymapMode) : 'local',
     hasAvatar: !!m.avatar_image_key,
   }
 }
@@ -52,7 +58,7 @@ export async function updateAccountSettings(
   db: TenantDb,
   args: { subject: string; displayNameOverride?: string | null; editorKeymap?: string },
 ): Promise<AccountSettings> {
-  if (args.editorKeymap !== undefined && args.editorKeymap !== 'default' && args.editorKeymap !== 'vim') {
+  if (args.editorKeymap !== undefined && !(KEYMAP_MODES as string[]).includes(args.editorKeymap)) {
     throw Object.assign(new Error('invalid keymap'), { statusCode: 400 })
   }
   if (args.displayNameOverride !== undefined) {

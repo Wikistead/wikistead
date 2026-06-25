@@ -247,7 +247,7 @@ export interface AccountSettings {
   displayName: string | null;         // effective: override ?? OIDC ?? null
   oidcDisplayName: string | null;     // IdP value (for the "reset to IdP name" affordance)
   displayNameOverride: string | null; // null = using the OIDC name
-  editorKeymap: "default" | "vim";
+  editorKeymap: "default" | "vim" | "local"; // startup-mode preference
   hasAvatar: boolean;
 }
 export function useAccountSettings() {
@@ -263,7 +263,7 @@ export function useUpdateAccountSettings() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { displayNameOverride?: string | null; editorKeymap?: "default" | "vim" }) =>
+    mutationFn: (body: { displayNameOverride?: string | null; editorKeymap?: "default" | "vim" | "local" }) =>
       apiFetch<AccountSettings>("/me/settings", token, { method: "PATCH", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["account-settings"] }),
   });
