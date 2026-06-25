@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, imageResolver, checkboxControl, type ImageResolver } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, imageResolver, checkboxControl, type ImageResolver } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette } from "./live-preview/palette";
@@ -15,6 +15,10 @@ import { vimExCommands } from "./live-preview/vim-ex";
 import { macroFold, autoFoldLargeFenceMacros } from "./macros";
 import { registerVimFold } from "./live-preview/vim-fold";
 import { macroEdit } from "./live-preview/macro-edit";
+
+// vim Compartment content: the keymap AND a vimEnabled flag (so the decoration builder
+// can be mode-aware — ADR-022 Part 11). Reused by mount + the Editor's vim toggle.
+export const vimCompartmentContent = (on: boolean) => (on ? [vim(), vimEnabled.of(true)] : [vimEnabled.of(false)]);
 
 // Map vim za/zo/zc onto CodeMirror fold commands (codemirror-vim omits them) so vim
 // users can fold macro blocks. Idempotent; runs once at module load.
@@ -41,13 +45,13 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; macroEditKey?: string } = {},
+  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
     doc: ytext.toString(),
     extensions: [
-      ...(opts.vimCompartment ? [opts.vimCompartment.of(opts.vim ? vim() : [])] : []),
+      ...(opts.vimCompartment ? [opts.vimCompartment.of(vimCompartmentContent(!!opts.vim))] : [vimEnabled.of(false)]),
       minimalSetup,
       // position:fixed so the palette/bubble/hint escape overflow:hidden ancestors and
       // CM flips them above/below + shifts horizontally to stay within the viewport.
@@ -62,8 +66,8 @@ export function mountLivePreview(
       // folding collapses a block to its summary line (vim za/zo). Editable surface only
       // — the fold affordance is an editing control; the published view just renders.
       macroFold,
-      // reveal↔render toggle + "<key> edit" hint for macros with a richEditUI (Part 11).
-      macroEdit(opts.macroEditKey ?? "Mod-Enter"),
+      // Inline macro edit state + Esc-exit (entered by clicking a macro — Part 11).
+      macroEdit,
       // Task checkboxes are interactive on the editable surface: a click flips the
       // `[ ]`/`[x]` char directly in the Y.Text (a normal draft edit). (Read-only →
       // disabled; the view surface wires its own no-revision persist below.)

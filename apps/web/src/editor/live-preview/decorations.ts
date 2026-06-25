@@ -13,14 +13,23 @@ import { parseDirectiveOpen } from "../macros/directive-parser";
 import { openMacroModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive } from "./macro-edit";
 import { TableEditWidget } from "./table-edit";
-import { getCM } from "@replit/codemirror-vim";
 
-// Non-vim mouse model (ADR-022 review #5): a CLICK on a table enters the rich edit mode
-// directly — no Ctrl+Enter (that key is for vim users, who lead from the keyboard). vim
-// ON → leave the click to place the caret (reveal raw source). Returns true if it entered
-// edit mode (caller should then preventDefault so the caret isn't also placed).
+// Whether the vim keymap is active. Set from the vim Compartment (Editor.tsx) so the
+// state-only decoration builder can be mode-aware (ADR-022 Part 11): non-vim renders
+// rich-editable macros always (never reveal-on-cursor); vim keeps reveal-on-cursor.
+export const vimEnabled = Facet.define<boolean, boolean>({ combine: (v) => (v.length ? v[v.length - 1]! : false) });
+
+// Reveal-on-cursor is allowed for a macro/table only when it is NOT rich-editable, OR vim
+// is on. So in non-vim, rich-editable blocks (table / :::table / Excalidraw) always render
+// and are edited by clicking; mermaid/callout (no rich editor) still reveal for source.
+function revealAllowed(state: EditorState, richEditable: boolean): boolean {
+  return !richEditable || state.facet(vimEnabled);
+}
+
+// Mode-based rich edit (ADR-022 Part 11): a CLICK on a table enters edit mode in BOTH
+// modes (the mouse is independent of vim; vim still reveals on the keyboard). Returns true
+// if it entered edit mode (caller preventDefaults so the caret isn't also placed).
 function tryEnterTableEdit(view: EditorView, pos: number): boolean {
-  if (getCM(view)) return false; // vim ON → click reveals source as before
   const tb = tableBlockAt(view.state, pos);
   if (!tb) return false;
   view.dispatch({ effects: setMacroRenderActive.of({ from: tb.from, to: tb.to }) });
@@ -317,29 +326,17 @@ class MacroWidget extends WidgetType {
       // raw source for editing. (CM maps a click on an opaque block widget to the
       // position AFTER it, which wouldn't reveal; we place it explicitly.) The fold
       // button stops propagation so its clicks don't reveal. Offset-invariant.
+      // Mode-based click launch (ADR-022 Part 11): clicking a rich-editable macro opens
+      // its editor in BOTH modes — inline (table) enters cell-edit, modal (Excalidraw)
+      // opens the modal. A macro without a richEditUI places the caret (reveal raw source).
       wrap.addEventListener("mousedown", (e) => {
         e.preventDefault();
-        // Non-vim: a click on a table macro enters edit mode directly (#5). Otherwise
-        // place the caret at the block start (reveal raw source).
-        if (this.macro.richEditUI?.present === "inline" && tryEnterTableEdit(view, view.posAtDOM(wrap))) return;
+        const present = this.macro.richEditUI?.present;
+        if (present === "modal") { openMacroModal(view, this.macro as FenceMacro, () => view.posAtDOM(wrap), currentMacroTheme()); return; }
+        if (present === "inline" && tryEnterTableEdit(view, view.posAtDOM(wrap))) return;
         view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)) });
         view.focus();
       });
-      // Rich-edit (modal) button — only for macros that declare one (e.g. Excalidraw).
-      if (this.macro.richEditUI?.present === "modal") {
-        const edit = document.createElement("button");
-        edit.type = "button";
-        edit.className = "cm-lp-macro-edit";
-        edit.title = "Edit";
-        edit.textContent = "✎";
-        edit.setAttribute("data-testid", "macro-edit");
-        edit.addEventListener("mousedown", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          openMacroModal(view, this.macro as FenceMacro, () => view.posAtDOM(wrap), currentMacroTheme());
-        });
-        wrap.appendChild(edit);
-      }
       if (this.foldable) {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -467,7 +464,9 @@ const RENDERERS: BlockRenderer[] = [
         // source (editable). Otherwise → the rendered macro (a collapsed block widget,
         // entered via blockEntry like table/image).
         if (isFolded(ctx.state, from, to)) return;
-        if (rangeRevealed(ctx.state, from, to)) return;
+        // Reveal source on the caret only when allowed (vim, or a macro with no rich
+        // editor); a rich-editable macro in non-vim always renders (#5 — click to edit).
+        if (revealAllowed(ctx.state, !!macro.richEditUI) && rangeRevealed(ctx.state, from, to)) return;
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), true), block: true }), from, to);
         return;
       }
@@ -503,7 +502,7 @@ const RENDERERS: BlockRenderer[] = [
         const from = first.from;
         const to = lastLine.to;
         if (tryTableEdit(ctx, from, to)) return; // render-active → cell-merge edit mode
-        if (rangeRevealed(ctx.state, from, to)) return;
+        if (revealAllowed(ctx.state, !!macro.richEditUI) && rangeRevealed(ctx.state, from, to)) return; // vim-only reveal for rich macros (#5)
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI }, parts.join("\n"), false), block: true }), from, to);
@@ -596,6 +595,9 @@ const RENDERERS: BlockRenderer[] = [
       // transaction filter redirects motion that would skip it INTO it, then these lines
       // are real and j/k/arrows traverse them one at a time.
       if (tryTableEdit(ctx, from, to)) return; // render-active → cell-merge edit mode (promote)
+      // GFM pipe table keeps reveal-on-cursor in BOTH modes (it's hand-typeable Markdown);
+      // a click still enters the rich edit. (Only :::table/Excalidraw — non-typeable macros
+      // — are non-vim-always-render, #5.)
       if (rangeRevealed(ctx.state, from, to)) return;
       ctx.addAtomic(Decoration.replace({ widget: new TableWidget(doc.sliceString(from, to)), block: true }), from, to);
     },
@@ -928,19 +930,23 @@ export const livePreviewTheme = EditorView.baseTheme({
     cursor: "row-resize",
     zIndex: "3",
   },
-  // Spreadsheet select-handle band (top row / left column) — visually distinct from cells.
+  // Spreadsheet select-handle band (top row / left column) — clearly NOT a cell: solid
+  // grey, no padding, fixed thin size, a grab cursor (#2).
   ".cm-lp-table-handle": {
-    background: "var(--panel-2, rgba(127,127,127,0.22))",
+    background: "var(--fg-dim, #9aa0a6)",
     border: "1px solid var(--border, #888)",
     padding: "0",
+    lineHeight: "0",
     cursor: "pointer",
+    opacity: "0.65",
   },
-  ".cm-lp-table-handle:hover": { background: "var(--accent, #4ea1ff)" },
-  ".cm-lp-table-colhandle": { height: "12px" },
-  ".cm-lp-table-rowhandle": { width: "14px" },
-  ".cm-lp-table-corner": { width: "14px", height: "12px" },
-  // Selection: light fill on each cell; a thick accent border only on the OUTER edges.
-  ".cm-lp-cell-sel": { background: "rgba(78,161,255,0.15)" },
+  ".cm-lp-table-handle:hover": { background: "var(--accent, #4ea1ff)", opacity: "1" },
+  ".cm-lp-table-colhandle": { height: "10px", minWidth: "0" },
+  ".cm-lp-table-rowhandle": { width: "12px" },
+  ".cm-lp-table-corner": { width: "12px", height: "10px" },
+  // Selection: a clearly-blue fill on each cell (#1 — must read as selected); a thick
+  // accent border only on the OUTER edges (per-side classes) — the spreadsheet look.
+  ".cm-lp-cell-sel": { background: "rgba(78,161,255,0.28)" },
   ".cm-lp-sel-t": { borderTop: "2px solid var(--accent, #4ea1ff)" },
   ".cm-lp-sel-b": { borderBottom: "2px solid var(--accent, #4ea1ff)" },
   ".cm-lp-sel-l": { borderLeft: "2px solid var(--accent, #4ea1ff)" },

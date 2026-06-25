@@ -1,15 +1,20 @@
 import { test, expect } from "@playwright/test";
 import { enterEdit, openScratch, sleep } from "../helpers";
 
-// M2 (ADR-022 Part 10): :::table renders its HTML <table> body (with colspan/rowspan)
-// as a sanitized table; the ::: fence reveals raw on the cursor; source round-trips; and
-// since it's a richEditUI=inline macro, the caret shows the "<key> edit" hint.
-test(":::table renders the HTML table (merged cell), reveals raw, round-trips, hints", async ({ browser }) => {
+// M2 (ADR-022 Part 10/11): :::table renders its HTML <table> body (colspan/rowspan) as a
+// sanitized table; in vim the caret reveals the raw source (round-trip preserved). We
+// author the :::table in VIM (reveal lets you hand-edit the source; non-vim renders
+// macros always, so it isn't hand-typed there — it's created by promoting a pipe table).
+test(":::table renders the HTML table (merged cell) and reveals raw source in vim", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "tablemacro");
   await enterEdit(page);
+  await page.getByTestId("vim-toggle").click();
+  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "true");
 
   await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("i"); // vim insert
   for (const line of [
     ":::table",
     '<table><tr><th>A</th><th>B</th></tr><tr><td colspan="2">merged</td></tr></table>',
@@ -20,21 +25,18 @@ test(":::table renders the HTML table (merged cell), reveals raw, round-trips, h
     await page.keyboard.type(line);
     await page.keyboard.press("Enter");
   }
-  await sleep(400);
+  await page.keyboard.press("Escape"); // normal; caret is below the block → it renders
+  await sleep(300);
 
-  // Renders as a sanitized table with the merged (colspan=2) cell.
   const tbl = page.locator("[data-pane=preview] [data-testid=macro-table]");
   await expect(tbl).toBeVisible();
   await expect(tbl).toContainText("merged");
   expect(await tbl.locator('td[colspan="2"]').count()).toBe(1); // the merge rendered
 
-  // vim ON: caret onto the block reveals the raw HTML source (round-trip preserved) +
-  // shows the edit hint. (Non-vim click enters edit mode instead — covered elsewhere.)
-  await page.getByTestId("vim-toggle").click();
-  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "true");
-  await tbl.click();
+  // Caret onto the block (gg) → raw HTML source revealed (round-trip preserved).
+  await page.keyboard.press("g");
+  await page.keyboard.press("g");
   await sleep(200);
-  await expect(page.getByTestId("macro-edit-hint")).toBeVisible();
   const raw = await page.locator("[data-pane=preview] .cm-content").innerText();
   expect(raw).toContain(":::table");
   expect(raw).toContain("colspan");
