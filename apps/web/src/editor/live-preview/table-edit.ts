@@ -27,6 +27,26 @@ function btn(label: string, testid: string): HTMLButtonElement {
   return b;
 }
 
+// Static, trusted inline SVG icons (no user data → innerHTML is safe here). Recognizable
+// text-align bars and cell merge/split glyphs (ADR-022 review #3).
+const I = (paths: string) => `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">${paths}</svg>`;
+const ICON: Record<string, string> = {
+  merge: I('<rect x="2" y="3.5" width="12" height="9" rx="1"/><path d="M8 3.5v9" stroke-dasharray="1.5 1.5"/><path d="M5.5 8h5M9 6l1.5 2L9 10M6.5 6L5 8l1.5 2"/>'),
+  unmerge: I('<rect x="2" y="3.5" width="12" height="9" rx="1"/><path d="M8 3.5v9"/>'),
+  alignLeft: I('<path d="M2 4h12M2 8h7M2 12h10"/>'),
+  alignCenter: I('<path d="M2 4h12M5 8h6M3 12h10"/>'),
+  alignRight: I('<path d="M2 4h12M7 8h7M4 12h10"/>'),
+};
+function svgBtn(svg: string, testid: string, title: string): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "cm-lp-table-edit-btn";
+  b.innerHTML = svg; // trusted static icon
+  b.title = title;
+  b.setAttribute("data-testid", testid);
+  return b;
+}
+
 export class TableEditWidget extends WidgetType {
   constructor(readonly grid: Grid, readonly from: number, readonly to: number) {
     super();
@@ -39,14 +59,16 @@ export class TableEditWidget extends WidgetType {
     wrap.className = "cm-lp-table-edit";
     wrap.setAttribute("data-testid", "table-edit");
 
+    // Floating contextual toolbar (ADR-022 review #1): shown near the selected cells,
+    // not as an always-on bar. Hidden until something is selected.
     const bar = document.createElement("div");
     bar.className = "cm-lp-table-edit-bar";
-    const mergeBtn = btn("Merge", "table-merge");
-    const unmergeBtn = btn("Unmerge", "table-unmerge");
-    const alignL = btn("⌫", "table-align-left");
-    const alignC = btn("≡", "table-align-center");
-    const alignR = btn("⌦", "table-align-right");
-    alignL.title = "Align left"; alignC.title = "Align center"; alignR.title = "Align right";
+    bar.style.display = "none";
+    const mergeBtn = svgBtn(ICON.merge!, "table-merge", "Merge cells");
+    const unmergeBtn = svgBtn(ICON.unmerge!, "table-unmerge", "Unmerge cells");
+    const alignL = svgBtn(ICON.alignLeft!, "table-align-left", "Align left");
+    const alignC = svgBtn(ICON.alignCenter!, "table-align-center", "Align center");
+    const alignR = svgBtn(ICON.alignRight!, "table-align-right", "Align right");
     const headerBtn = btn("H", "table-header");
     headerBtn.title = "Toggle header cells";
     const doneBtn = btn("Done", "table-done");
@@ -78,11 +100,13 @@ export class TableEditWidget extends WidgetType {
         if (cell.colspan > 1) el.colSpan = cell.colspan;
         if (cell.rowspan > 1) el.rowSpan = cell.rowspan;
         const key = `${r},${c}`;
+        el.dataset.cellkey = key;
         el.addEventListener("mousedown", (e) => {
           e.preventDefault();
           e.stopPropagation();
           if (selected.has(key)) { selected.delete(key); el.classList.remove("cm-lp-cell-sel"); }
           else { selected.add(key); el.classList.add("cm-lp-cell-sel"); }
+          updateToolbar();
         });
         // Column width: a drag handle on the right edge of the header row's cells.
         if (r === 0) {
@@ -115,8 +139,23 @@ export class TableEditWidget extends WidgetType {
     const apply = (next: Grid) => {
       const { tier, text } = serialize(next);
       const src = tier === "html" ? ":::table\n" + text + "\n:::" : text;
-      view.dispatch({ changes: { from: this.from, to: this.to, insert: src }, effects: setMacroRenderActive.of(null) });
+      // STAY in edit mode: re-point render-active at the rewritten block's new range
+      // (don't clear it). The user exits only via Done/Esc — editing operations never
+      // kick them back to reveal (ADR-022 review #2: edit mode persists until exit).
+      view.dispatch({ changes: { from: this.from, to: this.to, insert: src }, effects: setMacroRenderActive.of({ from: this.from, to: this.from + src.length }) });
       view.focus();
+    };
+    // Show/position the floating toolbar above the first selected cell; hide when nothing
+    // is selected (#1 — contextual, not always-on).
+    const updateToolbar = () => {
+      if (!selected.size) { bar.style.display = "none"; return; }
+      bar.style.display = "flex";
+      const cellEl = table.querySelector(`[data-cellkey="${[...selected][0]}"]`) as HTMLElement | null;
+      if (!cellEl) return;
+      const wrapRect = wrap.getBoundingClientRect();
+      const cellRect = cellEl.getBoundingClientRect();
+      bar.style.top = Math.max(0, cellRect.top - wrapRect.top - bar.offsetHeight - 4) + "px";
+      bar.style.left = Math.max(0, cellRect.left - wrapRect.left) + "px";
     };
     const coords = () => [...selected].map((s) => s.split(",").map(Number) as [number, number]);
     // Apply a style patch to the selected cells (a key set to undefined clears it). An

@@ -28,7 +28,10 @@ test(":::table renders the HTML table (merged cell), reveals raw, round-trips, h
   await expect(tbl).toContainText("merged");
   expect(await tbl.locator('td[colspan="2"]').count()).toBe(1); // the merge rendered
 
-  // Caret onto the block → raw HTML source revealed + the edit hint (richEditUI inline).
+  // vim ON: caret onto the block reveals the raw HTML source (round-trip preserved) +
+  // shows the edit hint. (Non-vim click enters edit mode instead — covered elsewhere.)
+  await page.getByTestId("vim-toggle").click();
+  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "true");
   await tbl.click();
   await sleep(200);
   await expect(page.getByTestId("macro-edit-hint")).toBeVisible();

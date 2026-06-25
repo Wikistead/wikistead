@@ -7,9 +7,8 @@ async function pipeTableInEdit(page: any) {
   await page.click("[data-pane=preview] .cm-content");
   for (const l of ["| A | B |", "| --- | --- |", "| 1 | 2 |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
   await sleep(250);
+  // Non-vim: a click enters edit mode directly (#5) — no Ctrl+Enter.
   await page.locator("[data-pane=preview] table.cm-lp-table").click();
-  await sleep(100);
-  await page.keyboard.press("Control+Enter");
   await expect(page.getByTestId("table-edit")).toBeVisible();
 }
 
@@ -85,4 +84,27 @@ test("header: toggle a body cell to header (th) → promotes with a body <th>", 
   await expect(macroTable).toBeVisible();
   // row 0 has 2 <th> (A,B); the promoted body header adds a 3rd → complex header.
   expect(await macroTable.locator("th").count()).toBe(3);
+});
+
+// #5: non-vim → a CLICK enters edit mode directly (no Ctrl+Enter). #2: edit mode persists
+// across operations (you only leave via Done/Esc).
+test("non-vim click enters edit; edit mode persists across ops; Esc exits", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tablepersist");
+  await enterEdit(page);
+  await pipeTableInEdit(page); // a plain click entered edit (asserted inside)
+
+  const edit = page.getByTestId("table-edit");
+  await edit.locator("td").first().click();
+  await page.getByTestId("table-align-center").click();
+  await sleep(150);
+  await expect(page.getByTestId("table-edit")).toBeVisible(); // still in edit mode (#2)
+  await page.getByTestId("table-edit").locator("td").first().click();
+  await page.getByTestId("table-bg-green").click();
+  await sleep(150);
+  await expect(page.getByTestId("table-edit")).toBeVisible(); // STILL in edit mode
+
+  await page.keyboard.press("Escape"); // explicit exit
+  await sleep(150);
+  await expect(page.getByTestId("table-edit")).toHaveCount(0);
 });
