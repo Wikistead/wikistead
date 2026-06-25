@@ -47,8 +47,10 @@ export class TableEditWidget extends WidgetType {
     const alignC = btn("≡", "table-align-center");
     const alignR = btn("⌦", "table-align-right");
     alignL.title = "Align left"; alignC.title = "Align center"; alignR.title = "Align right";
+    const headerBtn = btn("H", "table-header");
+    headerBtn.title = "Toggle header cells";
     const doneBtn = btn("Done", "table-done");
-    bar.append(mergeBtn, unmergeBtn, alignL, alignC, alignR);
+    bar.append(mergeBtn, unmergeBtn, alignL, alignC, alignR, headerBtn);
     // Background-color presets (ADR-022 review #2): a controlled palette (theme accent +
     // soft tints), NOT a free picker — keeps tables on-theme, accessible, round-trip-safe.
     for (const p of BG_PRESETS) {
@@ -139,6 +141,18 @@ export class TableEditWidget extends WidgetType {
       if (head) head.style = { ...(head.style ?? {}), width };
       apply(next);
     };
+    // Toggle the selected cells between header (<th>) and data (<td>). A header in a body
+    // row is pipe-inexpressible → promotes; clearing it back demotes.
+    headerBtn.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const cs = coords();
+      if (!cs.length) return;
+      const allHeader = cs.every(([r, c]) => this.grid[r]?.[c]?.header);
+      const next: Grid = this.grid.map((row) => row.map((cell) => (cell ? { ...cell } : null)));
+      for (const [r, c] of cs) { const cell = next[r]?.[c]; if (cell) cell.header = !allHeader; }
+      apply(next);
+    });
     alignL.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ align: "left" }); });
     alignC.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ align: "center" }); });
     alignR.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ align: "right" }); });
