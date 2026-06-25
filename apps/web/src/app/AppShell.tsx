@@ -39,7 +39,10 @@ export function AppShell({
 
   return (
     <div
-      data-collapsed={sidebar && collapsed ? "true" : "false"}
+      // collapse the sidebar column to 0 when the user collapses it OR when there is no
+      // sidebar at all (settings screens) — otherwise the empty 260px column sat there as
+      // a "ghost" panel, pushing the content right and breaking the centering.
+      data-collapsed={!sidebar || collapsed ? "true" : "false"}
       className="grid h-full grid-cols-[var(--sidebar-w)_1fr] grid-rows-[var(--header-h)_1fr] [grid-template-areas:'header_header''sidebar_main'] transition-[grid-template-columns] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)] data-[collapsed=true]:grid-cols-[0px_1fr]"
     >
       <header className="flex items-center gap-2 border-b border-border bg-panel px-4 [grid-area:header]">
@@ -72,7 +75,9 @@ export function AppShell({
         <ThemeToggle />
         {onLogout && <UserMenu onLogout={onLogout} />}
       </header>
-      <aside className="box-border min-w-0 overflow-hidden border-r border-border bg-panel [grid-area:sidebar]">{sidebar}</aside>
+      {/* Only render the sidebar panel when there IS one; on settings screens (no
+          sidebar) it would be an empty bordered panel column. */}
+      {sidebar && <aside className="box-border min-w-0 overflow-hidden border-r border-border bg-panel [grid-area:sidebar]">{sidebar}</aside>}
       <main className="min-h-0 min-w-0 overflow-hidden [grid-area:main]">{children}</main>
     </div>
   );

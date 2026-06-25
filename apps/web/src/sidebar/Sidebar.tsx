@@ -242,7 +242,7 @@ export function Sidebar() {
             width={size.width || 260}
             height={size.height || 400}
             indent={14}
-            rowHeight={32}
+            rowHeight={28}
             selection={pageId ? `page:${pageId}` : undefined}
             disableMultiSelection
             disableDrop={({ parentNode, dragNodes }) => {
