@@ -9,6 +9,7 @@ function colLabel(n: number): string {
   return s;
 }
 import { setMacroRenderActive } from "./macro-edit";
+import { observeBlockResize } from "./decorations";
 
 // Render-active table EDIT mode (ADR-022 Part 10/11). Cells select on click; the toolbar
 // merges the selected rectangle or un-merges a span. Each op rewrites the block source
@@ -56,11 +57,16 @@ function svgBtn(svg: string, testid: string, title: string): HTMLButtonElement {
 }
 
 export class TableEditWidget extends WidgetType {
+  private ro?: ResizeObserver;
   constructor(readonly grid: Grid, readonly from: number, readonly to: number) {
     super();
   }
   eq(o: TableEditWidget) {
     return o.from === this.from && o.to === this.to && JSON.stringify(o.grid) === JSON.stringify(this.grid);
+  }
+  destroy() {
+    this.ro?.disconnect();
+    this.ro = undefined;
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
@@ -368,6 +374,10 @@ export class TableEditWidget extends WidgetType {
     actions.append(addColBtn, addRowBtn, hint);
 
     wrap.append(bar, table, actions);
+    // The edit chrome (toolbar / handle band / action bar) and any cell-size changes shift
+    // the widget height after first measure → re-measure so lines below don't drift (#1b,
+    // common path with every other block widget).
+    this.ro = observeBlockResize(view, wrap);
     return wrap;
   }
   ignoreEvent() {

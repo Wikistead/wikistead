@@ -64,6 +64,18 @@ const codeBlockLine = Decoration.line({ attributes: { class: "cm-lp-code-line" }
 const quoteLine = Decoration.line({ attributes: { class: "cm-lp-quote" } });
 const hrLine = Decoration.line({ attributes: { class: "cm-lp-hr" } });
 
+// Shared by every BLOCK widget (image / table / macro / table-edit). A widget's rendered
+// height can change AFTER CM first measures it — an <img>/SVG loading async, child elements
+// mounting, edit-mode chrome appearing. When it does, CM's line geometry for everything
+// BELOW it goes stale and vim's visual-geometry j/k drift across that whole region. Observe
+// the widget's size and ask CM to re-measure on any change, so geometry always tracks the
+// real height — for ANY block widget, however its height changes. Disconnect in destroy().
+export function observeBlockResize(view: EditorView, dom: HTMLElement): ResizeObserver {
+  const ro = new ResizeObserver(() => view.requestMeasure());
+  ro.observe(dom);
+  return ro;
+}
+
 class BulletWidget extends WidgetType {
   toDOM() {
     const span = document.createElement("span");
@@ -175,6 +187,7 @@ const ATTACHMENT_REF = /^!\[([^\]]*)\]\(wks-attachment:([^)\s]+)\)$/;
 // expired) it re-resolves ONCE (refresh) before giving up — TTL caching means a
 // repeated image still costs one resolve while the URL is valid.
 class ImageWidget extends WidgetType {
+  private ro?: ResizeObserver;
   constructor(readonly id: string, readonly alt: string) {
     super();
   }
@@ -198,7 +211,14 @@ class ImageWidget extends WidgetType {
       load(true); // presigned URL likely expired → re-resolve once
     });
     load(false);
+    // The image loads async → its height changes after CM measured it. Re-measure on resize
+    // so lines below the image don't drift (ADR-024 motion correctness — common path).
+    this.ro = observeBlockResize(view, img);
     return img;
+  }
+  destroy() {
+    this.ro?.disconnect();
+    this.ro = undefined;
   }
   ignoreEvent() {
     return false; // clicks pass through so the cursor can enter → reveal raw
@@ -238,6 +258,7 @@ function linkHref(src: string): string | null {
 // is display-only: it replaces the markdown range visually; the canonical Y.Text
 // is unchanged, and putting the cursor in the table reveals the raw markdown.
 class TableWidget extends WidgetType {
+  private ro?: ResizeObserver;
   constructor(readonly source: string) {
     super();
   }
@@ -268,7 +289,14 @@ class TableWidget extends WidgetType {
     }
     if (thead.childNodes.length) table.appendChild(thead);
     if (tbody.childNodes.length) table.appendChild(tbody);
+    // Height can shift after first measure (fonts, reflow, edit-mode chrome) → re-measure
+    // so lines below a tall table don't drift (ADR-024 motion correctness — common path).
+    this.ro = observeBlockResize(view, table);
     return table;
+  }
+  destroy() {
+    this.ro?.disconnect();
+    this.ro = undefined;
   }
   ignoreEvent() {
     return false; // let clicks through so the cursor can enter (→ reveal raw)
@@ -362,15 +390,10 @@ class MacroWidget extends WidgetType {
       wrap.appendChild(btn);
       }
     }
-    // ADR-024 / motion correctness: mermaid & Excalidraw mount their SVG ASYNCHRONOUSLY,
-    // so the widget is added SHORT (CM measures it short) and then grows tall once the SVG
-    // loads. Without telling CM, every line BELOW the widget keeps a stale visual-y, and
-    // vim's visual-geometry j/k drift across the whole region under the widget. Observe the
-    // widget's size and ask CM to re-measure when it changes, so line geometry tracks the
-    // real height. (Cheap; CM coalesces measure requests. Disconnected on destroy.)
-    const ro = new ResizeObserver(() => view.requestMeasure());
-    ro.observe(wrap);
-    this.ro = ro;
+    // mermaid & Excalidraw mount their SVG ASYNCHRONOUSLY → the widget grows after CM
+    // measured it short → lines below drift. Re-measure on resize (common path, shared with
+    // every other block widget).
+    this.ro = observeBlockResize(view, wrap);
     return wrap;
   }
   destroy() {
