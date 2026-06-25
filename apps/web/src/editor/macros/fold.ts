@@ -1,7 +1,5 @@
-import { codeFolding, foldService, foldEffect, ensureSyntaxTree, syntaxTree } from "@codemirror/language";
-import type { EditorView } from "@codemirror/view";
-import { macroFenceAt, fenceLang } from "./fence";
-import { findFenceMacro } from "./registry";
+import { codeFolding, foldService } from "@codemirror/language";
+import { macroFenceAt } from "./fence";
 
 // Fold for macro blocks (ADR-022 Part 5). A large macro fence collapses to a single
 // landable summary line ("▶ Mermaid diagram"). Built on CodeMirror's native folding,
@@ -38,28 +36,8 @@ const macroCodeFolding = codeFolding({
 
 export const macroFold = [macroCodeFolding, macroFoldService];
 
-// Default a LARGE fence-macro block (e.g. a big Excalidraw JSON) to folded so a long
-// document stays skimmable (ADR-022 Part 5, "default-folded by size"). Run ONCE at
-// mount: a block the user then unfolds stays unfolded, and a block typed during the
-// session isn't folded out from under the editing cursor. Fence macros only (the
-// motivating case is large data bodies; directives stay open).
-const DEFAULT_FOLD_LINES = 10;
-export function autoFoldLargeFenceMacros(view: EditorView, threshold = DEFAULT_FOLD_LINES): void {
-  const state = view.state;
-  const tree = ensureSyntaxTree(state, state.doc.length, 100) ?? syntaxTree(state);
-  const effects: ReturnType<typeof foldEffect.of>[] = [];
-  tree.iterate({
-    enter: (n) => {
-      if (n.name !== "FencedCode") return;
-      const doc = state.doc;
-      const firstLine = doc.lineAt(n.from);
-      const lang = fenceLang(firstLine.text);
-      if (!lang || !findFenceMacro(lang)) return;
-      const lastLine = doc.lineAt(Math.max(n.from, Math.min(n.to, doc.length) - 1));
-      if (lastLine.number - firstLine.number + 1 > threshold) {
-        effects.push(foldEffect.of({ from: firstLine.from, to: lastLine.to }));
-      }
-    },
-  });
-  if (effects.length) view.dispatch({ effects });
-}
+// NOTE: there is deliberately NO auto-fold-on-load. A macro is an atom and always
+// renders (ADR-024 / Stage 1b) — a large Excalidraw/mermaid body must show its figure
+// on open, never the "▶ summary" placeholder. Fold is COSMETIC and manual only (za /
+// the fold button via `macroFold`). An earlier `autoFoldLargeFenceMacros` (ADR-022
+// Part 5, "default-folded by size") was removed when macros became atoms.

@@ -232,3 +232,32 @@ test("motion below TWO stacked tall macros is one doc line per key (no cumulativ
     prev = cur;
   }
 });
+
+// Regression: a LARGE fence macro already present at load renders as an atom (figure
+// shown), NOT the "▶ summary" fold placeholder. The old `autoFoldLargeFenceMacros`
+// folded any fence block over ~10 lines on sync, so a big Excalidraw/mermaid body
+// opened folded and only rendered once the cursor touched it — contradicting the atom
+// model (always rendered, never auto-reveal). We seed a >10-line mermaid, let collab
+// persist, RELOAD, enter edit WITHOUT touching the macro, and assert it rendered.
+test("a large macro present at load renders as an atom, not a fold placeholder", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const id = await openScratch(page, "atom-noautofold");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  // 12-line fence (```mermaid + 10 body + ```) — over the old 10-line fold threshold.
+  await page.keyboard.insertText(
+    "top\n```mermaid\nflowchart TD\nA-->B\nB-->C\nC-->D\nD-->E\nE-->F\nF-->G\nG-->H\nH-->I\n```\nbot\n",
+  );
+  await sleep(2500); // SVG mounts + collab persists the doc
+
+  // Reload from scratch: the large macro now arrives over the provider at sync time —
+  // exactly when the old auto-fold fired.
+  await page.goto(`/p/${id}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await enterEdit(page);
+  await sleep(2500); // sync + render; deliberately NO cursor interaction with the macro
+
+  // The figure is rendered and there is no fold placeholder.
+  expect(await page.getByTestId("macro-folded").count()).toBe(0);
+  expect(await page.locator("[data-pane=preview] [data-testid=macro-mermaid] svg").count()).toBeGreaterThanOrEqual(1);
+});
