@@ -8,7 +8,7 @@ function colLabel(n: number): string {
   for (let i = n; i >= 0; i = Math.floor(i / 26) - 1) s = String.fromCharCode(65 + (i % 26)) + s;
   return s;
 }
-import { setMacroRenderActive } from "./macro-edit";
+import { makeInnerEditHost } from "./macro-edit";
 import { observeBlockResize } from "./decorations";
 
 // Render-active table EDIT mode (ADR-022 Part 10/11). Cells select on click; the toolbar
@@ -69,6 +69,9 @@ export class TableEditWidget extends WidgetType {
     this.ro = undefined;
   }
   toDOM(view: EditorView) {
+    // ADR-025 step 1: write-back / exit go through the narrow InnerEditHost, not view
+    // directly (re-homing onto the common inline-edit contract). UI mechanics still use view.
+    const host = makeInnerEditHost(view, this.from, this.to);
     const wrap = document.createElement("div");
     wrap.className = "cm-lp-table-edit";
     wrap.setAttribute("data-testid", "table-edit");
@@ -262,8 +265,7 @@ export class TableEditWidget extends WidgetType {
       // STAY in edit mode: re-point render-active at the rewritten block's new range
       // (don't clear it). The user exits only via Done/Esc — editing operations never
       // kick them back to reveal (ADR-022 review #2: edit mode persists until exit).
-      view.dispatch({ changes: { from: this.from, to: this.to, insert: src }, effects: setMacroRenderActive.of({ from: this.from, to: this.from + src.length }) });
-      view.focus();
+      host.replaceSource(src);
     };
     // Show/position the floating toolbar above the first selected cell; hide when nothing
     // is selected (#1 — contextual, not always-on).
@@ -352,8 +354,7 @@ export class TableEditWidget extends WidgetType {
     doneBtn.addEventListener("mousedown", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      view.dispatch({ effects: setMacroRenderActive.of(null) });
-      view.focus();
+      host.exit();
     });
 
     // Persistent, ALWAYS-VISIBLE action bar (#1). The earlier add affordance was a 10px
