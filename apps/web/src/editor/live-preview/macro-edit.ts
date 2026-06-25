@@ -3,9 +3,9 @@ import { EditorView, showTooltip, type Tooltip } from "@codemirror/view";
 import { contextHintTooltip } from "./hint";
 import { isPaletteOpen } from "./palette";
 import { openMacroModal } from "./macro-modal";
-import { macroFenceAt, directiveMacroAt } from "../macros/fence";
+import { macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
-import type { FenceMacro, DirectiveMacro } from "../macros/registry";
+import type { FenceMacro, DirectiveMacro, RichEditUI } from "../macros/registry";
 import { eventMatches, displayChord } from "../../app/keybindings";
 import i18n from "../../i18n";
 
@@ -21,14 +21,21 @@ export const macroEditKey = Facet.define<string, string>({
   combine: (v) => (v.length ? v[v.length - 1]! : "Mod-Enter"),
 });
 
-interface Block { readonly from: number; readonly to: number; readonly macro: FenceMacro | DirectiveMacro }
+interface Block { readonly from: number; readonly to: number; readonly macro: { richEditUI?: RichEditUI } }
 
-// The macro WITH a richEditUI covering `pos` (fence or directive), or null.
+// A GFM pipe table is inline-editable (cell-merge promotes it to :::table) even though
+// it isn't a registry macro — present it as one so the hint + toggle apply.
+const PIPE_TABLE: { richEditUI: RichEditUI } = { richEditUI: { present: "inline" } };
+
+// The thing WITH a richEditUI covering `pos`: a fence macro, a directive macro, or a
+// GFM pipe table. null otherwise.
 function macroRichEditAt(state: EditorState, pos: number): Block | null {
   const f = macroFenceAt(state, pos);
   if (f?.macro.richEditUI) return { from: f.from, to: f.to, macro: f.macro };
   const d = directiveMacroAt(state, pos);
   if (d?.macro.richEditUI) return { from: d.from, to: d.to, macro: d.macro };
+  const t = tableBlockAt(state, pos);
+  if (t && t.tier === "pipe") return { from: t.from, to: t.to, macro: PIPE_TABLE };
   return null;
 }
 

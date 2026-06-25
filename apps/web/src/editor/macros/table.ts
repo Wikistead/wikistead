@@ -1,31 +1,33 @@
 import type { DirectiveMacro } from "./registry";
+import { parseHtml, type Grid } from "./table-model";
 
 // :::table — the Tier-2 table macro. Body is an HTML <table> (rowspan/colspan), which
 // a GFM pipe table promotes to when a merge is added (ADR-022 Part 10). The cell-merge
 // mouse UI (promote/demote) lands in the next commit; here is the render + round-trip.
 
-// Render an HTML <table> body to a SANITIZED table element. XSS-safe: we never inject
-// the raw HTML — DOMParser reads it, and we rebuild a clean DOM with textContent cells
-// and only the colspan/rowspan integer attributes.
-export function renderHtmlTable(html: string): HTMLTableElement {
+// Build a SANITIZED DOM table from a parsed grid. XSS-safe: cell text is set via
+// textContent (never innerHTML), and only integer colspan/rowspan are emitted. Shared
+// by the read render and the edit-mode render so the two never diverge.
+export function gridToTable(grid: Grid): HTMLTableElement {
   const out = document.createElement("table");
   out.className = "cm-lp-table cm-lp-table-merged";
-  const src = new DOMParser().parseFromString(html, "text/html").querySelector("table");
-  if (!src) return out;
-  for (const srcRow of Array.from(src.querySelectorAll("tr"))) {
+  for (const row of grid) {
     const tr = document.createElement("tr");
-    for (const srcCell of Array.from(srcRow.querySelectorAll("th,td"))) {
-      const cell = document.createElement(srcCell.tagName.toLowerCase() === "th" ? "th" : "td");
-      cell.textContent = srcCell.textContent ?? "";
-      const cs = srcCell.getAttribute("colspan");
-      const rs = srcCell.getAttribute("rowspan");
-      if (cs && /^\d+$/.test(cs)) cell.colSpan = Number(cs);
-      if (rs && /^\d+$/.test(rs)) cell.rowSpan = Number(rs);
-      tr.appendChild(cell);
+    for (const cell of row) {
+      if (!cell) continue; // covered position
+      const el = document.createElement(cell.header ? "th" : "td");
+      el.textContent = cell.text;
+      if (cell.colspan > 1) el.colSpan = cell.colspan;
+      if (cell.rowspan > 1) el.rowSpan = cell.rowspan;
+      tr.appendChild(el);
     }
     out.appendChild(tr);
   }
   return out;
+}
+
+export function renderHtmlTable(html: string): HTMLTableElement {
+  return gridToTable(parseHtml(html));
 }
 
 export const tableMacro: DirectiveMacro = {
