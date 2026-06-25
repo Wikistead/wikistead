@@ -15,9 +15,12 @@ test("slash palette inserts a macro (excalidraw) from its registration", async (
   expect(await page.locator("[data-testid=slash-palette] .lp-palette-row").count()).toBeGreaterThan(0);
   await page.keyboard.press("Enter");
   await sleep(200);
-  // The inserted ```excalidraw fence renders as the macro (non-vim always renders it),
-  // confirming /excalidraw inserted a working fence — not just literal text.
-  await expect(page.locator("[data-pane=preview] [data-testid=macro-excalidraw]")).toBeVisible();
+  // The inserted ```excalidraw fence is empty → it renders the common empty-macro
+  // placeholder (#3, non-vim always renders it), confirming /excalidraw inserted a working
+  // fence (not literal text). The placeholder names the macro and is click-to-edit.
+  const empty = page.locator("[data-pane=preview] [data-testid=macro-empty]");
+  await expect(empty).toBeVisible();
+  await expect(empty).toContainText("excalidraw");
 });
 
 // Fix #3 (ADR-017): vim G (jump to last line) must clear a macro that sits one line below

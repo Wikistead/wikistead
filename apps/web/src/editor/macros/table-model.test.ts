@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parsePipe, parseHtml, toHtml, toPipe, hasSpans, mergeRect, unmergeAt, serialize, sanitizeStyle } from "./table-model";
+import { parsePipe, parseHtml, toHtml, toPipe, hasSpans, mergeRect, unmergeAt, serialize, sanitizeStyle, insertColAt, insertRowAt, deleteColAt, deleteRowAt } from "./table-model";
 
 describe("table-model: parse/serialize", () => {
   it("parses a GFM pipe table (row 0 = header, no spans)", () => {
@@ -91,5 +91,64 @@ describe("table-model: merge → promote, unmerge → demote", () => {
     const reparsed = parseHtml(toHtml(merged));
     expect(reparsed[1]![0]).toMatchObject({ rowspan: 2 });
     expect(reparsed[2]![0]).toBeNull();
+  });
+});
+
+// #1: add/remove rows & columns. Span-free is the common (pipe) case and must STAY pipe
+// (Tier 1, no promotion); spans are kept consistent so a merged table never corrupts.
+describe("table-model: insert/delete rows & columns", () => {
+  it("inserts a column, keeps the table span-free (stays Tier-1 pipe)", () => {
+    const g = parsePipe("| A | B |\n| --- | --- |\n| 1 | 2 |");
+    const w = insertColAt(g, 1); // between A and B
+    expect(w[0]!.length).toBe(3);
+    expect(w[0]!.map((c) => c!.text)).toEqual(["A", "", "B"]);
+    expect(w[0]![1]).toMatchObject({ header: true }); // inserted into the header row → th
+    expect(w[1]!.map((c) => c!.text)).toEqual(["1", "", "2"]);
+    expect(serialize(w).tier).toBe("pipe"); // NO promotion — pure GFM
+  });
+
+  it("appends a column at the end and a row at the end", () => {
+    const g = parsePipe("| A | B |\n| --- | --- |\n| 1 | 2 |");
+    const w = insertColAt(g, 2);
+    expect(w[0]!.map((c) => c!.text)).toEqual(["A", "B", ""]);
+    const r = insertRowAt(g, g.length); // append a body row
+    expect(r.length).toBe(3);
+    expect(r[2]!.map((c) => c!.text)).toEqual(["", ""]);
+    expect(serialize(r).tier).toBe("pipe");
+  });
+
+  it("deletes a column and a row", () => {
+    const g = parsePipe("| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |");
+    const dc = deleteColAt(g, 1); // drop column B
+    expect(dc[0]!.map((c) => c!.text)).toEqual(["A", "C"]);
+    expect(dc[1]!.map((c) => c!.text)).toEqual(["1", "3"]);
+    const dr = deleteRowAt(g, 1); // drop the body row
+    expect(dr.length).toBe(1);
+    expect(dr[0]!.map((c) => c!.text)).toEqual(["A", "B", "C"]);
+  });
+
+  it("never deletes the last row or column", () => {
+    const one = parsePipe("| A |\n| --- |\n| 1 |");
+    expect(deleteColAt(one, 0)[0]!.length).toBe(1); // refused — still 1 col
+    const oneRow = parsePipe("| A | B |"); // header-less single row
+    expect(deleteRowAt(oneRow, 0).length).toBe(1); // refused — still 1 row
+  });
+
+  it("inserting a column inside a colspan widens the merged cell (no corruption)", () => {
+    const g = parseHtml('<table><tr><td colspan="2">m</td></tr><tr><td>1</td><td>2</td></tr></table>');
+    const w = insertColAt(g, 1); // boundary falls inside the colspan-2 origin
+    expect(w[0]![0]).toMatchObject({ text: "m", colspan: 3 }); // widened, not split
+    expect(w[0]![1]).toBeNull();
+    expect(w[1]!.map((c) => c!.text)).toEqual(["1", "", "2"]); // body row gets a real cell
+    // round-trips cleanly through HTML
+    const re = parseHtml(toHtml(w));
+    expect(re[0]![0]).toMatchObject({ colspan: 3 });
+  });
+
+  it("deleting a column shrinks a spanning cell instead of dropping content", () => {
+    const g = parseHtml('<table><tr><td colspan="2">m</td></tr><tr><td>1</td><td>2</td></tr></table>');
+    const d = deleteColAt(g, 0); // remove the first column under the span
+    expect(d[0]![0]).toMatchObject({ text: "m", colspan: 1 }); // shrank to 1, kept text
+    expect(d[1]!.map((c) => c!.text)).toEqual(["2"]);
   });
 });

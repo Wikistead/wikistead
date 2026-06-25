@@ -202,6 +202,83 @@ export function unmergeAt(grid: Grid, r: number, c: number): Grid {
   return g;
 }
 
+const cloneGrid = (grid: Grid): Grid => grid.map((row) => row.map((cell) => (cell ? { ...cell } : null)));
+const ncolsOf = (grid: Grid): number => grid.reduce((m, r) => Math.max(m, r.length), 0);
+// Fill any undefined holes left by span bookkeeping with empty 1×1 cells (keeps the grid
+// rectangular so toPipe/toHtml are well-defined).
+function normalizeGrid(grid: Grid): Grid {
+  const n = ncolsOf(grid);
+  for (const row of grid) for (let c = 0; c < n; c++) if (row[c] === undefined) row[c] = { text: "", header: false, colspan: 1, rowspan: 1 };
+  return grid;
+}
+
+// Insert an empty column before index `at` (0..ncols). A cell whose horizontal span
+// crosses the boundary is widened (the new slot becomes one of its covered positions);
+// otherwise a fresh empty cell is inserted. Everything to the right shifts.
+export function insertColAt(grid: Grid, at: number): Grid {
+  const g = cloneGrid(grid);
+  for (const row of g) {
+    let inside = false;
+    for (let c = at - 1; c >= 0; c--) {
+      const cell = row[c];
+      if (cell) { if (c + cell.colspan > at) { cell.colspan += 1; inside = true; } break; }
+    }
+    const nb = row[at] ?? row[at - 1] ?? row.find((c) => c);
+    row.splice(at, 0, inside ? null : { text: "", header: !!nb?.header, colspan: 1, rowspan: 1 });
+  }
+  return normalizeGrid(g);
+}
+
+// Insert an empty row before index `at` (0..nrows). A cell whose vertical span crosses the
+// boundary is heightened; otherwise a fresh empty cell is inserted. Rows below shift down.
+export function insertRowAt(grid: Grid, at: number): Grid {
+  const g = cloneGrid(grid);
+  const n = ncolsOf(g);
+  const newRow: (TCell | null)[] = [];
+  for (let c = 0; c < n; c++) {
+    let inside = false;
+    for (let r = at - 1; r >= 0; r--) {
+      const cell = g[r]?.[c];
+      if (cell) { if (r + cell.rowspan > at) { cell.rowspan += 1; inside = true; } break; }
+    }
+    newRow.push(inside ? null : { text: "", header: false, colspan: 1, rowspan: 1 });
+  }
+  g.splice(at, 0, newRow);
+  return normalizeGrid(g);
+}
+
+// Delete column `at`. A cell spanning across `at` shrinks by one; an origin that sits AT
+// `at` and spans right hands its data to the next slot (so content is not lost).
+export function deleteColAt(grid: Grid, at: number): Grid {
+  if (ncolsOf(grid) <= 1) return cloneGrid(grid); // never delete the last column
+  const g = cloneGrid(grid);
+  for (const row of g) {
+    const cell = row[at];
+    if (cell && cell.colspan > 1) row[at + 1] = { ...cell, colspan: cell.colspan - 1 };
+    else if (!cell) {
+      for (let c = at - 1; c >= 0; c--) { const o = row[c]; if (o) { if (c + o.colspan > at) o.colspan -= 1; break; } }
+    }
+    row.splice(at, 1);
+  }
+  return normalizeGrid(g);
+}
+
+// Delete row `at`, symmetric to deleteColAt.
+export function deleteRowAt(grid: Grid, at: number): Grid {
+  if (grid.length <= 1) return cloneGrid(grid); // never delete the last row
+  const g = cloneGrid(grid);
+  const n = ncolsOf(g);
+  for (let c = 0; c < n; c++) {
+    const cell = g[at]?.[c];
+    if (cell && cell.rowspan > 1) { if (g[at + 1]) g[at + 1]![c] = { ...cell, rowspan: cell.rowspan - 1 }; }
+    else if (!cell) {
+      for (let r = at - 1; r >= 0; r--) { const o = g[r]?.[c]; if (o) { if (r + o.rowspan > at) o.rowspan -= 1; break; } }
+    }
+  }
+  g.splice(at, 1);
+  return normalizeGrid(g);
+}
+
 // Serialize to the lowest tier that can represent the grid: pipes if span-free
 // (Tier 1), else a :::table HTML directive (Tier 2). This IS the promote/demote rule.
 export function serialize(grid: Grid): { tier: "pipe" | "html"; text: string } {

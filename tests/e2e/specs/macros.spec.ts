@@ -49,3 +49,26 @@ test("```mermaid macro: renders, folds/expands, round-trips raw source", async (
   expect(text).toContain("```mermaid");
   expect(text).toContain("graph TD; A-->B;");
 });
+
+// #3: an EMPTY macro (mermaid renders nothing for an empty body) must still show a
+// visible, named placeholder — so the block widget isn't invisible blank space that the
+// caret silently jumps over. Common to all macros (rendered in the shared MacroWidget).
+test("an empty macro renders a visible 'Empty …' placeholder (not blank space)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "emptymacro");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  // Insert a CLEAN empty mermaid fence via the slash palette (typing ``` fences directly
+  // is unreliable — the editor auto-closes them). The inserted ```mermaid\n\n``` has an
+  // empty body → mermaid's liveRender draws nothing → the common placeholder fires.
+  await page.keyboard.type("/mermaid");
+  await expect(page.getByTestId("slash-palette")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await sleep(400);
+  // Non-vim renders every macro regardless of caret position (#5), so even with the caret
+  // inside the fence the placeholder shows.
+  const ph = page.locator("[data-pane=preview] [data-testid=macro-empty]");
+  await expect(ph).toBeVisible();
+  await expect(ph).toContainText("mermaid"); // names the macro
+  expect((await ph.boundingBox())!.height).toBeGreaterThan(0); // genuinely occupies space
+});
