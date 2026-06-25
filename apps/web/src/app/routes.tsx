@@ -44,23 +44,25 @@ function useEditorKeymap(): [boolean, () => void] {
   return [vim, toggle];
 }
 
-// Ctrl+Alt+V toggles vim for the current session (#2). A modifier combo vim/the browser
-// don't claim, and it doesn't collide with the app's `/` `\` Ctrl-j/k Ctrl-k bindings.
-// Window-level so it works whatever has focus while editing; display/editor-core safe.
-function useVimToggleShortcut(toggle: () => void, enabled: boolean) {
+// editor.toggleVim (ADR-021 #2): toggles vim for the current session via the user's
+// chosen chord (default Ctrl+Alt+V — a combo vim/the browser don't claim; rebindable to
+// dodge AltGr). Window-level so it works whatever has focus while editing; matched by
+// event.code so it's layout-robust. Display/editor-core safe.
+function useVimToggleShortcut(toggle: () => void, enabled: boolean, chord: string) {
   useEffect(() => {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey && (e.code === "KeyV" || e.key.toLowerCase() === "v")) {
+      if (eventMatches(e, chord)) {
         e.preventDefault();
         toggle();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [toggle, enabled]);
+  }, [toggle, enabled, chord]);
 }
 import { PageStatus, PageVim, PageActions, PageControlsMobile, useMediaQuery, type PageControlsProps } from "./PageControls";
+import { resolveKey, eventMatches } from "./keybindings";
 import { PageTitle } from "./PageTitle";
 import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
@@ -208,7 +210,8 @@ function PageRoute() {
   // not remounted on a param change, so reset editing when the page changes.
   useEffect(() => { setEditing(autoEdit); dirtySig.set(false); }, [pageId, autoEdit, dirtySig]);
   const [vim, toggleVim] = useEditorKeymap(); // member: startup-mode pref + device-local toggle
-  useVimToggleShortcut(toggleVim, editing); // Ctrl+Alt+V (#2), only while editing
+  const keybindings = useAccountSettings().data?.keybindings; // ADR-021 overrides ({} default)
+  useVimToggleShortcut(toggleVim, editing, resolveKey("editor.toggleVim", keybindings)); // (#2)
   const isDesktop = useMediaQuery("(min-width: 768px)"); // 3 floating groups vs one ⋯
   // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
   const publishState = !canEdit ? null : published?.publishedMd == null ? "draft" : published?.hasUnpublishedChanges ? "unpublished" : null;
@@ -361,7 +364,7 @@ function GuestPage({ minted }: { minted: GuestToken }) {
   const canEdit = capability === "edit";
   const [editing, setEditing] = useState(false);
   const [vim, toggleVim] = useVimPref();
-  useVimToggleShortcut(toggleVim, editing); // Ctrl+Alt+V (#2)
+  useVimToggleShortcut(toggleVim, editing, resolveKey("editor.toggleVim", undefined)); // guest: default chord
   const isDesktop = useMediaQuery("(min-width: 768px)");
 
   const reloadPublished = useCallback(() => {
