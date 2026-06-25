@@ -12,6 +12,6 @@ registerMacro(calloutMacro);
 registerMacro(excalidrawMacro);
 registerMacro(tableMacro);
 
-export { macroFold, autoFoldLargeFenceMacros } from "./fold";
+export { macroFold } from "./fold";
 export { findFenceMacro, findDirectiveMacro, registeredFenceLangs, registeredDirectiveNames, registeredMacros } from "./registry";
 export type { Macro, FenceMacro, DirectiveMacro, MacroContext, MacroTheme } from "./registry";

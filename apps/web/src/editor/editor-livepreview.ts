@@ -12,7 +12,7 @@ import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette } from "./live-preview/palette";
 import { contextMenu } from "./live-preview/context-menu";
 import { vimExCommands } from "./live-preview/vim-ex";
-import { macroFold, autoFoldLargeFenceMacros } from "./macros";
+import { macroFold } from "./macros";
 import { registerVimFold } from "./live-preview/vim-fold";
 import { atomDelete } from "./live-preview/vim-atom";
 import { macroEdit } from "./live-preview/macro-edit";
@@ -122,15 +122,11 @@ export function mountLivePreview(
   // Drag-and-drop image attach (editable surface only — needs an uploader).
   if (!opts.readOnly && opts.uploadImage) attachImageDrop(view, opts.uploadImage);
 
-  // Default large macro blocks to folded — ONCE, after the initial collab sync (the
-  // doc is empty at mount; the content arrives over the provider). rAF so yCollab has
-  // applied the synced doc to CM before we measure block sizes.
-  if (!opts.readOnly) {
-    let folded = false;
-    const runAutoFold = () => { if (folded) return; folded = true; requestAnimationFrame(() => autoFoldLargeFenceMacros(view)); };
-    if (provider.synced) runAutoFold();
-    else provider.on("synced", runAutoFold);
-  }
+  // No auto-fold on load: a macro is an atom and ALWAYS renders (ADR-024 / Stage 1b).
+  // A large Excalidraw/mermaid body previously auto-folded to the "▶ summary" placeholder
+  // and only rendered the figure once the cursor touched it — that contradicts the atom
+  // model (rendered on open, never auto-reveal). Fold stays available as a COSMETIC manual
+  // action (za / the fold button via `macroFold`), but is no longer applied automatically.
 
   const host = document.createElement("div");
   host.className = "lp-editor-host";
