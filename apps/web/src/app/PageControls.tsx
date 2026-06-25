@@ -141,7 +141,7 @@ export function PageActions(p: PageControlsProps) {
         </>
       ) : (
         <>
-          {p.canEdit && <RoundBtn label={t("page.edit")} testId="edit-toggle" onClick={p.onEdit} icon={<Pencil size={16} />} />}
+          {p.canEdit && <RoundBtn label={t("page.edit")} testId="edit-toggle" primary onClick={p.onEdit} icon={<Pencil size={16} />} />}
           {p.onShare && <RoundBtn label={t("page.share")} testId="share-open" onClick={p.onShare} icon={<Share2 size={16} />} />}
         </>
       )}
