@@ -47,3 +47,24 @@ test("color: select a cell, pick a background preset → promotes with backgroun
   await expect(macroTable).toBeVisible();
   expect(await macroTable.locator('td[style*="background"]').count()).toBe(1);
 });
+
+test("width: drag a column border → promotes with a width style", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tablewidth");
+  await enterEdit(page);
+  await pipeTableInEdit(page);
+
+  const handle = page.getByTestId("table-col-resize-0");
+  const box = (await handle.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 90, box.y + box.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await sleep(200);
+
+  await page.getByText("below", { exact: true }).click();
+  await sleep(200);
+  const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
+  await expect(macroTable).toBeVisible();
+  expect(await macroTable.locator('th[style*="width"]').count()).toBe(1);
+});

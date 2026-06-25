@@ -82,6 +82,29 @@ export class TableEditWidget extends WidgetType {
           if (selected.has(key)) { selected.delete(key); el.classList.remove("cm-lp-cell-sel"); }
           else { selected.add(key); el.classList.add("cm-lp-cell-sel"); }
         });
+        // Column width: a drag handle on the right edge of the header row's cells.
+        if (r === 0) {
+          const handle = document.createElement("span");
+          handle.className = "cm-lp-col-resize";
+          handle.setAttribute("data-testid", "table-col-resize-" + c);
+          handle.addEventListener("pointerdown", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const startX = e.clientX;
+            const startW = el.getBoundingClientRect().width;
+            handle.setPointerCapture(e.pointerId);
+            const width = (ev: PointerEvent) => Math.max(40, Math.round(startW + (ev.clientX - startX)));
+            const onMove = (ev: PointerEvent) => { el.style.width = width(ev) + "px"; };
+            const onUp = (ev: PointerEvent) => {
+              handle.removeEventListener("pointermove", onMove);
+              handle.removeEventListener("pointerup", onUp);
+              applyColWidth(c, width(ev) + "px");
+            };
+            handle.addEventListener("pointermove", onMove);
+            handle.addEventListener("pointerup", onUp);
+          });
+          el.appendChild(handle);
+        }
         tr.appendChild(el);
       });
       table.appendChild(tr);
@@ -107,6 +130,13 @@ export class TableEditWidget extends WidgetType {
         (Object.keys(s) as (keyof CellStyle)[]).forEach((k) => s[k] === undefined && delete s[k]);
         cell.style = Object.keys(s).length ? s : undefined;
       }
+      apply(next);
+    };
+    // Set a column's width on its header cell (browsers apply it to the column).
+    const applyColWidth = (c: number, width: string) => {
+      const next: Grid = this.grid.map((row) => row.map((cell) => (cell ? { ...cell, style: cell.style ? { ...cell.style } : undefined } : null)));
+      const head = next[0]?.[c];
+      if (head) head.style = { ...(head.style ?? {}), width };
       apply(next);
     };
     alignL.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ align: "left" }); });
