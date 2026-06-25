@@ -12,5 +12,8 @@ export const notify = {
 };
 
 export function Toasts() {
-  return <Toaster position="bottom-right" />;
+  // bottom-center: keeps toasts clear of the bottom-RIGHT floating action buttons (they
+  // used to block the Edit/Publish group). Other Toaster defaults (close button, per-type
+  // colors, opaque bg) live in components/ui/sonner.tsx.
+  return <Toaster position="bottom-center" />;
 }
