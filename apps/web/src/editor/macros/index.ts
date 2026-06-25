@@ -5,10 +5,12 @@ import { registerMacro } from "./registry";
 import { mermaidMacro } from "./mermaid";
 import { calloutMacro } from "./callout";
 import { excalidrawMacro } from "./excalidraw";
+import { tableMacro } from "./table";
 
 registerMacro(mermaidMacro);
 registerMacro(calloutMacro);
 registerMacro(excalidrawMacro);
+registerMacro(tableMacro);
 
 export { macroFold, autoFoldLargeFenceMacros } from "./fold";
 export { findFenceMacro, findDirectiveMacro, registeredFenceLangs, registeredDirectiveNames } from "./registry";
