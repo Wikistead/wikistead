@@ -305,6 +305,7 @@ function isFolded(state: EditorState, from: number, to: number): boolean {
 // directive macros like :::table). foldable is fence-only (large data bodies).
 type RenderableMacro = { liveRender: (body: string, ctx: { theme: MacroTheme }) => HTMLElement; richEditUI?: import("../macros/registry").RichEditUI };
 class MacroWidget extends WidgetType {
+  private ro?: ResizeObserver;
   constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string, readonly selected: boolean) {
     super();
   }
@@ -361,7 +362,20 @@ class MacroWidget extends WidgetType {
       wrap.appendChild(btn);
       }
     }
+    // ADR-024 / motion correctness: mermaid & Excalidraw mount their SVG ASYNCHRONOUSLY,
+    // so the widget is added SHORT (CM measures it short) and then grows tall once the SVG
+    // loads. Without telling CM, every line BELOW the widget keeps a stale visual-y, and
+    // vim's visual-geometry j/k drift across the whole region under the widget. Observe the
+    // widget's size and ask CM to re-measure when it changes, so line geometry tracks the
+    // real height. (Cheap; CM coalesces measure requests. Disconnected on destroy.)
+    const ro = new ResizeObserver(() => view.requestMeasure());
+    ro.observe(wrap);
+    this.ro = ro;
     return wrap;
+  }
+  destroy() {
+    this.ro?.disconnect();
+    this.ro = undefined;
   }
   ignoreEvent() {
     return false; // clicks pass through so the cursor can enter → reveal raw

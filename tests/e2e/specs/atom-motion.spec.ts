@@ -106,3 +106,35 @@ test("dd then p pastes the whole macro back", async ({ browser }) => {
   await page.keyboard.press("p"); await sleep(200);
   expect((await blocks(page)).length).toBe(1); // whole macro pasted back (register held the whole macro)
 });
+
+// ADR-024 1b: a TALL RENDERED widget (mermaid SVG ~380px) mounts its SVG asynchronously;
+// without re-measuring, every line BELOW it kept a stale visual-y and vim j/k drifted
+// across the whole region under the widget. A ResizeObserver → view.requestMeasure() keeps
+// CM's line geometry in sync. This guards that motion below a tall rendered macro is
+// exactly one doc line per key (uses flowchart syntax, which renders here, not the
+// env-flaky `graph TD;`).
+test("motion below a TALL RENDERED mermaid is one doc line per key (no drift)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "atom-tall-render");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("top\n```mermaid\nflowchart TD\n  A --> B\n  B --> C\n  C --> D\n```\nB0\nB1\nB2\nB3\n");
+  await sleep(2500); // let the SVG mount → the widget becomes tall (~380px)
+  const svgH = await page.evaluate(() => { const m = document.querySelector("[data-pane=preview] [data-testid=macro-mermaid]") as HTMLElement; return m ? Math.round(m.getBoundingClientRect().height) : 0; });
+  expect(svgH).toBeGreaterThan(120); // genuinely tall
+  await page.getByTestId("vim-toggle").click();
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  const head = async () => page.evaluate(() => (window as any).__lpHeadLine);
+  // descend from the first line below the widget; each j must advance exactly one doc line.
+  await page.getByText("B0", { exact: true }).click();
+  await sleep(120);
+  let prev = await head();
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press("j");
+    await sleep(90);
+    const cur = await head();
+    expect(cur).toBe(prev + 1); // no 2-line drift below the tall widget
+    prev = cur;
+  }
+});
