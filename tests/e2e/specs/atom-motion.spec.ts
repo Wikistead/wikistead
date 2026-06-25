@@ -138,3 +138,33 @@ test("motion below a TALL RENDERED mermaid is one doc line per key (no drift)", 
     prev = cur;
   }
 });
+
+// ADR-024 1b (common resize path): a tall TABLE — like mermaid — must not drift the lines
+// below it. The resize observer is now on EVERY block widget (macro/table/image/table-edit),
+// so a height change of any kind re-measures CM.
+test("motion below a TALL table is one doc line per key (no drift)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "atom-tall-table");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  let rows = "| A | B |\n| - | - |\n";
+  for (let i = 0; i < 12; i++) rows += `| r${i} | v${i} |\n`;
+  await page.keyboard.insertText("top\n" + rows + "\nB0\nB1\nB2\nB3\n");
+  await sleep(500);
+  const tH = await page.evaluate(() => { const t = document.querySelector("[data-pane=preview] table.cm-lp-table") as HTMLElement; return t ? Math.round(t.getBoundingClientRect().height) : 0; });
+  expect(tH).toBeGreaterThan(120); // genuinely tall
+  await page.getByTestId("vim-toggle").click();
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  const head = async () => page.evaluate(() => (window as any).__lpHeadLine);
+  await page.getByText("B0", { exact: true }).click();
+  await sleep(120);
+  let prev = await head();
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press("j");
+    await sleep(90);
+    const cur = await head();
+    expect(cur).toBe(prev + 1); // no drift below the tall table
+    prev = cur;
+  }
+});
