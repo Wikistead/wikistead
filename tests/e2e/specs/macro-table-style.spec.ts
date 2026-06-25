@@ -68,3 +68,21 @@ test("width: drag a column border → promotes with a width style", async ({ bro
   await expect(macroTable).toBeVisible();
   expect(await macroTable.locator('th[style*="width"]').count()).toBe(1);
 });
+
+test("header: toggle a body cell to header (th) → promotes with a body <th>", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tableheader");
+  await enterEdit(page);
+  await pipeTableInEdit(page);
+
+  await page.getByTestId("table-edit").locator("td").first().click(); // a body cell
+  await page.getByTestId("table-header").click();
+  await sleep(200);
+
+  await page.getByText("below", { exact: true }).click();
+  await sleep(200);
+  const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
+  await expect(macroTable).toBeVisible();
+  // row 0 has 2 <th> (A,B); the promoted body header adds a 3rd → complex header.
+  expect(await macroTable.locator("th").count()).toBe(3);
+});
