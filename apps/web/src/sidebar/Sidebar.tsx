@@ -194,7 +194,7 @@ export function Sidebar() {
 
   const headerBtn = "flex cursor-pointer rounded-sm p-1 text-fg-dim transition-colors duration-[120ms] hover:bg-panel-2 hover:text-foreground";
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden text-sm" data-testid="sidebar">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden text-[length:var(--text-ui)]" data-testid="sidebar">
       {/* Space switcher — the space is a separate layer, not a tree root. */}
       <div className="flex items-center justify-between border-b border-border p-3">
         <DropdownMenu modal={false}>
@@ -242,7 +242,7 @@ export function Sidebar() {
             width={size.width || 260}
             height={size.height || 400}
             indent={14}
-            rowHeight={28}
+            rowHeight={32}
             selection={pageId ? `page:${pageId}` : undefined}
             disableMultiSelection
             disableDrop={({ parentNode, dragNodes }) => {
