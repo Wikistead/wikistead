@@ -13,6 +13,7 @@ export interface CellStyle {
   bg?: string; // background color
   color?: string; // text color
   width?: string; // column width
+  height?: string; // row height
   align?: "left" | "center" | "right";
 }
 export interface TCell {
@@ -43,6 +44,7 @@ export function sanitizeStyle(raw: string): CellStyle | undefined {
     if ((prop === "background" || prop === "background-color") && COLOR_RE.test(val)) out.bg = val;
     else if (prop === "color" && COLOR_RE.test(val)) out.color = val;
     else if (prop === "width" && WIDTH_RE.test(val)) out.width = val;
+    else if (prop === "height" && WIDTH_RE.test(val)) out.height = val;
     else if (prop === "text-align" && ALIGNS.has(val.toLowerCase())) out.align = val.toLowerCase() as CellStyle["align"];
   }
   return Object.keys(out).length ? out : undefined;
@@ -53,6 +55,7 @@ export function styleToCss(s: CellStyle): string {
   if (s.bg) p.push(`background:${s.bg}`);
   if (s.color) p.push(`color:${s.color}`);
   if (s.width) p.push(`width:${s.width}`);
+  if (s.height) p.push(`height:${s.height}`);
   if (s.align) p.push(`text-align:${s.align}`);
   return p.join(";");
 }
