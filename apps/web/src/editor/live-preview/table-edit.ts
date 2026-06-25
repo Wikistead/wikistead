@@ -152,13 +152,24 @@ export class TableEditWidget extends WidgetType {
       const start = axis === "x" ? e.clientX : e.clientY;
       const startSize = axis === "x" ? ref.getBoundingClientRect().width : ref.getBoundingClientRect().height;
       target.setPointerCapture(e.pointerId);
-      // #3: cap a column at the editor's visible width (no growing past the viewport).
-      const maxW = Math.max(80, view.scrollDOM.clientWidth - 24);
+      // #5: a column grows only until the TABLE fills the visible width, then it STOPS — it
+      // never steals width from the neighbouring columns. maxW = this column's start width
+      // plus the slack between the current table width and the viewport.
+      const tableEl = ref.closest("table");
+      const slackX = tableEl ? Math.max(0, view.scrollDOM.clientWidth - 24 - tableEl.getBoundingClientRect().width) : 0;
+      const maxW = startSize + slackX;
+      // #4: shrinking a row only follows live if EVERY cell in the row follows — one cell
+      // can't pull the row shorter than its siblings. Apply the live height to all of them.
+      const rowCells = axis === "y" ? (Array.from(ref.closest("tr")?.children ?? []) as HTMLElement[]) : [];
       const size = (ev: PointerEvent) => {
         const raw = Math.round(startSize + ((axis === "x" ? ev.clientX : ev.clientY) - start));
         return axis === "x" ? Math.min(maxW, Math.max(40, raw)) : Math.max(24, raw);
       };
-      const move = (ev: PointerEvent) => { ref.style[axis === "x" ? "width" : "height"] = size(ev) + "px"; };
+      const move = (ev: PointerEvent) => {
+        const s = size(ev);
+        if (axis === "x") ref.style.width = s + "px";
+        else for (const c of rowCells) c.style.height = s + "px";
+      };
       const up = (ev: PointerEvent) => { target.removeEventListener("pointermove", move); target.removeEventListener("pointerup", up); commit(size(ev)); };
       target.addEventListener("pointermove", move);
       target.addEventListener("pointerup", up);
