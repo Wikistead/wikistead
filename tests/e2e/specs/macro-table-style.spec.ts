@@ -117,9 +117,16 @@ test("column handle selects the whole column; color applies to all its cells", a
   await pipeTableInEdit(page);
 
   await page.getByTestId("table-col-select-0").click(); // select column 0 (A + 1)
-  // #1: the selected column's cells show the blue selection highlight + outer border.
-  expect(await page.locator("[data-testid=table-edit] .cm-lp-cell-sel").count()).toBe(2);
-  expect(await page.locator("[data-testid=table-edit] .cm-lp-sel-l").count()).toBeGreaterThan(0);
+  // #1: the selected column's cells must VISUALLY fill (computed style, not just the
+  // class) — incl. the HEADER cell, whose base `th` background would otherwise win the
+  // specificity contest. This is what the class-presence assertion missed on device.
+  const hdr = page.getByTestId("table-edit").locator('[data-cellkey="0,0"]'); // header "A"
+  const bg = await hdr.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(bg).not.toBe("rgba(0, 0, 0, 0)"); // not transparent
+  expect(bg).not.toBe("transparent");
+  expect(bg).not.toBe("rgba(127, 127, 127, 0.12)"); // not the unselected `th` grey
+  // outer accent border actually paints (2px on the left edge of the leftmost column).
+  expect(await hdr.evaluate((el) => parseFloat(getComputedStyle(el).borderLeftWidth))).toBeGreaterThanOrEqual(2);
   await page.getByTestId("table-bg-blue").click();
   await sleep(200);
 

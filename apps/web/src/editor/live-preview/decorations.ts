@@ -669,6 +669,10 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
   create: (state) => buildDecorations(state),
   update: (value, tr) => {
     if (tr.docChanged || tr.selection) return buildDecorations(tr.state);
+    // Toggling vim is a Compartment reconfigure — no doc/selection/effect change — but it
+    // flips reveal-on-cursor gating (revealAllowed): vim→non-vim must re-render every
+    // rich-editable macro that was revealed under the caret. Rebuild on the facet change.
+    if (tr.startState.facet(vimEnabled) !== tr.state.facet(vimEnabled)) return buildDecorations(tr.state);
     // A fold toggle changes WHICH macro blocks render (folded → CM's placeholder owns
     // the range, so the macro widget must drop) but is neither a doc nor selection
     // change — rebuild so isFolded() is re-evaluated and the stale widget is removed.
@@ -931,8 +935,12 @@ export const livePreviewTheme = EditorView.baseTheme({
     zIndex: "3",
   },
   // Spreadsheet select-handle band (top row / left column) — clearly NOT a cell: solid
-  // grey, no padding, fixed thin size, a grab cursor (#2).
-  ".cm-lp-table-handle": {
+  // grey, no padding, fixed thin size, a grab cursor (#2). NOTE the `.cm-lp-table-grid`
+  // prefix: the edit-widget table also carries `.cm-lp-table`, whose `th`/`td` rules
+  // (specificity 0,1,1) would otherwise OVERRIDE these handle/selection classes (0,1,0)
+  // — the band would inherit the faint `th` background and look like a header cell. The
+  // prefixed selectors (0,2,1 / 0,2,0) win, so the styling actually paints on device.
+  ".cm-lp-table-grid th.cm-lp-table-handle": {
     background: "var(--fg-dim, #9aa0a6)",
     border: "1px solid var(--border, #888)",
     padding: "0",
@@ -940,17 +948,18 @@ export const livePreviewTheme = EditorView.baseTheme({
     cursor: "pointer",
     opacity: "0.65",
   },
-  ".cm-lp-table-handle:hover": { background: "var(--accent, #4ea1ff)", opacity: "1" },
-  ".cm-lp-table-colhandle": { height: "10px", minWidth: "0" },
-  ".cm-lp-table-rowhandle": { width: "12px" },
-  ".cm-lp-table-corner": { width: "12px", height: "10px" },
-  // Selection: a clearly-blue fill on each cell (#1 — must read as selected); a thick
-  // accent border only on the OUTER edges (per-side classes) — the spreadsheet look.
-  ".cm-lp-cell-sel": { background: "rgba(78,161,255,0.28)" },
-  ".cm-lp-sel-t": { borderTop: "2px solid var(--accent, #4ea1ff)" },
-  ".cm-lp-sel-b": { borderBottom: "2px solid var(--accent, #4ea1ff)" },
-  ".cm-lp-sel-l": { borderLeft: "2px solid var(--accent, #4ea1ff)" },
-  ".cm-lp-sel-r": { borderRight: "2px solid var(--accent, #4ea1ff)" },
+  ".cm-lp-table-grid th.cm-lp-table-handle:hover": { background: "var(--accent, #4ea1ff)", opacity: "1" },
+  ".cm-lp-table-grid .cm-lp-table-colhandle": { height: "10px", minWidth: "0" },
+  ".cm-lp-table-grid .cm-lp-table-rowhandle": { width: "12px" },
+  ".cm-lp-table-grid .cm-lp-table-corner": { width: "12px", height: "10px" },
+  // Selection: a translucent THEME-accent fill on each cell (#1 — must read as selected,
+  // in the active theme color, not a fixed blue); a thick accent border only on the OUTER
+  // edges (per-side classes) — the spreadsheet look. Prefixed to beat the base cell rules.
+  ".cm-lp-table-grid .cm-lp-cell-sel": { background: "color-mix(in srgb, var(--accent, #4ea1ff) 24%, transparent)" },
+  ".cm-lp-table-grid .cm-lp-sel-t": { borderTop: "2px solid var(--accent, #4ea1ff)" },
+  ".cm-lp-table-grid .cm-lp-sel-b": { borderBottom: "2px solid var(--accent, #4ea1ff)" },
+  ".cm-lp-table-grid .cm-lp-sel-l": { borderLeft: "2px solid var(--accent, #4ea1ff)" },
+  ".cm-lp-table-grid .cm-lp-sel-r": { borderRight: "2px solid var(--accent, #4ea1ff)" },
   ".cm-lp-table-swatch": {
     flex: "0 0 auto",
     width: "18px",
