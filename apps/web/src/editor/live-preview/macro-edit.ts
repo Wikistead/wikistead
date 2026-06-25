@@ -78,6 +78,12 @@ const macroEditKeymap = Prec.high(
   EditorView.domEventHandlers({
     keydown(e, view) {
       if (view.state.readOnly) return false;
+      // Esc exits an inline edit session (render-active) — the explicit way out besides
+      // the Done button (#2: you stay in edit mode until you exit).
+      if (e.key === "Escape" && view.state.field(macroRenderActiveField)) {
+        view.dispatch({ effects: setMacroRenderActive.of(null) });
+        return true;
+      }
       if (!eventMatches(e, view.state.facet(macroEditKey))) return false;
       const sel = view.state.selection.main;
       if (!sel.empty) return false;

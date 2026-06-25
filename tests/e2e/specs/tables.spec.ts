@@ -29,9 +29,11 @@ test("GFM table renders as an HTML table; cursor reveals raw markdown", async ({
   await expect(table.locator("th").first()).toContainText("Name"); // header row
   await expect(table.locator("td").first()).toContainText("Alice"); // body row
 
-  // Cursor into the table → raw markdown revealed (the HTML table is gone).
-  await table.click();
+  // vim ON: the cursor in the table reveals raw markdown (non-vim click now enters the
+  // mouse edit mode instead — ADR-022 review #5, covered in the table-edit specs).
+  await page.getByTestId("vim-toggle").click();
+  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "true");
+  await page.locator("[data-pane=preview] table.cm-lp-table").click();
   await sleep(300);
-  expect(await page.locator("[data-pane=preview] table.cm-lp-table").count()).toBe(0);
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("| Name | Age |");
 });

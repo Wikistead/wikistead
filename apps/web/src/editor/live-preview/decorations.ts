@@ -13,6 +13,20 @@ import { parseDirectiveOpen } from "../macros/directive-parser";
 import { openMacroModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive } from "./macro-edit";
 import { TableEditWidget } from "./table-edit";
+import { getCM } from "@replit/codemirror-vim";
+
+// Non-vim mouse model (ADR-022 review #5): a CLICK on a table enters the rich edit mode
+// directly — no Ctrl+Enter (that key is for vim users, who lead from the keyboard). vim
+// ON → leave the click to place the caret (reveal raw source). Returns true if it entered
+// edit mode (caller should then preventDefault so the caret isn't also placed).
+function tryEnterTableEdit(view: EditorView, pos: number): boolean {
+  if (getCM(view)) return false; // vim ON → click reveals source as before
+  const tb = tableBlockAt(view.state, pos);
+  if (!tb) return false;
+  view.dispatch({ effects: setMacroRenderActive.of({ from: tb.from, to: tb.to }) });
+  view.focus();
+  return true;
+}
 
 // Force a full reload on HMR: this module's decorations/state are baked into the
 // EditorView at creation (built once, not re-run on hot-swap), so a hot update would
@@ -227,9 +241,13 @@ class TableWidget extends WidgetType {
   eq(other: TableWidget) {
     return other.source === this.source;
   }
-  toDOM() {
+  toDOM(view: EditorView) {
     const table = document.createElement("table");
     table.className = "cm-lp-table";
+    // Non-vim: a click enters edit mode directly (#5); vim leaves it to reveal raw.
+    table.addEventListener("mousedown", (e) => {
+      if (tryEnterTableEdit(view, view.posAtDOM(table))) e.preventDefault();
+    });
     const thead = document.createElement("thead");
     const tbody = document.createElement("tbody");
     let inBody = false;
@@ -301,6 +319,9 @@ class MacroWidget extends WidgetType {
       // button stops propagation so its clicks don't reveal. Offset-invariant.
       wrap.addEventListener("mousedown", (e) => {
         e.preventDefault();
+        // Non-vim: a click on a table macro enters edit mode directly (#5). Otherwise
+        // place the caret at the block start (reveal raw source).
+        if (this.macro.richEditUI?.present === "inline" && tryEnterTableEdit(view, view.posAtDOM(wrap))) return;
         view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)) });
         view.focus();
       });
@@ -862,17 +883,31 @@ export const livePreviewTheme = EditorView.baseTheme({
     paddingLeft: "0.8em",
   },
   // Table cell-merge edit mode (render-active): a toolbar + selectable cells.
-  ".cm-lp-table-edit": { margin: "0.4em 0", border: "1px solid var(--accent, #4ea1ff)", borderRadius: "4px", padding: "4px" },
-  ".cm-lp-table-edit-bar": { display: "flex", gap: "6px", marginBottom: "4px" },
-  ".cm-lp-table-edit-btn": {
-    border: "1px solid var(--border, #888)",
-    borderRadius: "4px",
+  ".cm-lp-table-edit": { position: "relative", margin: "0.4em 0", border: "1px solid var(--accent, #4ea1ff)", borderRadius: "4px", padding: "4px" },
+  // Floating contextual toolbar — positioned above the selected cell, over the table.
+  ".cm-lp-table-edit-bar": {
+    position: "absolute",
+    zIndex: "5",
+    display: "flex",
+    gap: "4px",
+    padding: "3px 4px",
     background: "var(--panel, #fff)",
+    border: "1px solid var(--border, #888)",
+    borderRadius: "6px",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
+  },
+  ".cm-lp-table-edit-btn": {
+    display: "inline-flex",
+    alignItems: "center",
+    border: "1px solid transparent",
+    borderRadius: "4px",
+    background: "transparent",
     color: "var(--fg, inherit)",
     cursor: "pointer",
     fontSize: "0.8em",
-    padding: "2px 8px",
+    padding: "2px 6px",
   },
+  ".cm-lp-table-edit-btn:hover": { background: "var(--panel-2, rgba(127,127,127,0.15))" },
   ".cm-lp-table-edit th, .cm-lp-table-edit td": { cursor: "pointer", position: "relative" },
   ".cm-lp-col-resize": {
     position: "absolute",

@@ -20,10 +20,8 @@ test("pipe table → merge promotes to :::table → unmerge demotes back", async
   await expect(page.locator("[data-pane=preview] table.cm-lp-table")).toBeVisible();
   expect(await page.locator("[data-pane=preview] [data-testid=macro-table]").count()).toBe(0);
 
-  // Caret into the table, then Ctrl+Enter → edit mode (cell-merge toolbar).
+  // Non-vim: a click enters edit mode (cell-merge toolbar) — no Ctrl+Enter (#5).
   await page.locator("[data-pane=preview] table.cm-lp-table").click();
-  await sleep(120);
-  await page.keyboard.press("Control+Enter");
   const edit = page.getByTestId("table-edit");
   await expect(edit).toBeVisible();
 
@@ -40,10 +38,8 @@ test("pipe table → merge promotes to :::table → unmerge demotes back", async
   await expect(macroTable).toBeVisible();
   expect(await macroTable.locator('td[colspan="2"]').count()).toBe(1);
 
-  // Now demote: edit the :::table, select the merged cell, Unmerge → back to pipe table.
+  // Now demote: click the :::table (enters edit), select the merged cell, Unmerge.
   await macroTable.click();
-  await sleep(120);
-  await page.keyboard.press("Control+Enter");
   await expect(page.getByTestId("table-edit")).toBeVisible();
   await page.getByTestId("table-edit").locator('td[colspan="2"]').click();
   await page.getByTestId("table-unmerge").click();
