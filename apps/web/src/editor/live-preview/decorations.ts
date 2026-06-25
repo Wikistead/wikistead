@@ -740,38 +740,46 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   const oldLine = doc.lineAt(oldHead).number;
   const newLine = doc.lineAt(newHead).number;
   const dir = newHead < oldHead ? -1 : 1;
-  // A one-line KEY (j/k/arrow) that skipped EXACTLY one block (from the line before to the
-  // line after) → land ON the block's near edge: its single atom stop. From above → first
-  // line; from below → last line. GATED on a real vertical key: a jump (gg/G/}) is NOT a
-  // one-line step even when its endpoints happen to be first-1/last+1 (the caret sitting
-  // right beside the block), so without this gate gg/G get hijacked onto the atom. When the
-  // caret is already ON the atom (oldLine within the block), the loop breaks → the next
-  // same-direction key steps off past it.
+  // Atom motion is for a one-line KEY (j/k/arrow) only — GATED on a real vertical key so a
+  // jump (gg/G/}) is never hijacked onto an atom (a jump's endpoints can coincide with an
+  // atom's edges when the caret sits right beside it). Two cases, both explicit so a TALL
+  // widget's visual height can't make CM overshoot the adjacent line:
+  //   1. caret ON the atom → step OFF to the line just outside it (down → last+1, up →
+  //      first-1). This is the fix for the device bug: trusting CM's landing here overshot
+  //      past a tall macro by its rendered height.
+  //   2. caret OUTSIDE, a step that reached/over the atom (incl. an overshoot) → land ON it
+  //      (one stop; down → first line, up → last line).
   if (lastVerticalStep) {
     for (const b of blocks) {
       const first = doc.lineAt(b.from).number;
       const last = doc.lineAt(b.to).number;
-      if (oldLine >= first && oldLine <= last) break; // caret was ON this atom → step off
-      if (dir === 1 && oldLine === first - 1 && newLine === last + 1 && newLine !== first) {
+      if (oldLine >= first && oldLine <= last) {
+        const t = dir === 1 ? last + 1 : first - 1;
+        if (t >= 1 && t <= doc.lines && t !== oldLine) {
+          return { selection: EditorSelection.cursor(doc.line(t).from), scrollIntoView: true };
+        }
+        break; // on this atom, no line outside in that direction → leave as-is
+      }
+      if (dir === 1 && oldLine === first - 1 && newLine >= last + 1) {
         return { selection: EditorSelection.cursor(doc.line(first).from), scrollIntoView: true };
       }
-      if (dir === -1 && oldLine === last + 1 && newLine === first - 1 && newLine !== last) {
+      if (dir === -1 && oldLine === last + 1 && newLine <= first - 1) {
         return { selection: EditorSelection.cursor(doc.line(last).from), scrollIntoView: true };
       }
     }
-  }
-  // Overshoot clamp: a single-line vertical KEY that skipped a tall block (a block lies
-  // strictly between oldLine and newLine) must move exactly one line — clamp to the
-  // adjacent line. Gated on a real motion key so jumps / wrapped-line steps are untouched.
-  if (lastVerticalStep) {
+    // Case 3 — overshoot clamp: a vertical key whose motion CROSSED a tall atom (a block
+    // lies strictly between oldLine and newLine, caret not on it) must move exactly one
+    // line. A tall widget makes CM's visual vertical motion overshoot from a line that is
+    // not directly adjacent to the atom (e.g. k from two lines below). Clamp to the
+    // adjacent line; the next key then lands ON the atom (case 2) and steps off (case 1).
     const adj = oldLine + dir;
     if (adj >= 1 && adj <= doc.lines && newLine !== adj) {
       const lo = Math.min(oldLine, newLine), hi = Math.max(oldLine, newLine);
-      const skipped = blocks.some((b) => {
+      const crossed = blocks.some((b) => {
         const f = doc.lineAt(b.from).number, l = doc.lineAt(b.to).number;
         return f >= lo && l <= hi && !(oldLine >= f && oldLine <= l);
       });
-      if (skipped) return { selection: EditorSelection.cursor(doc.line(adj).from), scrollIntoView: true };
+      if (crossed) return { selection: EditorSelection.cursor(doc.line(adj).from), scrollIntoView: true };
     }
   }
   return tr;
