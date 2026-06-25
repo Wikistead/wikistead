@@ -2,6 +2,7 @@ import { syntaxTree } from "@codemirror/language";
 import type { EditorState, Text } from "@codemirror/state";
 import { findFenceMacro, findDirectiveMacro, type FenceMacro, type DirectiveMacro } from "./registry";
 import { parseDirectiveOpen } from "./directive-parser";
+import { parsePipe, parseHtml, type Grid } from "./table-model";
 
 // Shared parsing of fenced-code blocks for the macro path. No DOM, no decorations
 // dependency — imported by both the live-preview renderer and the fold module.
@@ -93,4 +94,29 @@ export function directiveMacroAt(state: EditorState, pos: number): MacroDirectiv
   const parts: string[] = [];
   for (let n = firstLine.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
   return { from, to: lastLine.to, name: open.name, macro, body: parts.join("\n") };
+}
+
+export interface TableBlock {
+  readonly from: number;
+  readonly to: number;
+  readonly tier: "pipe" | "html"; // Tier-1 GFM pipes vs Tier-2 :::table HTML
+  readonly grid: Grid;
+}
+
+// The table block (a GFM pipe Table OR a :::table directive) covering `pos`, parsed into
+// the shared grid model — the unit the cell-merge UI edits. null if pos isn't in a table.
+export function tableBlockAt(state: EditorState, pos: number): TableBlock | null {
+  const dir = directiveMacroAt(state, pos);
+  if (dir && dir.name === "table") return { from: dir.from, to: dir.to, tier: "html", grid: parseHtml(dir.body) };
+  let node: ReturnType<ReturnType<typeof syntaxTree>["resolveInner"]> | null = syntaxTree(state).resolveInner(pos, 1);
+  while (node && node.name !== "Table") node = node.parent;
+  if (!node) {
+    node = syntaxTree(state).resolveInner(pos, -1);
+    while (node && node.name !== "Table") node = node.parent;
+  }
+  if (!node) return null;
+  const doc = state.doc;
+  const from = doc.lineAt(node.from).from;
+  const to = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1)).to;
+  return { from, to, tier: "pipe", grid: parsePipe(doc.sliceString(from, to)) };
 }

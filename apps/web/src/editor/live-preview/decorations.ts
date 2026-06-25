@@ -7,10 +7,12 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme } from "../macros/registry";
-import { fenceLang, fenceBody, macroFenceAt } from "../macros/fence";
+import { fenceLang, fenceBody, macroFenceAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
 import { openMacroModal } from "./macro-modal";
+import { macroRenderActiveField, setMacroRenderActive } from "./macro-edit";
+import { TableEditWidget } from "./table-edit";
 
 // Force a full reload on HMR: this module's decorations/state are baked into the
 // EditorView at creation (built once, not re-run on hot-swap), so a hot update would
@@ -252,6 +254,18 @@ class TableWidget extends WidgetType {
   }
 }
 
+// If the table block at [from, to] is render-active (toggled into edit mode, ADR-022
+// Part 11), emit the editable table widget (cell-merge UI) and return true so the caller
+// skips its read render. Safe when the field is absent (read-only surface).
+function tryTableEdit(ctx: RenderCtx, from: number, to: number): boolean {
+  const active = ctx.state.field(macroRenderActiveField, false);
+  if (!active || active.from > to || active.to < from) return false;
+  const tb = tableBlockAt(ctx.state, from);
+  if (!tb) return false;
+  ctx.addAtomic(Decoration.replace({ widget: new TableEditWidget(tb.grid, tb.from, tb.to), block: true }), tb.from, tb.to);
+  return true;
+}
+
 // True if a folded range (CodeMirror's native folding) covers [from, to). When folded
 // the macro renders nothing — CM's fold placeholder (the "▶ summary" line) owns the
 // range. foldedRanges is safe-empty if the folding extension isn't installed.
@@ -467,6 +481,7 @@ const RENDERERS: BlockRenderer[] = [
         // like a fence macro (not foldable). Body = lines between the ::: fences.
         const from = first.from;
         const to = lastLine.to;
+        if (tryTableEdit(ctx, from, to)) return; // render-active → cell-merge edit mode
         if (rangeRevealed(ctx.state, from, to)) return;
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
@@ -559,6 +574,7 @@ const RENDERERS: BlockRenderer[] = [
       // can't be ENTERED by vertical motion (it's a collapsed widget) — the blockEntry
       // transaction filter redirects motion that would skip it INTO it, then these lines
       // are real and j/k/arrows traverse them one at a time.
+      if (tryTableEdit(ctx, from, to)) return; // render-active → cell-merge edit mode (promote)
       if (rangeRevealed(ctx.state, from, to)) return;
       ctx.addAtomic(Decoration.replace({ widget: new TableWidget(doc.sliceString(from, to)), block: true }), from, to);
     },
@@ -633,7 +649,7 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
     // A fold toggle changes WHICH macro blocks render (folded → CM's placeholder owns
     // the range, so the macro widget must drop) but is neither a doc nor selection
     // change — rebuild so isFolded() is re-evaluated and the stale widget is removed.
-    for (const e of tr.effects) if (e.is(foldEffect) || e.is(unfoldEffect)) return buildDecorations(tr.state);
+    for (const e of tr.effects) if (e.is(foldEffect) || e.is(unfoldEffect) || e.is(setMacroRenderActive)) return buildDecorations(tr.state);
     return value;
   },
   provide: (f) => [
@@ -806,4 +822,18 @@ export const livePreviewTheme = EditorView.baseTheme({
     background: "rgba(127,127,127,0.08)",
     paddingLeft: "0.8em",
   },
+  // Table cell-merge edit mode (render-active): a toolbar + selectable cells.
+  ".cm-lp-table-edit": { margin: "0.4em 0", border: "1px solid var(--accent, #4ea1ff)", borderRadius: "4px", padding: "4px" },
+  ".cm-lp-table-edit-bar": { display: "flex", gap: "6px", marginBottom: "4px" },
+  ".cm-lp-table-edit-btn": {
+    border: "1px solid var(--border, #888)",
+    borderRadius: "4px",
+    background: "var(--panel, #fff)",
+    color: "var(--fg, inherit)",
+    cursor: "pointer",
+    fontSize: "0.8em",
+    padding: "2px 8px",
+  },
+  ".cm-lp-table-edit th, .cm-lp-table-edit td": { cursor: "pointer" },
+  ".cm-lp-cell-sel": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "-2px", background: "rgba(78,161,255,0.15)" },
 });
