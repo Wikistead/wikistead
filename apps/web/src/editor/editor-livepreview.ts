@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, atomDelete, motionKeyTracker, vimEnabled, imageResolver, checkboxControl, enterMacroCommand, type ImageResolver } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, imageResolver, checkboxControl, enterMacroCommand, type ImageResolver } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette } from "./live-preview/palette";
@@ -14,6 +14,7 @@ import { contextMenu } from "./live-preview/context-menu";
 import { vimExCommands } from "./live-preview/vim-ex";
 import { macroFold, autoFoldLargeFenceMacros } from "./macros";
 import { registerVimFold } from "./live-preview/vim-fold";
+import { atomDelete } from "./live-preview/vim-atom";
 import { macroEdit } from "./live-preview/macro-edit";
 
 // vim Compartment content: the keymap AND a vimEnabled flag (so the decoration builder

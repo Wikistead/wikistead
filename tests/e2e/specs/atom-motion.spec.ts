@@ -91,3 +91,18 @@ test("dd on a TALL macro atom deletes the whole macro verbatim", async ({ browse
   const text = (await page.locator("[data-pane=preview] .cm-content").innerText()).replace(/\n+/g, "|").replace(/\|$/, "");
   expect(text).toBe("top|mid|bot"); // whole fence removed verbatim; surrounding lines intact
 });
+
+// ADR-024 1b (Mode A): after dd the unnamed register holds the WHOLE macro, so p pastes
+// the whole macro back (not just its first line).
+test("dd then p pastes the whole macro back", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "atom-ddp");
+  await enterEdit(page);
+  await insertTallMermaid(page);
+  await vimOn(page);
+  await page.keyboard.press("g"); await page.keyboard.press("g"); await page.keyboard.press("j"); await sleep(110);
+  await page.keyboard.press("d"); await page.keyboard.press("d"); await sleep(150);
+  expect((await blocks(page)).length).toBe(0); // macro gone
+  await page.keyboard.press("p"); await sleep(200);
+  expect((await blocks(page)).length).toBe(1); // whole macro pasted back (register held the whole macro)
+});
