@@ -1,5 +1,5 @@
 import type { DirectiveMacro } from "./registry";
-import { parseHtml, type Grid } from "./table-model";
+import { parseHtml, styleToCss, type Grid } from "./table-model";
 
 // :::table — the Tier-2 table macro. Body is an HTML <table> (rowspan/colspan), which
 // a GFM pipe table promotes to when a merge is added (ADR-022 Part 10). The cell-merge
@@ -19,6 +19,7 @@ export function gridToTable(grid: Grid): HTMLTableElement {
       el.textContent = cell.text;
       if (cell.colspan > 1) el.colSpan = cell.colspan;
       if (cell.rowspan > 1) el.rowSpan = cell.rowspan;
+      if (cell.style) el.setAttribute("style", styleToCss(cell.style)); // already allowlisted
       tr.appendChild(el);
     }
     out.appendChild(tr);

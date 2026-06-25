@@ -4,13 +4,58 @@
 // cell to the up/left covers the position. Promotion/demotion is just "serialize the
 // grid as HTML (if it has spans) or as pipes (if it doesn't)".
 
+// Cell styling that GFM pipes can't express — its presence promotes a table to the
+// :::table HTML tier. STRICT allowlist (ADR-022 review #2): only these four properties,
+// only safe values. Anything else (arbitrary CSS, javascript:/url()/expression, other
+// props) is dropped on parse — this is the XSS boundary for both rendered and
+// vim-hand-edited :::table HTML.
+export interface CellStyle {
+  bg?: string; // background color
+  color?: string; // text color
+  width?: string; // column width
+  align?: "left" | "center" | "right";
+}
 export interface TCell {
   text: string;
   header: boolean;
   colspan: number;
   rowspan: number;
+  style?: CellStyle;
 }
 export type Grid = (TCell | null)[][]; // null = covered by a spanning origin
+
+// Safe value patterns: a hex color or a theme-token var() (no url()/javascript:/expr);
+// width is a bare number + px/%. align is an enum.
+const COLOR_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$|^var\(--[a-z0-9-]+\)$/i;
+const WIDTH_RE = /^\d{1,5}(?:px|%)$/;
+const ALIGNS = new Set(["left", "center", "right"]);
+
+// Parse a raw style="" string → an allowlisted CellStyle (drops everything not on the
+// four-property allowlist or whose value isn't safe). The ONLY way style enters the grid.
+export function sanitizeStyle(raw: string): CellStyle | undefined {
+  const out: CellStyle = {};
+  for (const decl of raw.split(";")) {
+    const i = decl.indexOf(":");
+    if (i < 0) continue;
+    const prop = decl.slice(0, i).trim().toLowerCase();
+    const val = decl.slice(i + 1).trim();
+    if (!val) continue;
+    if ((prop === "background" || prop === "background-color") && COLOR_RE.test(val)) out.bg = val;
+    else if (prop === "color" && COLOR_RE.test(val)) out.color = val;
+    else if (prop === "width" && WIDTH_RE.test(val)) out.width = val;
+    else if (prop === "text-align" && ALIGNS.has(val.toLowerCase())) out.align = val.toLowerCase() as CellStyle["align"];
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+export function styleToCss(s: CellStyle): string {
+  const p: string[] = [];
+  if (s.bg) p.push(`background:${s.bg}`);
+  if (s.color) p.push(`color:${s.color}`);
+  if (s.width) p.push(`width:${s.width}`);
+  if (s.align) p.push(`text-align:${s.align}`);
+  return p.join(";");
+}
 
 const clampSpan = (v: string | null): number => {
   const n = v && /^\d+$/.test(v) ? Number(v) : 1;
@@ -62,7 +107,8 @@ export function parseHtml(html: string): Grid {
       const attrs = m[2]!;
       const colspan = clampSpan(/colspan\s*=\s*"?(\d+)"?/i.exec(attrs)?.[1] ?? null);
       const rowspan = clampSpan(/rowspan\s*=\s*"?(\d+)"?/i.exec(attrs)?.[1] ?? null);
-      grid[r]![c] = { text: unesc(m[3]!).trim(), header: m[1]!.toLowerCase() === "th", colspan, rowspan };
+      const style = sanitizeStyle(/style\s*=\s*"([^"]*)"/i.exec(attrs)?.[1] ?? ""); // allowlist
+      grid[r]![c] = { text: unesc(m[3]!).trim(), header: m[1]!.toLowerCase() === "th", colspan, rowspan, ...(style ? { style } : {}) };
       for (let dr = 0; dr < rowspan; dr++) {
         for (let dc = 0; dc < colspan; dc++) {
           if (dr === 0 && dc === 0) continue;
@@ -83,6 +129,12 @@ export function hasSpans(grid: Grid): boolean {
   return grid.some((row) => row.some((cell) => cell && (cell.colspan > 1 || cell.rowspan > 1)));
 }
 
+const hasStyle = (grid: Grid): boolean => grid.some((row) => row.some((c) => c && c.style));
+// GFM pipes express a header ONLY as row 0 — they cannot put a <th> in a body row. So a
+// header BELOW row 0 is the pipe-inexpressible case → HTML tier. (Row 0 being td-only is
+// fine: toPipe renders row 0 as the header.)
+const complexHeader = (grid: Grid): boolean => grid.some((row, r) => r > 0 && row.some((c) => c && c.header));
+
 export function toHtml(grid: Grid): string {
   let s = "<table>";
   for (const row of grid) {
@@ -92,7 +144,8 @@ export function toHtml(grid: Grid): string {
       const tag = cell.header ? "th" : "td";
       const cs = cell.colspan > 1 ? ` colspan="${cell.colspan}"` : "";
       const rs = cell.rowspan > 1 ? ` rowspan="${cell.rowspan}"` : "";
-      s += `<${tag}${cs}${rs}>${esc(cell.text)}</${tag}>`;
+      const st = cell.style ? ` style="${styleToCss(cell.style)}"` : "";
+      s += `<${tag}${cs}${rs}${st}>${esc(cell.text)}</${tag}>`;
     }
     s += "</tr>";
   }
@@ -149,5 +202,6 @@ export function unmergeAt(grid: Grid, r: number, c: number): Grid {
 // Serialize to the lowest tier that can represent the grid: pipes if span-free
 // (Tier 1), else a :::table HTML directive (Tier 2). This IS the promote/demote rule.
 export function serialize(grid: Grid): { tier: "pipe" | "html"; text: string } {
-  return hasSpans(grid) ? { tier: "html", text: toHtml(grid) } : { tier: "pipe", text: toPipe(grid) };
+  const needsHtml = hasSpans(grid) || hasStyle(grid) || complexHeader(grid);
+  return needsHtml ? { tier: "html", text: toHtml(grid) } : { tier: "pipe", text: toPipe(grid) };
 }
