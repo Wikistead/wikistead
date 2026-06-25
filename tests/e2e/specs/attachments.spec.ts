@@ -7,9 +7,11 @@ const API = "http://dev.localhost:4010";
 test("attachments: upload -> confirm -> download, and unauthorized page is forbidden", async ({ page, request }) => {
   await openDemo(page);
 
-  // open the panel and upload a file (presign -> direct PUT to SeaweedFS -> confirm)
-  await page.click("[data-testid=attachments-panel] [aria-expanded]");
-  await sleep(300);
+  // open the attachments panel from the ⋯ menu, then upload (presign -> PUT -> confirm)
+  await page.click("[data-testid=page-overflow-trigger]");
+  await page.click("[data-testid=attachments-toggle]");
+  await expect(page.getByTestId("attachments-panel")).toBeVisible();
+  await sleep(200);
   await page.setInputFiles("[data-testid=attachments-panel] input[type=file]", {
     name: "hello-e2e.txt",
     mimeType: "text/plain",

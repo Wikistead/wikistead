@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, Download, Paperclip, Trash2, Upload } from "lucide-react";
+import { Download, Paperclip, Trash2, Upload, X } from "lucide-react";
 import { useSession } from "../session/SessionProvider";
+import { useEscClose } from "../ui/useEscClose";
 import {
   useAttachments,
   useDeleteAttachment,
@@ -20,10 +21,11 @@ function fmtSize(n: number | null): string {
 
 interface UploadState { name: string; status: "uploading" | "error"; message?: string }
 
-// Page attachments (member-only chrome; NOT part of the canonical Y.Text). All
+// Page attachments (member-only chrome; NOT part of the canonical Y.Text). A right-side
+// panel opened on demand from the ⋯ menu (no longer an always-on bottom bar). All
 // authorization is server-side: upload needs `edit`, list/download `view`,
 // delete `manage`. readOnly hides upload/delete (the server 403 is the real gate).
-export function AttachmentsPanel({ pageId, readOnly }: { pageId: string; readOnly: boolean }) {
+export function AttachmentsPanel({ pageId, readOnly, onClose }: { pageId: string; readOnly: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   const { token } = useSession();
   const meta = usePageMeta(pageId);
@@ -31,8 +33,8 @@ export function AttachmentsPanel({ pageId, readOnly }: { pageId: string; readOnl
   const list = useAttachments(spaceId, pageId);
   const upload = useUploadAttachment(spaceId, pageId);
   const del = useDeleteAttachment(pageId);
+  useEscClose(onClose);
 
-  const [open, setOpen] = useState(false);
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -62,15 +64,15 @@ export function AttachmentsPanel({ pageId, readOnly }: { pageId: string; readOnl
   const count = list.data?.length ?? 0;
 
   return (
-    <div className={styles.panel} data-testid="attachments-panel">
-      <button type="button" className={styles.header} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        <ChevronRight size={14} className={open ? styles.caretOpen : styles.caret} />
-        <Paperclip size={14} />
-        <span>{t("attachments.header", { count })}</span>
-      </button>
+    <aside className={styles.panel} data-testid="attachments-panel">
+      <div className={styles.header}>
+        <strong className={styles.title}><Paperclip size={14} /> {t("attachments.header", { count })}</strong>
+        <button type="button" className={styles.close} data-testid="attachments-close" aria-label={t("common.close")} onClick={onClose}>
+          <X size={16} aria-hidden />
+        </button>
+      </div>
 
-      {open && (
-        <div className={styles.body}>
+      <div className={styles.body}>
           {!readOnly && (
             <div className={styles.uploadRow}>
               <button type="button" className={styles.uploadBtn} data-testid="attach-upload" onClick={() => fileRef.current?.click()}>
@@ -109,8 +111,7 @@ export function AttachmentsPanel({ pageId, readOnly }: { pageId: string; readOnl
               </div>
             ))
           )}
-        </div>
-      )}
-    </div>
+      </div>
+    </aside>
   );
 }

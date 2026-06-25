@@ -1,33 +1,35 @@
+/* Right-side panel (matches Comments/History): opened on demand from the ⋯ menu, not
+   an always-on bottom bar. */
 .panel {
-  composes: wks-slide-up from global;
-  flex: 0 0 auto;
-  border-top: 1px solid var(--border);
-  background: var(--panel);
+  composes: wks-slide-right from global;
   display: flex;
   flex-direction: column;
-  max-height: 40%;
-}
-.header {
-  display: flex;
-  align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: none;
-  border: none;
-  color: var(--fg-dim);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
+  width: 300px;
   flex: 0 0 auto;
+  border-left: 1px solid var(--border);
+  padding: var(--space-3);
+  overflow-y: auto;
+  min-height: 0;
 }
-.header:hover { color: var(--fg); }
-.caret { transition: transform 0.12s ease; }
-.caretOpen { transition: transform 0.12s ease; transform: rotate(90deg); }
+.header { display: flex; align-items: center; justify-content: space-between; }
+.title { display: inline-flex; align-items: center; gap: var(--space-1); font-weight: 600; }
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.close:hover { background: var(--panel-2); color: var(--fg); }
 
 .body {
-  overflow: auto;
-  padding: 0 var(--space-3) var(--space-2);
+  display: flex;
+  flex-direction: column;
 }
 .uploadRow { padding: var(--space-1) 0 var(--space-2); }
 .uploadBtn {

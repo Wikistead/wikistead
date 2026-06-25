@@ -68,9 +68,11 @@ test("guest VIEW link renders a published image (guest image resolution)", async
   await member.waitForSelector("[data-pane=preview] .cm-content");
   await sleep(300);
 
-  // upload an image via the attachments panel (proven path)
-  await member.click("[data-testid=attachments-panel] [aria-expanded]");
-  await sleep(300);
+  // upload an image via the attachments panel (proven path) — open it from the ⋯ menu
+  await member.click("[data-testid=page-overflow-trigger]");
+  await member.click("[data-testid=attachments-toggle]");
+  await member.waitForSelector("[data-testid=attachments-panel]");
+  await sleep(200);
   await member.setInputFiles("[data-testid=attachments-panel] input[type=file]", { name: "g.png", mimeType: "image/png", buffer: Buffer.from(PNG_1x1, "base64") });
   await member.waitForFunction(() => [...document.querySelectorAll("[data-testid=attach-item]")].some((e) => (e as HTMLElement).innerText.includes("g.png")), undefined, { timeout: 8000 });
   const attId = await member.evaluate(async ({ api, pageId }) => {

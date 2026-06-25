@@ -184,6 +184,12 @@ function PageRoute() {
     try { localStorage.setItem("wks.historyOpen", "0"); } catch { /* no storage */ }
   }, []);
 
+  // Attachments: a right-side panel opened on demand from the ⋯ menu (no longer an
+  // always-on bottom bar).
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
+  const toggleAttachments = () => setAttachmentsOpen((v) => !v);
+  const closeAttachments = useCallback(() => setAttachmentsOpen(false), []);
+
   // Per-page permissions (manage only). Also the invite-to-draft surface.
   const [permsOpen, setPermsOpen] = useState(false);
   const [sharing, setSharing] = useState(false); // share dialog (current page)
@@ -260,6 +266,7 @@ function PageRoute() {
     onToggleComments: toggleComments,
     openComments,
     onHistory: toggleHistory,
+    onAttachments: toggleAttachments,
     onExport: () => { if (pageId) void downloadPageExport(token, pageId); },
     onPrint: () => window.print(),
     onPermissions: page?.canManage ? () => setPermsOpen(true) : undefined,
@@ -284,10 +291,10 @@ function PageRoute() {
             <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
           </div>
-          {pageId && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} />}
         </div>
         {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} />}
         {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} onCompare={openDiff} onClose={closeHistory} />}
+        {pageId && attachmentsOpen && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} onClose={closeAttachments} />}
       </div>
       {pageId && diffRevId && <DiffModal pageId={pageId} revId={diffRevId} onClose={closeDiff} />}
       {pageId && <PermissionsDialog pageId={pageId} open={permsOpen} onClose={() => setPermsOpen(false)} />}
