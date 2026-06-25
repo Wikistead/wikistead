@@ -35,6 +35,39 @@
   --color-fg-dim: var(--fg-dim);
 }
 
+/* shadcn BARE-token alias layer (root cause of the recurring "undefined token" bugs).
+   The @theme map above gives Tailwind UTILITIES (bg-popover, ring-ring, …) their colours.
+   But some shadcn components reference the bare shadcn names directly in inline styles /
+   CSS vars (e.g. sonner: `var(--popover)`, `var(--radius)`), which @theme does NOT
+   create — only `--color-*`. Those bare names were undefined → transparent bg / missing
+   radius (the toast + popup-border + radius bugs). Define them ONCE here, aliased to this
+   project's tokens, so any shadcn component (current or future) using a bare name resolves
+   correctly in both themes (the aliases are indirections, so they follow the light/dark
+   --panel/--fg swaps automatically). NOTE: bare `--accent` is intentionally NOT aliased —
+   in THIS project `--accent` is the brand accent (shadcn's "accent" hover-fill is
+   `--color-accent` = panel-2 via @theme); overriding bare `--accent` would recolour the
+   brand everywhere. `--border` already exists as a project token (same meaning). */
+:root {
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--panel);
+  --card-foreground: var(--fg);
+  --popover: var(--panel);
+  --popover-foreground: var(--fg);
+  --primary: var(--accent);
+  --primary-foreground: var(--accent-fg);
+  --secondary: var(--panel-2);
+  --secondary-foreground: var(--fg);
+  --muted: var(--panel-2);
+  --muted-foreground: var(--fg-dim);
+  --accent-foreground: var(--fg);
+  --destructive: var(--danger);
+  --destructive-foreground: var(--danger-fg);
+  --input: var(--border);
+  --ring: var(--accent);
+  --radius: var(--radius-lg);
+}
+
 /* Explicit-dark variant for any shadcn `dark:` utility. Semantic-token utilities
    (bg-card, …) already follow the var swap in :root below, including system-dark. */
 @custom-variant dark (&:is([data-theme="dark"] *));
