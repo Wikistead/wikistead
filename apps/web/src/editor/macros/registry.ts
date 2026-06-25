@@ -41,10 +41,6 @@ export interface MacroModalEditor {
   // May be async — the editor (e.g. Excalidraw) is lazy-loaded.
   mount(container: HTMLElement, body: string, ctx: MacroContext): Promise<MacroModalController>;
 }
-export type RichEditUI =
-  | { readonly present: "modal"; readonly editor: MacroModalEditor }
-  | { readonly present: "inline" };
-
 // ADR-025: the narrow host an INLINE rich-editor (e.g. table) talks to. Like MacroContext
 // it exposes NO editor / Yjs / app internals — only the macro's own source + theme + a
 // commit/exit. The editor edits its own model and commits via replaceSource (per-op, ADR-025
@@ -56,6 +52,18 @@ export interface InnerEditHost {
   replaceSource(next: string): void; // commit a new body
   exit(): void; // leave inline edit (Done / Esc)
 }
+export interface InlineController {
+  destroy(): void; // unmount / cleanup
+}
+// ADR-025 step 2: an INLINE rich-editor mounts its own DOM into `container` and talks ONLY
+// to InnerEditHost — it never sees CodeMirror/EditorView (a host-layer bridge widget wires
+// it in). Mirrors MacroModalEditor for the modal path; table is the first implementation.
+export interface InlineEditor {
+  mount(container: HTMLElement, host: InnerEditHost): InlineController;
+}
+export type RichEditUI =
+  | { readonly present: "modal"; readonly editor: MacroModalEditor }
+  | { readonly present: "inline"; readonly editor: InlineEditor };
 
 export interface FenceMacro {
   readonly kind: "fence";

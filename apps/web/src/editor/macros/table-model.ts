@@ -93,6 +93,19 @@ export function parsePipe(src: string): Grid {
   });
 }
 
+// Parse a table block's SOURCE TEXT → grid, detecting the tier: a `:::table` directive
+// (HTML body between the ::: fences) or a GFM pipe table. Used by the view-free inline
+// editor, which only gets the source via InnerEditHost.getSource() (ADR-025 step 2).
+export function parseTableSource(src: string): Grid {
+  const lines = src.split("\n");
+  if (lines[0]?.trimStart().startsWith(":::")) {
+    let end = lines.length;
+    if (lines[end - 1]?.trim() === ":::") end -= 1;
+    return parseHtml(lines.slice(1, end).join("\n"));
+  }
+  return parsePipe(src);
+}
+
 // Parse an HTML <table> → a grid (honouring colspan/rowspan). String-based (no DOM) so
 // it runs in node tests too; it parses OUR serialized HTML (and hand-edited variants).
 // XSS is not a concern here — text is later set via textContent, never innerHTML.
