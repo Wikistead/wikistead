@@ -14,6 +14,7 @@ import { contextMenu } from "./live-preview/context-menu";
 import { vimExCommands } from "./live-preview/vim-ex";
 import { macroFold, autoFoldLargeFenceMacros } from "./macros";
 import { registerVimFold } from "./live-preview/vim-fold";
+import { macroEdit } from "./live-preview/macro-edit";
 
 // Map vim za/zo/zc onto CodeMirror fold commands (codemirror-vim omits them) so vim
 // users can fold macro blocks. Idempotent; runs once at module load.
@@ -40,7 +41,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void } = {},
+  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; macroEditKey?: string } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -61,6 +62,8 @@ export function mountLivePreview(
       // folding collapses a block to its summary line (vim za/zo). Editable surface only
       // — the fold affordance is an editing control; the published view just renders.
       macroFold,
+      // reveal↔render toggle + "<key> edit" hint for macros with a richEditUI (Part 11).
+      macroEdit(opts.macroEditKey ?? "Mod-Enter"),
       // Task checkboxes are interactive on the editable surface: a click flips the
       // `[ ]`/`[x]` char directly in the Y.Text (a normal draft edit). (Read-only →
       // disabled; the view surface wires its own no-revision persist below.)

@@ -18,6 +18,9 @@ export interface CommandDef {
 export const COMMANDS: CommandDef[] = [
   { id: "editor.toggleVim", labelKey: "account.cmd_toggleVim", defaultKey: "Ctrl-Alt-v" },
   { id: "search.focus", labelKey: "account.cmd_searchFocus", defaultKey: "Mod-k" },
+  // Edit the macro under the caret (ADR-022 Part 11): inline macros toggle source↔render,
+  // modal macros (Excalidraw) open. event.code "Enter" → JIS/AltGr-safe.
+  { id: "editor.toggleMacroEdit", labelKey: "account.cmd_toggleMacroEdit", defaultKey: "Mod-Enter" },
 ];
 const DEFAULTS: Record<string, string> = { "palette.next": "Ctrl-j", "palette.prev": "Ctrl-k" };
 

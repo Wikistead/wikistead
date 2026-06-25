@@ -391,7 +391,7 @@ body {
 /* M0-3 vim visual hint: a tiny tooltip at the format-toolbar spot (above the selection),
    shown only in vim visual mode. Display-only — pointer-events:none so it never
    intercepts clicks; adds no document text/decoration. */
-.cm-tooltip.lp-vim-hint {
+.cm-tooltip.lp-context-hint {
   pointer-events: none;
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

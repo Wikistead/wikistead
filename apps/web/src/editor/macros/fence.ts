@@ -1,6 +1,7 @@
 import { syntaxTree } from "@codemirror/language";
 import type { EditorState, Text } from "@codemirror/state";
-import { findFenceMacro, type FenceMacro } from "./registry";
+import { findFenceMacro, findDirectiveMacro, type FenceMacro, type DirectiveMacro } from "./registry";
+import { parseDirectiveOpen } from "./directive-parser";
 
 // Shared parsing of fenced-code blocks for the macro path. No DOM, no decorations
 // dependency — imported by both the live-preview renderer and the fold module.
@@ -60,4 +61,36 @@ export function macroFenceAt(state: EditorState, pos: number): MacroFence | null
   const macro = findFenceMacro(lang);
   if (!macro) return null;
   return { from, to, lang, macro, body: fenceBody(doc, node.from, node.to) };
+}
+
+export interface MacroDirective {
+  readonly from: number; // start of the opening ::: line (whole-block range)
+  readonly to: number; // end of the closing ::: line
+  readonly name: string;
+  readonly macro: DirectiveMacro;
+  readonly body: string; // the lines BETWEEN the fences (e.g. the HTML <table>)
+}
+
+// The macro directive block (:::name … :::) covering `pos`, or null. Used by the
+// reveal↔render mechanism / table render. body = content lines between the fences.
+export function directiveMacroAt(state: EditorState, pos: number): MacroDirective | null {
+  let node: ReturnType<ReturnType<typeof syntaxTree>["resolveInner"]> | null = syntaxTree(state).resolveInner(pos, 1);
+  while (node && node.name !== "Directive") node = node.parent;
+  if (!node) {
+    node = syntaxTree(state).resolveInner(pos, -1);
+    while (node && node.name !== "Directive") node = node.parent;
+  }
+  if (!node) return null;
+  const doc = state.doc;
+  const open = parseDirectiveOpen(doc.lineAt(node.from).text);
+  if (!open) return null;
+  const macro = findDirectiveMacro(open.name);
+  if (!macro) return null;
+  const from = doc.lineAt(node.from).from;
+  const lastLine = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1));
+  const firstLine = doc.lineAt(node.from);
+  // body = lines strictly between the opening and closing fence lines
+  const parts: string[] = [];
+  for (let n = firstLine.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
+  return { from, to: lastLine.to, name: open.name, macro, body: parts.join("\n") };
 }
