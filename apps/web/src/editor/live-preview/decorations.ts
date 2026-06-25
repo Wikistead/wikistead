@@ -1,4 +1,4 @@
-import { syntaxTree } from "@codemirror/language";
+import { syntaxTree, foldedRanges, foldEffect, unfoldEffect } from "@codemirror/language";
 import { Facet, StateField, EditorState, EditorSelection, type Range, type Extension } from "@codemirror/state";
 import {
   Decoration,
@@ -6,6 +6,8 @@ import {
   EditorView,
   WidgetType,
 } from "@codemirror/view";
+import { findFenceMacro, type FenceMacro, type MacroTheme } from "../macros/registry";
+import { fenceLang, fenceBody, macroFenceAt } from "../macros/fence";
 
 // Force a full reload on HMR: this module's decorations/state are baked into the
 // EditorView at creation (built once, not re-run on hot-swap), so a hot update would
@@ -247,6 +249,76 @@ class TableWidget extends WidgetType {
   }
 }
 
+// Resolve the active theme for a macro's render. Read from <html data-theme> (set by
+// ThemeProvider); "system" (or unset) falls back to the OS preference.
+function currentMacroTheme(): MacroTheme {
+  const t = document.documentElement.dataset.theme;
+  if (t === "dark") return "dark";
+  if (t === "light") return "light";
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+// True if a folded range (CodeMirror's native folding) covers [from, to). When folded
+// the macro renders nothing — CM's fold placeholder (the "▶ summary" line) owns the
+// range. foldedRanges is safe-empty if the folding extension isn't installed.
+function isFolded(state: EditorState, from: number, to: number): boolean {
+  let folded = false;
+  foldedRanges(state).between(from, to, () => { folded = true; });
+  return folded;
+}
+
+// Renders a macro block (e.g. ```mermaid) via the registry's narrow liveRender, which
+// returns display DOM only — no editor/doc/Yjs access (ADR-023 trust boundary). The
+// macro never sees CodeMirror; this widget bridges its DOM into the live preview. On
+// the editable surface a corner button collapses the block to the folded summary.
+// Display-only / offset-invariant like every other block widget (ADR-008).
+class MacroWidget extends WidgetType {
+  constructor(readonly macro: FenceMacro, readonly body: string) {
+    super();
+  }
+  eq(other: MacroWidget) {
+    return other.macro === this.macro && other.body === this.body;
+  }
+  toDOM(view: EditorView) {
+    const wrap = document.createElement("div");
+    wrap.className = "cm-lp-macro-wrap";
+    wrap.appendChild(this.macro.liveRender(this.body, { theme: currentMacroTheme() }));
+    if (!view.state.readOnly) {
+      // Click the rendered macro → put the caret at the block start, which reveals the
+      // raw source for editing. (CM maps a click on an opaque block widget to the
+      // position AFTER it, which wouldn't reveal; we place it explicitly.) The fold
+      // button stops propagation so its clicks don't reveal. Offset-invariant.
+      wrap.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)) });
+        view.focus();
+      });
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cm-lp-macro-fold";
+      btn.title = "Collapse";
+      btn.textContent = "⊟";
+      btn.setAttribute("data-testid", "macro-fold");
+      // mousedown + preventDefault: keep the selection where it is (don't place the
+      // caret into the block, which would reveal raw) and fold the block's range. Use
+      // the button's screen position → doc pos (robust for a block widget) → the fence.
+      btn.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // posAtDOM maps the block widget's DOM to its start offset (posAtCoords would
+        // map to the line after the block — wrong for a block replace widget).
+        const fence = macroFenceAt(view.state, view.posAtDOM(wrap));
+        if (fence) view.dispatch({ effects: foldEffect.of({ from: fence.from, to: fence.to }) });
+      });
+      wrap.appendChild(btn);
+    }
+    return wrap;
+  }
+  ignoreEvent() {
+    return false; // clicks pass through so the cursor can enter → reveal raw
+  }
+}
+
 // A construct's syntax markers reveal (become editable raw text) when the main
 // selection touches the range the marker sits on — matching Obsidian's per-line
 // reveal. This only changes rendering, never offsets.
@@ -335,6 +407,21 @@ const RENDERERS: BlockRenderer[] = [
     match: (n) => n === "FencedCode",
     enter: (node, ctx) => {
       const doc = ctx.state.doc;
+      // Macro fence (```mermaid …)? Render via the registry instead of tinting. Needs
+      // no parser — the lang comes from the already-parsed fence's first line.
+      const lang = fenceLang(doc.lineAt(node.from).text);
+      const macro = lang ? findFenceMacro(lang) : undefined;
+      if (macro) {
+        const from = doc.lineAt(node.from).from;
+        const to = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1)).to;
+        // Folded → CM's fold placeholder owns the range. Caret inside → reveal raw
+        // source (editable). Otherwise → the rendered macro (a collapsed block widget,
+        // entered via blockEntry like table/image).
+        if (isFolded(ctx.state, from, to)) return;
+        if (rangeRevealed(ctx.state, from, to)) return;
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to)), block: true }), from, to);
+        return;
+      }
       const first = doc.lineAt(node.from).number;
       const last = doc.lineAt(Math.min(node.to, doc.length)).number;
       // Tint only the CODE lines, not the ``` / ~~~ fence lines (those would render
@@ -493,7 +580,14 @@ function buildDecorations(state: EditorState): {
 // cursor motion skips hidden markers), and the collapsed-block ranges (for blockEntry).
 export const livePreview = StateField.define<{ decorations: DecorationSet; atomic: DecorationSet; blocks: { from: number; to: number }[] }>({
   create: (state) => buildDecorations(state),
-  update: (value, tr) => (tr.docChanged || tr.selection ? buildDecorations(tr.state) : value),
+  update: (value, tr) => {
+    if (tr.docChanged || tr.selection) return buildDecorations(tr.state);
+    // A fold toggle changes WHICH macro blocks render (folded → CM's placeholder owns
+    // the range, so the macro widget must drop) but is neither a doc nor selection
+    // change — rebuild so isFolded() is re-evaluated and the stale widget is removed.
+    for (const e of tr.effects) if (e.is(foldEffect) || e.is(unfoldEffect)) return buildDecorations(tr.state);
+    return value;
+  },
   provide: (f) => [
     EditorView.decorations.from(f, (v) => v.decorations),
     EditorView.atomicRanges.of((view) => view.state.field(f).atomic),
@@ -612,4 +706,45 @@ export const livePreviewTheme = EditorView.baseTheme({
   },
   ".cm-lp-table th": { background: "rgba(127,127,127,0.12)", fontWeight: "700" },
   ".cm-lp-image": { maxWidth: "100%", height: "auto", borderRadius: "4px", verticalAlign: "bottom" },
+  // Macro block (e.g. ```mermaid). The wrap is relative so the fold button can sit in
+  // a corner; the rendered DOM is whatever the macro's liveRender returns.
+  ".cm-lp-macro-wrap": { position: "relative", margin: "0.4em 0" },
+  ".cm-lp-macro": { display: "block", overflowX: "auto" },
+  // pointer-events:none on the SVG so a click on the diagram falls through to the macro
+  // container (CM then places the caret → reveal-on-cursor shows the raw source). An
+  // SVG-internal click can't be mapped to a doc position, so without this clicking a
+  // diagram wouldn't reveal it. Scoped to the svg so the container stays hoverable
+  // (the fold button shows on hover).
+  ".cm-lp-mermaid svg": { maxWidth: "100%", height: "auto", pointerEvents: "none" },
+  ".cm-lp-macro-error": {
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    color: "var(--danger, #c00)",
+    background: "rgba(127,127,127,0.12)",
+    borderRadius: "4px",
+    padding: "0.4em 0.6em",
+  },
+  ".cm-lp-macro-fold": {
+    position: "absolute",
+    top: "4px",
+    right: "4px",
+    border: "1px solid var(--border, #888)",
+    borderRadius: "4px",
+    background: "var(--panel, #fff)",
+    color: "var(--fg-dim, #888)",
+    cursor: "pointer",
+    fontSize: "0.8em",
+    lineHeight: "1",
+    padding: "2px 5px",
+    opacity: "0",
+    transition: "opacity 120ms",
+  },
+  ".cm-lp-macro-wrap:hover .cm-lp-macro-fold": { opacity: "1" },
+  // Folded summary line ("▶ Mermaid diagram"). One landable line; click to expand
+  // (vim za/zo also toggle it — CM native folding).
+  ".cm-lp-macro-folded": {
+    cursor: "pointer",
+    color: "var(--fg-dim, #888)",
+    fontStyle: "italic",
+    fontSize: "0.95em",
+  },
 });

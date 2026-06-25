@@ -12,6 +12,7 @@ import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette } from "./live-preview/palette";
 import { contextMenu } from "./live-preview/context-menu";
 import { vimExCommands } from "./live-preview/vim-ex";
+import { macroFold } from "./macros";
 import type { ImageUploader } from "./live-preview/commands";
 import { attachImageDrop } from "./live-preview/image-drop";
 import { cmTheme } from "../styles/cm-theme";
@@ -51,6 +52,10 @@ export function mountLivePreview(
       markdownExtension(),
       livePreviewTheme,
       livePreview,
+      // Macro blocks (ADR-022): code-fence macros (```mermaid) render via the registry;
+      // folding collapses a block to its summary line (vim za/zo). Editable surface only
+      // — the fold affordance is an editing control; the published view just renders.
+      macroFold,
       // Task checkboxes are interactive on the editable surface: a click flips the
       // `[ ]`/`[x]` char directly in the Y.Text (a normal draft edit). (Read-only →
       // disabled; the view surface wires its own no-revision persist below.)

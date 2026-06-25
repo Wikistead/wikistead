@@ -29,6 +29,45 @@ const ALLOW = new Set([
 // distribution-licensing concern — skip them.
 const isWorkspacePkg = (name) => name === "wikistead" || name.startsWith("@wikistead/");
 
+// Per-package, per-VERSION verified overrides (ADR-011 — explicit allowlisting).
+// Only for packages whose published METADATA is wrong/missing but whose bundled
+// LICENSE file proves a permissive license. Keyed by exact name@version so a version
+// bump forces re-verification (the metadata gap may be fixed, or the license may
+// change). Each entry MUST cite the evidence.
+const OVERRIDES = {
+  // khroma's package.json omits the `license` field (→ pnpm reports "Unknown"), but
+  // its bundled `license` file is verbatim "The MIT License (MIT)" (verified
+  // 2026-06-25). Pulled in transitively by mermaid. MIT = permissive.
+  "khroma@2.1.0": { license: "MIT", reason: "package.json omits license; bundled LICENSE file is verbatim MIT (verified 2026-06-25)" },
+};
+
+// Accept an SPDX license expression if it is permissive. A bare token must be in the
+// allowlist. A compound expression is evaluated by SPDX precedence: an `OR` is allowed
+// if ANY alternative is allowed (we elect the permissive option — e.g. dompurify's
+// "(MPL-2.0 OR Apache-2.0)" elects Apache-2.0); an `AND` requires ALL operands. Parens
+// are flattened (our expressions don't mix OR/AND under nesting).
+function andAllowed(expr) {
+  const parts = expr.split(/\bAND\b/i).map((p) => p.trim()).filter(Boolean);
+  return parts.length > 0 && parts.every((p) => ALLOW.has(p));
+}
+function exprAllowed(raw) {
+  if (!raw) return false;
+  if (ALLOW.has(raw)) return true; // exact (covers entries like "MIT OR X11")
+  const s = raw.replace(/[()]/g, " ").trim();
+  if (/\bOR\b/i.test(s)) return s.split(/\bOR\b/i).some((branch) => andAllowed(branch));
+  return andAllowed(s);
+}
+
+// Effective license for a package: a verified override (any matching version) wins,
+// otherwise the reported license string.
+function effectiveLicense(name, versions, license) {
+  for (const v of versions) {
+    const o = OVERRIDES[`${name}@${v}`];
+    if (o) return o.license;
+  }
+  return license;
+}
+
 // Scoped font-license exception (ADR-011): the SIL Open Font License (OFL-1.1) is
 // permissive for the purpose of the code dual-licensing premise — it explicitly
 // permits bundling the font with any software, including commercial/closed-source
@@ -59,11 +98,13 @@ if (!raw.trim()) {
 const byLicense = JSON.parse(raw);
 const violations = [];
 for (const [license, pkgs] of Object.entries(byLicense)) {
-  if (ALLOW.has(license)) continue;
   for (const pkg of pkgs) {
     if (isWorkspacePkg(pkg.name)) continue;
-    if (FONT_LICENSE_ALLOW.has(license) && isFontPkg(pkg.name)) continue;
-    violations.push({ name: pkg.name, versions: (pkg.versions || []).join(", "), license });
+    const versions = pkg.versions || [];
+    const effective = effectiveLicense(pkg.name, versions, license);
+    if (exprAllowed(effective)) continue;
+    if (FONT_LICENSE_ALLOW.has(effective) && isFontPkg(pkg.name)) continue;
+    violations.push({ name: pkg.name, versions: versions.join(", "), license });
   }
 }
 
