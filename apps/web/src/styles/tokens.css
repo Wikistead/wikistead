@@ -373,7 +373,9 @@ body {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  /* Clearance so a long document's last lines scroll ABOVE the bottom-corner floating
-     controls (actions / vim) instead of hiding behind them (the FAB-overlap problem). */
-  padding-bottom: 4.5rem;
 }
+/* Small clearance ONLY at the very end of the document so the last line can scroll just
+   clear of the bottom-corner floating controls — small enough not to read as an empty
+   band that shrinks the page. The controls are translucent, so minor overlap mid-scroll
+   is fine. */
+.lp-editor-host .cm-content { padding-bottom: 1.5rem; }
