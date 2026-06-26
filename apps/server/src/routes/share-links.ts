@@ -37,8 +37,16 @@ function toShareLink(r: ShareLinkRow): ShareLink {
   }
 }
 
-// view -> FGA 'view' relation, edit -> 'edit'. Only these two are shareable.
-function relationFor(capability: Capability): 'view' | 'edit' {
+// The FGA relation a share link writes, by resource kind + capability:
+//  - page: view -> 'view', edit -> 'edit' (both shareable).
+//  - space: view-only -> 'viewer' (ADR-038: a space link opens the whole space READ-only;
+//    space#editor has no share_link, so guests never edit via a space link). An edit space
+//    link is rejected.
+function relationForResource(type: ResourceRef['type'], capability: Capability): 'view' | 'edit' | 'viewer' {
+  if (type === 'space') {
+    if (capability !== 'view') throw Object.assign(new Error('space links are view-only'), { statusCode: 400 })
+    return 'viewer'
+  }
   if (capability !== 'view' && capability !== 'edit') {
     throw Object.assign(new Error('capability must be view or edit'), { statusCode: 400 })
   }
@@ -67,22 +75,27 @@ export async function createShareLink(
     expiresInSeconds: number | null
   },
 ): Promise<ShareLink> {
-  if (args.resource.type !== 'page') {
-    throw Object.assign(new Error('only page links are supported'), { statusCode: 400 })
+  if (args.resource.type !== 'page' && args.resource.type !== 'space') {
+    throw Object.assign(new Error('only page or space links are supported'), { statusCode: 400 })
   }
   // Entitlement gate (issuance only): blocked plans cannot mint new links, but
   // already-issued links keep working. Free includes guest access (the hook).
   if (!resolveEntitlements(args.plan).guestAccess) {
     throw Object.assign(new Error('share links not available on this plan'), { statusCode: 402 })
   }
-  const relation = relationFor(args.capability)
+  // Relation by kind (space = view-only 'viewer'; page = view/edit). Throws 400 on an
+  // unshareable combo (e.g. an edit space link).
+  const relation = relationForResource(args.resource.type, args.capability)
 
+  // `manage` on the resource — issuing an anonymous link is administrative. For a space link
+  // this is space `manage` (exposing the WHOLE space is a bigger act than a page link).
   const canManage = await check(fga, `user:${args.userId}`, 'manage', args.resource)
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
   const expiresAt = args.expiresInSeconds != null ? new Date(Date.now() + args.expiresInSeconds * 1000) : null
 
-  // INSERT (DB-generated v4 id) + FGA grant in one tx; FGA failure rolls back.
+  // INSERT (DB-generated v4 id) + FGA grant in one tx; FGA failure rolls back. resource_type
+  // is stored verbatim so revoke deletes exactly the right tuple (1 link = 1 resource).
   const row = await db.tx(async (tx) => {
     const [r] = await tx<ShareLinkRow[]>`
       INSERT INTO share_links (tenant_id, resource_type, resource_id, capability, expires_at, created_by)
@@ -94,7 +107,7 @@ export async function createShareLink(
       {
         user: `share_link:${r.id}`,
         relation,
-        object: `page:${args.resource.id}`,
+        object: `${args.resource.type}:${args.resource.id}`, // page:<id> | space:<id>
         // Time-bounded link -> non_expired condition; permanent -> no condition.
         ...(expiresAt
           ? { condition: { name: 'non_expired', context: { expires_at: expiresAt.toISOString() } } }
@@ -143,7 +156,11 @@ export async function revokeShareLink(
   // missing tuple is success, not an error.
   try {
     await deleteTuples(fga, [
-      { user: `share_link:${row.id}`, relation: relationFor(row.capability as Capability), object: `page:${row.resource_id}` },
+      {
+        user: `share_link:${row.id}`,
+        relation: relationForResource(resource.type, row.capability as Capability),
+        object: `${resource.type}:${row.resource_id}`, // page:<id> | space:<id>
+      },
     ])
   } catch (err) {
     if (!String((err as Error)?.message ?? '').includes('did not exist')) throw err
