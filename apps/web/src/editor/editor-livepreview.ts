@@ -15,6 +15,7 @@ import { vimExCommands } from "./live-preview/vim-ex";
 import { macroFold } from "./macros";
 import { registerVimFold } from "./live-preview/vim-fold";
 import { atomDelete } from "./live-preview/vim-atom";
+import { blockDrag } from "./live-preview/block-drag";
 import { macroEdit } from "./live-preview/macro-edit";
 
 // vim Compartment content: the keymap AND a vimEnabled flag (so the decoration builder
@@ -105,6 +106,9 @@ export function mountLivePreview(
       // key lands ON the atom, the next steps past it (macros stay rendered; non-macro
       // blocks reveal on landing). motionKeyTracker gates the overshoot clamp. Editable only.
       ...(opts.readOnly ? [] : [motionKeyTracker, blockEntry, atomDelete]),
+      // #84: a left-gutter grip per top-level block; drag it to reorder (one Yjs op).
+      // Display-only gutter + drop indicator; editable surface only.
+      ...(opts.readOnly ? [] : [blockDrag]),
       // Inline-comment anchor highlights (display-only; fed via setCommentRanges).
       commentHighlightTheme,
       commentHighlights,
