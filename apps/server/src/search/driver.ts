@@ -35,7 +35,15 @@ export class LogicalSearchDriver implements SearchDriver {
       'title',
       'body',
     ])
-    await this.client.waitForTasks([t1.taskUid, t2.taskUid])
+    // CJK / Japanese tokenization (#115): pin the segmenter for title + body to the CJK
+    // locales + English instead of relying on per-document language auto-detection, which is
+    // unreliable for short or mixed-script text (a 2-3 char Japanese query, or JP body with a
+    // few ASCII words). localizedAttributes (Meili 1.10) applies the jpn/cmn/kor segmenters
+    // deterministically so reliably matches a body containing it.
+    const t3 = await index.updateLocalizedAttributes([
+      { attributePatterns: ['title', 'body'], locales: ['jpn', 'cmn', 'kor', 'eng'] },
+    ])
+    await this.client.waitForTasks([t1.taskUid, t2.taskUid, t3.taskUid])
   }
 
   async search({ tenantId, userId, groups, q, spaceId }: {
