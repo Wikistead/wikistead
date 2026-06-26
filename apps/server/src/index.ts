@@ -1,5 +1,9 @@
 import { buildApp } from './app.js'
 import { startOutboxWorker } from './search/index.js'
+import { assertProductionFgaPersistent } from './openfga-guard.js'
+
+// Fail fast: in production OpenFGA must be persistent (postgres), not in-memory (ADR-035).
+assertProductionFgaPersistent()
 
 const app = await buildApp()
 
