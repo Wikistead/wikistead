@@ -13,6 +13,7 @@ import type { Sql } from 'postgres'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { writeTuples } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
+import { emit } from '@wikistead/events'
 import type { TenantDb } from '../db/index.js'
 
 // Placeholder TTL (pre-launch; env-configurable later, like the session TTLs).
@@ -36,40 +37,58 @@ function memberTuples(tenantId: string, sub: string, role: InviteRole) {
   return tuples
 }
 
-// Seats in use for the CREATE check = current members + pending, non-expired
-// invites. Pending invites are treated as reserved seats so an admin cannot issue
-// more invites than seats (e.g. 100 invites on a 5-seat plan, all accepted later).
-async function seatsReservable(sql: Sql): Promise<number> {
-  const [{ n }] = await sql<[{ n: string }]>`
-    SELECT (
-      (SELECT count(*) FROM members)
-      + (SELECT count(*) FROM invites WHERE status = 'pending' AND expires_at > now())
-    )::text AS n
-  `
-  return Number(n)
-}
-
-// Seats actually consumed for the ACCEPT check = current members only (a pending
-// invite about to be accepted has not become a seat yet; revoked/expired ones
-// freed theirs). Defence in depth alongside the create-time check.
-async function seatsConsumed(sql: Sql): Promise<number> {
+// THE single source of truth for billable seat count (ADR-004 / ADR-034). A billable
+// seat == one member row. Guests are NEVER counted: they hold a short-lived share_link
+// principal (FGA), never a `members` row, so they are excluded structurally — there is
+// no guest discriminator to filter. Seat release is immediate: removing a member deletes
+// the row, so the count drops at once (no logical-delete residue). Whether a
+// suspended/deactivated member stays billable, and whether release is immediate vs.
+// end-of-period, are BUSINESS-NUMBER questions (ADR-031); the mechanism counts live
+// member rows and can be refined to a `billable` predicate here without touching callers.
+async function billableMemberCount(sql: Sql): Promise<number> {
   const [{ n }] = await sql<[{ n: string }]>`SELECT count(*)::text AS n FROM members`
   return Number(n)
 }
 
-// Create an invite. Authorization (tenant admin) is enforced at the route; this
-// enforces the SEAT cap (the primary paid lever). UNLIMITED (self-host) has
-// maxSeats = Infinity → the isFinite gate skips the check entirely = Community
-// First. Returns the PLAINTEXT token so the caller can build the link + email it;
-// only the hash is persisted.
+// Whether `sub` is ALREADY a member of this tenant. An existing member re-accepting an
+// invite (re-invite, or a second link) must be idempotent: no new seat, no error — they
+// already hold their one seat (dedupe by user identity).
+async function isMember(sql: Sql, sub: string): Promise<boolean> {
+  const rows = await sql<{ one: number }[]>`SELECT 1 AS one FROM members WHERE sub = ${sub} LIMIT 1`
+  return rows.length > 0
+}
+
+// Seats reserved for the issue-time WARNING = billable members + pending, non-expired
+// invites. Issue is NOT blocked (accept is the fortress); this only drives a warning so
+// an admin knows they are over-issuing. (A pending invite reserves a seat optimistically.)
+async function seatsReservable(sql: Sql): Promise<number> {
+  const pending = await sql<[{ n: string }]>`
+    SELECT count(*)::text AS n FROM invites WHERE status = 'pending' AND expires_at > now()
+  `
+  return (await billableMemberCount(sql)) + Number(pending[0]!.n)
+}
+
+// Per-tenant serialization for the accept seat check. pg_advisory_xact_lock is held to
+// end-of-transaction, so concurrent accepts for the SAME tenant run one at a time —
+// turning count→compare→insert into an atomic decision (no "remaining=1, two accept,
+// both succeed" race). Mirrors provisioning.ts's bootstrap lock.
+async function lockSeats(sql: Sql, tenantId: string): Promise<void> {
+  await sql`SELECT pg_advisory_xact_lock(hashtext(${'seats:' + tenantId})::bigint)`
+}
+
+// Create an invite. Authorization (tenant admin) is enforced at the route. Issuing is the
+// CONVENIENCE layer, not the fortress (ADR-034): it does NOT hard-block at the seat cap —
+// a seat may free up before the invite is accepted, and accept is where the cap is truly
+// enforced. Instead it returns `seatWarning` so the admin sees they are over-issuing. The
+// SEAT CAP itself (the primary paid lever) is enforced atomically in acceptInvite.
+// UNLIMITED (self-host) has maxSeats = Infinity → never warns = Community First. Returns
+// the PLAINTEXT token so the caller can build the link + email it; only the hash persists.
 export async function createInvite(
   db: TenantDb,
   args: { tenantId: string; plan: string; invitedBy: string; email: string | null; role: InviteRole },
-): Promise<{ id: string; token: string; expiresAt: Date }> {
+): Promise<{ id: string; token: string; expiresAt: Date; seatWarning: boolean }> {
   const ent = resolveEntitlements(args.plan)
-  if (isFinite(ent.maxSeats) && (await seatsReservable(db.sql)) >= ent.maxSeats) {
-    throw Object.assign(new Error('seat limit reached'), { statusCode: 403, code: 'seat_limit' })
-  }
+  const seatWarning = isFinite(ent.maxSeats) && (await seatsReservable(db.sql)) >= ent.maxSeats
   const token = generateToken()
   const expiresAt = new Date(Date.now() + INVITE_TTL_MS)
   const [row] = await db.sql<[{ id: string }]>`
@@ -77,17 +96,26 @@ export async function createInvite(
     VALUES (${args.tenantId}, ${hashInviteToken(token)}, ${args.email}, ${args.role}, ${args.invitedBy}, ${expiresAt})
     RETURNING id
   `
-  return { id: row.id, token, expiresAt }
+  return { id: row.id, token, expiresAt, seatWarning }
 }
 
 // Accept an invite: turn a verified-but-not-yet-member identity into a member.
-// Returns true if THIS call granted membership; false if the token is unknown,
-// expired, already consumed, revoked, or belongs to another tenant (all of which
-// must be indistinguishable to the caller). Throws (statusCode 403) only when the
-// seat cap is hit, so that case can be surfaced distinctly from "bad invite".
+// Returns true if THIS call granted (or idempotently confirmed) membership; false if the
+// token is unknown, expired, already consumed, revoked, or belongs to another tenant (all
+// indistinguishable to the caller). Throws (statusCode 402, code 'seat_limit') ONLY when a
+// NEW seat would exceed the cap, so a full tenant is surfaced distinctly from a bad invite.
 //
-// ADR-003: the invite flip + member INSERT happen in one tx; FGA is written LAST,
-// so a FGA failure rolls back the accept and the member row (no half member).
+// THE FORTRESS (ADR-034): accept is where the seat cap is enforced, atomically.
+//  - pg_advisory_xact_lock(seats:<tenant>) serializes concurrent accepts per tenant, so the
+//    count→compare→insert is one indivisible decision (remaining=1 + two accepts ⇒ one 402).
+//  - Idempotent by user identity: an existing member re-accepting consumes NO new seat and
+//    does not error (ON CONFLICT DO NOTHING; the seat check is skipped for them). A second
+//    link for the same person therefore costs one seat, not two.
+//  - 402 (not 403): the cap is a billing limit. A bad/expired token is a separate concern
+//    (returns false → the route answers uniformly, leaking nothing about token existence).
+//
+// ADR-003: the invite flip + member INSERT happen in one tx; FGA is written LAST, so a FGA
+// failure rolls back the accept and the member row (no half member).
 export async function acceptInvite(
   deps: { db: TenantDb; fga: OpenFgaClient },
   tenant: { id: string; plan: string },
@@ -95,6 +123,9 @@ export async function acceptInvite(
   claims: { sub: string; email?: string | null; name?: string | null },
 ): Promise<boolean> {
   return deps.db.tx(async (tx) => {
+    // Serialize seat decisions for this tenant for the rest of the tx (atomic cap check).
+    await lockSeats(tx, tenant.id)
+
     // Consume-once: only a pending, non-expired invite for THIS tenant wins, and
     // exactly one concurrent caller can flip it (single UPDATE ... RETURNING).
     const flipped = await tx<{ role: InviteRole }[]>`
@@ -109,21 +140,31 @@ export async function acceptInvite(
     if (flipped.length === 0) return false // unknown / expired / consumed / revoked / cross-tenant
     const role = flipped[0]!.role
 
-    // Re-check the seat cap at the moment membership is actually created (a pending
-    // invite reserved a seat, but races / revocations mean we verify against live
-    // members). Throw → the whole tx (including the invite flip) rolls back.
+    // Idempotent by identity: an existing member who re-accepts (a re-invite, or a second
+    // link) consumes NO new seat, makes no DB/FGA change, and does not error — they already
+    // hold their one seat and grant. The invite above is still consumed (one-time use).
+    if (await isMember(tx, claims.sub)) return true
+
+    // NEW member → enforce the cap, now atomic thanks to the per-tenant advisory lock above.
     const ent = resolveEntitlements(tenant.plan)
-    if (isFinite(ent.maxSeats) && (await seatsConsumed(tx)) >= ent.maxSeats) {
-      throw Object.assign(new Error('seat limit reached'), { statusCode: 403, code: 'seat_limit' })
+    if (isFinite(ent.maxSeats) && (await billableMemberCount(tx)) >= ent.maxSeats) {
+      // 402 = billing cap (vs 403 authz / bad token). Throw → whole tx rolls back, including
+      // the invite flip, so the invite stays pending and re-tryable once a seat frees.
+      throw Object.assign(new Error('seat limit reached'), { statusCode: 402, code: 'seat_limit' })
     }
 
+    // ON CONFLICT is belt-and-suspenders against a same-sub race (the advisory lock already
+    // serializes, and isMember ran inside it) — never errors on UNIQUE(tenant_id, sub).
     await tx`
       INSERT INTO members (tenant_id, sub, email, display_name, role)
       VALUES (${tenant.id}, ${claims.sub}, ${claims.email ?? null}, ${claims.name ?? null}, ${role})
+      ON CONFLICT (tenant_id, sub) DO NOTHING
     `
-    // FGA LAST (ADR-003): failure throws → tx rollback → no member row, invite
-    // stays pending (its flip is undone too).
+    // FGA LAST (ADR-003): failure throws → tx rollback → no member row, invite flip undone.
+    // Only a NEW member reaches here, so the grant does not yet exist (writeTuples is not
+    // idempotent — it rejects an existing tuple).
     await writeTuples(deps.fga, memberTuples(tenant.id, claims.sub, role))
+    emit({ type: 'member.added', tenantId: tenant.id, targetSub: claims.sub, role, via: 'invite' })
     return true
   })
 }

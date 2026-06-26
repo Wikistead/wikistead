@@ -110,12 +110,19 @@ export async function authPlugin(app: FastifyInstance) {
       // Accept the consume-once invite, then establish the session. A bad/expired/
       // revoked/cross-tenant invite returns false → no grant; a seat-cap hit throws
       // → no grant. Either way sid stays null and we fall through to the vague error.
+      let seatFull = false
       if (!sid && st.inviteToken) {
         try {
           if (await acceptInvite({ db, fga: app.fga }, tenant, st.inviteToken, claims)) {
             sid = await establishMemberSession(deps, tenant, claims)
           }
-        } catch { /* seat full / FGA failure → no session */ }
+        } catch (e) {
+          // A seat-cap hit (402) is surfaced distinctly so the user learns the tenant is
+          // full; any other failure stays vague. A bad/expired/revoked token returns false
+          // (not throw) → it never reaches here, so token existence is not leaked.
+          if ((e as { code?: string }).code === 'seat_limit') seatFull = true
+          /* else FGA/other failure → no session, vague error */
+        }
       }
 
       // (2) CE first-admin bootstrap — the bounded exception (tenant's own IdP +
@@ -124,9 +131,10 @@ export async function authPlugin(app: FastifyInstance) {
         sid = await establishMemberSession(deps, tenant, claims)
       }
       if (!sid) {
-        // Deliberately VAGUE (no "authenticated but not a member" — that would
-        // confirm the sub exists in the IdP = enumeration).
-        return reply.redirect('/login?error=access')
+        // Seat-full is a billing state the user should see; everything else stays
+        // deliberately VAGUE (no "authenticated but not a member" — that would confirm
+        // the sub exists in the IdP = enumeration).
+        return reply.redirect(seatFull ? '/login?error=seat_full' : '/login?error=access')
       }
       reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
       return reply.redirect(st.returnTo)
