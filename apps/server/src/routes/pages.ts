@@ -359,6 +359,13 @@ export async function toggleTask(
     `
     publishedAt = p.published_at
     outboxId = await enqueueOutbox(tx, { tenantId: page.tenant_id, pageId: args.pageId, operation: 'upsert' })
+    // Lightweight audit (ADR-019 D2 / #97): who toggled which checkbox to what, when. NOT in
+    // the revision/diff history (a toggle is interactive state). In the same tx as the flip,
+    // so the log can never disagree with the published state.
+    await tx`
+      INSERT INTO checkbox_events (tenant_id, page_id, actor, checkbox_index, checked)
+      VALUES (${page.tenant_id}, ${args.pageId}, ${args.subject}, ${args.index}, ${draftStates[args.index]!})
+    `
   })
   processOutboxAsync(driver, outboxId, { tenantId: page.tenant_id, pageId: args.pageId, operation: 'upsert' })
   return { publishedAt }
