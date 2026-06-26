@@ -13,6 +13,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { check } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import type { Capability } from '@wikistead/types'
+import { principalForPage } from './pages.js'
 
 interface ThreadRow {
   id: string; page_id: string; kind: string; anchor_start: Buffer | null; anchor_end: Buffer | null
@@ -23,24 +24,39 @@ interface CommentRow { id: string; thread_id: string; body: string; author_sub: 
 
 const b64 = (b: Buffer | null) => (b ? b.toString('base64') : null)
 
-// FGA gate on the page behind a comment/thread. Returns false (and sends the
-// response) when denied, so callers `if (!(await gate(...))) return`.
-async function requirePage(req: FastifyRequest, reply: FastifyReply, pageId: string, cap: Capability): Promise<boolean> {
-  const user = `user:${req.user.sub}`
+// The comment actor: a member (user:<sub>) or a guest (share_link:<id>, page-bound). `subject`
+// is the FGA principal; `authorId` is what we store as the comment author — a member's BARE
+// sub (unchanged) or a `guest:<id>` LABEL that can never collide with or impersonate a member.
+interface CommentActor { subject: string; authorId: string; context?: { current_time: string } }
+
+// FGA gate on the page behind a comment/thread. Returns the resolved actor on success, or
+// null (and sends the response) when denied → callers `const a = await requirePage(...); if
+// (!a) return`. Members AND comment-capable guests both flow through here; a guest's token is
+// bound to this exact page (principalForPage throws 403 otherwise → space-link guests, whose
+// token resource is a space, never reach the comment write path).
+async function requirePage(req: FastifyRequest, reply: FastifyReply, pageId: string, cap: Capability): Promise<CommentActor | null> {
+  let p: { subject: string; createdBy: string; context?: { current_time: string } }
+  try {
+    p = principalForPage(req, pageId)
+  } catch (e) {
+    await reply.code((e as { statusCode?: number }).statusCode ?? 401).send({ error: 'forbidden' })
+    return null
+  }
   const ref = { type: 'page', id: pageId } as const
-  // View is the floor for EVERY comment op: a user who can't view the page must
-  // learn nothing about it (existence, comments) → uniform 404. Only AFTER view
-  // passes does a write op fail with 403 for lacking comment capability — so 403
-  // never leaks a page to someone who can't see it (no-leak discipline, as search/tree).
-  if (!(await check(req.server.fga, user, 'view', ref))) {
+  // View is the floor for EVERY comment op: someone who can't view the page must learn nothing
+  // (existence, comments) → uniform 404. Only AFTER view passes does a write op 403 for lacking
+  // comment — so 403 never leaks a page to someone who can't see it (no-leak discipline).
+  if (!(await check(req.server.fga, p.subject, 'view', ref, p.context))) {
     await reply.code(404).send({ error: 'not found' })
-    return false
+    return null
   }
-  if (cap === 'comment' && !(await check(req.server.fga, user, 'comment', ref))) {
+  if (cap === 'comment' && !(await check(req.server.fga, p.subject, 'comment', ref, p.context))) {
     await reply.code(403).send({ error: 'forbidden' })
-    return false
+    return null
   }
-  return true
+  // Member → bare sub (unchanged storage format); guest → "guest:<shareLinkId>" label.
+  const authorId = req.user ? req.user.sub : p.createdBy
+  return { subject: p.subject, authorId, context: p.context }
 }
 
 async function isTenantAdmin(req: FastifyRequest): Promise<boolean> {
@@ -73,6 +89,7 @@ async function mentionableViewers(req: FastifyRequest, pageId: string): Promise<
 // can neither be notified nor leak the page. Email is best-effort (P1.3): the
 // comment is already saved, so a failed/disabled send changes nothing.
 async function notifyMentions(req: FastifyRequest, pageId: string, mentions: string[] | undefined): Promise<void> {
+  if (!req.user) return // guests do not @mention (the mentionable directory is member-only)
   if (!mentions?.length) return
   const allowed = await mentionableViewers(req, pageId)
   const wanted = new Set(mentions)
@@ -103,7 +120,7 @@ async function threadPage(req: FastifyRequest, threadId: string): Promise<{ page
 export async function commentsPlugin(app: FastifyInstance) {
   // List threads (+ non-deleted comments) for a page. page#view required → a user
   // who can't view the page gets a uniform 404, never comment bodies.
-  app.get<{ Params: { pageId: string } }>('/pages/:pageId/comments', async (req, reply) => {
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/comments', { config: { guest: 'view' } }, async (req, reply) => {
     if (!(await requirePage(req, reply, req.params.pageId, 'view'))) return
     const threads = await req.db.sql<ThreadRow[]>`
       SELECT id, page_id, kind, anchor_start, anchor_end, quoted_text, status, created_by, created_at, resolved_by, resolved_at
@@ -137,8 +154,10 @@ export async function commentsPlugin(app: FastifyInstance) {
   // Start a thread (page or inline) with its first comment. page#comment required.
   app.post<{ Params: { pageId: string }; Body: { body?: string; kind?: string; anchorStart?: string; anchorEnd?: string; quotedText?: string; mentions?: string[] } }>(
     '/pages/:pageId/comments',
+    { config: { guest: 'comment' } },
     async (req, reply) => {
-      if (!(await requirePage(req, reply, req.params.pageId, 'comment'))) return
+      const actor = await requirePage(req, reply, req.params.pageId, 'comment')
+      if (!actor) return
       const body = req.body?.body?.trim()
       if (!body) return reply.code(400).send({ error: 'empty comment' })
       const kind = req.body?.kind === 'inline' ? 'inline' : 'page'
@@ -148,27 +167,28 @@ export async function commentsPlugin(app: FastifyInstance) {
       const thread = await req.db.tx(async (tx) => {
         const [t] = await tx<[{ id: string }]>`
           INSERT INTO comment_threads (tenant_id, page_id, kind, anchor_start, anchor_end, quoted_text, created_by)
-          VALUES (${req.tenant.id}, ${req.params.pageId}, ${kind}, ${anchorStart}, ${anchorEnd}, ${req.body?.quotedText ?? null}, ${req.user.sub})
+          VALUES (${req.tenant.id}, ${req.params.pageId}, ${kind}, ${anchorStart}, ${anchorEnd}, ${req.body?.quotedText ?? null}, ${actor.authorId})
           RETURNING id`
-        await tx`INSERT INTO comments (tenant_id, thread_id, body, author_sub) VALUES (${req.tenant.id}, ${t.id}, ${body}, ${req.user.sub})`
+        await tx`INSERT INTO comments (tenant_id, thread_id, body, author_sub) VALUES (${req.tenant.id}, ${t.id}, ${body}, ${actor.authorId})`
         return t
       })
-      emit({ type: 'comment.created', tenantId: req.tenant.id, actorId: req.user.sub, pageId: req.params.pageId, threadId: thread.id })
+      emit({ type: 'comment.created', tenantId: req.tenant.id, actorId: actor.authorId, pageId: req.params.pageId, threadId: thread.id })
       await notifyMentions(req, req.params.pageId, req.body?.mentions)
       return reply.code(201).send({ threadId: thread.id })
     },
   )
 
   // Reply to a thread. page#comment on the thread's page required.
-  app.post<{ Params: { threadId: string }; Body: { body?: string; mentions?: string[] } }>('/comments/threads/:threadId/comments', async (req, reply) => {
+  app.post<{ Params: { threadId: string }; Body: { body?: string; mentions?: string[] } }>('/comments/threads/:threadId/comments', { config: { guest: 'comment' } }, async (req, reply) => {
     const t = await threadPage(req, req.params.threadId)
     if (!t) return reply.code(404).send({ error: 'not found' })
-    if (!(await requirePage(req, reply, t.pageId, 'comment'))) return
+    const actor = await requirePage(req, reply, t.pageId, 'comment')
+    if (!actor) return
     const body = req.body?.body?.trim()
     if (!body) return reply.code(400).send({ error: 'empty comment' })
     const [c] = await req.db.sql<[{ id: string }]>`
-      INSERT INTO comments (tenant_id, thread_id, body, author_sub) VALUES (${req.tenant.id}, ${req.params.threadId}, ${body}, ${req.user.sub}) RETURNING id`
-    emit({ type: 'comment.created', tenantId: req.tenant.id, actorId: req.user.sub, pageId: t.pageId, threadId: req.params.threadId })
+      INSERT INTO comments (tenant_id, thread_id, body, author_sub) VALUES (${req.tenant.id}, ${req.params.threadId}, ${body}, ${actor.authorId}) RETURNING id`
+    emit({ type: 'comment.created', tenantId: req.tenant.id, actorId: actor.authorId, pageId: t.pageId, threadId: req.params.threadId })
     await notifyMentions(req, t.pageId, req.body?.mentions)
     return reply.code(201).send({ commentId: c.id })
   })

@@ -733,7 +733,7 @@ export async function deletePage(
 // attribution id, and (guests) the time context for the share_link condition.
 // A guest whose token resource is NOT this page is rejected (resource binding) —
 // a token for page A can never read/publish page B.
-function principalForPage(req: FastifyRequest, pageId: string): { subject: string; createdBy: string; context?: { current_time: string } } {
+export function principalForPage(req: FastifyRequest, pageId: string): { subject: string; createdBy: string; context?: { current_time: string } } {
   if (req.user) {
     return { subject: `user:${req.user.sub}`, createdBy: `user:${req.user.sub}` }
   }

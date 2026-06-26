@@ -61,8 +61,10 @@ declare module 'fastify' {
   }
   interface FastifyContextConfig {
     // Marks a route as guest-accessible and the capability a guest token must assert
-    // to use it (FGA re-checks the share_link's real authority regardless).
-    guest?: 'view' | 'edit'
+    // to use it (FGA re-checks the share_link's real authority regardless). 'comment'
+    // (#100) gates guest commenting — a view-only token is rejected by the convenience
+    // guard below; edit ⊃ comment, so an edit token also satisfies a comment route.
+    guest?: 'view' | 'edit' | 'comment'
     // Marks a route as public-but-tenant-scoped: the tenant is resolved from the
     // Host, but no authentication is required (e.g. GET /branding). The handler
     // must only return intentionally-public data.
@@ -192,7 +194,12 @@ export async function buildApp(): Promise<FastifyInstance> {
       const need = req.routeOptions?.config?.guest
       const c = need ? await verifyGuestToken(guestCfg, token).catch(() => null) : null
       // need-but-not-edit-token guard (convenience layer; FGA is the real gate).
-      if (!need || !c || c.tenantId !== req.tenant.id || (need === 'edit' && c.capability !== 'edit')) {
+      // Convenience guard (FGA is the real gate): an edit route needs an edit token; a
+      // comment route needs comment-or-edit (a view-only token can't comment).
+      const capInsufficient =
+        (need === 'edit' && c?.capability !== 'edit') ||
+        (need === 'comment' && c?.capability !== 'comment' && c?.capability !== 'edit')
+      if (!need || !c || c.tenantId !== req.tenant.id || capInsufficient) {
         emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'guest', reason: 'guest token rejected' })
         await reply.code(401).send({ error: 'unauthorized' })
         return
