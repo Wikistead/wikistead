@@ -1,5 +1,40 @@
 import { describe, it, expect } from "vitest";
-import { parsePipe, parseHtml, toHtml, toPipe, hasSpans, mergeRect, unmergeAt, serialize, sanitizeStyle, insertColAt, insertRowAt, deleteColAt, deleteRowAt } from "./table-model";
+import { parsePipe, parseHtml, toHtml, toPipe, hasSpans, mergeRect, unmergeAt, serialize, sanitizeStyle, insertColAt, insertRowAt, deleteColAt, deleteRowAt, cellTextToHtml, htmlToCellText, representableAsPipe } from "./table-model";
+
+// ADR-037 in-cell newlines: a cell newline is the only kept markup, as GFM <br>. The pair
+// MUST round-trip with no <br> loss/duplication (the tiptap #7731 class of bug) and a
+// multiline cell must force the :::table HTML tier (pipes can't hold a newline → lossless).
+describe("table-model: in-cell newline <-> <br> round-trip (#86 / ADR-037)", () => {
+  it("serializes an in-cell newline as <br> and parses it back to a newline", () => {
+    expect(cellTextToHtml("a\nb")).toBe("a<br>b");
+    expect(htmlToCellText("a<br>b")).toBe("a\nb");
+  });
+
+  it("round-trips multi-line cell text through toHtml -> parseHtml with no loss or duplication", () => {
+    const grid = [[{ text: "line1\nline2\nline3", header: false, colspan: 1, rowspan: 1 }]];
+    const back = parseHtml(toHtml(grid));
+    expect(back[0]![0]!.text).toBe("line1\nline2\nline3"); // exactly preserved
+  });
+
+  it("parses both <br> and <br/> (hand-edited variants) to a single newline (no dup)", () => {
+    expect(htmlToCellText("a<br>b<br/>c<br />d")).toBe("a\nb\nc\nd");
+  });
+
+  it("escapes <, >, & in cell text and never lets a tag survive as markup", () => {
+    expect(cellTextToHtml("a<b>&c\nd")).toBe("a&lt;b&gt;&amp;c<br>d");
+    // a pasted/hand-edited <b> tag is stripped (not kept as markup); only <br> -> newline
+    expect(htmlToCellText("x<b>y</b><br>z")).toBe("xy\nz");
+  });
+
+  it("forces the :::table HTML tier for a multiline cell (a pipe would flatten the newline)", () => {
+    const multiline = [[{ text: "a\nb", header: false, colspan: 1, rowspan: 1 }]];
+    expect(representableAsPipe(multiline)).toBe(false);
+    expect(serialize(multiline).tier).toBe("html");
+    // a single-line grid still demotes to a pipe table
+    const flat = [[{ text: "a", header: false, colspan: 1, rowspan: 1 }]];
+    expect(representableAsPipe(flat)).toBe(true);
+  });
+});
 
 describe("table-model: parse/serialize", () => {
   it("parses a GFM pipe table (row 0 = header, no spans)", () => {

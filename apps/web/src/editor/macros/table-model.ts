@@ -67,6 +67,20 @@ const clampSpan = (v: string | null): number => {
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const unesc = (s: string) => s.replace(/<[^>]*>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
 
+// Cell text <-> inline HTML (ADR-037). An in-cell newline is the ONLY markup a cell keeps,
+// serialized as a GFM `<br>` (chosen over Outline's `\n`-escape so the source stays portable
+// Markdown — Publish anywhere). Canonical in-grid form is "\n"; on the wire it is "<br>".
+// Everything else is plain text: escaped on the way out, tags stripped on the way in (the XSS
+// boundary — cell text is rendered via textContent + <br> elements, NEVER innerHTML). The pair
+// must round-trip exactly (no <br> loss/duplication — the tiptap #7731 class of bug).
+export function cellTextToHtml(text: string): string {
+  return esc(text).replace(/\n/g, "<br>");
+}
+export function htmlToCellText(html: string): string {
+  // <br> -> newline BEFORE unesc strips remaining tags; then decode entities.
+  return unesc(html.replace(/<br\s*\/?>/gi, "\n"));
+}
+
 function splitPipeRow(line: string): string[] {
   let s = line.trim();
   if (s.startsWith("|")) s = s.slice(1);
@@ -124,7 +138,7 @@ export function parseHtml(html: string): Grid {
       const colspan = clampSpan(/colspan\s*=\s*"?(\d+)"?/i.exec(attrs)?.[1] ?? null);
       const rowspan = clampSpan(/rowspan\s*=\s*"?(\d+)"?/i.exec(attrs)?.[1] ?? null);
       const style = sanitizeStyle(/style\s*=\s*"([^"]*)"/i.exec(attrs)?.[1] ?? ""); // allowlist
-      grid[r]![c] = { text: unesc(m[3]!).trim(), header: m[1]!.toLowerCase() === "th", colspan, rowspan, ...(style ? { style } : {}) };
+      grid[r]![c] = { text: htmlToCellText(m[3]!).trim(), header: m[1]!.toLowerCase() === "th", colspan, rowspan, ...(style ? { style } : {}) };
       for (let dr = 0; dr < rowspan; dr++) {
         for (let dc = 0; dc < colspan; dc++) {
           if (dr === 0 && dc === 0) continue;
@@ -150,6 +164,10 @@ const hasStyle = (grid: Grid): boolean => grid.some((row) => row.some((c) => c &
 // header BELOW row 0 is the pipe-inexpressible case → HTML tier. (Row 0 being td-only is
 // fine: toPipe renders row 0 as the header.)
 const complexHeader = (grid: Grid): boolean => grid.some((row, r) => r > 0 && row.some((c) => c && c.header));
+// A GFM pipe row is single-line, so a cell with an in-cell newline is pipe-inexpressible →
+// it must serialize at the :::table HTML tier (where the newline becomes <br>). Without this
+// guard toPipe would silently flatten the newline (lossy).
+const hasMultilineCell = (grid: Grid): boolean => grid.some((row) => row.some((c) => c && c.text.includes("\n")));
 
 export function toHtml(grid: Grid): string {
   let s = "<table>";
@@ -161,7 +179,7 @@ export function toHtml(grid: Grid): string {
       const cs = cell.colspan > 1 ? ` colspan="${cell.colspan}"` : "";
       const rs = cell.rowspan > 1 ? ` rowspan="${cell.rowspan}"` : "";
       const st = cell.style ? ` style="${styleToCss(cell.style)}"` : "";
-      s += `<${tag}${cs}${rs}${st}>${esc(cell.text)}</${tag}>`;
+      s += `<${tag}${cs}${rs}${st}>${cellTextToHtml(cell.text)}</${tag}>`;
     }
     s += "</tr>";
   }
@@ -296,7 +314,7 @@ export function deleteRowAt(grid: Grid, at: number): Grid {
 // share ONE rule: a grid is a GFM pipe table iff it has no spans, no per-cell style, and no
 // body-row header (all pipe-inexpressible → the :::table HTML tier).
 export function representableAsPipe(grid: Grid): boolean {
-  return !hasSpans(grid) && !hasStyle(grid) && !complexHeader(grid);
+  return !hasSpans(grid) && !hasStyle(grid) && !complexHeader(grid) && !hasMultilineCell(grid);
 }
 
 // Serialize to the lowest tier that can represent the grid: pipes if span-free
