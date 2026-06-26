@@ -25,8 +25,19 @@ export const tableTier: MacroTier = {
 // a GFM pipe table promotes to when a merge is added (ADR-022 Part 10). The cell-merge
 // mouse UI (promote/demote) lands in the next commit; here is the render + round-trip.
 
-// Build a SANITIZED DOM table from a parsed grid. XSS-safe: cell text is set via
-// textContent (never innerHTML), and only integer colspan/rowspan are emitted. Shared
+// Render cell text into an element, preserving in-cell newlines as <br> ELEMENTS (ADR-037).
+// Built as DOM nodes, never via innerHTML — the XSS boundary holds (a cell can contain only
+// text + <br>). Shared so the read render and the edit-mode render of a cell never diverge.
+export function setCellText(el: HTMLElement, text: string): void {
+  el.textContent = "";
+  text.split("\n").forEach((part, i) => {
+    if (i > 0) el.appendChild(document.createElement("br"));
+    if (part) el.appendChild(document.createTextNode(part));
+  });
+}
+
+// Build a SANITIZED DOM table from a parsed grid. XSS-safe: cell text is set via DOM nodes
+// (textContent + <br>, never innerHTML), and only integer colspan/rowspan are emitted. Shared
 // by the read render and the edit-mode render so the two never diverge.
 export function gridToTable(grid: Grid): HTMLTableElement {
   const out = document.createElement("table");
@@ -36,7 +47,7 @@ export function gridToTable(grid: Grid): HTMLTableElement {
     for (const cell of row) {
       if (!cell) continue; // covered position
       const el = document.createElement(cell.header ? "th" : "td");
-      el.textContent = cell.text;
+      setCellText(el, cell.text);
       if (cell.colspan > 1) el.colSpan = cell.colspan;
       if (cell.rowspan > 1) el.rowSpan = cell.rowspan;
       if (cell.style) el.setAttribute("style", styleToCss(cell.style)); // already allowlisted
