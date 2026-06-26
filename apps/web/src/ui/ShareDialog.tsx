@@ -18,10 +18,14 @@ const EXPIRY_OPTIONS: { key: string; seconds: number | null }[] = [
 // Member-facing share UI: create page links (view/edit, optional expiry), copy
 // the URL, and revoke. The URL carries only the unguessable link id; the guest
 // exchanges it for a short-lived token at the public landing endpoint.
-export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClose: () => void }) {
+export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | null; spaceId?: string | null; onClose: () => void }) {
   const { t } = useTranslation();
-  const open = pageId !== null;
-  const links = useShareLinks(pageId ?? "", open);
+  // Exactly one of page/space identifies the shared resource. Space links are view-only and
+  // open the WHOLE space (added pages auto-publish) — surfaced as a warning (#104 / ADR-038).
+  const resource = pageId ? ({ type: "page", id: pageId } as const) : spaceId ? ({ type: "space", id: spaceId } as const) : null;
+  const isSpace = !!spaceId;
+  const open = resource !== null;
+  const links = useShareLinks(resource, open);
   const create = useCreateShareLink();
   const revoke = useRevokeShareLink();
 
@@ -35,10 +39,18 @@ export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClos
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent data-testid="share-dialog" className="sm:max-w-[540px]">
         <DialogHeader>
-          <DialogTitle>{t("shareDialog.title")}</DialogTitle>
+          <DialogTitle>{isSpace ? t("shareDialog.spaceTitle") : t("shareDialog.title")}</DialogTitle>
         </DialogHeader>
 
+        {isSpace && (
+          <div data-testid="share-space-warning" className="rounded-md border border-[var(--border)] bg-[color-mix(in_srgb,var(--accent)_8%,transparent)] px-3 py-2 text-xs text-fg-dim">
+            {t("shareDialog.spaceWarning")}
+          </div>
+        )}
+
         <div className="flex items-center gap-2">
+          {/* Space links are view-only; only page links choose view vs edit. */}
+          {!isSpace && (
           <Select
             value={capability}
             onChange={(v) => setCapability(v as "view" | "edit")}
@@ -50,6 +62,7 @@ export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClos
               { value: "edit", label: t("shareDialog.canEdit") },
             ]}
           />
+          )}
           <Select
             value={String(expiry)}
             onChange={(v) => setExpiry(v === "null" ? null : Number(v))}
@@ -61,8 +74,8 @@ export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClos
             variant="primary"
             size="sm"
             data-testid="create-link"
-            disabled={pageId === null || create.isPending}
-            onClick={() => pageId && create.mutate({ pageId, capability, expiresInSeconds: expiry }, {
+            disabled={!resource || create.isPending}
+            onClick={() => resource && create.mutate({ resource, capability: isSpace ? "view" : capability, expiresInSeconds: expiry }, {
               onSuccess: () => notify.success(t("toast.linkCreated")),
               onError: () => notify.error(t("toast.actionFailed")),
             })}
@@ -100,7 +113,7 @@ export function ShareDialog({ pageId, onClose }: { pageId: string | null; onClos
                   title={t("shareDialog.revoke")}
                   data-testid="revoke-link"
                   className="text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:text-destructive"
-                  onClick={() => pageId && revoke.mutate({ id: l.id, pageId }, {
+                  onClick={() => resource && revoke.mutate({ id: l.id, resource }, {
                     onSuccess: () => notify.success(t("toast.linkRevoked")),
                     onError: () => notify.error(t("toast.actionFailed")),
                   })}

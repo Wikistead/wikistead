@@ -120,17 +120,19 @@ export async function createShareLink(
   return toShareLink(row as ShareLinkRow)
 }
 
+// List a resource's active share links (page or space). `manage` on the resource is required
+// (only someone who can administer it may see/curate its links).
 export async function listShareLinks(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { pageId: string; userId: string },
+  args: { resource: ResourceRef; userId: string },
 ): Promise<ShareLink[]> {
-  const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: args.pageId })
+  const canManage = await check(fga, `user:${args.userId}`, 'manage', args.resource)
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
   const rows = await db.sql<ShareLinkRow[]>`
     SELECT id, tenant_id, resource_type, resource_id, capability, expires_at, created_by, created_at, revoked_at
     FROM share_links
-    WHERE resource_type = 'page' AND resource_id = ${args.pageId} AND revoked_at IS NULL
+    WHERE resource_type = ${args.resource.type} AND resource_id = ${args.resource.id} AND revoked_at IS NULL
     ORDER BY created_at DESC
   `
   return rows.map(toShareLink)
@@ -254,7 +256,11 @@ export async function shareLinksPlugin(app: FastifyInstance) {
   )
 
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/share-links', async (req) => {
-    return listShareLinks(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub })
+    return listShareLinks(req.db, app.fga, { resource: { type: 'page', id: req.params.pageId }, userId: req.user.sub })
+  })
+
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/share-links', async (req) => {
+    return listShareLinks(req.db, app.fga, { resource: { type: 'space', id: req.params.spaceId }, userId: req.user.sub })
   })
 
   app.delete<{ Params: { id: string } }>('/share-links/:id', async (req, reply) => {

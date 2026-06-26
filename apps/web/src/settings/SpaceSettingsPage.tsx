@@ -7,6 +7,7 @@ import { useActiveSpace } from "../app/ActiveSpace";
 import { useSession } from "../session/SessionProvider";
 import { useSpaces, useRenameSpace, useDeleteSpace, useUploadSpaceIcon, useRemoveSpaceIcon } from "../data/queries";
 import { Button } from "../ui/Button";
+import { ShareDialog } from "../ui/ShareDialog";
 import { Input } from "../ui/Input";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import { ConfirmDialog } from "../ui/dialogs";
@@ -76,6 +77,7 @@ function SpaceGeneralTab() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(name);
   const [confirming, setConfirming] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   // Image upload mirrors the tenant logo: base64 in, server re-validates magic bytes
   // + size. Unset → the space shows its auto initials chip.
@@ -130,9 +132,18 @@ function SpaceGeneralTab() {
         )}
       </div>
 
+      {/* Space-scoped share link (#104): a view-only link to the whole space. */}
+      <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("spaceSettings.shareLabel")}</label>
+      <p style={{ color: "var(--fg-dim)", fontSize: 13, marginTop: 0 }}>{t("spaceSettings.shareHint")}</p>
+      <div style={{ marginBottom: 32 }}>
+        <Button variant="default" onClick={() => setSharing(true)} data-testid="space-share">{t("spaceSettings.shareSpace")}</Button>
+      </div>
+
       <h3 style={{ color: "var(--danger)" }}>{t("spaceSettings.dangerZone")}</h3>
       <p style={{ color: "var(--fg-dim)", fontSize: 13 }}>{t("spaceSettings.deleteHint")}</p>
       <Button variant="danger" onClick={() => setConfirming(true)} data-testid="space-delete">{t("spaceSettings.deleteSpace")}</Button>
+
+      <ShareDialog spaceId={sharing ? spaceId : null} onClose={() => setSharing(false)} />
 
       <ConfirmDialog
         open={confirming}

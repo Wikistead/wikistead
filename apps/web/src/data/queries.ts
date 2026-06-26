@@ -146,20 +146,23 @@ export function useDeleteSpace() {
 }
 
 // ── share links ────────────────────────────────────────────────────────────
+export type ShareResource = { type: "page" | "space"; id: string };
 export interface ShareLink {
   id: string;
-  resource: { type: "page"; id: string };
-  capability: "view" | "edit";
+  resource: ShareResource;
+  capability: "view" | "comment" | "edit";
   expiresAt: string | null;
   createdAt: string;
 }
+const linksPath = (r: ShareResource) => `/${r.type}s/${r.id}/share-links`; // /pages/.. | /spaces/..
+const linksKey = (r: ShareResource) => ["share-links", r.type, r.id];
 
-export function useShareLinks(pageId: string, enabled = true) {
+export function useShareLinks(resource: ShareResource | null, enabled = true) {
   const { token } = useSession();
   return useQuery({
-    queryKey: ["share-links", pageId],
-    queryFn: () => apiFetch<ShareLink[]>(`/pages/${pageId}/share-links`, token).then((r) => r ?? []),
-    enabled,
+    queryKey: ["share-links", resource?.type, resource?.id],
+    queryFn: () => apiFetch<ShareLink[]>(linksPath(resource!), token).then((r) => r ?? []),
+    enabled: enabled && resource != null,
   });
 }
 
@@ -167,16 +170,12 @@ export function useCreateShareLink() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { pageId: string; capability: "view" | "edit"; expiresInSeconds: number | null }) =>
+    mutationFn: (args: { resource: ShareResource; capability: "view" | "comment" | "edit"; expiresInSeconds: number | null }) =>
       apiFetch<ShareLink>("/share-links", token, {
         method: "POST",
-        body: JSON.stringify({
-          resource: { type: "page", id: args.pageId },
-          capability: args.capability,
-          expiresInSeconds: args.expiresInSeconds,
-        }),
+        body: JSON.stringify({ resource: args.resource, capability: args.capability, expiresInSeconds: args.expiresInSeconds }),
       }),
-    onSuccess: (_l, args) => qc.invalidateQueries({ queryKey: ["share-links", args.pageId] }),
+    onSuccess: (_l, args) => qc.invalidateQueries({ queryKey: linksKey(args.resource) }),
   });
 }
 
@@ -184,9 +183,9 @@ export function useRevokeShareLink() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { id: string; pageId: string }) =>
+    mutationFn: (args: { id: string; resource: ShareResource }) =>
       apiFetch<null>(`/share-links/${args.id}`, token, { method: "DELETE" }),
-    onSuccess: (_r, args) => qc.invalidateQueries({ queryKey: ["share-links", args.pageId] }),
+    onSuccess: (_r, args) => qc.invalidateQueries({ queryKey: linksKey(args.resource) }),
   });
 }
 

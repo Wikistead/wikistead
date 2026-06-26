@@ -169,6 +169,9 @@
     "iconHint": "画像をアップロードできます。未設定の場合はスペース名からイニシャルを自動生成します。",
     "iconImageUpload": "画像をアップロード",
     "iconImageRemove": "画像を削除",
+    "shareLabel": "スペースを共有",
+    "shareHint": "このスペース全体（すべての公開ページ）への閲覧専用リンクを作成します。",
+    "shareSpace": "スペースを共有…",
     "dangerZone": "危険な操作",
     "deleteHint": "スペースを削除すると、配下のすべてのページも完全に削除されます。",
     "deleteSpace": "スペースを削除",
@@ -274,6 +277,8 @@
   },
   "shareDialog": {
     "title": "ページを共有",
+    "spaceTitle": "スペースを共有",
+    "spaceWarning": "このリンクを持つ人は、このスペースの公開ページをすべて閲覧できます（後から追加したページも含む）。リンクは閲覧専用です。",
     "capability": "権限",
     "canView": "閲覧可",
     "canEdit": "編集可",
