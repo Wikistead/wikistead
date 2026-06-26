@@ -1,4 +1,5 @@
 import * as Y from 'yjs'
+import type { Sql } from 'postgres'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
@@ -27,14 +28,55 @@ function toPage(r: PageRow): Page {
 // concurrency property). KNOWN LIMITATION: ~53 consecutive inserts into the SAME
 // gap make two positions compare equal (float precision exhaustion) and the order
 // becomes ambiguous.
-// TODO(phase: tree-rebalance): detect a collapsed/duplicate gap and re-spread the
-//   affected siblings' positions (or switch to a LexoRank string key). Until then
-//   listPages tie-breaks equal positions by created_at so order stays stable.
+// Fractional positions can exhaust float precision after ~53 consecutive inserts into the
+// SAME gap (two siblings compare equal → ambiguous order). #118: detect that collapse and
+// re-spread the affected sibling group with evenly-spaced integer positions. Stays fractional
+// (no LexoRank string migration); the spread restores ample bisection room.
 function positionBetween(before: number | null, after: number | null): number {
   if (before == null && after == null) return 0
   if (before == null) return (after as number) - 1
   if (after == null) return before + 1
   return (before + after) / 2
+}
+
+// A gap is COLLAPSED when the midpoint between two neighbours is not STRICTLY between them —
+// i.e. inserting there would produce a position equal to a neighbour (float exhaustion or
+// duplicate/equal positions). Only meaningful with two finite neighbours.
+export function gapCollapsed(before: number | null, after: number | null): boolean {
+  if (before == null || after == null) return false
+  const mid = (before + after) / 2
+  return !(before < mid && mid < after)
+}
+
+export const POSITION_STEP = 1024 // wide, power-of-two spacing → lots of future bisection room
+
+// Evenly-spaced positions for `n` siblings: STEP, 2·STEP, … (1-based so nothing sits at 0).
+export function spreadPositions(n: number): number[] {
+  return Array.from({ length: n }, (_, i) => (i + 1) * POSITION_STEP)
+}
+
+// Re-spread a sibling group to evenly-spaced positions, preserving the current visible order
+// (position, then created_at — the same tie-break listPages uses, so a collapsed/duplicate gap
+// resolves deterministically). Excludes `excludeId` (the page being moved). A multi-row UPDATE,
+// but only invoked on the rare collapse. Returns the fresh (id, position) list in order.
+export async function rebalanceSiblings(
+  sql: Sql,
+  spaceId: string,
+  parentId: string | null,
+  excludeId: string,
+): Promise<{ id: string; position: number }[]> {
+  const sibs = await sql<{ id: string }[]>`
+    SELECT id FROM pages
+    WHERE space_id = ${spaceId} AND parent_id IS NOT DISTINCT FROM ${parentId} AND id <> ${excludeId}
+    ORDER BY position, created_at
+  `
+  const spread = spreadPositions(sibs.length)
+  const out: { id: string; position: number }[] = []
+  for (let i = 0; i < sibs.length; i++) {
+    await sql`UPDATE pages SET position = ${spread[i]!}, updated_at = now() WHERE id = ${sibs[i]!.id}`
+    out.push({ id: sibs[i]!.id, position: spread[i]! })
+  }
+  return out
 }
 
 // Decode the markdown body from a persisted Y.Doc binary (the canonical 'content'
@@ -594,6 +636,26 @@ export async function movePage(
   const position = positionBetween(before, after)
 
   if (!crossSpace) {
+    // Common case: a single-row UPDATE with the fractional position (no sibling renumber, so
+    // concurrent moves of different pages don't conflict). Collapsed gap (#118): re-spread the
+    // destination sibling group first, then recompute the slot — all in one tx.
+    if (gapCollapsed(before, after)) {
+      const r = await db.tx(async (tx) => {
+        const fresh = await rebalanceSiblings(tx, targetSpace, newParent, args.pageId)
+        let b: number | null = null
+        let a: number | null = null
+        if (args.afterId == null) a = fresh[0]?.position ?? null
+        else { const i = fresh.findIndex((s) => s.id === args.afterId); b = fresh[i]!.position; a = fresh[i + 1]?.position ?? null }
+        const [row] = await tx<PageRow[]>`
+          UPDATE pages SET parent_id = ${newParent}, position = ${positionBetween(b, a)}, updated_at = now()
+          WHERE id = ${args.pageId}
+          RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
+        `
+        return row!
+      })
+      emit({ type: 'page.updated', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
+      return toPage(r)
+    }
     const [r] = await db.sql<PageRow[]>`
       UPDATE pages SET parent_id = ${newParent}, position = ${position}, updated_at = now()
       WHERE id = ${args.pageId}
