@@ -42,3 +42,26 @@ test(":::callout directive: styled box, nested markdown, hide-fence + round-trip
   const revealed = await page.locator("[data-pane=preview] .cm-content").innerText();
   expect(revealed).toContain(":::callout");
 });
+
+// #94: a leading [label] renders as the callout's header (CSS ::before from data-label),
+// while the `:::callout[label]` source text stays hidden (offset-invariant, reveal-on-cursor).
+test(":::callout[label] renders a header from the leading label", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "callout-label");
+  await enterEdit(page);
+
+  await page.click("[data-pane=preview] .cm-content");
+  for (const line of [":::callout[Important Note]", "body text", ":::", "", "after"]) {
+    await page.keyboard.type(line);
+    await page.keyboard.press("Enter");
+  }
+  await sleep(400);
+
+  // The open line carries the parsed label as data-label (the CSS ::before shows it as the
+  // header), and the raw `:::callout[Important Note]` text is hidden while the caret is away.
+  const header = page.locator("[data-pane=preview] .cm-lp-directive-label").first();
+  await expect(header).toHaveAttribute("data-label", "Important Note");
+  const visible = await page.locator("[data-pane=preview] .cm-content").innerText();
+  expect(visible).not.toContain(":::callout[Important Note]");
+  await expect(page.locator("[data-pane=preview] .cm-lp-callout").first()).toBeVisible();
+});

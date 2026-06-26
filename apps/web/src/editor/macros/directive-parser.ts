@@ -16,10 +16,16 @@ import type { MarkdownConfig } from "@lezer/markdown";
 
 const COLON = 58; // ':'
 
-// Opening fence: 3+ colons, a name, optional {attrs}. Returns the colon count + name.
-export function parseDirectiveOpen(text: string): { colons: number; name: string } | null {
-  const m = /^(:{3,})\s*([A-Za-z][\w-]*)[ \t]*(\{[^}]*\})?[ \t]*$/.exec(text);
-  return m ? { colons: m[1]!.length, name: m[2]! } : null;
+// Opening fence: 3+ colons, a name, an optional [label] (a leading label / custom header,
+// remark-directive style), and optional {attrs}. Returns the colon count + name + label.
+// Backward compatible: a fence with no [label] yields no `label` field.
+export function parseDirectiveOpen(text: string): { colons: number; name: string; label?: string } | null {
+  const m = /^(:{3,})\s*([A-Za-z][\w-]*)[ \t]*(?:\[([^\]]*)\])?[ \t]*(\{[^}]*\})?[ \t]*$/.exec(text);
+  if (!m) return null;
+  const out: { colons: number; name: string; label?: string } = { colons: m[1]!.length, name: m[2]! };
+  const label = m[3]?.trim();
+  if (label) out.label = label;
+  return out;
 }
 
 // Closing fence: only colons (>= the opening count), nothing else.
