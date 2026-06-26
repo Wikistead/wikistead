@@ -98,9 +98,11 @@ export async function publicPlugin(app: FastifyInstance) {
 
     const content = page.published_md ?? ''
 
-    // TODO(phase: public-html): noindex enforcement (X-Robots-Tag header) belongs
-    // in the HTML rendering layer that crawlers actually visit, not here.
-    // The noindex field is returned so the client can set <meta name="robots">.
+    // noindex enforcement (#124): emit the HTTP X-Robots-Tag header so a crawler that fetches
+    // this page is told not to index it — the header is authoritative even before any HTML/SSR
+    // layer exists, and the reverse proxy (#125) forwards it as-is. The `noindex` field is
+    // ALSO returned so the SPA can mirror it as <meta name="robots"> for the rendered page.
+    if (page.noindex) reply.header('X-Robots-Tag', 'noindex')
     //
     // Public child tree: each child is individually checked (loadPublicChildTree) — a
     // public parent does NOT make its children public, and non-public children (and their
