@@ -11,6 +11,7 @@ import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, deletePage } from '../routes/pages.js'
+import { loadPublicChildTree, type PublicChild } from '../routes/public.js'
 import { checkRelation } from '@wikistead/authz'
 import type { Tenant } from '@wikistead/types'
 
@@ -190,5 +191,81 @@ describe('noindex', () => {
     // noindex enforcement (X-Robots-Tag, <meta>) is the HTML rendering layer's
     // responsibility — tested here only as field presence.
     await adminPool`UPDATE pages SET noindex = false WHERE id = ${publicPageId}`
+  })
+})
+
+// ── loadPublicChildTree (ADR-030 / #26): leak-safe public descendant tree ──
+//
+// Authz-critical: a public parent must NOT make its children public, and a non-public node
+// must leave NO trace — not by id/title/count NOR by a gap/index/ordering. We build a tree:
+//
+//   P (public)
+//   ├─ C1 (public)         → shown
+//   │   └─ G1 (public)     → shown (recursion into a public node)
+//   └─ C2 (PRIVATE)        → hidden
+//       └─ G2 (public)     → hidden (only reachable through the private C2 — never traversed)
+describe('loadPublicChildTree leak safety', () => {
+  let P: string, C1: string, C2: string, G1: string, G2: string
+  const ids = () => [P, C1, C2, G1, G2]
+
+  // Flatten every id that appears anywhere in the returned tree.
+  function flatten(nodes: PublicChild[]): string[] {
+    return nodes.flatMap((n) => [n.id, ...flatten(n.children)])
+  }
+
+  beforeAll(async () => {
+    const mk = async (title: string, parentId: string | null) =>
+      (await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title, parentId })).id
+    P = await mk('P public parent', null)
+    C1 = await mk('C1 public child', P)
+    C2 = await mk('C2 private child', P)
+    G1 = await mk('G1 public grandchild', C1)
+    G2 = await mk('G2 public-but-under-private', C2)
+    // Public grants for everyone EXCEPT C2. Note G2 is granted public on its own, yet must
+    // still stay hidden because the only path to it runs through the private C2.
+    await writeTuples(fgaClient, [P, C1, G1, G2].map((id) => ({ user: 'user:*', relation: 'view', object: `page:${id}` })))
+  })
+
+  afterAll(async () => {
+    await deleteTuples(fgaClient, [P, C1, G1, G2].map((id) => ({ user: 'user:*', relation: 'view', object: `page:${id}` })))
+    // delete leaves first (children before parents) so FK / tree invariants hold
+    for (const id of [G1, G2, C1, C2, P]) await deletePage(db, fgaClient, driver, { pageId: id, userId: 'dev-user' })
+  })
+
+  it('includes a public direct child', async () => {
+    const tree = await loadPublicChildTree(tenant.id, P)
+    expect(tree.map((n) => n.id)).toContain(C1)
+  })
+
+  it('excludes a non-public direct child (no id, no title, no placeholder)', async () => {
+    const tree = await loadPublicChildTree(tenant.id, P)
+    expect(flatten(tree)).not.toContain(C2)
+    expect(JSON.stringify(tree)).not.toContain('private') // C2's title must not leak anywhere
+  })
+
+  it('recurses into a public child to surface a public grandchild', async () => {
+    const tree = await loadPublicChildTree(tenant.id, P)
+    const c1 = tree.find((n) => n.id === C1)!
+    expect(c1.children.map((n) => n.id)).toContain(G1)
+  })
+
+  it('does NOT traverse through a private node, even to a public grandchild', async () => {
+    // G2 is public on its own, but only reachable via the private C2 → must stay hidden.
+    const tree = await loadPublicChildTree(tenant.id, P)
+    expect(flatten(tree)).not.toContain(G2)
+  })
+
+  it('returns only confirmed-public nodes (no foreign ids leak)', async () => {
+    const tree = await loadPublicChildTree(tenant.id, P)
+    const allowed = new Set([C1, G1]) // everything reachable through public nodes only
+    for (const id of flatten(tree)) expect(allowed.has(id)).toBe(true)
+    // sanity: the private branch ids are part of the fixture but never surface
+    expect(ids()).toContain(C2)
+  })
+
+  it('respects the depth bound (no descent past the limit)', async () => {
+    const shallow = await loadPublicChildTree(tenant.id, P, 1) // direct children only
+    const c1 = shallow.find((n) => n.id === C1)!
+    expect(c1.children).toEqual([]) // G1 is depth 2 — not loaded at depth 1
   })
 })

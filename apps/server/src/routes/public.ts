@@ -38,6 +38,47 @@ async function loadPublicPage(tenantId: string, pageId: string): Promise<PublicP
   }) as Promise<PublicPageRow | null>
 }
 
+// Public child tree (ADR-030 / #26). A public page exposes its publicly-viewable
+// descendants for navigation. NO inheritance: every node is individually FGA-checked with
+// user:anonymous, and we never traverse INTO a non-public node — so a private page, and its
+// whole subtree (reachable only through it), is excluded and never leaked. The result is a
+// compact list of public pages only; sibling positions / indices are never exposed, so the
+// presence of an omitted private sibling can't be inferred from a gap. Depth and fan-out are
+// bounded so a deep/wide tree can't blow up the request.
+export interface PublicChild { id: string; title: string; children: PublicChild[] }
+const MAX_TREE_DEPTH = 6
+const MAX_CHILDREN_PER_NODE = 200
+
+async function loadDirectChildren(tenantId: string, parentId: string): Promise<{ id: string; title: string }[]> {
+  return pool.begin(async (tx) => {
+    await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+    return tx<{ id: string; title: string }[]>`
+      SELECT id, title FROM pages WHERE parent_id = ${parentId}
+      ORDER BY position, created_at LIMIT ${MAX_CHILDREN_PER_NODE}
+    `
+  }) as Promise<{ id: string; title: string }[]>
+}
+
+// Recursively collect the public descendants of `parentId`. Each candidate child is
+// individually authorized with ANON view; a non-public child is skipped AND not descended
+// into (no path through a hidden node), so neither it nor anything below it leaks. Only
+// confirmed-public nodes — and the gaps between them are not observable — are returned.
+export async function loadPublicChildTree(
+  tenantId: string,
+  parentId: string,
+  depth: number = MAX_TREE_DEPTH,
+): Promise<PublicChild[]> {
+  if (depth <= 0) return []
+  const kids = await loadDirectChildren(tenantId, parentId)
+  const out: PublicChild[] = []
+  for (const k of kids) {
+    const ok = await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: k.id })
+    if (!ok) continue
+    out.push({ id: k.id, title: k.title, children: await loadPublicChildTree(tenantId, k.id, depth - 1) })
+  }
+  return out
+}
+
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function publicPlugin(app: FastifyInstance) {
@@ -61,18 +102,20 @@ export async function publicPlugin(app: FastifyInstance) {
     // in the HTML rendering layer that crawlers actually visit, not here.
     // The noindex field is returned so the client can set <meta name="robots">.
     //
-    // TODO(phase: public-html): when parent_id is wired, each child page must be
-    // individually checked: checkRelation(ANON, 'view', child) before inclusion.
-    // A public parent does NOT automatically make children public.
+    // Public child tree: each child is individually checked (loadPublicChildTree) — a
+    // public parent does NOT make its children public, and non-public children (and their
+    // subtrees) are excluded with no observable gap.
     //
     // Explicitly NOT included: viewerUsers/viewerGroups (internal ACL),
     // created_by (would leak user IDs), revision history,
     // attachment presigned URLs, non-public children.
+    const children = await loadPublicChildTree(tenant.id, page.id)
     return reply.send({
       id: page.id,
       title: page.title,
       content,
       noindex: page.noindex,
+      children,
     })
   })
 
