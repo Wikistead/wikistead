@@ -196,17 +196,25 @@ describe('noindex', () => {
 
 // ── loadPublicChildTree (ADR-030 / #26): leak-safe public descendant tree ──
 //
-// Authz-critical: a public parent must NOT make its children public, and a non-public node
-// must leave NO trace — not by id/title/count NOR by a gap/index/ordering. We build a tree:
+// Authz-critical (per the approval on #110): a public parent must NOT make its children
+// public, and a non-public node must leave NO observable trace — not by id/title/count, NOR
+// by a gap/index/ordering/size. "Public" means ANON (user:anonymous) can `view`; a share-link
+// child (viewable only by share_link:Y, not user:*) is NOT public and stays hidden. The
+// fixture (sibling order = creation order via append):
 //
 //   P (public)
-//   ├─ C1 (public)         → shown
-//   │   └─ G1 (public)     → shown (recursion into a public node)
-//   └─ C2 (PRIVATE)        → hidden
-//       └─ G2 (public)     → hidden (only reachable through the private C2 — never traversed)
+//   ├─ C1 (public)            → shown
+//   │   ├─ G1 (public)        → shown (recursion into a public node)
+//   │   └─ G3 (PRIVATE)       → hidden (non-public grandchild under a *public* parent)
+//   ├─ Cmid (PRIVATE)         → hidden (sits between two public siblings — gap not revealed)
+//   ├─ Cpub2 (public)         → shown (proves order compacts: [C1, Cpub2], no slot for Cmid)
+//   ├─ Cshare (share-only)    → hidden for ANON (viewable only via share_link:tl)
+//   └─ C2 (PRIVATE)           → hidden
+//       └─ G2 (public)        → hidden (only reachable through private C2 — never traversed)
 describe('loadPublicChildTree leak safety', () => {
-  let P: string, C1: string, C2: string, G1: string, G2: string
-  const ids = () => [P, C1, C2, G1, G2]
+  let P: string, C1: string, Cmid: string, Cpub2: string, Cshare: string, C2: string
+  let G1: string, G3: string, G2: string
+  const SHARE = 'share_link:tl'
 
   // Flatten every id that appears anywhere in the returned tree.
   function flatten(nodes: PublicChild[]): string[] {
@@ -217,55 +225,85 @@ describe('loadPublicChildTree leak safety', () => {
     const mk = async (title: string, parentId: string | null) =>
       (await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title, parentId })).id
     P = await mk('P public parent', null)
+    // direct children, created in this order so positions are C1 < Cmid < Cpub2 < Cshare < C2
     C1 = await mk('C1 public child', P)
+    Cmid = await mk('Cmid private child', P)
+    Cpub2 = await mk('Cpub2 public child', P)
+    Cshare = await mk('Cshare share-only child', P)
     C2 = await mk('C2 private child', P)
     G1 = await mk('G1 public grandchild', C1)
+    G3 = await mk('G3 private grandchild', C1)
     G2 = await mk('G2 public-but-under-private', C2)
-    // Public grants for everyone EXCEPT C2. Note G2 is granted public on its own, yet must
-    // still stay hidden because the only path to it runs through the private C2.
-    await writeTuples(fgaClient, [P, C1, G1, G2].map((id) => ({ user: 'user:*', relation: 'view', object: `page:${id}` })))
+
+    // Public (user:*) grants: P, C1, Cpub2, G1, G2. NOT Cmid/G3/C2 (no grant) and NOT
+    // Cshare (share-link only). G2 is granted public on its own, yet must stay hidden because
+    // the only path to it runs through the private C2.
+    await writeTuples(fgaClient, [P, C1, Cpub2, G1, G2].map((id) => ({ user: 'user:*', relation: 'view', object: `page:${id}` })))
+    // Cshare is genuinely viewable — but only by a share_link principal, never by ANON.
+    await writeTuples(fgaClient, [{ user: SHARE, relation: 'view', object: `page:${Cshare}` }])
   })
 
   afterAll(async () => {
-    await deleteTuples(fgaClient, [P, C1, G1, G2].map((id) => ({ user: 'user:*', relation: 'view', object: `page:${id}` })))
-    // delete leaves first (children before parents) so FK / tree invariants hold
-    for (const id of [G1, G2, C1, C2, P]) await deletePage(db, fgaClient, driver, { pageId: id, userId: 'dev-user' })
+    await deleteTuples(fgaClient, [P, C1, Cpub2, G1, G2].map((id) => ({ user: 'user:*', relation: 'view', object: `page:${id}` })))
+    await deleteTuples(fgaClient, [{ user: SHARE, relation: 'view', object: `page:${Cshare}` }])
+    // delete leaves first (children before parents) so the parent_id tree stays consistent
+    for (const id of [G1, G3, G2, C1, Cmid, Cpub2, Cshare, C2, P]) {
+      await deletePage(db, fgaClient, driver, { pageId: id, userId: 'dev-user' })
+    }
   })
 
-  it('includes a public direct child', async () => {
+  it('includes public direct children and recurses into a public child', async () => {
     const tree = await loadPublicChildTree(tenant.id, P)
     expect(tree.map((n) => n.id)).toContain(C1)
+    expect(tree.map((n) => n.id)).toContain(Cpub2)
+    const c1 = tree.find((n) => n.id === C1)!
+    expect(c1.children.map((n) => n.id)).toContain(G1) // recursion into a public node
   })
 
-  it('excludes a non-public direct child (no id, no title, no placeholder)', async () => {
+  it('① excludes a non-public direct child (no id, no title, no placeholder)', async () => {
     const tree = await loadPublicChildTree(tenant.id, P)
+    expect(flatten(tree)).not.toContain(Cmid)
     expect(flatten(tree)).not.toContain(C2)
-    expect(JSON.stringify(tree)).not.toContain('private') // C2's title must not leak anywhere
+    expect(JSON.stringify(tree)).not.toContain('private') // private titles never leak
   })
 
-  it('recurses into a public child to surface a public grandchild', async () => {
+  it('② excludes a non-public grandchild under a PUBLIC parent (no inheritance at any depth)', async () => {
     const tree = await loadPublicChildTree(tenant.id, P)
     const c1 = tree.find((n) => n.id === C1)!
-    expect(c1.children.map((n) => n.id)).toContain(G1)
+    expect(c1.children.map((n) => n.id)).not.toContain(G3) // G3 checked individually, excluded
+  })
+
+  it('③ excludes a share-only child (public = ANON view, not share_link)', async () => {
+    // Sanity: Cshare really is viewable — just not by ANON. Proves it is a genuine share-only
+    // page, not merely an ungranted one, and that we key on ANON view specifically.
+    expect(await checkRelation(fgaClient, SHARE, 'view', { type: 'page', id: Cshare })).toBe(true)
+    expect(await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: Cshare })).toBe(false)
+    const tree = await loadPublicChildTree(tenant.id, P)
+    expect(flatten(tree)).not.toContain(Cshare)
+  })
+
+  it('④ compacts order so a hidden sibling leaves no gap/index/placeholder', async () => {
+    const tree = await loadPublicChildTree(tenant.id, P)
+    // Exactly the public siblings, in order, with NO slot for Cmid/Cshare/C2 between them.
+    expect(tree.map((n) => n.id)).toEqual([C1, Cpub2])
+    // No positional / index field leaks the original sibling slots.
+    for (const n of tree) expect(Object.keys(n).sort()).toEqual(['children', 'id', 'title'])
   })
 
   it('does NOT traverse through a private node, even to a public grandchild', async () => {
-    // G2 is public on its own, but only reachable via the private C2 → must stay hidden.
     const tree = await loadPublicChildTree(tenant.id, P)
-    expect(flatten(tree)).not.toContain(G2)
+    expect(flatten(tree)).not.toContain(G2) // public on its own, but unreachable via private C2
   })
 
-  it('returns only confirmed-public nodes (no foreign ids leak)', async () => {
+  it('returns only confirmed-public nodes (no foreign id leaks anywhere)', async () => {
     const tree = await loadPublicChildTree(tenant.id, P)
-    const allowed = new Set([C1, G1]) // everything reachable through public nodes only
+    const allowed = new Set([C1, Cpub2, G1]) // everything reachable through public nodes only
     for (const id of flatten(tree)) expect(allowed.has(id)).toBe(true)
-    // sanity: the private branch ids are part of the fixture but never surface
-    expect(ids()).toContain(C2)
   })
 
-  it('respects the depth bound (no descent past the limit)', async () => {
+  it('⑤ respects the depth bound without a placeholder for the cut-off subtree', async () => {
     const shallow = await loadPublicChildTree(tenant.id, P, 1) // direct children only
     const c1 = shallow.find((n) => n.id === C1)!
-    expect(c1.children).toEqual([]) // G1 is depth 2 — not loaded at depth 1
+    expect(c1.children).toEqual([]) // G1/G3 are depth 2 — empty array, not a hint they exist
   })
 })
