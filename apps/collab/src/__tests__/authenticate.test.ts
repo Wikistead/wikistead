@@ -76,3 +76,40 @@ describe("collab authenticate — guest token, reconnect blocked after revoke", 
     }
   });
 });
+
+// #104 / ADR-038: a SPACE share-link token admits the guest to ANY published page that
+// inherits view from the space — not just one page — and never to a page outside the space
+// or after revoke. View-only.
+describe("collab authenticate — space share-link token (#104)", () => {
+  const guestCfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 };
+  const SPACE = "sl-space-104";
+  const LINK = "sl-link-104";
+  const spaceGrant = { user: `share_link:${LINK}`, relation: "viewer", object: `space:${SPACE}` };
+  const pageInSpace = { user: `space:${SPACE}`, relation: "space", object: "page:demo" }; // demo ∈ SPACE
+
+  it("admits a space-token guest to a page in the space (read-only), rejects out-of-space + post-revoke", async () => {
+    // Clean any leftover INDIVIDUALLY (a batch delete aborts if one tuple is already gone).
+    for (const t of [spaceGrant, pageInSpace]) await deleteTuples(fgaClient, [t]).catch(() => {});
+    await writeTuples(fgaClient, [spaceGrant, pageInSpace]); // space link + demo inherits from SPACE
+    const token = await mintGuestToken(guestCfg, {
+      tenantId: "tenant_dev", shareLinkId: LINK, resource: { type: "space", id: SPACE }, capability: "view",
+    });
+    try {
+      // a page in the space → admitted, view-only (no page-id match needed for a space token)
+      const r = await authenticate({ token, documentName: DOC }); // DOC = t:tenant_dev:p:demo
+      expect(r.principal).toMatchObject({ kind: "guest", shareLinkId: LINK });
+      expect(r.readOnly).toBe(true); // space links are view-only
+
+      // a page NOT in the space → rejected (inheritance doesn't reach it)
+      await expect(authenticate({ token, documentName: "t:tenant_dev:p:not-in-space-xyz" }))
+        .rejects.toThrow(/denied|expired|forbidden/);
+
+      // revoke = delete the one space tuple → the same token is rejected on reconnect
+      await deleteTuples(fgaClient, [spaceGrant]);
+      await expect(authenticate({ token, documentName: DOC })).rejects.toThrow(/denied|expired|forbidden/);
+    } finally {
+      // Individually — spaceGrant was already deleted by the revoke step above.
+      for (const t of [spaceGrant, pageInSpace]) await deleteTuples(fgaClient, [t]).catch(() => {});
+    }
+  });
+});

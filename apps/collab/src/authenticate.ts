@@ -50,19 +50,30 @@ export async function authenticate(args: { token: string; documentName: string }
   if (looksLikeGuestToken(token)) {
     const c = await verifyGuestToken(guestCfg, token);
     assert(c.tenantId === tenantId, "tenant mismatch");
-    assert(c.resource.type === "page" && c.resource.id === pageId, "resource mismatch");
-    // JWT asserts intent; OpenFGA asserts authority (revoked/expired links fail here).
+    // A PAGE token is bound to exactly one page. A SPACE token (ADR-038 / #104) admits the
+    // guest to ANY page that inherits view from the space (i.e. a published page in that
+    // space) — so we do NOT assert a page-id match for it; the OpenFGA check below is the
+    // authority (page#view ← viewer from space). A space link is view-only.
+    if (c.resource.type === "page") {
+      assert(c.resource.id === pageId, "resource mismatch");
+    } else {
+      assert(c.resource.type === "space", "unsupported resource");
+    }
+    const capability = c.resource.type === "space" ? "view" : c.capability;
+    // JWT asserts intent; OpenFGA asserts authority (revoked/expired links fail here). For a
+    // space token this resolves via viewer-from-space, granting only published pages in S and
+    // never a page in another space / a draft / after revoke.
     const allowed = await check(
       fgaClient,
       `share_link:${c.shareLinkId}`,
-      c.capability === "view" ? "view" : "edit",
+      capability === "view" ? "view" : "edit",
       { type: "page", id: pageId },
       { current_time: new Date().toISOString() },
     );
     assert(allowed, "share_link access denied or expired");
     return {
-      principal: { kind: "guest", tenantId, shareLinkId: c.shareLinkId, capability: c.capability },
-      readOnly: c.capability === "view",
+      principal: { kind: "guest", tenantId, shareLinkId: c.shareLinkId, capability },
+      readOnly: capability === "view",
     };
   }
 
