@@ -601,7 +601,14 @@ const RENDERERS: BlockRenderer[] = [
       if (macro.containerClass) {
         // CONTAINER directive (callout): a CSS box over every line; content stays markdown.
         const box = Decoration.line({ attributes: { class: macro.containerClass } });
-        for (let n = first.number; n <= lastLine.number; n++) ctx.add(box, doc.line(n).from);
+        // A leading [label] (#94) renders as the box header via CSS ::before(attr(data-label))
+        // on the OPEN line — display-only (the `:::name[label]` text stays the hidden source,
+        // reveal-on-cursor to edit). No widget, so it never fights the DirectiveMark hide.
+        const openLine = open!.label
+          ? Decoration.line({ attributes: { class: `${macro.containerClass} cm-lp-directive-label`, 'data-label': open!.label } })
+          : box;
+        ctx.add(openLine, first.from);
+        for (let n = first.number + 1; n <= lastLine.number; n++) ctx.add(box, doc.line(n).from);
       }
     },
   },
@@ -1032,6 +1039,16 @@ export const livePreviewTheme = EditorView.baseTheme({
     borderLeft: "3px solid var(--accent, #4ea1ff)",
     background: "rgba(127,127,127,0.08)",
     paddingLeft: "0.8em",
+  },
+  // Leading [label] header (#94): rendered from the open line's data-label so it shows even
+  // while the `:::name[label]` source text is hidden (display-only; reveal-on-cursor edits it).
+  ".cm-lp-directive-label::before": {
+    content: "attr(data-label)",
+    display: "block",
+    fontWeight: "600",
+    fontSize: "0.85em",
+    opacity: "0.8",
+    paddingTop: "0.1em",
   },
   // Table cell-merge edit mode (render-active): a toolbar + selectable cells.
   // margin 0 (see cm-lp-macro-wrap): the edit widget's root margin would be uncounted in

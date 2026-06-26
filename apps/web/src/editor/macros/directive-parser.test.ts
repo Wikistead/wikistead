@@ -19,6 +19,13 @@ describe("directive fence matchers", () => {
     expect(parseDirectiveOpen(":::")).toBeNull(); // no name → not an opening
     expect(parseDirectiveOpen("text")).toBeNull();
   });
+  it("parses an optional leading [label] / custom header (#94)", () => {
+    expect(parseDirectiveOpen(":::callout[My Note]")).toEqual({ colons: 3, name: "callout", label: "My Note" });
+    expect(parseDirectiveOpen(":::note[Heads up]{type=warn}")).toEqual({ colons: 3, name: "note", label: "Heads up" });
+    expect(parseDirectiveOpen(":::callout[  spaced  ]")).toEqual({ colons: 3, name: "callout", label: "spaced" }); // trimmed
+    expect(parseDirectiveOpen(":::callout[]")).toEqual({ colons: 3, name: "callout" }); // empty → no label
+    expect(parseDirectiveOpen(":::callout")).toEqual({ colons: 3, name: "callout" }); // unchanged (no label)
+  });
   it("recognizes a closing fence (>= opening colon count)", () => {
     expect(isDirectiveClose(":::", 3)).toBe(true);
     expect(isDirectiveClose("::::", 3)).toBe(true); // longer closes a shorter open
