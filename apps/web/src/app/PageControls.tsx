@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip } from "lucide-react";
+import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui/Button";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
@@ -33,6 +33,9 @@ export interface PageControlsProps {
   onExport?: () => void;
   onPrint?: () => void;
   onPermissions?: () => void;
+  // Delete the page. Set only when the caller may manage the page (FGA `manage`); the
+  // server re-checks and 403s regardless (two-layer authz). Undefined → item hidden.
+  onDelete?: () => void;
   dirtySignal?: DirtySignal;
 }
 
@@ -73,6 +76,11 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string): Overflow
   if (p.onAttachments) items.push({ value: "attachments", label: t("page.attachments"), icon: <Paperclip size={14} />, testId: "attachments-toggle" });
   if (p.onHistory) items.push({ value: "history", label: t("page.history"), icon: <History size={14} />, testId: "history-toggle" });
   if (p.onPermissions) items.push({ value: "permissions", label: t("page.permissions"), icon: <Shield size={14} />, testId: "permissions-open" });
+  // Share in the ⋯ only while EDITING (view mode already has the dedicated Share button).
+  // manage-gated by onShare being set (the server re-checks). #4.
+  if (p.editing && p.onShare) items.push({ value: "share", label: t("page.share"), icon: <Share2 size={14} />, testId: "share-page" });
+  // Delete in BOTH modes; manage-gated by onDelete being set. Destructive (danger). #4.
+  if (p.onDelete) items.push({ value: "delete", label: t("page.delete"), icon: <Trash2 size={14} />, testId: "delete-page", danger: true });
   return items;
 }
 function runOverflow(p: PageControlsProps, v: string) {
@@ -81,6 +89,8 @@ function runOverflow(p: PageControlsProps, v: string) {
   else if (v === "history") p.onHistory?.();
   else if (v === "attachments") p.onAttachments?.();
   else if (v === "permissions") p.onPermissions?.();
+  else if (v === "share") p.onShare?.();
+  else if (v === "delete") p.onDelete?.();
 }
 
 // ── STATUS: under the title, right-aligned (draft / unpublished text + comments btn) ──

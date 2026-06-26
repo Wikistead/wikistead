@@ -24,7 +24,8 @@
     "copied": "Link copied to clipboard",
     "actionFailed": "Something went wrong",
     "saved": "Saved",
-    "spaceDeleted": "Space deleted"
+    "spaceDeleted": "Space deleted",
+    "pageDeleted": "Page deleted"
   },
   "theme": {
     "label": "Theme",
@@ -235,6 +236,7 @@
     "history": "History",
     "attachments": "Attachments",
     "permissions": "Permissions",
+    "delete": "Delete page",
     "notFound": "This page doesn't exist. It may have been deleted, or the link is wrong.",
     "forbidden": "You don't have access to this page."
   },

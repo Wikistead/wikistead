@@ -24,7 +24,8 @@
     "copied": "リンクをクリップボードにコピーしました",
     "actionFailed": "問題が発生しました",
     "saved": "保存しました",
-    "spaceDeleted": "スペースを削除しました"
+    "spaceDeleted": "スペースを削除しました",
+    "pageDeleted": "ページを削除しました"
   },
   "theme": {
     "label": "テーマ",
@@ -235,6 +236,7 @@
     "history": "履歴",
     "attachments": "添付ファイル",
     "permissions": "権限",
+    "delete": "ページを削除",
     "notFound": "このページは存在しません。削除されたか、リンクが誤っている可能性があります。",
     "forbidden": "このページにアクセスする権限がありません。"
   },
