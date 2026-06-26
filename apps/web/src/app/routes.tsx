@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, Route, Routes, useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { LoginScreen } from "./LoginScreen";
 import { AdminRoutes } from "../settings/AdminPage";
@@ -78,7 +78,8 @@ import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, ApiError, type GuestToken } from "../data/apiClient";
-import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage } from "../data/queries";
+import { ConfirmDialog } from "../ui/dialogs";
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport } from "../data/exportApi";
 import { useActiveSpace } from "./ActiveSpace";
@@ -201,6 +202,9 @@ function PageRoute() {
   // Per-page permissions (manage only). Also the invite-to-draft surface.
   const [permsOpen, setPermsOpen] = useState(false);
   const [sharing, setSharing] = useState(false); // share dialog (current page)
+  const [deleting, setDeleting] = useState(false); // delete-page confirm (current page)
+  const deletePage = useDeletePage();
+  const navigate = useNavigate();
 
   // Edit mode + layout are owned here now (PageToolbar is the chrome). editing
   // starts true for the create-page flow (?edit=1). layout (single/split) persists.
@@ -270,7 +274,11 @@ function PageRoute() {
     publishing: publish.isPending,
     vim,
     onToggleVim: toggleVim,
-    onShare: () => setSharing(true),
+    // Share + Delete are manage-only (FGA): undefined when the user can't manage, so the
+    // ⋯ items / Share button don't render. The server re-checks and 403s regardless
+    // (two-layer authz — UI suppression + server enforcement). #4.
+    onShare: page?.canManage ? () => setSharing(true) : undefined,
+    onDelete: page?.canManage ? () => setDeleting(true) : undefined,
     commentsOpen,
     onToggleComments: toggleComments,
     openComments,
@@ -308,6 +316,24 @@ function PageRoute() {
       {pageId && diffRevId && <DiffModal pageId={pageId} revId={diffRevId} onClose={closeDiff} />}
       {pageId && <PermissionsDialog pageId={pageId} open={permsOpen} onClose={() => setPermsOpen(false)} />}
       <ShareDialog pageId={sharing ? pageId ?? null : null} onClose={() => setSharing(false)} />
+      <ConfirmDialog
+        open={deleting}
+        message={t("sidebar.deletePageConfirm", { name: page?.title ?? "" })}
+        onClose={() => setDeleting(false)}
+        confirmTestId="confirm-delete-page"
+        onConfirm={() => {
+          setDeleting(false);
+          if (!pageId || !spaceId) return;
+          deletePage.mutate(
+            { pageId, spaceId },
+            {
+              // The page is gone — leave it. The home route resolves to a remaining page.
+              onSuccess: () => { notify.success(t("toast.pageDeleted")); navigate("/", { replace: true }); },
+              onError: () => notify.error(t("toast.actionFailed")),
+            },
+          );
+        }}
+      />
     </AppShell>
   );
 }

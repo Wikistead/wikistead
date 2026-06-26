@@ -234,6 +234,22 @@ describe('page lifecycle', () => {
     expect(await check(fgaClient, 'share_link:page-delete-test-link', 'view', { type: 'page', id: page.id })).toBe(false)
   })
 
+  it('deletePage rejects a non-manage user with 403 (server enforcement — the fortress)', async () => {
+    // The UI hides Delete for non-manage users, but the server is the bastion: a user
+    // without `manage` on the page is rejected even if the request reaches the handler. #4
+    const page = await createPage(db, fgaClient, driver, {
+      tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'KeepMe',
+    })
+    await expect(
+      deletePage(db, fgaClient, driver, { pageId: page.id, userId: 'page-rando' }),
+    ).rejects.toMatchObject({ statusCode: 403 })
+    // the page survives the rejected delete
+    const rows = await db.sql`SELECT id FROM pages WHERE id = ${page.id}`
+    expect(rows).toHaveLength(1)
+
+    await deletePage(db, fgaClient, driver, { pageId: page.id, userId: 'dev-user' })
+  })
+
   it('FGA write failure rolls back createPage DB INSERT', async () => {
     const badFga = new OpenFgaClient({
       apiUrl: 'http://127.0.0.1:9999',
