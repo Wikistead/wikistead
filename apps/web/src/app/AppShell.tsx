@@ -7,6 +7,7 @@ import { LanguageToggle } from "./LanguageToggle";
 import { UserMenu } from "./UserMenu";
 import { BrandLockup } from "./BrandLockup";
 import { useBranding } from "../data/queries";
+import { assetUrl } from "../data/apiClient";
 
 // App skeleton: header / sidebar slot / main content. `sidebar` holds the page
 // tree and `search` the search box — both member-only; guest (share) routes pass
@@ -59,7 +60,7 @@ export function AppShell({
             on onLogout, NOT sidebar: the settings shell has no sidebar but is a member. */}
         {(() => {
           const brand = branding.data?.logoUrl ? (
-            <img className="block h-[22px] max-w-[160px] object-contain" src={branding.data.logoUrl} alt={branding.data.displayName || "Wikistead"} data-testid="brand-logo" />
+            <img className="block h-[22px] max-w-[160px] object-contain" src={assetUrl(branding.data.logoUrl)} alt={branding.data.displayName || "Wikistead"} data-testid="brand-logo" />
           ) : branding.data?.displayName ? (
             <span className="text-[15px] font-semibold" data-testid="brand">{branding.data.displayName}</span>
           ) : (
