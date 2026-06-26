@@ -42,13 +42,14 @@ function toShareLink(r: ShareLinkRow): ShareLink {
 //  - space: view-only -> 'viewer' (ADR-038: a space link opens the whole space READ-only;
 //    space#editor has no share_link, so guests never edit via a space link). An edit space
 //    link is rejected.
-function relationForResource(type: ResourceRef['type'], capability: Capability): 'view' | 'edit' | 'viewer' {
+function relationForResource(type: ResourceRef['type'], capability: Capability): 'view' | 'comment' | 'edit' | 'viewer' {
   if (type === 'space') {
     if (capability !== 'view') throw Object.assign(new Error('space links are view-only'), { statusCode: 400 })
     return 'viewer'
   }
-  if (capability !== 'view' && capability !== 'edit') {
-    throw Object.assign(new Error('capability must be view or edit'), { statusCode: 400 })
+  // page: view / comment (#100) / edit are shareable; manage is not.
+  if (capability !== 'view' && capability !== 'comment' && capability !== 'edit') {
+    throw Object.assign(new Error('capability must be view, comment, or edit'), { statusCode: 400 })
   }
   return capability
 }

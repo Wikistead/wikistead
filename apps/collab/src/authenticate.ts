@@ -62,18 +62,20 @@ export async function authenticate(args: { token: string; documentName: string }
     const capability = c.resource.type === "space" ? "view" : c.capability;
     // JWT asserts intent; OpenFGA asserts authority (revoked/expired links fail here). For a
     // space token this resolves via viewer-from-space, granting only published pages in S and
-    // never a page in another space / a draft / after revoke.
+    // never a page in another space / a draft / after revoke. In the collab room only EDIT is
+    // writable; a view OR comment guest joins read-only (a comment guest comments via the HTTP
+    // API, not by editing the doc) — so the FGA check is 'edit' only for an edit token.
     const allowed = await check(
       fgaClient,
       `share_link:${c.shareLinkId}`,
-      capability === "view" ? "view" : "edit",
+      capability === "edit" ? "edit" : "view",
       { type: "page", id: pageId },
       { current_time: new Date().toISOString() },
     );
     assert(allowed, "share_link access denied or expired");
     return {
       principal: { kind: "guest", tenantId, shareLinkId: c.shareLinkId, capability },
-      readOnly: capability === "view",
+      readOnly: capability !== "edit",
     };
   }
 
