@@ -11,6 +11,7 @@ import IORedis from "ioredis";
 import { docName } from "@wikistead/types";
 import { loadYdoc, storeYdoc } from "./ydoc.js";
 import { authenticate, parseDocName } from "./authenticate.js";
+import { selectGuestConnectionsToClose, parseRevokeMessage } from "./revoke.js";
 
 const server = new Hocuspocus({
   port: Number(process.env.COLLAB_PORT ?? 4100),
@@ -119,6 +120,44 @@ flushSub.on("pmessage", async (_pattern: string, channel: string, reqId: string)
     // Ack regardless: a store error or a not-open doc both mean "proceed" (pages.ydoc
     // is the best available snapshot). The API also has a timeout as a backstop.
     flushPub.publish(`wks:flushack:${reqId}`, "1").catch(() => {});
+  }
+});
+
+// ── Share-link revoke subscriber (#106 / ADR-028) ──────────────────────────
+//
+// On revoke the API server deletes the FGA tuple (the authority — revocation is instant) and
+// publishes wks:revoke:<documentName> with { shareLinkId }. We sever every still-connected
+// guest on that link NOW, so a revoked guest stops editing immediately instead of lingering
+// until the token TTL. Members and guests on OTHER links are left untouched — their
+// presence/collab session must not be disrupted.
+//
+// Discarding unsynced guest edits is intentional (per the #106 approval): closing the socket
+// drops anything the guest had not yet sent — revocation puts authorization above data
+// preservation. Edits already synced before revoke remain (they were legitimate). A severed
+// guest cannot rejoin: the collab onAuthenticate re-checks FGA on every connect and the tuple
+// is gone, so any reconnect is rejected.
+//
+// Best-effort, like the restore/flush channels: if this is missed (Valkey down, doc not open
+// in this pod), the token TTL + the reconnect FGA check are the backstop — latency degrades,
+// never correctness.
+const revokeSub = new IORedis(process.env.VALKEY_URL ?? "redis://localhost:6379");
+
+revokeSub.psubscribe("wks:revoke:*", (err) => {
+  if (err) console.error("[revoke:sub] subscribe failed:", err);
+});
+
+revokeSub.on("pmessage", (_pattern: string, channel: string, data: string) => {
+  const documentName = channel.replace("wks:revoke:", "");
+  const document = server.documents.get(documentName);
+  if (!document) return; // nobody connected here; TTL + reconnect-check are the backstop
+  const msg = parseRevokeMessage(data);
+  if (!msg) return;
+  for (const conn of selectGuestConnectionsToClose(document.getConnections(), msg.shareLinkId)) {
+    try {
+      conn.close(); // socket drops → unsynced edits discarded; reconnect is FGA-rejected
+    } catch (err) {
+      console.error(`[revoke:close] failed for ${documentName}:`, err);
+    }
   }
 });
 
