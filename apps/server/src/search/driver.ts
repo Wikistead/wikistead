@@ -4,6 +4,7 @@
 import { MeiliSearch } from 'meilisearch'
 import type { SearchDoc } from '@wikistead/types'
 import type { SearchDriver, SearchHit } from '@wikistead/hooks'
+import { SEARCH_CANDIDATE_LIMIT } from './paginate.js'
 
 export type { SearchDriver, SearchHit }
 
@@ -54,7 +55,7 @@ export class LogicalSearchDriver implements SearchDriver {
     // UI renders it as text (no XSS). cropLength is a placeholder (tune later).
     const result = await this.client.index(this.INDEX).search<SearchDoc>(q, {
       filter: filters.join(' AND '),
-      limit: 20,
+      limit: SEARCH_CANDIDATE_LIMIT, // over-fetch candidates for stage-2 FGA paging (ADR-027)
       attributesToRetrieve: ['id', 'tenantId', 'spaceId', 'title'],
       attributesToCrop: ['body'],
       cropLength: 30,
