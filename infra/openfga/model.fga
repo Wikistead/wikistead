@@ -68,7 +68,11 @@ type page
     #   share_link with non_expired — time-bounded link (tuple written with condition)
     # OpenFGA requires both to be declared to allow either form.
     define edit: [user, group#member, share_link, share_link with non_expired] or manage or editor from space
-    define comment: [user, group#member] or edit
+    # Guest (share-link) commenting (#100 / ADR-029): comment is independently grantable to a
+    # share_link (permanent + non_expired forms, like edit/view), so a comment-link guest can
+    # comment AND view (view includes `or comment`) but NOT edit. edit ⊃ comment ⊃ view holds.
+    # NOT granted to user:* (no anonymous commenting — only an explicit comment link).
+    define comment: [user, group#member, share_link, share_link with non_expired] or edit
     # user:* here means public page — keep in sync with search is_public.
     define view: [user, group#member, user:*, share_link, share_link with non_expired] or comment or viewer from space
 
