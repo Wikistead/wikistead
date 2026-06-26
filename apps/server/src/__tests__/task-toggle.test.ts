@@ -98,5 +98,10 @@ describe('task-checkbox toggle (no-revision, ADR-019)', () => {
     expect(pub.publishedMd).toContain('- [ ] beta')
     expect(pub.hasUnpublishedChanges).toBe(false) // draft == published again
     expect(await revisionCount(pageId)).toBe(before) // NO new revision — history unpolluted
+
+    // #97 / ADR-019 D2: a lightweight audit row records who/which/state — NOT a revision.
+    const [ev] = await admin<[{ actor: string; checkbox_index: number; checked: boolean }]>`
+      SELECT actor, checkbox_index, checked FROM checkbox_events WHERE page_id = ${pageId} ORDER BY created_at DESC LIMIT 1`
+    expect(ev).toMatchObject({ actor: 'user:dev-user', checkbox_index: 0, checked: true })
   })
 })
