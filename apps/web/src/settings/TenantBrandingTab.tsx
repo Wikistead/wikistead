@@ -5,6 +5,7 @@ import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
 import { AccentPicker } from "./AccentPicker";
+import { assetUrl } from "../data/apiClient";
 
 const LOGO_MAX_BYTES = 512 * 1024;
 const LOGO_TYPES = /^image\/(png|jpeg|webp)$/;
@@ -86,7 +87,7 @@ export function TenantBrandingTab() {
       <p className="mt-0 text-sm text-fg-dim" style={{ marginTop: 0 }}>{t("tenantBranding.logoHint")}</p>
       <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
         {branding.data?.logoUrl && (
-          <img src={branding.data.logoUrl} alt="logo" data-testid="tenant-logo-preview" style={{ height: 28, maxWidth: 160, objectFit: "contain", border: "1px solid var(--border)", borderRadius: 4, padding: 2 }} />
+          <img src={assetUrl(branding.data.logoUrl)} alt="logo" data-testid="tenant-logo-preview" style={{ height: 28, maxWidth: 160, objectFit: "contain", border: "1px solid var(--border)", borderRadius: 4, padding: 2 }} />
         )}
         <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" hidden data-testid="tenant-logo-input" onChange={onPickLogo} />
         <Button variant="default" size="sm" disabled={locked || uploadLogo.isPending} onClick={() => fileRef.current?.click()} data-testid="tenant-logo-upload">{t("tenantBranding.logoUpload")}</Button>
