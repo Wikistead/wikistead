@@ -9,7 +9,7 @@ import { fgaClient, checkRelation, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { provisionTenant } from '../auth/provisioning.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, publishPage } from '../routes/pages.js'
+import { createPage, publishPage, deletePage, listPages } from '../routes/pages.js'
 import { createShareLink, revokeShareLink } from '../routes/share-links.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -91,6 +91,25 @@ describe('#104 space share-link issuance', () => {
     expect(await canView(link1.id, pageA2)).toBe(false) // all of A's pages cut at once
     expect(await canView(link2.id, pageA1)).toBe(true) // the other space link is independent
     await revokeShareLink(db, fgaClient, { id: link2.id, userId: OWNER, tenantId })
+  })
+
+  it('a space-link guest lists the space PUBLISHED pages (drafts + other spaces excluded)', async () => {
+    const link = await createShareLink(db, fgaClient, { tenantId, plan: 'free', userId: OWNER, resource: { type: 'space', id: spaceA }, capability: 'view', expiresInSeconds: null })
+    const draft = await createPage(db, fgaClient, driver, { tenantId, spaceId: spaceA, userId: OWNER, title: 'DraftA' }) // NOT published
+    try {
+      const subject = `share_link:${link.id}`
+      const ctx = { current_time: new Date().toISOString() }
+      const aPages = (await listPages(db, fgaClient, { spaceId: spaceA, subject, context: ctx })).map((p) => p.id)
+      expect(aPages).toContain(pageA1)
+      expect(aPages).toContain(pageA2) // published pages in A
+      expect(aPages).not.toContain(draft.id) // a draft is creator-only — never via the space link
+      // cross-space: A's link lists nothing in space B
+      const bPages = await listPages(db, fgaClient, { spaceId: spaceB, subject, context: ctx })
+      expect(bPages).toHaveLength(0)
+    } finally {
+      await deletePage(db, fgaClient, driver, { pageId: draft.id, userId: OWNER }).catch(() => {})
+      await revokeShareLink(db, fgaClient, { id: link.id, userId: OWNER, tenantId })
+    }
   })
 
   it('rejects an EDIT space link (space links are view-only)', async () => {

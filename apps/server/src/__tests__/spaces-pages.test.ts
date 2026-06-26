@@ -281,7 +281,7 @@ describe('page nesting and ordering', () => {
     const parent = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'parent' })
     const a = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'A', parentId: parent.id })
     const b = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'B', parentId: parent.id })
-    const pages = await listPages(db, fgaClient, { spaceId, userId: 'dev-user' })
+    const pages = await listPages(db, fgaClient, { spaceId, subject: 'user:dev-user' })
     const child = pages.find((p) => p.id === a.id)!
     expect(child.parentId).toBe(parent.id)
     // created in order -> A before B by position
@@ -294,7 +294,7 @@ describe('page nesting and ordering', () => {
     const a = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'A2', parentId: parent.id })
     const b = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'B2', parentId: parent.id })
     await movePage(db, fgaClient, driver, { pageId: b.id, userId: 'dev-user', parentId: parent.id, afterId: null }) // B to first
-    const kids = (await listPages(db, fgaClient, { spaceId, userId: 'dev-user' })).filter((p) => p.parentId === parent.id)
+    const kids = (await listPages(db, fgaClient, { spaceId, subject: 'user:dev-user' })).filter((p) => p.parentId === parent.id)
     expect(kids.map((k) => k.id)).toEqual([b.id, a.id])
   })
 
@@ -500,8 +500,8 @@ describe('tree listing is FGA-filtered (security)', () => {
     expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: locked.pageId })).toBe(false)
     expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: visible.id })).toBe(true)
 
-    expect((await listPages(db, fgaClient, { spaceId: space.id, userId: 'dev-user' })).map((p) => p.id)).toContain(visible.id)
-    expect(await listPages(db, fgaClient, { spaceId: locked.spaceId, userId: 'dev-user' })).toHaveLength(0)
+    expect((await listPages(db, fgaClient, { spaceId: space.id, subject: 'user:dev-user' })).map((p) => p.id)).toContain(visible.id)
+    expect(await listPages(db, fgaClient, { spaceId: locked.spaceId, subject: 'user:dev-user' })).toHaveLength(0)
 
     await deletePage(db, fgaClient, driver, { pageId: visible.id, userId: 'dev-user' })
     await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: space.id, userId: 'dev-user' })

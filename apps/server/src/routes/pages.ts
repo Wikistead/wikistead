@@ -169,17 +169,22 @@ export async function createPage(
 // lists (or leaks the title of) a page the user cannot open — the same
 // "confirm via OpenFGA before display" rule the search two-stage guard follows
 // (the project design notes). A page the user lacks `view` on is excluded.
+// Lists the pages in a space the SUBJECT may view. The subject is the FGA principal
+// ("user:<sub>" for a member, "share_link:<id>" for a space-link guest); `context` carries
+// current_time for a time-bounded guest link. A space-link guest only sees PUBLISHED pages
+// (a draft has no page#space, so view doesn't inherit from the space) and never another
+// space's pages (the space_id filter) — leak-safe by construction.
 export async function listPages(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { spaceId: string; userId: string },
+  args: { spaceId: string; subject: string; context?: { current_time: string } },
 ): Promise<Page[]> {
   const rows = await db.sql<PageRow[]>`
     SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at,
            has_unpublished_changes, (published_at IS NOT NULL) AS published
     FROM pages WHERE space_id = ${args.spaceId} ORDER BY position, created_at
   `
-  const allowed = await filterAuthorized(fga, `user:${args.userId}`, 'view', rows.map((r) => r.id))
+  const allowed = await filterAuthorized(fga, args.subject, 'view', rows.map((r) => r.id), args.context)
   return rows.filter((r) => allowed.has(r.id)).map(toPage)
 }
 
@@ -781,8 +786,24 @@ export async function pagesPlugin(app: FastifyInstance) {
     },
   )
 
-  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/pages', async (req) => {
-    return listPages(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub })
+  // The space page tree — for a member, or a space-link guest (#104). A guest's token is
+  // bound to THIS space (resource.type=space, id=spaceId), and listPages only returns the
+  // published pages the guest may view (leak-safe). View is the floor (no comment/edit needed).
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/pages', { config: { guest: 'view' } }, async (req, reply) => {
+    let subject: string
+    let context: { current_time: string } | undefined
+    if (req.user) {
+      subject = `user:${req.user.sub}`
+    } else if (req.guest) {
+      if (req.guest.resource.type !== 'space' || req.guest.resource.id !== req.params.spaceId) {
+        return reply.code(403).send({ error: 'forbidden' })
+      }
+      subject = `share_link:${req.guest.shareLinkId}`
+      context = { current_time: new Date().toISOString() }
+    } else {
+      return reply.code(401).send({ error: 'unauthorized' })
+    }
+    return listPages(req.db, app.fga, { spaceId: req.params.spaceId, subject, context })
   })
 
   // Pages overview for space managers (Phase 5 #5) — space#manage gated.
