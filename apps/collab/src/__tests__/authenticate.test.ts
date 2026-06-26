@@ -2,7 +2,7 @@
 // member-collab-token path (P1.1 C4) plus the dev bypass. The token asserts
 // identity; authority is re-derived from OpenFGA per document.
 import { describe, it, expect, afterAll } from "vitest";
-import { mintMemberCollabToken } from "@wikistead/auth";
+import { mintMemberCollabToken, mintGuestToken } from "@wikistead/auth";
 import { fgaClient, writeTuples, deleteTuples } from "@wikistead/authz";
 import { authenticate } from "../authenticate.js";
 
@@ -45,6 +45,34 @@ describe("collab authenticate — member collab token", () => {
       expect(r.readOnly).toBe(true); // view ⇒ read-only ⇒ Hocuspocus rejects writes
     } finally {
       await deleteTuples(fgaClient, [{ user: `user:${VIEWER}`, relation: "view", object: "page:demo" }]).catch(() => {});
+    }
+  });
+});
+
+// #106 / ADR-028: active disconnect severs connected guests on revoke, but the disconnect is
+// only safe because a severed guest CANNOT rejoin. Revocation = deleting the share_link tuple;
+// onAuthenticate re-derives authority from FGA on every connect, so the same (still
+// structurally valid) token is rejected after revoke. Without this, reconnect-after-disconnect
+// would make the active disconnect pointless.
+describe("collab authenticate — guest token, reconnect blocked after revoke", () => {
+  const guestCfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 };
+  const LINK = "revoke-test-link-106";
+  const tuple = { user: `share_link:${LINK}`, relation: "view", object: "page:demo" };
+
+  it("admits a guest while the tuple exists; rejects the SAME token after the tuple is deleted", async () => {
+    await writeTuples(fgaClient, [tuple]);
+    const token = await mintGuestToken(guestCfg, {
+      tenantId: "tenant_dev", shareLinkId: LINK, resource: { type: "page", id: "demo" }, capability: "view",
+    });
+    try {
+      const ok = await authenticate({ token, documentName: DOC });
+      expect(ok.principal).toMatchObject({ kind: "guest", shareLinkId: LINK });
+
+      // Revoke (the active-disconnect authority). A reconnect with the same token must fail.
+      await deleteTuples(fgaClient, [tuple]);
+      await expect(authenticate({ token, documentName: DOC })).rejects.toThrow(/denied|expired|forbidden/);
+    } finally {
+      await deleteTuples(fgaClient, [tuple]).catch(() => {});
     }
   });
 });

@@ -11,7 +11,8 @@ import { makeMemberVerifier, looksLikeGuestToken, verifyGuestToken } from '@wiki
 import { verifyApiKey } from './api-key-auth.js'
 import { getAuthProviders, getSearchDriver, getEmailDriver, type EmailDriver } from '@wikistead/hooks'
 import { resolveEmailDriver } from './email/index.js'
-import { emit } from '@wikistead/events'
+import { emit, onDomainEvent } from '@wikistead/events'
+import { publishRevoke } from './collab-revoke.js'
 import { LogicalSearchDriver } from './search/index.js'
 import type { SearchDriver } from './search/index.js'
 import { LogicalStorageDriver } from './storage/index.js'
@@ -94,6 +95,17 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
   app.decorate('valkey', valkey)
+
+  // Active guest disconnect on share-link revoke (#106 / ADR-028). revokeShareLink already
+  // deletes the FGA tuple (the authority) and emits share_link.revoked; here we forward that
+  // to the collab server over Valkey so connected guests on the link are severed at once.
+  // Best-effort liveness: the guest TTL + the collab reconnect FGA check are the backstop, so
+  // a failed publish never affects the (already-completed) revocation.
+  onDomainEvent((e) => {
+    if (e.type === 'share_link.revoked') {
+      void publishRevoke(valkey, { tenantId: e.tenantId, pageId: e.pageId, shareLinkId: e.shareLinkId })
+    }
+  })
 
   // Transactional email (P1.3). EE/Cloud may registerEmailDriver; CE uses SMTP
   // when configured, else a no-op (announced once — see email/index.ts).
