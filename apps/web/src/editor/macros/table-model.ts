@@ -292,9 +292,15 @@ export function deleteRowAt(grid: Grid, at: number): Grid {
   return normalizeGrid(g);
 }
 
+// The promote/demote DECISION, split out (ADR-025 step 3) so the MacroTier and serialize()
+// share ONE rule: a grid is a GFM pipe table iff it has no spans, no per-cell style, and no
+// body-row header (all pipe-inexpressible → the :::table HTML tier).
+export function representableAsPipe(grid: Grid): boolean {
+  return !hasSpans(grid) && !hasStyle(grid) && !complexHeader(grid);
+}
+
 // Serialize to the lowest tier that can represent the grid: pipes if span-free
 // (Tier 1), else a :::table HTML directive (Tier 2). This IS the promote/demote rule.
 export function serialize(grid: Grid): { tier: "pipe" | "html"; text: string } {
-  const needsHtml = hasSpans(grid) || hasStyle(grid) || complexHeader(grid);
-  return needsHtml ? { tier: "html", text: toHtml(grid) } : { tier: "pipe", text: toPipe(grid) };
+  return representableAsPipe(grid) ? { tier: "pipe", text: toPipe(grid) } : { tier: "html", text: toHtml(grid) };
 }

@@ -1,6 +1,25 @@
-import type { DirectiveMacro } from "./registry";
-import { parseHtml, styleToCss, type Grid } from "./table-model";
+import type { DirectiveMacro, MacroTier, MacroLevel } from "./registry";
+import { parseHtml, styleToCss, parseTableSource, toHtml, toPipe, representableAsPipe, type Grid } from "./table-model";
 import { tableInlineEditor } from "../live-preview/table-edit";
+
+// ADR-025 step 3: the table's tier. pipe (GFM) is the lowest, most portable level;
+// :::table HTML (a directive) is the richest. canRepresentAt / toLevel both go through the
+// shared grid model, so the host can AUTO-DEMOTE a styled/merged edit back to a plain pipe
+// table the moment the richness is gone (open formats). This is the promote/demote rule that
+// used to live in the table editor (serialize()), now declared as data the host applies.
+const PIPE: MacroLevel = { id: "pipe", layer: "gfm" };
+const HTML: MacroLevel = { id: "html", layer: "directive" };
+export const tableTier: MacroTier = {
+  levels: [PIPE, HTML],
+  canRepresentAt(source, level) {
+    if (level.id === HTML.id) return true; // HTML can express any grid
+    return representableAsPipe(parseTableSource(source)); // pipe only if span/style/complex-header free
+  },
+  toLevel(source, level) {
+    const grid = parseTableSource(source);
+    return level.id === PIPE.id ? toPipe(grid) : ":::table\n" + toHtml(grid) + "\n:::";
+  },
+};
 
 // :::table — the Tier-2 table macro. Body is an HTML <table> (rowspan/colspan), which
 // a GFM pipe table promotes to when a merge is added (ADR-022 Part 10). The cell-merge
@@ -37,6 +56,7 @@ export const tableMacro: DirectiveMacro = {
   name: "table",
   exportFidelity: "preserve", // HTML is standard Markdown; round-trips verbatim
   richEditUI: { present: "inline", editor: tableInlineEditor }, // ADR-025: the view-free table InlineEditor
+  tier: tableTier, // ADR-025 step 3: host auto-demotes pipe ⟷ :::table
   liveRender: (body) => {
     const el = renderHtmlTable(body);
     el.setAttribute("data-testid", "macro-table");
