@@ -369,7 +369,62 @@ function ShareRoute() {
   if (state.status === "denied" || !state.minted) {
     return <AppShell><div style={{ padding: 16 }}>{t("share.invalid")}</div></AppShell>;
   }
-  return <GuestPage minted={state.minted} />;
+  // A space link's token carries a space marker docName (t:<tenant>:s:<spaceId>); show the
+  // space's pages (#104). A page link goes straight to the page.
+  return state.minted.docName.includes(":s:") ? <GuestSpace minted={state.minted} /> : <GuestPage minted={state.minted} />;
+}
+
+// Space-link guest landing (#104): list the published pages the space link exposes, then open
+// one as a guest page (reusing the SAME space token — the server authorizes in-space pages).
+function GuestSpace({ minted }: { minted: GuestToken }) {
+  const { t } = useTranslation();
+  const { token, docName } = minted;
+  const m = /^t:(.+?):s:(.+)$/.exec(docName);
+  const tenant = m?.[1] ?? "";
+  const spaceId = m?.[2] ?? "";
+  const [pages, setPages] = useState<{ id: string; title: string }[] | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ id: string; title: string }[]>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
+      .then((r) => { if (!cancelled) setPages(r ?? []); })
+      .catch(() => { if (!cancelled) setPages([]); });
+    return () => { cancelled = true; };
+  }, [spaceId, token]);
+
+  if (openId) {
+    // View-only page access via the space token (server re-checks in-space authority).
+    const pageMinted: GuestToken = { token, docName: `t:${tenant}:p:${openId}`, capability: "view", readOnly: true };
+    return <GuestPage minted={pageMinted} onBack={() => setOpenId(null)} />;
+  }
+  return (
+    <AppShell>
+      <div style={{ padding: 16, maxWidth: 640 }}>
+        <h2 style={{ marginTop: 0 }}>{t("share.spaceTitle")}</h2>
+        {pages == null ? (
+          <div>{t("share.opening")}</div>
+        ) : pages.length === 0 ? (
+          <div style={{ color: "var(--fg-dim)" }}>{t("share.spaceEmpty")}</div>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+            {pages.map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  data-testid="guest-space-page"
+                  onClick={() => setOpenId(p.id)}
+                  style={{ width: "100%", textAlign: "left", padding: "8px 10px", background: "transparent", border: "1px solid var(--border)", borderRadius: 6, cursor: "pointer" }}
+                >
+                  {p.title || t("common.untitled")}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </AppShell>
+  );
 }
 
 // The shared page for an anonymous guest (after the link → token exchange). Same
@@ -377,7 +432,7 @@ function ShareRoute() {
 // collab — the live draft never reaches a view guest's browser); EDIT links join
 // the collab draft to co-edit and can Publish. The published content is fetched
 // over HTTP with the guest token (the server re-checks the share_link's authority).
-function GuestPage({ minted }: { minted: GuestToken }) {
+function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void }) {
   const { t } = useTranslation();
   const { token, docName, capability } = minted;
   const pageId = docName.replace(/^t:.+?:p:/, "");
@@ -427,6 +482,11 @@ function GuestPage({ minted }: { minted: GuestToken }) {
   return (
     <AppShell>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+        {onBack && (
+          <button type="button" onClick={onBack} data-testid="guest-space-back" style={{ alignSelf: "flex-start", margin: "8px 12px 0", padding: "4px 8px", background: "transparent", border: "1px solid var(--border)", borderRadius: 6, cursor: "pointer" }}>
+            ← {t("share.backToSpace")}
+          </button>
+        )}
         <div className="relative" style={{ flex: 1, minHeight: 0 }}>
           <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} />
           {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}

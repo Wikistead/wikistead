@@ -217,7 +217,10 @@
   },
   "share": {
     "opening": "Opening shared page…",
-    "invalid": "This share link is invalid, expired, or revoked."
+    "invalid": "This share link is invalid, expired, or revoked.",
+    "spaceTitle": "Shared space",
+    "spaceEmpty": "This space has no published pages yet.",
+    "backToSpace": "Back to pages"
   },
   "page": {
     "edit": "Edit",
