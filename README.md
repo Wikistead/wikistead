@@ -94,17 +94,29 @@ top. Test counts are integration tests against **real Postgres + real OpenFGA**
 | API keys (`wks_`, third principal) | ✅ | api-keys (13) |
 | Share links (anonymous mint / revoke) | ✅ | share-links (9) |
 | **Web frontend** (editor, tree, search, share, attachments) | ✅ | e2e: editor / foundation / tree (3) / search / share / attachments |
+| **Editor** (CM6 live-preview, vim, macros: mermaid/callout/table/excalidraw, comments, i18n en/ja) | ✅ | e2e: editor / macros / tables / atom-motion / comments |
 
-ADRs 000–014 record the locked decisions. Migrations 001–011 are applied by
-`migrate`. Remaining `TODO(phase: ...)` markers point at the polish/business items
-below, not missing core features.
+ADRs (`docs/adr/`) record the locked decisions and the active design drafts.
+Migrations 001–011 are applied by `migrate`. Remaining `TODO(phase: ...)` markers
+point at the polish/business items below, not missing core features.
 
 ## Remaining (polish + business)
-Core knowledge-base features are complete. What's left is product polish and the
-business layer:
-- **Revenue tiers**: concrete plan → limits design on top of the entitlements layer.
-- **i18n**: UI translation + Meilisearch CJK/Japanese tokenization.
-- **Space-scoped share links** (model TODO in `model.fga`: add `[share_link]` to
-  `space#viewer`) and **immediate disconnect of connected guests** on revoke.
-- **Comments**, and rich rendering (**PlantUML / Mermaid / math**).
-- **Release tooling**: semantic-release is intentionally not yet wired (see the project design notes).
+Core knowledge-base features are implemented and green (tenancy, authz, spaces/pages,
+collab, search, storage, revisions, public render, API keys, share links, billing, the
+web editor with live-preview / vim / macros, comments, i18n en/ja). What's left is
+polish, hardening, and the business layer — most of it captured as ADR drafts in
+`docs/adr/`:
+- **Macros**: columns / details / tabs directives; PlantUML / math rendering (Mermaid,
+  callout, table, Excalidraw are done).
+- **Search hardening**: body-content indexing; CJK/Japanese tokenization config; the
+  two-stage authorized-hit gap (ADR-027).
+- **Guest / sharing**: space-scoped share links (`model.fga`: add `[share_link]` to
+  `space#viewer`); guest (share-link) commenting (ADR-029); active disconnect of
+  connected guests on revoke (ADR-028); rate-limiting the link-exchange endpoint
+  (ADR-026).
+- **Public**: nested public page tree with per-child gating (ADR-030).
+- **Ops / scale**: production reverse proxy + persistent OpenFGA; revision pruning /
+  S3 offload.
+- **Business / legal**: final plan limits + pricing and a metered-overage soft cap;
+  CE/EE split + AGPL legal review; `LICENSE` / `CHANGELOG` / `CONTRIBUTING`; release
+  tooling (semantic-release, intentionally deferred — see the project design notes).
