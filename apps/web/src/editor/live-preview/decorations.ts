@@ -1050,6 +1050,20 @@ export const livePreviewTheme = EditorView.baseTheme({
     opacity: "0.8",
     paddingTop: "0.1em",
   },
+  // Block drag-to-reorder (#84): a grip in the left gutter on each top-level block's first
+  // line, and a drop-target line indicator. Display-only.
+  ".cm-lp-block-gutter": { width: "1.1em" },
+  ".cm-lp-block-grip": {
+    cursor: "grab",
+    opacity: "0.25", // faint until hovered; pointer events still fire at any opacity
+    color: "var(--muted, #999)",
+    userSelect: "none",
+    lineHeight: "1",
+    padding: "0 1px",
+  },
+  ".cm-editor:hover .cm-lp-block-grip": { opacity: "0.55" },
+  ".cm-lp-block-grip:hover": { opacity: "1" },
+  ".cm-lp-block-droptarget": { boxShadow: "inset 0 2px 0 0 var(--accent, #4ea1ff)" },
   // Table cell-merge edit mode (render-active): a toolbar + selectable cells.
   // margin 0 (see cm-lp-macro-wrap): the edit widget's root margin would be uncounted in
   // CM's heightMap. The accent border + inner padding give it presence without an outer
