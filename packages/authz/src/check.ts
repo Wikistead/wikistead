@@ -97,10 +97,13 @@ export async function filterAuthorized(
   user: string,
   capability: Capability,
   pageIds: string[],
+  // Optional FGA context (e.g. current_time) — required when `user` is a share_link with a
+  // non_expired condition, so a time-bounded guest link is evaluated against the clock.
+  context?: CheckContext,
 ): Promise<Set<string>> {
   const results = await Promise.all(
     pageIds.map((id) =>
-      check(fga, user, capability, { type: 'page', id }).then((ok) => [id, ok] as const),
+      check(fga, user, capability, { type: 'page', id }, context).then((ok) => [id, ok] as const),
     ),
   )
   return new Set(results.filter(([, ok]) => ok).map(([id]) => id))
