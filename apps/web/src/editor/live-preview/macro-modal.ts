@@ -1,6 +1,6 @@
 import { EditorView } from "@codemirror/view";
-import type { FenceMacro, MacroModalController, MacroTheme } from "../macros/registry";
-import { macroFenceAt } from "../macros/fence";
+import type { FenceMacro, DirectiveMacro, MacroModalController, MacroTheme } from "../macros/registry";
+import { macroFenceAt, directiveMacroAt } from "../macros/fence";
 
 // Rich-edit a macro block in a modal (ADR-022 Part 3). The overlay is plain DOM — the
 // macro mounts its own editor (React for Excalidraw) INSIDE it, never in CodeMirror
@@ -11,12 +11,22 @@ import { macroFenceAt } from "../macros/fence";
 // last-write-wins still applies but is surfaced (a toast/console) rather than silent.
 export function openMacroModal(
   view: EditorView,
-  macro: FenceMacro,
+  macro: FenceMacro | DirectiveMacro,
   getPos: () => number, // live position of the block (view.posAtDOM(wrap))
   theme: MacroTheme,
 ): void {
   if (macro.richEditUI?.present !== "modal") return;
-  const start = macroFenceAt(view.state, getPos());
+  // Resolve the block's CURRENT range + body and how to re-serialize body → source. Works for
+  // a fenced-code macro (```lang) and a container directive (:::name) alike (#86: table modal).
+  const resolve = () => {
+    if (macro.kind === "directive") {
+      const d = directiveMacroAt(view.state, getPos());
+      return d && { from: d.from, to: d.to, body: d.body, wrap: (b: string) => `:::${d.name}\n${b}\n:::` };
+    }
+    const f = macroFenceAt(view.state, getPos());
+    return f && { from: f.from, to: f.to, body: f.body, wrap: (b: string) => "```" + f.lang + "\n" + b + "\n```" };
+  };
+  const start = resolve();
   if (!start) return;
   const originalBody = start.body;
 
@@ -29,7 +39,7 @@ export function openMacroModal(
   bar.className = "wks-macro-modal-bar";
   const title = document.createElement("span");
   title.className = "wks-macro-modal-title";
-  title.textContent = macro.summary(originalBody);
+  title.textContent = "summary" in macro ? macro.summary(originalBody) : macro.name;
   const spacer = document.createElement("div");
   spacer.style.flex = "1";
   const cancelBtn = document.createElement("button");
@@ -61,14 +71,14 @@ export function openMacroModal(
   cancelBtn.addEventListener("click", close);
   saveBtn.addEventListener("click", () => {
     const body = controller?.getBody() ?? originalBody;
-    // Re-derive the block's CURRENT range from the live widget (handles remote shifts).
-    const fence = macroFenceAt(view.state, getPos());
-    if (fence) {
-      if (fence.body !== originalBody) {
+    // Re-derive the block's CURRENT range from the live position (handles remote shifts).
+    const cur = resolve();
+    if (cur) {
+      if (cur.body !== originalBody) {
         // The block's source changed while editing → last-write-wins (a-scope collab).
         console.warn("macro block was edited concurrently; applying last write");
       }
-      view.dispatch({ changes: { from: fence.from, to: fence.to, insert: "```" + fence.lang + "\n" + body + "\n```" } });
+      view.dispatch({ changes: { from: cur.from, to: cur.to, insert: cur.wrap(body) } });
     }
     close();
   });
