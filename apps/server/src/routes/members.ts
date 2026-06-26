@@ -111,12 +111,14 @@ export async function membersPlugin(app: FastifyInstance) {
     if (!ROLES.includes(role)) return reply.code(400).send({ error: 'invalid role' })
     const email = req.body?.email?.trim() || null
 
+    // Issuing does NOT hard-block at the seat cap (ADR-034: accept is the fortress); it
+    // returns `seatWarning` so the UI can warn the admin they are over-issuing.
     let token: string
+    let seatWarning = false
     try {
-      ;({ token } = await createInvite(req.db, { tenantId: req.tenant.id, plan: req.tenant.plan, invitedBy: req.user.sub, email, role }))
-    } catch (e) {
-      const code = (e as { statusCode?: number }).statusCode ?? 500
-      return reply.code(code).send({ error: code === 403 ? 'seat limit reached' : 'could not create invite' })
+      ;({ token, seatWarning } = await createInvite(req.db, { tenantId: req.tenant.id, plan: req.tenant.plan, invitedBy: req.user.sub, email, role }))
+    } catch {
+      return reply.code(500).send({ error: 'could not create invite' })
     }
 
     const scheme = process.env.NODE_ENV === 'production' ? 'https' : 'http'
@@ -137,7 +139,7 @@ export async function membersPlugin(app: FastifyInstance) {
       }
     }
     emit({ type: 'invite.created', tenantId: req.tenant.id, actorId: req.user.sub, role })
-    return reply.code(201).send({ inviteUrl, emailed })
+    return reply.code(201).send({ inviteUrl, emailed, seatWarning })
   })
 
   app.delete<{ Params: { id: string } }>('/members/invites/:id', async (req, reply) => {

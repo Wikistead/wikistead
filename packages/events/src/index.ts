@@ -38,6 +38,7 @@ export type DomainEvent =
   | { type: 'auth.success'; tenantId: string; actorId: string; method: 'oidc' | 'apikey' | 'guest' | 'dev' | string }
   | { type: 'auth.failed';  tenantId: string; method: string; reason: string }
   // ── Members / invites (P1.4) ──────────────────────────────────────────
+  | { type: 'member.added';        tenantId: string; targetSub: string; role: string; via: 'invite' | 'provision' | 'bootstrap' }
   | { type: 'member.role_changed'; tenantId: string; actorId: string; targetSub: string; role: string }
   | { type: 'member.removed';      tenantId: string; actorId: string; targetSub: string }
   | { type: 'invite.created';      tenantId: string; actorId: string; role: string }
