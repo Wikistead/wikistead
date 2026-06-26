@@ -169,6 +169,9 @@
     "iconHint": "Upload an image, or leave it empty to show an auto-generated initials chip from the name.",
     "iconImageUpload": "Upload image",
     "iconImageRemove": "Remove image",
+    "shareLabel": "Share space",
+    "shareHint": "Create a view-only link to this whole space (all published pages).",
+    "shareSpace": "Share space…",
     "dangerZone": "Danger zone",
     "deleteHint": "Deleting a space permanently removes it and all of its pages.",
     "deleteSpace": "Delete space",
@@ -274,6 +277,8 @@
   },
   "shareDialog": {
     "title": "Share page",
+    "spaceTitle": "Share space",
+    "spaceWarning": "Anyone with this link can view every published page in this space — including pages you add later. The link is view-only.",
     "capability": "Capability",
     "canView": "Can view",
     "canEdit": "Can edit",

@@ -70,7 +70,7 @@ describe('share link lifecycle', () => {
     const a = await createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null })
     const b = await createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'edit', expiresInSeconds: null })
     await revokeShareLink(db, fgaClient, { id: b.id, userId: 'dev-user', tenantId: tenant.id })
-    const active = await listShareLinks(db, fgaClient, { pageId, userId: 'dev-user' })
+    const active = await listShareLinks(db, fgaClient, { resource: { type: 'page', id: pageId }, userId: 'dev-user' })
     const ids = active.map((l) => l.id)
     expect(ids).toContain(a.id)
     expect(ids).not.toContain(b.id)
