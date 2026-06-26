@@ -65,6 +65,28 @@ export type RichEditUI =
   | { readonly present: "modal"; readonly editor: MacroModalEditor }
   | { readonly present: "inline"; readonly editor: InlineEditor };
 
+// ADR-025 step 3: a macro's source can often be written at more than one "level" — a
+// standard, portable form (CommonMark / GFM) or a richer non-standard one (a ::: directive
+// or HTML). A MacroTier declares those levels (lowest = most standard/portable first) plus
+// how to test and convert a source between them. The HOST consults it to AUTO-DEMOTE on every
+// edit: persist at the LOWEST level that can represent the content (open formats — a plain
+// GFM table stays a pipe table; only a merged/styled one promotes to :::table). Both fence
+// and directive macros may declare a tier; a macro without one (e.g. mermaid) is single-level
+// and the host writes its source verbatim. The tier operates ONLY on source strings (it
+// round-trips through the macro's own model) — no EditorView/Yjs, same trust boundary.
+export type StandardLayer = "commonmark" | "gfm" | "directive";
+export interface MacroLevel {
+  readonly id: string; // macro-local id, e.g. "pipe" | "html"
+  readonly layer: StandardLayer; // which standard layer this level lives in
+}
+export interface MacroTier {
+  readonly levels: readonly MacroLevel[]; // ordered LOWEST (most standard) → highest
+  // Can `source` be written at `level` with NO loss? (e.g. a merged table can't be pipe)
+  canRepresentAt(source: string, level: MacroLevel): boolean;
+  // Re-serialize `source` at `level` (round-trips through the macro's own model).
+  toLevel(source: string, level: MacroLevel): string;
+}
+
 export interface FenceMacro {
   readonly kind: "fence";
   // The fenced-code info string this macro claims, e.g. "mermaid" (```mermaid …).
@@ -85,6 +107,9 @@ export interface FenceMacro {
   // Mouse rich-edit surface (modal for embedded React editors — keeps React out of
   // CodeMirror, ADR-013).
   readonly richEditUI?: RichEditUI;
+  // Tier levels for host auto-demote (ADR-025 step 3). Optional — most fence macros are
+  // single-level (mermaid/excalidraw round-trip verbatim in their fence).
+  readonly tier?: MacroTier;
   readonly slash?: MacroSlash; // appears in the `/` palette
 }
 
@@ -107,6 +132,9 @@ export interface DirectiveMacro {
   htmlRender(body: string): string;
   readonly exportFidelity: "preserve" | "degrade";
   readonly richEditUI?: RichEditUI;
+  // Tier levels for host auto-demote (ADR-025 step 3). The table declares this (pipe ⟷
+  // :::table); container directives without alternate representations omit it.
+  readonly tier?: MacroTier;
   readonly slash?: MacroSlash; // appears in the `/` palette
 }
 

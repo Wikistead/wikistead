@@ -1,4 +1,4 @@
-import { mergeRect, unmergeAt, serialize, styleToCss, insertColAt, insertRowAt, deleteColAt, deleteRowAt, parseTableSource, type Grid, type CellStyle } from "../macros/table-model";
+import { mergeRect, unmergeAt, toHtml, styleToCss, insertColAt, insertRowAt, deleteColAt, deleteRowAt, parseTableSource, type Grid, type CellStyle } from "../macros/table-model";
 import type { InnerEditHost, InlineEditor, InlineController } from "../macros/registry";
 
 // Spreadsheet-style column label: A, B … Z, AA, AB … (so the handle band reads like a
@@ -13,9 +13,10 @@ function colLabel(n: number): string {
 // `container` and talks ONLY to InnerEditHost (theme/getSource/replaceSource/exit); it never
 // touches the EditorView/Yjs (a host-layer bridge widget wires it in). Cells select on click;
 // the toolbar merges/unmerges/aligns/colours/sizes/header-toggles/insert-deletes. Each op
-// rewrites the block source via the grid model + serialize → pipes (Tier 1) or :::table
-// HTML (Tier 2) — the auto promote/demote — committed via host.replaceSource (one
-// offset-invariant Y.Text edit, per-op). The grid is parsed from host.getSource at mount.
+// rewrites the block by handing the host a LOSSLESS :::table source; the HOST's MacroTier
+// auto-demotes it to the lowest representable level — pipes (Tier 1) or :::table HTML
+// (Tier 2) (ADR-025 step 3). Committed via host.replaceSource (one offset-invariant Y.Text
+// edit, per-op). The grid is parsed from host.getSource at mount.
 // Controlled background palette: undefined = clear; var(--accent) stays on theme; the
 // tints are safe hex (pass the style allowlist). Not a free color picker (ADR-022 #2).
 const BG_PRESETS: { id: string; value: string | undefined; title: string }[] = [
@@ -268,11 +269,12 @@ export const tableInlineEditor: InlineEditor = {
     });
 
     const apply = (next: Grid) => {
-      const { tier, text } = serialize(next);
-      const src = tier === "html" ? ":::table\n" + text + "\n:::" : text;
+      // Hand the host a LOSSLESS source (the richest :::table form) and let IT pick the level
+      // (ADR-025 step 3): the host's tier auto-demotes to a pipe table when the grid is
+      // span/style/complex-header free. The editor no longer decides pipe-vs-:::table.
       // STAY in edit mode: host.replaceSource re-points render-active at the rewritten range
       // (per-op LWW; the user exits only via Done/Esc — ADR-022 review #2).
-      host.replaceSource(src);
+      host.replaceSource(":::table\n" + toHtml(next) + "\n:::");
     };
     // Show/position the floating toolbar above the first selected cell; hide when nothing
     // is selected (#1 — contextual, not always-on).

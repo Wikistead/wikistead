@@ -13,7 +13,8 @@ import { parseDirectiveOpen } from "../macros/directive-parser";
 import { openMacroModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost } from "./macro-edit";
 import { tableInlineEditor } from "./table-edit";
-import type { InlineEditor, InlineController } from "../macros/registry";
+import { tableTier } from "../macros/table";
+import type { InlineEditor, InlineController, MacroTier } from "../macros/registry";
 
 // Whether the vim keymap is active. Set from the vim Compartment (Editor.tsx). Macros no
 // longer reveal-on-cursor (ADR-024: atoms are entered explicitly), so this no longer gates
@@ -312,11 +313,11 @@ class TableWidget extends WidgetType {
 class InlineEditWidget extends WidgetType {
   private ro?: ResizeObserver;
   private ctrl?: InlineController;
-  constructor(readonly from: number, readonly to: number, readonly source: string, readonly editor: InlineEditor) {
+  constructor(readonly from: number, readonly to: number, readonly source: string, readonly editor: InlineEditor, readonly tier?: MacroTier) {
     super();
   }
   eq(o: InlineEditWidget) {
-    return o.from === this.from && o.to === this.to && o.source === this.source && o.editor === this.editor;
+    return o.from === this.from && o.to === this.to && o.source === this.source && o.editor === this.editor && o.tier === this.tier;
   }
   destroy() {
     this.ctrl?.destroy();
@@ -326,7 +327,7 @@ class InlineEditWidget extends WidgetType {
   }
   toDOM(view: EditorView) {
     const container = document.createElement("div");
-    this.ctrl = this.editor.mount(container, makeInnerEditHost(view, this.from, this.to));
+    this.ctrl = this.editor.mount(container, makeInnerEditHost(view, this.from, this.to, this.tier));
     this.ro = observeBlockResize(view, container);
     return container;
   }
@@ -344,7 +345,7 @@ function tryTableEdit(ctx: RenderCtx, from: number, to: number): boolean {
   const tb = tableBlockAt(ctx.state, from);
   if (!tb) return false;
   const source = ctx.state.doc.sliceString(tb.from, Math.min(tb.to, ctx.state.doc.length));
-  ctx.addAtomic(Decoration.replace({ widget: new InlineEditWidget(tb.from, tb.to, source, tableInlineEditor), block: true }), tb.from, tb.to);
+  ctx.addAtomic(Decoration.replace({ widget: new InlineEditWidget(tb.from, tb.to, source, tableInlineEditor, tableTier), block: true }), tb.from, tb.to);
   return true;
 }
 
