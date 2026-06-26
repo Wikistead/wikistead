@@ -733,19 +733,23 @@ export async function deletePage(
   emit({ type: 'page.deleted', tenantId, pageId: args.pageId, actorId: args.userId })
 }
 
-// Resolve the request principal (member OR guest) for a page action and bind a
-// guest to the page its token was issued for. Returns the FGA subject, the
-// attribution id, and (guests) the time context for the share_link condition.
-// A guest whose token resource is NOT this page is rejected (resource binding) —
-// a token for page A can never read/publish page B.
+// Resolve the request principal (member OR guest) for a page action. Returns the FGA subject,
+// the attribution id, and (guests) the time context for the share_link condition.
+//
+// Guest token binding:
+//  - a PAGE token is bound to its own page (a token for page A can never read page B).
+//  - a SPACE token (#104) is accepted for ANY page — the per-route FGA check re-derives
+//    authority (page#view ← viewer from space), so it grants ONLY published pages in that
+//    space and never an out-of-space page or a draft. (Space links are view-only, so the
+//    edit-gated routes reject the token at the auth hook before this is reached.)
 export function principalForPage(req: FastifyRequest, pageId: string): { subject: string; createdBy: string; context?: { current_time: string } } {
   if (req.user) {
     return { subject: `user:${req.user.sub}`, createdBy: `user:${req.user.sub}` }
   }
   if (req.guest) {
-    if (req.guest.resource.type !== 'page' || req.guest.resource.id !== pageId) {
-      throw Object.assign(new Error('forbidden'), { statusCode: 403 })
-    }
+    const r = req.guest.resource
+    const bound = (r.type === 'page' && r.id === pageId) || r.type === 'space'
+    if (!bound) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
     return {
       subject: `share_link:${req.guest.shareLinkId}`,
       createdBy: `guest:${req.guest.shareLinkId}`,
