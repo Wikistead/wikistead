@@ -207,6 +207,9 @@ export async function mintTokenForShareLink(
   // links, the non_expired condition must pass at current_time). This is what
   // makes revocation correct even if the DB row and FGA tuple diverge — e.g. the
   // tuple was deleted but the revoked_at UPDATE failed: FGA says no -> no token.
+  // check() maps the capability to the per-type FGA relation (space view → 'viewer'), so we
+  // pass the capability. The minted token carries the resource so the collab join point
+  // authorizes the right pages (a space token → any published page in the space).
   const allowed = await check(fga, `share_link:${row.id}`, capability, resource, {
     current_time: new Date().toISOString(),
   })
@@ -225,7 +228,10 @@ export async function mintTokenForShareLink(
     { secret: guestCfg.secret, ttlSeconds: ttl },
     { tenantId, shareLinkId: row.id, resource, capability },
   )
-  return { token, docName: `t:${tenantId}:p:${resource.id}`, capability, readOnly: capability === 'view' }
+  // A page link points at one collab doc; a space link has no single doc — the client uses
+  // the space marker to show the space's pages and connects per-page (t:<tenant>:p:<pageId>).
+  const docName = resource.type === 'space' ? `t:${tenantId}:s:${resource.id}` : `t:${tenantId}:p:${resource.id}`
+  return { token, docName, capability, readOnly: capability === 'view' }
 }
 
 // ── Fastify plugin ─────────────────────────────────────────────────────────
