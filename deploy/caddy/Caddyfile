@@ -1,0 +1,61 @@
+# Wikistead production reverse proxy — non-k8s self-host (#125 / ADR-039).
+#
+# Same-origin model (ADR-016): the browser only ever talks to THIS origin. /api and /collab
+# are proxied here so the BFF session cookie and the collab WebSocket flow on one origin —
+# never expose server:4000 / collab:4100 directly or the cookie/auth model breaks. Caddy
+# terminates TLS automatically via ACME (HTTP-01) for the host below.
+#
+# Configure via env (defaults in braces) or edit inline:
+#   SITE_HOST        public host, e.g. app.wikistead.com
+#   SERVER_UPSTREAM  BFF/API service           {server:4000}
+#   COLLAB_UPSTREAM  Hocuspocus collab service {collab:4100}
+#   WEB_UPSTREAM     static SPA service        {web:80}
+
+{$SITE_HOST:app.wikistead.com} {
+	encode zstd gzip
+
+	# Security headers. HSTS is safe because Caddy serves HTTPS only.
+	# NOTE: the public-page noindex header (X-Robots-Tag) is the APPLICATION's job
+	# (task #124 / rendering layer), NOT the proxy — setting it here would deindex the
+	# entire app. Do not add X-Robots-Tag in this file.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# API (BFF). Same origin so the session cookie is sent on every request.
+	handle /api/* {
+		reverse_proxy {$SERVER_UPSTREAM:server:4000}
+	}
+
+	# Collab WebSocket (Hocuspocus). Caddy v2 upgrades WebSockets automatically; the long
+	# transport timeouts keep idle collab connections alive (mirrors the nginx ingress 1h).
+	handle /collab/* {
+		reverse_proxy {$COLLAB_UPSTREAM:collab:4100} {
+			transport http {
+				read_timeout 1h
+				write_timeout 1h
+			}
+		}
+	}
+
+	# Static SPA (everything else). Fingerprinted assets get a long immutable cache; the
+	# HTML shell is left revalidated by the upstream so a deploy is picked up immediately.
+	handle {
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		reverse_proxy {$WEB_UPSTREAM:web:80}
+	}
+}
+
+# ── Per-tenant subdomains ────────────────────────────────────────────────────
+# Tenant subdomains route to the SAME services (the Host header carries the tenant; the
+# server resolves it). Wildcard TLS needs a DNS-01 provider module (custom Caddy build) —
+# tracked separately as the custom-domain wildcard TLS work (task #123 / ADR-016). Until
+# then, either list explicit tenant hosts here or front this with a wildcard cert. Example:
+#
+# *.wikistead.com {
+# 	import same_origin_routes   # (factor the handle blocks above into a snippet to reuse)
+# }
