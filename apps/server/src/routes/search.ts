@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { filterAuthorized, fgaClient } from '@wikistead/authz'
+import { paginateAuthorized } from '../search/paginate.js'
 
 export async function searchPlugin(app: FastifyInstance) {
   // GET /search?q=...&spaceId=...
@@ -10,28 +11,34 @@ export async function searchPlugin(app: FastifyInstance) {
   // Stage 2 — filterAuthorized FGA final check on the candidate set.
   // Authoritative: catches anything Stage 1 missed due to stale state.
   //
-  app.get<{ Querystring: { q?: string; spaceId?: string } }>('/search', async (req) => {
+  app.get<{ Querystring: { q?: string; spaceId?: string } }>('/search', async (req, reply) => {
     const q = req.query.q?.trim() ?? ''
     if (!q) return []
 
-    // Stage 1: Meilisearch (fast denormalized filter)
-    const hits = await app.searchDriver.search({
+    // Stage 1: Meilisearch over-fetches CANDIDATES (denormalized filter). We page AFTER
+    // the FGA filter (ADR-027) so authorized hits past the page cutoff aren't silently lost.
+    const candidates = await app.searchDriver.search({
       tenantId: req.tenant.id,
       userId: req.user.sub,
       groups: req.user.groups,
       q,
       spaceId: req.query.spaceId,
     })
-    if (hits.length === 0) return []
+    if (candidates.length === 0) return []
 
-    // Stage 2: FGA final authorization check
+    // Stage 2: FGA final authorization check on the candidate set (authoritative).
     const authorized = await filterAuthorized(
       fgaClient,
       `user:${req.user.sub}`,
       'view',
-      hits.map(h => h.id),
+      candidates.map(h => h.id),
     )
 
-    return hits.filter(h => authorized.has(h.id))
+    // Page the AUTHORIZED set; never return an FGA-unconfirmed candidate. `hasMore` is
+    // surfaced (never a silent cap) via a response header so clients can show "more may
+    // exist" without a breaking body change.
+    const { results, hasMore } = paginateAuthorized(candidates, authorized)
+    reply.header('X-Search-Has-More', String(hasMore))
+    return results
   })
 }
