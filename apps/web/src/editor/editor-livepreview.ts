@@ -14,7 +14,7 @@ import { contextMenu } from "./live-preview/context-menu";
 import { vimExCommands } from "./live-preview/vim-ex";
 import { macroFold } from "./macros";
 import { registerVimFold } from "./live-preview/vim-fold";
-import { atomDelete } from "./live-preview/vim-atom";
+import { atomDelete, atomYank } from "./live-preview/vim-atom";
 import { blockDrag } from "./live-preview/block-drag";
 import { macroEdit } from "./live-preview/macro-edit";
 
@@ -105,7 +105,7 @@ export function mountLivePreview(
       // ADR-024 atom motion: every block decoration is a single motion-stop — a one-line
       // key lands ON the atom, the next steps past it (macros stay rendered; non-macro
       // blocks reveal on landing). motionKeyTracker gates the overshoot clamp. Editable only.
-      ...(opts.readOnly ? [] : [motionKeyTracker, blockEntry, atomDelete]),
+      ...(opts.readOnly ? [] : [motionKeyTracker, blockEntry, atomDelete, atomYank]),
       // #84: a left-gutter grip per top-level block; drag it to reorder (one Yjs op).
       // Display-only gutter + drop indicator; editable surface only.
       ...(opts.readOnly ? [] : [blockDrag]),

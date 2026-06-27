@@ -130,6 +130,38 @@ test("dd then p pastes the whole macro back", async ({ browser }) => {
   expect((await blocks(page)).length).toBe(1); // whole macro pasted back (register held the whole macro)
 });
 
+// #91: yy on a macro atom yanks the WHOLE macro (the read counterpart of dd). yy changes no
+// doc, so we move past the atom and paste: p brings the whole macro back as a 2nd atom.
+test("yy on a TALL macro atom yanks the whole macro; p pastes it back whole", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "atom-yy");
+  await enterEdit(page);
+  await insertTallMermaid(page);
+  await vimOn(page);
+  await page.keyboard.press("g"); await page.keyboard.press("g"); await page.keyboard.press("j"); await sleep(110); // land on atom
+  await page.keyboard.press("y"); await page.keyboard.press("y"); await sleep(150);
+  expect((await blocks(page)).length).toBe(1); // yy doesn't change the doc — the macro is still there
+  await page.keyboard.press("G"); await sleep(110); // move below the macro so p doesn't land mid-fence
+  await page.keyboard.press("p"); await sleep(200);
+  expect((await blocks(page)).length).toBe(2); // the WHOLE macro pasted as a second atom
+});
+
+// #91 regression: the intercept only fires on an atom's first line. yy on a NORMAL line still
+// yanks exactly that one line (passes through to vim) — binding `y` must not break plain yy.
+test("yy on a normal line still yanks just that line (passes through to vim)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "atom-yy-plain");
+  await enterEdit(page);
+  await insertTallMermaid(page);
+  await vimOn(page);
+  await page.keyboard.press("g"); await page.keyboard.press("g"); await sleep(110); // line 1 "top"
+  await page.keyboard.press("y"); await page.keyboard.press("y"); await sleep(120);
+  await page.keyboard.press("p"); await sleep(150); // paste below line 1
+  expect((await blocks(page)).length).toBe(1); // no new macro (only one line was yanked)
+  const text = (await page.locator("[data-pane=preview] .cm-content").innerText());
+  expect(text.split("top").length - 1).toBe(2); // "top" now appears twice (line duplicated)
+});
+
 // ADR-024 1b: a TALL RENDERED widget (mermaid SVG ~380px) mounts its SVG asynchronously;
 // without re-measuring, every line BELOW it kept a stale visual-y and vim j/k drifted
 // across the whole region under the widget. A ResizeObserver → view.requestMeasure() keeps
