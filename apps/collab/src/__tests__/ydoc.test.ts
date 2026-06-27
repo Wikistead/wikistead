@@ -68,7 +68,12 @@ describe('storeYdoc', () => {
   it('returns stored=false for a non-existent page (0-row UPDATE)', async () => {
     // This is the 0-row detection test: RLS or missing page causes silent 0-row UPDATE.
     // storeYdoc must detect this and return stored=false rather than silently discarding.
-    const { stored } = await storeYdoc(TENANT, 'nonexistent-page-xyz', new Uint8Array([1, 2, 3]))
+    // Must pass a VALID Yjs update: storeYdoc decodes it (decodeContent) BEFORE the UPDATE
+    // to compute has_unpublished_changes, so raw bytes would fail to decode (#149) before
+    // the 0-row path is even reached.
+    const doc = new Y.Doc()
+    doc.getText('content').insert(0, 'orphan write')
+    const { stored } = await storeYdoc(TENANT, 'nonexistent-page-xyz', Y.encodeStateAsUpdate(doc))
     expect(stored).toBe(false)
   })
 
@@ -107,7 +112,11 @@ describe('storeYdoc', () => {
       RETURNING id
     `
     try {
-      const { stored } = await storeYdoc(TENANT, acmePage, new Uint8Array([99]))
+      // Valid Yjs update (storeYdoc decodes it before the UPDATE — see #149); RLS then
+      // blocks the cross-tenant write → 0 rows → stored=false (the real assertion).
+      const doc = new Y.Doc()
+      doc.getText('content').insert(0, 'cross-tenant write')
+      const { stored } = await storeYdoc(TENANT, acmePage, Y.encodeStateAsUpdate(doc))
       expect(stored).toBe(false)
     } finally {
       await adminPool`DELETE FROM spaces WHERE id = ${acmeSpace}`
