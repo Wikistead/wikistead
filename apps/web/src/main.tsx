@@ -6,6 +6,7 @@ import "@fontsource/plus-jakarta-sans/600.css"; // brand wordmark (OFL); self-ho
 import "./styles/tokens.css";
 import "./styles/print.css";
 import "./styles/macro-modal.css";
+import "./styles/table-edit.css"; // #86: table editor runs in the modal (outside CM baseTheme)
 
 // StrictMode is intentional: it double-invokes effects in dev, which exercises
 // the <Editor/> connect/destroy/reconnect path and surfaces any WS leak or ghost
