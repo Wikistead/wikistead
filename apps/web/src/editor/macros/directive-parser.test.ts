@@ -26,6 +26,12 @@ describe("directive fence matchers", () => {
     expect(parseDirectiveOpen(":::callout[]")).toEqual({ colons: 3, name: "callout" }); // empty → no label
     expect(parseDirectiveOpen(":::callout")).toEqual({ colons: 3, name: "callout" }); // unchanged (no label)
   });
+  it("tolerates trailing content after the label (no fall-back to Markdown) — #94 bug", () => {
+    // The old strict `$` made these FAIL → the line became a paragraph and the `[..]` linkified.
+    expect(parseDirectiveOpen(":::callout[a]b]")).toEqual({ colons: 3, name: "callout", label: "a" });
+    expect(parseDirectiveOpen(":::callout[a] trailing")).toEqual({ colons: 3, name: "callout", label: "a" });
+    expect(parseDirectiveOpen(":::warning[サーバ停止のお知らせ]")).toEqual({ colons: 3, name: "warning", label: "サーバ停止のお知らせ" });
+  });
   it("recognizes a closing fence (>= opening colon count)", () => {
     expect(isDirectiveClose(":::", 3)).toBe(true);
     expect(isDirectiveClose("::::", 3)).toBe(true); // longer closes a shorter open
@@ -57,5 +63,14 @@ describe("directive parser (composite, nested markdown)", () => {
 
   it("leaves a lone ::: (no name) as ordinary text, not a Directive", () => {
     expect(nodes("just text\n").some((n) => n.startsWith("Directive["))).toBe(false);
+  });
+
+  it("a labeled open line is a Directive with NO Link node — the label's [..] is not linkified (#94)", () => {
+    // The whole open line is consumed as a DirectiveMark, so its `[..]` is never inline-parsed.
+    for (const src of [":::callout[My Note]\nbody\n:::\n", ":::callout[a]b]\nbody\n:::\n", ":::warning[サーバ停止のお知らせ]\nbody\n:::\n"]) {
+      const ns = nodes(src);
+      expect(ns.some((n) => n.startsWith("Directive["))).toBe(true);
+      expect(ns.some((n) => n.startsWith("Link["))).toBe(false); // no link decoration source
+    }
   });
 });

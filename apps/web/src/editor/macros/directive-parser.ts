@@ -16,11 +16,14 @@ import type { MarkdownConfig } from "@lezer/markdown";
 
 const COLON = 58; // ':'
 
-// Opening fence: 3+ colons, a name, an optional [label] (a leading label / custom header,
-// remark-directive style), and optional {attrs}. Returns the colon count + name + label.
-// Backward compatible: a fence with no [label] yields no `label` field.
+// Opening fence: 3+ colons, a name, an optional leading [label] (remark-directive style; the
+// FIRST [..]). Returns the colon count + name + label. Backward compatible: no [label] → no
+// `label` field. TRAILING content after the name/label is TOLERATED — the whole line is consumed
+// as a DirectiveMark (parseBlock below), so a label's `[..]` (or any stray `]`) is never left to
+// Markdown inline parsing. #94 bug: the old strict `$` made `:::callout[a]b]` (and any `:::name
+// [label] trailing`) FAIL to match → the line fell back to a paragraph and `[a]` was linkified.
 export function parseDirectiveOpen(text: string): { colons: number; name: string; label?: string } | null {
-  const m = /^(:{3,})\s*([A-Za-z][\w-]*)[ \t]*(?:\[([^\]]*)\])?[ \t]*(\{[^}]*\})?[ \t]*$/.exec(text);
+  const m = /^(:{3,})[ \t]*([A-Za-z][\w-]*)[ \t]*(?:\[([^\]]*)\])?/.exec(text);
   if (!m) return null;
   const out: { colons: number; name: string; label?: string } = { colons: m[1]!.length, name: m[2]! };
   const label = m[3]?.trim();
