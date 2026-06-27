@@ -145,7 +145,12 @@ export const tableInlineEditor: InlineEditor = {
     const selectAll = () => { selected.clear(); selMode = "cells"; selCol = -1; selRow = -1; grid.forEach((row, r) => row.forEach((cell, c) => { if (cell) selected.add(`${r},${c}`); })); applySel(); };
 
     // A border drag handle: tracks the pointer, previews the size, commits on release.
-    const dragSize = (e: PointerEvent, axis: "x" | "y", ref: HTMLElement, commit: (px: number) => void) => {
+    // ADR-041 / #146 (option B): the live preview sizes the SAME set of cells the commit will
+    // apply (`previewEls` = a cell of every affected column/row). When a multi-cell selection
+    // includes the dragged cell, that set is every selected column/row (uniform resize); else
+    // it is just the grabbed one. This kills the bug where the preview moved one column but the
+    // commit resized all selected → the table jumped on release.
+    const dragSize = (e: PointerEvent, axis: "x" | "y", ref: HTMLElement, previewEls: HTMLElement[], commit: (px: number) => void) => {
       const target = e.target as HTMLElement;
       const start = axis === "x" ? e.clientX : e.clientY;
       const startSize = axis === "x" ? ref.getBoundingClientRect().width : ref.getBoundingClientRect().height;
@@ -156,17 +161,15 @@ export const tableInlineEditor: InlineEditor = {
       const tableEl = ref.closest("table");
       const slackX = tableEl ? Math.max(0, container.clientWidth - 24 - tableEl.getBoundingClientRect().width) : 0;
       const maxW = startSize + slackX;
-      // #4: shrinking a row only follows live if EVERY cell in the row follows — one cell
-      // can't pull the row shorter than its siblings. Apply the live height to all of them.
-      const rowCells = axis === "y" ? (Array.from(ref.closest("tr")?.children ?? []) as HTMLElement[]) : [];
       const size = (ev: PointerEvent) => {
         const raw = Math.round(startSize + ((axis === "x" ? ev.clientX : ev.clientY) - start));
         return axis === "x" ? Math.min(maxW, Math.max(40, raw)) : Math.max(24, raw);
       };
+      // #4: a row's live height follows only if EVERY cell in it follows. Here every cell of
+      // every affected column/row follows, so the preview == what commit writes (no jump).
       const move = (ev: PointerEvent) => {
-        const s = size(ev);
-        if (axis === "x") ref.style.width = s + "px";
-        else for (const c of rowCells) c.style.height = s + "px";
+        const s = size(ev) + "px";
+        for (const el of previewEls) { if (axis === "x") el.style.width = s; else el.style.height = s; }
       };
       const up = (ev: PointerEvent) => { target.removeEventListener("pointermove", move); target.removeEventListener("pointerup", up); commit(size(ev)); };
       target.addEventListener("pointermove", move);
@@ -187,6 +190,9 @@ export const tableInlineEditor: InlineEditor = {
     // selection, resize ALL selected columns/rows uniformly; otherwise just this one.
     const dragCols = (c: number) => { const sset = new Set(coords().map(([, cc]) => cc)); return selected.has(`${anchor[0]},${c}`) && sset.size > 1 ? [...sset] : [c]; };
     const dragRows = (r: number) => { const sset = new Set(coords().map(([rr]) => rr)); return selected.has(`${r},${anchor[1]}`) && sset.size > 1 ? [...sset] : [r]; };
+    // Cells (origin only — handles excluded) of a given column / row, for the live resize preview (#146).
+    const colCellsOf = (ci: number) => [...cellEls].filter(([k]) => Number(k.split(",")[1]) === ci).map(([, el]) => el);
+    const rowCellsOf = (ri: number) => [...cellEls].filter(([k]) => Number(k.split(",")[0]) === ri).map(([, el]) => el);
 
     // Spreadsheet handle band: corner (select all) + a select handle per column.
     const htr = document.createElement("tr");
@@ -289,8 +295,14 @@ export const tableInlineEditor: InlineEditor = {
         // Resize on the cell BORDERS (#1): right edge = column width, bottom edge = row
         // height. The interior is for drag-select. Border handles stopPropagation so they
         // never start a selection. testid only on the representative cell per col/row.
-        el.appendChild(resizeHandle("cm-lp-col-resize", r === 0 ? "table-col-resize-" + c : "", (e) => dragSize(e, "x", el, (px) => applyColWidths(dragCols(c), px + "px"))));
-        el.appendChild(resizeHandle("cm-lp-row-resize", c === 0 ? "table-row-resize-" + r : "", (e) => dragSize(e, "y", el, (px) => applyRowHeights(dragRows(r), px + "px"))));
+        el.appendChild(resizeHandle("cm-lp-col-resize", r === 0 ? "table-col-resize-" + c : "", (e) => {
+          const cols = dragCols(c); // affected set, fixed at drag start (selection can't change mid-drag)
+          dragSize(e, "x", el, cols.flatMap(colCellsOf), (px) => applyColWidths(cols, px + "px"));
+        }));
+        el.appendChild(resizeHandle("cm-lp-row-resize", c === 0 ? "table-row-resize-" + r : "", (e) => {
+          const rows = dragRows(r);
+          dragSize(e, "y", el, rows.flatMap(rowCellsOf), (px) => applyRowHeights(rows, px + "px"));
+        }));
         // Rectangular drag-select: pointerdown anchors here; moving extends the rectangle.
         el.addEventListener("pointerdown", (e) => {
           if (editing) return; // a cell is being typed into — let the browser place the caret

@@ -70,6 +70,46 @@ test("width: drag a column border → promotes with a width style", async ({ bro
   expect(await macroTable.locator('th[style*="width"]').count()).toBe(1);
 });
 
+// #146 / ADR-041 option B: with MULTIPLE columns selected, a single border drag resizes ALL
+// selected columns, and the LIVE PREVIEW already moves them — so the table does NOT jump on
+// release (preview == commit, the bug fix), and every selected column ends up with a width.
+test("multi-column resize: live preview matches commit (no jump) + all selected columns resized", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tablemultiresize");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  for (const l of ["| A | B | C |", "| - | - | - |", "| 1 | 2 | 3 |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
+  await sleep(250);
+  await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await expect(page.getByTestId("macro-modal")).toBeVisible();
+  await expect(page.getByTestId("table-edit")).toBeVisible();
+
+  const grid = page.locator("[data-testid=table-edit] table.cm-lp-table-grid");
+  const before = (await grid.boundingBox())!.width;
+
+  await page.getByTestId("table-select-all").click(); // select every cell → drag resizes all columns
+  await sleep(100);
+  const handle = page.getByTestId("table-col-resize-0");
+  const box = (await handle.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 80, box.y + box.height / 2, { steps: 8 });
+  await sleep(60);
+  const previewW = (await grid.boundingBox())!.width; // table width WHILE dragging (the preview)
+  await page.mouse.up();
+  await sleep(200);
+  const committedW = (await page.locator("[data-testid=table-edit] table.cm-lp-table-grid").boundingBox())!.width; // after commit re-render
+
+  expect(committedW).toBeGreaterThan(before + 40); // multiple columns grew (not just one)
+  expect(Math.abs(committedW - previewW)).toBeLessThanOrEqual(8); // no jump: preview == commit
+
+  await page.getByTestId("macro-modal-save").click();
+  await sleep(200);
+  const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
+  await expect(macroTable).toBeVisible();
+  expect(await macroTable.locator('th[style*="width"]').count()).toBeGreaterThanOrEqual(2); // all selected columns got a width
+});
+
 test("header: toggle a body cell to header (th) → promotes with a body <th>", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "tableheader");
