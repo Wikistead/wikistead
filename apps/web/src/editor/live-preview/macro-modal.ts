@@ -1,6 +1,7 @@
 import { EditorView } from "@codemirror/view";
 import type { FenceMacro, DirectiveMacro, MacroModalController, MacroTheme } from "../macros/registry";
 import { macroFenceAt, directiveMacroAt } from "../macros/fence";
+import { applyTier } from "./macro-edit";
 
 // Rich-edit a macro block in a modal (ADR-022 Part 3). The overlay is plain DOM — the
 // macro mounts its own editor (React for Excalidraw) INSIDE it, never in CodeMirror
@@ -78,7 +79,11 @@ export function openMacroModal(
         // The block's source changed while editing → last-write-wins (a-scope collab).
         console.warn("macro block was edited concurrently; applying last write");
       }
-      view.dispatch({ changes: { from: cur.from, to: cur.to, insert: cur.wrap(body) } });
+      // Tier auto-demote on save (open formats): a span/style-free table is written back as a
+      // plain GFM pipe table, not :::table. No tier (e.g. Excalidraw) → the wrapped form as-is.
+      let source = cur.wrap(body);
+      if (macro.tier) source = applyTier(macro.tier, source);
+      view.dispatch({ changes: { from: cur.from, to: cur.to, insert: source } });
     }
     close();
   });
