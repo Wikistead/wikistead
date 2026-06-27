@@ -1,5 +1,6 @@
-import { Vim } from "@replit/codemirror-vim";
-import { EditorState, EditorSelection, type Extension } from "@codemirror/state";
+import { Vim, getCM } from "@replit/codemirror-vim";
+import { EditorState, EditorSelection, Prec, type Extension } from "@codemirror/state";
+import { keymap } from "@codemirror/view";
 import { livePreview } from "./decorations";
 
 // ADR-024 1b (Mode A): dd treats a macro ATOM as one unit — the WHOLE macro source is the
@@ -12,9 +13,9 @@ import { livePreview } from "./decorations";
 // beginning exactly at a block start and not extending past it is touched — dG and edits
 // elsewhere pass through; normal-line dd / registers are intact.
 //
-// KNOWN GAP (yy): yank has no transaction to hook and mapCommand can't override yy either,
-// so `yy` on a macro yanks only the first line (degrades to vim default). Making yy yank
-// the whole macro needs a pre-vim chord intercept — deferred (dd→p cut/paste works).
+// yy COUNTERPART (#91): yank has no transaction to hook (the doc doesn't change) and
+// mapCommand can't override yy either, so the whole-atom yank is done with a PRE-VIM chord
+// intercept (atomYank, below) instead of the transactionFilter dd uses.
 
 export const atomDelete: Extension = EditorState.transactionFilter.of((tr) => {
   if (!tr.docChanged) return tr;
@@ -41,3 +42,38 @@ export const atomDelete: Extension = EditorState.transactionFilter.of((tr) => {
   }
   return tr;
 });
+
+// `yy` on a macro/table atom → yank the WHOLE atom (linewise), the read counterpart of
+// atomDelete's `dd`. yy changes no doc, so the transactionFilter can't see it, and
+// Vim.mapCommand can't override yy. So we intercept the SECOND `y` of the chord with a
+// pre-vim keymap (Prec.highest beats vim's keymap): after the first `y` vim sets
+// inputState.operator='yank'; on the next `y`, if the caret is on an atom's first line and
+// it's a plain, uncounted, default-register yy, we overwrite the unnamed register with the
+// whole atom source (linewise) and cancel vim's pending operator with the PUBLIC
+// Vim.handleKey(cm,'<Esc>') — no internal mutation. Everything else (yw/y$/yj, 3yy, "ayy,
+// yy on a normal line, insert/visual mode, vim off) returns false and passes through to vim.
+export const atomYank: Extension = Prec.highest(
+  keymap.of([
+    {
+      key: "y",
+      run: (view) => {
+        const cm = getCM(view);
+        const vim = cm?.state.vim;
+        if (!vim || vim.insertMode || vim.visualMode) return false;
+        const is = vim.inputState;
+        if (!is || is.operator !== "yank") return false; // not the second y of a bare yy
+        if (is.registerName) return false; // "ayy → let vim handle the named register
+        if (is.prefixRepeat && is.prefixRepeat.length) return false; // 3yy → let vim handle the count
+        const doc = view.state.doc;
+        const caretLine = doc.lineAt(view.state.selection.main.head);
+        const blocks = view.state.field(livePreview, false)?.blocks;
+        const b = blocks?.find((bl) => doc.lineAt(bl.from).from === caretLine.from);
+        if (!b) return false; // not on an atom's first line → normal yy
+        const end = Math.min(b.to + 1, doc.length);
+        try { Vim.getRegisterController().getRegister().setText(doc.sliceString(b.from, end), true); } catch { /* register unavailable */ }
+        if (cm) Vim.handleKey(cm, "<Esc>", "mapping"); // cancel the pending yank operator
+        return true;
+      },
+    },
+  ]),
+);
