@@ -12,11 +12,9 @@ import "./styles/table-edit.css"; // #86: table editor runs in the modal (outsid
 // the <Editor/> connect/destroy/reconnect path and surfaces any WS leak or ghost
 // cursor immediately (see ADR-013 §verification).
 //
-// TODO(web): a benign dev-only "Cannot read properties of null (reading
-//   'useId')" can log once during StrictMode's portal teardown (Ark
-//   Combobox/Dialog). React is a single copy (not a duplicate-React bug) and it
-//   cannot occur in production (no StrictMode double-invoke there). Revisit only
-//   if it appears in a production build or becomes noisy.
+// (The old benign dev-only "Cannot read properties of null (reading 'useId')" on
+// StrictMode portal teardown was an Ark Combobox/Dialog artifact; it no longer
+// reproduces after the shadcn/Radix migration — #142.)
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />
