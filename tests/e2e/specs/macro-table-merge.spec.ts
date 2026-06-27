@@ -36,7 +36,7 @@ test("pipe table → merge promotes to :::table → unmerge demotes back", async
   await sleep(200);
 
   // Caret off the block → the promoted :::table renders with a colspan=2 cell.
-  await page.getByText("below", { exact: true }).click();
+  await page.getByTestId("macro-modal-save").click();
   await sleep(200);
   const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
   await expect(macroTable).toBeVisible();
@@ -49,7 +49,7 @@ test("pipe table → merge promotes to :::table → unmerge demotes back", async
   await page.getByTestId("table-unmerge").click();
   await sleep(200);
 
-  await page.getByText("below", { exact: true }).click();
+  await page.getByTestId("macro-modal-save").click();
   await sleep(200);
   // Demoted: no more :::table macro; a plain pipe table renders again.
   expect(await page.locator("[data-pane=preview] [data-testid=macro-table]").count()).toBe(0);

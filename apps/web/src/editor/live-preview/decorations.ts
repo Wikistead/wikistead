@@ -10,11 +10,8 @@ import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme } 
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
-import { openMacroModal } from "./macro-modal";
-import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost } from "./macro-edit";
-import { tableInlineEditor } from "./table-edit";
-import { tableTier } from "../macros/table";
-import type { InlineEditor, InlineController, MacroTier } from "../macros/registry";
+import { openMacroModal, openTableModal } from "./macro-modal";
+import { macroRenderActiveField, setMacroRenderActive } from "./macro-edit";
 
 // Whether the vim keymap is active. Set from the vim Compartment (Editor.tsx). Macros no
 // longer reveal-on-cursor (ADR-024: atoms are entered explicitly), so this no longer gates
@@ -25,11 +22,18 @@ export const vimEnabled = Facet.define<boolean, boolean>({ combine: (v) => (v.le
 // Mode-based rich edit (ADR-022 Part 11): a CLICK on a table enters edit mode in BOTH
 // modes (the mouse is independent of vim; vim still reveals on the keyboard). Returns true
 // if it entered edit mode (caller preventDefaults so the caret isn't also placed).
-function tryEnterTableEdit(view: EditorView, pos: number): boolean {
+function openTableEditing(view: EditorView, pos: number): boolean {
   const tb = tableBlockAt(view.state, pos);
   if (!tb) return false;
-  view.dispatch({ effects: setMacroRenderActive.of({ from: tb.from, to: tb.to }) });
-  view.focus();
+  // vim × pipe table → reveal the raw GFM source (hand-typeable markdown stays keyboard-
+  // editable). Otherwise (a :::table directive, or any non-vim surface) open the MODAL table
+  // editor (#86) — never a contenteditable inside CM, which would fight CM for focus (ADR-013).
+  if (view.state.facet(vimEnabled) && tb.tier === "pipe") {
+    view.dispatch({ selection: EditorSelection.cursor(tb.from), effects: setMacroRenderActive.of({ from: tb.from, to: tb.to }) });
+    view.focus();
+  } else {
+    openTableModal(view, () => tb.from, currentMacroTheme());
+  }
   return true;
 }
 
@@ -272,7 +276,7 @@ class TableWidget extends WidgetType {
     table.className = "cm-lp-table";
     // Non-vim: a click enters edit mode directly (#5); vim leaves it to reveal raw.
     table.addEventListener("mousedown", (e) => {
-      if (tryEnterTableEdit(view, view.posAtDOM(table))) e.preventDefault();
+      if (openTableEditing(view, view.posAtDOM(table))) e.preventDefault();
     });
     const thead = document.createElement("thead");
     const tbody = document.createElement("tbody");
@@ -303,50 +307,6 @@ class TableWidget extends WidgetType {
   ignoreEvent() {
     return false; // let clicks through so the cursor can enter (→ reveal raw)
   }
-}
-
-// ADR-025 step 2: the host-layer BRIDGE for an inline macro editor. It is the only piece
-// that touches the EditorView — it builds the narrow InnerEditHost and mounts the macro's
-// view-free InlineEditor into a container. Generic: any inline macro (table today, plugins
-// later) rides this. eq compares from/to/source so it's stable across selection changes (no
-// churn) but rebuilds when the block content changes.
-class InlineEditWidget extends WidgetType {
-  private ro?: ResizeObserver;
-  private ctrl?: InlineController;
-  constructor(readonly from: number, readonly to: number, readonly source: string, readonly editor: InlineEditor, readonly tier?: MacroTier) {
-    super();
-  }
-  eq(o: InlineEditWidget) {
-    return o.from === this.from && o.to === this.to && o.source === this.source && o.editor === this.editor && o.tier === this.tier;
-  }
-  destroy() {
-    this.ctrl?.destroy();
-    this.ctrl = undefined;
-    this.ro?.disconnect();
-    this.ro = undefined;
-  }
-  toDOM(view: EditorView) {
-    const container = document.createElement("div");
-    this.ctrl = this.editor.mount(container, makeInnerEditHost(view, this.from, this.to, this.tier));
-    this.ro = observeBlockResize(view, container);
-    return container;
-  }
-  ignoreEvent() {
-    return true; // the editor handles its own events; clicks don't move the caret
-  }
-}
-
-// If the table block at [from, to] is render-active (toggled into edit mode, ADR-022
-// Part 11), emit the editable table widget (cell-merge UI) and return true so the caller
-// skips its read render. Safe when the field is absent (read-only surface).
-function tryTableEdit(ctx: RenderCtx, from: number, to: number): boolean {
-  const active = ctx.state.field(macroRenderActiveField, false);
-  if (!active || active.from > to || active.to < from) return false;
-  const tb = tableBlockAt(ctx.state, from);
-  if (!tb) return false;
-  const source = ctx.state.doc.sliceString(tb.from, Math.min(tb.to, ctx.state.doc.length));
-  ctx.addAtomic(Decoration.replace({ widget: new InlineEditWidget(tb.from, tb.to, source, tableInlineEditor, tableTier), block: true }), tb.from, tb.to);
-  return true;
 }
 
 // True if a folded range (CodeMirror's native folding) covers [from, to). When folded
@@ -591,8 +551,8 @@ const RENDERERS: BlockRenderer[] = [
         // like a fence macro (not foldable). Body = lines between the ::: fences.
         const from = first.from;
         const to = lastLine.to;
-        if (tryTableEdit(ctx, from, to)) return; // ENTERED (Ctrl+Enter/click) → cell-edit widget
-        // ADR-024: no auto-reveal-on-cursor — the table atom is entered explicitly.
+        // ADR-024: no auto-reveal-on-cursor — a :::table is entered explicitly into the MODAL
+        // editor (#86, enterMacroAt → openTableEditing), so the widget always renders here.
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to)), block: true }), from, to);
@@ -691,10 +651,9 @@ const RENDERERS: BlockRenderer[] = [
       // can't be ENTERED by vertical motion (it's a collapsed widget) — the blockEntry
       // transaction filter redirects motion that would skip it INTO it, then these lines
       // are real and j/k/arrows traverse them one at a time.
-      if (tryTableEdit(ctx, from, to)) return; // render-active → cell-merge edit mode (promote)
-      // GFM pipe table keeps reveal-on-cursor in BOTH modes (it's hand-typeable Markdown);
-      // a click still enters the rich edit. (Only :::table/Excalidraw — non-typeable macros
-      // — are non-vim-always-render, #5.)
+      // GFM pipe table: vim reveals raw source on cursor (openTableEditing puts the caret in
+      // range → rangeRevealed true); a click/Ctrl+Enter opens the MODAL editor (#86). Only
+      // :::table/Excalidraw — non-typeable macros — never reveal source (#5).
       if (rangeRevealed(ctx.state, from, to)) return;
       ctx.addAtomic(Decoration.replace({ widget: new TableWidget(doc.sliceString(from, to)), block: true }), from, to);
     },
@@ -881,6 +840,7 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
 // entered. Display-only: the document is untouched; presence/collab unaffected.
 export function enterMacroAt(view: EditorView, pos: number): boolean {
   if (view.state.readOnly) return false;
+  if (tableBlockAt(view.state, pos)) return openTableEditing(view, pos); // pipe OR :::table (#86)
   const fence = macroFenceAt(view.state, pos);
   if (fence) {
     if (fence.macro.richEditUI?.present === "modal") {

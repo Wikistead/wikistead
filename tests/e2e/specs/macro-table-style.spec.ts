@@ -7,8 +7,10 @@ async function pipeTableInEdit(page: any) {
   await page.click("[data-pane=preview] .cm-content");
   for (const l of ["| A | B |", "| --- | --- |", "| 1 | 2 |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
   await sleep(250);
-  // Non-vim: a click enters edit mode directly (#5) — no Ctrl+Enter.
+  // #86: a click on the table opens the MODAL table editor (outside CM); the editor
+  // (table-edit) lives inside it. Edits commit to the doc only on the modal's Save.
   await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await expect(page.getByTestId("macro-modal")).toBeVisible();
   await expect(page.getByTestId("table-edit")).toBeVisible();
 }
 
@@ -23,7 +25,7 @@ test("align: select a cell, Align Center → promotes to :::table with text-alig
   await page.getByTestId("table-align-center").click();
   await sleep(200);
 
-  await page.getByText("below", { exact: true }).click();
+  await page.getByTestId("macro-modal-save").click();
   await sleep(200);
   const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
   await expect(macroTable).toBeVisible(); // promoted to :::table
@@ -40,7 +42,7 @@ test("color: select a cell, pick a background preset → promotes with backgroun
   await page.getByTestId("table-bg-green").click();
   await sleep(200);
 
-  await page.getByText("below", { exact: true }).click();
+  await page.getByTestId("macro-modal-save").click();
   await sleep(200);
   const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
   await expect(macroTable).toBeVisible();
@@ -61,7 +63,7 @@ test("width: drag a column border → promotes with a width style", async ({ bro
   await page.mouse.up();
   await sleep(200);
 
-  await page.getByText("below", { exact: true }).click();
+  await page.getByTestId("macro-modal-save").click();
   await sleep(200);
   const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
   await expect(macroTable).toBeVisible();
@@ -78,7 +80,7 @@ test("header: toggle a body cell to header (th) → promotes with a body <th>", 
   await page.getByTestId("table-header").click();
   await sleep(200);
 
-  await page.getByText("below", { exact: true }).click();
+  await page.getByTestId("macro-modal-save").click();
   await sleep(200);
   const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
   await expect(macroTable).toBeVisible();
@@ -130,7 +132,7 @@ test("column handle selects the whole column; color applies to all its cells", a
   await page.getByTestId("table-bg-blue").click();
   await sleep(200);
 
-  await page.getByText("below", { exact: true }).click();
+  await page.getByTestId("macro-modal-save").click();
   await sleep(200);
   const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
   await expect(macroTable).toBeVisible();
@@ -164,7 +166,7 @@ test("the trailing + adds a column and a row (stays Tier-1 pipe)", async ({ brow
   await sleep(150);
   await expect(page.getByTestId("table-row-select-2")).toBeVisible(); // 3rd row now exists
 
-  await page.getByText("below", { exact: true }).click();
+  await page.getByTestId("macro-modal-save").click();
   await sleep(200);
   // Span-free + style-free → still a GFM pipe table (no :::table promotion).
   await expect(page.locator("[data-pane=preview] [data-testid=macro-table]")).toHaveCount(0);

@@ -1,5 +1,6 @@
 import { mergeRect, unmergeAt, toHtml, styleToCss, insertColAt, insertRowAt, deleteColAt, deleteRowAt, parseTableSource, type Grid, type CellStyle } from "../macros/table-model";
 import type { InnerEditHost, InlineEditor, InlineController } from "../macros/registry";
+import { setCellText, cellElToText, insertBrAtCaret, insertTextAtCaret, stripZeroWidth } from "../macros/table-cell-dom";
 
 // Spreadsheet-style column label: A, B … Z, AA, AB … (so the handle band reads like a
 // spreadsheet header — unmistakably NOT a data cell, #2).
@@ -110,6 +111,7 @@ export const tableInlineEditor: InlineEditor = {
     const cellEls = new Map<string, HTMLElement>();
     const ncols = grid.reduce((m, row) => Math.max(m, row.length), 0);
     let dragging = false;
+    let editing = false; // a cell is in contenteditable text-edit mode (#86)
     let anchor: [number, number] = [0, 0];
     // Whole-column / whole-row selection drives the structural-op group in the toolbar (so
     // "insert before/after" has an unambiguous target). -1 = not a single col/row select.
@@ -213,6 +215,59 @@ export const tableInlineEditor: InlineEditor = {
     htr.appendChild(addColCell);
     table.appendChild(htr);
 
+    // Cell text editing (#86): double-click a cell to type into it. The cell becomes
+    // contenteditable IN PLACE — this is safe because the whole editor lives in the modal
+    // overlay, OUTSIDE CodeMirror, so CM can't steal the contentDOM focus (the bug that sank
+    // the in-CM attempt). Enter commits; Shift+Enter inserts an in-cell <br>; paste is forced
+    // to text/plain; blur commits. Every commit rewrites the block via apply (one Y.Text
+    // edit) and remounts, so the grid/handles/selection rebuild from the canonical source.
+    const beginEdit = (el: HTMLElement, r: number, c: number) => {
+      const cur = grid[r]?.[c];
+      if (!cur || editing) return;
+      editing = true;
+      selected.clear();
+      applySel();
+      // Drop the resize handles + the " " placeholder; render the cell's real text.
+      el.querySelectorAll(".cm-lp-col-resize, .cm-lp-row-resize").forEach((h) => h.remove());
+      setCellText(el, cur.text);
+      el.contentEditable = "true";
+      el.classList.add("cm-lp-cell-editing");
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false); // caret at end
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+      const finish = (commit: boolean) => {
+        if (!editing) return;
+        editing = false;
+        el.removeEventListener("blur", onBlur);
+        el.removeEventListener("keydown", onKey);
+        el.removeEventListener("paste", onPaste);
+        if (!commit) { apply(grid); return; } // Esc → discard: remount from the current grid
+        const text = stripZeroWidth(cellElToText(el));
+        const next: Grid = grid.map((row) => row.map((cl) => (cl ? { ...cl } : null)));
+        const target = next[r]?.[c];
+        if (target) target.text = text;
+        apply(next); // → host.replaceSource → tier demote → remount
+      };
+      const onBlur = () => finish(true);
+      const onKey = (ev: KeyboardEvent) => {
+        ev.stopPropagation(); // keep keystrokes off the table drag/select handlers
+        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); finish(true); }
+        else if (ev.key === "Enter" && ev.shiftKey) { ev.preventDefault(); insertBrAtCaret(); }
+        else if (ev.key === "Escape") { ev.preventDefault(); finish(false); }
+      };
+      const onPaste = (ev: ClipboardEvent) => {
+        ev.preventDefault();
+        insertTextAtCaret(ev.clipboardData?.getData("text/plain") ?? "");
+      };
+      el.addEventListener("blur", onBlur);
+      el.addEventListener("keydown", onKey);
+      el.addEventListener("paste", onPaste);
+    };
+
     grid.forEach((row, r) => {
       const trow = document.createElement("tr");
       const rh = document.createElement("th");
@@ -238,6 +293,7 @@ export const tableInlineEditor: InlineEditor = {
         el.appendChild(resizeHandle("cm-lp-row-resize", c === 0 ? "table-row-resize-" + r : "", (e) => dragSize(e, "y", el, (px) => applyRowHeights(dragRows(r), px + "px"))));
         // Rectangular drag-select: pointerdown anchors here; moving extends the rectangle.
         el.addEventListener("pointerdown", (e) => {
+          if (editing) return; // a cell is being typed into — let the browser place the caret
           e.preventDefault();
           e.stopPropagation();
           dragging = true;
@@ -246,6 +302,8 @@ export const tableInlineEditor: InlineEditor = {
           const end = () => { dragging = false; window.removeEventListener("pointerup", end); };
           window.addEventListener("pointerup", end);
         });
+        // Double-click → edit the cell's text in place (#86).
+        el.addEventListener("dblclick", (e) => { e.preventDefault(); e.stopPropagation(); beginEdit(el, r, c); });
         trow.appendChild(el);
       });
       table.appendChild(trow);

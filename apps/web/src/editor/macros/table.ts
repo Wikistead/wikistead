@@ -1,5 +1,6 @@
-import type { DirectiveMacro, MacroTier, MacroLevel } from "./registry";
+import type { DirectiveMacro, MacroTier, MacroLevel, MacroModalEditor, InnerEditHost, InlineController } from "./registry";
 import { parseHtml, styleToCss, parseTableSource, toHtml, toPipe, representableAsPipe, type Grid } from "./table-model";
+import { setCellText } from "./table-cell-dom";
 import { tableInlineEditor } from "../live-preview/table-edit";
 
 // ADR-025 step 3: the table's tier. pipe (GFM) is the lowest, most portable level;
@@ -24,17 +25,6 @@ export const tableTier: MacroTier = {
 // :::table — the Tier-2 table macro. Body is an HTML <table> (rowspan/colspan), which
 // a GFM pipe table promotes to when a merge is added (ADR-022 Part 10). The cell-merge
 // mouse UI (promote/demote) lands in the next commit; here is the render + round-trip.
-
-// Render cell text into an element, preserving in-cell newlines as <br> ELEMENTS (ADR-037).
-// Built as DOM nodes, never via innerHTML — the XSS boundary holds (a cell can contain only
-// text + <br>). Shared so the read render and the edit-mode render of a cell never diverge.
-export function setCellText(el: HTMLElement, text: string): void {
-  el.textContent = "";
-  text.split("\n").forEach((part, i) => {
-    if (i > 0) el.appendChild(document.createElement("br"));
-    if (part) el.appendChild(document.createTextNode(part));
-  });
-}
 
 // Build a SANITIZED DOM table from a parsed grid. XSS-safe: cell text is set via DOM nodes
 // (textContent + <br>, never innerHTML), and only integer colspan/rowspan are emitted. Shared
@@ -62,11 +52,40 @@ export function renderHtmlTable(html: string): HTMLTableElement {
   return gridToTable(parseHtml(html));
 }
 
+// The table's MODAL editor (#86 / ADR-036): mounts the existing view-free tableInlineEditor in
+// the modal overlay (OUTSIDE CodeMirror), so a cell can be contenteditable without CM stealing
+// focus. openTableModal passes the table block's FULL current source (pipe table OR :::table);
+// the editor parses both. A toolbar op (merge/style/…) calls replaceSource → we re-render so the
+// modal reflects it; getBody returns the current source (openTableModal applies the tier on save,
+// demoting a span/style-free table back to a plain pipe table — open formats).
+export const tableModalEditor: MacroModalEditor = {
+  async mount(container, body, ctx) {
+    let current = body;
+    let ctrl: InlineController | null = null;
+    const render = () => {
+      ctrl?.destroy();
+      container.replaceChildren();
+      ctrl = tableInlineEditor.mount(container, host);
+      // The modal frame owns Save/Cancel, so the editor's in-toolbar "Done" (host.exit, a
+      // no-op here) is redundant — drop it to avoid a dead button (#86).
+      container.querySelector('[data-testid="table-done"]')?.remove();
+    };
+    const host: InnerEditHost = {
+      theme: ctx.theme,
+      getSource: () => current,
+      replaceSource: (next) => { current = next; render(); },
+      exit: () => { /* the modal frame owns close/save */ },
+    };
+    render();
+    return { getBody: () => current, destroy: () => ctrl?.destroy() };
+  },
+};
+
 export const tableMacro: DirectiveMacro = {
   kind: "directive",
   name: "table",
   exportFidelity: "preserve", // HTML is standard Markdown; round-trips verbatim
-  richEditUI: { present: "inline", editor: tableInlineEditor }, // ADR-025: the view-free table InlineEditor
+  richEditUI: { present: "modal", editor: tableModalEditor }, // #86: whole-table editing in a modal (outside CM)
   tier: tableTier, // ADR-025 step 3: host auto-demotes pipe ⟷ :::table
   liveRender: (body) => {
     const el = renderHtmlTable(body);
