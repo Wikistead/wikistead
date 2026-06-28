@@ -2,7 +2,8 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, type MutableRefObjec
 import { Compartment } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { connect } from "./collab";
-import { mountLivePreview, mountPublishedView, vimCompartmentContent } from "./editor-livepreview";
+import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayModeContent } from "./editor-livepreview";
+import type { DisplayMode } from "./live-preview/decorations";
 import { makeImageResolver } from "./image-resolver";
 import { createAnchor, resolveAnchor } from "./comment-anchors";
 import { setCommentRanges, type CommentRange } from "./live-preview/comment-highlights";
@@ -58,6 +59,8 @@ export interface EditorProps {
   // shown (only honored for edit-capable users), and whether vim keymap is on.
   editing?: boolean;
   vim?: boolean;
+  // ADR-056 / #164: editor display mode (live/source/…), orthogonal to vim. Default "live".
+  displayMode?: DisplayMode;
   // Uploads a picked image and returns the ref+alt to insert. Omit to hide the
   // image button (e.g. guests, or a view-only surface).
   onUploadImage?: (file: File) => Promise<{ ref: string; alt: string } | null>;
@@ -106,13 +109,15 @@ function tint(color: string): string {
 // memo: the host (PageRoute) re-renders on its own state and on the published poll;
 // without memo those re-render <Editor> too, which the tree-move e2e forbids and
 // churns the editor. Props are referentially stable across host re-renders.
-export const Editor = memo(function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, onUploadImage, inlineComments, anchorGetterRef, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
+export const Editor = memo(function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
   const previewViewRef = useRef<EditorView | null>(null);
   const awarenessRef = useRef<Awareness | null>(null);
   // Owned here so the vim toggle reconfigures the SAME compartment in place.
   const vimCompartment = useRef(new Compartment()).current;
+  // ADR-056 / #164: display-mode Compartment, reconfigured in place on a mode switch (no remount).
+  const displayModeCompartment = useRef(new Compartment()).current;
 
   // Resolve inline-comment anchors against the live doc and push the ranges to the
   // preview's highlight field.
@@ -201,6 +206,8 @@ export const Editor = memo(function Editor({ docName, token, collabUrl, user, ca
       uploadImage: onUploadImage,
       vim,
       vimCompartment,
+      displayMode,
+      displayModeCompartment,
       onExitEdit,
       onPublish,
     });
@@ -234,6 +241,14 @@ export const Editor = memo(function Editor({ docName, token, collabUrl, user, ca
     if (!v || surfaceKey !== "edit") return;
     v.dispatch({ effects: vimCompartment.reconfigure(vimCompartmentContent(vim)) });
   }, [vim, surfaceKey, vimCompartment]);
+
+  // Display mode switch (ADR-056 / #164): reconfigure the Compartment in place (no remount →
+  // collab/presence untouched), exactly like vim. Edit surface only.
+  useEffect(() => {
+    const v = previewViewRef.current;
+    if (!v || surfaceKey !== "edit") return;
+    v.dispatch({ effects: displayModeCompartment.reconfigure(displayModeContent(displayMode)) });
+  }, [displayMode, surfaceKey, displayModeCompartment]);
 
   // Keep the published view in sync when publishedMd changes WITHOUT remounting.
   useEffect(() => {

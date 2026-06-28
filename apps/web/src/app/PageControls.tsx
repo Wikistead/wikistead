@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2 } from "lucide-react";
+import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Eye, Code } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui/Button";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
@@ -24,6 +24,9 @@ export interface PageControlsProps {
   publishing?: boolean;
   vim?: boolean;
   onToggleVim?: () => void;
+  // ADR-056 / #164: editor display mode + cycle (live ⇄ source in phase 1). Edit-only.
+  displayMode?: "live" | "source" | "reading" | "wysiwyg";
+  onCycleDisplayMode?: () => void;
   onShare?: () => void;
   commentsOpen?: boolean;
   onToggleComments?: () => void;
@@ -119,18 +122,30 @@ export function PageStatus(p: PageControlsProps) {
 // (state reads at a glance). ──────────────────────────────────────────────────────────
 export function PageVim(p: PageControlsProps) {
   const { t } = useTranslation();
-  if (!p.editing || !p.onToggleVim) return null;
+  if (!p.editing || (!p.onToggleVim && !p.onCycleDisplayMode)) return null;
+  const source = p.displayMode === "source";
   return (
-    <div className="pointer-events-none absolute bottom-4 left-4 z-10">
-      <button type="button" role="switch" aria-checked={p.vim} data-testid="vim-toggle"
-        title={t("page.vimMode")} aria-label={t("page.vimMode")} onClick={p.onToggleVim}
-        className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] px-3 py-1.5 text-xs font-medium shadow-md backdrop-blur transition-colors hover:bg-panel-2">
-        <SquareTerminal size={14} className={p.vim ? "text-[var(--accent)]" : "text-fg-dim"} />
-        <span>Vim</span>
-        <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${p.vim ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}>
-          <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${p.vim ? "left-[14px]" : "left-0.5"}`} />
-        </span>
-      </button>
+    <div className="pointer-events-none absolute bottom-4 left-4 z-10 flex items-center gap-2">
+      {p.onToggleVim && (
+        <button type="button" role="switch" aria-checked={p.vim} data-testid="vim-toggle"
+          title={t("page.vimMode")} aria-label={t("page.vimMode")} onClick={p.onToggleVim}
+          className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] px-3 py-1.5 text-xs font-medium shadow-md backdrop-blur transition-colors hover:bg-panel-2">
+          <SquareTerminal size={14} className={p.vim ? "text-[var(--accent)]" : "text-fg-dim"} />
+          <span>Vim</span>
+          <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${p.vim ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}>
+            <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${p.vim ? "left-[14px]" : "left-0.5"}`} />
+          </span>
+        </button>
+      )}
+      {/* ADR-056 / #164: display-mode toggle (live ⇄ source). A pill that shows + cycles the mode. */}
+      {p.onCycleDisplayMode && (
+        <button type="button" data-testid="displaymode-toggle" data-mode={p.displayMode ?? "live"}
+          title={t("page.displayMode")} aria-label={t("page.displayMode")} onClick={p.onCycleDisplayMode}
+          className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] px-3 py-1.5 text-xs font-medium shadow-md backdrop-blur transition-colors hover:bg-panel-2">
+          {source ? <Code size={14} className="text-[var(--accent)]" /> : <Eye size={14} className="text-fg-dim" />}
+          <span>{t(source ? "page.modeSource" : "page.modeLive")}</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -190,6 +205,7 @@ export function PageControlsMobile(p: PageControlsProps) {
               {p.onPublish && <DropdownMenuItem disabled={p.publishing || !canPublish} onSelect={() => p.onPublish?.()} data-testid="m-publish-page"><UploadCloud size={14} /> {t("page.publish")}</DropdownMenuItem>}
               <DropdownMenuItem onSelect={p.onDone} data-testid="m-view-toggle"><X size={14} /> {t("page.done")}</DropdownMenuItem>
               {p.onToggleVim && <DropdownMenuItem onSelect={p.onToggleVim} data-testid="m-vim-toggle"><SquareTerminal size={14} /> Vim {p.vim ? t("common.on") : t("common.off")}</DropdownMenuItem>}
+              {p.onCycleDisplayMode && <DropdownMenuItem onSelect={p.onCycleDisplayMode} data-testid="m-displaymode-toggle">{p.displayMode === "source" ? <Code size={14} /> : <Eye size={14} />} {t("page.displayMode")}: {t(p.displayMode === "source" ? "page.modeSource" : "page.modeLive")}</DropdownMenuItem>}
             </>
           ) : (
             <>
