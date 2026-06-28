@@ -80,7 +80,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   // otherwise risk plaintext secret storage). See auth/secret-crypto.ts.
   assertSecretKey()
 
-  const app = Fastify({ logger: true })
+  // trustProxy: behind the prod reverse proxy (ADR-039) the client IP arrives via
+  // X-Forwarded-For; without this req.ip would be the proxy's address, defeating the
+  // per-IP rate limit on the public share-link exchange (#107). In dev (no proxy) there is
+  // no XFF, so req.ip stays the socket address. Always deploy behind the trusted proxy.
+  const app = Fastify({ logger: true, trustProxy: true })
   await app.register(cors, { origin: true })
   await app.register(cookie)
 
