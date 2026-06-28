@@ -52,4 +52,23 @@ describe('#107 share-link exchange rate limit', () => {
     expect(codes.slice(0, 30).every((c) => c === 404)).toBe(true)
     expect(codes[30]).toBe(429)
   })
+
+  // #107 review (the owner): with trustProxy enabled (app.ts), the per-IP bucket must key on
+  // the X-Forwarded-For CLIENT ip, not the proxy's socket address — otherwise, behind the prod
+  // reverse proxy (ADR-039), every client would share one bucket (the proxy's IP) and a single
+  // user could exhaust it for everyone. Proven without a real proxy: vary only the XFF header.
+  const xffReq = (id: string, clientIp: string, proxyIp: string) =>
+    app.inject({ method: 'POST', url: `/public/share-links/${id}/token`, headers: { ...H, 'x-forwarded-for': clientIp }, remoteAddress: proxyIp })
+
+  it('keys the per-IP bucket on the X-Forwarded-For client IP (trustProxy), not the proxy socket', async () => {
+    const PROXY = '172.16.0.1' // same socket address for every request (the reverse proxy)
+    // Client 1.1.1.1 (distinct link ids so the per-link bucket never trips first): 30 under-limit, 31st 429.
+    const c1: number[] = []
+    for (let i = 0; i < 31; i++) c1.push((await xffReq(`rl-xff-a-${i}`, '1.1.1.1', PROXY)).statusCode)
+    expect(c1.slice(0, 30).every((c) => c === 404)).toBe(true)
+    expect(c1[30]).toBe(429) // the client IP (not the shared proxy socket) hit its own per-IP limit
+    // Client 2.2.2.2 over the SAME proxy socket is INDEPENDENT — if buckets keyed on the socket IP,
+    // it would already be over the limit (429) from 1.1.1.1's 31 hits; it is 404, so keying is per-client.
+    expect((await xffReq('rl-xff-b-0', '2.2.2.2', PROXY)).statusCode).toBe(404)
+  })
 })
