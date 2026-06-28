@@ -10,6 +10,7 @@ import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme } 
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
+import { noteCalloutMacro } from "../macros/callout";
 import { openMacroModal, openTableModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive } from "./macro-edit";
 
@@ -542,7 +543,9 @@ const RENDERERS: BlockRenderer[] = [
     enter: (node, ctx) => {
       const doc = ctx.state.doc;
       const open = parseDirectiveOpen(doc.lineAt(node.from).text);
-      const macro = open ? findDirectiveMacro(open.name) : undefined;
+      // #150: an unknown directive type falls back to a `note` callout (Obsidian-compatible),
+      // so e.g. `:::foobar` renders as a note box rather than raw text.
+      const macro = open ? (findDirectiveMacro(open.name) ?? noteCalloutMacro) : undefined;
       if (!macro) return;
       const first = doc.lineAt(node.from);
       const lastLine = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1));
@@ -561,11 +564,16 @@ const RENDERERS: BlockRenderer[] = [
       if (macro.containerClass) {
         // CONTAINER directive (callout): a CSS box over every line; content stays markdown.
         const box = Decoration.line({ attributes: { class: macro.containerClass } });
-        // A leading [label] (#94) renders as the box header via CSS ::before(attr(data-label))
-        // on the OPEN line — display-only (the `:::name[label]` text stays the hidden source,
-        // reveal-on-cursor to edit). No widget, so it never fights the DirectiveMark hide.
-        const openLine = open!.label
-          ? Decoration.line({ attributes: { class: `${macro.containerClass} cm-lp-directive-label`, 'data-label': open!.label } })
+        // The OPEN line renders a header when there is a leading [label] (#94) AND/OR the macro
+        // has an icon (#150 typed callouts) — via CSS ::before(attr(data-icon) attr(data-label)),
+        // display-only (the `:::name[label]` text stays the hidden source, reveal-on-cursor to
+        // edit). No widget, so it never fights the DirectiveMark hide.
+        const openLine = (open!.label || macro.icon)
+          ? Decoration.line({ attributes: {
+              class: `${macro.containerClass} cm-lp-directive-label`,
+              'data-label': open!.label ?? '',
+              ...(macro.icon ? { 'data-icon': macro.icon } : {}),
+            } })
           : box;
         ctx.add(openLine, first.from);
         for (let n = first.number + 1; n <= lastLine.number; n++) ctx.add(box, doc.line(n).from);
@@ -997,17 +1005,22 @@ export const livePreviewTheme = EditorView.baseTheme({
   // stays live-preview Markdown.
   ".cm-lp-callout": {
     borderLeft: "3px solid var(--accent, #4ea1ff)",
-    background: "rgba(127,127,127,0.08)",
+    background: "color-mix(in srgb, var(--accent, #4ea1ff) 8%, transparent)",
     paddingLeft: "0.8em",
   },
-  // Leading [label] header (#94): rendered from the open line's data-label so it shows even
-  // while the `:::name[label]` source text is hidden (display-only; reveal-on-cursor edits it).
+  // Per-type accents (#150). note/info ride the base accent; tip/warning use safe hues (no
+  // semantic token yet), danger uses --danger. color-mix tints stay legible in light + dark.
+  ".cm-lp-callout-tip": { borderLeftColor: "#2ea043", background: "color-mix(in srgb, #2ea043 10%, transparent)" },
+  ".cm-lp-callout-warning": { borderLeftColor: "#d29922", background: "color-mix(in srgb, #d29922 13%, transparent)" },
+  ".cm-lp-callout-danger": { borderLeftColor: "var(--danger, #cf222e)", background: "color-mix(in srgb, var(--danger, #cf222e) 10%, transparent)" },
+  // Header (#94 label and/or #150 icon): rendered from the open line's data-icon/data-label so
+  // it shows while the `:::name[label]` source stays hidden (display-only; reveal-on-cursor edits).
   ".cm-lp-directive-label::before": {
-    content: "attr(data-label)",
+    content: 'attr(data-icon) " " attr(data-label)',
     display: "block",
     fontWeight: "600",
     fontSize: "0.85em",
-    opacity: "0.8",
+    opacity: "0.85",
     paddingTop: "0.1em",
   },
   // Block drag-to-reorder (#84): a grip in the left gutter on each top-level block's first
