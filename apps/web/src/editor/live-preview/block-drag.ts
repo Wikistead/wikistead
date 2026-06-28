@@ -69,6 +69,7 @@ class GripMarker extends GutterMarker {
 const blockGutter = gutter({
   class: "cm-lp-block-gutter",
   lineMarker: (view, line) => {
+    if (view.state.readOnly) return null // Reading mode (#164): no drag affordance on a clean view
     const b = blockRangeAt(view.state, line.from)
     return b && b.from === line.from ? new GripMarker(view, line.from) : null
   },

@@ -258,7 +258,8 @@
     "forbidden": "このページにアクセスする権限がありません。",
     "displayMode": "表示モード",
     "modeLive": "ライブ",
-    "modeSource": "ソース"
+    "modeSource": "ソース",
+    "modeReading": "リーディング"
   },
   "sidebar": {
     "newSpace": "新しいスペース",

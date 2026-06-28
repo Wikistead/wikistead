@@ -41,6 +41,8 @@ test("account settings: name override persists + resets; keymap syncs; theme swi
   // ADR-056 / #164-3: the display-mode startup pref is persisted too (server-synced).
   await page.click("[data-testid=account-displaymode-source]");
   await expect.poll(() => settings(page).then((s) => s.editorDisplayMode), { timeout: 5000 }).toBe("source");
+  await page.click("[data-testid=account-displaymode-local]"); // reset (shared e2e DB hygiene): don't leave 'source'
+  await expect.poll(() => settings(page).then((s) => s.editorDisplayMode), { timeout: 5000 }).toBe("local");
 
   // Theme: reuses the existing control → reflected on <html data-theme>
   await page.click("[data-testid=settings-tab-theme]");

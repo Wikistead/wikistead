@@ -68,13 +68,16 @@ import type { DisplayMode } from "../editor/live-preview/decorations";
 // Editor display mode (ADR-056 / #164), device-local persistence (phase 1: live ⇄ source; a
 // server-stored default like the keymap's is a later increment). Orthogonal to vim.
 const DISPLAYMODE_LS = "wks.editorDisplayMode";
-const readLocalMode = (): DisplayMode => { try { return localStorage.getItem(DISPLAYMODE_LS) === "source" ? "source" : "live"; } catch { return "live"; } };
+// Phase 1 implements live / source / reading (wysiwyg is phase 2). The toolbar cycles these three.
+const CYCLE: DisplayMode[] = ["live", "source", "reading"];
+const nextMode = (m: DisplayMode): DisplayMode => CYCLE[(CYCLE.indexOf(m) + 1) % CYCLE.length] ?? "live";
+const readLocalMode = (): DisplayMode => { try { const m = localStorage.getItem(DISPLAYMODE_LS); return (CYCLE as string[]).includes(m ?? "") ? (m as DisplayMode) : "live"; } catch { return "live"; } };
 const writeLocalMode = (m: DisplayMode) => { try { localStorage.setItem(DISPLAYMODE_LS, m); } catch { /* no storage */ } };
 // Guest (share-link, no member row): localStorage only.
 function useDisplayMode(): [DisplayMode, () => void] {
   const [mode, setMode] = useState<DisplayMode>(readLocalMode);
   // Phase 1 cycles between the two implemented modes; reading/wysiwyg join the cycle later.
-  const cycle = useCallback(() => setMode((m) => { const next: DisplayMode = m === "live" ? "source" : "live"; writeLocalMode(next); return next; }), []);
+  const cycle = useCallback(() => setMode((m) => { const next = nextMode(m); writeLocalMode(next); return next; }), []);
   return [mode, cycle];
 }
 // Member (#164-3): the cross-device STARTUP pref is a MODE on Account → Editor — 'live'/'source'
@@ -90,7 +93,7 @@ function useMemberDisplayMode(): [DisplayMode, () => void] {
     else if (pref === "source") setMode("source");
     else setMode(readLocalMode()); // 'local'
   }, [pref]);
-  const cycle = useCallback(() => setMode((m) => { const next: DisplayMode = m === "live" ? "source" : "live"; writeLocalMode(next); return next; }), []);
+  const cycle = useCallback(() => setMode((m) => { const next = nextMode(m); writeLocalMode(next); return next; }), []);
   return [mode, cycle];
 }
 // editor.cycleDisplayMode (ADR-021 #21): window-level, event.code-matched, edit-only — mirrors
