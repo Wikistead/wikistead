@@ -1,0 +1,122 @@
+import { parser } from "@lezer/markdown";
+import { directiveExtension } from "./directive-parser";
+
+// #90 S0 (A′ shared) — render a Markdown source string to a SANITIZED DOM fragment, for use
+// INSIDE a block-widget macro (columns / tabs) that can't reach CodeMirror's own renderers (the
+// macro host is `{theme}` only). Built on the same @lezer/markdown parser the editor uses (no new
+// dependency). SECURITY: this is the XSS boundary — DOM is built node-by-node from an allowlist;
+// text is set via textContent (never innerHTML); raw HTML in the source is rendered as LITERAL
+// TEXT (the HTML* nodes fall through to the text default), so `<script>` can never execute; link
+// hrefs are scheme-checked. Anything unhandled degrades to its source text (safe).
+
+const mdParser = parser.configure(directiveExtension);
+// @lezer/common isn't a direct dependency — derive the SyntaxNode type from the parser instead.
+type SNode = ReturnType<typeof mdParser.parse>["topNode"];
+
+// Mark/structural nodes whose own text must NOT be emitted (the `*`/`#`/`[` `]` `(` `)` etc.).
+const MARKS = new Set([
+  "EmphasisMark", "CodeMark", "LinkMark", "HeaderMark", "QuoteMark", "ListMark",
+  "DirectiveMark", "URL", "CodeInfo", "LinkTitle",
+]);
+
+// Block-level nodes get their own recursion; everything else is inline/text.
+const HEADINGS: Record<string, string> = {
+  ATXHeading1: "h1", ATXHeading2: "h2", ATXHeading3: "h3", ATXHeading4: "h4", ATXHeading5: "h5", ATXHeading6: "h6",
+  SetextHeading1: "h1", SetextHeading2: "h2",
+};
+
+// Block dangerous schemes; allow everything else (relative, https, mailto, …). Never throws.
+function safeHref(url: string): string | null {
+  return /^\s*(javascript|data|vbscript|file):/i.test(url) ? null : url.trim();
+}
+
+const txt = (src: string, n: SNode) => src.slice(n.from, n.to);
+
+// Render the children of `parent` over [from,to): emit a text node for each gap, recurse into
+// inline child nodes, and SKIP mark nodes (so `**x**` becomes <strong>x</strong>, not `**x**`).
+function renderInline(parent: SNode, src: string, into: Node): void {
+  let pos = parent.from;
+  let first = true; // trim the leading syntax space after an opening mark (e.g. "# " / "- " / "> ")
+  const pushText = (s: string) => {
+    const v = first ? s.replace(/^[ \t]+/, "") : s;
+    if (v) { into.appendChild(document.createTextNode(v)); first = false; }
+  };
+  for (let c = parent.firstChild; c; c = c.nextSibling) {
+    if (c.from > pos) pushText(src.slice(pos, c.from));
+    if (!MARKS.has(c.name)) { renderInlineNode(c, src, into); first = false; }
+    pos = c.to;
+  }
+  if (pos < parent.to) pushText(src.slice(pos, parent.to));
+}
+
+function renderInlineNode(node: SNode, src: string, into: Node): void {
+  switch (node.name) {
+    case "Emphasis": { const el = document.createElement("em"); renderInline(node, src, el); into.appendChild(el); return; }
+    case "StrongEmphasis": { const el = document.createElement("strong"); renderInline(node, src, el); into.appendChild(el); return; }
+    case "Strikethrough": { const el = document.createElement("s"); renderInline(node, src, el); into.appendChild(el); return; }
+    case "InlineCode": { const el = document.createElement("code"); el.textContent = stripMarks(node, src, "CodeMark"); into.appendChild(el); return; }
+    case "Link": {
+      const urlNode = node.getChild("URL");
+      const href = urlNode ? safeHref(txt(src, urlNode)) : null;
+      const el = document.createElement(href ? "a" : "span");
+      if (href) { (el as HTMLAnchorElement).href = href; (el as HTMLAnchorElement).rel = "noopener noreferrer nofollow"; }
+      renderInline(node, src, el); // link text (marks + URL skipped)
+      into.appendChild(el);
+      return;
+    }
+    case "HardBreak": into.appendChild(document.createElement("br")); return;
+    // HTML*, and anything else inline → literal text (the XSS-safe default).
+    default: into.appendChild(document.createTextNode(txt(src, node)));
+  }
+}
+
+// The text of `node` minus a given mark (e.g. InlineCode without its backticks).
+function stripMarks(node: SNode, src: string, mark: string): string {
+  let out = "", pos = node.from;
+  for (let c = node.firstChild; c; c = c.nextSibling) {
+    if (c.name === mark) { if (c.from > pos) out += src.slice(pos, c.from); pos = c.to; }
+  }
+  out += src.slice(pos, node.to);
+  return out;
+}
+
+function renderBlock(node: SNode, src: string, into: Node): void {
+  if (HEADINGS[node.name]) { const el = document.createElement(HEADINGS[node.name]!); renderInline(node, src, el); into.appendChild(el); return; }
+  switch (node.name) {
+    case "Paragraph": { const el = document.createElement("p"); renderInline(node, src, el); into.appendChild(el); return; }
+    case "Blockquote": { const el = document.createElement("blockquote"); renderBlocks(node, src, el); into.appendChild(el); return; }
+    case "BulletList": { const el = document.createElement("ul"); renderBlocks(node, src, el); into.appendChild(el); return; }
+    case "OrderedList": { const el = document.createElement("ol"); renderBlocks(node, src, el); into.appendChild(el); return; }
+    case "ListItem": { const el = document.createElement("li"); renderBlocks(node, src, el); into.appendChild(el); return; }
+    case "FencedCode": case "CodeBlock": {
+      const pre = document.createElement("pre"); const code = document.createElement("code");
+      const t = node.getChild("CodeText");
+      code.textContent = t ? txt(src, t) : "";
+      pre.appendChild(code); into.appendChild(pre); return;
+    }
+    case "HorizontalRule": into.appendChild(document.createElement("hr")); return;
+    case "Directive": { // nested container directive — render its inner blocks in a generic box
+      const el = document.createElement("div"); el.className = "cm-lp-md-directive";
+      renderBlocks(node, src, el); into.appendChild(el); return;
+    }
+    // Unknown block (incl. HTMLBlock) → literal text, safe.
+    default: { const p = document.createElement("p"); p.textContent = txt(src, node); into.appendChild(p); }
+  }
+}
+
+// Render the BLOCK children of a container (skipping marks); leaf inline content under a block
+// without block children is handled by renderBlock's inline path.
+function renderBlocks(parent: SNode, src: string, into: Node): void {
+  for (let c = parent.firstChild; c; c = c.nextSibling) {
+    if (MARKS.has(c.name)) continue;
+    renderBlock(c, src, into);
+  }
+}
+
+// Parse `src` as Markdown and return a sanitized DOM fragment. Safe by construction (no innerHTML).
+export function renderMarkdownToDom(src: string): DocumentFragment {
+  const tree = mdParser.parse(src);
+  const frag = document.createDocumentFragment();
+  renderBlocks(tree.topNode, src, frag);
+  return frag;
+}
