@@ -30,6 +30,11 @@ function sniffImage(b: Uint8Array): { mime: string; ext: string } | null {
 export type KeymapMode = 'default' | 'vim' | 'local'
 const KEYMAP_MODES: KeymapMode[] = ['default', 'vim', 'local']
 
+// editorDisplayMode (ADR-056 / #164-3) is the STARTUP display mode (cross-device), like keymap:
+//   'live' — always start Live · 'source' — always start Source · 'local' — follow this device.
+export type DisplayModePref = 'live' | 'source' | 'local'
+const DISPLAY_MODE_PREFS: DisplayModePref[] = ['live', 'source', 'local']
+
 // Remappable chord commands (ADR-021) — ONLY these may be rebound; structural/contextual
 // keys (`/` `\` Enter/Esc/Tab, mnemonics, ex-commands) and vim's own keymap are fixed.
 const REMAPPABLE_COMMANDS = ['editor.toggleVim', 'search.focus', 'palette.next', 'palette.prev']
@@ -55,14 +60,15 @@ export interface AccountSettings {
   displayName: string | null          // effective: override ?? OIDC ?? null
   oidcDisplayName: string | null      // the IdP value (for the "reset to IdP name" label)
   displayNameOverride: string | null  // the user's override (null = using OIDC)
-  editorKeymap: KeymapMode            // startup-mode preference
+  editorKeymap: KeymapMode            // startup-mode preference (keymap)
+  editorDisplayMode: DisplayModePref  // startup display mode (ADR-056 / #164)
   keybindings: Record<string, string> // commandId → chord override (ADR-021); {} = defaults
   hasAvatar: boolean                  // an uploaded avatar exists (else OIDC/initials)
 }
 
 export async function getAccountSettings(db: TenantDb, args: { subject: string }): Promise<AccountSettings> {
-  const [m] = await db.sql<[{ display_name: string | null; display_name_override: string | null; avatar_image_key: string | null; editor_keymap: string | null; keybindings: unknown }?]>`
-    SELECT display_name, display_name_override, avatar_image_key, editor_keymap, keybindings
+  const [m] = await db.sql<[{ display_name: string | null; display_name_override: string | null; avatar_image_key: string | null; editor_keymap: string | null; editor_display_mode: string | null; keybindings: unknown }?]>`
+    SELECT display_name, display_name_override, avatar_image_key, editor_keymap, editor_display_mode, keybindings
     FROM members WHERE sub = ${args.subject} LIMIT 1`
   if (!m) throw Object.assign(new Error('no member row'), { statusCode: 404 })
   // JSONB comes back as a raw JSON string from this pg driver — parse it (null → {}).
@@ -72,6 +78,7 @@ export async function getAccountSettings(db: TenantDb, args: { subject: string }
     oidcDisplayName: m.display_name ?? null,
     displayNameOverride: m.display_name_override ?? null,
     editorKeymap: (KEYMAP_MODES as string[]).includes(m.editor_keymap ?? '') ? (m.editor_keymap as KeymapMode) : 'local',
+    editorDisplayMode: (DISPLAY_MODE_PREFS as string[]).includes(m.editor_display_mode ?? '') ? (m.editor_display_mode as DisplayModePref) : 'local',
     keybindings: kb as Record<string, string>,
     hasAvatar: !!m.avatar_image_key,
   }
@@ -82,10 +89,13 @@ export async function getAccountSettings(db: TenantDb, args: { subject: string }
 // only display_name, so the override set here survives re-login (ADR-020 D2).
 export async function updateAccountSettings(
   db: TenantDb,
-  args: { subject: string; displayNameOverride?: string | null; editorKeymap?: string; keybindings?: Record<string, string> },
+  args: { subject: string; displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string> },
 ): Promise<AccountSettings> {
   if (args.editorKeymap !== undefined && !(KEYMAP_MODES as string[]).includes(args.editorKeymap)) {
     throw Object.assign(new Error('invalid keymap'), { statusCode: 400 })
+  }
+  if (args.editorDisplayMode !== undefined && !(DISPLAY_MODE_PREFS as string[]).includes(args.editorDisplayMode)) {
+    throw Object.assign(new Error('invalid display mode'), { statusCode: 400 })
   }
   if (args.keybindings !== undefined) validateKeybindings(args.keybindings)
   if (args.displayNameOverride !== undefined) {
@@ -94,6 +104,9 @@ export async function updateAccountSettings(
   }
   if (args.editorKeymap !== undefined) {
     await db.sql`UPDATE members SET editor_keymap = ${args.editorKeymap}, updated_at = now() WHERE sub = ${args.subject}`
+  }
+  if (args.editorDisplayMode !== undefined) {
+    await db.sql`UPDATE members SET editor_display_mode = ${args.editorDisplayMode}, updated_at = now() WHERE sub = ${args.subject}`
   }
   if (args.keybindings !== undefined) {
     await db.sql`UPDATE members SET keybindings = ${JSON.stringify(args.keybindings)}::jsonb, updated_at = now() WHERE sub = ${args.subject}`
@@ -132,8 +145,8 @@ export async function accountPlugin(app: FastifyInstance) {
   // All member-gated (the default guard requires req.user; guests/unauth are rejected).
   app.get('/me/settings', async (req) => getAccountSettings(req.db, { subject: req.user.sub }))
 
-  app.patch<{ Body: { displayNameOverride?: string | null; editorKeymap?: string; keybindings?: Record<string, string> } }>('/me/settings', async (req) =>
-    updateAccountSettings(req.db, { subject: req.user.sub, displayNameOverride: req.body?.displayNameOverride, editorKeymap: req.body?.editorKeymap, keybindings: req.body?.keybindings }),
+  app.patch<{ Body: { displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string> } }>('/me/settings', async (req) =>
+    updateAccountSettings(req.db, { subject: req.user.sub, displayNameOverride: req.body?.displayNameOverride, editorKeymap: req.body?.editorKeymap, editorDisplayMode: req.body?.editorDisplayMode, keybindings: req.body?.keybindings }),
   )
 
   app.put<{ Body: { data?: string } }>('/me/avatar', { bodyLimit: AVATAR_BODY_LIMIT }, async (req, reply) => {

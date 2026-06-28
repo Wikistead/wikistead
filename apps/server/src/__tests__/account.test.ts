@@ -75,6 +75,14 @@ describe('account settings (ADR-020)', () => {
     await expect(updateAccountSettings(db, { subject: SUB_A, editorKeymap: 'emacs' })).rejects.toMatchObject({ statusCode: 400 })
   })
 
+  it('display-mode pref round-trips (live/source/local), defaults to local, rejects invalid (#164-3)', async () => {
+    expect((await getAccountSettings(db, { subject: SUB_B })).editorDisplayMode).toBe('local') // null → 'local'
+    for (const m of ['live', 'source', 'local'] as const) {
+      expect((await updateAccountSettings(db, { subject: SUB_A, editorDisplayMode: m })).editorDisplayMode).toBe(m)
+    }
+    await expect(updateAccountSettings(db, { subject: SUB_A, editorDisplayMode: 'wysiwyg' })).rejects.toMatchObject({ statusCode: 400 }) // not a startup choice in phase 1
+  })
+
   it('keybindings round-trip; reject unknown command / duplicate key / reserved key (ADR-021)', async () => {
     expect((await getAccountSettings(db, { subject: SUB_B })).keybindings).toEqual({}) // null → {}
     const ok = await updateAccountSettings(db, { subject: SUB_A, keybindings: { "editor.toggleVim": "Ctrl-Alt-v", "search.focus": "Mod-k" } })

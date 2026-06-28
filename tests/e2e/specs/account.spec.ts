@@ -38,6 +38,9 @@ test("account settings: name override persists + resets; keymap syncs; theme swi
   await page.click("[data-testid=settings-tab-editor]");
   await page.click("[data-testid=account-keymap-vim]");
   await expect.poll(() => settings(page).then((s) => s.editorKeymap), { timeout: 5000 }).toBe("vim");
+  // ADR-056 / #164-3: the display-mode startup pref is persisted too (server-synced).
+  await page.click("[data-testid=account-displaymode-source]");
+  await expect.poll(() => settings(page).then((s) => s.editorDisplayMode), { timeout: 5000 }).toBe("source");
 
   // Theme: reuses the existing control → reflected on <html data-theme>
   await page.click("[data-testid=settings-tab-theme]");

@@ -166,6 +166,7 @@ function EditorTab() {
   const settings = useAccountSettings();
   const update = useUpdateAccountSettings();
   const mode = settings.data?.editorKeymap ?? "local";
+  const dmode = settings.data?.editorDisplayMode ?? "local"; // ADR-056 / #164 startup display mode
   const kb = settings.data?.keybindings ?? {};
   // Startup-mode preference (cross-device, server). 'local' follows this device's last
   // toolbar toggle; 'vim'/'default' force the startup state. The toolbar toggle
@@ -192,6 +193,26 @@ function EditorTab() {
           </Button>
         ))}
       </div>
+
+      <section className="mt-8">
+        {/* ADR-056 / #164: startup display mode (live/source/local), orthogonal to the keymap. */}
+        <label className="mb-1 block text-sm font-medium">{t("account.displayMode")}</label>
+        <p className="mb-2 text-xs text-fg-dim">{t("account.displayModeHint")}</p>
+        <div className="flex flex-col gap-2">
+          {(["local", "live", "source"] as const).map((m) => (
+            <Button
+              key={m}
+              variant={dmode === m ? "primary" : "default"}
+              onClick={() => update.mutate({ editorDisplayMode: m })}
+              data-testid={`account-displaymode-${m}`}
+              aria-pressed={dmode === m}
+              className="justify-start"
+            >
+              {t(`account.displayMode_${m}`)}
+            </Button>
+          ))}
+        </div>
+      </section>
 
       <section className="mt-8">
         <label className="mb-1 block text-sm font-medium">{t("account.shortcuts")}</label>
