@@ -406,6 +406,24 @@ class MacroWidget extends WidgetType {
   }
 }
 
+// #90 details: the collapsed state — a single "▸ summary" bar replacing the whole block. Caret-in
+// (click / motion) reveals the raw source (enterMacroAt). Display-only; no doc/offset/presence.
+class DetailsSummaryWidget extends WidgetType {
+  constructor(readonly summary: string) { super(); }
+  eq(o: DetailsSummaryWidget) { return o.summary === this.summary; }
+  toDOM(view: EditorView) {
+    const el = document.createElement("div");
+    el.className = "cm-lp-details-summary";
+    el.setAttribute("data-testid", "macro-details");
+    el.textContent = `▸ ${this.summary}`; // textContent — never innerHTML
+    if (!view.state.readOnly) {
+      el.addEventListener("mousedown", (e) => { e.preventDefault(); enterMacroAt(view, view.posAtDOM(el)); view.focus(); });
+    }
+    return el;
+  }
+  ignoreEvent() { return false; }
+}
+
 // A construct's syntax markers reveal (become editable raw text) when the main
 // selection touches the range the marker sits on — matching Obsidian's per-line
 // reveal. This only changes rendering, never offsets.
@@ -564,6 +582,13 @@ const RENDERERS: BlockRenderer[] = [
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to)), block: true }), from, to);
         return macro.revealOnCursor ? false : undefined;
+      }
+      if (macro.collapsible && !rangeRevealed(ctx.state, first.from, lastLine.to)) {
+        // #90 details, collapsed: replace the whole block with a "▸ summary" bar (one widget →
+        // no per-line decoration conflict). Skip children so the fences aren't double-processed.
+        // Caret-in (rangeRevealed) falls through to the container render below = raw editable.
+        ctx.addAtomic(Decoration.replace({ widget: new DetailsSummaryWidget(open!.label ?? "Details"), block: true }), first.from, lastLine.to);
+        return false;
       }
       if (macro.containerClass) {
         // CONTAINER directive (callout): a CSS box over every line; content stays markdown.
@@ -1018,6 +1043,9 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-tabpanel": { display: "none" },
   ".cm-lp-tabpanel-active": { display: "block" },
   ".cm-lp-tabpanel > :first-child": { marginTop: "0" },
+  // #90 details: collapsed bar + (revealed) a subtle bordered box.
+  ".cm-lp-details-summary": { border: "1px solid var(--border, #888)", borderRadius: "4px", padding: "0.35em 0.7em", cursor: "pointer", color: "var(--fg-dim, #888)", userSelect: "none" },
+  ".cm-lp-details": { borderLeft: "3px solid var(--border, #888)", paddingLeft: "0.8em" },
   // ::: callout directive: a tinted box with an accent left bar. Applied per line
   // (the fence lines are hidden → empty padding rows inside the box). The content
   // stays live-preview Markdown.

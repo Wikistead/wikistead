@@ -70,6 +70,22 @@ export const columnsMacro: DirectiveMacro = {
       .join("")}</div>`,
 };
 
+export const detailsMacro: DirectiveMacro = {
+  kind: "directive",
+  name: "details",
+  containerClass: "cm-lp-details",
+  collapsible: true, // caret-away → "▸ summary" bar; caret-in → raw editable (reveal-on-cursor)
+  exportFidelity: "preserve",
+  slash: {
+    labelKey: "palette.details",
+    keywords: "details collapsible summary fold accordion toggle",
+    insert: ":::details[Summary]\n\n:::",
+    caret: 20, // ":::details[Summary]\n" → the blank body line
+  },
+  // M3 export (the [label] summary lives on the fence line, not in body → generic for now).
+  htmlRender: (body) => `<details><summary>Details</summary>\n\n${escapeHtml(body)}\n\n</details>`,
+};
+
 export const tabsMacro: DirectiveMacro = {
   kind: "directive",
   name: "tabs",

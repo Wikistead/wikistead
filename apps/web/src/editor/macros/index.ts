@@ -6,7 +6,7 @@ import { mermaidMacro } from "./mermaid";
 import { calloutMacros } from "./callout";
 import { excalidrawMacro } from "./excalidraw";
 import { tableMacro } from "./table";
-import { columnsMacro, tabsMacro } from "./layout-directives";
+import { columnsMacro, tabsMacro, detailsMacro } from "./layout-directives";
 
 registerMacro(mermaidMacro);
 calloutMacros.forEach(registerMacro); // note / info / tip / warning / danger (#150)
@@ -14,6 +14,7 @@ registerMacro(excalidrawMacro);
 registerMacro(tableMacro);
 registerMacro(columnsMacro); // M2 layout directive (#90)
 registerMacro(tabsMacro); // M2 layout directive (#90)
+registerMacro(detailsMacro); // M2 layout directive (#90)
 
 export { macroFold } from "./fold";
 export { findFenceMacro, findDirectiveMacro, registeredFenceLangs, registeredDirectiveNames, registeredMacros } from "./registry";
