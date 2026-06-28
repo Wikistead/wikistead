@@ -7,6 +7,7 @@ import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
+import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
 
@@ -342,19 +343,42 @@ export async function revokeSpaceAccess(
 
 export async function listSpaceAccess(
   fga: OpenFgaClient,
-  args: { spaceId: string; userId: string },
-): Promise<{ grantee: string; capability: SpaceCapability }[]> {
+  db: TenantDb,
+  args: { spaceId: string; tenantId: string; userId: string },
+): Promise<{ grantee: string; capability: SpaceCapability; groupName?: string }[]> {
   await requireSpaceManage(fga, args.userId, args.spaceId)
   const { tuples } = await fga.read({ object: `space:${args.spaceId}` })
-  const out: { grantee: string; capability: SpaceCapability }[] = []
+  // #163: resolve group grantee ids back to names for display (groupFgaId is one-way).
+  const names = (await db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`).map((r) => r.g)
+  const byId = groupNameByFgaId(args.tenantId, names)
+  const out: { grantee: string; capability: SpaceCapability; groupName?: string }[] = []
   for (const { key } of tuples ?? []) {
     if (!key || !(key.relation in RELATION_TO_CAP)) continue
     // Direct member/group grants only — never expose share_link, user:* (public)
     // or the structural tenant link.
     if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
-    out.push({ grantee: key.user, capability: RELATION_TO_CAP[key.relation]! })
+    const groupName = resolveGroupName(key.user, byId)
+    out.push({ grantee: key.user, capability: RELATION_TO_CAP[key.relation]!, ...(groupName ? { groupName } : {}) })
   }
   return out
+}
+
+// Tenant group-name source for the group-grant picker (#163 / ADR-053). The set of group names
+// seen across the tenant's members (IdP-imported via members.groups, #111 — no manual group CRUD).
+// manage-gated like the grant itself: group NAMES can themselves be sensitive (existence leak), so
+// this is NOT open to every member — only someone who can actually grant on this space (#163
+// review condition). RLS-scopes to the tenant. A name with zero current members is still listed
+// (granting to it is allowed — it resolves once members sync, ADR-053).
+export async function listTenantGroups(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { spaceId: string; userId: string },
+): Promise<string[]> {
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  const rows = await db.sql<{ g: string }[]>`
+    SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL ORDER BY g
+  `
+  return rows.map((r) => r.g).filter((g) => g != null && g !== '')
 }
 
 // Member typeahead for the grant picker. manage-gated (a space manager may add any
@@ -410,23 +434,33 @@ export async function spacesPlugin(app: FastifyInstance) {
 
   // ── per-space access (Phase 5b) — all manage-gated ──
   app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/access', async (req) => {
-    return listSpaceAccess(app.fga, { spaceId: req.params.spaceId, userId: req.user.sub })
+    return listSpaceAccess(app.fga, req.db, { spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub })
   })
 
-  app.post<{ Params: { spaceId: string }; Body: { grantee: string; relation: string } }>('/spaces/:spaceId/access', async (req, reply) => {
+  // grantee = user:<sub> | group:<id>#member (raw), OR groupName (#163: server resolves it to
+  // group:<id>#member via groupGrantee → groupFgaId, so the id always matches #111's sync).
+  app.post<{ Params: { spaceId: string }; Body: { grantee?: string; groupName?: string; relation: string } }>('/spaces/:spaceId/access', async (req, reply) => {
+    const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
     await grantSpaceAccess(req.db, app.fga, app.searchDriver, {
       spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
-      grantee: req.body?.grantee ?? '', capability: req.body?.relation ?? '',
+      grantee, capability: req.body?.relation ?? '',
     })
     return reply.code(204).send()
   })
 
-  app.delete<{ Params: { spaceId: string }; Body: { grantee: string; relation: string } }>('/spaces/:spaceId/access', async (req, reply) => {
+  app.delete<{ Params: { spaceId: string }; Body: { grantee?: string; groupName?: string; relation: string } }>('/spaces/:spaceId/access', async (req, reply) => {
+    const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
     await revokeSpaceAccess(req.db, app.fga, app.searchDriver, {
       spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
-      grantee: req.body?.grantee ?? '', capability: req.body?.relation ?? '',
+      grantee, capability: req.body?.relation ?? '',
     })
     return reply.code(204).send()
+  })
+
+  // Tenant group-name source for the group-grant picker (#163). manage-gated (group names can be
+  // sensitive — not exposed to all members).
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/groups', async (req) => {
+    return listTenantGroups(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub })
   })
 
   app.get<{ Params: { spaceId: string }; Querystring: { q?: string } }>('/spaces/:spaceId/member-candidates', async (req) => {

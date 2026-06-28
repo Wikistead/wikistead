@@ -64,12 +64,12 @@ describe('per-page access (grant/revoke/list)', () => {
   })
 
   it('list returns direct grantees for a manager; a non-manager is rejected (403)', async () => {
-    const list = await listPageAccess(fgaClient, { pageId, userId: 'dev-user' })
+    const list = await listPageAccess(fgaClient, db, { pageId, tenantId: TENANT, userId: 'dev-user' })
     expect(list).toEqual(expect.arrayContaining([
       { grantee: GRANTEE, relation: 'view' },
       { grantee: 'user:dev-user', relation: 'manage' }, // the creator grant
     ]))
-    await expect(listPageAccess(fgaClient, { pageId, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
+    await expect(listPageAccess(fgaClient, db, { pageId, tenantId: TENANT, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
   })
 
   it('revoke removes FGA view and drops the grantee from search', async () => {
