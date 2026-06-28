@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, imageResolver, checkboxControl, enterMacroCommand, type ImageResolver } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, displayMode, imageResolver, checkboxControl, enterMacroCommand, type ImageResolver, type DisplayMode } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette } from "./live-preview/palette";
@@ -21,6 +21,9 @@ import { macroEdit } from "./live-preview/macro-edit";
 // vim Compartment content: the keymap AND a vimEnabled flag (so the decoration builder
 // can be mode-aware — ADR-022 Part 11). Reused by mount + the Editor's vim toggle.
 export const vimCompartmentContent = (on: boolean) => (on ? [vim(), vimEnabled.of(true)] : [vimEnabled.of(false)]);
+
+// Display-mode Compartment content (ADR-056 / #164). Reused by mount + the Editor's mode toggle.
+export const displayModeContent = (m: DisplayMode) => displayMode.of(m);
 
 // Map vim za/zo/zc onto CodeMirror fold commands (codemirror-vim omits them) so vim
 // users can fold macro blocks. Idempotent; runs once at module load.
@@ -47,13 +50,16 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void } = {},
+  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
     doc: ytext.toString(),
     extensions: [
       ...(opts.vimCompartment ? [opts.vimCompartment.of(vimCompartmentContent(!!opts.vim))] : [vimEnabled.of(false)]),
+      // ADR-056 / #164: editor display mode (live/source/...) via a Compartment so the caller can
+      // switch it in place (no remount → collab/presence untouched), like vim.
+      ...(opts.displayModeCompartment ? [opts.displayModeCompartment.of(displayMode.of(opts.displayMode ?? "live"))] : [displayMode.of(opts.displayMode ?? "live")]),
       minimalSetup,
       // position:fixed so the palette/bubble/hint escape overflow:hidden ancestors and
       // CM flips them above/below + shifts horizontally to stay within the viewport.

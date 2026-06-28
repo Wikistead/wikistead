@@ -63,6 +63,29 @@ function useVimToggleShortcut(toggle: () => void, enabled: boolean, chord: strin
 }
 import { PageStatus, PageVim, PageActions, PageControlsMobile, useMediaQuery, type PageControlsProps } from "./PageControls";
 import { resolveKey, eventMatches } from "./keybindings";
+import type { DisplayMode } from "../editor/live-preview/decorations";
+
+// Editor display mode (ADR-056 / #164), device-local persistence (phase 1: live ⇄ source; a
+// server-stored default like the keymap's is a later increment). Orthogonal to vim.
+const DISPLAYMODE_LS = "wks.editorDisplayMode";
+const readLocalMode = (): DisplayMode => { try { return localStorage.getItem(DISPLAYMODE_LS) === "source" ? "source" : "live"; } catch { return "live"; } };
+const writeLocalMode = (m: DisplayMode) => { try { localStorage.setItem(DISPLAYMODE_LS, m); } catch { /* no storage */ } };
+function useDisplayMode(): [DisplayMode, () => void] {
+  const [mode, setMode] = useState<DisplayMode>(readLocalMode);
+  // Phase 1 cycles between the two implemented modes; reading/wysiwyg join the cycle later.
+  const cycle = useCallback(() => setMode((m) => { const next: DisplayMode = m === "live" ? "source" : "live"; writeLocalMode(next); return next; }), []);
+  return [mode, cycle];
+}
+// editor.cycleDisplayMode (ADR-021 #21): window-level, event.code-matched, edit-only — mirrors
+// the vim-toggle shortcut. Rebindable; default Ctrl-E (Obsidian parity).
+function useDisplayModeShortcut(cycle: () => void, enabled: boolean, chord: string) {
+  useEffect(() => {
+    if (!enabled) return;
+    const onKey = (e: KeyboardEvent) => { if (eventMatches(e, chord)) { e.preventDefault(); cycle(); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [cycle, enabled, chord]);
+}
 import { PageTitle } from "./PageTitle";
 import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
@@ -216,6 +239,8 @@ function PageRoute() {
   const [vim, toggleVim] = useEditorKeymap(); // member: startup-mode pref + device-local toggle
   const keybindings = useAccountSettings().data?.keybindings; // ADR-021 overrides ({} default)
   useVimToggleShortcut(toggleVim, editing, resolveKey("editor.toggleVim", keybindings)); // (#2)
+  const [displayMode, cycleDisplayMode] = useDisplayMode(); // ADR-056 / #164 (device-local)
+  useDisplayModeShortcut(cycleDisplayMode, editing, resolveKey("editor.cycleDisplayMode", keybindings));
   const isDesktop = useMediaQuery("(min-width: 768px)"); // 3 floating groups vs one ⋯
   // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
   const publishState = !canEdit ? null : published?.publishedMd == null ? "draft" : published?.hasUnpublishedChanges ? "unpublished" : null;
@@ -274,6 +299,8 @@ function PageRoute() {
     publishing: publish.isPending,
     vim,
     onToggleVim: toggleVim,
+    displayMode,
+    onCycleDisplayMode: cycleDisplayMode,
     // Share + Delete are manage-only (FGA): undefined when the user can't manage, so the
     // ⋯ items / Share button don't render. The server re-checks and 403s regardless
     // (two-layer authz — UI suppression + server enforcement). #4.
@@ -305,7 +332,7 @@ function PageRoute() {
           {isDesktop && <div className="relative z-10 mx-auto flex w-full max-w-[740px] justify-end px-6"><PageStatus {...controls} /></div>}
           {/* Editor area is the positioning context for the floating ACTIONS/VIM groups. */}
           <div className="relative" style={{ flex: 1, minHeight: 0 }}>
-            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
           </div>
         </div>
@@ -446,6 +473,8 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
   const [editing, setEditing] = useState(false);
   const [vim, toggleVim] = useVimPref();
   useVimToggleShortcut(toggleVim, editing, resolveKey("editor.toggleVim", undefined)); // guest: default chord
+  const [displayMode, cycleDisplayMode] = useDisplayMode(); // ADR-056 / #164 (device-local; guests have no server profile)
+  useDisplayModeShortcut(cycleDisplayMode, editing, resolveKey("editor.cycleDisplayMode", undefined));
   const isDesktop = useMediaQuery("(min-width: 768px)");
 
   const reloadPublished = useCallback(() => {
@@ -475,6 +504,8 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
     onDone: () => setEditing(false),
     vim,
     onToggleVim: toggleVim,
+    displayMode,
+    onCycleDisplayMode: cycleDisplayMode,
     canPublish: true,
     onPublish: canEdit ? () => void onPublish() : undefined,
     publishing,
@@ -488,7 +519,7 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
           </button>
         )}
         <div className="relative" style={{ flex: 1, minHeight: 0 }}>
-          <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} />
+          <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} />
           {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
         </div>
       </div>

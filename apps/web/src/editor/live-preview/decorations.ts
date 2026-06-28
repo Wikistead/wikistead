@@ -20,6 +20,14 @@ import { macroRenderActiveField, setMacroRenderActive } from "./macro-edit";
 // decoration field can still rebuild on a mode change if needed.
 export const vimEnabled = Facet.define<boolean, boolean>({ combine: (v) => (v.length ? v[v.length - 1]! : false) });
 
+// Editor display mode (ADR-056 / #164) — an editor-wide axis, orthogonal to vim, that decides how
+// syntax is shown. Set from a Compartment (Editor.tsx). Phase 1: "live" (reveal-on-cursor, the
+// default) and "source" (syntax ALWAYS raw = force reveal everywhere). "reading" (read-only clean
+// render) + "wysiwyg" (ADR-051 B / #153) are later phases. This is DISPLAY-ONLY: it never touches
+// the doc/offsets/presence, so collaborators each pick their own mode.
+export type DisplayMode = "live" | "source" | "reading" | "wysiwyg";
+export const displayMode = Facet.define<DisplayMode, DisplayMode>({ combine: (v) => (v.length ? v[v.length - 1]! : "live") });
+
 // Mode-based rich edit (ADR-022 Part 11): a CLICK on a table enters edit mode in BOTH
 // modes (the mouse is independent of vim; vim still reveals on the keyboard). Returns true
 // if it entered edit mode (caller preventDefaults so the caret isn't also placed).
@@ -434,6 +442,9 @@ class DetailsSummaryWidget extends WidgetType {
 // first-line construct (a leading image, heading, or table) as raw markdown.
 function rangeRevealed(state: EditorState, from: number, to: number): boolean {
   if (state.readOnly) return false;
+  // Source mode (ADR-056 / #164): syntax is ALWAYS raw — every construct reveals regardless of the
+  // caret. (Live = reveal only under the selection, below.)
+  if (state.facet(displayMode) === "source") return true;
   return state.selection.ranges.some((r) => r.from <= to && r.to >= from);
 }
 function lineRevealed(state: EditorState, pos: number): boolean {
@@ -768,6 +779,9 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
     // flips reveal-on-cursor gating (revealAllowed): vim→non-vim must re-render every
     // rich-editable macro that was revealed under the caret. Rebuild on the facet change.
     if (tr.startState.facet(vimEnabled) !== tr.state.facet(vimEnabled)) return buildDecorations(tr.state);
+    // Switching display mode (ADR-056 / #164) is a Compartment reconfigure (no doc/selection
+    // change) but flips reveal globally (e.g. live→source reveals every construct). Rebuild.
+    if (tr.startState.facet(displayMode) !== tr.state.facet(displayMode)) return buildDecorations(tr.state);
     // A fold toggle changes WHICH macro blocks render (folded → CM's placeholder owns
     // the range, so the macro widget must drop) but is neither a doc nor selection
     // change — rebuild so isFolded() is re-evaluated and the stale widget is removed.

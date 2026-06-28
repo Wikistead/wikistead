@@ -17,6 +17,10 @@ export interface CommandDef {
 // works if a value ever arrives.
 export const COMMANDS: CommandDef[] = [
   { id: "editor.toggleVim", labelKey: "account.cmd_toggleVim", defaultKey: "Ctrl-Alt-v" },
+  // ADR-056 / #164: cycle the editor display mode (live ⇄ source in phase 1). Ctrl-E for
+  // Obsidian parity; rebindable (in vim, Ctrl-E is scroll-down — the rebind UI lets vim users
+  // move it). event.code-matched, window-level, edit-only.
+  { id: "editor.cycleDisplayMode", labelKey: "account.cmd_cycleDisplayMode", defaultKey: "Ctrl-e" },
   { id: "search.focus", labelKey: "account.cmd_searchFocus", defaultKey: "Mod-k" },
 ];
 const DEFAULTS: Record<string, string> = { "palette.next": "Ctrl-j", "palette.prev": "Ctrl-k" };
