@@ -3,7 +3,7 @@ import { Text } from "@codemirror/state";
 import { findFenceMacro, findDirectiveMacro, registeredFenceLangs, registeredDirectiveNames } from "./index"; // importing index registers first-party macros
 import { registerMacro } from "./registry";
 import { mermaidMacro } from "./mermaid";
-import { calloutMacro } from "./callout";
+import { noteCalloutMacro } from "./callout";
 import { fenceLang, fenceBody } from "./fence";
 
 describe("macro registry", () => {
@@ -34,14 +34,15 @@ describe("macro registry", () => {
     expect(mermaidMacro.summary("graph TD; A-->B;")).toBe("Mermaid diagram");
   });
 
-  it("registers the first-party callout directive macro", () => {
-    const m = findDirectiveMacro("callout");
+  it("registers the first-party callout directive macros (#150 typed)", () => {
+    const m = findDirectiveMacro("warning");
     expect(m).toBeDefined();
     expect(m!.kind).toBe("directive");
-    expect(m!.containerClass).toBe("cm-lp-callout");
+    expect(m!.containerClass).toBe("cm-lp-callout cm-lp-callout-warning");
+    expect(m!.icon).toBe("⚠️"); // typed variants carry a header icon (note has none)
     expect(m!.exportFidelity).toBe("preserve"); // ::: stays plain text → round-trips
-    expect(registeredDirectiveNames()).toContain("callout");
-    expect(findDirectiveMacro("CALLOUT")).toBe(m); // case-insensitive
+    expect(registeredDirectiveNames()).toContain("warning");
+    expect(findDirectiveMacro("WARNING")).toBe(m); // case-insensitive
     expect(findDirectiveMacro("nope")).toBeUndefined();
   });
 
@@ -53,11 +54,15 @@ describe("macro registry", () => {
   });
 
   it("rejects a duplicate directive registration", () => {
-    expect(() => registerMacro(calloutMacro)).toThrow(/duplicate/);
+    expect(() => registerMacro(noteCalloutMacro)).toThrow(/duplicate/);
+  });
+
+  it("registers the typed callout variants (#150)", () => {
+    for (const t of ["note", "info", "tip", "warning", "danger"]) expect(registeredDirectiveNames()).toContain(t);
   });
 
   it("callout htmlRender escapes its body (XSS-safe wrapper)", () => {
-    expect(calloutMacro.htmlRender("<img src=x onerror=1>")).not.toContain("<img");
+    expect(noteCalloutMacro.htmlRender("<img src=x onerror=1>")).not.toContain("<img");
   });
 });
 

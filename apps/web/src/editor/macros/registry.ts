@@ -126,6 +126,9 @@ export interface DirectiveMacro {
   //  - liveRender: a BLOCK (table) — render the body (e.g. an HTML <table>) as a
   //    display widget (reveal-on-cursor shows the raw source), like a fence macro.
   readonly containerClass?: string;
+  // Optional header icon for a container directive (#150 typed callouts). When set, the open
+  // line always renders a header (icon [+ label]); display-only, shown via data-icon.
+  readonly icon?: string;
   readonly liveRender?: (body: string, ctx: MacroContext) => HTMLElement;
   // Static HTML for export / SSR (M3): wrap the rendered body. The inner Markdown is
   // rendered by the server pipeline; this supplies the wrapper. MUST be XSS-safe.

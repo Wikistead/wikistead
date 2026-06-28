@@ -3,12 +3,12 @@
 // `macroFold` from here, so registration runs before any editor mounts.
 import { registerMacro } from "./registry";
 import { mermaidMacro } from "./mermaid";
-import { calloutMacro } from "./callout";
+import { calloutMacros } from "./callout";
 import { excalidrawMacro } from "./excalidraw";
 import { tableMacro } from "./table";
 
 registerMacro(mermaidMacro);
-registerMacro(calloutMacro);
+calloutMacros.forEach(registerMacro); // note / info / tip / warning / danger (#150)
 registerMacro(excalidrawMacro);
 registerMacro(tableMacro);
 
