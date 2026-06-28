@@ -69,3 +69,51 @@ export const columnsMacro: DirectiveMacro = {
       .map((c) => `<div class="column">\n\n${escapeHtml(c.content)}\n\n</div>`)
       .join("")}</div>`,
 };
+
+export const tabsMacro: DirectiveMacro = {
+  kind: "directive",
+  name: "tabs",
+  exportFidelity: "preserve",
+  revealOnCursor: true,
+  slash: {
+    labelKey: "palette.tabs",
+    keywords: "tabs tabbed panels sections",
+    insert: "::::tabs\n:::tab[Tab 1]\n\n:::\n:::tab[Tab 2]\n\n:::\n::::",
+    caret: 23, // "::::tabs\n:::tab[Tab 1]\n" → the first tab's blank body line
+  },
+  liveRender: (body) => {
+    const items = parseLayoutItems(body, "tab");
+    const wrap = document.createElement("div");
+    wrap.className = "cm-lp-tabs";
+    wrap.setAttribute("data-testid", "macro-tabs");
+    const bar = document.createElement("div");
+    bar.className = "cm-lp-tabbar";
+    const panels = document.createElement("div");
+    panels.className = "cm-lp-tabpanels";
+    items.forEach((t, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cm-lp-tab";
+      btn.textContent = t.label || `Tab ${i + 1}`;
+      const panel = document.createElement("div");
+      panel.className = "cm-lp-tabpanel";
+      panel.appendChild(renderMarkdownToDom(t.content));
+      const activate = () => {
+        for (const b of Array.from(bar.children)) b.classList.toggle("cm-lp-tab-active", b === btn);
+        for (const p of Array.from(panels.children)) (p as HTMLElement).classList.toggle("cm-lp-tabpanel-active", p === panel);
+      };
+      // Switching tabs is DISPLAY-ONLY local state (resets on a re-render — acceptable v1; doc/
+      // offset/presence untouched). stopPropagation so a tab click doesn't enter the atom (reveal).
+      btn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); activate(); });
+      bar.appendChild(btn);
+      panels.appendChild(panel);
+      if (i === 0) activate(); // default to the first tab (after both are in the DOM)
+    });
+    wrap.append(bar, panels);
+    return wrap;
+  },
+  htmlRender: (body) =>
+    `<div class="tabs">${parseLayoutItems(body, "tab")
+      .map((t, i) => `<section class="tab" data-label="${escapeHtml(t.label || `Tab ${i + 1}`)}">\n\n${escapeHtml(t.content)}\n\n</section>`)
+      .join("")}</div>`,
+};
