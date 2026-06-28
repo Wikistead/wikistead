@@ -153,8 +153,9 @@ class CheckboxWidget extends WidgetType {
     box.className = "cm-lp-checkbox";
     box.setAttribute("data-testid", "task-checkbox");
     const ctl = view.state.facet(checkboxControl);
-    box.disabled = !ctl;
-    if (ctl) {
+    // Reading mode (#164 / ADR-056) is read-only → the checkbox is inert (no doc toggle).
+    box.disabled = !ctl || view.state.readOnly;
+    if (ctl && !view.state.readOnly) {
       // mousedown + preventDefault: keep editor focus/selection and drive the toggle
       // ourselves (so the rendered state always follows the document, never the native
       // input). The doc/host update re-renders the widget with the new checked state.

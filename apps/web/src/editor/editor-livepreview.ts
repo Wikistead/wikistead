@@ -23,7 +23,13 @@ import { macroEdit } from "./live-preview/macro-edit";
 export const vimCompartmentContent = (on: boolean) => (on ? [vim(), vimEnabled.of(true)] : [vimEnabled.of(false)]);
 
 // Display-mode Compartment content (ADR-056 / #164). Reused by mount + the Editor's mode toggle.
-export const displayModeContent = (m: DisplayMode) => displayMode.of(m);
+// Reading is read-only + non-editable (clean render, nothing reveals — rangeRevealed already
+// returns false under readOnly); the editing affordances (grips, checkbox toggles) gate themselves
+// on state.readOnly so they go inert. Live/Source stay editable.
+export const displayModeContent = (m: DisplayMode) =>
+  m === "reading"
+    ? [displayMode.of(m), EditorState.readOnly.of(true), EditorView.editable.of(false)]
+    : [displayMode.of(m), EditorState.readOnly.of(false), EditorView.editable.of(true)];
 
 // Map vim za/zo/zc onto CodeMirror fold commands (codemirror-vim omits them) so vim
 // users can fold macro blocks. Idempotent; runs once at module load.
@@ -59,7 +65,7 @@ export function mountLivePreview(
       ...(opts.vimCompartment ? [opts.vimCompartment.of(vimCompartmentContent(!!opts.vim))] : [vimEnabled.of(false)]),
       // ADR-056 / #164: editor display mode (live/source/...) via a Compartment so the caller can
       // switch it in place (no remount → collab/presence untouched), like vim.
-      ...(opts.displayModeCompartment ? [opts.displayModeCompartment.of(displayMode.of(opts.displayMode ?? "live"))] : [displayMode.of(opts.displayMode ?? "live")]),
+      ...(opts.displayModeCompartment ? [opts.displayModeCompartment.of(displayModeContent(opts.displayMode ?? "live"))] : [displayMode.of(opts.displayMode ?? "live")]),
       minimalSetup,
       // position:fixed so the palette/bubble/hint escape overflow:hidden ancestors and
       // CM flips them above/below + shifts horizontally to stay within the viewport.
