@@ -1,6 +1,6 @@
 import { Vim, getCM } from "@replit/codemirror-vim";
-import { EditorState, EditorSelection, Prec, type Extension } from "@codemirror/state";
-import { keymap } from "@codemirror/view";
+import { EditorState, EditorSelection, type Extension } from "@codemirror/state";
+import { ViewPlugin, type EditorView } from "@codemirror/view";
 import { livePreview } from "./decorations";
 
 // ADR-024 1b (Mode A): dd treats a macro ATOM as one unit — the WHOLE macro source is the
@@ -15,7 +15,7 @@ import { livePreview } from "./decorations";
 //
 // yy COUNTERPART (#91): yank has no transaction to hook (the doc doesn't change) and
 // mapCommand can't override yy either, so the whole-atom yank is done with a PRE-VIM chord
-// intercept (atomYank, below) instead of the transactionFilter dd uses.
+// intercept (atomChords, below) instead of the transactionFilter dd uses.
 
 export const atomDelete: Extension = EditorState.transactionFilter.of((tr) => {
   if (!tr.docChanged) return tr;
@@ -34,8 +34,10 @@ export const atomDelete: Extension = EditorState.transactionFilter.of((tr) => {
     const firstLine = doc.lineAt(b.from);
     if (d.fromA === b.from && d.toA >= firstLine.to && d.toA <= b.to + 1) {
       const end = Math.min(b.to + 1, doc.length);
-      // p must paste the WHOLE macro: vim yanked only the first line, so overwrite the
-      // unnamed register with the full macro source (linewise). Deterministic side effect.
+      // The register is also corrected to the WHOLE macro — but vim sets the unnamed register
+      // AFTER this filter runs (it yanked only its 1-line range), overwriting this setText. So
+      // the authoritative register fix is deferred to a microtask in `atomChords` ("d" branch);
+      // this setText is a harmless best-effort. (See #91: dd→p was pasting an EMPTY macro.)
       try { Vim.getRegisterController().getRegister().setText(doc.sliceString(b.from, end), true); } catch { /* register unavailable */ }
       return { changes: { from: b.from, to: end }, selection: EditorSelection.cursor(Math.min(b.from, end)) };
     }
@@ -45,35 +47,75 @@ export const atomDelete: Extension = EditorState.transactionFilter.of((tr) => {
 
 // `yy` on a macro/table atom → yank the WHOLE atom (linewise), the read counterpart of
 // atomDelete's `dd`. yy changes no doc, so the transactionFilter can't see it, and
-// Vim.mapCommand can't override yy. So we intercept the SECOND `y` of the chord with a
-// pre-vim keymap (Prec.highest beats vim's keymap): after the first `y` vim sets
-// inputState.operator='yank'; on the next `y`, if the caret is on an atom's first line and
-// it's a plain, uncounted, default-register yy, we overwrite the unnamed register with the
-// whole atom source (linewise) and cancel vim's pending operator with the PUBLIC
-// Vim.handleKey(cm,'<Esc>') — no internal mutation. Everything else (yw/y$/yj, 3yy, "ayy,
-// yy on a normal line, insert/visual mode, vim off) returns false and passes through to vim.
-export const atomYank: Extension = Prec.highest(
-  keymap.of([
-    {
-      key: "y",
-      run: (view) => {
-        const cm = getCM(view);
-        const vim = cm?.state.vim;
-        if (!vim || vim.insertMode || vim.visualMode) return false;
-        const is = vim.inputState;
-        if (!is || is.operator !== "yank") return false; // not the second y of a bare yy
-        if (is.registerName) return false; // "ayy → let vim handle the named register
-        if (is.prefixRepeat && is.prefixRepeat.length) return false; // 3yy → let vim handle the count
-        const doc = view.state.doc;
-        const caretLine = doc.lineAt(view.state.selection.main.head);
-        const blocks = view.state.field(livePreview, false)?.blocks;
-        const b = blocks?.find((bl) => doc.lineAt(bl.from).from === caretLine.from);
-        if (!b) return false; // not on an atom's first line → normal yy
-        const end = Math.min(b.to + 1, doc.length);
-        try { Vim.getRegisterController().getRegister().setText(doc.sliceString(b.from, end), true); } catch { /* register unavailable */ }
-        if (cm) Vim.handleKey(cm, "<Esc>", "mapping"); // cancel the pending yank operator
-        return true;
-      },
-    },
-  ]),
-);
+// Vim.mapCommand can't override yy.
+//
+// A CM `keymap` does NOT work here: codemirror-vim handles keys in a ViewPlugin keydown
+// eventHandler that CONSUMES `y` (preventDefault) before any keymap binding runs — so a
+// Prec.highest keymap "y" never fires (verified: it silently lost to vim, and yy yanked only
+// the atom's first line → pasting an EMPTY macro, #91). Keys vim does NOT consume (Ctrl-Enter)
+// still reach keymaps, which is why those work and this didn't.
+//
+// Fix: intercept the SECOND `y` of the chord with a CAPTURE-phase keydown listener on the
+// content DOM — capture runs before vim's (bubble) handler, so we win deterministically. The
+// FIRST `y` is left for vim (operator becomes 'yank'); on the next `y`, if the caret is on an
+// atom's first line and it's a plain, uncounted, default-register yy, overwrite the unnamed
+// register with the whole atom source (linewise), cancel vim's pending operator via the PUBLIC
+// Vim.handleKey(cm,'<Esc>'), and swallow the key so vim's 1-line yank never runs. Everything
+// else (yw/y$/yj, 3yy, "ayy, yy on a normal line, insert/visual, vim off) is left to vim.
+// The atom-on-first-line block at the caret, if this is a plain (uncounted, default-register)
+// chord whose first key already set vim's `operator`. Returns the block + its full source range.
+function atomChordTarget(view: EditorView, operator: "yank" | "delete"): { from: number; to: number } | null {
+  const cm = getCM(view);
+  const vim = cm?.state.vim;
+  if (!vim || vim.insertMode || vim.visualMode) return null;
+  const is = vim.inputState;
+  if (!is || is.operator !== operator) return null; // not the 2nd key of a bare yy/dd
+  if (is.registerName) return null; // "ayy / "add → named register, let vim handle
+  if (is.prefixRepeat && is.prefixRepeat.length) return null; // 3yy / 3dd → counted, let vim handle
+  const doc = view.state.doc;
+  const caretLine = doc.lineAt(view.state.selection.main.head);
+  const blocks = view.state.field(livePreview, false)?.blocks;
+  const b = blocks?.find((bl) => doc.lineAt(bl.from).from === caretLine.from);
+  if (!b) return null; // not on an atom's first line → normal yy/dd
+  return { from: b.from, to: Math.min(b.to + 1, doc.length) };
+}
+
+// CAPTURE-phase keydown for the second key of `yy` / `dd` on a macro atom (#91). codemirror-vim
+// handles keys in a ViewPlugin keydown that CONSUMES y/d before any CM keymap runs, so a keymap
+// can't intercept them; a capture-phase listener on contentDOM runs BEFORE vim's (bubble)
+// handler and wins deterministically.
+//   yy: do the whole-atom yank ourselves and SWALLOW the key so vim's 1-line yank never runs.
+//   dd: let vim + the atomDelete transactionFilter perform the (correct, whole-block) delete, but
+//       CORRECT the unnamed register AFTER vim sets it — vim's register set runs synchronously
+//       inside this keydown, so a microtask (after the event) is the authoritative last write.
+// Without this, both pasted an EMPTY macro (vim's register held only the atom's first ::: line).
+export const atomYank: Extension = ViewPlugin.define((view) => {
+  const onKeydown = (e: KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const cm = getCM(view);
+    if (e.key === "y") {
+      const t = atomChordTarget(view, "yank");
+      if (!t) return; // first y, or not an atom → let vim handle
+      const src = view.state.doc.sliceString(t.from, t.to);
+      try { Vim.getRegisterController().getRegister().setText(src, true); } catch { /* register unavailable */ }
+      Vim.handleKey(cm!, "<Esc>", "mapping"); // cancel the pending yank operator
+      e.preventDefault();
+      e.stopImmediatePropagation(); // vim must NOT also see this 2nd y (it would yank 1 line)
+    } else if (e.key === "d") {
+      const t = atomChordTarget(view, "delete");
+      if (!t) return; // first d, or not an atom → let vim do a normal dd
+      const src = view.state.doc.sliceString(t.from, t.to);
+      const newLen = view.state.doc.length - (t.to - t.from);
+      // Do the whole-block delete ourselves and SWALLOW the key: if we let vim run, it sets the
+      // unnamed register to its 1-line range AFTER any filter/microtask, so p pasted an empty
+      // macro. (atomDelete still re-normalizes this dispatch harmlessly if it ever fires.)
+      view.dispatch({ changes: { from: t.from, to: t.to }, selection: EditorSelection.cursor(Math.min(t.from, newLen)) });
+      try { Vim.getRegisterController().getRegister().setText(src, true); } catch { /* register unavailable */ }
+      Vim.handleKey(cm!, "<Esc>", "mapping"); // back to normal (cancel the pending delete operator)
+      e.preventDefault();
+      e.stopImmediatePropagation(); // vim must NOT also see this 2nd d
+    }
+  };
+  view.contentDOM.addEventListener("keydown", onKeydown, true); // capture: before vim's handler
+  return { destroy() { view.contentDOM.removeEventListener("keydown", onKeydown, true); } };
+});
