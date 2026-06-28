@@ -130,6 +130,10 @@ export interface DirectiveMacro {
   // line always renders a header (icon [+ label]); display-only, shown via data-icon.
   readonly icon?: string;
   readonly liveRender?: (body: string, ctx: MacroContext) => HTMLElement;
+  // #90 (A′): a liveRender directive that REVEALS its raw source when the caret is inside its
+  // range (like the GFM table / mermaid atoms) instead of being entered explicitly. Used by the
+  // layout directives (columns/tabs) so editing is reveal-on-cursor, not a modal.
+  readonly revealOnCursor?: boolean;
   // Static HTML for export / SSR (M3): wrap the rendered body. The inner Markdown is
   // rendered by the server pipeline; this supplies the wrapper. MUST be XSS-safe.
   htmlRender(body: string): string;

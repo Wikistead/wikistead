@@ -408,6 +408,7 @@
       "warning": "警告（callout）",
       "danger": "危険（callout）"
     },
+    "columns": "段組み",
     "h1": "見出し 1",
     "h2": "見出し 2",
     "h3": "見出し 3",
