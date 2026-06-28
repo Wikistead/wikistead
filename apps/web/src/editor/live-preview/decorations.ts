@@ -1010,6 +1010,14 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-columns": { display: "flex", gap: "1.2em", alignItems: "flex-start" },
   ".cm-lp-column": { flex: "1 1 0", minWidth: "0" },
   ".cm-lp-column > :first-child": { marginTop: "0" },
+  // #90 tabs: a tab bar + only the active panel shown (display-only switch).
+  ".cm-lp-tabbar": { display: "flex", gap: "0.25em", borderBottom: "1px solid var(--border, #888)", marginBottom: "0.6em" },
+  ".cm-lp-tab": { border: "none", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", padding: "0.3em 0.7em", fontSize: "0.9em", borderBottom: "2px solid transparent", marginBottom: "-1px" },
+  ".cm-lp-tab:hover": { color: "var(--fg, inherit)" },
+  ".cm-lp-tab-active": { color: "var(--fg, inherit)", borderBottomColor: "var(--accent, #4ea1ff)", fontWeight: "600" },
+  ".cm-lp-tabpanel": { display: "none" },
+  ".cm-lp-tabpanel-active": { display: "block" },
+  ".cm-lp-tabpanel > :first-child": { marginTop: "0" },
   // ::: callout directive: a tinted box with an accent left bar. Applied per line
   // (the fence lines are hidden → empty padding rows inside the box). The content
   // stays live-preview Markdown.
