@@ -468,7 +468,9 @@ export interface RenderNode {
 
 export interface BlockRenderer {
   match(name: string): boolean;
-  enter(node: RenderNode, ctx: RenderCtx): void;
+  // Return `false` to SKIP this node's children (e.g. a layout-directive atom that has rendered
+  // its inner :::column/:::tab itself — #90); void/undefined descends as usual.
+  enter(node: RenderNode, ctx: RenderCtx): void | boolean;
 }
 
 const RENDERERS: BlockRenderer[] = [
@@ -550,16 +552,18 @@ const RENDERERS: BlockRenderer[] = [
       const first = doc.lineAt(node.from);
       const lastLine = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1));
       if (macro.liveRender) {
-        // BLOCK directive (table): render the body as a widget, reveal raw on cursor —
-        // like a fence macro (not foldable). Body = lines between the ::: fences.
+        // BLOCK directive: render the body as a widget atom. :::table is entered explicitly
+        // (modal, #86) so it never reveals here. A LAYOUT directive (#90 columns/tabs) sets
+        // revealOnCursor: while the caret is inside, reveal the WHOLE raw block (return false →
+        // skip the inner :::column/:::tab so it's plain editable source); otherwise render the
+        // widget AND skip the inner directives (they live inside the atom — no double-render).
         const from = first.from;
         const to = lastLine.to;
-        // ADR-024: no auto-reveal-on-cursor — a :::table is entered explicitly into the MODAL
-        // editor (#86, enterMacroAt → openTableEditing), so the widget always renders here.
+        if (macro.revealOnCursor && rangeRevealed(ctx.state, from, to)) return false;
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to)), block: true }), from, to);
-        return;
+        return macro.revealOnCursor ? false : undefined;
       }
       if (macro.containerClass) {
         // CONTAINER directive (callout): a CSS box over every line; content stays markdown.
@@ -712,8 +716,10 @@ function buildDecorations(state: EditorState): {
   syntaxTree(state).iterate({
     enter: (node) => {
       // Mutually-exclusive matches by node name; descend by default (return void)
-      // so child markers (HeaderMark, CodeMark, LinkMark/URL) are still visited.
-      for (const r of RENDERERS) if (r.match(node.name)) r.enter(node, ctx);
+      // so child markers (HeaderMark, CodeMark, LinkMark/URL) are still visited. A renderer
+      // returning false skips children (a layout-directive atom that rendered its own inner
+      // :::column/:::tab — #90), so they aren't double-rendered.
+      for (const r of RENDERERS) if (r.match(node.name)) return r.enter(node, ctx) === false ? false : undefined;
     },
   });
 
@@ -1000,6 +1006,10 @@ export const livePreviewTheme = EditorView.baseTheme({
     fontStyle: "italic",
     fontSize: "0.95em",
   },
+  // #90 columns: the A′ widget lays its inner column DOM out as an even flex row.
+  ".cm-lp-columns": { display: "flex", gap: "1.2em", alignItems: "flex-start" },
+  ".cm-lp-column": { flex: "1 1 0", minWidth: "0" },
+  ".cm-lp-column > :first-child": { marginTop: "0" },
   // ::: callout directive: a tinted box with an accent left bar. Applied per line
   // (the fence lines are hidden → empty padding rows inside the box). The content
   // stays live-preview Markdown.
