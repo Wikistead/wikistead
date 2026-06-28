@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto'
 import type IORedis from 'ioredis'
 import type { OpenFgaClient } from '@openfga/sdk'
 import type { TenantDb } from '../db/index.js'
+import { syncMemberGroups } from './group-sync.js'
 
 export const SESSION_COOKIE = 'wks_sess'
 
@@ -137,13 +138,23 @@ export async function establishMemberSession(
   const { allowed } = await deps.fga.check({ user: `user:${claims.sub}`, relation: 'member', object: `tenant:${tenant.id}` })
   if (!allowed) throw Object.assign(new Error('not a member of this tenant'), { statusCode: 403 })
 
-  const [row] = await deps.db.sql<[{ role: string; groups: string[] }]>`
-    INSERT INTO members (tenant_id, sub, email, display_name, picture_url, groups)
-    VALUES (${tenant.id}, ${claims.sub}, ${claims.email ?? null}, ${claims.name ?? null}, ${claims.picture ?? null}, ${deps.db.sql.array(claims.groups ?? [])})
-    ON CONFLICT (tenant_id, sub) DO UPDATE SET
-      email = EXCLUDED.email, display_name = EXCLUDED.display_name, picture_url = EXCLUDED.picture_url, groups = EXCLUDED.groups, updated_at = now()
-    RETURNING role, groups
-  `
+  // Upsert the profile + groups, then mirror the group membership into FGA `group#member`
+  // (#111). Both in one tx: if the FGA sync fails the row rolls back, so members.groups and
+  // FGA stay aligned and the next login re-derives the same diff. (Login already requires FGA
+  // — the membership check above — so this adds no new "FGA down" failure mode.)
+  const row = await deps.db.tx(async (tx) => {
+    const [prevRow] = await tx<[{ groups: string[] }?]>`
+      SELECT groups FROM members WHERE tenant_id = ${tenant.id} AND sub = ${claims.sub}`
+    const [r] = await tx<[{ role: string; groups: string[] }]>`
+      INSERT INTO members (tenant_id, sub, email, display_name, picture_url, groups)
+      VALUES (${tenant.id}, ${claims.sub}, ${claims.email ?? null}, ${claims.name ?? null}, ${claims.picture ?? null}, ${deps.db.sql.array(claims.groups ?? [])})
+      ON CONFLICT (tenant_id, sub) DO UPDATE SET
+        email = EXCLUDED.email, display_name = EXCLUDED.display_name, picture_url = EXCLUDED.picture_url, groups = EXCLUDED.groups, updated_at = now()
+      RETURNING role, groups
+    `
+    await syncMemberGroups(deps.fga, tenant.id, claims.sub, prevRow?.groups ?? [], r.groups)
+    return r
+  })
   return createSession(deps.valkey, {
     tenantId: tenant.id,
     sub: claims.sub,
