@@ -199,7 +199,12 @@
     "add": "Add",
     "revoke": "Revoke",
     "empty": "No direct grants yet.",
-    "group": "group"
+    "group": "group",
+    "granteeType": "Grantee",
+    "typeUser": "Member",
+    "typeGroup": "Group",
+    "selectGroup": "Select a group",
+    "noGroups": "No groups (imported from your IdP)"
   },
   "auth": {
     "signInTitle": "Sign in to wikistead",
@@ -311,7 +316,12 @@
     "add": "Add",
     "revoke": "Revoke",
     "empty": "No direct grants yet.",
-    "group": "group"
+    "group": "group",
+    "granteeType": "Grantee",
+    "typeUser": "Member",
+    "typeGroup": "Group",
+    "selectGroup": "Select a group",
+    "noGroups": "No groups (imported from your IdP)"
   },
   "spaceTheme": {
     "title": "Theme",

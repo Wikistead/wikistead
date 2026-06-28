@@ -199,7 +199,12 @@
     "add": "追加",
     "revoke": "取り消し",
     "empty": "直接付与はまだありません。",
-    "group": "グループ"
+    "group": "グループ",
+    "granteeType": "付与先",
+    "typeUser": "メンバー",
+    "typeGroup": "グループ",
+    "selectGroup": "グループを選択",
+    "noGroups": "グループがありません（IdP から取り込み）"
   },
   "auth": {
     "signInTitle": "wikistead にサインイン",
@@ -311,7 +316,12 @@
     "add": "追加",
     "revoke": "取り消し",
     "empty": "直接付与はまだありません。",
-    "group": "グループ"
+    "group": "グループ",
+    "granteeType": "付与先",
+    "typeUser": "メンバー",
+    "typeGroup": "グループ",
+    "selectGroup": "グループを選択",
+    "noGroups": "グループがありません（IdP から取り込み）"
   },
   "spaceTheme": {
     "title": "テーマ",

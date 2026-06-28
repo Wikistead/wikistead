@@ -371,7 +371,7 @@ export interface PageMeta {
 
 // ── per-page access (Phase 4) ──────────────────────────────────────────────
 export type PageRelation = "view" | "edit" | "manage";
-export interface PageGrant { grantee: string; relation: PageRelation }
+export interface PageGrant { grantee: string; relation: PageRelation; groupName?: string }
 
 export function usePageAccess(pageId: string, enabled = true) {
   const { token } = useSession();
@@ -382,11 +382,13 @@ export function usePageAccess(pageId: string, enabled = true) {
   });
 }
 
+// grantee = user:<sub>/group:<id>#member (raw), OR groupName (#163: server resolves it via
+// groupFgaId so the id matches the membership sync; the client never hashes).
 export function useGrantAccess(pageId: string) {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { grantee: string; relation: PageRelation }) =>
+    mutationFn: (args: { grantee?: string; groupName?: string; relation: PageRelation }) =>
       apiFetch<null>(`/pages/${encodeURIComponent(pageId)}/access`, token, { method: "POST", body: JSON.stringify(args) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["page-access", pageId] }),
   });
@@ -396,9 +398,20 @@ export function useRevokeAccess(pageId: string) {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { grantee: string; relation: PageRelation }) =>
+    mutationFn: (args: { grantee?: string; groupName?: string; relation: PageRelation }) =>
       apiFetch<null>(`/pages/${encodeURIComponent(pageId)}/access`, token, { method: "DELETE", body: JSON.stringify(args) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["page-access", pageId] }),
+  });
+}
+
+// The tenant's group-name source for the group-grant picker (#163). manage-gated server-side
+// (group names can be sensitive), so scope the query to a space the caller manages.
+export function useTenantGroups(spaceId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["tenant-groups", spaceId],
+    queryFn: () => apiFetch<string[]>(`/spaces/${encodeURIComponent(spaceId)}/groups`, token).then((r) => r ?? []),
+    enabled: enabled && spaceId.length > 0,
   });
 }
 export function usePage(pageId: string) {
@@ -412,7 +425,7 @@ export function usePage(pageId: string) {
 }
 
 // ── per-space access (Phase 5b) — same vocabulary as page access ─────────────
-export interface SpaceGrant { grantee: string; capability: PageRelation }
+export interface SpaceGrant { grantee: string; capability: PageRelation; groupName?: string }
 export interface MemberCandidate { sub: string; displayName: string | null }
 
 export function useSpaceAccess(spaceId: string, enabled = true) {
@@ -427,9 +440,10 @@ export function useGrantSpaceAccess(spaceId: string) {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    // The API body keys the capability as `relation` (shared page/space vocabulary).
-    mutationFn: (args: { grantee: string; capability: PageRelation }) =>
-      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/access`, token, { method: "POST", body: JSON.stringify({ grantee: args.grantee, relation: args.capability }) }),
+    // The API body keys the capability as `relation` (shared page/space vocabulary). grantee OR
+    // groupName (#163: server resolves the group name → group:<id>#member).
+    mutationFn: (args: { grantee?: string; groupName?: string; capability: PageRelation }) =>
+      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/access`, token, { method: "POST", body: JSON.stringify({ grantee: args.grantee, groupName: args.groupName, relation: args.capability }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["space-access", spaceId] }),
   });
 }
@@ -437,8 +451,8 @@ export function useRevokeSpaceAccess(spaceId: string) {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { grantee: string; capability: PageRelation }) =>
-      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/access`, token, { method: "DELETE", body: JSON.stringify({ grantee: args.grantee, relation: args.capability }) }),
+    mutationFn: (args: { grantee?: string; groupName?: string; capability: PageRelation }) =>
+      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/access`, token, { method: "DELETE", body: JSON.stringify({ grantee: args.grantee, groupName: args.groupName, relation: args.capability }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["space-access", spaceId] }),
   });
 }

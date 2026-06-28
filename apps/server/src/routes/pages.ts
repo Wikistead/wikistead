@@ -9,6 +9,7 @@ import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import type { TenantDb } from '../db/index.js'
 import { flushDraft } from '../collab-flush.js'
+import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean }
 export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean }
@@ -467,16 +468,21 @@ export async function revokePageAccess(
 
 export async function listPageAccess(
   fga: OpenFgaClient,
-  args: { pageId: string; userId: string },
-): Promise<{ grantee: string; relation: PageRelation }[]> {
+  db: TenantDb,
+  args: { pageId: string; tenantId: string; userId: string },
+): Promise<{ grantee: string; relation: PageRelation; groupName?: string }[]> {
   await requireManage(fga, args.userId, args.pageId)
   const { tuples } = await fga.read({ object: `page:${args.pageId}` })
-  const out: { grantee: string; relation: PageRelation }[] = []
+  // #163: resolve group grantee ids back to names for display (groupFgaId is one-way).
+  const names = (await db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`).map((r) => r.g)
+  const byId = groupNameByFgaId(args.tenantId, names)
+  const out: { grantee: string; relation: PageRelation; groupName?: string }[] = []
   for (const { key } of tuples ?? []) {
     if (!key || !PAGE_RELATIONS.includes(key.relation as PageRelation)) continue
     // Direct member/group grants only — never expose share_link or the space link.
     if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
-    out.push({ grantee: key.user, relation: key.relation as PageRelation })
+    const groupName = resolveGroupName(key.user, byId)
+    out.push({ grantee: key.user, relation: key.relation as PageRelation, ...(groupName ? { groupName } : {}) })
   }
   return out
 }
@@ -870,21 +876,25 @@ export async function pagesPlugin(app: FastifyInstance) {
 
   // ── per-page access (manage-gated; member-only, no guest config) ──────────
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/access', async (req) => {
-    return listPageAccess(app.fga, { pageId: req.params.pageId, userId: req.user.sub })
+    return listPageAccess(app.fga, req.db, { pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub })
   })
 
-  app.post<{ Params: { pageId: string }; Body: { grantee: string; relation: string } }>('/pages/:pageId/access', async (req, reply) => {
+  // grantee = user:<sub> | group:<id>#member (raw), OR groupName (#163: server resolves to
+  // group:<id>#member via groupGrantee → matches #111's sync id exactly).
+  app.post<{ Params: { pageId: string }; Body: { grantee?: string; groupName?: string; relation: string } }>('/pages/:pageId/access', async (req, reply) => {
+    const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
     await grantPageAccess(req.db, app.fga, app.searchDriver, {
       pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub,
-      grantee: req.body?.grantee ?? '', relation: req.body?.relation ?? '',
+      grantee, relation: req.body?.relation ?? '',
     })
     return reply.code(204).send()
   })
 
-  app.delete<{ Params: { pageId: string }; Body: { grantee: string; relation: string } }>('/pages/:pageId/access', async (req, reply) => {
+  app.delete<{ Params: { pageId: string }; Body: { grantee?: string; groupName?: string; relation: string } }>('/pages/:pageId/access', async (req, reply) => {
+    const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
     await revokePageAccess(req.db, app.fga, app.searchDriver, {
       pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub,
-      grantee: req.body?.grantee ?? '', relation: req.body?.relation ?? '',
+      grantee, relation: req.body?.relation ?? '',
     })
     return reply.code(204).send()
   })
