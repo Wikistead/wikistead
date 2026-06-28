@@ -153,7 +153,7 @@ test("yy on a TALL macro atom yanks the whole macro; p pastes it back whole", as
 // lines) · 7 mid · 8 bot.
 async function insertTallTable(page: any) {
   await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.insertText("top\n:::table\n<table>\n<tr><td>a</td><td>b</td></tr>\n</table>\n:::\nmid\nbot\n");
+  await page.keyboard.insertText("top\n:::table\n<table>\n<tr><td>CELLDATA</td><td>b</td></tr>\n</table>\n:::\nmid\nbot\n");
   await sleep(400);
 }
 
@@ -176,6 +176,11 @@ test("dd on a :::table directive atom deletes the whole block verbatim", async (
   expect((await blocks(page)).length).toBe(0); // whole :::table gone, not just the ::: line
   const text = (await page.locator("[data-pane=preview] .cm-content").innerText()).replace(/\n+/g, "|").replace(/\|$/, "");
   expect(text).toBe("top|mid|bot");
+  // #91 content regression: dd's register holds the WHOLE block, so p restores it WITH content.
+  await page.keyboard.press("G"); await sleep(110);
+  await page.keyboard.press("p"); await sleep(200);
+  expect((await blocks(page)).length).toBe(1); // the macro is back…
+  expect((await page.locator("[data-pane=preview] .cm-content").innerText()).match(/CELLDATA/g)?.length).toBe(1); // …with its cell body
 });
 
 test("yy on a :::table directive atom yanks the whole block; p pastes it back whole", async ({ browser }) => {
@@ -190,6 +195,10 @@ test("yy on a :::table directive atom yanks the whole block; p pastes it back wh
   await page.keyboard.press("G"); await sleep(110); // below the block so p doesn't land mid-block
   await page.keyboard.press("p"); await sleep(200);
   expect((await blocks(page)).length).toBe(2); // WHOLE :::table pasted as a 2nd atom (not a lone ::: line)
+  // #91 content regression: the pasted atom must carry the CELL CONTENT, not an empty frame.
+  // (A lone `:::table` yank pastes an "Empty table" — block count alone would not catch that.)
+  const txt = await page.locator("[data-pane=preview] .cm-content").innerText();
+  expect((txt.match(/CELLDATA/g) || []).length).toBe(2); // original + pasted, both with the cell body
 });
 
 // #91 regression: the intercept only fires on an atom's first line. yy on a NORMAL line still
