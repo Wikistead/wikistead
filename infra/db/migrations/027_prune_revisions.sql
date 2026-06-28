@@ -2,8 +2,11 @@
 --
 -- Migration 007 left "TODO(phase: revisions): add pruning (keep last N revisions per page)".
 -- A single AFTER INSERT trigger is the app-agnostic chokepoint: it covers EVERY revision
--- source (collab auto-snapshot in apps/collab, publish in pages.ts, restore in revisions.ts)
--- with zero application code, so no insert path can forget to prune.
+-- source with zero application code, so no insert path can forget to prune. Per ADR-019,
+-- revisions are created ONLY on explicit publish (pages.ts) and restore (revisions.ts) — the
+-- collab auto-save does NOT insert revisions (storeYdoc only UPDATEs pages.ydoc), so there is
+-- no third path. Both real paths INSERT as the app role under tenant RLS (see SECURITY INVOKER
+-- note below), which is exactly what the prune DELETE relies on.
 --
 -- This COUNT cap is distinct from time-based retention (the entitlement historyRetentionDays,
 -- enforced at list/read time): it bounds how many revisions a single heavily-revised page can
