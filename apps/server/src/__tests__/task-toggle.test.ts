@@ -66,23 +66,23 @@ afterAll(async () => {
 describe('task-checkbox toggle (no-revision, ADR-019)', () => {
   it('is edit-gated: a non-editor is rejected (403)', async () => {
     await setDraft(pageId, `# Tasks\n\n- [x] alpha\n- [ ] beta\n`) // a valid single flip…
-    await expect(toggleTask(db, fgaClient, app.searchDriver, { pageId, subject: 'user:toggle-rando-xyz', index: 0 }))
+    await expect(toggleTask(db, fgaClient, app.searchDriver, { pageId, subject: 'user:toggle-rando-xyz', createdBy: 'user:toggle-rando-xyz', index: 0 }))
       .rejects.toMatchObject({ statusCode: 403 }) // …still 403: FGA edit is checked first
   })
 
   it('rejects (409) when the draft mixes in non-checkbox changes', async () => {
     // a checkbox flip PLUS other content — must not slip a real edit past history
     await setDraft(pageId, `# Tasks\n\n- [x] alpha\n- [ ] beta\nstealth edit\n`)
-    await expect(toggleTask(db, fgaClient, app.searchDriver, { pageId, subject: 'user:dev-user', index: 0 }))
+    await expect(toggleTask(db, fgaClient, app.searchDriver, { pageId, subject: 'user:dev-user', createdBy: 'user:dev-user', index: 0 }))
       .rejects.toMatchObject({ statusCode: 409 })
   })
 
   it('rejects (409) when nothing flipped, or the flip is not at the claimed index', async () => {
     await setDraft(pageId, BASE) // identical to published → zero flips
-    await expect(toggleTask(db, fgaClient, app.searchDriver, { pageId, subject: 'user:dev-user', index: 0 }))
+    await expect(toggleTask(db, fgaClient, app.searchDriver, { pageId, subject: 'user:dev-user', createdBy: 'user:dev-user', index: 0 }))
       .rejects.toMatchObject({ statusCode: 409 })
     await setDraft(pageId, `# Tasks\n\n- [ ] alpha\n- [x] beta\n`) // beta (index 1) flipped…
-    await expect(toggleTask(db, fgaClient, app.searchDriver, { pageId, subject: 'user:dev-user', index: 0 }))
+    await expect(toggleTask(db, fgaClient, app.searchDriver, { pageId, subject: 'user:dev-user', createdBy: 'user:dev-user', index: 0 }))
       .rejects.toMatchObject({ statusCode: 409 }) // …but index 0 claimed → reject
   })
 
@@ -91,7 +91,7 @@ describe('task-checkbox toggle (no-revision, ADR-019)', () => {
     expect(before).toBe(1) // just the baseline publish
     // the page is now "dirty" by exactly one flip (alpha checked) — the success path
     await setDraft(pageId, `# Tasks\n\n- [x] alpha\n- [ ] beta\n`)
-    await toggleTask(db, fgaClient, app.searchDriver, { pageId, subject: 'user:dev-user', index: 0 })
+    await toggleTask(db, fgaClient, app.searchDriver, { pageId, subject: 'user:dev-user', createdBy: 'user:dev-user', index: 0 })
 
     const pub = await getPublished(db, fgaClient, { pageId, subject: 'user:dev-user' })
     expect(pub.publishedMd).toContain('- [x] alpha')
@@ -103,5 +103,21 @@ describe('task-checkbox toggle (no-revision, ADR-019)', () => {
     const [ev] = await admin<[{ actor: string; checkbox_index: number; checked: boolean }]>`
       SELECT actor, checkbox_index, checked FROM checkbox_events WHERE page_id = ${pageId} ORDER BY created_at DESC LIMIT 1`
     expect(ev).toMatchObject({ actor: 'user:dev-user', checkbox_index: 0, checked: true })
+  })
+
+  // #97 (review fix): the audit `actor` is the human-readable principal (createdBy =
+  // `guest:`/`user:`), matching the revision attribution label — NOT the FGA `subject`
+  // (`share_link:`). principalForPage ties subject↔createdBy; here we pass them split to prove
+  // the INSERT records createdBy, not subject. (subject still gates the FGA edit check.)
+  it('records the audit actor as createdBy (guest:), not the FGA subject (share_link:)', async () => {
+    // published is now `[x] alpha, [ ] beta` (from the prior success case); flip beta (index 1).
+    await setDraft(pageId, `# Tasks\n\n- [x] alpha\n- [x] beta\n`)
+    await toggleTask(db, fgaClient, app.searchDriver, {
+      pageId, subject: 'user:dev-user', createdBy: 'guest:demo-share-link', index: 1,
+    })
+    const [ev] = await admin<[{ actor: string; checkbox_index: number }]>`
+      SELECT actor, checkbox_index FROM checkbox_events WHERE page_id = ${pageId} ORDER BY created_at DESC LIMIT 1`
+    expect(ev).toMatchObject({ actor: 'guest:demo-share-link', checkbox_index: 1 })
+    expect(ev.actor).not.toMatch(/^share_link:/)
   })
 })

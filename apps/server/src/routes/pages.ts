@@ -325,7 +325,7 @@ export async function toggleTask(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { pageId: string; subject: string; index: number; context?: { current_time: string } },
+  args: { pageId: string; subject: string; createdBy: string; index: number; context?: { current_time: string } },
 ): Promise<{ publishedAt: Date | null }> {
   const canEdit = await check(fga, args.subject, 'edit', { type: 'page', id: args.pageId }, args.context)
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
@@ -366,10 +366,12 @@ export async function toggleTask(
     outboxId = await enqueueOutbox(tx, { tenantId: page.tenant_id, pageId: args.pageId, operation: 'upsert' })
     // Lightweight audit (ADR-019 D2 / #97): who toggled which checkbox to what, when. NOT in
     // the revision/diff history (a toggle is interactive state). In the same tx as the flip,
-    // so the log can never disagree with the published state.
+    // so the log can never disagree with the published state. `actor` uses the human-readable
+    // principal (`user:`/`guest:` = createdBy), matching the attribution label revisions store —
+    // NOT the FGA `subject` (`share_link:`), which is the authz check identity only.
     await tx`
       INSERT INTO checkbox_events (tenant_id, page_id, actor, checkbox_index, checked)
-      VALUES (${page.tenant_id}, ${args.pageId}, ${args.subject}, ${args.index}, ${draftStates[args.index]!})
+      VALUES (${page.tenant_id}, ${args.pageId}, ${args.createdBy}, ${args.index}, ${draftStates[args.index]!})
     `
   })
   processOutboxAsync(driver, outboxId, { tenantId: page.tenant_id, pageId: args.pageId, operation: 'upsert' })
@@ -854,7 +856,7 @@ export async function pagesPlugin(app: FastifyInstance) {
       const p = principalForPage(req, req.params.pageId)
       await flushDraft(app.valkey, docName(req.tenant.id, req.params.pageId))
       return toggleTask(req.db, app.fga, app.searchDriver, {
-        pageId: req.params.pageId, subject: p.subject, index: req.body.index, context: p.context,
+        pageId: req.params.pageId, subject: p.subject, createdBy: p.createdBy, index: req.body.index, context: p.context,
       })
     },
   )
