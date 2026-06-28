@@ -81,7 +81,12 @@
     "theme_light": "Light",
     "theme_dark": "Dark",
     "theme_system": "System",
-    "cmd_cycleDisplayMode": "Cycle display mode"
+    "cmd_cycleDisplayMode": "Cycle display mode",
+    "displayMode": "Display mode",
+    "displayModeHint": "How the editor opens its syntax: Live reveals it under the cursor, Source shows it always. Orthogonal to vim. Local follows this device.",
+    "displayMode_local": "This device (follow toolbar)",
+    "displayMode_live": "Always Live",
+    "displayMode_source": "Always Source"
   },
   "settings": {
     "back": "Back to app",

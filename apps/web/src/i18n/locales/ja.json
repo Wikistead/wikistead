@@ -81,7 +81,12 @@
     "theme_light": "ライト",
     "theme_dark": "ダーク",
     "theme_system": "システム",
-    "cmd_cycleDisplayMode": "表示モードを切替"
+    "cmd_cycleDisplayMode": "表示モードを切替",
+    "displayMode": "表示モード",
+    "displayModeHint": "エディタの構文の見せ方：ライブはカーソル下だけ表示、ソースは常時表示。vim と直交。ローカルはこの端末のツールバー設定に従う。",
+    "displayMode_local": "この端末（ツールバーに従う）",
+    "displayMode_live": "常にライブ",
+    "displayMode_source": "常にソース"
   },
   "settings": {
     "back": "アプリに戻る",

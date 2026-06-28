@@ -70,9 +70,26 @@ import type { DisplayMode } from "../editor/live-preview/decorations";
 const DISPLAYMODE_LS = "wks.editorDisplayMode";
 const readLocalMode = (): DisplayMode => { try { return localStorage.getItem(DISPLAYMODE_LS) === "source" ? "source" : "live"; } catch { return "live"; } };
 const writeLocalMode = (m: DisplayMode) => { try { localStorage.setItem(DISPLAYMODE_LS, m); } catch { /* no storage */ } };
+// Guest (share-link, no member row): localStorage only.
 function useDisplayMode(): [DisplayMode, () => void] {
   const [mode, setMode] = useState<DisplayMode>(readLocalMode);
   // Phase 1 cycles between the two implemented modes; reading/wysiwyg join the cycle later.
+  const cycle = useCallback(() => setMode((m) => { const next: DisplayMode = m === "live" ? "source" : "live"; writeLocalMode(next); return next; }), []);
+  return [mode, cycle];
+}
+// Member (#164-3): the cross-device STARTUP pref is a MODE on Account → Editor — 'live'/'source'
+// (the mode wins at startup) or 'local' (follow this device's last toggle, via localStorage). The
+// toolbar toggle is always a device-local session switch. Mirrors useEditorKeymap.
+function useMemberDisplayMode(): [DisplayMode, () => void] {
+  const settings = useAccountSettings();
+  const [mode, setMode] = useState<DisplayMode>(readLocalMode);
+  const pref = settings.data?.editorDisplayMode; // 'live' | 'source' | 'local' | undefined (loading)
+  useEffect(() => {
+    if (!pref) return;
+    if (pref === "live") setMode("live");
+    else if (pref === "source") setMode("source");
+    else setMode(readLocalMode()); // 'local'
+  }, [pref]);
   const cycle = useCallback(() => setMode((m) => { const next: DisplayMode = m === "live" ? "source" : "live"; writeLocalMode(next); return next; }), []);
   return [mode, cycle];
 }
@@ -239,7 +256,7 @@ function PageRoute() {
   const [vim, toggleVim] = useEditorKeymap(); // member: startup-mode pref + device-local toggle
   const keybindings = useAccountSettings().data?.keybindings; // ADR-021 overrides ({} default)
   useVimToggleShortcut(toggleVim, editing, resolveKey("editor.toggleVim", keybindings)); // (#2)
-  const [displayMode, cycleDisplayMode] = useDisplayMode(); // ADR-056 / #164 (device-local)
+  const [displayMode, cycleDisplayMode] = useMemberDisplayMode(); // ADR-056 / #164 (startup pref + device-local)
   useDisplayModeShortcut(cycleDisplayMode, editing, resolveKey("editor.cycleDisplayMode", keybindings));
   const isDesktop = useMediaQuery("(min-width: 768px)"); // 3 floating groups vs one ⋯
   // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
