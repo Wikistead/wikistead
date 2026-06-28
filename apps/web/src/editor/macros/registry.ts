@@ -129,6 +129,9 @@ export interface DirectiveMacro {
   // Optional header icon for a container directive (#150 typed callouts). When set, the open
   // line always renders a header (icon [+ label]); display-only, shown via data-icon.
   readonly icon?: string;
+  // #90 details: a collapsible container — caret-away collapses to a "▸ summary" bar (one block
+  // widget), caret-in reveals the raw source (reveal-on-cursor). Pairs with containerClass.
+  readonly collapsible?: boolean;
   readonly liveRender?: (body: string, ctx: MacroContext) => HTMLElement;
   // #90 (A′): a liveRender directive that REVEALS its raw source when the caret is inside its
   // range (like the GFM table / mermaid atoms) instead of being entered explicitly. Used by the
