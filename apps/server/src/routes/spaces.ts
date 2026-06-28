@@ -41,17 +41,19 @@ export async function createSpace(
   args: { tenantId: string; userId: string; name: string; plan: string },
 ): Promise<Space> {
   const ent = resolveEntitlements(args.plan)
-  if (isFinite(ent.maxSpaces)) {
-    // TODO(phase: billing): count + insert race; see billing.ts for details.
-    const [{ count }] = await db.sql<[{ count: string }]>`
-      SELECT count(*)::text AS count FROM spaces
-    `
-    if (Number(count) >= ent.maxSpaces) {
-      throw Object.assign(new Error('space limit reached'), { statusCode: 403 })
-    }
-  }
-
+  // maxSpaces is enforced ATOMICALLY (#129 / ADR-044): the count + insert run in ONE tx, gated
+  // by a per-tenant advisory xact lock, so two concurrent creates at the cap can't both pass the
+  // check and both insert (the old count-outside-the-tx race). The lock is tenant-scoped (no
+  // cross-tenant contention) and auto-releases at tx end; the count runs under tenant RLS.
+  // entitlement(ce) is the bastion — the UI count is advisory; the server enforces here.
   const row = await db.tx(async (tx) => {
+    if (isFinite(ent.maxSpaces)) {
+      await tx`SELECT pg_advisory_xact_lock(hashtext(${`space:${args.tenantId}`}))`
+      const [{ count }] = await tx<[{ count: string }]>`SELECT count(*)::text AS count FROM spaces`
+      if (Number(count) >= ent.maxSpaces) {
+        throw Object.assign(new Error('space limit reached'), { statusCode: 403 })
+      }
+    }
     const [r] = await tx<SpaceRow[]>`
       INSERT INTO spaces (tenant_id, name)
       VALUES (${args.tenantId}, ${args.name})
