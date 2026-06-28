@@ -8,6 +8,24 @@ import type { Capability, ResourceRef } from '@wikistead/types'
 import { pool } from '../db/pool.js'
 import { resolveTenantFromHost, loadTenant } from '../tenant.js'
 import type { TenantDb } from '../db/index.js'
+import type IORedis from 'ioredis'
+
+// Rate-limit windows for the public share-link exchange (#107 / ADR-026). Starting points —
+// tune from real traffic. The per-IP bucket is the brute-force/DoS guard; the per-link bucket
+// caps hammering one id. Both are fixed-window counters in the shared Valkey (cross-replica).
+// Env-overridable (ADR-026: the numbers are tuned from real traffic; e2e raises them so the
+// whole suite hitting the endpoint from one localhost IP doesn't trip the per-IP bucket).
+const EXCHANGE_RL_WINDOW_S = 60
+const EXCHANGE_RL_IP_MAX = Number(process.env.EXCHANGE_RL_IP_MAX ?? 30)
+const EXCHANGE_RL_LINK_MAX = Number(process.env.EXCHANGE_RL_LINK_MAX ?? 10)
+
+// Fixed-window counter: INCR the key, set the TTL on the first hit, return whether still within
+// `max`. One round-trip + an occasional EXPIRE; idempotent under concurrency (INCR is atomic).
+async function bumpRateBucket(valkey: IORedis, key: string, max: number): Promise<boolean> {
+  const n = await valkey.incr(key)
+  if (n === 1) await valkey.expire(key, EXCHANGE_RL_WINDOW_S)
+  return n <= max
+}
 
 interface ShareLinkRow {
   id: string
@@ -268,17 +286,40 @@ export async function shareLinksPlugin(app: FastifyInstance) {
     return reply.code(204).send()
   })
 
-  // PUBLIC, unauthenticated (under /public/, skipped by the auth onRequest hook).
-  // TODO(phase: guest): rate-limit this endpoint — it is the brute-force / DoS
-  //   surface for guessing share link ids. Per-IP + per-id throttling.
-  app.post<{ Params: { id: string } }>('/public/share-links/:id/token', async (req, reply) => {
-    const { slug, domain } = resolveTenantFromHost(req.headers.host ?? '')
-    const tenant = await loadTenant(slug, domain)
-    // Uniform 404 for unknown tenant too — never reveal anything to an enumerator.
-    if (!tenant) return reply.code(404).send({ error: 'not found' })
+  // PUBLIC, unauthenticated (under /public/, skipped by the auth onRequest hook). Rate-limited
+  // (#107 / ADR-026): two INDEPENDENT fixed-window buckets in Valkey — per client IP and per
+  // link id — checked in a preHandler BEFORE the lookup, so a 429 is emitted for a valid OR an
+  // unknown id alike (outcome-agnostic: the limiter never becomes an existence oracle; 404 stays
+  // the only existence signal). Valkey is the shared store so the limit holds across replicas
+  // (prod runs >1). NB: implemented directly on the existing ioredis (app.valkey) rather than
+  // pulling in @fastify/rate-limit (ADR-026's suggestion) — the confirmed mechanism is two
+  // ORDERED buckets, which the plugin can't express cleanly, and this adds no new dependency.
+  app.post<{ Params: { id: string } }>(
+    '/public/share-links/:id/token',
+    {
+      preHandler: async (req, reply) => {
+        const ip = req.ip
+        const id = req.params.id
+        // Bump BOTH buckets regardless of outcome (the per-link bucket must not depend on the
+        // lookup succeeding — no success/existence oracle). 429 if EITHER is over its window.
+        const okIp = await bumpRateBucket(app.valkey, `rl:slx:ip:${ip}`, EXCHANGE_RL_IP_MAX)
+        const okLink = await bumpRateBucket(app.valkey, `rl:slx:link:${id}`, EXCHANGE_RL_LINK_MAX)
+        if (!okIp || !okLink) {
+          const ttl = await app.valkey.ttl(okIp ? `rl:slx:link:${id}` : `rl:slx:ip:${ip}`)
+          reply.header('Retry-After', String(Math.max(1, ttl)))
+          return reply.code(429).send({ error: 'too many requests' })
+        }
+      },
+    },
+    async (req, reply) => {
+      const { slug, domain } = resolveTenantFromHost(req.headers.host ?? '')
+      const tenant = await loadTenant(slug, domain)
+      // Uniform 404 for unknown tenant too — never reveal anything to an enumerator.
+      if (!tenant) return reply.code(404).send({ error: 'not found' })
 
-    const minted = await mintTokenForShareLink(app.fga, tenant.id, req.params.id)
-    if (!minted) return reply.code(404).send({ error: 'not found' })
-    return reply.send(minted)
-  })
+      const minted = await mintTokenForShareLink(app.fga, tenant.id, req.params.id)
+      if (!minted) return reply.code(404).send({ error: 'not found' })
+      return reply.send(minted)
+    },
+  )
 }
