@@ -58,4 +58,33 @@ describe('#116 revision pruning (keep last N per page)', () => {
     const [{ n }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM revisions WHERE page_id = ${other}`
     expect(n).toBe(1) // unaffected by the other page hitting the cap
   })
+
+  // #116 review (the owner point 3): the trigger is SECURITY INVOKER, so the prune DELETE
+  // runs as the INSERTING role under RLS — and BOTH real revision-insert paths (publish via
+  // req.db, restore via pool.begin+set_config) insert as the app role, NOT the admin/superuser
+  // the tests above use. (The collab auto-save path does NOT insert revisions — storeYdoc only
+  // UPDATEs pages.ydoc per ADR-019, so there is no third path.) Inserting as superuser bypasses
+  // RLS and the GRANTs, so it would NOT catch a missing DELETE grant on the app role — which
+  // would make publish/restore throw in production when the trigger fires. Insert as the app
+  // role here to prove the prune actually works on the path the app uses.
+  it('prunes under the APP role + tenant RLS (SECURITY INVOKER has DELETE on the real path)', async () => {
+    const [{ id: appPage }] = await admin<[{ id: string }]>`
+      INSERT INTO pages (tenant_id, space_id, title)
+      SELECT ${tenantId}, space_id, 'AppRole' FROM pages WHERE id = ${pageId} RETURNING id`
+    const extra = 3
+    const ydoc = Buffer.from([1, 2, 3])
+    // Insert via the APP-role pool with the tenant RLS context set (exactly like publish/restore).
+    await pool.begin(async (tx) => {
+      await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+      for (let i = 0; i < KEEP + extra; i++) {
+        await tx`
+          INSERT INTO revisions (tenant_id, page_id, ydoc, title, created_at)
+          VALUES (${tenantId}, ${appPage}, ${ydoc}, ${'a' + i}, now() + (${i} || ' seconds')::interval)`
+      }
+    })
+    // If the app role lacked DELETE on revisions, the trigger would have errored above; reaching
+    // here AND seeing exactly KEEP proves the SECURITY INVOKER prune works under app-role RLS.
+    const [{ n }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM revisions WHERE page_id = ${appPage}`
+    expect(n).toBe(KEEP)
+  })
 })
