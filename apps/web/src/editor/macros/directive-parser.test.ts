@@ -65,6 +65,20 @@ describe("directive parser (composite, nested markdown)", () => {
     expect(nodes("just text\n").some((n) => n.startsWith("Directive["))).toBe(false);
   });
 
+  it("interrupts an open paragraph: `text\\n:::name` parses the directive (endLeaf, #91)", () => {
+    // Without endLeaf, a directive line right after a paragraph (no blank line) was absorbed
+    // as a lazy continuation → no Directive node → the macro never rendered and vim dd/yy
+    // operated on the literal ::: line. A directive open must end the paragraph like FencedCode.
+    const src = "top\n:::table\n<table></table>\n:::\nbot\n";
+    const ns = nodes(src);
+    expect(ns.some((n) => n.startsWith("Directive["))).toBe(true);
+    const para = ns.find((n) => n.startsWith("Paragraph["));
+    expect(para).toBeDefined();
+    // the paragraph is just "top" (ends before the directive), not "top\n:::table…"
+    const [, , pTo] = /Paragraph\[(\d+),(\d+)\]/.exec(para!)!;
+    expect(Number(pTo)).toBe(3); // "top" only
+  });
+
   it("a labeled open line is a Directive with NO Link node — the label's [..] is not linkified (#94)", () => {
     // The whole open line is consumed as a DirectiveMark, so its `[..]` is never inline-parsed.
     for (const src of [":::callout[My Note]\nbody\n:::\n", ":::callout[a]b]\nbody\n:::\n", ":::warning[サーバ停止のお知らせ]\nbody\n:::\n"]) {

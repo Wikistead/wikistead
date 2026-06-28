@@ -146,6 +146,52 @@ test("yy on a TALL macro atom yanks the whole macro; p pastes it back whole", as
   expect((await blocks(page)).length).toBe(2); // the WHOLE macro pasted as a second atom
 });
 
+// #91 (review fix): the dd/yy atom handling must work for a `:::table` DIRECTIVE atom,
+// not only a ```fence``` macro — the owner reported yy on `:::table` copying just the `:::`
+// opening line. A directive's atom block range is resolved differently (first.from..lastLine.to,
+// not the fence node) so it gets its own coverage. Doc lines: 1 top · 2-6 :::table (3 body
+// lines) · 7 mid · 8 bot.
+async function insertTallTable(page: any) {
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("top\n:::table\n<table>\n<tr><td>a</td><td>b</td></tr>\n</table>\n:::\nmid\nbot\n");
+  await sleep(400);
+}
+
+test(":::table directive is a single atom spanning its whole block", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tbl-atom-range");
+  await enterEdit(page);
+  await insertTallTable(page);
+  expect(await blocks(page)).toEqual([{ fromLine: 2, toLine: 6 }]); // whole :::table…::: , not just line 2
+});
+
+test("dd on a :::table directive atom deletes the whole block verbatim", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tbl-dd");
+  await enterEdit(page);
+  await insertTallTable(page);
+  await vimOn(page);
+  await page.keyboard.press("g"); await page.keyboard.press("g"); await page.keyboard.press("j"); await sleep(110); // land on atom
+  await page.keyboard.press("d"); await page.keyboard.press("d"); await sleep(200);
+  expect((await blocks(page)).length).toBe(0); // whole :::table gone, not just the ::: line
+  const text = (await page.locator("[data-pane=preview] .cm-content").innerText()).replace(/\n+/g, "|").replace(/\|$/, "");
+  expect(text).toBe("top|mid|bot");
+});
+
+test("yy on a :::table directive atom yanks the whole block; p pastes it back whole", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tbl-yy");
+  await enterEdit(page);
+  await insertTallTable(page);
+  await vimOn(page);
+  await page.keyboard.press("g"); await page.keyboard.press("g"); await page.keyboard.press("j"); await sleep(110); // land on atom
+  await page.keyboard.press("y"); await page.keyboard.press("y"); await sleep(150);
+  expect((await blocks(page)).length).toBe(1); // yy doesn't change the doc
+  await page.keyboard.press("G"); await sleep(110); // below the block so p doesn't land mid-block
+  await page.keyboard.press("p"); await sleep(200);
+  expect((await blocks(page)).length).toBe(2); // WHOLE :::table pasted as a 2nd atom (not a lone ::: line)
+});
+
 // #91 regression: the intercept only fires on an atom's first line. yy on a NORMAL line still
 // yanks exactly that one line (passes through to vim) — binding `y` must not break plain yy.
 test("yy on a normal line still yanks just that line (passes through to vim)", async ({ browser }) => {

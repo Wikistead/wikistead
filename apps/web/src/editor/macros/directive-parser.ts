@@ -60,6 +60,13 @@ export const directiveExtension: MarkdownConfig = {
     {
       name: "Directive",
       before: "FencedCode", // a ::: line must win before generic block parsing
+      // A directive-opening line must INTERRUPT an open paragraph, the way FencedCode does
+      // (CommonMark: a block construct on the next line ends the paragraph). Without this,
+      // `text\n:::table` is read as one lazy paragraph and the directive never parses → the
+      // macro doesn't render and vim dd/yy operate on the literal `:::` line (#91 / #90).
+      endLeaf(_cx, line) {
+        return parseDirectiveOpen(line.text.slice(line.pos)) != null
+      },
       parse(cx, line) {
         const open = parseDirectiveOpen(line.text.slice(line.pos));
         if (!open) return false;
