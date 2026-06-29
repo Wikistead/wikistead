@@ -44,7 +44,7 @@ afterAll(async () => {
 describe('createApiKey', () => {
   it('returns plaintext once; DB stores only the hash (never plaintext)', async () => {
     const result = await createApiKey(db, {
-      tenantId: tenant.id, ownerUserId: 'dev-user', name: 'test-key-1',
+      tenantId: tenant.id, plan: 'pro', ownerUserId: 'dev-user', name: 'test-key-1',
     })
 
     expect(result.plaintext).toMatch(/^wks_[A-Za-z0-9_-]{8}_[A-Za-z0-9_-]{32}$/)
@@ -71,7 +71,7 @@ describe('verifyApiKey', () => {
   let keyId: string
 
   beforeAll(async () => {
-    const k = await createApiKey(db, { tenantId: tenant.id, ownerUserId: 'dev-user', name: 'verify-test' })
+    const k = await createApiKey(db, { tenantId: tenant.id, plan: 'pro', ownerUserId: 'dev-user', name: 'verify-test' })
     plaintext = k.plaintext
     keyId = k.id
   })
@@ -131,7 +131,7 @@ describe('verifyApiKey', () => {
 
 describe('listApiKeys and revokeApiKey', () => {
   it('lists only active keys (not revoked)', async () => {
-    const k = await createApiKey(db, { tenantId: tenant.id, ownerUserId: 'dev-user', name: 'list-test' })
+    const k = await createApiKey(db, { tenantId: tenant.id, plan: 'pro', ownerUserId: 'dev-user', name: 'list-test' })
     const list = await listApiKeys(db)
     expect(list.some(x => x.id === k.id)).toBe(true)
 
@@ -141,7 +141,7 @@ describe('listApiKeys and revokeApiKey', () => {
   })
 
   it('revokeApiKey returns false for a key owned by a different user (owner check)', async () => {
-    const k = await createApiKey(db, { tenantId: tenant.id, ownerUserId: 'dev-user', name: 'other-user-key' })
+    const k = await createApiKey(db, { tenantId: tenant.id, plan: 'pro', ownerUserId: 'dev-user', name: 'other-user-key' })
     const result = await revokeApiKey(db, { id: k.id, ownerUserId: 'other-user' })
     expect(result).toBe(false)
     // Cleanup

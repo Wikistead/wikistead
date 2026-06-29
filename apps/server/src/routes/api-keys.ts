@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
+import { resolveEntitlements } from '@wikistead/entitlements'
 import type { TenantDb } from '../db/index.js'
 
 export type ApiScope = 'read' | 'write'
@@ -54,11 +55,16 @@ export interface ApiKeyCreated extends ApiKeySummary {
 // scope (Phase 5f) restricts the key below the owner's authority; it is capped by
 // the tenant policy (getApiKeyMaxScope) — requesting 'write' when the cap is 'read'
 // is rejected (403). Defaults to 'write' (the owner's full authority, = pre-5f).
-// TODO(phase: billing): gate API key creation by entitlement (resolveEntitlements(plan).apiAccess).
+// #126 / ADR-063: API key creation is entitlement-gated (resolveEntitlements(plan).apiAccess).
+// The gate reads the resolved boolean — no plan checks scattered (entitlement⟂authz separation).
+// Which plans get apiAccess is a business placeholder; self-host (UNLIMITED) is always on.
 export async function createApiKey(
   db: TenantDb,
-  args: { tenantId: string; ownerUserId: string; name: string; scope?: ApiScope },
+  args: { tenantId: string; plan: string; ownerUserId: string; name: string; scope?: ApiScope },
 ): Promise<ApiKeyCreated> {
+  if (!resolveEntitlements(args.plan).apiAccess) {
+    throw Object.assign(new Error('API keys are not available on this plan'), { statusCode: 403, code: 'api_not_entitled' })
+  }
   const scope: ApiScope = args.scope === 'read' ? 'read' : 'write'
   // Cap: a key may never exceed the tenant policy (deny write when capped to read).
   if (scope === 'write' && (await getApiKeyMaxScope(db)) === 'read') {
@@ -123,6 +129,7 @@ export async function apiKeysPlugin(app: FastifyInstance) {
   app.post<{ Body: { name: string; scope?: ApiScope } }>('/api-keys', async (req, reply) => {
     const created = await createApiKey(req.db, {
       tenantId: req.tenant.id,
+      plan: req.tenant.plan,
       ownerUserId: req.user.sub,
       name: req.body.name,
       scope: req.body?.scope,
