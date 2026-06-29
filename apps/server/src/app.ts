@@ -9,6 +9,8 @@ import type { TenantDb } from './db/index.js'
 import { fgaClient } from '@wikistead/authz'
 import { makeMemberVerifier, looksLikeGuestToken, verifyGuestToken } from '@wikistead/auth'
 import { verifyApiKey } from './api-key-auth.js'
+import { resolveEntitlements } from '@wikistead/entitlements'
+import { bumpRateBucket, API_RATE_LIMIT_WINDOW_S } from './rate-limit.js'
 import { getAuthProviders, getSearchDriver, getEmailDriver, type EmailDriver } from '@wikistead/hooks'
 import { resolveEmailDriver } from './email/index.js'
 import { emit, onDomainEvent } from '@wikistead/events'
@@ -241,6 +243,20 @@ export async function buildApp(): Promise<FastifyInstance> {
         emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'read-only key on a write' })
         await reply.code(403).send({ error: 'read-only API key' })
         return
+      }
+      // Request rate limit (#175 / ADR-063): per-key (fairness) AND per-tenant (all-keys
+      // ceiling), stricter trips first → 429. Limits resolve PER REQUEST so a downgrade takes
+      // effect immediately; Infinity (self-host) short-circuits with no Valkey op.
+      const rl = resolveEntitlements(req.tenant.plan).apiRateLimit
+      if (rl.perKey !== Infinity || rl.perTenant !== Infinity) {
+        const okKey = await bumpRateBucket(valkey, `apikey-rl:key:${apiUser.keyId}`, rl.perKey, API_RATE_LIMIT_WINDOW_S)
+        const okTenant = await bumpRateBucket(valkey, `apikey-rl:tenant:${req.tenant.id}`, rl.perTenant, API_RATE_LIMIT_WINDOW_S)
+        if (!okKey || !okTenant) {
+          emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'rate limited' })
+          reply.header('Retry-After', String(API_RATE_LIMIT_WINDOW_S))
+          await reply.code(429).send({ error: 'rate limit exceeded' })
+          return
+        }
       }
       req.user = { sub: apiUser.sub, groups: [] }
       req.apiScope = apiUser.scope

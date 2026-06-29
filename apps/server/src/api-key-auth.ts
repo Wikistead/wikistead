@@ -17,7 +17,7 @@ interface ApiKeyRow { id: string; owner_user_id: string; key_hash: string; scope
 export async function verifyApiKey(
   token: string,
   tenantId: string,
-): Promise<{ sub: string; scope: 'read' | 'write' } | null> {
+): Promise<{ sub: string; scope: 'read' | 'write'; keyId: string } | null> {
   if (!token.startsWith('wks_')) return null
 
   // keyPrefix is always 'wks_' (4 chars) + 8 base64url chars = 12 chars total.
@@ -48,5 +48,6 @@ export async function verifyApiKey(
   // Non-blocking last_used_at update — must not slow the auth hot path.
   void pool`UPDATE api_keys SET last_used_at = now() WHERE id = ${row.id}`
 
-  return { sub: row.owner_user_id, scope: row.scope === 'read' ? 'read' : 'write' }
+  // keyId enables per-key rate limiting (#175) without re-querying on the hot path.
+  return { sub: row.owner_user_id, scope: row.scope === 'read' ? 'read' : 'write', keyId: row.id }
 }

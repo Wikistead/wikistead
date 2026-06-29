@@ -53,6 +53,13 @@ export interface Entitlements {
   // is a business placeholder; the gate reads this resolved boolean. Losing it revokes the domain
   // (ADR-064 downgrade: three-point revoke — the entitlement is the one place this is decided).
   customDomain: boolean
+
+  // API-key REQUEST rate limit (#175 / ADR-063): max authenticated API-key requests per fixed
+  // window — `perKey` (fairness per key) and `perTenant` (the all-keys-combined tenant ceiling),
+  // evaluated AND (the stricter trips first → 429). Infinity = no limit (self-host: the limiter is
+  // skipped entirely, zero overhead). Resolved PER REQUEST so a downgrade takes effect immediately.
+  // The numbers are a business placeholder. Window = API_RATE_LIMIT_WINDOW_S (env, default 60).
+  apiRateLimit: { perKey: number; perTenant: number }
 }
 
 // Self-host / Community edition: never plan-limited.
@@ -65,6 +72,7 @@ export const UNLIMITED: Entitlements = {
   branding: true,
   apiAccess: true,
   customDomain: true,
+  apiRateLimit: { perKey: Infinity, perTenant: Infinity },
 }
 
 // NOTE (ADR-069 / #132): the Cloud plan table (`CLOUD_PLANS`) and its resolver
