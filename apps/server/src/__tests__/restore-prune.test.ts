@@ -74,7 +74,7 @@ describe('#116 restore is copy-safe even when the trigger prunes the restored-fr
 
     // Restore the target. Its insert pushes the count to 201 → the trigger prunes the oldest
     // (the target itself). Copy-safety means the restored content still lands.
-    await restoreRevision(db, fgaClient, app.valkey, { tenantId: TENANT, pageId, revId: target.id, userId: 'dev-user', plan: 'pro' })
+    await restoreRevision(db, fgaClient, app.valkey, app.storageDriver, { tenantId: TENANT, pageId, revId: target.id, userId: 'dev-user', plan: 'pro' })
 
     // The page's PUBLISHED content is the restored target (copied before the prune)…
     const [pg] = await admin<[{ published_md: string; published_revision_id: string | null }]>`

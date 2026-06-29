@@ -90,7 +90,7 @@ describe('guest HTTP path: published read + publish authorization', () => {
   })
 
   it('FGA authority: a view link has no edit tuple — publishPage denied even past the hook', async () => {
-    await expect(publishPage(db, fgaClient, app.searchDriver, {
+    await expect(publishPage(db, fgaClient, app.searchDriver, app.storageDriver, {
       pageId: pageA, subject: `share_link:${viewLinkId}`, createdBy: `guest:${viewLinkId}`,
       context: { current_time: new Date().toISOString() },
     })).rejects.toMatchObject({ statusCode: 403 })
