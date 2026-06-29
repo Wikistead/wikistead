@@ -6,6 +6,7 @@ import {
   HeadObjectCommand,
   HeadBucketCommand,
   CreateBucketCommand,
+  ListObjectsV2Command,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
@@ -37,6 +38,10 @@ export interface StorageDriver {
   // attachment's page before reading. Never expose a path that takes a caller-
   // supplied key straight through to this.
   getObject(key: string): Promise<Uint8Array>
+  // List all object keys under a prefix (paginated internally). INTERNAL/admin use only
+  // (reconciling GC) — like getObject it is auth-bypassing; the caller owns the boundary.
+  // Used by the revision GC to find storage objects with no live DB pointer (#113 / ADR-062).
+  listObjects(prefix: string): Promise<string[]>
 }
 
 // Single shared bucket; tenant prefix embedded in every key.
@@ -104,6 +109,19 @@ export class LogicalStorageDriver implements StorageDriver {
   async getObject(key: string): Promise<Uint8Array> {
     const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }))
     return result.Body!.transformToByteArray()
+  }
+
+  // List all keys under a prefix, following continuation tokens so large prefixes are
+  // returned in full (the GC must see EVERY object to diff against the live key set).
+  async listObjects(prefix: string): Promise<string[]> {
+    const keys: string[] = []
+    let token: string | undefined
+    do {
+      const r = await this.s3.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, ContinuationToken: token }))
+      for (const o of r.Contents ?? []) if (o.Key) keys.push(o.Key)
+      token = r.IsTruncated ? r.NextContinuationToken : undefined
+    } while (token)
+    return keys
   }
 }
 
