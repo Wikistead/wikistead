@@ -23,3 +23,41 @@ test("inline + block math render via KaTeX; caret-in reveals the raw TeX", async
   await sleep(200);
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("E=mc^2");
 });
+
+// #158-C3 XSS boundary: KaTeX runs trust:false + strict, so a hostile \href (javascript:) must NOT
+// produce a clickable javascript anchor, and no script element appears. (Hardening: the happy path
+// alone wouldn't catch a trust-config regression.)
+test("malicious TeX (\\href javascript:) renders no dangerous anchor / no script", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "mathxss");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("x $\\href{javascript:alert(1)}{click}$ y\n\ntail\n");
+  await sleep(400);
+  await page.keyboard.press("Control+End");
+  await sleep(200);
+  const danger = await page.evaluate(() => {
+    const root = document.querySelector("[data-pane=preview]")!;
+    const jsAnchor = Array.from(root.querySelectorAll("a")).some((a) => (a.getAttribute("href") ?? "").trim().toLowerCase().startsWith("javascript:"));
+    return { jsAnchor, script: !!root.querySelector("script"), onerror: root.innerHTML.includes("onerror=") };
+  });
+  expect(danger.jsAnchor).toBe(false); // trust:false → no javascript: href survives
+  expect(danger.script).toBe(false);
+  expect(danger.onerror).toBe(false);
+});
+
+// #158-C3 boundary: a `$` inside code (inline `code` / fenced block) is LITERAL, not math — the
+// inCode skip (syntax-tree check) must hold so code samples containing $ aren't mangled.
+test("a $…$ inside inline code or a fenced block is NOT rendered as math", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "mathcode");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("inline `cost is $5 and $9` here\n\n```sh\necho $HOME and $PATH\n```\n\ntail\n");
+  await sleep(400);
+  await page.keyboard.press("Control+End");
+  await sleep(200);
+  // no math widget should have formed from the $ inside code.
+  expect(await page.locator("[data-pane=preview] [data-testid=math-inline]").count()).toBe(0);
+  expect(await page.locator("[data-pane=preview] [data-testid=math-block]").count()).toBe(0);
+});
