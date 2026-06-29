@@ -1,5 +1,6 @@
 import type { Sql } from 'postgres'
 import type { Tenant } from '@wikistead/types'
+import { effectivePlan } from '../plan.js'
 
 interface Row {
   id: string
@@ -7,6 +8,8 @@ interface Row {
   custom_domain: string | null
   isolation: 'logical' | 'namespace'
   plan: string
+  pending_plan: string | null
+  pending_plan_at: Date | null
 }
 
 interface CacheEntry { tenant: Tenant; expiresAt: number }
@@ -23,7 +26,7 @@ export class TenantRegistry {
     if (hit !== undefined) return hit
 
     const [row] = await this.sql<Row[]>`
-      SELECT id, slug, custom_domain, isolation, plan
+      SELECT id, slug, custom_domain, isolation, plan, pending_plan, pending_plan_at
       FROM tenants WHERE slug = ${slug}
     `
     return this.store(row ?? null)
@@ -34,7 +37,7 @@ export class TenantRegistry {
     if (hit !== undefined) return hit
 
     const [row] = await this.sql<Row[]>`
-      SELECT id, slug, custom_domain, isolation, plan
+      SELECT id, slug, custom_domain, isolation, plan, pending_plan, pending_plan_at
       FROM tenants WHERE custom_domain = ${domain}
     `
     return this.store(row ?? null)
@@ -47,7 +50,12 @@ export class TenantRegistry {
       slug: row.slug,
       customDomain: row.custom_domain ?? undefined,
       isolation: row.isolation,
-      plan: row.plan,
+      // EFFECTIVE plan (#131 / ADR-064): during a downgrade's grace the old plan stays in
+      // effect; past grace it's the new (lower) plan even before the reconcile batch commits.
+      // Computed here so every downstream resolveEntitlements(tenant.plan) is the effective plan.
+      // The 30s cache means a ≤30s lag at the (days-long) grace boundary — harmless; the batch
+      // commits tenants.plan anyway, so it converges.
+      plan: effectivePlan({ plan: row.plan, pendingPlan: row.pending_plan, pendingPlanAt: row.pending_plan_at }),
     }
     const entry: CacheEntry = { tenant, expiresAt: Date.now() + this.ttl }
     this.bySlug.set(tenant.slug, entry)
