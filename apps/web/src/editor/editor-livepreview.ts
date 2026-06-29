@@ -18,6 +18,7 @@ import { atomDelete, atomYank } from "./live-preview/vim-atom";
 import { blockDrag } from "./live-preview/block-drag";
 import { m1Spike } from "./live-preview/m1-spike";
 import { everforestHighlight } from "./everforest-highlight";
+import { mathField } from "./live-preview/math";
 import { macroEdit } from "./live-preview/macro-edit";
 
 // vim Compartment content: the keymap AND a vimEnabled flag (so the decoration builder
@@ -86,6 +87,7 @@ export function mountLivePreview(
       everforestHighlight,
       livePreviewTheme,
       livePreview,
+      mathField, // #158-C3: KaTeX math ($…$ / $$…$$), reveal-on-cursor atoms
       // Macro blocks (ADR-022): code-fence macros (```mermaid) render via the registry;
       // folding collapses a block to its summary line (vim za/zo). Editable surface only
       // — the fold affordance is an editing control; the published view just renders.
@@ -186,6 +188,7 @@ export function mountPublishedView(
       everforestHighlight, // #158-C2: same code highlighting on the read-only published view
       livePreviewTheme,
       livePreview,
+      mathField, // #158-C3: KaTeX math ($…$ / $$…$$), reveal-on-cursor atoms
       linkClicks,
       checkboxControl.of(opts.onToggleTask ? { mode: "view", onToggle: opts.onToggleTask } : null),
       ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
