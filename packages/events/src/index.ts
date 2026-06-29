@@ -31,6 +31,13 @@ export type DomainEvent =
   // strict-private drafts (creator gone + no live viewer). Audited per ADR-061 — the
   // privileged recovery surface is traceable even though enumeration is read-only.
   | { type: 'orphan_draft.enumerated'; tenantId: string; actorId: string; count: number }
+  // The two-stage recovery (#99 / ADR-061): claim grants the admin a TEMPORARY audited grant;
+  // reassign hands the page to a live member and revokes the admin grant; claim_expired is the
+  // TTL sweep revoking an un-reassigned claim (page returns to orphan). All audited for the
+  // accountability of the admin's temporary access.
+  | { type: 'orphan_draft.claimed'; tenantId: string; actorId: string; pageId: string; expiresAt: string }
+  | { type: 'orphan_draft.reassigned'; tenantId: string; actorId: string; pageId: string; newOwner: string }
+  | { type: 'orphan_draft.claim_expired'; tenantId: string; pageId: string; adminSub: string }
   // ── Attachments ──────────────────────────────────────────────────────
   | { type: 'attachment.confirmed'; tenantId: string; attachmentId: string; pageId: string; actorId: string }
   | { type: 'attachment.deleted';   tenantId: string; attachmentId: string; pageId: string; actorId: string }

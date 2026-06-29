@@ -15,6 +15,7 @@
     "storage:gc": "tsx --env-file=../../.env src/storage/gc.ts",
     "search:sync": "tsx --env-file=../../.env src/search-sync.ts",
     "tenant:oidc-disable": "tsx --env-file=../../.env src/scripts/oidc-disable.ts",
+    "orphan:sweep": "tsx --env-file=../../.env src/scripts/orphan-claim-sweep.ts",
     "test": "vitest run"
   },
   "dependencies": {
