@@ -87,6 +87,9 @@ importers:
       '@wikistead/entitlements':
         specifier: workspace:^
         version: link:../../packages/entitlements
+      '@wikistead/entitlements-cloud':
+        specifier: workspace:^
+        version: link:../../packages/entitlements-cloud
       '@wikistead/events':
         specifier: workspace:^
         version: link:../../packages/events
@@ -333,6 +336,16 @@ importers:
         version: 5.9.3
 
   packages/entitlements:
+    devDependencies:
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+
+  packages/entitlements-cloud:
+    dependencies:
+      '@wikistead/entitlements':
+        specifier: workspace:*
+        version: link:../entitlements
     devDependencies:
       typescript:
         specifier: ^5.6.0
