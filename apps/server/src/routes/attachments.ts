@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check } from '@wikistead/authz'
+import { assertPageViewable } from '../page-view-gate.js'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import { pool } from '../db/pool.js'
@@ -134,8 +135,7 @@ export async function downloadAttachment(
   if (!row || row.status === 'pending') throw Object.assign(new Error('not found'), { statusCode: 404 })
   if (row.status === 'deleted') throw Object.assign(new Error('gone'), { statusCode: 410 })
 
-  const canView = await check(fga, args.subject, 'view', { type: 'page', id: row.page_id }, args.context)
-  if (!canView) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  await assertPageViewable(fga, args.subject, row.page_id, args.context) // #108/ADR-071 host-mediated gate
 
   const downloadUrl = await storage.presignGet(row.s3_key, { ttlSeconds: GET_TTL })
   return { downloadUrl, filename: row.filename, expiresAt: new Date(Date.now() + GET_TTL * 1000).toISOString() }
@@ -148,8 +148,7 @@ export async function listAttachments(
   fga: OpenFgaClient,
   args: { pageId: string; userId: string },
 ): Promise<AttachmentSummary[]> {
-  const canView = await check(fga, `user:${args.userId}`, 'view', { type: 'page', id: args.pageId })
-  if (!canView) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  await assertPageViewable(fga, `user:${args.userId}`, args.pageId) // #108/ADR-071 host-mediated gate
 
   const rows = await db.sql<AttachmentRow[]>`
     SELECT id, filename, content_type, size_bytes, created_at
