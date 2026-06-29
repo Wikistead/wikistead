@@ -223,6 +223,9 @@ importers:
       i18next:
         specifier: ^26.3.1
         version: 26.3.1(typescript@5.9.3)
+      katex:
+        specifier: 0.16.11
+        version: 0.16.11
       lucide-react:
         specifier: ^1.21.0
         version: 1.21.0(react@19.2.7)
@@ -266,6 +269,9 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.1
         version: 4.3.1(vite@5.4.21(@types/node@22.19.21)(lightningcss@1.32.0)(sass@1.51.0))
+      '@types/katex':
+        specifier: 0.16.7
+        version: 0.16.7
       '@types/react':
         specifier: ^19.2.17
         version: 19.2.17
@@ -2495,6 +2501,9 @@ packages:
   '@types/geojson@7946.0.16':
     resolution: {integrity: sha512-6C8nqWur3j98U6+lXDfTUWIfgvZU+EumvpHKcYjujKH7woYyLj2sUmff0tRhrqM7BohUw7Pz3ZB1jj2gW9Fvmg==}
 
+  '@types/katex@0.16.7':
+    resolution: {integrity: sha512-HMwFiRujE5PjrgwHQ25+bsLJgowjGjm5Z8FVSf0N6PwgJrwxH0QxzHYDcKsTfV3wva0vzrpqMTJS2jXPr5BMEQ==}
+
   '@types/node@22.19.21':
     resolution: {integrity: sha512-VMeFBSCKQKmm2swI2kW51SFusDqekC6q9trBCvJ/JliDchFSuoYYKN7yVNjPthP1HKZcx3U1gI/wTcEBjEFKTA==}
 
@@ -3257,6 +3266,10 @@ packages:
   json5@2.2.3:
     resolution: {integrity: sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==}
     engines: {node: '>=6'}
+    hasBin: true
+
+  katex@0.16.11:
+    resolution: {integrity: sha512-RQrI8rlHY92OLf3rho/Ts8i/XvjgguEjOkO1BEXcU3N8BqPpSzBNwV/G0Ukr+P/l3ivvJUE/Fa/CwbS6HesGNQ==}
     hasBin: true
 
   katex@0.16.47:
@@ -6429,6 +6442,8 @@ snapshots:
 
   '@types/geojson@7946.0.16': {}
 
+  '@types/katex@0.16.7': {}
+
   '@types/node@22.19.21':
     dependencies:
       undici-types: 6.21.0
@@ -7282,6 +7297,10 @@ snapshots:
   json-schema-traverse@1.0.0: {}
 
   json5@2.2.3: {}
+
+  katex@0.16.11:
+    dependencies:
+      commander: 8.3.0
 
   katex@0.16.47:
     dependencies:
