@@ -18,6 +18,7 @@
     "orphan:sweep": "tsx --env-file=../../.env src/scripts/orphan-claim-sweep.ts",
     "revisions:gc": "tsx --env-file=../../.env src/scripts/revisions-gc.ts",
     "revisions:backfill": "tsx --env-file=../../.env src/scripts/revisions-backfill.ts",
+    "plan:reconcile": "tsx --env-file=../../.env src/scripts/plan-reconcile.ts",
     "test": "vitest run"
   },
   "dependencies": {
