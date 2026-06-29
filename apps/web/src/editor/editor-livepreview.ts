@@ -17,6 +17,7 @@ import { registerVimFold } from "./live-preview/vim-fold";
 import { atomDelete, atomYank } from "./live-preview/vim-atom";
 import { blockDrag } from "./live-preview/block-drag";
 import { m1Spike } from "./live-preview/m1-spike";
+import { everforestHighlight } from "./everforest-highlight";
 import { macroEdit } from "./live-preview/macro-edit";
 
 // vim Compartment content: the keymap AND a vimEnabled flag (so the decoration builder
@@ -81,6 +82,8 @@ export function mountLivePreview(
       EditorView.scrollMargins.of(() => ({ bottom: 72 })),
       // GFM base (tables) + fenced-code highlighting. The doc stays plain markdown.
       markdownExtension(),
+      // #158-C2: Everforest code highlighting (after minimalSetup's default → takes precedence).
+      everforestHighlight,
       livePreviewTheme,
       livePreview,
       // Macro blocks (ADR-022): code-fence macros (```mermaid) render via the registry;
@@ -180,6 +183,7 @@ export function mountPublishedView(
       cmTheme,
       EditorView.lineWrapping,
       markdownExtension(),
+      everforestHighlight, // #158-C2: same code highlighting on the read-only published view
       livePreviewTheme,
       livePreview,
       linkClicks,
