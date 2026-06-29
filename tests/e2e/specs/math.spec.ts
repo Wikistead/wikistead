@@ -46,6 +46,27 @@ test("malicious TeX (\\href javascript:) renders no dangerous anchor / no script
   expect(danger.onerror).toBe(false);
 });
 
+// #158-C3 × #164: math honors the display mode. Source mode shows raw TeX always (force-reveal),
+// even with the caret away — verifying math.ts consults the displayMode facet (not just selection).
+test("Source display mode shows raw TeX (math.ts respects displayMode)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "mathmode");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("see $E=mc^2$ here\n\ntail\n");
+  await sleep(400);
+  await page.keyboard.press("Control+End");
+  await sleep(200);
+  const content = () => page.locator("[data-pane=preview] .cm-content").innerText();
+  // Live (default): rendered, raw hidden.
+  expect(await content()).not.toContain("E=mc^2");
+  // → Source: raw TeX shown even though the caret is elsewhere.
+  const toggle = page.getByTestId("displaymode-toggle");
+  for (let i = 0; i < 3 && (await toggle.getAttribute("data-mode")) !== "source"; i++) { await toggle.click(); await sleep(150); }
+  await page.keyboard.press("Control+End"); await sleep(200);
+  expect(await content()).toContain("E=mc^2"); // force-revealed in Source
+});
+
 // #158-C3 boundary: a `$` inside code (inline `code` / fenced block) is LITERAL, not math — the
 // inCode skip (syntax-tree check) must hold so code samples containing $ aren't mangled.
 test("a $…$ inside inline code or a fenced block is NOT rendered as math", async ({ browser }) => {
