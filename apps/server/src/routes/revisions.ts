@@ -7,6 +7,8 @@ import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import { pool } from '../db/pool.js'
 import type { TenantDb } from '../db/index.js'
+import type { StorageDriver } from '../storage/index.js'
+import { storeRevisionYdoc, readRevisionYdoc } from './revision-ydoc.js'
 
 interface RevisionRow {
   id: string; tenant_id: string; page_id: string
@@ -83,17 +85,19 @@ export async function listRevisions(
 export async function getRevisionContent(
   db: TenantDb,
   fga: OpenFgaClient,
+  storage: StorageDriver,
   args: { pageId: string; revId: string; userId: string; plan: string },
 ): Promise<{ content: string }> {
   const canView = await check(fga, `user:${args.userId}`, 'view', { type: 'page', id: args.pageId })
   if (!canView) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
-  const [rev] = await db.sql<[{ ydoc: Buffer }]>`
-    SELECT ydoc FROM revisions
+  const [rev] = await db.sql<[{ ydoc: Buffer | null; ydoc_key: string | null }]>`
+    SELECT ydoc, ydoc_key FROM revisions
     WHERE id = ${args.revId} AND page_id = ${args.pageId} AND created_at >= ${retentionCutoff(args.plan)}
   `
   if (!rev) throw Object.assign(new Error('revision not found'), { statusCode: 404 })
+  const bytes = await readRevisionYdoc(storage, rev) // dual-read (ydoc_key ?? inline), LOUD if dangling
   const doc = new Y.Doc()
-  Y.applyUpdate(doc, new Uint8Array(rev.ydoc))
+  Y.applyUpdate(doc, bytes)
   return { content: doc.getText('content').toString() }
 }
 
@@ -113,6 +117,7 @@ export async function restoreRevision(
   db: TenantDb,
   fga: OpenFgaClient,
   valkey: IORedis,
+  storage: StorageDriver,
   args: { tenantId: string; pageId: string; revId: string; userId: string; plan: string },
 ): Promise<{ documentName: string }> {
   const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: args.pageId })
@@ -126,15 +131,16 @@ export async function restoreRevision(
 
   // Plan-gated retention: a revision outside the window is not restorable (and is
   // reported as not found, matching what listRevisions exposes).
-  const [rev] = await db.sql<[{ ydoc: Buffer; tenant_id: string }]>`
-    SELECT ydoc, tenant_id FROM revisions
+  const [rev] = await db.sql<[{ ydoc: Buffer | null; ydoc_key: string | null; tenant_id: string }]>`
+    SELECT ydoc, ydoc_key, tenant_id FROM revisions
     WHERE id = ${args.revId} AND page_id = ${args.pageId} AND created_at >= ${retentionCutoff(args.plan)}
   `
   if (!rev) throw Object.assign(new Error('revision not found'), { statusCode: 404 })
 
   if (!current.ydoc) throw Object.assign(new Error('no saved ydoc for this page'), { statusCode: 409 })
 
-  const restoreUpdate = computeRestoreUpdate(current.ydoc, rev.ydoc)
+  const revBytes = await readRevisionYdoc(storage, rev) // dual-read of the target revision
+  const restoreUpdate = computeRestoreUpdate(current.ydoc, Buffer.from(revBytes))
 
   // Apply restore update to get new full state
   const restoredDoc = new Y.Doc()
@@ -147,13 +153,17 @@ export async function restoreRevision(
   // restored body text; the freshly-inserted revision is the new published pointer.
   const restoredMd = restoredDoc.getText('content').toString()
 
+  // Offload the new revision bytes to storage S3-FIRST (ADR-062): if the put fails we throw
+  // here and never write a row → no dangling pointer (the new pages.ydoc below is unaffected).
+  const newRevKey = await storeRevisionYdoc(storage, args.tenantId, newYdoc)
+
   // Write new state + always-insert revision so the restored state is immediately
   // visible in history and undoable, AND repoint published_* to it.
   await pool.begin(async (tx) => {
     await tx`SELECT set_config('app.tenant_id', ${args.tenantId}, true)`
     const [newRev] = await tx<[{ id: string }]>`
-      INSERT INTO revisions (tenant_id, page_id, ydoc, title, created_by)
-      VALUES (${args.tenantId}, ${args.pageId}, ${newYdoc}, ${current.title}, ${`user:${args.userId}`})
+      INSERT INTO revisions (tenant_id, page_id, ydoc_key, title, created_by)
+      VALUES (${args.tenantId}, ${args.pageId}, ${newRevKey}, ${current.title}, ${`user:${args.userId}`})
       RETURNING id
     `
     await tx`
@@ -191,13 +201,13 @@ export async function revisionsPlugin(app: FastifyInstance) {
   })
 
   app.get<{ Params: { pageId: string; revId: string } }>('/pages/:pageId/revisions/:revId/content', async (req) => {
-    return getRevisionContent(req.db, app.fga, { pageId: req.params.pageId, revId: req.params.revId, userId: req.user.sub, plan: req.tenant.plan })
+    return getRevisionContent(req.db, app.fga, app.storageDriver, { pageId: req.params.pageId, revId: req.params.revId, userId: req.user.sub, plan: req.tenant.plan })
   })
 
   app.post<{ Params: { pageId: string; revId: string } }>(
     '/pages/:pageId/revisions/:revId/restore',
     async (req, reply) => {
-      await restoreRevision(req.db, app.fga, app.valkey, {
+      await restoreRevision(req.db, app.fga, app.valkey, app.storageDriver, {
         tenantId: req.tenant.id,
         pageId: req.params.pageId,
         revId: req.params.revId,

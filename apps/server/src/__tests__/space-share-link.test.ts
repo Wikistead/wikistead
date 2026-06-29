@@ -7,6 +7,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, checkRelation, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
+import { LogicalStorageDriver } from '../storage/index.js'
 import { provisionTenant } from '../auth/provisioning.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, publishPage, deletePage, listPages } from '../routes/pages.js'
@@ -14,6 +15,7 @@ import { createShareLink, revokeShareLink } from '../routes/share-links.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const driver = new LogicalSearchDriver()
+const storage = new LogicalStorageDriver()
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'free', isolation: 'logical' }) as Tenant
 const OWNER = 'spacelink-owner'
 
@@ -39,7 +41,7 @@ beforeAll(async () => {
   // A space link exposes PUBLISHED pages (publish writes page#space, enabling `viewer from
   // space` inheritance). Drafts stay creator-only — they are not shared by a space link.
   for (const id of [pageA1, pageA2, pageB1]) {
-    await publishPage(db, fgaClient, driver, { pageId: id, subject: `user:${OWNER}`, createdBy: `user:${OWNER}` })
+    await publishPage(db, fgaClient, driver, storage, { pageId: id, subject: `user:${OWNER}`, createdBy: `user:${OWNER}` })
   }
 })
 

@@ -7,6 +7,8 @@ import { emit } from '@wikistead/events'
 import { docName } from '@wikistead/types'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
+import type { StorageDriver } from '../storage/index.js'
+import { storeRevisionYdoc } from './revision-ydoc.js'
 import type { TenantDb } from '../db/index.js'
 import { flushDraft } from '../collab-flush.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
@@ -246,6 +248,7 @@ export async function publishPage(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
+  storage: StorageDriver,
   // subject = FGA principal for the edit check ("user:<sub>" | "share_link:<id>");
   // createdBy attributes the revision/event ("user:<sub>" | "guest:<id>"); context
   // (guests) evaluates the share_link's non_expired condition.
@@ -276,16 +279,19 @@ export async function publishPage(
     return { publishedAt: draft.published_at, revisionId: draft.published_revision_id, noop: true }
   }
 
-  // revisions.ydoc is NOT NULL — a never-edited page publishes an empty Y.Doc.
+  // A never-edited page publishes an empty Y.Doc snapshot.
   const ydocBuf = draft.ydoc ?? Buffer.from(Y.encodeStateAsUpdate(new Y.Doc()))
+  // Offload the revision bytes to storage S3-FIRST (ADR-062 #113): put succeeds → write the
+  // key; a put failure throws here BEFORE the tx, so no row with a dangling pointer is created.
+  const ydocKey = await storeRevisionYdoc(storage, draft.tenant_id, ydocBuf)
 
   let outboxId!: string
   let revisionId!: string
   let publishedAt!: Date
   await db.tx(async (tx) => {
     const [rev] = await tx<[{ id: string }]>`
-      INSERT INTO revisions (tenant_id, page_id, ydoc, title, created_by)
-      VALUES (${draft.tenant_id}, ${args.pageId}, ${ydocBuf}, ${draft.title}, ${args.createdBy})
+      INSERT INTO revisions (tenant_id, page_id, ydoc_key, title, created_by)
+      VALUES (${draft.tenant_id}, ${args.pageId}, ${ydocKey}, ${draft.title}, ${args.createdBy})
       RETURNING id
     `
     revisionId = rev.id
@@ -851,7 +857,7 @@ export async function pagesPlugin(app: FastifyInstance) {
     // does not leave them behind as "unpublished changes". Best-effort: never blocks
     // longer than the timeout, and is a no-op when collab isn't running (e.g. tests).
     await flushDraft(app.valkey, docName(req.tenant.id, req.params.pageId))
-    return publishPage(req.db, app.fga, app.searchDriver, { pageId: req.params.pageId, ...p })
+    return publishPage(req.db, app.fga, app.searchDriver, app.storageDriver, { pageId: req.params.pageId, ...p })
   })
 
   // Toggle a single task checkbox on the published page WITHOUT creating a revision

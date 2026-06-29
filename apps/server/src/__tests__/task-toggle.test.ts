@@ -46,7 +46,7 @@ beforeAll(async () => {
   pageId = page.id
   // Publish the baseline so published_md == draft (both unchecked). revisions = 1.
   await setDraft(pageId, BASE)
-  await publishPage(db, fgaClient, app.searchDriver, { pageId, subject: 'user:dev-user', createdBy: 'user:dev-user' })
+  await publishPage(db, fgaClient, app.searchDriver, app.storageDriver, { pageId, subject: 'user:dev-user', createdBy: 'user:dev-user' })
 }, 30_000)
 
 afterAll(async () => {

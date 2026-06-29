@@ -10,12 +10,14 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { LogicalSearchDriver, buildSearchDoc } from '../search/index.js'
+import { LogicalStorageDriver } from '../storage/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, publishPage, movePage } from '../routes/pages.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const driver = new LogicalSearchDriver()
+const storage = new LogicalStorageDriver()
 const TENANT = 'tenant_dev'
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'free', isolation: 'logical' }) as Tenant
 const VIEWER = 'user:vg-viewer'   // a SPACE viewer (not the creator)
@@ -72,7 +74,7 @@ describe('Phase 4 visibility gate', () => {
     expect((await driver.search({ tenantId: TENANT, userId: 'vg-viewer', groups: [], q: TITLE })).some((h) => h.id === draftId)).toBe(false)
 
     // publish → page#space written → space inheritance released (FGA + search)
-    await publishPage(db, fgaClient, driver, { pageId: draftId, subject: 'user:dev-user', createdBy: 'user:dev-user' })
+    await publishPage(db, fgaClient, driver, storage, { pageId: draftId, subject: 'user:dev-user', createdBy: 'user:dev-user' })
     expect(await spaceLinked(draftId)).toBe(true)
     expect(await check(fgaClient, VIEWER, 'view', { type: 'page', id: draftId })).toBe(true)
     const after = await buildSearchDoc(pool, fgaClient, draftId, TENANT)

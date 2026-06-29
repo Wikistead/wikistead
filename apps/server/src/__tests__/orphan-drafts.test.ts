@@ -9,6 +9,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, deleteObjectTuples, writeTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
+import { LogicalStorageDriver } from '../storage/index.js'
 import { createPage, publishPage } from '../routes/pages.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { listOrphanDrafts, requireTenantAdminOr404, claimOrphanDraft, reassignOrphanDraft, isOrphanPage } from '../routes/orphan-drafts.js'
@@ -21,6 +22,7 @@ const canManage = async (sub: string, pageId: string) =>
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const driver = new LogicalSearchDriver()
+const storage = new LogicalStorageDriver()
 const TENANT = 'tenant_dev'
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'free', isolation: 'logical' }) as Tenant
 const ydoc = (t: string) => Buffer.from(Y.encodeStateAsUpdate((() => { const d = new Y.Doc(); d.getText('content').insert(0, t); return d })()))
@@ -91,7 +93,7 @@ describe('listOrphanDrafts (#99 / ADR-061 read side)', () => {
   it('does NOT list a PUBLISHED page (published_at set ⇒ not a draft candidate)', async () => {
     const pub = await mkPage('published-not-orphan')
     await admin`UPDATE pages SET ydoc = ${ydoc('# pub\n')} WHERE id = ${pub}`
-    await publishPage(db, fgaClient, driver, { pageId: pub, subject: 'user:dev-user', createdBy: 'user:dev-user' })
+    await publishPage(db, fgaClient, driver, storage, { pageId: pub, subject: 'user:dev-user', createdBy: 'user:dev-user' })
     // Even after stripping its grants, a published page is not a draft → never an orphan candidate.
     await deleteObjectTuples(fgaClient, `page:${pub}`)
     expect(await ids()).not.toContain(pub)
