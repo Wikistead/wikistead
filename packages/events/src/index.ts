@@ -23,6 +23,10 @@ export type DomainEvent =
   | { type: 'space.branding_updated'; tenantId: string; spaceId: string; actorId: string }
   | { type: 'tenant.branding_updated'; tenantId: string; actorId: string }
   | { type: 'tenant.oidc_updated'; tenantId: string; actorId: string; enabled: boolean }
+  // Break-glass recovery (#105 / ADR-060): an OPERATOR (not a tenant principal —
+  // hence `operator`, not `actorId`) disabled a locked-out tenant's own OIDC out of
+  // band, via the admin-DB CLI. It only flips the login gate; it grants no access.
+  | { type: 'tenant.oidc_recovered'; tenantId: string; operator: string }
   // ── Attachments ──────────────────────────────────────────────────────
   | { type: 'attachment.confirmed'; tenantId: string; attachmentId: string; pageId: string; actorId: string }
   | { type: 'attachment.deleted';   tenantId: string; attachmentId: string; pageId: string; actorId: string }
