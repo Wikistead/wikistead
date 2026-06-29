@@ -67,6 +67,7 @@ describe("collab authenticate — guest token, reconnect blocked after revoke", 
     try {
       const ok = await authenticate({ token, documentName: DOC });
       expect(ok.principal).toMatchObject({ kind: "guest", shareLinkId: LINK });
+      expect(ok.readOnly).toBe(true); // a view guest joins read-only (the write fortress)
 
       // Revoke (the active-disconnect authority). A reconnect with the same token must fail.
       await deleteTuples(fgaClient, [tuple]);
@@ -74,6 +75,45 @@ describe("collab authenticate — guest token, reconnect blocked after revoke", 
     } finally {
       await deleteTuples(fgaClient, [tuple]).catch(() => {});
     }
+  });
+});
+
+// The guest capability → readOnly mapping (apps/collab invariant: "a view-capability guest can
+// NOT edit; readOnly is enforced"). Edit guests write; view/comment guests are readOnly; and a
+// token that CLAIMS edit without edit authority is denied (intent ≠ authority — the write fortress).
+describe("collab authenticate — guest capability ⇒ readOnly (write fortress)", () => {
+  const guestCfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 };
+  const LINK = "cap-link-collab";
+  const editTuple = { user: `share_link:${LINK}`, relation: "edit", object: "page:demo" };
+  const viewTuple = { user: `share_link:${LINK}`, relation: "view", object: "page:demo" };
+  const mint = (capability: string) => mintGuestToken(guestCfg, {
+    tenantId: "tenant_dev", shareLinkId: LINK, resource: { type: "page", id: "demo" }, capability,
+  });
+  afterAll(async () => { for (const t of [editTuple, viewTuple]) await deleteTuples(fgaClient, [t]).catch(() => {}); });
+
+  it("an EDIT guest (edit authority) joins WRITABLE (readOnly:false)", async () => {
+    await writeTuples(fgaClient, [editTuple]);
+    const r = await authenticate({ token: await mint("edit"), documentName: DOC });
+    expect(r.principal).toMatchObject({ kind: "guest", capability: "edit" });
+    expect(r.readOnly).toBe(false);
+    await deleteTuples(fgaClient, [editTuple]).catch(() => {});
+  });
+
+  it("a COMMENT guest joins read-only (comments go via HTTP, never the doc)", async () => {
+    await writeTuples(fgaClient, [{ user: `share_link:${LINK}`, relation: "comment", object: "page:demo" }]);
+    const r = await authenticate({ token: await mint("comment"), documentName: DOC });
+    expect(r.readOnly).toBe(true); // capability !== "edit" ⇒ readOnly
+    await deleteTuples(fgaClient, [{ user: `share_link:${LINK}`, relation: "comment", object: "page:demo" }]).catch(() => {});
+  });
+
+  it("a token that CLAIMS edit but has only VIEW authority is DENIED (intent ≠ authority)", async () => {
+    await writeTuples(fgaClient, [viewTuple]); // only view authority
+    // The token forges capability:"edit" → the FGA check is for 'edit' → fails → rejected.
+    await expect(authenticate({ token: await mint("edit"), documentName: DOC })).rejects.toThrow(/denied|expired|forbidden|access/);
+    // …and the same link as a proper VIEW guest is admitted read-only (authority honoured).
+    const r = await authenticate({ token: await mint("view"), documentName: DOC });
+    expect(r.readOnly).toBe(true);
+    await deleteTuples(fgaClient, [viewTuple]).catch(() => {});
   });
 });
 
