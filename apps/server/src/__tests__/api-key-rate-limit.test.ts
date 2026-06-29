@@ -1,0 +1,68 @@
+// Integration test — API-key request rate limiting (#175 / ADR-063). Verifies the limiter
+// trips at the entitlement-resolved cap (per-key AND per-tenant, stricter wins → 429 + Retry-
+// After), and is skipped entirely on the self-host UNLIMITED resolver. Drives the real auth
+// hook via inject, with a custom resolver supplying low limits for determinism.
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
+import postgres from 'postgres'
+import IORedis from 'ioredis'
+import type { FastifyInstance } from 'fastify'
+import { pool } from '../db/pool.js'
+import { acquireTenantDb, type TenantDb } from '../db/index.js'
+import { buildApp } from '../app.js'
+import { createApiKey } from '../routes/api-keys.js'
+import { UNLIMITED, registerEntitlementsResolver, resetEntitlementsResolver, type Entitlements } from '@wikistead/entitlements'
+import type { Tenant } from '@wikistead/types'
+
+const admin = postgres(process.env.DATABASE_ADMIN_URL!)
+const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
+const TENANT = 'tenant_dev'
+const HOST = 'dev.localhost'
+const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'free', isolation: 'logical' }) as Tenant
+let db: TenantDb, app: FastifyInstance
+const bearer = (tok: string) => ({ host: HOST, authorization: `Bearer ${tok}` })
+const limits = (perKey: number, perTenant: number): Entitlements => ({ ...UNLIMITED, apiRateLimit: { perKey, perTenant } })
+const get = (tok: string) => app.inject({ method: 'GET', url: '/api-keys', headers: bearer(tok) })
+
+beforeAll(async () => { db = await acquireTenantDb(asTenant(TENANT)); app = await buildApp(); await app.ready() }, 30_000)
+afterAll(async () => {
+  resetEntitlementsResolver()
+  await app.close()
+  await admin`DELETE FROM api_keys WHERE tenant_id = ${TENANT}`.catch(() => {})
+  await db.release(); await admin.end(); await valkey.quit(); await pool.end()
+}, 30_000)
+beforeEach(() => resetEntitlementsResolver())
+
+async function freshKey(): Promise<{ id: string; plaintext: string }> {
+  const k = await createApiKey(db, { tenantId: TENANT, plan: 'pro', ownerUserId: 'dev-user', name: 'rl', scope: 'read' })
+  await valkey.del(`apikey-rl:key:${k.id}`)
+  return k
+}
+
+describe('API key request rate limiting (#175)', () => {
+  it('trips per-key at the entitlement cap → 429 + Retry-After (earlier requests pass)', async () => {
+    const k = await freshKey()
+    await valkey.del(`apikey-rl:tenant:${TENANT}`)
+    registerEntitlementsResolver(() => limits(2, 1000)) // per-key 2; tenant high so per-key trips
+    expect((await get(k.plaintext)).statusCode).toBe(200) // 1
+    expect((await get(k.plaintext)).statusCode).toBe(200) // 2
+    const third = await get(k.plaintext)
+    expect(third.statusCode).toBe(429)                    // 3 → over per-key cap
+    expect(third.headers['retry-after']).toBeTruthy()
+  })
+
+  it('trips per-tenant across multiple keys (the all-keys ceiling)', async () => {
+    const a = await freshKey(); const b = await freshKey()
+    await valkey.del(`apikey-rl:tenant:${TENANT}`)
+    registerEntitlementsResolver(() => limits(1000, 2)) // per-key high; tenant 2 → combined trips
+    expect((await get(a.plaintext)).statusCode).toBe(200) // tenant 1 (key a)
+    expect((await get(b.plaintext)).statusCode).toBe(200) // tenant 2 (key b)
+    expect((await get(a.plaintext)).statusCode).toBe(429) // tenant 3 → over per-tenant cap
+  })
+
+  it('self-host UNLIMITED skips the limiter (no 429 under load)', async () => {
+    const k = await freshKey()
+    await valkey.del(`apikey-rl:tenant:${TENANT}`)
+    // default resolver = UNLIMITED (apiRateLimit Infinity) → never limited
+    for (let i = 0; i < 8; i++) expect((await get(k.plaintext)).statusCode).toBe(200)
+  })
+})
