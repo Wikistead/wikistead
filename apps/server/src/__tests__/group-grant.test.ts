@@ -100,6 +100,19 @@ describe('#163 grant access to a group by name', () => {
     expect(await checkRelation(fgaClient, `user:${STRANGER}`, 'view', { type: 'page', id: pageId })).toBe(false)
   })
 
+  it('a grant to a group no longer in any member (renamed/emptied at IdP) shows the raw id (display fallback, ADR-053)', async () => {
+    // groupFgaId is one-way: if "Ghost" appears in no member's groups, listSpaceAccess can't map the
+    // hashed grantee back to a name → it falls back to the raw group:<id>#member (never crashes,
+    // never shows a wrong name). The grant itself still resolves once a member syncs into "Ghost".
+    const ghost = groupGrantee(T, 'Ghost')
+    await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: T, userId: MANAGER, grantee: ghost, capability: 'view' })
+    const listed = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: MANAGER })
+    const row = listed.find((g) => g.grantee === ghost)
+    expect(row).toBeDefined()
+    expect(row!.groupName).toBeUndefined() // unknown id → no name → UI shows the raw grantee
+    await revokeSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: T, userId: MANAGER, grantee: ghost, capability: 'view' }).catch(() => {})
+  })
+
   it('the group source is manage-gated and tenant-scoped (no cross-tenant leak)', async () => {
     const groups = await listTenantGroups(db, fgaClient, { spaceId, userId: MANAGER })
     expect(groups).toContain('Engineering')
