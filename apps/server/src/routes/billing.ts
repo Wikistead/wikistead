@@ -96,6 +96,9 @@ export async function processWebhookEvent(event: Stripe.Event): Promise<void> {
       // Upgrade (or same/higher): apply immediately AND cancel any pending downgrade — more
       // entitlement is always safe, and a re-upgrade during grace voids the pending downgrade.
       await tx`UPDATE tenants SET plan = ${newPlan}, pending_plan = NULL, pending_plan_at = NULL WHERE id = ${tenant.id}`
+      // Reactivate any members frozen by a prior downgrade (ADR-064: re-upgrade restores access;
+      // the cap is re-enforced only if a future downgrade commits while over the new cap).
+      await tx`UPDATE members SET deactivated_at = NULL WHERE tenant_id = ${tenant.id} AND deactivated_at IS NOT NULL`
     }
     return true
   })

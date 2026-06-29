@@ -9,7 +9,29 @@
 // gates); the existing-overage freeze (deactivation) is a separate enforcement step (ADR-064).
 import postgres from 'postgres'
 import { emit } from '@wikistead/events'
+import { resolveEntitlements } from '@wikistead/entitlements'
 import { PLAN_DOWNGRADE_GRACE_S } from '../plan.js'
+
+// Freeze EXISTING seat overage on a committed downgrade (ADR-064): deactivate over-cap members,
+// NEWEST-first, NEVER an admin (owner-protected — selection is a business placeholder). Reversible
+// (data kept; reactivated on re-upgrade) — never a delete. maxSeats=Infinity (self-host UNLIMITED,
+// or no Cloud resolver registered) → no-op. Returns how many were deactivated.
+async function freezeSeatOverage(sql: postgres.Sql, tenantId: string, newPlan: string): Promise<number> {
+  const maxSeats = resolveEntitlements(newPlan).maxSeats
+  if (maxSeats === Infinity) return 0
+  const active = await sql<{ id: string; role: string }[]>`
+    SELECT id, role FROM members WHERE tenant_id = ${tenantId} AND deactivated_at IS NULL
+    ORDER BY created_at ASC
+  `
+  const admins = active.filter((m) => m.role === 'admin')           // always kept (owner-protected)
+  const nonAdmins = active.filter((m) => m.role !== 'admin')
+  const seatsForNonAdmins = Math.max(0, maxSeats - admins.length)   // admins consume seats first
+  const toFreeze = nonAdmins.slice(seatsForNonAdmins)               // newest beyond the cap
+  for (const m of toFreeze) {
+    await sql`UPDATE members SET deactivated_at = now() WHERE id = ${m.id} AND deactivated_at IS NULL`
+  }
+  return toFreeze.length
+}
 
 export async function reconcilePlans(
   sql: postgres.Sql,
@@ -29,6 +51,8 @@ export async function reconcilePlans(
       WHERE id = ${t.id} AND pending_plan = ${t.pending_plan}
     `
     if (res.count > 0) {
+      // Commit done → enforce the reversible seat freeze for the now-effective lower plan.
+      await freezeSeatOverage(sql, t.id, t.pending_plan)
       emit({ type: 'tenant.plan_changed', tenantId: t.id, oldPlan: t.plan, newPlan: t.pending_plan })
       committed++
     }
