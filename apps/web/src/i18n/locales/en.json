@@ -104,7 +104,19 @@
     "branding": "Branding",
     "auth": "Authentication",
     "api": "API",
-    "billing": "Billing"
+    "billing": "Billing",
+    "orphans": "Orphan drafts"
+  },
+  "adminOrphans": {
+    "title": "Orphan drafts",
+    "body": "Drafts whose creator was deleted and that no one else can see. Claim one to read it, then reassign it to a member. Claiming grants you temporary access that is revoked on reassign (or expires automatically).",
+    "empty": "No orphaned drafts.",
+    "untitled": "Untitled",
+    "claim": "Claim",
+    "claimed": "Claimed — you now have temporary access.",
+    "reassign": "Reassign",
+    "reassigned": "Reassigned.",
+    "newOwnerPlaceholder": "New owner (member sub)"
   },
   "billing": {
     "title": "Billing",

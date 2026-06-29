@@ -104,7 +104,19 @@
     "branding": "ブランディング",
     "auth": "認証",
     "api": "API",
-    "billing": "課金"
+    "billing": "課金",
+    "orphans": "孤立ドラフト"
+  },
+  "adminOrphans": {
+    "title": "孤立ドラフト",
+    "body": "作成者が削除され、誰も閲覧できなくなったドラフトです。Claim すると一時的に閲覧でき、メンバーに再割り当てできます。一時アクセスは再割り当て時に失効します（未操作でも自動失効）。",
+    "empty": "孤立ドラフトはありません。",
+    "untitled": "無題",
+    "claim": "Claim",
+    "claimed": "Claim しました — 一時アクセスが付与されました。",
+    "reassign": "再割り当て",
+    "reassigned": "再割り当てしました。",
+    "newOwnerPlaceholder": "新オーナー（メンバー sub）"
   },
   "billing": {
     "title": "課金",
