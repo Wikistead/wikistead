@@ -54,6 +54,11 @@ export interface Entitlements {
   // (ADR-064 downgrade: three-point revoke — the entitlement is the one place this is decided).
   customDomain: boolean
 
+  // SAML SSO (#135 / ADR-067): gates tenant SAML config + login. EE tier (self-host EE on;
+  // Cloud = top tier only — business placeholder). CE bundles no SAML; the provider loads only
+  // under this entitlement. The gate reads this resolved boolean (entitlement⟂authz).
+  samlSso: boolean
+
   // API-key REQUEST rate limit (#175 / ADR-063): max authenticated API-key requests per fixed
   // window — `perKey` (fairness per key) and `perTenant` (the all-keys-combined tenant ceiling),
   // evaluated AND (the stricter trips first → 429). Infinity = no limit (self-host: the limiter is
@@ -72,6 +77,7 @@ export const UNLIMITED: Entitlements = {
   branding: true,
   apiAccess: true,
   customDomain: true,
+  samlSso: true,
   apiRateLimit: { perKey: Infinity, perTenant: Infinity },
 }
 

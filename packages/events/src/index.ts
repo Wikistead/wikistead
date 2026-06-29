@@ -43,6 +43,8 @@ export type DomainEvent =
   | { type: 'tenant.custom_domain_added'; tenantId: string; domain: string }
   | { type: 'tenant.custom_domain_verified'; tenantId: string; domain: string }
   | { type: 'tenant.custom_domain_removed'; tenantId: string; domain: string }
+  // SAML config change (#135 / ADR-067), EE. The production SP/ACS validation is a separate sub-task.
+  | { type: 'tenant.saml_updated'; tenantId: string; actorId: string; enabled: boolean }
   // ── Attachments ──────────────────────────────────────────────────────
   | { type: 'attachment.confirmed'; tenantId: string; attachmentId: string; pageId: string; actorId: string }
   | { type: 'attachment.deleted';   tenantId: string; attachmentId: string; pageId: string; actorId: string }
