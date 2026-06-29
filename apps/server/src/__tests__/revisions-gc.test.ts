@@ -8,10 +8,13 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, deleteObjectTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
+import { LogicalStorageDriver } from '../storage/index.js'
 import type { StorageDriver } from '../storage/index.js'
 import { createPage } from '../routes/pages.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { runRevisionGc } from '../scripts/revisions-gc.js'
+import { backfillRevisionYdoc } from '../scripts/revisions-backfill.js'
+import { readRevisionYdoc } from '../routes/revision-ydoc.js'
 import type { Tenant } from '@wikistead/types'
 
 function fakeStorage() {
@@ -102,6 +105,35 @@ describe('runRevisionGc (#113 / ADR-062)', () => {
       expect(cand).toBeUndefined()                      // un-marked
     } finally {
       await admin`DELETE FROM revisions WHERE ydoc_key = ${ORPHAN}`
+    }
+  })
+})
+
+describe('backfillRevisionYdoc (#113 / ADR-062 — converge legacy inline → storage)', () => {
+  it('moves a legacy inline revision to storage (ydoc_key set, ydoc NULL) preserving bytes', async () => {
+    // REAL storage: backfill is a global batch, so any collateral inline rows migrate to the
+    // real bucket (never lost), and our row's bytes genuinely round-trip through storage.
+    const storage = new LogicalStorageDriver()
+    await storage.ensureBucket()
+    // A legacy row: inline ydoc, no key (the pre-offload shape).
+    const bytes = Buffer.from([4, 2, 4, 2])
+    const [row] = await admin<[{ id: string }]>`
+      INSERT INTO revisions (tenant_id, page_id, ydoc, title, created_by)
+      VALUES (${TENANT}, ${pageId}, ${bytes}, 'legacy', 'user:dev-user') RETURNING id
+    `
+    try {
+      const r = await backfillRevisionYdoc(admin, storage, { batchSize: 500 })
+      expect(r.migrated).toBeGreaterThanOrEqual(1)
+      const [after] = await admin<[{ ydoc: Buffer | null; ydoc_key: string | null }]>`
+        SELECT ydoc, ydoc_key FROM revisions WHERE id = ${row.id}
+      `
+      expect(after.ydoc).toBeNull()                       // inline bytes dropped
+      expect(after.ydoc_key).toMatch(/^revisions\/tenant_dev\//) // now points at storage
+      // Bytes preserved + readable via dual-read (now from storage).
+      const read = await readRevisionYdoc(storage, after)
+      expect(Array.from(read)).toEqual([4, 2, 4, 2])
+    } finally {
+      await admin`DELETE FROM revisions WHERE id = ${row.id}`
     }
   })
 })
