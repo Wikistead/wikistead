@@ -85,5 +85,14 @@ export function makeInnerEditHost(
       view.dispatch({ effects: setMacroRenderActive.of(null) });
       view.focus();
     },
+    // #153 / ADR-054: focus delegation for in-editor WYSIWYG cell editing. Focus/selection ONLY —
+    // no dispatch/state/Yjs here. The M1 spike proved CM does NOT reclaim focus from a nested
+    // contenteditable island inside an atomic widget (root contenteditable=false + ignoreEvent),
+    // so this is thin: hand focus to `target`; end() returns focus to the editor. The inner
+    // editor commits its text via replaceSource (one Y.Text edit); it never writes Yjs itself.
+    beginTextEdit: (target: HTMLElement) => {
+      target.focus();
+      return { end: () => view.focus() };
+    },
   };
 }
