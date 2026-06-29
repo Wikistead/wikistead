@@ -4,6 +4,7 @@ import Stripe from 'stripe'
 import { pool } from '../db/pool.js'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
+import { isDowngrade } from '../plan.js'
 
 // `||` not `??`: an explicitly-empty STRIPE_SECRET_KEY (CE/dev/test .env) must
 // fall back to the placeholder — `new Stripe('')` throws at module load and would
@@ -79,6 +80,7 @@ export async function processWebhookEvent(event: Stripe.Event): Promise<void> {
 
   // Idempotency + atomicity in one tx: insert the marker AND apply the plan change
   // together. ON CONFLICT DO NOTHING → a duplicate inserts 0 rows → skip the update.
+  const downgrade = isDowngrade(tenant.plan, newPlan)
   const applied = await pool.begin(async (tx) => {
     const ins = await tx`
       INSERT INTO plan_events (tenant_id, event_type, stripe_event_id, old_plan, new_plan)
@@ -86,10 +88,19 @@ export async function processWebhookEvent(event: Stripe.Event): Promise<void> {
       ON CONFLICT (stripe_event_id) DO NOTHING
     `
     if (ins.count === 0) return false
-    await tx`UPDATE tenants SET plan = ${newPlan} WHERE id = ${tenant.id}`
+    if (downgrade) {
+      // Grace (#131 / ADR-064): keep the OLD plan effective; record the pending target. The
+      // reconciling batch commits it once grace elapses. Don't cut entitlements instantly.
+      await tx`UPDATE tenants SET pending_plan = ${newPlan}, pending_plan_at = now() WHERE id = ${tenant.id}`
+    } else {
+      // Upgrade (or same/higher): apply immediately AND cancel any pending downgrade — more
+      // entitlement is always safe, and a re-upgrade during grace voids the pending downgrade.
+      await tx`UPDATE tenants SET plan = ${newPlan}, pending_plan = NULL, pending_plan_at = NULL WHERE id = ${tenant.id}`
+    }
     return true
   })
-  if (applied) emit({ type: 'tenant.plan_changed', tenantId: tenant.id, oldPlan: tenant.plan, newPlan })
+  // A deferred downgrade has not changed the effective plan yet — emit only on an applied change.
+  if (applied && !downgrade) emit({ type: 'tenant.plan_changed', tenantId: tenant.id, oldPlan: tenant.plan, newPlan })
 }
 
 // ── Fastify plugin ────────────────────────────────────────────────────────
