@@ -2,6 +2,7 @@ import Fastify from 'fastify'
 import type { FastifyInstance } from 'fastify'
 import cors from '@fastify/cors'
 import cookie from '@fastify/cookie'
+import formbody from '@fastify/formbody'
 import type { Tenant, ResourceRef, Capability } from '@wikistead/types'
 import { resolveTenantFromHost, loadTenant } from './tenant.js'
 import { acquireTenantDb } from './db/index.js'
@@ -42,6 +43,7 @@ import { tenantOidcPlugin } from './routes/tenant-oidc.js'
 import { orphanDraftsPlugin } from './routes/orphan-drafts.js'
 import { customDomainsPlugin } from './routes/custom-domains.js'
 import { tenantSamlPlugin } from './routes/tenant-saml.js'
+import { samlAuthPlugin } from './routes/saml-auth.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -92,6 +94,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: true, trustProxy: true })
   await app.register(cors, { origin: true })
   await app.register(cookie)
+  await app.register(formbody) // SAML ACS uses the form-urlencoded POST binding (#135)
 
   app.decorate('fga', fgaClient)
 
@@ -143,6 +146,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     if (req.url === '/healthz' || req.url === '/readyz' ||
         req.url.startsWith('/webhooks/') || req.url.startsWith('/public/') ||
         req.url.startsWith('/auth/login') || req.url.startsWith('/auth/callback') ||
+        req.url.startsWith('/auth/saml/') || // SAML SP-initiated login + ACS establish the session (#135)
         req.url.startsWith('/signup/')) return
 
     const { slug, domain } = resolveTenantFromHost(req.headers.host ?? '')
@@ -290,6 +294,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(orphanDraftsPlugin)
   await app.register(customDomainsPlugin)
   await app.register(tenantSamlPlugin)
+  await app.register(samlAuthPlugin)
   await app.register(spacesPlugin)
   await app.register(pagesPlugin)
   await app.register(billingPlugin)
