@@ -3,6 +3,7 @@ import { Text } from "@codemirror/state";
 import { findFenceMacro, findDirectiveMacro, registeredFenceLangs, registeredDirectiveNames } from "./index"; // importing index registers first-party macros
 import { registerMacro } from "./registry";
 import { mermaidMacro } from "./mermaid";
+import { plantumlMacro } from "./plantuml";
 import { noteCalloutMacro } from "./callout";
 import { fenceLang, fenceBody } from "./fence";
 
@@ -32,6 +33,20 @@ describe("macro registry", () => {
 
   it("mermaid summary is a one-line label", () => {
     expect(mermaidMacro.summary("graph TD; A-->B;")).toBe("Mermaid diagram");
+  });
+
+  it("registers the plantuml fence macro as degrade-to-source (#140 / ADR-074)", () => {
+    const m = findFenceMacro("plantuml");
+    expect(m).toBeDefined();
+    expect(m!.kind).toBe("fence");
+    expect(m!.exportFidelity).toBe("degrade"); // no bundled GPL renderer → degrades to its source
+    expect(registeredFenceLangs()).toContain("plantuml");
+  });
+
+  it("plantuml htmlRender escapes its body (XSS-safe static export)", () => {
+    const html = plantumlMacro.htmlRender("<script>alert(1)</script>");
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;");
   });
 
   it("registers the first-party callout directive macros (#150 typed)", () => {

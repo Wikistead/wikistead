@@ -3,12 +3,14 @@
 // `macroFold` from here, so registration runs before any editor mounts.
 import { registerMacro } from "./registry";
 import { mermaidMacro } from "./mermaid";
+import { plantumlMacro } from "./plantuml";
 import { calloutMacros } from "./callout";
 import { excalidrawMacro } from "./excalidraw";
 import { tableMacro } from "./table";
 import { columnsMacro, tabsMacro, detailsMacro } from "./layout-directives";
 
 registerMacro(mermaidMacro);
+registerMacro(plantumlMacro); // ```plantuml — degrade-to-source until an external service is configured (#140 / ADR-074)
 calloutMacros.forEach(registerMacro); // note / info / tip / warning / danger (#150)
 registerMacro(excalidrawMacro);
 registerMacro(tableMacro);
