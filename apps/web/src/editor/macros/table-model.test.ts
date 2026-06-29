@@ -26,6 +26,26 @@ describe("table-model: in-cell newline <-> <br> round-trip (#86 / ADR-037)", () 
     expect(htmlToCellText("x<b>y</b><br>z")).toBe("xy\nz");
   });
 
+  // #154 prep (in-editor WYSIWYG cell editing, blocked on #153): the paste boundary is pure
+  // (htmlToCellText) and dependency-free, so its anti-tests can land now. A rich-HTML paste
+  // (Word/Google Docs) must reduce to TEXT ONLY — no markup, no script — except <br> → newline.
+  it("a rich-HTML paste reduces to text only — tags/styles/anchors stripped, only <br> kept (#154)", () => {
+    expect(htmlToCellText('<span style="color:red"><b>bold</b> and <i>x</i></span>')).toBe("bold and x");
+    expect(htmlToCellText('<a href="javascript:alert(1)">link</a>')).toBe("link"); // no href/markup survives
+    expect(htmlToCellText('<p>one</p><br><p>two</p>')).toBe("one\ntwo"); // block tags gone, <br> → newline
+  });
+
+  it("a <script>/<img onerror> pasted into a cell is stripped to text (XSS boundary) (#154)", () => {
+    expect(htmlToCellText('<script>alert(1)</script>safe')).toBe("alert(1)safe"); // tag stripped; inert text only
+    expect(htmlToCellText('<img src=x onerror=alert(1)>')).toBe(""); // void tag → nothing; no element ever built
+    // the result is later set via textContent (never innerHTML), so even the leftover text can't execute.
+  });
+
+  it("Japanese cell text round-trips with an in-cell newline (#154)", () => {
+    const jp = "日本語の行1\n行2（全角）";
+    expect(htmlToCellText(cellTextToHtml(jp))).toBe(jp); // lossless, no <br> dup, no mojibake
+  });
+
   it("forces the :::table HTML tier for a multiline cell (a pipe would flatten the newline)", () => {
     const multiline = [[{ text: "a\nb", header: false, colspan: 1, rowspan: 1 }]];
     expect(representableAsPipe(multiline)).toBe(false);
