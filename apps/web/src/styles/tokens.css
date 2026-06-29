@@ -201,8 +201,12 @@
   --space-6: 32px;
   --header-h: 40px;
   --sidebar-w: 260px;
-  --font: system-ui, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* #158-C1 fonts. UI = Inter (Latin) + Noto Sans JP (JP), self-hosted woff2 (OFL). Body/mono =
+     UDEV Gothic (OFL, UD-legible, full-width = 2× half-width → vim columns stay exact); it leads
+     the stack so it's used once its woff2 is vendored (@font-face — follow-up), and falls back to
+     a strict-monospace stack until then (the body-strict-monospace invariant holds either way). */
+  --font: "Inter", "Noto Sans JP", system-ui, sans-serif;
+  --font-mono: "UDEV Gothic", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Type scale (Group C). Two tiers: reading/prose content is 16px (--text-body,
      inherited by the editor), the operating surface (sidebar, buttons, toolbar,

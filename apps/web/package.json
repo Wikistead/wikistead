@@ -19,6 +19,8 @@
     "@codemirror/state": "^6.4.0",
     "@codemirror/view": "^6.34.0",
     "@excalidraw/excalidraw": "^0.18.1",
+    "@fontsource/inter": "5.2.8",
+    "@fontsource/noto-sans-jp": "5.2.9",
     "@fontsource/plus-jakarta-sans": "^5.2.8",
     "@hocuspocus/provider": "^2.15.0",
     "@lezer/highlight": "1.2.3",

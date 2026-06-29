@@ -9,7 +9,9 @@ import { EditorView } from "@codemirror/view";
 // highlight token colors come from the language highlightStyle and are left as-is.
 export const cmTheme = EditorView.theme({
   "&": { color: "var(--fg)", backgroundColor: "var(--bg)" },
-  ".cm-content": { caretColor: "var(--fg)" },
+  // #158-C1: the editor body uses the strict-monospace stack (UDEV Gothic lead → vim columns stay
+  // exact; full-width = 2× half-width). Falls back to ui-monospace until the woff2 is vendored.
+  ".cm-content": { caretColor: "var(--fg)", fontFamily: "var(--font-mono)" },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--fg)" },
   "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
     backgroundColor: "var(--selection)",

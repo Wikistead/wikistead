@@ -3,6 +3,14 @@ import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import "./i18n"; // initialize i18next before the app renders
 import "@fontsource/plus-jakarta-sans/600.css"; // brand wordmark (OFL); self-hosted
+// #158-C1 UI fonts (OFL, self-hosted woff2): Inter (Latin) + Noto Sans JP (JP) → Notion-grade UI.
+import "@fontsource/inter/400.css";
+import "@fontsource/inter/500.css";
+import "@fontsource/inter/600.css";
+import "@fontsource/inter/700.css";
+import "@fontsource/noto-sans-jp/400.css";
+import "@fontsource/noto-sans-jp/500.css";
+import "@fontsource/noto-sans-jp/700.css";
 import "./styles/tokens.css";
 import "./styles/print.css";
 import "./styles/macro-modal.css";
