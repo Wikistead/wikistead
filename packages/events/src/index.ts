@@ -38,6 +38,11 @@ export type DomainEvent =
   | { type: 'orphan_draft.claimed'; tenantId: string; actorId: string; pageId: string; expiresAt: string }
   | { type: 'orphan_draft.reassigned'; tenantId: string; actorId: string; pageId: string; newOwner: string }
   | { type: 'orphan_draft.claim_expired'; tenantId: string; pageId: string; adminSub: string }
+  // Custom domain verification (#123 / ADR-065): added (pending), verified (activated +
+  // mirrored to host→tenant resolution), removed (three-point revocation). EE audit subscribes.
+  | { type: 'tenant.custom_domain_added'; tenantId: string; domain: string }
+  | { type: 'tenant.custom_domain_verified'; tenantId: string; domain: string }
+  | { type: 'tenant.custom_domain_removed'; tenantId: string; domain: string }
   // ── Attachments ──────────────────────────────────────────────────────
   | { type: 'attachment.confirmed'; tenantId: string; attachmentId: string; pageId: string; actorId: string }
   | { type: 'attachment.deleted';   tenantId: string; attachmentId: string; pageId: string; actorId: string }

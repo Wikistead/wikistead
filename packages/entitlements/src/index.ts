@@ -47,6 +47,12 @@ export interface Entitlements {
   // self-host on (Community First), Cloud free off, Cloud Pro/Team on. WHICH plans is a business
   // placeholder; the gate reads this resolved boolean (entitlement⟂authz separation).
   apiAccess: boolean
+
+  // Custom domain (#123 / ADR-065). Gates adding/verifying a tenant custom domain (docs.acme.com).
+  // A Pro value lever: self-host on (Community First), Cloud free off, Cloud Pro/Team on. WHICH plans
+  // is a business placeholder; the gate reads this resolved boolean. Losing it revokes the domain
+  // (ADR-064 downgrade: three-point revoke — the entitlement is the one place this is decided).
+  customDomain: boolean
 }
 
 // Self-host / Community edition: never plan-limited.
@@ -58,6 +64,7 @@ export const UNLIMITED: Entitlements = {
   maxStorageBytes: Infinity,
   branding: true,
   apiAccess: true,
+  customDomain: true,
 }
 
 // NOTE (ADR-069 / #132): the Cloud plan table (`CLOUD_PLANS`) and its resolver
