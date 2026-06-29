@@ -3,6 +3,7 @@
 // identity; authority is re-derived from OpenFGA per document.
 import { describe, it, expect, afterAll } from "vitest";
 import { mintMemberCollabToken, mintGuestToken } from "@wikistead/auth";
+import type { Capability } from "@wikistead/types";
 import { fgaClient, writeTuples, deleteTuples } from "@wikistead/authz";
 import { authenticate } from "../authenticate.js";
 
@@ -86,7 +87,7 @@ describe("collab authenticate — guest capability ⇒ readOnly (write fortress)
   const LINK = "cap-link-collab";
   const editTuple = { user: `share_link:${LINK}`, relation: "edit", object: "page:demo" };
   const viewTuple = { user: `share_link:${LINK}`, relation: "view", object: "page:demo" };
-  const mint = (capability: string) => mintGuestToken(guestCfg, {
+  const mint = (capability: Capability) => mintGuestToken(guestCfg, {
     tenantId: "tenant_dev", shareLinkId: LINK, resource: { type: "page", id: "demo" }, capability,
   });
   afterAll(async () => { for (const t of [editTuple, viewTuple]) await deleteTuples(fgaClient, [t]).catch(() => {}); });
