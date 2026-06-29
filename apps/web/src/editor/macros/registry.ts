@@ -51,6 +51,14 @@ export interface InnerEditHost {
   getSource(): string; // the macro's current body (source text)
   replaceSource(next: string): void; // commit a new body
   exit(): void; // leave inline edit (Done / Esc)
+  // #153 / ADR-054 (M1 spike GO): delegate focus to a host-managed editable element for in-editor
+  // WYSIWYG cell editing. The host (which holds the EditorView) focuses `target` and, while
+  // active, does not reclaim focus / sync its selection over it. focus/selection ONLY — NO
+  // view.dispatch, NO state, NO Yjs; doc still commits via replaceSource; the inner editor's
+  // contenteditable never writes Yjs. Returns a release handle; end() restores editor focus.
+  // (M1 mechanism proven by the spike: an atomic widget root [contenteditable=false + ignoreEvent]
+  // with a nested contenteditable island holds focus and CM doesn't reclaim it — vim and non-vim.)
+  beginTextEdit(target: HTMLElement): { end(): void };
 }
 export interface InlineController {
   destroy(): void; // unmount / cleanup

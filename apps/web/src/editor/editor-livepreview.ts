@@ -16,6 +16,7 @@ import { macroFold } from "./macros";
 import { registerVimFold } from "./live-preview/vim-fold";
 import { atomDelete, atomYank } from "./live-preview/vim-atom";
 import { blockDrag } from "./live-preview/block-drag";
+import { m1Spike } from "./live-preview/m1-spike";
 import { macroEdit } from "./live-preview/macro-edit";
 
 // vim Compartment content: the keymap AND a vimEnabled flag (so the decoration builder
@@ -113,6 +114,9 @@ export function mountLivePreview(
         const bs = u.state.field(livePreview, false)?.blocks ?? [];
         w.__lpBlocks = bs.map((b) => ({ fromLine: u.state.doc.lineAt(b.from).number, toLine: u.state.doc.lineAt(b.to).number }));
       })] : []),
+      // M1 focus-delegation SPIKE (#153 / ADR-054) — DEV/e2e only, never in prod. Activated by the
+      // literal token `@SPIKE@` in the doc. Strip from prod builds.
+      ...(import.meta.env.DEV ? [m1Spike] : []),
       linkClicks,
       // ADR-024 atom motion: every block decoration is a single motion-stop — a one-line
       // key lands ON the atom, the next steps past it (macros stay rendered; non-macro

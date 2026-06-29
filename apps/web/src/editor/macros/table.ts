@@ -75,6 +75,10 @@ export const tableModalEditor: MacroModalEditor = {
       getSource: () => current,
       replaceSource: (next) => { current = next; render(); },
       exit: () => { /* the modal frame owns close/save */ },
+      // #153 / ADR-054: in the MODAL path there is no EditorView to fight for focus, so this is a
+      // plain focus hand-off (the modal frame owns focus). The CM-host bridge (macro-edit.ts) is
+      // where the focus-guard semantics matter; the in-editor WYSIWYG cell path (#154) uses that.
+      beginTextEdit: (target: HTMLElement) => { target.focus(); return { end: () => {} }; },
     };
     render();
     return { getBody: () => current, destroy: () => ctrl?.destroy() };
