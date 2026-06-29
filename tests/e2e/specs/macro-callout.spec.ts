@@ -52,7 +52,10 @@ test(":::warning[label] renders the warning variant with icon + label header", a
   await expect(page.locator("[data-pane=preview] .cm-lp-callout-warning").first()).toBeVisible();
   const header = page.locator("[data-pane=preview] .cm-lp-directive-label").first();
   await expect(header).toHaveAttribute("data-label", "Server down"); // #94 label
-  await expect(header).toHaveAttribute("data-icon", "⚠️"); // #150 icon
+  await expect(header).toHaveAttribute("data-icon", "triangle-alert"); // #158-C4 Lucide icon name
+  // #158-C4: the icon renders as a mask-image on ::before (Lucide SVG, currentColor-tinted).
+  const beforeMask = await header.evaluate((el) => getComputedStyle(el, "::before").maskImage || getComputedStyle(el, "::before").webkitMaskImage);
+  expect(beforeMask).toContain("svg"); // a mask-image SVG data URI is set (not "none")
   const visible = await page.locator("[data-pane=preview] .cm-content").innerText();
   expect(visible).not.toContain(":::warning[Server down]"); // raw hidden (no linkification — #94)
 });

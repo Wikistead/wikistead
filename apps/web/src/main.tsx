@@ -7,6 +7,7 @@ import "./styles/tokens.css";
 import "./styles/print.css";
 import "./styles/macro-modal.css";
 import "./styles/table-edit.css"; // #86: table editor runs in the modal (outside CM baseTheme)
+import "./styles/callout-icons.css"; // #158-C4: callout header icons (Lucide mask-image)
 
 // StrictMode is intentional: it double-invokes effects in dev, which exercises
 // the <Editor/> connect/destroy/reconnect path and surfaces any WS leak or ghost

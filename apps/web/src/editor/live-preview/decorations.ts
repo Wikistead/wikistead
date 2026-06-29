@@ -1074,16 +1074,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-callout-tip": { borderLeftColor: "var(--callout-tip, #2ea043)", background: "color-mix(in srgb, var(--callout-tip, #2ea043) 10%, transparent)" },
   ".cm-lp-callout-warning": { borderLeftColor: "var(--callout-warning, #d29922)", background: "color-mix(in srgb, var(--callout-warning, #d29922) 13%, transparent)" },
   ".cm-lp-callout-danger": { borderLeftColor: "var(--callout-danger, #cf222e)", background: "color-mix(in srgb, var(--callout-danger, #cf222e) 10%, transparent)" },
-  // Header (#94 label and/or #150 icon): rendered from the open line's data-icon/data-label so
-  // it shows while the `:::name[label]` source stays hidden (display-only; reveal-on-cursor edits).
-  ".cm-lp-directive-label::before": {
-    content: 'attr(data-icon) " " attr(data-label)',
-    display: "block",
-    fontWeight: "600",
-    fontSize: "0.85em",
-    opacity: "0.85",
-    paddingTop: "0.1em",
-  },
+  // Header (#94 label + #158-C4 icon): the masked Lucide icon (::before) + the label text
+  // (::after) live in callout-icons.css (long mask-image data URIs + per-type colour tokens),
+  // global CSS so the data URIs stay out of this baseTheme. Display-only; reveal-on-cursor edits
+  // the hidden `:::name[label]` source. paddingTop keeps the header off the box's top edge.
+  ".cm-lp-directive-label::before, .cm-lp-directive-label::after": { paddingTop: "0.1em" },
   // Block drag-to-reorder (#84): a grip in the left gutter on each top-level block's first
   // line, and a drop-target line indicator. Display-only.
   ".cm-lp-block-gutter": { width: "1.1em" },

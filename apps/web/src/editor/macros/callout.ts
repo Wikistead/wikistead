@@ -6,7 +6,8 @@ import type { DirectiveMacro } from "./registry";
 // `:::WARNING` == `:::warning`. Combinable with a leading `[label]` header (#94). The content
 // stays Markdown (nested, reveal-on-cursor); the `:::` fences hide. An UNKNOWN type
 // (`:::foobar`) falls back to `note` (Obsidian-compatible) — see `noteCalloutMacro` + the
-// directive renderer. `note` has no icon (colour only); the rest carry a static emoji icon.
+// directive renderer. Each type carries a Lucide icon NAME (#158-C4): the open-line header
+// renders it as a mask-image SVG (currentColor-tinted, ISC, no new dep) — see decorations.ts.
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -14,15 +15,17 @@ function escapeHtml(s: string): string {
 
 interface CalloutSpec {
   type: "note" | "info" | "tip" | "warning" | "danger";
-  icon?: string; // static emoji (allowlist-safe); note has none
+  icon: string; // Lucide icon NAME (#158-C4); the header renders it as a mask-image SVG
 }
 
+// #158-C4 mapping (the owner): note=Pencil (distinct from info), info=Info, tip=Lightbulb,
+// warning=TriangleAlert, danger=OctagonAlert. Names key the mask-image CSS in decorations.ts.
 const SPECS: readonly CalloutSpec[] = [
-  { type: "note" },
-  { type: "info", icon: "ℹ️" },
-  { type: "tip", icon: "💡" },
-  { type: "warning", icon: "⚠️" },
-  { type: "danger", icon: "⛔" },
+  { type: "note", icon: "pencil" },
+  { type: "info", icon: "info" },
+  { type: "tip", icon: "lightbulb" },
+  { type: "warning", icon: "triangle-alert" },
+  { type: "danger", icon: "octagon-alert" },
 ];
 
 function makeCallout(spec: CalloutSpec): DirectiveMacro {
@@ -32,7 +35,7 @@ function makeCallout(spec: CalloutSpec): DirectiveMacro {
     // base class (shared box) + per-type modifier (colour). The icon (if any) renders as the
     // header via the open line's data-icon (display-only).
     containerClass: `cm-lp-callout cm-lp-callout-${spec.type}`,
-    ...(spec.icon ? { icon: spec.icon } : {}),
+    icon: spec.icon,
     exportFidelity: "preserve", // ::: stays plain text → lossless round-trip
     slash: {
       labelKey: `palette.callout.${spec.type}`,
