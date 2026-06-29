@@ -30,3 +30,19 @@ test("::::tabs: tab bar + active panel, switch is display-only, caret-in reveals
   await sleep(250);
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("::::tabs");
 });
+
+// XSS boundary (parity with ::::columns): a tab panel's inner Markdown is rendered via the S0
+// sanitizer (textContent + allowlist), so raw HTML is LITERAL TEXT — a <script>/<img onerror>
+// in a panel produces no element. (Tabs went through S0 like columns but lacked an XSS test.)
+test("::::tabs inner content is sanitized — a <script>/<img onerror> in a panel makes no element", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tabs-xss");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("::::tabs\n:::tab[One]\n<script>alert(1)</script> <img src=x onerror=alert(1)>\n:::\n:::tab[Two]\nok\n:::\n::::\n\nbelow\n");
+  await sleep(400);
+  const widget = page.locator("[data-pane=preview] [data-testid=macro-tabs]");
+  await expect(widget).toBeVisible();
+  expect(await widget.locator("script").count()).toBe(0); // literal text, not a script element
+  expect(await widget.locator("img").count()).toBe(0);    // no img → no onerror to fire
+});
