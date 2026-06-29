@@ -596,6 +596,35 @@ export function useUpdateApiPolicy() {
   });
 }
 
+// Orphan-draft admin handoff (#99 / ADR-061) — tenant#admin only. Enumerate stranded
+// strict-private drafts, then claim (temp access) → reassign to a member. The server holds
+// all authz: a non-admin 404s, claim re-checks the orphan condition (a live page can't be
+// claimed), reassign revokes the admin's temp grant.
+export interface OrphanDraftDTO { id: string; title: string; createdAt: string }
+export function useOrphanDrafts() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["orphan-drafts"],
+    queryFn: () => apiFetch<OrphanDraftDTO[]>("/admin/orphan-drafts", token).then((r) => r ?? []),
+  });
+}
+export function useClaimOrphanDraft() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (pageId: string) => apiFetch<{ pageId: string; expiresAt: string }>(`/admin/orphan-drafts/${encodeURIComponent(pageId)}/claim`, token, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["orphan-drafts"] }),
+  });
+}
+export function useReassignOrphanDraft() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { pageId: string; to: string }) => apiFetch<null>(`/admin/orphan-drafts/${encodeURIComponent(args.pageId)}/reassign`, token, { method: "POST", body: JSON.stringify({ to: args.to }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["orphan-drafts"] }),
+  });
+}
+
 // Tenant OIDC (members' SSO) settings (Phase 5e) — tenant#admin only. The secret is
 // never returned (write-only); hasSecret signals whether one is stored.
 export interface TenantOidcDTO { issuer: string; clientId: string; scopes: string; redirectUri: string; enabled: boolean; hasSecret: boolean; groupsClaim: string | null }

@@ -9,6 +9,7 @@ import { TenantBrandingTab } from "./TenantBrandingTab";
 import { AdminAuthTab } from "./AdminAuthTab";
 import { AdminApiTab } from "./AdminApiTab";
 import { AdminBillingTab } from "./AdminBillingTab";
+import { AdminOrphanDraftsTab } from "./AdminOrphanDraftsTab";
 import { SettingsShell, SettingsDenied, type SettingsTab } from "./SettingsShell";
 
 // Tenant admin console (Phase 5a). Gate: tenant#admin. All tabs now live (Members,
@@ -24,6 +25,7 @@ function useAdminTabs(): SettingsTab[] {
     { key: "auth", label: t("adminNav.auth"), to: "/admin/auth" },
     { key: "api", label: t("adminNav.api"), to: "/admin/api" },
     { key: "billing", label: t("adminNav.billing"), to: "/admin/billing" },
+    { key: "orphans", label: t("adminNav.orphans"), to: "/admin/orphan-drafts" },
   ];
 }
 
@@ -58,6 +60,7 @@ export function AdminRoutes() {
       <Route path="auth" element={<AdminAuthTab />} />
       <Route path="api" element={<AdminApiTab />} />
       <Route path="billing" element={<AdminBillingTab />} />
+      <Route path="orphan-drafts" element={<AdminOrphanDraftsTab />} />
     </Route>
   );
 }
