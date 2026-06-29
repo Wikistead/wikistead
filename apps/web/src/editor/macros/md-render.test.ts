@@ -29,6 +29,37 @@ describe("renderMarkdownToDom (#90 S0)", () => {
     expect(bad.textContent).toContain("x"); // text preserved
   });
 
+  it("DROPS every dangerous href scheme (data/vbscript/file), keeping the text (XSS boundary)", () => {
+    // safeHref blocks javascript|data|vbscript|file; the javascript: case is above. Pin the rest,
+    // each with a distinct payload so a regression that drops only one scheme is caught.
+    for (const [src, label] of [
+      ["[d](data:text/html;base64,PHNjcmlwdD4=)", "data"],
+      ["[v](vbscript:msgbox)", "vbscript"],
+      ["[f](file:///etc/passwd)", "file"],
+    ] as const) {
+      const d = root(src);
+      expect(d.querySelector("a"), `${label}: must not become an anchor`).toBeNull();
+      expect(d.querySelector("span")?.textContent).toBe(label[0]); // link text preserved as a span
+    }
+  });
+
+  it("blocks scheme-evasion by CASE (the regex is case-insensitive)", () => {
+    const d = root("[x](JaVaScRiPt:alert)");
+    expect(d.querySelector("a")).toBeNull(); // mixed-case javascript: still dropped
+    expect(d.textContent).toContain("x");
+  });
+
+  it("ALLOWS safe schemes (mailto/relative) and sets rel on the anchor (allow-side + tabnabbing guard)", () => {
+    const mail = root("[m](mailto:a@b.com)");
+    expect(mail.querySelector("a")?.getAttribute("href")).toBe("mailto:a@b.com");
+
+    const rel = root("[r](/page/123)");
+    const a = rel.querySelector("a");
+    expect(a?.getAttribute("href")).toBe("/page/123"); // relative URL is kept
+    // every emitted anchor carries the tabnabbing/referrer guard
+    expect(a?.getAttribute("rel")).toBe("noopener noreferrer nofollow");
+  });
+
   it("renders raw HTML as LITERAL TEXT — no script/img element, no execution (XSS boundary)", () => {
     const d = root("<script>alert(1)</script>\n\nhi <img src=x onerror=alert(1)> there");
     expect(d.querySelector("script")).toBeNull();
