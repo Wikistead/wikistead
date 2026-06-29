@@ -37,6 +37,7 @@ import { commentsPlugin } from './routes/comments.js'
 import { exportPlugin } from './routes/export.js'
 import { brandingPlugin } from './routes/branding.js'
 import { tenantOidcPlugin } from './routes/tenant-oidc.js'
+import { orphanDraftsPlugin } from './routes/orphan-drafts.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -268,6 +269,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(exportPlugin)
   await app.register(brandingPlugin)
   await app.register(tenantOidcPlugin)
+  await app.register(orphanDraftsPlugin)
   await app.register(spacesPlugin)
   await app.register(pagesPlugin)
   await app.register(billingPlugin)
