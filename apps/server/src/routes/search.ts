@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import { filterAuthorized, fgaClient } from '@wikistead/authz'
-import { paginateAuthorized } from '../search/paginate.js'
+import { fillAuthorizedPage, SEARCH_CANDIDATE_LIMIT } from '../search/paginate.js'
 
 export async function searchPlugin(app: FastifyInstance) {
-  // GET /search?q=...&spaceId=...
+  // GET /search?q=...&spaceId=...&cursor=...
   //
   // Two-stage guard
   // Stage 1 — Meilisearch filter (fast, denormalized viewerUsers/viewerGroups/isPublic).
@@ -11,34 +11,29 @@ export async function searchPlugin(app: FastifyInstance) {
   // Stage 2 — filterAuthorized FGA final check on the candidate set.
   // Authoritative: catches anything Stage 1 missed due to stale state.
   //
-  app.get<{ Querystring: { q?: string; spaceId?: string } }>('/search', async (req, reply) => {
+  // MeiliFGA Deep pagination (#103/ADR-068)
+  // we scan ranked candidate WINDOWS under a bounded budget, filtering each by FGA, so an
+  // authorized hit past the first window stays REACHABLE via `cursor` (not just signalled).
+  app.get<{ Querystring: { q?: string; spaceId?: string; cursor?: string } }>('/search', async (req, reply) => {
     const q = req.query.q?.trim() ?? ''
     if (!q) return []
 
-    // Stage 1: Meilisearch over-fetches CANDIDATES (denormalized filter). We page AFTER
-    // the FGA filter (ADR-027) so authorized hits past the page cutoff aren't silently lost.
-    const candidates = await app.searchDriver.search({
-      tenantId: req.tenant.id,
-      userId: req.user.sub,
-      groups: req.user.groups,
-      q,
-      spaceId: req.query.spaceId,
-    })
-    if (candidates.length === 0) return []
+    // Resume offset (opaque cursor). A tampered cursor only re-positions the ranked scan — it
+    // can never leak an unauthorized hit (stage-2 FGA filters every window) — but bound it anyway.
+    const start = Number(req.query.cursor)
+    const startOffset = Number.isInteger(start) && start > 0 ? start : 0
 
-    // Stage 2: FGA final authorization check on the candidate set (authoritative).
-    const authorized = await filterAuthorized(
-      fgaClient,
-      `user:${req.user.sub}`,
-      'view',
-      candidates.map(h => h.id),
+    const { results, nextCursor } = await fillAuthorizedPage(
+      (offset, limit) => app.searchDriver.search({
+        tenantId: req.tenant.id, userId: req.user.sub, groups: req.user.groups, q, spaceId: req.query.spaceId, offset, limit,
+      }),
+      (ids) => filterAuthorized(fgaClient, `user:${req.user.sub}`, 'view', ids), // stage-2: authoritative
+      { startOffset, windowSize: SEARCH_CANDIDATE_LIMIT },
     )
 
-    // Page the AUTHORIZED set; never return an FGA-unconfirmed candidate. `hasMore` is
-    // surfaced (never a silent cap) via a response header so clients can show "more may
-    // exist" without a breaking body change.
-    const { results, hasMore } = paginateAuthorized(candidates, authorized)
-    reply.header('X-Search-Has-More', String(hasMore))
+    // Never a silent cap: nextCursor (and the back-compat has-more flag) signal + ENABLE more.
+    reply.header('X-Search-Has-More', String(nextCursor != null))
+    if (nextCursor != null) reply.header('X-Search-Cursor', String(nextCursor))
     return results
   })
 }
