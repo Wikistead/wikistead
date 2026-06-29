@@ -12,6 +12,34 @@ export interface TenantOidcConfig {
   clientSecret: string | null
   scopes: string
   redirectUri: string
+  // ADR-055 / #102: which id_token claim holds the user's groups. Default 'groups' (Authentik/
+  // Keycloak/Okta); per-tenant override for IdPs that use 'roles' or a custom claim.
+  groupsClaim?: string
+}
+
+// ADR-055 / #102: coerce an UNTRUSTED groups claim (it rides the token) into a safe string[].
+// Accept only an array of non-empty strings; trim, de-dupe, and BOUND it (≤100 groups, ≤200 chars
+// each) so a hostile/huge token can't blow up the row or the FGA writes. Over-limit is truncated +
+// logged, NEVER thrown — an IdP anomaly must not block login (the owner approval condition).
+const MAX_GROUPS = 100
+const MAX_GROUP_LEN = 200
+export function coerceGroups(raw: unknown, sub?: string): string[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  let dropped = false
+  for (const v of raw) {
+    if (typeof v !== 'string') { dropped = true; continue }
+    const name = v.trim()
+    if (!name) { dropped = true; continue }
+    const bounded = name.length > MAX_GROUP_LEN ? name.slice(0, MAX_GROUP_LEN) : name
+    if (bounded.length < name.length) dropped = true
+    if (!seen.has(bounded)) seen.add(bounded)
+    if (seen.size >= MAX_GROUPS) { dropped = dropped || seen.size < raw.length; break }
+  }
+  if (dropped || seen.size < raw.length) {
+    console.warn(`[oidc:groups] coerced groups claim for ${sub ?? 'user'}: ${raw.length} in → ${seen.size} kept (truncated/filtered)`)
+  }
+  return [...seen]
 }
 
 // The platform IdP (Cloud only) from env — the DEFAULT identity source for tenants
@@ -25,6 +53,7 @@ export function loadPlatformOidc(): TenantOidcConfig | null {
     clientSecret: process.env.PLATFORM_OIDC_CLIENT_SECRET ?? null,
     scopes: process.env.PLATFORM_OIDC_SCOPES ?? 'openid email profile',
     redirectUri: process.env.PLATFORM_OIDC_REDIRECT_URI!,
+    groupsClaim: process.env.PLATFORM_OIDC_GROUPS_CLAIM, // #102: default 'groups' if unset
   }
 }
 
@@ -73,6 +102,10 @@ export interface IdpClaims {
   // `picture` is the standard OIDC profile-image URL claim. Peer-visible identity
   // (avatar / collab cursor) — never email. NULL when the IdP omits it.
   picture: string | null
+  // ADR-055 / #102: the user's groups from the configured claim, coerced + bounded. Fed to the
+  // existing establishMemberSession path (#111: members.groups + FGA group#member sync). [] when
+  // the IdP omits it. Applies only to already-provisioned members (login never creates membership).
+  groups: string[]
 }
 
 // Exchange the callback code for tokens and return the verified id_token claims.
@@ -90,10 +123,13 @@ export async function exchangeCode(
   })
   const claims = tokens.claims()
   if (!claims?.sub) throw new Error('id_token has no sub')
+  const sub = String(claims.sub)
   return {
-    sub: String(claims.sub),
+    sub,
     email: typeof claims.email === 'string' ? claims.email : null,
     name: typeof claims.name === 'string' ? claims.name : null,
     picture: typeof claims.picture === 'string' ? claims.picture : null,
+    // #102: read the configured groups claim (default 'groups'); coerce/bound the untrusted value.
+    groups: coerceGroups((claims as Record<string, unknown>)[cfg.groupsClaim || 'groups'], sub),
   }
 }

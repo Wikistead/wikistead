@@ -70,4 +70,15 @@ describe('tenant OIDC settings', () => {
     })
     expect((await getTenantOidc(db))?.hasSecret).toBe(false)
   })
+
+  it('groups_claim round-trips; blank → null (default groups) (#102)', async () => {
+    await updateTenantOidc(db, fgaClient, {
+      tenantId: TENANT, userId: 'dev-user', issuer: issuer.url, clientId: 'wikistead-tenant', redirectUri: REDIRECT, enabled: false, groupsClaim: 'roles',
+    })
+    expect((await getTenantOidc(db))?.groupsClaim).toBe('roles')
+    await updateTenantOidc(db, fgaClient, {
+      tenantId: TENANT, userId: 'dev-user', issuer: issuer.url, clientId: 'wikistead-tenant', redirectUri: REDIRECT, enabled: false, groupsClaim: '  ',
+    })
+    expect((await getTenantOidc(db))?.groupsClaim).toBeNull() // blank → null → default 'groups'
+  })
 })

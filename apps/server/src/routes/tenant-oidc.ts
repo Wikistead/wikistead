@@ -17,6 +17,7 @@ import type { TenantDb } from '../db/index.js'
 //     existing one unless a new value is supplied (or null to clear → public client).
 export interface TenantOidcView {
   issuer: string; clientId: string; scopes: string; redirectUri: string; enabled: boolean; hasSecret: boolean
+  groupsClaim: string | null // #102: id_token claim for groups (null → default 'groups')
 }
 
 async function requireTenantAdmin(fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> {
@@ -50,13 +51,14 @@ export async function validateIssuer(issuer: string): Promise<string | null> {
 }
 
 export async function getTenantOidc(db: TenantDb): Promise<TenantOidcView | null> {
-  const [row] = await db.sql<{ issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean }[]>`
-    SELECT issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled FROM tenant_oidc LIMIT 1
+  const [row] = await db.sql<{ issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean; groups_claim: string | null }[]>`
+    SELECT issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim FROM tenant_oidc LIMIT 1
   `
   if (!row) return null
   return {
     issuer: row.issuer, clientId: row.client_id, scopes: row.scopes,
     redirectUri: row.redirect_uri, enabled: row.enabled, hasSecret: row.client_secret_enc != null,
+    groupsClaim: row.groups_claim,
   }
 }
 
@@ -66,7 +68,7 @@ export async function updateTenantOidc(
   args: {
     tenantId: string; userId: string;
     issuer: string; clientId: string; clientSecret?: string | null;
-    scopes?: string; redirectUri: string; enabled: boolean;
+    scopes?: string; redirectUri: string; enabled: boolean; groupsClaim?: string | null;
   },
 ): Promise<void> {
   await requireTenantAdmin(fga, args.userId, args.tenantId)
@@ -74,6 +76,7 @@ export async function updateTenantOidc(
   const clientId = args.clientId.trim()
   const redirectUri = args.redirectUri.trim()
   const scopes = (args.scopes ?? '').trim() || 'openid email profile'
+  const groupsClaim = args.groupsClaim?.trim() ? args.groupsClaim.trim() : null // #102: null → default 'groups'
   if (!issuer || !clientId || !redirectUri) {
     throw Object.assign(new Error('issuer, client id and redirect URI are required'), { statusCode: 400 })
   }
@@ -93,11 +96,12 @@ export async function updateTenantOidc(
   else secretEnc = existing?.client_secret_enc ?? null
 
   await db.sql`
-    INSERT INTO tenant_oidc (tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled)
-    VALUES (${args.tenantId}, ${issuer}, ${clientId}, ${secretEnc}, ${scopes}, ${redirectUri}, ${args.enabled})
+    INSERT INTO tenant_oidc (tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim)
+    VALUES (${args.tenantId}, ${issuer}, ${clientId}, ${secretEnc}, ${scopes}, ${redirectUri}, ${args.enabled}, ${groupsClaim})
     ON CONFLICT (tenant_id) DO UPDATE SET
       issuer = ${issuer}, client_id = ${clientId}, client_secret_enc = ${secretEnc},
-      scopes = ${scopes}, redirect_uri = ${redirectUri}, enabled = ${args.enabled}, updated_at = now()
+      scopes = ${scopes}, redirect_uri = ${redirectUri}, enabled = ${args.enabled},
+      groups_claim = ${groupsClaim}, updated_at = now()
   `
   emit({ type: 'tenant.oidc_updated', tenantId: args.tenantId, actorId: args.userId, enabled: args.enabled })
 }
@@ -108,12 +112,13 @@ export async function tenantOidcPlugin(app: FastifyInstance) {
     return getTenantOidc(req.db)
   })
 
-  app.patch<{ Body: { issuer: string; clientId: string; clientSecret?: string | null; scopes?: string; redirectUri: string; enabled: boolean } }>('/admin/oidc', async (req, reply) => {
+  app.patch<{ Body: { issuer: string; clientId: string; clientSecret?: string | null; scopes?: string; redirectUri: string; enabled: boolean; groupsClaim?: string | null } }>('/admin/oidc', async (req, reply) => {
     await updateTenantOidc(req.db, app.fga, {
       tenantId: req.tenant.id, userId: req.user.sub,
       issuer: req.body?.issuer ?? '', clientId: req.body?.clientId ?? '',
       clientSecret: req.body?.clientSecret, scopes: req.body?.scopes,
       redirectUri: req.body?.redirectUri ?? '', enabled: !!req.body?.enabled,
+      groupsClaim: req.body?.groupsClaim,
     })
     return reply.code(204).send()
   })

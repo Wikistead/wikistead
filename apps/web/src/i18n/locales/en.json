@@ -154,7 +154,8 @@
     "testing": "Testing…",
     "testOk": "Discovery succeeded — this issuer looks reachable.",
     "testFail": "Could not verify this issuer.",
-    "saveFailed": "Couldn't save — test the connection first."
+    "saveFailed": "Couldn't save — test the connection first.",
+    "groupsClaim": "Groups claim"
   },
   "adminSpaces": {
     "title": "Spaces",

@@ -24,6 +24,7 @@ export function AdminAuthTab() {
   const [clientSecret, setClientSecret] = useState("");
   const [scopes, setScopes] = useState("openid email profile");
   const [redirectUri, setRedirectUri] = useState("");
+  const [groupsClaim, setGroupsClaim] = useState(""); // #102: blank → default 'groups'
   const [enabled, setEnabled] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; error: string | null } | null>(null);
 
@@ -32,7 +33,7 @@ export function AdminAuthTab() {
   useEffect(() => {
     if (!data) return;
     setIssuer(data.issuer); setClientId(data.clientId); setScopes(data.scopes);
-    setRedirectUri(data.redirectUri); setEnabled(data.enabled);
+    setRedirectUri(data.redirectUri); setEnabled(data.enabled); setGroupsClaim(data.groupsClaim ?? "");
   }, [data]);
 
   const onTest = () => {
@@ -41,7 +42,7 @@ export function AdminAuthTab() {
   };
   const onSave = () => {
     update.mutate(
-      { issuer, clientId, clientSecret: clientSecret ? clientSecret : undefined, scopes, redirectUri, enabled },
+      { issuer, clientId, clientSecret: clientSecret ? clientSecret : undefined, scopes, redirectUri, enabled, groupsClaim: groupsClaim.trim() || null },
       {
         onSuccess: () => { notify.success(t("toast.saved")); setClientSecret(""); },
         onError: () => notify.error(t("adminAuth.saveFailed")),
@@ -70,6 +71,10 @@ export function AdminAuthTab() {
 
       <label className={label}>{t("adminAuth.redirectUri")}</label>
       <Input value={redirectUri} onChange={(e) => setRedirectUri(e.target.value)} placeholder="https://your-tenant.example.com/auth/callback" data-testid="oidc-redirect" />
+
+      {/* #102 / ADR-055: the id_token claim that carries the user's groups (blank → 'groups'). */}
+      <label className={label}>{t("adminAuth.groupsClaim")}</label>
+      <Input value={groupsClaim} onChange={(e) => setGroupsClaim(e.target.value)} placeholder="groups" data-testid="oidc-groups-claim" />
 
       <label className="my-4 mb-1 flex items-center gap-2 text-sm">
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} data-testid="oidc-enabled" />

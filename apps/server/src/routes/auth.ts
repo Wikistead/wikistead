@@ -20,8 +20,8 @@ async function resolveTenant(host: string | undefined): Promise<Tenant | null> {
 // The tenant's own IdP (RLS-scoped, one row per tenant); secret decrypted here.
 async function loadTenantOidc(db: TenantDb): Promise<TenantOidcConfig | null> {
   const [row] = await db.sql<
-    { issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean }[]
-  >`SELECT issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled FROM tenant_oidc LIMIT 1`
+    { issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean; groups_claim: string | null }[]
+  >`SELECT issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim FROM tenant_oidc LIMIT 1`
   if (!row || !row.enabled) return null
   return {
     issuer: row.issuer,
@@ -29,6 +29,7 @@ async function loadTenantOidc(db: TenantDb): Promise<TenantOidcConfig | null> {
     clientSecret: row.client_secret_enc ? decryptSecret(row.client_secret_enc) : null,
     scopes: row.scopes,
     redirectUri: row.redirect_uri,
+    groupsClaim: row.groups_claim ?? undefined, // #102: per-tenant groups claim (default 'groups')
   }
 }
 
