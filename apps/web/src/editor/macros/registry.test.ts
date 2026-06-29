@@ -39,7 +39,8 @@ describe("macro registry", () => {
     expect(m).toBeDefined();
     expect(m!.kind).toBe("directive");
     expect(m!.containerClass).toBe("cm-lp-callout cm-lp-callout-warning");
-    expect(m!.icon).toBe("⚠️"); // typed variants carry a header icon (note has none)
+    expect(m!.icon).toBe("triangle-alert"); // #158-C4: Lucide icon NAME (rendered as a mask-image)
+    expect(findDirectiveMacro("note")!.icon).toBe("pencil"); // note now carries an icon too (C4)
     expect(m!.exportFidelity).toBe("preserve"); // ::: stays plain text → round-trips
     expect(registeredDirectiveNames()).toContain("warning");
     expect(findDirectiveMacro("WARNING")).toBe(m); // case-insensitive
