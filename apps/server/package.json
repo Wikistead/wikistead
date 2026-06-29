@@ -26,6 +26,7 @@
     "@aws-sdk/s3-request-presigner": "^3.658.0",
     "@fastify/cookie": "^11",
     "@fastify/cors": "^10.0.0",
+    "@node-saml/node-saml": "^5.1.0",
     "@openfga/sdk": "^0.7.0",
     "@wikistead/auth": "workspace:*",
     "@wikistead/authz": "workspace:*",
