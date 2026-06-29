@@ -178,6 +178,9 @@ importers:
       '@hocuspocus/provider':
         specifier: ^2.15.0
         version: 2.15.3(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)
+      '@lezer/highlight':
+        specifier: 1.2.3
+        version: 1.2.3
       '@lezer/markdown':
         specifier: 1.6.4
         version: 1.6.4

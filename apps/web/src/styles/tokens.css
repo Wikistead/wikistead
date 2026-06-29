@@ -116,6 +116,17 @@
   --callout-tip: #2ea043;
   --callout-warning: #d29922;
   --callout-danger: var(--danger);
+  /* Syntax highlight (#158-C2 / ADR-052): Everforest LIGHT (medium) hues as semantic tokens —
+     code-fence highlighting consumes these so the palette is themeable (Neovim-consistent). */
+  --hl-keyword: #f85552;   /* red */
+  --hl-string: #8da101;    /* green */
+  --hl-comment: #939f91;   /* grey */
+  --hl-number: #df69ba;    /* purple */
+  --hl-function: #3a94c5;  /* blue */
+  --hl-type: #dfa000;      /* yellow */
+  --hl-variable: #5c6a72;  /* fg */
+  --hl-operator: #f57d26;  /* orange */
+  --hl-meta: #35a77c;      /* aqua (tags/attrs/links) */
   --selection: color-mix(in srgb, var(--accent) 22%, transparent);
   /* Selected-row fill (sidebar): neutral, NOT an accent wash — the accent is carried
      by a left indicator bar instead (Group C static refinement). */
@@ -144,6 +155,16 @@
   --callout-tip: #3fb950;
   --callout-warning: #e3b341;
   --callout-danger: var(--danger);
+  /* Everforest DARK (medium) hues (#158-C2). */
+  --hl-keyword: #e67e80;   /* red */
+  --hl-string: #a7c080;    /* green */
+  --hl-comment: #859289;   /* grey */
+  --hl-number: #d699b6;    /* purple */
+  --hl-function: #7fbbb3;  /* blue */
+  --hl-type: #dbbc7f;      /* yellow */
+  --hl-variable: #d3c6aa;  /* fg */
+  --hl-operator: #e69875;  /* orange */
+  --hl-meta: #83c092;      /* aqua */
   --selection: color-mix(in srgb, var(--accent) 30%, transparent);
   --selected: var(--panel-3);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
