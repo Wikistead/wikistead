@@ -5,6 +5,7 @@ import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { planRank, isDowngrade, effectivePlan } from '../plan.js'
 import { reconcilePlans } from '../scripts/plan-reconcile.js'
+import { TenantRegistry } from '../db/registry.js'
 
 describe('plan helpers (#131 / ADR-064)', () => {
   it('planRank / isDowngrade order free < pro < team', () => {
@@ -60,5 +61,16 @@ describe('reconcilePlans batch (#131 / ADR-064)', () => {
     // Idempotent: a re-run has nothing pending to commit.
     const again = await reconcilePlans(admin, { graceSeconds: 0 })
     expect(again.committed).toBe(0)
+  })
+
+  it('the registry resolves the EFFECTIVE plan (within grace → old; past grace → new)', async () => {
+    // Within grace: keep the old (paid) plan effective even though a downgrade is pending.
+    await admin`UPDATE tenants SET plan = 'pro', pending_plan = 'free', pending_plan_at = now() WHERE id = ${TENANT}`
+    expect((await new TenantRegistry(pool).findBySlug('dev'))?.plan).toBe('pro')
+
+    // Past grace (pending recorded 100 days ago): the new (lower) plan is effective, safe-side,
+    // even before the reconcile batch commits tenants.plan.
+    await admin`UPDATE tenants SET plan = 'pro', pending_plan = 'free', pending_plan_at = now() - interval '100 days' WHERE id = ${TENANT}`
+    expect((await new TenantRegistry(pool).findBySlug('dev'))?.plan).toBe('free')
   })
 })
