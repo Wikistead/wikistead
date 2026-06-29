@@ -33,7 +33,9 @@ export interface StoreResult {
 //
 // 0-row UPDATE detection: RLS or a deleted/missing page causes the UPDATE
 // to affect 0 rows. When stored=false: error is logged and pages.ydoc is not
-// written. TODO: add retry / alert mechanism for persistent 0-row failures.
+// written. The retry + alert mechanism for persistent 0-row failures is designed
+// in ADR-058 / #114 (bounded retry + a stable structured failure marker; the store
+// callback stops swallowing the result) — pending approval, not yet implemented.
 //
 // Draft-only persistence (draft/publish model): this autosaves the live draft
 // (pages.ydoc) so edits survive a tab close / restart. It deliberately does NOT
