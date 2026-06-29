@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
+import { entitlementDenied } from '../entitlement-ux.js'
 import { pool } from '../db/pool.js'
 import type { TenantDb } from '../db/index.js'
 
@@ -57,7 +58,7 @@ export async function addCustomDomain(
   args: { tenantId: string; plan: string; domain: string },
 ): Promise<CustomDomainView> {
   if (!resolveEntitlements(args.plan).customDomain) {
-    throw Object.assign(new Error('custom domains are not available on this plan'), { statusCode: 403, code: 'custom_domain_not_entitled' })
+    throw entitlementDenied('custom_domain', 'custom domains are not available on this plan')
   }
   const domain = normalizeDomain(args.domain)
   const token = randomBytes(24).toString('base64url')

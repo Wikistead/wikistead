@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
 import { resolveEntitlements } from '@wikistead/entitlements'
+import { entitlementDenied } from '../entitlement-ux.js'
 import type { TenantDb } from '../db/index.js'
 
 export type ApiScope = 'read' | 'write'
@@ -63,7 +64,7 @@ export async function createApiKey(
   args: { tenantId: string; plan: string; ownerUserId: string; name: string; scope?: ApiScope },
 ): Promise<ApiKeyCreated> {
   if (!resolveEntitlements(args.plan).apiAccess) {
-    throw Object.assign(new Error('API keys are not available on this plan'), { statusCode: 403, code: 'api_not_entitled' })
+    throw entitlementDenied('api', 'API keys are not available on this plan') // 403 api_not_entitled + upgrade
   }
   const scope: ApiScope = args.scope === 'read' ? 'read' : 'write'
   // Cap: a key may never exceed the tenant policy (deny write when capped to read).
