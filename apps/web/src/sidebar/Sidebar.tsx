@@ -86,7 +86,9 @@ export function Sidebar() {
 
   // Active space capability gates management actions (UI only; the server is the
   // fortress). Space-level: a per-page edit override inside a view-only space would
-  // widen beyond this — not possible until per-page grants exist (Phase 4 E; TODO).
+  // widen beyond this. Per-page grants now exist (#163 / PermissionsDialog), but the
+  // sidebar still gates on the SPACE capability; reflecting per-page capability here is
+  // a separate enhancement (the server re-checks per page regardless).
   const currentSpace = spaces.find((s) => s.id === current);
   const canEdit = currentSpace?.capability === "edit" || currentSpace?.capability === "manage";
   const canManage = currentSpace?.capability === "manage";
