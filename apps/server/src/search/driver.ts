@@ -46,8 +46,8 @@ export class LogicalSearchDriver implements SearchDriver {
     await this.client.waitForTasks([t1.taskUid, t2.taskUid, t3.taskUid])
   }
 
-  async search({ tenantId, userId, groups, q, spaceId }: {
-    tenantId: string; userId: string; groups: string[]; q: string; spaceId?: string
+  async search({ tenantId, userId, groups, q, spaceId, offset, limit }: {
+    tenantId: string; userId: string; groups: string[]; q: string; spaceId?: string; offset?: number; limit?: number
   }): Promise<SearchHit[]> {
     // TODO(phase: tenancy-namespace): route to NamespaceSearchDriver
     const visibilityFilter = [
@@ -63,7 +63,8 @@ export class LogicalSearchDriver implements SearchDriver {
     // UI renders it as text (no XSS). cropLength is a placeholder (tune later).
     const result = await this.client.index(this.INDEX).search<SearchDoc>(q, {
       filter: filters.join(' AND '),
-      limit: SEARCH_CANDIDATE_LIMIT, // over-fetch candidates for stage-2 FGA paging (ADR-027)
+      limit: limit ?? SEARCH_CANDIDATE_LIMIT, // over-fetch candidates for stage-2 FGA paging (ADR-027)
+      offset: offset ?? 0,                    // #103/ADR-068: deep pagination resumes a ranked scan
       attributesToRetrieve: ['id', 'tenantId', 'spaceId', 'title'],
       attributesToCrop: ['body'],
       cropLength: 30,

@@ -26,6 +26,11 @@ export interface SearchDriver {
     groups: string[]
     q: string
     spaceId?: string
+    // #103 / ADR-068: deep pagination. `offset` resumes a ranked candidate scan; `limit` sizes
+    // the window. Both optional — omitting them yields the first default-sized candidate window
+    // (backward compatible). The caller (two-stage search) loops windows under a scan budget.
+    offset?: number
+    limit?: number
   }): Promise<SearchHit[]>
   upsertDoc(doc: SearchDoc): Promise<void>
   deleteDoc(pageId: string): Promise<void>
