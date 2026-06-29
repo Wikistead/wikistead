@@ -10,7 +10,7 @@ import { generateKeyPair, exportJWK, SignJWT, type KeyLike } from 'jose'
 
 export interface TestIssuer {
   url: string
-  setSubject(sub: string, profile?: { email?: string; name?: string }): void
+  setSubject(sub: string, profile?: { email?: string; name?: string; groups?: unknown }): void
   close(): Promise<void>
 }
 
@@ -20,6 +20,7 @@ interface PendingCode {
   sub: string
   email?: string
   name?: string
+  groups?: unknown
 }
 
 export async function startTestIssuer(opts: { clientId: string }): Promise<TestIssuer> {
@@ -29,7 +30,7 @@ export async function startTestIssuer(opts: { clientId: string }): Promise<TestI
   jwk.alg = 'RS256'
   jwk.use = 'sig'
 
-  let subject = { sub: 'test-sub', email: undefined as string | undefined, name: undefined as string | undefined }
+  let subject = { sub: 'test-sub', email: undefined as string | undefined, name: undefined as string | undefined, groups: undefined as unknown }
   const codes = new Map<string, PendingCode>()
   let codeSeq = 0
 
@@ -65,6 +66,7 @@ export async function startTestIssuer(opts: { clientId: string }): Promise<TestI
         sub: subject.sub,
         email: subject.email,
         name: subject.name,
+        groups: subject.groups,
       })
       const redirectUri = u.searchParams.get('redirect_uri')!
       const state = u.searchParams.get('state') ?? ''
@@ -89,7 +91,7 @@ export async function startTestIssuer(opts: { clientId: string }): Promise<TestI
           if (pending.codeChallenge && pending.codeChallenge !== challenge) {
             res.writeHead(400, { 'content-type': 'application/json' }); return res.end('{"error":"invalid_grant"}')
           }
-          const idToken = await new SignJWT({ nonce: pending.nonce, email: pending.email, name: pending.name })
+          const idToken = await new SignJWT({ nonce: pending.nonce, email: pending.email, name: pending.name, ...(pending.groups !== undefined ? { groups: pending.groups } : {}) })
             .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
             .setIssuedAt()
             .setIssuer(issuerUrl)
@@ -110,7 +112,7 @@ export async function startTestIssuer(opts: { clientId: string }): Promise<TestI
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`
   return {
     url,
-    setSubject(sub, profile) { subject = { sub, email: profile?.email, name: profile?.name } },
+    setSubject(sub, profile) { subject = { sub, email: profile?.email, name: profile?.name, groups: profile?.groups } },
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   }
 }

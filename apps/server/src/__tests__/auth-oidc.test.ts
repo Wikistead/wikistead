@@ -9,6 +9,7 @@ import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { groupFgaId } from '../auth/group-sync.js'
 import { buildApp } from '../app.js'
 import { encryptSecret } from '../auth/secret-crypto.js'
 import { SESSION_COOKIE } from '../auth/session.js'
@@ -56,6 +57,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await deleteTuples(fgaClient, [{ user: `user:${MEMBER}`, relation: 'member', object: `tenant:${tenant.id}` }]).catch(() => {})
+  // #102: drop any group#member tuples the groups-claim test synced (defensive — the test's
+  // second login already diffs them away, but a mid-test failure could leave them).
+  for (const g of ['Engineering', 'Sales']) {
+    await deleteTuples(fgaClient, [{ user: `user:${MEMBER}`, relation: 'member', object: `group:${groupFgaId(tenant.id, g)}` }]).catch(() => {})
+  }
   await db.sql`DELETE FROM members WHERE sub IN (${MEMBER}, ${STRANGER})`.catch(() => {})
   // Restore the dummy dev OIDC config (don't leave it pointing at a dead test issuer).
   await db.sql`UPDATE tenant_oidc SET issuer = ${process.env.OIDC_ISSUER!}, enabled = true WHERE tenant_id = ${tenant.id}`.catch(() => {})
@@ -78,6 +84,26 @@ describe('OIDC login flow', () => {
     const me = await app.inject({ method: 'GET', url: '/auth/me', headers: { host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${sid}` } })
     expect(me.statusCode).toBe(200)
     expect(me.json()).toMatchObject({ sub: MEMBER })
+  })
+
+  // #102 / ADR-055: the id_token groups claim flows into members.groups AND the FGA group#member
+  // sync (#111), so a group grant (#163) resolves — and a non-array claim is ignored (coerced).
+  it('groups claim → members.groups + FGA group#member; garbage claim is ignored', async () => {
+    issuer.setSubject(MEMBER, { email: 'm@x.test', groups: ['Engineering', 'Sales'] })
+    await cb(await startLogin('/'))
+    const [m] = await db.sql<[{ groups: string[] }]>`SELECT groups FROM members WHERE sub = ${MEMBER}`
+    expect(new Set(m.groups)).toEqual(new Set(['Engineering', 'Sales']))
+    // the #111 sync wrote the group#member tuples → a member of Engineering resolves it (group is
+    // not a page/space ResourceRef, so check via the raw FGA client, like group-sync.test).
+    expect((await fgaClient.check({ user: `user:${MEMBER}`, relation: 'member', object: `group:${groupFgaId(tenant.id, 'Engineering')}` })).allowed).toBe(true)
+
+    // Re-login with a GARBAGE (non-array) groups claim → coerced to [] (membership unaffected: the
+    // diff removes the previous groups). An IdP anomaly never throws / blocks login.
+    issuer.setSubject(MEMBER, { email: 'm@x.test', groups: 'not-an-array' })
+    const res = await cb(await startLogin('/'))
+    expect(res.statusCode).toBe(302) // login still succeeds
+    const [m2] = await db.sql<[{ groups: string[] }]>`SELECT groups FROM members WHERE sub = ${MEMBER}`
+    expect(m2.groups).toEqual([])
   })
 
   // identity ≠ membership, through the REAL flow: the IdP authenticates STRANGER

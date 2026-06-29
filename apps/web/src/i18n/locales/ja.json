@@ -154,7 +154,8 @@
     "testing": "テスト中…",
     "testOk": "ディスカバリに成功しました — この issuer に到達できます。",
     "testFail": "この issuer を検証できませんでした。",
-    "saveFailed": "保存できませんでした — 先に接続テストをしてください。"
+    "saveFailed": "保存できませんでした — 先に接続テストをしてください。",
+    "groupsClaim": "グループのクレーム名"
   },
   "adminSpaces": {
     "title": "スペース",

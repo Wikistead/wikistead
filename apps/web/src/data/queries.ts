@@ -598,8 +598,8 @@ export function useUpdateApiPolicy() {
 
 // Tenant OIDC (members' SSO) settings (Phase 5e) — tenant#admin only. The secret is
 // never returned (write-only); hasSecret signals whether one is stored.
-export interface TenantOidcDTO { issuer: string; clientId: string; scopes: string; redirectUri: string; enabled: boolean; hasSecret: boolean }
-export interface TenantOidcInput { issuer: string; clientId: string; clientSecret?: string | null; scopes: string; redirectUri: string; enabled: boolean }
+export interface TenantOidcDTO { issuer: string; clientId: string; scopes: string; redirectUri: string; enabled: boolean; hasSecret: boolean; groupsClaim: string | null }
+export interface TenantOidcInput { issuer: string; clientId: string; clientSecret?: string | null; scopes: string; redirectUri: string; enabled: boolean; groupsClaim?: string | null }
 export function useTenantOidc() {
   const { token } = useSession();
   return useQuery({
