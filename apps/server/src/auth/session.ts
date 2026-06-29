@@ -138,6 +138,16 @@ export async function establishMemberSession(
   const { allowed } = await deps.fga.check({ user: `user:${claims.sub}`, relation: 'member', object: `tenant:${tenant.id}` })
   if (!allowed) throw Object.assign(new Error('not a member of this tenant'), { statusCode: 403 })
 
+  // #131 / ADR-064: a member frozen by a plan-downgrade seat overage cannot establish a session
+  // (data kept; reactivated on re-upgrade). The membership tuple stays — this is a reversible
+  // billing freeze, not a revocation. Checked AFTER membership, so non-members still read 403.
+  const [frozen] = await deps.db.sql<{ deactivated_at: Date | null }[]>`
+    SELECT deactivated_at FROM members WHERE tenant_id = ${tenant.id} AND sub = ${claims.sub}
+  `
+  if (frozen?.deactivated_at) {
+    throw Object.assign(new Error('account deactivated by a plan change'), { statusCode: 403, code: 'member_deactivated' })
+  }
+
   // Upsert the profile + groups, then mirror the group membership into FGA `group#member`
   // (#111). Both in one tx: if the FGA sync fails the row rolls back, so members.groups and
   // FGA stay aligned and the next login re-derives the same diff. (Login already requires FGA
