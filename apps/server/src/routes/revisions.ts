@@ -76,6 +76,20 @@ export async function listRevisions(
   return rows.map(r => ({ id: r.id, pageId: r.page_id, title: r.title, createdBy: r.created_by, createdAt: r.created_at }))
 }
 
+// #109 / ADR-072: does this page have revisions HIDDEN by the plan's history-retention window?
+// An entitlement loss (short retention) must be disclosed as "older history hidden — upgrade to
+// see the full timeline" (the data is kept, not deleted), NOT silently omitted (which reads as
+// "no history" = data-loss). The list route surfaces this so the UI can show the upgrade
+// affordance. Unlimited retention → nothing is ever hidden.
+export async function hasHiddenRevisions(db: TenantDb, args: { pageId: string; plan: string }): Promise<boolean> {
+  if (!isFinite(resolveEntitlements(args.plan).historyRetentionDays)) return false
+  const [row] = await db.sql<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM revisions
+    WHERE page_id = ${args.pageId} AND created_at < ${retentionCutoff(args.plan)}
+  `
+  return (row?.n ?? 0) > 0
+}
+
 // Restore a page to a specific revision.
 //
 // Decoded Markdown body of one revision snapshot (Design-5 diff). view-gated like the
@@ -196,8 +210,12 @@ export async function restoreRevision(
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function revisionsPlugin(app: FastifyInstance) {
-  app.get<{ Params: { pageId: string } }>('/pages/:pageId/revisions', async (req) => {
-    return listRevisions(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub, plan: req.tenant.plan })
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/revisions', async (req, reply) => {
+    const list = await listRevisions(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub, plan: req.tenant.plan })
+    // #109/ADR-072: disclose plan-hidden history (non-destructive entitlement loss) so the UI can
+    // show "upgrade to see the full timeline" rather than silently implying there is no older history.
+    reply.header('X-Retention-Limited', String(await hasHiddenRevisions(req.db, { pageId: req.params.pageId, plan: req.tenant.plan })))
+    return list
   })
 
   app.get<{ Params: { pageId: string; revId: string } }>('/pages/:pageId/revisions/:revId/content', async (req) => {
