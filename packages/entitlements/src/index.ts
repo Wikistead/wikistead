@@ -42,6 +42,11 @@ export interface Entitlements {
   // downgrade cleanly reverts to the default look while stored values survive for a
   // re-upgrade. Personal light/dark theme is NOT gated (always available).
   branding: boolean
+
+  // API key access (#126 / ADR-063). Gates POST /api-keys creation. A Pro value lever:
+  // self-host on (Community First), Cloud free off, Cloud Pro/Team on. WHICH plans is a business
+  // placeholder; the gate reads this resolved boolean (entitlement⟂authz separation).
+  apiAccess: boolean
 }
 
 // Self-host / Community edition: never plan-limited.
@@ -52,6 +57,7 @@ export const UNLIMITED: Entitlements = {
   historyRetentionDays: Infinity,
   maxStorageBytes: Infinity,
   branding: true,
+  apiAccess: true,
 }
 
 const GB = 1_000_000_000
@@ -68,12 +74,12 @@ const GB = 1_000_000_000
 // TODO(open-core): these Cloud numbers are a commercial concern; move CLOUD_PLANS
 //   into an EE/Cloud package when one exists, so the AGPL CE package stays clean.
 const CLOUD_PLANS: Record<string, Entitlements> = {
-  free: { guestAccess: true, maxSeats: 5,        maxSpaces: Infinity, historyRetentionDays: 7,        maxStorageBytes: 5 * GB,     branding: false },
-  pro:  { guestAccess: true, maxSeats: Infinity, maxSpaces: Infinity, historyRetentionDays: Infinity, maxStorageBytes: Infinity, branding: true },
+  free: { guestAccess: true, maxSeats: 5,        maxSpaces: Infinity, historyRetentionDays: 7,        maxStorageBytes: 5 * GB,     branding: false, apiAccess: false },
+  pro:  { guestAccess: true, maxSeats: Infinity, maxSpaces: Infinity, historyRetentionDays: Infinity, maxStorageBytes: Infinity, branding: true,  apiAccess: true  },
   // The Cloud top tier is "team" (contact-sales / invoiced) — NOT "enterprise",
   // which ADR-015 reserves for the self-host proprietary edition. Mirrors Pro for
   // now; its differentiators (SCIM, audit log) are post-launch and add flags here.
-  team: { guestAccess: true, maxSeats: Infinity, maxSpaces: Infinity, historyRetentionDays: Infinity, maxStorageBytes: Infinity, branding: true },
+  team: { guestAccess: true, maxSeats: Infinity, maxSpaces: Infinity, historyRetentionDays: Infinity, maxStorageBytes: Infinity, branding: true,  apiAccess: true  },
 }
 
 // The Cloud resolver. Registered by the Cloud entrypoint; exported so tests can
