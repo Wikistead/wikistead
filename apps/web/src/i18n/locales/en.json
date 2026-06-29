@@ -434,6 +434,7 @@
     "vimHint": "\\ format",
     "excalidraw": "Excalidraw drawing",
     "mermaid": "Mermaid diagram",
+    "plantuml": "PlantUML diagram",
     "callout": {
       "note": "Note callout",
       "info": "Info callout",
