@@ -60,33 +60,12 @@ export const UNLIMITED: Entitlements = {
   apiAccess: true,
 }
 
-const GB = 1_000_000_000
-
-// Cloud plan table. PLACEHOLDER VALUES — the specific numbers, the number of
-// tiers (free/pro now; Team later), and pricing are NOT decided; they are set to
-// rough norms so enforcement can be wired and tested. Finalize before launch.
-// TODO(business): finalize limits + pricing + tier count; map to CE/EE/Cloud
-//   (Cloud's future top tier is "Team", NOT "Enterprise" — that word is reserved
-//   for the self-host proprietary edition). See ADR-015.
-// TODO(billing): Pro storage is Infinity = metered overage. Before launch it
-//   needs a soft cap + usage alerts so a tenant cannot rack up a silent runaway
-//   bill (the classic metered-billing trap).
-// TODO(open-core): these Cloud numbers are a commercial concern; move CLOUD_PLANS
-//   into an EE/Cloud package when one exists, so the AGPL CE package stays clean.
-const CLOUD_PLANS: Record<string, Entitlements> = {
-  free: { guestAccess: true, maxSeats: 5,        maxSpaces: Infinity, historyRetentionDays: 7,        maxStorageBytes: 5 * GB,     branding: false, apiAccess: false },
-  pro:  { guestAccess: true, maxSeats: Infinity, maxSpaces: Infinity, historyRetentionDays: Infinity, maxStorageBytes: Infinity, branding: true,  apiAccess: true  },
-  // The Cloud top tier is "team" (contact-sales / invoiced) — NOT "enterprise",
-  // which ADR-015 reserves for the self-host proprietary edition. Mirrors Pro for
-  // now; its differentiators (SCIM, audit log) are post-launch and add flags here.
-  team: { guestAccess: true, maxSeats: Infinity, maxSpaces: Infinity, historyRetentionDays: Infinity, maxStorageBytes: Infinity, branding: true,  apiAccess: true  },
-}
-
-// The Cloud resolver. Registered by the Cloud entrypoint; exported so tests can
-// exercise the limited behavior directly.
-export function cloudEntitlements(plan: string): Entitlements {
-  return CLOUD_PLANS[plan] ?? CLOUD_PLANS['free']!
-}
+// NOTE (ADR-069 / #132): the Cloud plan table (`CLOUD_PLANS`) and its resolver
+// (`cloudEntitlements`) have MOVED to the proprietary `@wikistead/entitlements-cloud`
+// package, so this AGPL CE package carries NO commercial Cloud config. This package keeps
+// only the edition-neutral seam: the `Entitlements` interface, `UNLIMITED`, the resolver
+// registry, and `resolveEntitlements`. The Cloud composition root imports cloudEntitlements
+// from that package and registers it at boot (ADR-015 wiring unchanged).
 
 // ── Resolver registry (same register/get pattern as @wikistead/hooks) ───────
 // Default resolver = UNLIMITED. Self-host registers nothing. Cloud registers

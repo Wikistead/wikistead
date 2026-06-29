@@ -26,6 +26,7 @@
     "@wikistead/auth": "workspace:*",
     "@wikistead/authz": "workspace:*",
     "@wikistead/entitlements": "workspace:^",
+    "@wikistead/entitlements-cloud": "workspace:^",
     "@wikistead/events": "workspace:^",
     "@wikistead/hooks": "workspace:^",
     "@wikistead/types": "workspace:*",
