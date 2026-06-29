@@ -87,6 +87,21 @@ describe('storeYdoc', () => {
     expect(row.has_unpublished_changes).toBe(true)
   })
 
+  it('CLEARS has_unpublished_changes when the draft equals published_md (no spurious badge / debounce-lag regression)', async () => {
+    // The accuracy invariant (storeYdoc): the badge is `published_md IS DISTINCT FROM md`, NOT
+    // always true. After publish, the trailing debounced store fires with content that EQUALS the
+    // just-published version — it must leave the badge CLEARED, not re-raise "unpublished changes".
+    const BODY = 'published and synced body'
+    await adminPool`UPDATE pages SET published_md = ${BODY}, has_unpublished_changes = true WHERE id = ${testPageId}`
+    const doc = new Y.Doc()
+    doc.getText('content').insert(0, BODY) // draft content == published_md
+    await storeYdoc(TENANT, testPageId, Y.encodeStateAsUpdate(doc))
+    const [row] = await adminPool<[{ has_unpublished_changes: boolean }]>`
+      SELECT has_unpublished_changes FROM pages WHERE id = ${testPageId}`
+    expect(row.has_unpublished_changes).toBe(false) // equal → badge cleared (not spuriously true)
+    await adminPool`UPDATE pages SET published_md = NULL WHERE id = ${testPageId}` // restore fixture
+  })
+
   it('does NOT enqueue search_outbox on a draft save (publish reindexes, not the draft)', async () => {
     // Draft/publish model: storeYdoc only autosaves the draft. Search/export reflect
     // the PUBLISHED version, reindexed solely by POST /pages/:id/publish — a draft
