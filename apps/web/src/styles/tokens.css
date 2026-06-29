@@ -110,6 +110,12 @@
   --accent-fg: #ffffff; /* text/icon on an accent fill */
   --danger: #cf222e;    /* destructive actions (delete / remove / revoke) */
   --danger-fg: #ffffff;
+  /* Callout accents (#158-C5 / ADR-052): semantic tokens so per-type callout colours are no
+     longer hardcoded (#150). note/info ride --accent; danger rides --danger; tip/warning get
+     their own hues. tenant themes / dark override these. C2 (syntax) + C3 (math) add their own. */
+  --callout-tip: #2ea043;
+  --callout-warning: #d29922;
+  --callout-danger: var(--danger);
   --selection: color-mix(in srgb, var(--accent) 22%, transparent);
   /* Selected-row fill (sidebar): neutral, NOT an accent wash — the accent is carried
      by a left indicator bar instead (Group C static refinement). */
@@ -134,6 +140,10 @@
   --accent-fg: #06243f;
   --danger: #f0584d;
   --danger-fg: #ffffff;
+  /* Dark-tuned callout hues (#158-C5): brighter so the tinted box + bar stay legible on dark. */
+  --callout-tip: #3fb950;
+  --callout-warning: #e3b341;
+  --callout-danger: var(--danger);
   --selection: color-mix(in srgb, var(--accent) 30%, transparent);
   --selected: var(--panel-3);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);

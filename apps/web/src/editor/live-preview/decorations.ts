@@ -1069,11 +1069,11 @@ export const livePreviewTheme = EditorView.baseTheme({
     background: "color-mix(in srgb, var(--accent, #4ea1ff) 8%, transparent)",
     paddingLeft: "0.8em",
   },
-  // Per-type accents (#150). note/info ride the base accent; tip/warning use safe hues (no
-  // semantic token yet), danger uses --danger. color-mix tints stay legible in light + dark.
-  ".cm-lp-callout-tip": { borderLeftColor: "#2ea043", background: "color-mix(in srgb, #2ea043 10%, transparent)" },
-  ".cm-lp-callout-warning": { borderLeftColor: "#d29922", background: "color-mix(in srgb, #d29922 13%, transparent)" },
-  ".cm-lp-callout-danger": { borderLeftColor: "var(--danger, #cf222e)", background: "color-mix(in srgb, var(--danger, #cf222e) 10%, transparent)" },
+  // Per-type accents (#150 → #158-C5 tokens). note/info ride the base accent; tip/warning/danger
+  // ride semantic --callout-* tokens (tokens.css, light/dark + tenant-overridable) — no hardcodes.
+  ".cm-lp-callout-tip": { borderLeftColor: "var(--callout-tip, #2ea043)", background: "color-mix(in srgb, var(--callout-tip, #2ea043) 10%, transparent)" },
+  ".cm-lp-callout-warning": { borderLeftColor: "var(--callout-warning, #d29922)", background: "color-mix(in srgb, var(--callout-warning, #d29922) 13%, transparent)" },
+  ".cm-lp-callout-danger": { borderLeftColor: "var(--callout-danger, #cf222e)", background: "color-mix(in srgb, var(--callout-danger, #cf222e) 10%, transparent)" },
   // Header (#94 label and/or #150 icon): rendered from the open line's data-icon/data-label so
   // it shows while the `:::name[label]` source stays hidden (display-only; reveal-on-cursor edits).
   ".cm-lp-directive-label::before": {
