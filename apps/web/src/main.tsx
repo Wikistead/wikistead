@@ -11,6 +11,9 @@ import "@fontsource/inter/700.css";
 import "@fontsource/noto-sans-jp/400.css";
 import "@fontsource/noto-sans-jp/500.css";
 import "@fontsource/noto-sans-jp/700.css";
+// #173 / #158-C1: editor monospace font (OFL, self-hosted woff2 subset). Loads "UDEV Gothic" so the
+// editor's --font-mono renders it (full-width = 2×half-width → vim columns stay exact for Japanese).
+import "./assets/fonts/udev-gothic.css";
 import "./styles/tokens.css";
 import "./styles/print.css";
 import "./styles/macro-modal.css";
