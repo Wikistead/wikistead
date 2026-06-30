@@ -29,7 +29,10 @@ const ask = (q: string) =>
     headers: { host: HOST, 'content-type': 'application/json', authorization: 'Bearer dev-token' },
     payload: JSON.stringify({ question: q }),
   })
-const clear = () => admin`DELETE FROM usage_counters WHERE tenant_id = ${TENANT} AND resource = 'ai.tokens' AND period_start = ${PERIOD}`
+const clear = async () => {
+  await admin`DELETE FROM usage_counters WHERE tenant_id = ${TENANT} AND resource = 'ai.tokens' AND period_start = ${PERIOD}`
+  await admin`DELETE FROM usage_alerts WHERE tenant_id = ${TENANT} AND resource = 'ai.tokens' AND period_start = ${PERIOD}`
+}
 
 beforeAll(async () => {
   db = await acquireTenantDb(asTenant(TENANT))

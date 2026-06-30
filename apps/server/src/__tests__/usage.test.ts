@@ -7,7 +7,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
-import { recordUsage, getUsage } from '../usage.js'
+import { recordUsage, getUsage, recordThresholdAlert } from '../usage.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -22,11 +22,13 @@ let other: TenantDb
 
 beforeAll(async () => {
   await admin`DELETE FROM usage_counters WHERE resource LIKE 'test.%'` // clean slate
+  await admin`DELETE FROM usage_alerts WHERE resource LIKE 'test.%'`
   dev = await acquireTenantDb(asTenant(DEV))
   other = await acquireTenantDb(asTenant(OTHER))
 }, 30_000)
 afterAll(async () => {
   await admin`DELETE FROM usage_counters WHERE resource LIKE 'test.%'`.catch(() => {})
+  await admin`DELETE FROM usage_alerts WHERE resource LIKE 'test.%'`.catch(() => {})
   await dev.release()
   await other.release()
   await admin.end()
@@ -56,6 +58,14 @@ describe('usage ledger (#128 / ADR-082)', () => {
     expect(await getUsage(dev, R, P)).toBe(42) // unaffected by the other period/resource
     expect(await getUsage(dev, R, '2026-08-01')).toBe(7)
     expect(await getUsage(dev, 'test.other', P)).toBe(5)
+  })
+
+  it('alert dedup: the FIRST claim of (resource, period, threshold) wins, repeats are no-ops', async () => {
+    expect(await recordThresholdAlert(dev, R, P, 0.8)).toBe(true) // first crosser emits
+    expect(await recordThresholdAlert(dev, R, P, 0.8)).toBe(false) // concurrent/repeat → suppressed
+    expect(await recordThresholdAlert(dev, R, P, 1.0)).toBe(true) // a DIFFERENT threshold still fires
+    // a different tenant claims the same (resource, period, threshold) independently (RLS-scoped PK)
+    expect(await recordThresholdAlert(other, R, P, 0.8)).toBe(true)
   })
 
   it('is RLS-isolated: another tenant neither sees nor is affected by this usage', async () => {
