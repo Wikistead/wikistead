@@ -46,6 +46,7 @@ import { tenantSamlPlugin } from './routes/tenant-saml.js'
 import { samlAuthPlugin } from './routes/saml-auth.js'
 import { aiPlugin } from './routes/ai.js'
 import { scimTokensPlugin } from './routes/scim-tokens.js'
+import { scimPlugin } from './routes/scim.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -149,6 +150,7 @@ export async function buildApp(): Promise<FastifyInstance> {
         req.url.startsWith('/webhooks/') || req.url.startsWith('/public/') ||
         req.url.startsWith('/auth/login') || req.url.startsWith('/auth/callback') ||
         req.url.startsWith('/auth/saml/') || // SAML SP-initiated login + ACS establish the session (#135)
+        req.url.startsWith('/scim/v2/') || // SCIM uses its own scm_ bearer scheme; authenticated in scimPlugin (#134)
         req.url.startsWith('/signup/')) return
 
     const { slug, domain } = resolveTenantFromHost(req.headers.host ?? '')
@@ -299,6 +301,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(samlAuthPlugin)
   await app.register(aiPlugin)
   await app.register(scimTokensPlugin)
+  await app.register(scimPlugin)
   await app.register(spacesPlugin)
   await app.register(pagesPlugin)
   await app.register(billingPlugin)
