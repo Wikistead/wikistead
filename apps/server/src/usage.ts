@@ -43,6 +43,25 @@ export async function recordUsage(
   return rows.length > 0
 }
 
+// Claim a usage-alert for (resource, period, threshold) — returns true iff THIS call is the first to
+// record it (so the caller emits exactly once). Durable + concurrency-safe (the PK makes a second
+// writer a no-op), closing the concurrent-double-alert gap that crossedThresholds alone can't (two
+// requests reading the same pre-usage). RLS-scoped via the caller's tenant.
+export async function recordThresholdAlert(
+  db: TenantDb,
+  resource: string,
+  periodStart: string,
+  threshold: number,
+): Promise<boolean> {
+  const rows = await db.sql<{ claimed: boolean }[]>`
+    INSERT INTO usage_alerts (tenant_id, resource, period_start, threshold)
+    VALUES (current_setting('app.tenant_id', TRUE), ${resource}, ${periodStart}, ${threshold})
+    ON CONFLICT (tenant_id, resource, period_start, threshold) DO NOTHING
+    RETURNING TRUE AS claimed
+  `
+  return rows.length > 0
+}
+
 // Total metered usage for a resource in a billing window (SUM of recorded increments). RLS scopes the
 // read to the caller's tenant; returns 0 when nothing is recorded.
 export async function getUsage(db: TenantDb, resource: string, periodStart: string): Promise<number> {

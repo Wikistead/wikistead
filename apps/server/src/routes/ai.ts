@@ -8,7 +8,7 @@ import { fgaClient } from '@wikistead/authz'
 import type { TenantDb } from '../db/index.js'
 import { bumpRateBucket } from '../rate-limit.js'
 import { gatherAuthorizedContext } from '../ai/context.js'
-import { recordUsage, getUsage, currentPeriodStart, estimateTokens } from '../usage.js'
+import { recordUsage, getUsage, currentPeriodStart, estimateTokens, recordThresholdAlert } from '../usage.js'
 
 // The metered resource id for AI token consumption (#128 / ADR-082 — usage_counters).
 const AI_TOKENS = 'ai.tokens'
@@ -127,10 +127,13 @@ export async function aiPlugin(app: FastifyInstance) {
     // A per-request source_id keeps recordUsage idempotent if this ever moves behind a retrying outbox.
     const consumed = tokens ?? estimateTokens(question, context, text)
     await recordUsage(req.db, AI_TOKENS, period, `ai:${randomUUID()}`, consumed)
-    // Alert before the wall (#128): fire once per (resource, period, threshold) as usage advances —
-    // crossedThresholds reports only boundaries THIS call passed (usedBefore → usedBefore+consumed).
+    // Alert before the wall (#128): crossedThresholds reports the boundaries THIS call passed
+    // (usedBefore → usedBefore+consumed); recordThresholdAlert is the DURABLE once-per-period guard so
+    // even concurrent crossers emit exactly once. Only the first claimer emits.
     for (const threshold of crossedThresholds(usedBefore, usedBefore + consumed, allowance, USAGE_ALERT_THRESHOLDS)) {
-      emit({ type: 'usage.threshold_crossed', tenantId: req.tenant.id, resource: AI_TOKENS, threshold, period })
+      if (await recordThresholdAlert(req.db, AI_TOKENS, period, threshold)) {
+        emit({ type: 'usage.threshold_crossed', tenantId: req.tenant.id, resource: AI_TOKENS, threshold, period })
+      }
     }
     return { answer: text, sources }
   })
