@@ -8,6 +8,7 @@ import { calloutMacros } from "./callout";
 import { excalidrawMacro } from "./excalidraw";
 import { tableMacro } from "./table";
 import { columnsMacro, tabsMacro, detailsMacro } from "./layout-directives";
+import { transcludeMacro } from "./transclude";
 
 registerMacro(mermaidMacro);
 registerMacro(plantumlMacro); // ```plantuml — degrade-to-source until an external service is configured (#140 / ADR-074)
@@ -17,6 +18,7 @@ registerMacro(tableMacro);
 registerMacro(columnsMacro); // M2 layout directive (#90)
 registerMacro(tabsMacro); // M2 layout directive (#90)
 registerMacro(detailsMacro); // M2 layout directive (#90)
+registerMacro(transcludeMacro); // #108 internal transclude (host-mediated; ADR-071)
 
 export { macroFold } from "./fold";
 export { findFenceMacro, findDirectiveMacro, registeredFenceLangs, registeredDirectiveNames, registeredMacros } from "./registry";

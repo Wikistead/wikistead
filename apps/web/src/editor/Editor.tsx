@@ -6,6 +6,7 @@ import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayMod
 import type { DisplayMode } from "./live-preview/decorations";
 import { makeImageResolver } from "./image-resolver";
 import { makeDiagramRenderer } from "./diagram-renderer";
+import { makeTranscludeResolver } from "./transclude-resolver";
 import { createAnchor, resolveAnchor } from "./comment-anchors";
 import { setCommentRanges, type CommentRange } from "./live-preview/comment-highlights";
 import type { DirtySignal } from "./dirtySignal";
@@ -149,6 +150,9 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
   // #140: host-mediated diagram render (plantuml). Only when we have a pageId (the render endpoint is
   // page-scoped + page-view gated); otherwise undefined → the macro degrades to its source fence.
   const renderDiagram = useMemo(() => (pageId ? makeDiagramRenderer(apiToken, pageId) : undefined), [apiToken, pageId]);
+  // #108: host-mediated internal transclude (the :::transclude macro never fetches). page-scoped (the
+  // server re-checks view on the referenced page); undefined without a pageId → placeholder.
+  const resolveTransclude = useMemo(() => (pageId ? makeTranscludeResolver(apiToken, pageId) : undefined), [apiToken, pageId]);
 
   // Dev-only probe for the isolation invariant (ADR-013): editor content is not in
   // React state, so typing must NOT re-render this component (read before/after).
@@ -196,7 +200,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
             onToggleTask(index).catch(() => set(checked ? "x" : " ")); // revert on failure
           }
         : undefined;
-      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, renderDiagram, onToggleTask: onToggleTaskInView });
+      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, renderDiagram, resolveTransclude, onToggleTask: onToggleTaskInView });
       views.push(v);
       previewViewRef.current = v;
       if (anchorGetterRef) anchorGetterRef.current = null;
@@ -214,6 +218,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       readOnly: false,
       resolveImageUrl,
       renderDiagram,
+      resolveTransclude,
       macroLevelCap,
       uploadImage: onUploadImage,
       vim,
@@ -244,7 +249,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     };
     // vim excluded (Compartment reconfigure, not a remount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, renderDiagram, macroLevelCap, onUploadImage]);
+  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, renderDiagram, resolveTransclude, macroLevelCap, onUploadImage]);
 
   // vim on/off: reconfigure the Compartment IN PLACE (no remount → collab/presence
   // untouched). Only meaningful on the edit surface.

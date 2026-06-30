@@ -14,6 +14,7 @@ import { flushDraft } from '../collab-flush.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { resolveEmbed, EmbedDeniedError } from '../embed-resolve.js'
+import { resolveTranscludeRef } from '../transclude-resolve.js'
 import { renderPlantuml } from '../plantuml-render.js'
 import { assertPageViewable } from '../page-view-gate.js'
 import { resolveEntitlements } from '@wikistead/entitlements'
@@ -924,6 +925,20 @@ export async function pagesPlugin(app: FastifyInstance) {
       }
       throw e
     }
+  })
+
+  // Internal transclude resolve (#108 / ADR-071): return the REFERENCED page's published content for
+  // a viewer who can see it. resolveTranscludeRef re-checks `view` on the REF page itself (the host
+  // page's view is NOT enough — monotonic deny) and returns an IDENTICAL 'denied' for unviewable /
+  // unpublished / absent (no existence oracle). Host page is :pageId (gates the request); :refId is
+  // the transcluded page. Member or view-guest.
+  app.get<{ Params: { pageId: string; refId: string } }>('/pages/:pageId/transclude/:refId', { config: { guest: 'view' } }, async (req, reply) => {
+    const { subject, context } = principalForPage(req, req.params.pageId)
+    const r = await resolveTranscludeRef({ db: req.db, fga: app.fga }, { principal: subject, refPageId: req.params.refId, context })
+    if (r.ok) return { content: r.content }
+    // denied → 403 (existence-hiding, uniform); cycle/depth → 422 (the host page IS viewable — this
+    // is the user's own structure, not an existence leak).
+    return reply.code(r.reason === 'denied' ? 403 : 422).send({ error: 'transclude not available', reason: r.reason })
   })
 
   // PlantUML render (#140 / ADR-074): host-mediated server render of a plantuml fence's source via

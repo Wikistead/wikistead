@@ -440,6 +440,7 @@
     "excalidraw": "Excalidraw 図",
     "mermaid": "Mermaid 図",
     "plantuml": "PlantUML 図",
+    "transclude": "ページをトランスクルード",
     "callout": {
       "note": "ノート（callout）",
       "info": "インフォ（callout）",
