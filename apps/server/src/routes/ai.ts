@@ -3,7 +3,16 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { getAIProvider } from '@wikistead/hooks'
 import { emit } from '@wikistead/events'
+import { fgaClient } from '@wikistead/authz'
 import type { TenantDb } from '../db/index.js'
+import { bumpRateBucket } from '../rate-limit.js'
+import { gatherAuthorizedContext } from '../ai/context.js'
+
+// Per-tenant AI request cap — a runaway-bill FLOOR (ADR-077 forbids unbounded cost). This is
+// a coarse rate limit, NOT the full metered allowance + soft-cap + alerts (that is #128, which
+// needs a usage ledger; tracked separately). Generous defaults; env-overridable.
+const AI_RATE_LIMIT_PER_TENANT = Number(process.env.AI_RATE_LIMIT_PER_TENANT ?? 60)
+const AI_RATE_LIMIT_WINDOW_S = Number(process.env.AI_RATE_LIMIT_WINDOW_S ?? 60)
 
 // AI assist capability + the tenant-level consent toggle (#130 / ADR-077).
 //
@@ -67,5 +76,37 @@ export async function aiPlugin(app: FastifyInstance) {
     await setTenantAiEnabled(req.db, req.tenant.id, req.body.enabled)
     emit({ type: 'tenant.ai_toggled', tenantId: req.tenant.id, actorId: req.user.sub, enabled: req.body.enabled })
     return { aiEnabled: req.body.enabled }
+  })
+
+  // Ask-KB: answer a question over the asking member's FGA-authorized pages. This is the only
+  // egress point — it sends context to the provider ONLY after the full ADR-077 consent gate
+  // (entitled AND configured AND tenant opted-in) AND gathers context FGA-scoped (a page the
+  // member can't view never reaches the provider). Guests never reach here (/ai/ask is not a
+  // guest route → the auth hook rejects a guest token). req.user is therefore always a member.
+  app.post<{ Body: { question?: string } }>('/ai/ask', async (req, reply) => {
+    if (!req.user) return reply.code(403).send({ error: 'forbidden' }) // defensive: never a guest
+    if (!resolveEntitlements(req.tenant.plan).aiFeatures) return reply.code(403).send({ error: 'ai not available' })
+    const provider = getAIProvider()
+    if (!provider) return reply.code(503).send({ error: 'ai not configured' })
+    if (!(await getTenantAiEnabled(req.db))) return reply.code(403).send({ error: 'ai not enabled for this tenant' })
+
+    const question = req.body?.question?.trim()
+    if (!question) return reply.code(400).send({ error: 'question required' })
+
+    // Runaway-bill floor (per tenant). Over the cap → 429 (no egress for this request).
+    const ok = await bumpRateBucket(app.valkey, `ai-rl:tenant:${req.tenant.id}`, AI_RATE_LIMIT_PER_TENANT, AI_RATE_LIMIT_WINDOW_S)
+    if (!ok) {
+      reply.header('Retry-After', String(AI_RATE_LIMIT_WINDOW_S))
+      return reply.code(429).send({ error: 'ai rate limit exceeded' })
+    }
+
+    // FGA-scoped retrieval (the security core): only pages this member can view contribute.
+    const { context, sources } = await gatherAuthorizedContext(
+      { db: req.db, searchDriver: app.searchDriver, fga: fgaClient },
+      { tenantId: req.tenant.id, userSub: req.user.sub, groups: req.user.groups, question },
+    )
+    const { text } = await provider.complete({ prompt: question, context })
+    // TODO(#130/#128): meter token usage here (soft-cap + alerts) once the usage ledger lands.
+    return { answer: text, sources }
   })
 }
