@@ -46,7 +46,11 @@ function memberTuples(tenantId: string, sub: string, role: InviteRole) {
 // end-of-period, are BUSINESS-NUMBER questions (ADR-031); the mechanism counts live
 // member rows and can be refined to a `billable` predicate here without touching callers.
 export async function billableMemberCount(sql: Sql): Promise<number> {
-  const [{ n }] = await sql<[{ n: string }]>`SELECT count(*)::text AS n FROM members`
+  // A SCIM-deprovisioned member (deactivation_reason='scim', #134) RELEASES its seat — excluded
+  // here. A #131 downgrade-freeze member (reason='downgrade_freeze') stays billable (still counted)
+  // — it is the result of being over-cap, restored on re-upgrade. Active members (reason NULL) count.
+  const [{ n }] = await sql<[{ n: string }]>`
+    SELECT count(*)::text AS n FROM members WHERE deactivation_reason IS DISTINCT FROM 'scim'`
   return Number(n)
 }
 

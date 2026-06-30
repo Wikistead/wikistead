@@ -28,7 +28,10 @@ async function freezeSeatOverage(sql: postgres.Sql, tenantId: string, newPlan: s
   const seatsForNonAdmins = Math.max(0, maxSeats - admins.length)   // admins consume seats first
   const toFreeze = nonAdmins.slice(seatsForNonAdmins)               // newest beyond the cap
   for (const m of toFreeze) {
-    await sql`UPDATE members SET deactivated_at = now() WHERE id = ${m.id} AND deactivated_at IS NULL`
+    // reason='downgrade_freeze' (#134): a frozen member STAYS billable (still counted by
+    // billableMemberCount), distinguishing it from a SCIM deprovision (reason='scim') which frees
+    // the seat. Restored on re-upgrade.
+    await sql`UPDATE members SET deactivated_at = now(), deactivation_reason = 'downgrade_freeze' WHERE id = ${m.id} AND deactivated_at IS NULL`
   }
   return toFreeze.length
 }
