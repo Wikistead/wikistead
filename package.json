@@ -10,6 +10,8 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "license:check": "node scripts/check-licenses.mjs",
+    "docs:gen": "tsx scripts/gen-docs.ts",
+    "docs:check": "tsx scripts/gen-docs.ts --check",
     "lint:no-ee-imports": "node scripts/check-ce-imports.mjs",
     "lint:no-css-modules": "node scripts/check-no-css-modules.mjs",
     "build:ee": "turbo run build",
