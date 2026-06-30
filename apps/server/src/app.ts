@@ -44,6 +44,7 @@ import { orphanDraftsPlugin } from './routes/orphan-drafts.js'
 import { customDomainsPlugin } from './routes/custom-domains.js'
 import { tenantSamlPlugin } from './routes/tenant-saml.js'
 import { samlAuthPlugin } from './routes/saml-auth.js'
+import { aiPlugin } from './routes/ai.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -295,6 +296,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(customDomainsPlugin)
   await app.register(tenantSamlPlugin)
   await app.register(samlAuthPlugin)
+  await app.register(aiPlugin)
   await app.register(spacesPlugin)
   await app.register(pagesPlugin)
   await app.register(billingPlugin)
