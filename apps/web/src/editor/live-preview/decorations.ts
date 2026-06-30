@@ -6,7 +6,7 @@ import {
   EditorView,
   WidgetType,
 } from "@codemirror/view";
-import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme } from "../macros/registry";
+import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme, type StandardLayer } from "../macros/registry";
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
@@ -208,6 +208,14 @@ export const diagramRenderer = Facet.define<DiagramRenderer, DiagramRenderer>({
 });
 // Macros whose body is rendered by the host (not bundled / not the macro). Others ignore the renderer.
 const HOST_RENDERABLE = new Set(["plantuml"]);
+
+// Tenant macro level-cap (#93 / ADR-073) — the ceiling standard-layer a tenant may persist. The
+// macro-edit modal save demotes a tiered macro (e.g. :::table directive → gfm pipe) to within this
+// cap (demoteToCapLevel). Default "directive" = no cap (UNLIMITED / all current plans) ⇒ inert. The
+// server publishPage fortress remains the authoritative bastion; this is the friendly client side.
+export const macroLevelCap = Facet.define<StandardLayer, StandardLayer>({
+  combine: (values) => values[0] ?? "directive",
+});
 const ATTACHMENT_REF = /^!\[([^\]]*)\]\(wks-attachment:([^)\s]+)\)$/;
 
 // Renders an image from a wks-attachment reference. src is filled in

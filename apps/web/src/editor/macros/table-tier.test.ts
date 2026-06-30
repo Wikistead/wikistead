@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { tableTier } from "./table";
 import { applyTier } from "../live-preview/macro-edit";
+import { demoteToCapLevel } from "./tier-cap";
 
 // ADR-025 step 3: the table MacroTier (pipe ⟷ :::table) + the host's auto-demote (applyTier).
 // The tier IS the promote/demote rule, now declared as data the host applies — the editor
@@ -57,5 +58,25 @@ describe("applyTier (host auto-demote)", () => {
     const out = applyTier(tableTier, MERGED, PIPE);
     expect(out).not.toContain(":::table");
     expect(out).toContain("|"); // a (lossy) pipe table
+  });
+});
+
+// #93 / ADR-073: the layer-based tenant cap (the StandardLayer that flows from the entitlement —
+// "gfm" / "directive") applied to the REAL table tier. This is exactly what the modal save calls.
+describe("demoteToCapLevel (tenant macro level-cap, real table tier)", () => {
+  it("cap=directive (default / UNLIMITED) is inert — keeps :::table when the grid needs it", () => {
+    expect(demoteToCapLevel(tableTier, MERGED, "directive")).toContain(":::table");
+    expect(demoteToCapLevel(tableTier, MERGED, "directive")).toContain('colspan="2"');
+    // a simple grid still demotes to the lowest representable (pipe) — open formats
+    expect(demoteToCapLevel(tableTier, SIMPLE_PIPE, "directive")).not.toContain(":::table");
+  });
+
+  it("cap=gfm forces a merged/styled table DOWN to a (lossy) pipe table — normalize, not reject", () => {
+    const merged = demoteToCapLevel(tableTier, MERGED, "gfm");
+    expect(merged).not.toContain(":::table"); // directive layer is above the cap → excluded
+    expect(merged).toContain("|"); // a pipe table (the colspan is dropped — ADR-073 lossy normalize)
+    const styled = demoteToCapLevel(tableTier, STYLED, "gfm");
+    expect(styled).not.toContain(":::table");
+    expect(styled).not.toContain("background:#fee"); // per-cell style can't survive in gfm
   });
 });
