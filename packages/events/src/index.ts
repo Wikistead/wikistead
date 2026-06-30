@@ -47,6 +47,9 @@ export type DomainEvent =
   | { type: 'tenant.saml_updated'; tenantId: string; actorId: string; enabled: boolean }
   // Tenant AI opt-in toggle (#130 / ADR-077): the tenant half of the two-stage egress consent.
   | { type: 'tenant.ai_toggled'; tenantId: string; actorId: string; enabled: boolean }
+  // Metered usage crossed an alert threshold (#128 / ADR-082): warn before the soft-cap wall. Fired
+  // once per (resource, period, threshold) as usage advances. EE/Cloud notifies the admin; CE can log.
+  | { type: 'usage.threshold_crossed'; tenantId: string; resource: string; threshold: number; period: string }
   // SCIM provisioning tokens (#134 / ADR-070), EE. The SCIM endpoints that consume them are separate.
   | { type: 'scim_token.created'; tenantId: string; actorId: string; tokenId: string }
   | { type: 'scim_token.revoked'; tenantId: string; actorId: string; tokenId: string }

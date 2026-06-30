@@ -9,6 +9,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { buildApp } from '../app.js'
 import { registerAIProvider, resetAIProvider } from '@wikistead/hooks'
+import { onDomainEvent } from '@wikistead/events'
 import { registerEntitlementsResolver, resetEntitlementsResolver, UNLIMITED } from '@wikistead/entitlements'
 import { setTenantAiEnabled } from '../routes/ai.js'
 import { getUsage, currentPeriodStart } from '../usage.js'
@@ -68,6 +69,27 @@ describe('AI metering soft-cap (#128 / ADR-082)', () => {
     const r = await ask('big')
     expect(r.statusCode).toBe(200) // enormous usage, still allowed under an Infinity cap
     expect(await getUsage(db, 'ai.tokens', PERIOD)).toBe(1_000_000_000)
+  })
+
+  it('emits usage.threshold_crossed once per threshold as usage advances (alert before the wall)', async () => {
+    await clear()
+    registerEntitlementsResolver(() => ({ ...UNLIMITED, aiTokenAllowance: 100 }))
+    registerAIProvider({ name: 'fake', complete: async () => ({ text: 'a', tokens: 60 }) })
+    const seen: Array<{ resource: string; threshold: number }> = []
+    const off = onDomainEvent((e) => {
+      if (e.type === 'usage.threshold_crossed') seen.push({ resource: e.resource, threshold: e.threshold })
+    })
+    try {
+      expect((await ask('c1')).statusCode).toBe(200) // 0 → 60: below 80% — no alert
+      expect(seen).toEqual([])
+      expect((await ask('c2')).statusCode).toBe(200) // 60 → 120: crosses 80% then 100%
+      expect(seen).toEqual([
+        { resource: 'ai.tokens', threshold: 0.8 },
+        { resource: 'ai.tokens', threshold: 1.0 },
+      ])
+    } finally {
+      off()
+    }
   })
 
   it('falls back to an estimate when the provider does not report tokens', async () => {
