@@ -14,6 +14,7 @@ import { createPage, publishPage } from '../routes/pages.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { listOrphanDrafts, requireTenantAdminOr404, claimOrphanDraft, reassignOrphanDraft, isOrphanPage } from '../routes/orphan-drafts.js'
 import { sweepExpiredClaims } from '../scripts/orphan-claim-sweep.js'
+import { drainAuditOutbox } from '../audit/outbox.js'
 import type { Tenant } from '@wikistead/types'
 
 const NEW_OWNER = 'orphan-new-owner-sub'
@@ -57,6 +58,8 @@ afterAll(async () => {
     await admin`DELETE FROM pages WHERE id = ${id}`.catch(() => {})
   }
   await admin`DELETE FROM orphan_claims WHERE tenant_id = ${TENANT}`.catch(() => {})
+  await admin`DELETE FROM audit_log WHERE tenant_id = ${TENANT}`.catch(() => {})
+  await admin`DELETE FROM audit_outbox WHERE tenant_id = ${TENANT}`.catch(() => {})
   await admin`DELETE FROM members WHERE tenant_id = ${TENANT} AND sub = ${NEW_OWNER}`.catch(() => {})
   await deleteSpace(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user' }).catch(() => {})
   await db.release()
@@ -113,6 +116,14 @@ describe('claimOrphanDraft (#99 / ADR-061 — temp grant + TOCTOU)', () => {
     expect(r.pageId).toBe(id)
     expect(await canManage('dev-user', id)).toBe(true)          // admin can now read it
     expect(await isOrphanPage(db, fgaClient, id)).toBe(false)   // claimed → no longer orphan
+  })
+
+  it('records a durable orphan_draft.claimed audit entry when entitled + plan passed (#177)', async () => {
+    const id = await mkOrphan('claim-audited')
+    await claimOrphanDraft(db, fgaClient, { tenantId: TENANT, pageId: id, adminSub: 'dev-user', plan: 'team' }) // default UNLIMITED resolver → auditLog
+    expect(await drainAuditOutbox()).toBeGreaterThanOrEqual(1)
+    const rows = await db.sql<{ action: string; target: string; actor: string }[]>`SELECT action, target, actor FROM audit_log WHERE tenant_id = ${TENANT} ORDER BY seq`
+    expect(rows.some((r) => r.action === 'orphan_draft.claimed' && r.target === `page:${id}` && r.actor === 'user:dev-user')).toBe(true)
   })
 
   it('REFUSES to claim a live strict-private page (TOCTOU re-check, 404 — bypass impossible)', async () => {
