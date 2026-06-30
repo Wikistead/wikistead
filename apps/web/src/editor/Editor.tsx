@@ -5,6 +5,7 @@ import { connect } from "./collab";
 import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayModeContent } from "./editor-livepreview";
 import type { DisplayMode } from "./live-preview/decorations";
 import { makeImageResolver } from "./image-resolver";
+import { makeDiagramRenderer } from "./diagram-renderer";
 import { createAnchor, resolveAnchor } from "./comment-anchors";
 import { setCommentRanges, type CommentRange } from "./live-preview/comment-highlights";
 import type { DirtySignal } from "./dirtySignal";
@@ -43,6 +44,9 @@ type SurfaceKey = "view" | "edit";
 
 export interface EditorProps {
   docName: string;
+  // The page id (for host-mediated diagram render — POST /pages/:pageId/plantuml/render, #140).
+  // Omit outside a page context; plantuml then just degrades to its source.
+  pageId?: string;
   token: string; // collab WebSocket token
   collabUrl: string;
   user: EditorUser;
@@ -109,7 +113,7 @@ function tint(color: string): string {
 // memo: the host (PageRoute) re-renders on its own state and on the published poll;
 // without memo those re-render <Editor> too, which the tree-move e2e forbids and
 // churns the editor. Props are referentially stable across host re-renders.
-export const Editor = memo(function Editor({ docName, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
+export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
   const previewViewRef = useRef<EditorView | null>(null);
@@ -139,6 +143,9 @@ export const Editor = memo(function Editor({ docName, token, collabUrl, user, ca
   const surfaceKey: SurfaceKey = canEdit && editing ? "edit" : "view";
 
   const resolveImageUrl = useMemo(() => makeImageResolver(apiToken), [apiToken]);
+  // #140: host-mediated diagram render (plantuml). Only when we have a pageId (the render endpoint is
+  // page-scoped + page-view gated); otherwise undefined → the macro degrades to its source fence.
+  const renderDiagram = useMemo(() => (pageId ? makeDiagramRenderer(apiToken, pageId) : undefined), [apiToken, pageId]);
 
   // Dev-only probe for the isolation invariant (ADR-013): editor content is not in
   // React state, so typing must NOT re-render this component (read before/after).
@@ -186,7 +193,7 @@ export const Editor = memo(function Editor({ docName, token, collabUrl, user, ca
             onToggleTask(index).catch(() => set(checked ? "x" : " ")); // revert on failure
           }
         : undefined;
-      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, onToggleTask: onToggleTaskInView });
+      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, renderDiagram, onToggleTask: onToggleTaskInView });
       views.push(v);
       previewViewRef.current = v;
       if (anchorGetterRef) anchorGetterRef.current = null;
@@ -203,6 +210,7 @@ export const Editor = memo(function Editor({ docName, token, collabUrl, user, ca
     const previewView = mountLivePreview(previewHost, c.ytext, c.provider, {
       readOnly: false,
       resolveImageUrl,
+      renderDiagram,
       uploadImage: onUploadImage,
       vim,
       vimCompartment,
@@ -232,7 +240,7 @@ export const Editor = memo(function Editor({ docName, token, collabUrl, user, ca
     };
     // vim excluded (Compartment reconfigure, not a remount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, onUploadImage]);
+  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, renderDiagram, onUploadImage]);
 
   // vim on/off: reconfigure the Compartment IN PLACE (no remount → collab/presence
   // untouched). Only meaningful on the edit surface.

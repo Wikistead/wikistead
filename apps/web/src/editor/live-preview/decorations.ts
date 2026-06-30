@@ -196,6 +196,18 @@ const noopResolver: ImageResolver = async () => null;
 export const imageResolver = Facet.define<ImageResolver, ImageResolver>({
   combine: (values) => values[0] ?? noopResolver,
 });
+
+// Host-mediated diagram render (#140 / ADR-074). A renderable fence (plantuml) is NEVER fetched by
+// the macro (host-API is {theme} only — ADR-024); the HOST resolves the source to image bytes via
+// this injected renderer (it holds pageId/token and calls the gated, SSRF-guarded server endpoint).
+// null ⇒ degrade-to-source (the widget keeps the source fence — Open formats, never a broken embed).
+export type DiagramRenderer = (lang: string, source: string) => Promise<Blob | null>;
+const noopDiagramRenderer: DiagramRenderer = async () => null;
+export const diagramRenderer = Facet.define<DiagramRenderer, DiagramRenderer>({
+  combine: (values) => values[0] ?? noopDiagramRenderer,
+});
+// Macros whose body is rendered by the host (not bundled / not the macro). Others ignore the renderer.
+const HOST_RENDERABLE = new Set(["plantuml"]);
 const ATTACHMENT_REF = /^!\[([^\]]*)\]\(wks-attachment:([^)\s]+)\)$/;
 
 // Renders an image from a wks-attachment reference. src is filled in
@@ -338,6 +350,8 @@ function isFolded(state: EditorState, from: number, to: number): boolean {
 type RenderableMacro = { liveRender: (body: string, ctx: { theme: MacroTheme }) => HTMLElement; richEditUI?: import("../macros/registry").RichEditUI };
 class MacroWidget extends WidgetType {
   private ro?: ResizeObserver;
+  private objectUrl?: string; // #140: revoked on destroy so the rendered image blob isn't leaked
+  private destroyed = false; // guards the async render swap against a widget torn down mid-fetch
   constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string, readonly selected: boolean) {
     super();
   }
@@ -367,7 +381,26 @@ class MacroWidget extends WidgetType {
       ph.textContent = `Empty ${this.name} — click to edit`;
       wrap.appendChild(ph);
     } else {
-      wrap.appendChild(this.macro.liveRender(this.body, { theme: currentMacroTheme() }));
+      const rendered = this.macro.liveRender(this.body, { theme: currentMacroTheme() });
+      wrap.appendChild(rendered);
+      // #140 / ADR-074: host-mediated render. The macro returned its degrade DOM (the source fence);
+      // for a host-renderable lang (plantuml) ask the injected renderer for image bytes and, on
+      // success, swap the source for the image. null (unconfigured / failure / non-viewer 403) keeps
+      // the source — Open formats, never a broken embed. Fires ONCE per widget instance (eq() reuses
+      // the widget while name+body are stable, so there's no churn / re-fetch on every keystroke).
+      const renderDiagram = view.state.facet(diagramRenderer);
+      if (HOST_RENDERABLE.has(this.name) && renderDiagram !== noopDiagramRenderer) {
+        void renderDiagram(this.name, this.body).then((blob) => {
+          if (this.destroyed || !blob) return; // torn down mid-fetch, or degrade → leave the source
+          this.objectUrl = URL.createObjectURL(blob);
+          const img = document.createElement("img");
+          img.className = "cm-lp-macro-rendered";
+          img.alt = `${this.name} diagram`;
+          img.setAttribute("data-testid", `macro-${this.name}-rendered`);
+          img.src = this.objectUrl;
+          rendered.replaceChildren(img); // the outer macro div (class/testid) stays; inner source → image
+        });
+      }
     }
     if (!view.state.readOnly) {
       // ADR-024: a click ENTERS the macro atom (the mouse path, same as Ctrl+Enter) —
@@ -407,6 +440,8 @@ class MacroWidget extends WidgetType {
     return wrap;
   }
   destroy() {
+    this.destroyed = true;
+    if (this.objectUrl) { URL.revokeObjectURL(this.objectUrl); this.objectUrl = undefined; }
     this.ro?.disconnect();
     this.ro = undefined;
   }
