@@ -1,0 +1,12 @@
+-- Migration 042: member deactivation reason (#134 / ADR-070 + #131 / ADR-064).
+--
+-- Two distinct "deactivations" share the deactivated_at primitive but differ in seat billing
+-- (the owner decision, #134):
+--   reason='scim'            — a SCIM admin de-provisioned the member. Soft (reversible), login
+--                              blocked, and the seat IS RELEASED (excluded from billableMemberCount).
+--   reason='downgrade_freeze' — #131 over-cap freeze. Soft, login blocked, but the seat is NOT
+--                              released (still billable; restored on re-upgrade).
+-- NULL alongside a NULL deactivated_at = an active member. The existing members GRANT (012)
+-- covers the column. billableMemberCount excludes reason='scim'; freezeSeatOverage tags
+-- 'downgrade_freeze'.
+ALTER TABLE members ADD COLUMN IF NOT EXISTS deactivation_reason TEXT;
