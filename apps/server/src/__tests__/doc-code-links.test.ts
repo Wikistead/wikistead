@@ -3,9 +3,29 @@
 // changed without its docs page → violation; with its docs page → none; an unrelated
 // change → none; glob matching (`**`, `*`) behaves. Also checks the real DOC_CODE_MAP is
 // well-formed.
+import { readdirSync, statSync } from 'node:fs'
+import { join, dirname, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, it, expect } from 'vitest'
 // @ts-expect-error — .mjs script module, no types (pure JS CI helper)
 import { evaluateDocLinks, matchesAny, globToRegExp, DOC_CODE_MAP } from '../../../../scripts/doc-code-map.mjs'
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..')
+
+// Repo-relative paths under the source dirs the map can reference (excludes build output).
+function repoFiles(): string[] {
+  const out: string[] = []
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir)) {
+      if (e === 'node_modules' || e === 'dist' || e === '.git') continue
+      const full = join(dir, e)
+      if (statSync(full).isDirectory()) walk(full)
+      else out.push(relative(repoRoot, full).split('\\').join('/'))
+    }
+  }
+  for (const d of ['apps', 'packages', 'docs']) walk(join(repoRoot, d))
+  return out
+}
 
 const MAP = [
   { label: 'levers', kind: 'generated', code: ['packages/entitlements/src/index.ts'], doc: 'docs/generated/entitlement-levers.md' },
@@ -49,6 +69,23 @@ describe('doc↔code linkage evaluator (#139 / ADR-080)', () => {
       expect(Array.isArray(e.code) && e.code.length).toBeTruthy()
       expect(e.doc).toBeTruthy()
       expect(['generated', 'authored']).toContain(e.kind)
+    }
+  })
+
+  it('no DEAD code globs — every map entry matches a real file (no silent linkage gap)', () => {
+    // A typo'd or moved code region would silently never fire (the linkage check would
+    // never bind it). Assert every entry's code globs match at least one existing file.
+    const files = repoFiles()
+    for (const e of DOC_CODE_MAP) {
+      const matched = files.some((f: string) => matchesAny(f, e.code))
+      expect(matched, `"${e.label}" code globs ${JSON.stringify(e.code)} match no file`).toBe(true)
+    }
+  })
+
+  it('generated docs referenced by the map exist in-repo', () => {
+    const files = new Set(repoFiles())
+    for (const e of DOC_CODE_MAP) {
+      if (e.kind === 'generated') expect(files.has(e.doc), `${e.doc} missing`).toBe(true)
     }
   })
 })
