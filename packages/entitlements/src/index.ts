@@ -162,3 +162,6 @@ export function resetEntitlementsResolver(): void {
 // its Markdown generator. CE-only (never imports the Cloud plan table).
 export { LEVER_CATALOG, type LeverDoc, type LeverUnit } from './catalog.js'
 export { renderEntitlementsMarkdown } from './gen-doc.js'
+
+// Metered-usage soft-cap + alert decision core (#128 / ADR-082).
+export { decideAllowance, crossedThresholds, type AllowanceDecision } from './metering.js'
