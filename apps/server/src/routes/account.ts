@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { TenantDb } from '../db/index.js'
 import type { StorageDriver } from '../storage/index.js'
+// Account settings option sets live in the pure settings-catalog leaf (#139 doc↔code linkage):
+// the SINGLE source for both this route's validation and the generated settings reference.
+import { KEYMAP_MODES, DISPLAY_MODE_PREFS, REMAPPABLE_COMMANDS, RESERVED_KEYS, type KeymapMode, type DisplayModePref } from '../settings-catalog.js'
+export type { KeymapMode, DisplayModePref }
 
 // ADR-020 — personal account settings. SELF-SCOPE: every read/write is keyed to the
 // authenticated member's own row (WHERE sub = req.user.sub) + tenant RLS. This is
@@ -22,25 +26,6 @@ function sniffImage(b: Uint8Array): { mime: string; ext: string } | null {
   if (b.length >= 6 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return { mime: 'image/gif', ext: 'gif' }
   return null
 }
-
-// editorKeymap is the STARTUP-MODE preference (cross-device): how the editor opens.
-//   'vim'     — always start in vim (the toolbar toggle still switches for the session)
-//   'default' — always start in non-vim
-//   'local'   — follow this device's last toolbar choice (localStorage). Default.
-export type KeymapMode = 'default' | 'vim' | 'local'
-const KEYMAP_MODES: KeymapMode[] = ['default', 'vim', 'local']
-
-// editorDisplayMode (ADR-056 / #164-3) is the STARTUP display mode (cross-device), like keymap:
-//   'live' — always start Live · 'source' — always start Source · 'local' — follow this device.
-export type DisplayModePref = 'live' | 'source' | 'local'
-const DISPLAY_MODE_PREFS: DisplayModePref[] = ['live', 'source', 'local']
-
-// Remappable chord commands (ADR-021) — ONLY these may be rebound; structural/contextual
-// keys (`/` `\` Enter/Esc/Tab, mnemonics, ex-commands) and vim's own keymap are fixed.
-const REMAPPABLE_COMMANDS = ['editor.toggleVim', 'search.focus', 'palette.next', 'palette.prev']
-// Keys the browser owns — a page can't intercept them, so never allow binding to them
-// (defence-in-depth; the UI also blocks these). Normalized "Mod-"/"Ctrl-" chord strings.
-const RESERVED_KEYS = ['Mod-w', 'Mod-n', 'Mod-t', 'Ctrl-w', 'Ctrl-n', 'Ctrl-t']
 
 // Server-side guard for a keybindings map (the UI validates too — this is the bastion):
 // only known command ids, non-empty values, no browser-reserved keys, no duplicates.

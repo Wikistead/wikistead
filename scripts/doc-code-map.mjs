@@ -32,6 +32,12 @@ export const DOC_CODE_MAP = [
     code: ['packages/events/src/index.ts', 'packages/events/src/catalog.ts'],
     doc: 'docs/generated/domain-events.md',
   },
+  {
+    label: 'account settings',
+    kind: 'generated',
+    code: ['apps/server/src/settings-catalog.ts'],
+    doc: 'docs/generated/account-settings.md',
+  },
   // Authored pages live in the wikistead-docs repo (paths are docs-repo-relative). Seeded
   // for the designated regions; the check binds them in the combined CI checkout.
   {
