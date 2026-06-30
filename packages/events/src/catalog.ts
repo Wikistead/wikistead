@@ -38,6 +38,7 @@ export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   'tenant.saml_updated': 'The tenant SAML SSO configuration was changed (EE).',
   'tenant.plan_changed': 'The tenant plan changed (billing).',
   'tenant.ai_toggled': 'A tenant admin enabled/disabled AI for the tenant (ADR-077 consent).',
+  'usage.threshold_crossed': 'Metered usage crossed an alert threshold (#128 / ADR-082) — warn before the soft-cap wall; EE/Cloud notifies the admin.',
   // Orphan drafts (admin recovery)
   'orphan_draft.enumerated': 'An admin enumerated orphaned strict-private drafts.',
   'orphan_draft.claimed': 'An admin took a temporary audited claim on an orphaned draft.',

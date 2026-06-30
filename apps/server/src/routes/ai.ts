@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { randomUUID } from 'node:crypto'
-import { resolveEntitlements, decideAllowance } from '@wikistead/entitlements'
+import { resolveEntitlements, decideAllowance, crossedThresholds } from '@wikistead/entitlements'
 import { getAIProvider } from '@wikistead/hooks'
 import { emit } from '@wikistead/events'
 import { fgaClient } from '@wikistead/authz'
@@ -12,6 +12,8 @@ import { recordUsage, getUsage, currentPeriodStart, estimateTokens } from '../us
 
 // The metered resource id for AI token consumption (#128 / ADR-082 — usage_counters).
 const AI_TOKENS = 'ai.tokens'
+// Warn before the wall: alert at 80% then at the cap (#128 / ADR-082). Fractions of the allowance.
+const USAGE_ALERT_THRESHOLDS = [0.8, 1.0]
 
 // Per-tenant AI request cap — a runaway-bill FLOOR (ADR-077 forbids unbounded cost). This is
 // a coarse rate limit, NOT the full metered allowance + soft-cap + alerts (that is #128, which
@@ -125,6 +127,11 @@ export async function aiPlugin(app: FastifyInstance) {
     // A per-request source_id keeps recordUsage idempotent if this ever moves behind a retrying outbox.
     const consumed = tokens ?? estimateTokens(question, context, text)
     await recordUsage(req.db, AI_TOKENS, period, `ai:${randomUUID()}`, consumed)
+    // Alert before the wall (#128): fire once per (resource, period, threshold) as usage advances —
+    // crossedThresholds reports only boundaries THIS call passed (usedBefore → usedBefore+consumed).
+    for (const threshold of crossedThresholds(usedBefore, usedBefore + consumed, allowance, USAGE_ALERT_THRESHOLDS)) {
+      emit({ type: 'usage.threshold_crossed', tenantId: req.tenant.id, resource: AI_TOKENS, threshold, period })
+    }
     return { answer: text, sources }
   })
 }
