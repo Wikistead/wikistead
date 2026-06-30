@@ -3,6 +3,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
 import { writeTuples, deleteTuples } from '@wikistead/authz'
 import type { TenantDb } from '../db/index.js'
+import { auditIfEntitled } from '../audit/outbox.js'
 
 // Default claim TTL: an un-reassigned claim auto-expires back to orphan after this (ADR-061).
 // A conservative ops default (24h); tunable. Enforced by the reconciling sweep (no time-
@@ -105,7 +106,7 @@ export async function isOrphanPage(db: TenantDb, fga: OpenFgaClient, pageId: str
 export async function claimOrphanDraft(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { tenantId: string; pageId: string; adminSub: string; ttlSeconds?: number },
+  args: { tenantId: string; pageId: string; adminSub: string; plan?: string; ttlSeconds?: number },
 ): Promise<{ pageId: string; expiresAt: string }> {
   // TOCTOU: re-check it is actually an orphan right now. 404 (not 403) — never reveal that a
   // non-orphan (live strict-private) page exists, and make claim unusable as a peek primitive.
@@ -113,17 +114,22 @@ export async function claimOrphanDraft(
     throw Object.assign(new Error('not found'), { statusCode: 404 })
   }
   const ttl = args.ttlSeconds ?? CLAIM_TTL_SECONDS
-  // Row first (PK guards a concurrent claim); then the grant. A dangling row (if the grant
-  // write fails) is harmless — the sweep deletes a non-existent grant as a no-op and clears it.
-  const [claim] = await db.sql<{ expires_at: Date }[]>`
-    INSERT INTO orphan_claims (tenant_id, page_id, admin_sub, expires_at)
-    VALUES (${args.tenantId}, ${args.pageId}, ${args.adminSub}, now() + make_interval(secs => ${ttl}))
-    ON CONFLICT (tenant_id, page_id) DO NOTHING
-    RETURNING expires_at
-  `
-  if (!claim) throw Object.assign(new Error('already claimed'), { statusCode: 409, code: 'already_claimed' })
-  await writeTuples(fga, [{ user: `user:${args.adminSub}`, relation: 'manage', object: `page:${args.pageId}` }])
-  const expiresAt = claim.expires_at.toISOString()
+  // Row + durable audit in ONE tx (ADR-061: audit failure = operation failure); FGA grant LAST so
+  // a grant failure rolls back the row + audit (ADR-003). PK guards a concurrent claim.
+  const expiresAt = await db.tx(async (tx) => {
+    const [claim] = await tx<{ expires_at: Date }[]>`
+      INSERT INTO orphan_claims (tenant_id, page_id, admin_sub, expires_at)
+      VALUES (${args.tenantId}, ${args.pageId}, ${args.adminSub}, now() + make_interval(secs => ${ttl}))
+      ON CONFLICT (tenant_id, page_id) DO NOTHING
+      RETURNING expires_at
+    `
+    if (!claim) throw Object.assign(new Error('already claimed'), { statusCode: 409, code: 'already_claimed' })
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.adminSub}`, action: 'orphan_draft.claimed', target: `page:${args.pageId}` })
+    }
+    await writeTuples(fga, [{ user: `user:${args.adminSub}`, relation: 'manage', object: `page:${args.pageId}` }])
+    return claim.expires_at.toISOString()
+  })
   emit({ type: 'orphan_draft.claimed', tenantId: args.tenantId, actorId: args.adminSub, pageId: args.pageId, expiresAt })
   return { pageId: args.pageId, expiresAt }
 }
@@ -134,18 +140,25 @@ export async function claimOrphanDraft(
 export async function reassignOrphanDraft(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { tenantId: string; pageId: string; adminSub: string; newOwnerSub: string },
+  args: { tenantId: string; pageId: string; adminSub: string; newOwnerSub: string; plan?: string },
 ): Promise<void> {
-  const [claim] = await db.sql<{ page_id: string }[]>`
-    SELECT page_id FROM orphan_claims WHERE page_id = ${args.pageId} AND admin_sub = ${args.adminSub}
-  `
-  if (!claim) throw Object.assign(new Error('not found'), { statusCode: 404 }) // must claim first
-  const [member] = await db.sql<{ sub: string }[]>`SELECT sub FROM members WHERE sub = ${args.newOwnerSub}`
-  if (!member) throw Object.assign(new Error('new owner must be a tenant member'), { statusCode: 400, code: 'not_a_member' })
+  await db.tx(async (tx) => {
+    const [claim] = await tx<{ page_id: string }[]>`
+      SELECT page_id FROM orphan_claims WHERE page_id = ${args.pageId} AND admin_sub = ${args.adminSub}
+    `
+    if (!claim) throw Object.assign(new Error('not found'), { statusCode: 404 }) // must claim first
+    const [member] = await tx<{ sub: string }[]>`SELECT sub FROM members WHERE sub = ${args.newOwnerSub}`
+    if (!member) throw Object.assign(new Error('new owner must be a tenant member'), { statusCode: 400, code: 'not_a_member' })
 
-  await writeTuples(fga, [{ user: `user:${args.newOwnerSub}`, relation: 'manage', object: `page:${args.pageId}` }])
-  await deleteTuples(fga, [{ user: `user:${args.adminSub}`, relation: 'manage', object: `page:${args.pageId}` }])
-  await db.sql`DELETE FROM orphan_claims WHERE tenant_id = ${args.tenantId} AND page_id = ${args.pageId}`
+    // DB first (delete claim + audit), FGA last — a grant failure rolls back the claim delete +
+    // audit (ADR-003 ordering + ADR-061 audit-failure = operation-failure).
+    await tx`DELETE FROM orphan_claims WHERE tenant_id = ${args.tenantId} AND page_id = ${args.pageId}`
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.adminSub}`, action: 'orphan_draft.reassigned', target: `page:${args.pageId}` })
+    }
+    await writeTuples(fga, [{ user: `user:${args.newOwnerSub}`, relation: 'manage', object: `page:${args.pageId}` }])
+    await deleteTuples(fga, [{ user: `user:${args.adminSub}`, relation: 'manage', object: `page:${args.pageId}` }])
+  })
   emit({ type: 'orphan_draft.reassigned', tenantId: args.tenantId, actorId: args.adminSub, pageId: args.pageId, newOwner: `user:${args.newOwnerSub}` })
 }
 
@@ -161,7 +174,7 @@ export async function orphanDraftsPlugin(app: FastifyInstance) {
   // Claim → temporary audited admin access (server re-checks the orphan condition; TOCTOU).
   app.post<{ Params: { pageId: string } }>('/admin/orphan-drafts/:pageId/claim', async (req, reply) => {
     await requireTenantAdminOr404(app.fga, req.user.sub, req.tenant.id)
-    const r = await claimOrphanDraft(req.db, app.fga, { tenantId: req.tenant.id, pageId: req.params.pageId, adminSub: req.user.sub })
+    const r = await claimOrphanDraft(req.db, app.fga, { tenantId: req.tenant.id, pageId: req.params.pageId, adminSub: req.user.sub, plan: req.tenant.plan })
     return reply.code(201).send(r)
   })
 
@@ -169,7 +182,7 @@ export async function orphanDraftsPlugin(app: FastifyInstance) {
   app.post<{ Params: { pageId: string }; Body: { to?: string } }>('/admin/orphan-drafts/:pageId/reassign', async (req, reply) => {
     await requireTenantAdminOr404(app.fga, req.user.sub, req.tenant.id)
     if (!req.body?.to) return reply.code(400).send({ error: 'to (new owner sub) is required' })
-    await reassignOrphanDraft(req.db, app.fga, { tenantId: req.tenant.id, pageId: req.params.pageId, adminSub: req.user.sub, newOwnerSub: req.body.to })
+    await reassignOrphanDraft(req.db, app.fga, { tenantId: req.tenant.id, pageId: req.params.pageId, adminSub: req.user.sub, newOwnerSub: req.body.to, plan: req.tenant.plan })
     return reply.code(204).send()
   })
 }
