@@ -11,6 +11,7 @@ import { fgaClient, check, deleteObjectTuples } from '@wikistead/authz'
 import { LogicalSearchDriver, buildSearchDoc } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, grantPageAccess, revokePageAccess, listPageAccess } from '../routes/pages.js'
+import { drainAuditOutbox } from '../audit/outbox.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -39,6 +40,8 @@ afterAll(async () => {
   await driver.deleteDoc(pageId).catch(() => {})
   await deleteObjectTuples(fgaClient, `page:${pageId}`).catch(() => {})
   await admin`DELETE FROM search_outbox WHERE page_id = ${pageId}`.catch(() => {})
+  await admin`DELETE FROM audit_log WHERE tenant_id = ${TENANT}`.catch(() => {})
+  await admin`DELETE FROM audit_outbox WHERE tenant_id = ${TENANT}`.catch(() => {})
   await admin`DELETE FROM pages WHERE id = ${pageId}`.catch(() => {})
   await deleteSpace(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user' }).catch(() => {})
   await db.release()
@@ -89,5 +92,13 @@ describe('per-page access (grant/revoke/list)', () => {
       .rejects.toMatchObject({ statusCode: 400 })
     await expect(grantPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', grantee: GRANTEE, relation: 'owner' }))
       .rejects.toMatchObject({ statusCode: 400 })
+  })
+
+  it('records a durable page.access_granted audit entry when entitled + plan passed (#177)', async () => {
+    await grantPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', grantee: 'user:pa-audit', relation: 'view', plan: 'team' })
+    expect(await drainAuditOutbox()).toBeGreaterThanOrEqual(1)
+    const rows = await db.sql<{ action: string; target: string; actor: string }[]>`SELECT action, target, actor FROM audit_log WHERE tenant_id = ${TENANT} ORDER BY seq`
+    expect(rows.some((r) => r.action === 'page.access_granted' && r.target === `page:${pageId}` && r.actor === 'user:dev-user')).toBe(true)
+    await deleteObjectTuples(fgaClient, `page:${pageId}`).catch(() => {}) // clean the extra grantee tuple
   })
 })

@@ -8,6 +8,7 @@ import { emit } from '@wikistead/events'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
+import { auditIfEntitled } from '../audit/outbox.js'
 import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
 
@@ -319,11 +320,18 @@ export async function grantSpaceAccess(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string },
+  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string; plan?: string },
 ): Promise<void> {
   validateSpaceGrant(args.grantee, args.capability)
   await requireSpaceManage(fga, args.userId, args.spaceId)
-  await writeTuples(fga, [{ user: args.grantee, relation: CAP_TO_RELATION[args.capability], object: `space:${args.spaceId}` }])
+  const relation = CAP_TO_RELATION[args.capability] // narrowed here (assertion doesn't flow into the closure)
+  // Durable audit (#177) + FGA in one tx; FGA LAST so a grant failure rolls the audit back.
+  await db.tx(async (tx) => {
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_granted', target: `space:${args.spaceId}` })
+    }
+    await writeTuples(fga, [{ user: args.grantee, relation, object: `space:${args.spaceId}` }])
+  })
   await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
   emit({ type: 'space.access_granted', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
 }
@@ -332,11 +340,18 @@ export async function revokeSpaceAccess(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string },
+  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string; plan?: string },
 ): Promise<void> {
   validateSpaceGrant(args.grantee, args.capability)
   await requireSpaceManage(fga, args.userId, args.spaceId)
-  await deleteTuples(fga, [{ user: args.grantee, relation: CAP_TO_RELATION[args.capability], object: `space:${args.spaceId}` }])
+  const relation = CAP_TO_RELATION[args.capability] // narrowed here (assertion doesn't flow into the closure)
+  // Durable audit (#177) + FGA in one tx; FGA LAST so a revoke failure rolls the audit back.
+  await db.tx(async (tx) => {
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_revoked', target: `space:${args.spaceId}` })
+    }
+    await deleteTuples(fga, [{ user: args.grantee, relation, object: `space:${args.spaceId}` }])
+  })
   await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
   emit({ type: 'space.access_revoked', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
 }
@@ -443,7 +458,7 @@ export async function spacesPlugin(app: FastifyInstance) {
     const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
     await grantSpaceAccess(req.db, app.fga, app.searchDriver, {
       spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
-      grantee, capability: req.body?.relation ?? '',
+      grantee, capability: req.body?.relation ?? '', plan: req.tenant.plan,
     })
     return reply.code(204).send()
   })
@@ -452,7 +467,7 @@ export async function spacesPlugin(app: FastifyInstance) {
     const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
     await revokeSpaceAccess(req.db, app.fga, app.searchDriver, {
       spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
-      grantee, capability: req.body?.relation ?? '',
+      grantee, capability: req.body?.relation ?? '', plan: req.tenant.plan,
     })
     return reply.code(204).send()
   })

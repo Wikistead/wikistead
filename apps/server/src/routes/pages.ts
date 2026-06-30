@@ -12,6 +12,7 @@ import { storeRevisionYdoc } from './revision-ydoc.js'
 import type { TenantDb } from '../db/index.js'
 import { flushDraft } from '../collab-flush.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
+import { auditIfEntitled } from '../audit/outbox.js'
 
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean }
 export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean }
@@ -445,13 +446,20 @@ export async function grantPageAccess(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { pageId: string; tenantId: string; userId: string; grantee: string; relation: string },
+  args: { pageId: string; tenantId: string; userId: string; grantee: string; relation: string; plan?: string },
 ): Promise<void> {
   validateGrant(args.grantee, args.relation)
   await requireManage(fga, args.userId, args.pageId)
-  await writeTuples(fga, [{ user: args.grantee, relation: args.relation, object: `page:${args.pageId}` }])
-  // Reindex so the new grantee appears in the search viewer set.
-  const oid = await db.tx(async (tx) => enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' }))
+  // One tx: durable audit (#177) + the reindex outbox; FGA LAST so a grant failure rolls both back.
+  const oid = await db.tx(async (tx) => {
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.access_granted', target: `page:${args.pageId}` })
+    }
+    const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+    await writeTuples(fga, [{ user: args.grantee, relation: args.relation, object: `page:${args.pageId}` }])
+    return o
+  })
+  // Reindex so the new grantee appears in the search viewer set (post-commit; FGA now set).
   processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
   emit({ type: 'page.access_granted', tenantId: args.tenantId, pageId: args.pageId, grantee: args.grantee, relation: args.relation, actorId: args.userId })
 }
@@ -460,14 +468,21 @@ export async function revokePageAccess(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { pageId: string; tenantId: string; userId: string; grantee: string; relation: string },
+  args: { pageId: string; tenantId: string; userId: string; grantee: string; relation: string; plan?: string },
 ): Promise<void> {
   validateGrant(args.grantee, args.relation)
   await requireManage(fga, args.userId, args.pageId)
-  await deleteTuples(fga, [{ user: args.grantee, relation: args.relation, object: `page:${args.pageId}` }])
+  // One tx: durable audit (#177) + the reindex outbox; FGA LAST so a revoke failure rolls both back.
+  const oid = await db.tx(async (tx) => {
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.access_revoked', target: `page:${args.pageId}` })
+    }
+    const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+    await deleteTuples(fga, [{ user: args.grantee, relation: args.relation, object: `page:${args.pageId}` }])
+    return o
+  })
   // Reindex so the revoked grantee drops out of the search viewer set immediately
   // (FGA-derived surfaces — tree/comments/attachments/collab — drop on next request).
-  const oid = await db.tx(async (tx) => enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' }))
   processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
   emit({ type: 'page.access_revoked', tenantId: args.tenantId, pageId: args.pageId, grantee: args.grantee, relation: args.relation, actorId: args.userId })
 }
@@ -891,7 +906,7 @@ export async function pagesPlugin(app: FastifyInstance) {
     const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
     await grantPageAccess(req.db, app.fga, app.searchDriver, {
       pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub,
-      grantee, relation: req.body?.relation ?? '',
+      grantee, relation: req.body?.relation ?? '', plan: req.tenant.plan,
     })
     return reply.code(204).send()
   })
@@ -900,7 +915,7 @@ export async function pagesPlugin(app: FastifyInstance) {
     const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
     await revokePageAccess(req.db, app.fga, app.searchDriver, {
       pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub,
-      grantee, relation: req.body?.relation ?? '',
+      grantee, relation: req.body?.relation ?? '', plan: req.tenant.plan,
     })
     return reply.code(204).send()
   })
