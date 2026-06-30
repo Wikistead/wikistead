@@ -124,6 +124,18 @@ export async function buildApp(): Promise<FastifyInstance> {
     }
   })
 
+  // Metered usage alerts (#128 / ADR-082): the CE baseline logs that a soft-cap threshold was crossed
+  // so the warning is at least visible in app logs ("no silent runaway bill"). EE/Cloud registers its
+  // own subscriber to notify the admin (email/in-app); this CE sink is additive and never throws.
+  onDomainEvent((e) => {
+    if (e.type === 'usage.threshold_crossed') {
+      app.log.warn(
+        { tenantId: e.tenantId, resource: e.resource, threshold: e.threshold, period: e.period },
+        'metered usage crossed an alert threshold (soft-cap approaching)',
+      )
+    }
+  })
+
   // Transactional email (P1.3). EE/Cloud may registerEmailDriver; CE uses SMTP
   // when configured, else a no-op (announced once — see email/index.ts).
   app.decorate('email', getEmailDriver(resolveEmailDriver((m) => app.log.info(m))))
