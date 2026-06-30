@@ -1,0 +1,20 @@
+/* UDEV Gothic (OFL-1.1) — self-hosted editor MONOSPACE font (#173 / #158-C1).
+ * The editor's --font-mono leads with "UDEV Gothic": it is UD-legible AND full-width = 2×half-width,
+ * so Japanese stays on an exact monospace grid (vim columns line up). Vendored woff2 subset (Latin +
+ * kana + JIS kanji + punctuation + box-drawing/symbols) so it actually loads; falls back to
+ * ui-monospace for any uncovered glyph. Subset built with fonttools/pyftsubset from UDEVGothic v2.2.0.
+ * Source + license: https://github.com/yuru7/udev-gothic (SIL OFL 1.1) — see LICENSE-UDEVGothic.txt. */
+@font-face {
+  font-family: "UDEV Gothic";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./udevgothic-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "UDEV Gothic";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./udevgothic-Bold.woff2") format("woff2");
+}

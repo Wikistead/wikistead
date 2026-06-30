@@ -201,10 +201,10 @@
   --space-6: 32px;
   --header-h: 40px;
   --sidebar-w: 260px;
-  /* #158-C1 fonts. UI = Inter (Latin) + Noto Sans JP (JP), self-hosted woff2 (OFL). Body/mono =
-     UDEV Gothic (OFL, UD-legible, full-width = 2× half-width → vim columns stay exact); it leads
-     the stack so it's used once its woff2 is vendored (@font-face — follow-up), and falls back to
-     a strict-monospace stack until then (the body-strict-monospace invariant holds either way). */
+  /* #158-C1 fonts. UI = Inter (Latin) + Noto Sans JP (JP), self-hosted woff2 (OFL). Mono =
+     UDEV Gothic (OFL, UD-legible, full-width = 2× half-width → vim columns stay exact), now vendored
+     as a self-hosted woff2 subset (#173 — assets/fonts/udev-gothic.css, @font-face 400/700); it leads
+     the mono stack and falls back to a strict-monospace stack for any uncovered glyph. */
   --font: "Inter", "Noto Sans JP", system-ui, sans-serif;
   --font-mono: "UDEV Gothic", ui-monospace, SFMono-Regular, Menlo, monospace;
 
