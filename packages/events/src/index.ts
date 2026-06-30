@@ -45,6 +45,9 @@ export type DomainEvent =
   | { type: 'tenant.custom_domain_removed'; tenantId: string; domain: string }
   // SAML config change (#135 / ADR-067), EE. The production SP/ACS validation is a separate sub-task.
   | { type: 'tenant.saml_updated'; tenantId: string; actorId: string; enabled: boolean }
+  // SCIM provisioning tokens (#134 / ADR-070), EE. The SCIM endpoints that consume them are separate.
+  | { type: 'scim_token.created'; tenantId: string; actorId: string; tokenId: string }
+  | { type: 'scim_token.revoked'; tenantId: string; actorId: string; tokenId: string }
   // ── Attachments ──────────────────────────────────────────────────────
   | { type: 'attachment.confirmed'; tenantId: string; attachmentId: string; pageId: string; actorId: string }
   | { type: 'attachment.deleted';   tenantId: string; attachmentId: string; pageId: string; actorId: string }
