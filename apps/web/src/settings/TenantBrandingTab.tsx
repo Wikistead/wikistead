@@ -6,6 +6,8 @@ import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
 import { AccentPicker } from "./AccentPicker";
 import { assetUrl } from "../data/apiClient";
+import { UpgradeNotice } from "../ui/UpgradeNotice";
+import { useSession } from "../session/SessionProvider";
 
 const LOGO_MAX_BYTES = 512 * 1024;
 const LOGO_TYPES = /^image\/(png|jpeg|webp)$/;
@@ -16,6 +18,7 @@ const LOGO_TYPES = /^image\/(png|jpeg|webp)$/;
 // (Tenant logo upload is Phase 5d-2, pending the multipart dependency.)
 export function TenantBrandingTab() {
   const { t } = useTranslation();
+  const { isAdmin } = useSession();
   const branding = useBranding();
   const ent = useEntitlements();
   const update = useUpdateTenantBranding();
@@ -66,12 +69,13 @@ export function TenantBrandingTab() {
       <h2 style={{ marginTop: 0 }}>{t("tenantBranding.title")}</h2>
       <p className="mt-0 text-sm text-fg-dim">{t("tenantBranding.body")}</p>
 
-      {locked && (
-        <div className="mb-5 rounded-lg border border-border border-l-[3px] border-l-[var(--accent)] bg-panel px-3.5 py-3" data-testid="branding-upgrade">
-          <strong className="text-sm">{t("branding.upgradeTitle")}</strong>
-          <p className="mb-0 mt-1 text-xs text-fg-dim">{t("branding.upgradeBody")}</p>
-        </div>
-      )}
+      <UpgradeNotice
+        kind={locked ? "entitlement" : null}
+        isAdmin={isAdmin}
+        testId="branding-upgrade"
+        title={t("branding.upgradeTitle")}
+        body={t("branding.upgradeBody")}
+      />
 
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("tenantBranding.displayName")}</label>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 28 }}>
