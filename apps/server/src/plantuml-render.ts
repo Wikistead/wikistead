@@ -44,6 +44,31 @@ export async function renderPlantuml(
   }
   if (!res.ok) return null
   if (!(res.headers.get('content-type') ?? '').startsWith('image/')) return null // raster only (no XSS)
-  const buf = Buffer.from(await res.arrayBuffer())
-  return buf.byteLength > 0 && buf.byteLength <= MAX_RENDER_BYTES ? buf : null
+  return readBoundedBytes(res, MAX_RENDER_BYTES)
+}
+
+// Read up to `maxBytes` of the image body, degrading to null if it exceeds the cap. content-length
+// is a cheap first reject but is NOT trusted: a chunked / absent-header / lying endpoint could still
+// stream an unbounded body, and `res.arrayBuffer()` would buffer the WHOLE thing into memory first
+// (OOM DoS). Stream-read and abort the moment we pass the cap — at most maxBytes is ever buffered.
+async function readBoundedBytes(res: Response, maxBytes: number): Promise<Buffer | null> {
+  if (Number(res.headers.get('content-length') ?? 0) > maxBytes) return null
+  const reader = res.body?.getReader()
+  if (!reader) {
+    const buf = Buffer.from(await res.arrayBuffer())
+    return buf.byteLength > 0 && buf.byteLength <= maxBytes ? buf : null
+  }
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.length
+    if (total > maxBytes) {
+      await reader.cancel()
+      return null // over cap → degrade to source (never a broken/oversized embed)
+    }
+    chunks.push(value)
+  }
+  return total > 0 ? Buffer.concat(chunks) : null // empty body → degrade
 }

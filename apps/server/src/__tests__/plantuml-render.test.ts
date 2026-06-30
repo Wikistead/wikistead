@@ -43,4 +43,19 @@ describe('renderPlantuml (#140 / ADR-074)', () => {
     const big = async () => png(MAX_RENDER_BYTES + 1)
     expect(await renderPlantuml('x', { endpoint: 'https://k/', fetcher: big })).toBeNull()
   })
+
+  it('degrades on an over-size streamed body with NO content-length (no header = no bypass)', async () => {
+    // A chunked endpoint omits content-length, so the header fast-reject (declared=0) passes; the
+    // stream bound must still catch it before the whole body is buffered into memory.
+    const streamed = async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        pull(ctrl) {
+          ctrl.enqueue(new Uint8Array(MAX_RENDER_BYTES + 1)) // one over-cap chunk, no content-length
+          ctrl.close()
+        },
+      })
+      return new Response(stream, { headers: { 'content-type': 'image/png' } })
+    }
+    expect(await renderPlantuml('x', { endpoint: 'https://k/', fetcher: streamed })).toBeNull()
+  })
 })
