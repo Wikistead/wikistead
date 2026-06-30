@@ -88,4 +88,30 @@ describe('fillAuthorizedPage', () => {
     await fillAuthorizedPage(rec, authorizeOnly(new Set(['p50'])), { startOffset: 40, pageSize: 20, windowSize: 20, maxScan: 60 })
     expect(seen[0]).toBe(40) // first window fetched at the cursor, not 0
   })
+
+  // #103 / ADR-068 side-channel (B1/B2): the resume signal must not become an existence oracle. The
+  // cursor itself is opaque + scope-bound (search-cursor.test); these assert the FILL-loop signal.
+  it('B1: a budget-exhausted unauthorized scan and an authorized-tail-past-budget scan are INDISTINGUISHABLE (same cursor, empty page)', async () => {
+    const stream = hits(1000) // identical candidate stream (stage-1 is the same query for everyone)
+    const opts = { pageSize: 20, windowSize: 20, maxScan: 200 }
+    // unauthorized viewer: authorize() returns nothing → empty page, budget cursor.
+    const unauth = await fillAuthorizedPage(windowOver(stream), authorizeOnly(new Set()), opts)
+    // a viewer whose only authorized hit sits PAST the budget → also empty page, budget cursor.
+    const tail = await fillAuthorizedPage(windowOver(stream), authorizeOnly(new Set(['p900'])), opts)
+    expect(unauth.results).toEqual([])
+    expect(tail.results).toEqual([])
+    expect(unauth.nextCursor).not.toBeNull()
+    expect(unauth.nextCursor).toBe(tail.nextCursor) // same resume offset → "budget" vs "more beyond" not distinguishable
+  })
+
+  it('B2: an unauthorized viewer page/cursor does NOT depend on how many hits are authorized for OTHERS', async () => {
+    const opts = { pageSize: 20, windowSize: 20, maxScan: 200 }
+    // Same candidate stream; this viewer's authorize() is empty regardless of others' grants. Whether
+    // the stream is "rich in others' authorized docs" or "sparse", this viewer sees the SAME output —
+    // so results/cursor carry no trace of authorized-for-others existence.
+    const out = await fillAuthorizedPage(windowOver(hits(1000)), authorizeOnly(new Set()), opts)
+    const again = await fillAuthorizedPage(windowOver(hits(1000)), authorizeOnly(new Set()), opts)
+    expect(out).toEqual({ results: [], nextCursor: 200 })
+    expect(again).toEqual(out) // deterministic; the only viewer-visible signal is the budget bound
+  })
 })

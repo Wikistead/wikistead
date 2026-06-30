@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { filterAuthorized, fgaClient } from '@wikistead/authz'
 import { fillAuthorizedPage, SEARCH_CANDIDATE_LIMIT } from '../search/paginate.js'
+import { encodeCursor, decodeCursor, type CursorScope } from '../search/cursor.js'
 
 export async function searchPlugin(app: FastifyInstance) {
   // GET /search?q=...&spaceId=...&cursor=...
@@ -18,10 +19,12 @@ export async function searchPlugin(app: FastifyInstance) {
     const q = req.query.q?.trim() ?? ''
     if (!q) return []
 
-    // Resume offset (opaque cursor). A tampered cursor only re-positions the ranked scan — it
-    // can never leak an unauthorized hit (stage-2 FGA filters every window) — but bound it anyway.
-    const start = Number(req.query.cursor)
-    const startOffset = Number.isInteger(start) && start > 0 ? start : 0
+    // Resume offset from a SIGNED opaque cursor (#103 / ADR-068): HMAC-bound to this tenant +
+    // principal + query, so it can't be read, tampered, or reused across queries/principals. Any
+    // failure decodes to 0 (restart) — no error oracle. Stage-2 FGA still filters every window, so a
+    // forged offset could at most re-position the scan, never leak an unauthorized hit.
+    const scope: CursorScope = { tenantId: req.tenant.id, principal: req.user.sub, q, spaceId: req.query.spaceId }
+    const startOffset = decodeCursor(req.query.cursor, scope)
 
     const { results, nextCursor } = await fillAuthorizedPage(
       (offset, limit) => app.searchDriver.search({
@@ -31,9 +34,11 @@ export async function searchPlugin(app: FastifyInstance) {
       { startOffset, windowSize: SEARCH_CANDIDATE_LIMIT },
     )
 
-    // Never a silent cap: nextCursor (and the back-compat has-more flag) signal + ENABLE more.
+    // Never a silent cap: the cursor (and the back-compat has-more flag) signal + ENABLE more. The
+    // has-more flag reflects the SCAN budget / candidate stream (not the authorized count), and the
+    // cursor is opaque, so neither reveals to an unauthorized viewer whether authorized hits exist.
     reply.header('X-Search-Has-More', String(nextCursor != null))
-    if (nextCursor != null) reply.header('X-Search-Cursor', String(nextCursor))
+    if (nextCursor != null) reply.header('X-Search-Cursor', encodeCursor(nextCursor, scope))
     return results
   })
 }
