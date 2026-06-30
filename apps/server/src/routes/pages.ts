@@ -16,6 +16,8 @@ import { auditIfEntitled } from '../audit/outbox.js'
 import { resolveEmbed, EmbedDeniedError } from '../embed-resolve.js'
 import { renderPlantuml } from '../plantuml-render.js'
 import { assertPageViewable } from '../page-view-gate.js'
+import { resolveEntitlements } from '@wikistead/entitlements'
+import { markdownExceedsLevelCap } from '../macro-level-cap.js'
 
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean }
 export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean }
@@ -256,7 +258,9 @@ export async function publishPage(
   // subject = FGA principal for the edit check ("user:<sub>" | "share_link:<id>");
   // createdBy attributes the revision/event ("user:<sub>" | "guest:<id>"); context
   // (guests) evaluates the share_link's non_expired condition.
-  args: { pageId: string; subject: string; createdBy: string; context?: { current_time: string } },
+  // `plan` (optional) enables the server macro level-cap fortress (#93/ADR-073). Inert when the
+  // tenant cap is 'directive' (the default for all current plans) or when plan is omitted.
+  args: { pageId: string; subject: string; createdBy: string; plan?: string; context?: { current_time: string } },
 ): Promise<{ publishedAt: Date | null; revisionId: string | null; noop: boolean }> {
   const canEdit = await check(fga, args.subject, 'edit', { type: 'page', id: args.pageId }, args.context)
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
@@ -266,6 +270,12 @@ export async function publishPage(
   `
   if (!draft) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const md = decodeYdocContent(draft.ydoc)
+
+  // Macro level-cap fortress (#93/ADR-073): reject a publish whose Markdown exceeds the tenant cap
+  // (server is authoritative — a client bypassing the editor's auto-demote can't persist over-cap).
+  if (args.plan !== undefined && markdownExceedsLevelCap(md, resolveEntitlements(args.plan).macroLevelCap)) {
+    throw Object.assign(new Error('content uses macros above the plan level cap'), { statusCode: 422, code: 'macro_level_cap' })
+  }
 
   // No-op guard (server is the accurate gate): if the draft text equals what is
   // already published, do NOT create a revision — that would be meaningless history.
@@ -875,7 +885,7 @@ export async function pagesPlugin(app: FastifyInstance) {
     // does not leave them behind as "unpublished changes". Best-effort: never blocks
     // longer than the timeout, and is a no-op when collab isn't running (e.g. tests).
     await flushDraft(app.valkey, docName(req.tenant.id, req.params.pageId))
-    return publishPage(req.db, app.fga, app.searchDriver, app.storageDriver, { pageId: req.params.pageId, ...p })
+    return publishPage(req.db, app.fga, app.searchDriver, app.storageDriver, { pageId: req.params.pageId, ...p, plan: req.tenant.plan })
   })
 
   // Toggle a single task checkbox on the published page WITHOUT creating a revision
