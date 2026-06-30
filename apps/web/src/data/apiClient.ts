@@ -13,10 +13,29 @@ const API_URL = (import.meta as any).env?.VITE_API_URL ?? "/api";
 export const assetUrl = (path: string) => `${API_URL}${path}`;
 
 export class ApiError extends Error {
+  // `code` / `upgrade` come from the server error body (entitlement-ux.ts): an entitlement gate
+  // returns 403 + `<feature>_not_entitled` (or `upgrade_required`); the client uses these to
+  // distinguish an entitlement loss (offer "upgrade", data preserved) from an authz loss (404,
+  // existence-hiding, NEVER an affordance — see disclosureKindFromError in ui/upgrade-affordance).
+  code?: string;
+  upgrade?: boolean;
   constructor(public status: number, public path: string, message: string) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+// Build an ApiError from a status + parsed error body. Pure (no fetch) so the body→error mapping is
+// unit-tested directly. The body is whatever the server sent (Fastify's default shape is
+// { statusCode, code, error, message }); `upgrade` is honored if present. Defensive against a
+// non-object / non-JSON body (e.g. an HTML error page) — falls back to a generic message.
+export function apiErrorFrom(status: number, path: string, body: unknown): ApiError {
+  const b = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const message = typeof b.message === "string" && b.message ? b.message : `API ${status} for ${path}`;
+  const err = new ApiError(status, path, message);
+  if (typeof b.code === "string") err.code = b.code;
+  if (b.upgrade === true) err.upgrade = true;
+  return err;
 }
 
 export async function apiFetch<T = unknown>(
@@ -39,7 +58,15 @@ export async function apiFetch<T = unknown>(
     },
   });
   if (!res.ok) {
-    throw new ApiError(res.status, path, `API ${res.status} for ${path}`);
+    // Capture the error body so entitlement denials (code / upgrade) survive to the UI. A body that
+    // isn't JSON (HTML error page, empty) just yields a generic ApiError.
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      /* non-JSON error body — keep body null */
+    }
+    throw apiErrorFrom(res.status, path, body);
   }
   return res.status === 204 ? null : ((await res.json()) as T);
 }
