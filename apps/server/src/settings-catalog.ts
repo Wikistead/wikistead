@@ -1,0 +1,48 @@
+// "Code is truth" account-settings catalog (#139 / ADR-080 doc↔code linkage). A PURE leaf (no
+// server deps) so it is the SINGLE source for BOTH the account route's validation AND the
+// generated settings reference — a new option cannot be added to one without the other.
+
+export type KeymapMode = 'default' | 'vim' | 'local'
+export const KEYMAP_MODES: KeymapMode[] = ['default', 'vim', 'local']
+
+export type DisplayModePref = 'live' | 'source' | 'local'
+export const DISPLAY_MODE_PREFS: DisplayModePref[] = ['live', 'source', 'local']
+
+// Remappable chord commands (ADR-021) — ONLY these may be rebound; structural/contextual keys
+// (`/` `\` Enter/Esc/Tab, mnemonics, ex-commands) and vim's own keymap are fixed.
+export const REMAPPABLE_COMMANDS = ['editor.toggleVim', 'search.focus', 'palette.next', 'palette.prev']
+// Keys the browser owns — never bindable (defence-in-depth; the UI also blocks these).
+export const RESERVED_KEYS = ['Mod-w', 'Mod-n', 'Mod-t', 'Ctrl-w', 'Ctrl-n', 'Ctrl-t']
+
+const KEYMAP_DESC: Record<KeymapMode, string> = {
+  default: 'Always start in non-vim mode.',
+  vim: 'Always start in vim mode (the toolbar toggle still switches for the session).',
+  local: "Follow this device's last toolbar choice (the default).",
+}
+const DISPLAY_DESC: Record<DisplayModePref, string> = {
+  live: 'Always start in Live preview.',
+  source: 'Always start in Source mode.',
+  local: "Follow this device's last choice (the default).",
+}
+
+const HEADER = `<!--
+  AUTO-GENERATED — DO NOT EDIT BY HAND.
+  Source: apps/server/src/settings-catalog.ts.
+  Regenerate: pnpm docs:gen   ·   Verify (CI): pnpm docs:check
+  The "code is truth" account-settings reference (ADR-080 doc↔code linkage).
+-->`
+
+// Deterministic Markdown for the account settings reference (cross-device startup preferences +
+// the rebindable-keys contract). Generated from the same constants the server validates against.
+export function renderAccountSettingsMarkdown(): string {
+  const lines: string[] = [HEADER, '', '# Account settings', '']
+  lines.push('## Editor keymap (startup mode, cross-device)', '', '| Value | Meaning |', '|---|---|')
+  for (const m of KEYMAP_MODES) lines.push(`| \`${m}\` | ${KEYMAP_DESC[m]} |`)
+  lines.push('', '## Editor display mode (startup, cross-device)', '', '| Value | Meaning |', '|---|---|')
+  for (const m of DISPLAY_MODE_PREFS) lines.push(`| \`${m}\` | ${DISPLAY_DESC[m]} |`)
+  lines.push('', '## Custom key bindings', '')
+  lines.push(`Rebindable commands: ${REMAPPABLE_COMMANDS.map((c) => `\`${c}\``).join(', ')}.`)
+  lines.push('', `Reserved (never bindable — browser-owned): ${RESERVED_KEYS.map((k) => `\`${k}\``).join(', ')}.`)
+  lines.push('')
+  return lines.join('\n')
+}

@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { renderEntitlementsMarkdown } from '../packages/entitlements/src/index.js'
 import { renderEventsMarkdown } from '../packages/events/src/index.js'
+import { renderAccountSettingsMarkdown } from '../apps/server/src/settings-catalog.js'
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 
@@ -28,6 +29,11 @@ const SURFACES: { name: string; outPath: string; render: () => string }[] = [
     name: 'domain events',
     outPath: join(root, 'docs/generated/domain-events.md'),
     render: renderEventsMarkdown,
+  },
+  {
+    name: 'account settings',
+    outPath: join(root, 'docs/generated/account-settings.md'),
+    render: renderAccountSettingsMarkdown,
   },
 ]
 
