@@ -2,7 +2,11 @@
 // + URL validation are the security core; verified with DISTINCT addresses (private/metadata/v6
 // blocked, public allowed) and an injected resolver so no real DNS/network is needed.
 import { describe, it, expect } from 'vitest'
-import { isBlockedIp, assertSafeUrl } from '../safe-fetch.js'
+import { isBlockedIp, assertSafeUrl, resolveGuarded, pinnedLookup, readCapped } from '../safe-fetch.js'
+
+async function* fromChunks(chunks: string[]): AsyncIterable<Uint8Array> {
+  for (const c of chunks) yield new TextEncoder().encode(c)
+}
 
 describe('isBlockedIp (#108/#140 SSRF)', () => {
   it('blocks private / loopback / link-local / metadata / CGNAT', () => {
@@ -39,5 +43,53 @@ describe('assertSafeUrl (#108/#140 SSRF)', () => {
   it('rejects a malformed URL and an unresolvable host', async () => {
     await expect(assertSafeUrl('not a url', { resolve: resolve(['8.8.8.8']) })).rejects.toMatchObject({ code: 'invalid_url' })
     await expect(assertSafeUrl('https://nx.example', { resolve: resolve([]) })).rejects.toMatchObject({ code: 'dns_unresolved' })
+  })
+})
+
+// ADR-083 / #181: tenant-OIDC issuer fetch hardening. The operator opt-in, IP pinning (DNS-rebinding
+// defense), and bounded read are the security core — tested with distinct values and injected DNS.
+describe('resolveGuarded — operator opt-in for private (ADR-083 #181)', () => {
+  const resolve = (ips: string[]) => async () => ips
+  it('rejects a private/metadata issuer by DEFAULT (no operator flag)', async () => {
+    await expect(resolveGuarded('https://idp.evil', { resolve: resolve(['169.254.169.254']) })).rejects.toMatchObject({ code: 'ssrf_blocked' })
+    await expect(resolveGuarded('https://idp.evil', { resolve: resolve(['10.0.0.5']) })).rejects.toMatchObject({ code: 'ssrf_blocked' })
+  })
+  it('PERMITS a private issuer ONLY when the operator opted in (self-host path)', async () => {
+    const { url, ips } = await resolveGuarded('https://keycloak.internal', { resolve: resolve(['10.0.0.5']), allowPrivate: true })
+    expect(url.host).toBe('keycloak.internal')
+    expect(ips).toEqual(['10.0.0.5']) // returned for pinning
+  })
+  it('still requires https even with the operator flag (no http/file SSRF)', async () => {
+    await expect(resolveGuarded('http://keycloak.internal', { resolve: resolve(['10.0.0.5']), allowPrivate: true })).rejects.toMatchObject({ code: 'scheme_blocked' })
+  })
+  it('returns the validated IPs so the connection can be pinned to them', async () => {
+    const { ips } = await resolveGuarded('https://idp.example', { resolve: resolve(['93.184.216.34']) })
+    expect(ips).toEqual(['93.184.216.34'])
+  })
+})
+
+describe('pinnedLookup — DNS-rebinding defense (ADR-083 #181)', () => {
+  it('hands back the pre-validated IP and NEVER re-resolves the hostname', () => {
+    const lookup = pinnedLookup(['93.184.216.34'])
+    let got: unknown
+    // A rebinding attacker would flip the hostname to a private IP at connect time; the pinned lookup
+    // ignores the hostname entirely, so the socket can only reach the IP we already validated.
+    lookup('attacker-rebinds-to-127.0.0.1.example', undefined, (...a: unknown[]) => { got = a })
+    expect(got).toEqual([null, '93.184.216.34', 4])
+  })
+  it('supports the all:true form (and infers IPv6 family)', () => {
+    const lookup = pinnedLookup(['2606:4700:4700::1111'])
+    let got: unknown
+    lookup('idp.example', { all: true }, (...a: unknown[]) => { got = a })
+    expect(got).toEqual([null, [{ address: '2606:4700:4700::1111', family: 6 }]])
+  })
+})
+
+describe('readCapped — bounded discovery read, no OOM (ADR-083 #181)', () => {
+  it('returns the body when under the cap', async () => {
+    expect(await readCapped(fromChunks(['{"ok":', 'true}']), 1024)).toBe('{"ok":true}')
+  })
+  it('refuses to buffer a body past the cap (rejects, does not OOM)', async () => {
+    await expect(readCapped(fromChunks(['x'.repeat(200), 'y'.repeat(200)]), 256)).rejects.toMatchObject({ code: 'body_too_large' })
   })
 })

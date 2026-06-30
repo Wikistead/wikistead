@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
 import { encryptSecret } from '../auth/secret-crypto.js'
+import { safeFetchJson } from '../safe-fetch.js'
 import type { TenantDb } from '../db/index.js'
 
 // Tenant OIDC (members' SSO) settings (Phase 5e). tenant#admin gated. Available on
@@ -25,9 +26,17 @@ async function requireTenantAdmin(fga: OpenFgaClient, userId: string, tenantId: 
   if (!allowed) throw Object.assign(new Error('admin only'), { statusCode: 403 })
 }
 
-// Fetch the issuer's OIDC discovery doc (timeout-bounded) and confirm the core
-// endpoints. Returns null on success, or a human error string.
-export async function validateIssuer(issuer: string): Promise<string | null> {
+// Fetch the issuer's OIDC discovery doc and confirm the core endpoints. Returns null on success, or
+// a human error string. SSRF + OOM hardened (ADR-083 / #181): the issuer is admin-supplied, so the
+// fetch goes through the SSRF guard (https-only, no private/metadata IP, connection pinned to the
+// validated IP so DNS can't rebind to a private host), forwards no credentials, refuses redirects,
+// and caps the body — never a raw fetch or an unbounded `.json()`. Self-hosted IdPs on a private
+// network work only when the OPERATOR (not a tenant admin) opts in via OIDC_ALLOW_PRIVATE_ISSUER.
+// The discovery fetcher is injectable ONLY so integration tests can exercise the persist / secret /
+// groups flow against a local test issuer without a real TLS endpoint; production always uses the
+// hardened default (safeFetchJson). The default path's https/SSRF policy is still asserted directly.
+export type DiscoveryFetch = typeof safeFetchJson
+export async function validateIssuer(issuer: string, fetchJson: DiscoveryFetch = safeFetchJson): Promise<string | null> {
   let url: string
   try {
     const base = issuer.endsWith('/') ? issuer : `${issuer}/`
@@ -35,18 +44,21 @@ export async function validateIssuer(issuer: string): Promise<string | null> {
   } catch {
     return 'invalid issuer URL'
   }
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), 5000)
+  // Read the operator flag at call time (not module-load) so it can be set per deployment/test run.
+  const allowPrivate = process.env.OIDC_ALLOW_PRIVATE_ISSUER === '1'
   try {
-    const r = await fetch(url, { signal: ctrl.signal })
-    if (!r.ok) return `discovery returned HTTP ${r.status}`
-    const doc = (await r.json()) as { authorization_endpoint?: string; token_endpoint?: string; jwks_uri?: string }
+    const doc = (await fetchJson(url, { allowPrivate, timeoutMs: 5000, maxBytes: 256 * 1024 })) as {
+      authorization_endpoint?: string; token_endpoint?: string; jwks_uri?: string
+    }
     if (!doc.authorization_endpoint || !doc.token_endpoint || !doc.jwks_uri) return 'discovery is missing required endpoints'
     return null
-  } catch {
+  } catch (e) {
+    const code = (e as { code?: string }).code
+    if (code === 'scheme_blocked') return 'issuer must be an https URL'
+    if (code === 'ssrf_blocked') return 'issuer address is not allowed (private/internal)'
+    if (code === 'dns_unresolved') return 'could not resolve the issuer host'
+    if (code === 'body_too_large') return 'discovery document is too large'
     return 'could not reach the issuer discovery document'
-  } finally {
-    clearTimeout(timer)
   }
 }
 
@@ -70,6 +82,7 @@ export async function updateTenantOidc(
     issuer: string; clientId: string; clientSecret?: string | null;
     scopes?: string; redirectUri: string; enabled: boolean; groupsClaim?: string | null;
   },
+  fetchJson: DiscoveryFetch = safeFetchJson, // injectable for tests; prod uses the hardened default
 ): Promise<void> {
   await requireTenantAdmin(fga, args.userId, args.tenantId)
   const issuer = args.issuer.trim()
@@ -82,7 +95,7 @@ export async function updateTenantOidc(
   }
   // Enabling a broken IdP would lock everyone out — validate discovery first.
   if (args.enabled) {
-    const err = await validateIssuer(issuer)
+    const err = await validateIssuer(issuer, fetchJson)
     if (err) throw Object.assign(new Error(err), { statusCode: 400, code: 'oidc_unreachable' })
   }
   // Secret is write-only: a non-empty value sets it, explicit null clears it

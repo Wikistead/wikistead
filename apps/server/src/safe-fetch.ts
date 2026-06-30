@@ -1,4 +1,5 @@
 import { lookup } from 'node:dns/promises'
+import { request as httpsRequest } from 'node:https'
 
 // SSRF-guarded external fetch (#108 / #140 · ADR-071/ADR-074). The shared gate for any server-side
 // fetch of a user/operator-supplied URL (external embeds, PlantUML/Kroki render). It refuses
@@ -31,18 +32,63 @@ export function isBlockedIp(ip: string): boolean {
 type Resolver = (host: string) => Promise<string[]>
 const defaultResolve: Resolver = async (host) => (await lookup(host, { all: true })).map((a) => a.address)
 
-// Validate a URL for server-side fetch: https only, and EVERY resolved IP must be public (an
-// attacker can point a domain at a private IP). Throws on violation; returns the parsed URL.
-export async function assertSafeUrl(raw: string, opts: { resolve?: Resolver } = {}): Promise<URL> {
+export interface GuardOpts {
+  resolve?: Resolver
+  // Operator opt-in (NOT tenant/admin-settable): permit private/loopback destinations for this
+  // fetch only, so a self-hosted Wikistead can reach a self-hosted IdP on the same private network
+  // (ADR-083). Defaults false → cloud/multi-tenant stays guarded.
+  allowPrivate?: boolean
+}
+
+// Resolve + validate a URL for a server-side fetch, returning the URL AND the exact resolved IPs so
+// the caller can PIN the connection to them (defeats DNS rebinding: the IP we validated is the IP we
+// connect to). https only; every resolved IP must be public unless the operator opted into private.
+export async function resolveGuarded(raw: string, opts: GuardOpts = {}): Promise<{ url: URL; ips: string[] }> {
   let u: URL
   try { u = new URL(raw) } catch { throw Object.assign(new Error('invalid URL'), { statusCode: 400, code: 'invalid_url' }) }
   if (u.protocol !== 'https:') throw Object.assign(new Error('only https is allowed'), { statusCode: 400, code: 'scheme_blocked' })
   const ips = await (opts.resolve ?? defaultResolve)(u.hostname)
   if (ips.length === 0) throw Object.assign(new Error('host did not resolve'), { statusCode: 400, code: 'dns_unresolved' })
-  for (const ip of ips) {
-    if (isBlockedIp(ip)) throw Object.assign(new Error('host resolves to a blocked address'), { statusCode: 400, code: 'ssrf_blocked' })
+  if (!opts.allowPrivate) {
+    for (const ip of ips) {
+      if (isBlockedIp(ip)) throw Object.assign(new Error('host resolves to a blocked address'), { statusCode: 400, code: 'ssrf_blocked' })
+    }
   }
-  return u
+  return { url: u, ips }
+}
+
+// Validate a URL for server-side fetch: https only, and EVERY resolved IP must be public (an
+// attacker can point a domain at a private IP). Throws on violation; returns the parsed URL.
+export async function assertSafeUrl(raw: string, opts: GuardOpts = {}): Promise<URL> {
+  return (await resolveGuarded(raw, opts)).url
+}
+
+// A node `lookup` that ALWAYS hands back a pre-validated IP and never consults DNS again — so the
+// socket connects to the exact address we checked, closing the DNS-rebinding TOCTOU (a hostile
+// resolver returning public at validation time then private at connect time). TLS still uses the
+// URL's hostname for SNI/cert verification, so pinning to the IP does not weaken TLS. Pure/testable.
+export function pinnedLookup(ips: string[]): (hostname: string, options: unknown, cb: (...a: unknown[]) => void) => void {
+  const fam = (ip: string) => (ip.includes(':') ? 6 : 4)
+  return (_hostname, options, cb) => {
+    if (options && typeof options === 'object' && (options as { all?: boolean }).all) {
+      cb(null, ips.map((address) => ({ address, family: fam(address) })))
+    } else {
+      cb(null, ips[0]!, fam(ips[0]!))
+    }
+  }
+}
+
+// Read an async byte stream into a string, REFUSING to buffer more than maxBytes (no OOM from a
+// hostile/large body). Pure over any AsyncIterable so it is unit-testable without a socket.
+export async function readCapped(source: AsyncIterable<Uint8Array>, maxBytes: number): Promise<string> {
+  let received = 0
+  const chunks: Buffer[] = []
+  for await (const chunk of source) {
+    received += chunk.length
+    if (received > maxBytes) throw Object.assign(new Error('response body too large'), { statusCode: 502, code: 'body_too_large' })
+    chunks.push(Buffer.from(chunk))
+  }
+  return Buffer.concat(chunks).toString('utf8')
 }
 
 // SSRF-guarded fetch: validate → fetch with bounded time + NO credential/cookie forward. Callers
@@ -57,5 +103,41 @@ export async function safeFetch(raw: string, opts: { resolve?: Resolver; timeout
     return await fetch(u, { redirect: 'error', signal: ctrl.signal, headers: {} }) // no Authorization/Cookie forwarded
   } finally {
     clearTimeout(timer)
+  }
+}
+
+// SSRF-guarded GET of a JSON document over a connection PINNED to the validated IPs (ADR-083). Used
+// for tenant-admin-supplied URLs the server must fetch itself (OIDC issuer discovery, JWKS): the
+// holes were a raw fetch (SSRF) + an unbounded `r.json()` (OOM). This routes through the SSRF guard
+// (operator-opt-in for private), pins the connection to the validated IP (no DNS rebinding), caps the
+// body, forces https, forwards no credentials, and refuses redirects. Throws (statusCode/code) on
+// any violation; never buffers an unbounded body.
+export async function safeFetchJson(
+  raw: string,
+  opts: GuardOpts & { timeoutMs?: number; maxBytes?: number } = {},
+): Promise<unknown> {
+  const { url, ips } = await resolveGuarded(raw, opts)
+  const maxBytes = opts.maxBytes ?? 256 * 1024
+  const timeoutMs = opts.timeoutMs ?? 5000
+  const body = await new Promise<string>((resolve, reject) => {
+    const req = httpsRequest(
+      url,
+      { method: 'GET', lookup: pinnedLookup(ips) as never, headers: {} }, // pinned IP; no creds
+      (res) => {
+        const status = res.statusCode ?? 0
+        // No redirect bounce: a 30x could otherwise point past the guard to a private host.
+        if (status >= 300 && status < 400) { res.destroy(); reject(Object.assign(new Error('redirect not allowed'), { statusCode: 502, code: 'redirect_blocked' })); return }
+        if (status < 200 || status >= 300) { res.destroy(); reject(Object.assign(new Error(`HTTP ${status}`), { statusCode: 502, code: 'bad_status', httpStatus: status })); return }
+        readCapped(res, maxBytes).then(resolve, (e) => { res.destroy(); reject(e) })
+      },
+    )
+    req.on('error', reject)
+    req.setTimeout(timeoutMs, () => req.destroy(Object.assign(new Error('timeout'), { statusCode: 504, code: 'timeout' })))
+    req.end()
+  })
+  try {
+    return JSON.parse(body)
+  } catch {
+    throw Object.assign(new Error('response was not valid JSON'), { statusCode: 502, code: 'invalid_json' })
   }
 }
