@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { writeTuples, deleteTuples } from '@wikistead/authz'
 import { createInvite, revokeInvite, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
+import { auditIfEntitled } from '../audit/outbox.js'
 import { emit } from '@wikistead/events'
 
 const ROLES: InviteRole[] = ['admin', 'member']
@@ -63,6 +64,8 @@ export async function membersPlugin(app: FastifyInstance) {
       const adminTuple = [{ user: `user:${req.params.sub}`, relation: 'admin', object: `tenant:${req.tenant.id}` }]
       if (role === 'admin') await writeTuples(req.server.fga, adminTuple)
       else await deleteTuples(req.server.fga, adminTuple)
+      // Durable compliance audit (#177), in-tx + EE-gated.
+      await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'member.role_changed', target: `user:${req.params.sub}` })
     })
     emit({ type: 'member.role_changed', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: req.params.sub, role })
     return { ok: true }
@@ -86,6 +89,8 @@ export async function membersPlugin(app: FastifyInstance) {
       const tuples = [{ user: `user:${req.params.sub}`, relation: 'member', object: `tenant:${req.tenant.id}` }]
       if (existing.role === 'admin') tuples.push({ user: `user:${req.params.sub}`, relation: 'admin', object: `tenant:${req.tenant.id}` })
       await deleteTuples(req.server.fga, tuples) // FGA last → rollback on failure
+      // Durable compliance audit (#177), in-tx + EE-gated.
+      await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'member.removed', target: `user:${req.params.sub}` })
     })
     await destroyMemberSessions(req.server.valkey, req.tenant.id, req.params.sub)
     emit({ type: 'member.removed', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: req.params.sub })

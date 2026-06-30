@@ -11,6 +11,7 @@ import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { buildApp } from '../app.js'
 import { provisionTenant } from '../auth/provisioning.js'
 import { createSession, SESSION_COOKIE } from '../auth/session.js'
+import { drainAuditOutbox } from '../audit/outbox.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
@@ -52,13 +53,16 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app.close()
-  for (const sub of ['mem-admin', 'mem-admin2', 'mem-plain', 'mem-victim']) {
+  for (const sub of ['mem-admin', 'mem-admin2', 'mem-plain', 'mem-victim', 'mem-audit']) {
     await deleteTuples(fgaClient, [
       { user: `user:${sub}`, relation: 'member', object: `tenant:${tenantId}` },
       { user: `user:${sub}`, relation: 'admin', object: `tenant:${tenantId}` },
     ]).catch(() => {})
   }
   await admin`DELETE FROM invites WHERE tenant_id = ${tenantId}`.catch(() => {})
+  // member ops now enqueue audit intents (#177); clean them before the tenant FK delete.
+  await admin`DELETE FROM audit_log WHERE tenant_id = ${tenantId}`.catch(() => {})
+  await admin`DELETE FROM audit_outbox WHERE tenant_id = ${tenantId}`.catch(() => {})
   await admin`DELETE FROM members WHERE tenant_id = ${tenantId}`.catch(() => {})
   await admin`DELETE FROM tenants WHERE id = ${tenantId}`.catch(() => {})
   await admin.end()
@@ -191,5 +195,20 @@ describe('last-admin guard', () => {
     expect(removeLast.statusCode).toBe(409)
     // Still an admin (guard held).
     expect(await hasRel('user:mem-admin', 'admin', `tenant:${tenantId}`)).toBe(true)
+  })
+})
+
+// ── #177: admin member ops write a durable, EE-gated audit entry ─────────────
+// LAST describe: it seeds + promotes mem-audit, so it must not precede the count /
+// last-admin assertions above.
+describe('member ops → audit log (#177)', () => {
+  it('a role change records a member.role_changed audit entry (entitled tenant)', async () => {
+    await seedMember('mem-audit', 'member') // provisionTenant has no cloud resolver → UNLIMITED.auditLog
+    const res = await app.inject({ method: 'PATCH', url: '/members/mem-audit', headers: { host, cookie: cookie(adminSid), 'content-type': 'application/json' }, payload: JSON.stringify({ role: 'admin' }) })
+    expect(res.statusCode).toBe(200)
+    expect(await drainAuditOutbox()).toBeGreaterThanOrEqual(1)
+    const rows = await admin<{ actor: string; action: string; target: string }[]>`
+      SELECT actor, action, target FROM audit_log WHERE tenant_id = ${tenantId} ORDER BY seq`
+    expect(rows.some((r) => r.action === 'member.role_changed' && r.target === 'user:mem-audit' && r.actor === 'user:mem-admin')).toBe(true)
   })
 })
