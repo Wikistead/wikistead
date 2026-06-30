@@ -105,6 +105,13 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     enforcedAt: 'AI capability gate (entitled AND configured)',
     downgrade: 'gated; non-destructive (metered soft-cap blocks, keeps content)',
   },
+  aiTokenAllowance: {
+    title: 'AI token allowance',
+    summary: 'Metered AI-token soft cap per billing window (#128 / ADR-082). New AI calls are refused once the window usage reaches it; existing content is untouched and an alert fires before the wall.',
+    unit: 'count',
+    enforcedAt: 'AI call (decideAllowance over usage_counters before a billable completion)',
+    downgrade: 'new AI calls soft-cap when over the lower allowance; existing content/usage kept (ADR-082/072)',
+  },
   samlSso: {
     title: 'SAML SSO',
     summary: 'Tenant SAML single sign-on — config + login (#135 / ADR-067, EE).',
