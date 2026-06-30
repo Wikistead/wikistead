@@ -154,6 +154,9 @@ importers:
       vitest:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@22.19.21)(happy-dom@20.10.6)(lightningcss@1.32.0)(sass@1.51.0)
+      xml-crypto:
+        specifier: ^6.1.2
+        version: 6.1.2
 
   apps/web:
     dependencies:
