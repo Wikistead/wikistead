@@ -13,6 +13,7 @@ import type { TenantDb } from '../db/index.js'
 import { flushDraft } from '../collab-flush.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import { auditIfEntitled } from '../audit/outbox.js'
+import { resolveEmbed, EmbedDeniedError } from '../embed-resolve.js'
 
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean }
 export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean }
@@ -893,6 +894,24 @@ export async function pagesPlugin(app: FastifyInstance) {
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/published', { config: { guest: 'view' } }, async (req) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
     return getPublished(req.db, app.fga, { pageId: req.params.pageId, subject, context })
+  })
+
+  // External embed resolve (#108 / ADR-071): server-fetch an allowlisted provider URL for a page a
+  // viewer can see. page-view gate + provider allowlist + SSRF guard are in resolveEmbed; the
+  // allowlist is the tenant setting (default empty ⇒ external embed off). Member or view-guest.
+  app.get<{ Params: { pageId: string }; Querystring: { url?: string } }>('/pages/:pageId/embed', { config: { guest: 'view' } }, async (req, reply) => {
+    const { subject, context } = principalForPage(req, req.params.pageId)
+    const url = req.query?.url
+    if (!url) return reply.code(400).send({ error: 'url is required' })
+    const [row] = await req.db.sql<{ embed_providers: string[] }[]>`SELECT embed_providers FROM tenant_settings LIMIT 1`
+    try {
+      return await resolveEmbed({ fga: app.fga }, { principal: subject, pageId: req.params.pageId, url, allowlist: row?.embed_providers ?? [], context })
+    } catch (e) {
+      if (e instanceof EmbedDeniedError || (e as { statusCode?: number })?.statusCode === 403) {
+        return reply.code(403).send({ error: 'embed not available' }) // uniform — no provider/existence leak
+      }
+      throw e
+    }
   })
 
   // ── per-page access (manage-gated; member-only, no guest config) ──────────
