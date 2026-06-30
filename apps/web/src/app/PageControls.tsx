@@ -147,8 +147,13 @@ export function PageVim(p: PageControlsProps) {
         <button type="button" data-testid="displaymode-toggle" data-mode={dm}
           title={t("page.displayMode")} aria-label={t("page.displayMode")} onClick={p.onCycleDisplayMode}
           className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] px-3 py-1.5 text-xs font-medium shadow-md backdrop-blur transition-colors hover:bg-panel-2">
-          {modeIcon}
-          <span>{modeLabel}</span>
+          {/* #165/#166 switch feedback: key={dm} remounts the label on each mode change so it briefly
+              fades/zooms in — a glance-able "mode changed" cue. Toolbar-only; never touches the editor
+              surface (reveal-on-cursor stays un-animated). */}
+          <span key={dm} className="inline-flex items-center gap-2 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200">
+            {modeIcon}
+            <span>{modeLabel}</span>
+          </span>
         </button>
       )}
     </div>
