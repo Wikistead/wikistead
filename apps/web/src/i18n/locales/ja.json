@@ -272,7 +272,8 @@
     "displayMode": "表示モード",
     "modeLive": "ライブ",
     "modeSource": "ソース",
-    "modeReading": "リーディング"
+    "modeReading": "リーディング",
+    "modeWysiwyg": "WYSIWYG"
   },
   "sidebar": {
     "newSpace": "新しいスペース",

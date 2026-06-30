@@ -484,12 +484,26 @@ class DetailsSummaryWidget extends WidgetType {
 // surface (the default "view" mode) there is nothing to edit, so NOTHING is ever
 // revealed — otherwise the view's default selection (position 0) would reveal any
 // first-line construct (a leading image, heading, or table) as raw markdown.
+// The per-mode syntax-reveal decision (ADR-056 / ADR-078), extracted PURE so it is unit-testable and
+// shared by the inline/block reveal (here) and math (math.ts) — the two must never diverge.
+//   readOnly (reading / view) → never reveal (clean render; nothing to edit).
+//   source                    → ALWAYS reveal (raw everywhere).
+//   wysiwyg                   → NEVER reveal (the inverse of source: markers stay hidden + atomic so
+//                               the doc always shows the rendered form; text stays editable, format
+//                               via toolbar / richEditUI). Opt-in (default is live).
+//   live                      → reveal only where the caret/selection overlaps the marker.
+export function syntaxRevealsAt(mode: DisplayMode, readOnly: boolean, underSelection: boolean): boolean {
+  if (readOnly) return false;
+  if (mode === "source") return true;
+  if (mode === "wysiwyg") return false;
+  return underSelection;
+}
 function rangeRevealed(state: EditorState, from: number, to: number): boolean {
-  if (state.readOnly) return false;
-  // Source mode (ADR-056 / #164): syntax is ALWAYS raw — every construct reveals regardless of the
-  // caret. (Live = reveal only under the selection, below.)
-  if (state.facet(displayMode) === "source") return true;
-  return state.selection.ranges.some((r) => r.from <= to && r.to >= from);
+  return syntaxRevealsAt(
+    state.facet(displayMode),
+    state.readOnly,
+    state.selection.ranges.some((r) => r.from <= to && r.to >= from),
+  );
 }
 function lineRevealed(state: EditorState, pos: number): boolean {
   const line = state.doc.lineAt(pos);

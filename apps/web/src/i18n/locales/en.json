@@ -272,7 +272,8 @@
     "displayMode": "Display mode",
     "modeLive": "Live",
     "modeSource": "Source",
-    "modeReading": "Reading"
+    "modeReading": "Reading",
+    "modeWysiwyg": "WYSIWYG"
   },
   "sidebar": {
     "newSpace": "New space",

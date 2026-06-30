@@ -8,7 +8,7 @@ import { EditorView, Decoration, WidgetType, type DecorationSet } from "@codemir
 import { StateField, EditorState, RangeSetBuilder, type Range } from "@codemirror/state"
 import { syntaxTree } from "@codemirror/language"
 import katex from "katex"
-import { displayMode } from "./decorations"
+import { displayMode, syntaxRevealsAt } from "./decorations"
 
 interface MathRange { from: number; to: number; tex: string; display: boolean }
 
@@ -79,9 +79,11 @@ class MathWidget extends WidgetType {
 }
 
 function rangeRevealed(state: EditorState, from: number, to: number): boolean {
-  if (state.readOnly) return false
-  if (state.facet(displayMode) === "source") return true // Source mode: always raw
-  return state.selection.ranges.some((r) => r.from <= to && r.to >= from)
+  return syntaxRevealsAt(
+    state.facet(displayMode),
+    state.readOnly,
+    state.selection.ranges.some((r) => r.from <= to && r.to >= from),
+  )
 }
 
 function buildMath(state: EditorState): { deco: DecorationSet; atomic: DecorationSet } {
