@@ -45,8 +45,43 @@ export async function resolveEmbed(
   const res = await (deps.fetcher ?? safeFetch)(args.url)
   const contentType = (res.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
   if (!ALLOWED_CONTENT_TYPES.includes(contentType)) throw new EmbedDeniedError('unsupported content-type')
+  // Fast reject on an honest content-length header...
   const declaredLen = Number(res.headers.get('content-length') ?? 0)
   if (declaredLen > MAX_EMBED_BYTES) throw new EmbedDeniedError('embed too large')
-  const body = (await res.text()).slice(0, MAX_EMBED_BYTES)
+  // ...but never TRUST it: a chunked / absent-header / lying response could still stream an
+  // unbounded body. `res.text()` would buffer the WHOLE thing into memory first (OOM DoS), so read
+  // the stream and abort the moment we exceed the cap — at most MAX_EMBED_BYTES is ever buffered.
+  const body = await readBounded(res, MAX_EMBED_BYTES)
   return { contentType, body }
+}
+
+// Stream-read up to `maxBytes`; cancel + reject as soon as the body exceeds it (don't slice-and-
+// return a truncated half-document — be consistent with the content-length rejection above). Falls
+// back to a bounded text read only when the platform exposes no body stream.
+async function readBounded(res: Response, maxBytes: number): Promise<string> {
+  const reader = res.body?.getReader()
+  if (!reader) {
+    const text = await res.text()
+    if (text.length > maxBytes) throw new EmbedDeniedError('embed too large')
+    return text
+  }
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.length
+    if (total > maxBytes) {
+      await reader.cancel()
+      throw new EmbedDeniedError('embed too large')
+    }
+    chunks.push(value)
+  }
+  const buf = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) {
+    buf.set(c, offset)
+    offset += c.length
+  }
+  return new TextDecoder().decode(buf)
 }

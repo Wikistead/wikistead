@@ -48,4 +48,19 @@ describe('resolveEmbed (#108 / ADR-071 external embed gates)', () => {
     const big = stubFetcher('x', { 'content-type': 'text/html', 'content-length': String(MAX_EMBED_BYTES + 1) })
     await expect(resolveEmbed({ fga: fga(true), fetcher: big.fetcher }, base)).rejects.toBeInstanceOf(EmbedDeniedError)
   })
+
+  it('rejects an over-size body even when content-length is ABSENT (no header = no bypass)', async () => {
+    // A chunked / lying provider omits content-length so the header check (declaredLen=0) passes;
+    // the stream bound must still catch it before the whole body is buffered into memory.
+    const oversized = 'a'.repeat(MAX_EMBED_BYTES + 1)
+    const { fetcher } = stubFetcher(oversized, { 'content-type': 'text/html' }) // note: no content-length
+    await expect(resolveEmbed({ fga: fga(true), fetcher }, base)).rejects.toBeInstanceOf(EmbedDeniedError)
+  })
+
+  it('accepts a body exactly at the cap (boundary inclusive, off-by-one guard)', async () => {
+    const atCap = 'a'.repeat(MAX_EMBED_BYTES)
+    const { fetcher } = stubFetcher(atCap, { 'content-type': 'text/html' })
+    const r = await resolveEmbed({ fga: fga(true), fetcher }, base)
+    expect(r.body.length).toBe(MAX_EMBED_BYTES) // exactly-at-cap allowed; only > cap rejects
+  })
 })
