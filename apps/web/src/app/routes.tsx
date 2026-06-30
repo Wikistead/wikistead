@@ -68,8 +68,8 @@ import type { DisplayMode } from "../editor/live-preview/decorations";
 // Editor display mode (ADR-056 / #164), device-local persistence (phase 1: live ⇄ source; a
 // server-stored default like the keymap's is a later increment). Orthogonal to vim.
 const DISPLAYMODE_LS = "wks.editorDisplayMode";
-// Phase 1 implements live / source / reading (wysiwyg is phase 2). The toolbar cycles these three.
-const CYCLE: DisplayMode[] = ["live", "source", "reading"];
+// The toolbar cycles all four display modes (ADR-056 phase 1: live/source/reading; ADR-078: wysiwyg).
+const CYCLE: DisplayMode[] = ["live", "source", "reading", "wysiwyg"];
 const nextMode = (m: DisplayMode): DisplayMode => CYCLE[(CYCLE.indexOf(m) + 1) % CYCLE.length] ?? "live";
 const readLocalMode = (): DisplayMode => { try { const m = localStorage.getItem(DISPLAYMODE_LS); return (CYCLE as string[]).includes(m ?? "") ? (m as DisplayMode) : "live"; } catch { return "live"; } };
 const writeLocalMode = (m: DisplayMode) => { try { localStorage.setItem(DISPLAYMODE_LS, m); } catch { /* no storage */ } };

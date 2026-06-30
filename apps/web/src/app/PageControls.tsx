@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Eye, Code, BookOpen } from "lucide-react";
+import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Eye, Code, BookOpen, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui/Button";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
@@ -126,8 +126,9 @@ export function PageVim(p: PageControlsProps) {
   const dm = p.displayMode ?? "live";
   const modeIcon = dm === "source" ? <Code size={14} className="text-[var(--accent)]" />
     : dm === "reading" ? <BookOpen size={14} className="text-[var(--accent)]" />
+    : dm === "wysiwyg" ? <Sparkles size={14} className="text-[var(--accent)]" />
     : <Eye size={14} className="text-fg-dim" />;
-  const modeLabel = t(dm === "source" ? "page.modeSource" : dm === "reading" ? "page.modeReading" : "page.modeLive");
+  const modeLabel = t(dm === "source" ? "page.modeSource" : dm === "reading" ? "page.modeReading" : dm === "wysiwyg" ? "page.modeWysiwyg" : "page.modeLive");
   return (
     <div className="pointer-events-none absolute bottom-4 left-4 z-10 flex items-center gap-2">
       {p.onToggleVim && (
@@ -209,7 +210,7 @@ export function PageControlsMobile(p: PageControlsProps) {
               {p.onPublish && <DropdownMenuItem disabled={p.publishing || !canPublish} onSelect={() => p.onPublish?.()} data-testid="m-publish-page"><UploadCloud size={14} /> {t("page.publish")}</DropdownMenuItem>}
               <DropdownMenuItem onSelect={p.onDone} data-testid="m-view-toggle"><X size={14} /> {t("page.done")}</DropdownMenuItem>
               {p.onToggleVim && <DropdownMenuItem onSelect={p.onToggleVim} data-testid="m-vim-toggle"><SquareTerminal size={14} /> Vim {p.vim ? t("common.on") : t("common.off")}</DropdownMenuItem>}
-              {p.onCycleDisplayMode && <DropdownMenuItem onSelect={p.onCycleDisplayMode} data-testid="m-displaymode-toggle">{p.displayMode === "source" ? <Code size={14} /> : p.displayMode === "reading" ? <BookOpen size={14} /> : <Eye size={14} />} {t("page.displayMode")}: {t(p.displayMode === "source" ? "page.modeSource" : p.displayMode === "reading" ? "page.modeReading" : "page.modeLive")}</DropdownMenuItem>}
+              {p.onCycleDisplayMode && <DropdownMenuItem onSelect={p.onCycleDisplayMode} data-testid="m-displaymode-toggle">{p.displayMode === "source" ? <Code size={14} /> : p.displayMode === "reading" ? <BookOpen size={14} /> : p.displayMode === "wysiwyg" ? <Sparkles size={14} /> : <Eye size={14} />} {t("page.displayMode")}: {t(p.displayMode === "source" ? "page.modeSource" : p.displayMode === "reading" ? "page.modeReading" : p.displayMode === "wysiwyg" ? "page.modeWysiwyg" : "page.modeLive")}</DropdownMenuItem>}
             </>
           ) : (
             <>
