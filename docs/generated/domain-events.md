@@ -35,6 +35,7 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `tenant.custom_domain_removed` | A custom domain was removed (three-point revocation). |
 | `tenant.saml_updated` | The tenant SAML SSO configuration was changed (EE). |
 | `tenant.plan_changed` | The tenant plan changed (billing). |
+| `tenant.ai_toggled` | A tenant admin enabled/disabled AI for the tenant (ADR-077 consent). |
 | `orphan_draft.enumerated` | An admin enumerated orphaned strict-private drafts. |
 | `orphan_draft.claimed` | An admin took a temporary audited claim on an orphaned draft. |
 | `orphan_draft.reassigned` | An orphaned draft was reassigned to a live member. |
