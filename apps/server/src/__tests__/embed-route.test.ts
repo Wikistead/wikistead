@@ -70,3 +70,20 @@ describe('POST /pages/:pageId/plantuml/render (#140 / ADR-074)', () => {
     expect((await render()).statusCode).toBe(400)
   })
 })
+
+describe('GET /pages/:pageId/transclude/:refId (#108 / ADR-071)', () => {
+  const transclude = (refId: string) =>
+    app.inject({ method: 'GET', url: `/pages/${pageId}/transclude/${refId}`, headers: { host: HOST, authorization: 'Bearer dev-token' } })
+
+  it('a non-existent ref → 403 (existence-hiding placeholder, no oracle)', async () => {
+    const res = await transclude('does-not-exist-xyz')
+    expect(res.statusCode).toBe(403) // absent is indistinguishable from unviewable
+  })
+
+  it('an UNPUBLISHED but viewable ref → the SAME 403 (no published content ≠ leak)', async () => {
+    // dev-user can view pageId (creator) but it has no published_md → still the uniform 403, so a
+    // viewer can't tell "exists-but-unpublished" from "denied"/"absent".
+    const res = await transclude(pageId)
+    expect(res.statusCode).toBe(403)
+  })
+})

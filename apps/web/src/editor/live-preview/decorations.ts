@@ -10,6 +10,7 @@ import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme, t
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
+import { renderMarkdownToDom } from "../macros/md-render";
 import { noteCalloutMacro } from "../macros/callout";
 import { openMacroModal, openTableModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive } from "./macro-edit";
@@ -209,6 +210,16 @@ export const diagramRenderer = Facet.define<DiagramRenderer, DiagramRenderer>({
 // Macros whose body is rendered by the host (not bundled / not the macro). Others ignore the renderer.
 const HOST_RENDERABLE = new Set(["plantuml"]);
 
+// Host-mediated internal transclude (#108 / ADR-071). The :::transclude macro never fetches (host-API
+// is {theme} only); the HOST resolves the referenced page's markdown via this injected resolver (the
+// gated server route re-checks `view` on the REFERENCED page). null ⇒ an existence-hiding placeholder
+// (denied / cycle / absent are indistinguishable). The resolved markdown renders via renderMarkdownToDom.
+export type TranscludeResolver = (refId: string) => Promise<string | null>;
+const noopTranscludeResolver: TranscludeResolver = async () => null;
+export const transcludeResolver = Facet.define<TranscludeResolver, TranscludeResolver>({
+  combine: (values) => values[0] ?? noopTranscludeResolver,
+});
+
 // Tenant macro level-cap (#93 / ADR-073) — the ceiling standard-layer a tenant may persist. The
 // macro-edit modal save demotes a tiered macro (e.g. :::table directive → gfm pipe) to within this
 // cap (demoteToCapLevel). Default "directive" = no cap (UNLIMITED / all current plans) ⇒ inert. The
@@ -407,6 +418,26 @@ class MacroWidget extends WidgetType {
           img.setAttribute("data-testid", `macro-${this.name}-rendered`);
           img.src = this.objectUrl;
           rendered.replaceChildren(img); // the outer macro div (class/testid) stays; inner source → image
+        });
+      }
+      // #108 / ADR-071: host-mediated transclude. The macro can't fetch (narrow host-API); the host
+      // resolves the referenced page's markdown (authz re-checked server-side on the REF page) and
+      // renders it in place, or an existence-hiding placeholder (null = denied/cycle/absent — all
+      // indistinguishable). Fires once per widget instance (eq() stable on name+body).
+      const resolveTransclude = view.state.facet(transcludeResolver);
+      if (this.name === "transclude" && resolveTransclude !== noopTranscludeResolver) {
+        void resolveTransclude(this.body).then((content) => {
+          if (this.destroyed) return;
+          rendered.replaceChildren();
+          if (content == null) {
+            const ph = document.createElement("div");
+            ph.className = "cm-lp-transclude-denied";
+            ph.setAttribute("data-testid", "macro-transclude-denied");
+            ph.textContent = "Cannot display this content"; // uniform — hides whether the page exists
+            rendered.appendChild(ph);
+          } else {
+            rendered.appendChild(renderMarkdownToDom(content)); // sanitized DOM (no innerHTML)
+          }
         });
       }
     }
