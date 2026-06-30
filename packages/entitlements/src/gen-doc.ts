@@ -27,6 +27,8 @@ function renderCommunityValue(key: string, lever: LeverDoc): string {
       const fmt = (n: number) => (n === Infinity ? 'unlimited' : String(n))
       return `perKey ${fmt(r.perKey)}, perTenant ${fmt(r.perTenant)}`
     }
+    case 'enum':
+      return String(v)
     default:
       return String(v)
   }

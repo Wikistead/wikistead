@@ -79,7 +79,22 @@ export interface Entitlements {
   // skipped entirely, zero overhead). Resolved PER REQUEST so a downgrade takes effect immediately.
   // The numbers are a business placeholder. Window = API_RATE_LIMIT_WINDOW_S (env, default 60).
   apiRateLimit: { perKey: number; perTenant: number }
+
+  // Tenant macro LEVEL CAP (#93 / ADR-073): the highest MacroTier standard layer the tenant may
+  // persist. The host auto-demotes to min(lowest-representable, this cap) — server is the fortress
+  // (persist-time normalize). 'directive' = no cap (top). Self-host UNLIMITED = 'directive'; a
+  // restricted tier could cap at 'gfm'/'commonmark' — business placeholder. entitlement⟂authz.
+  macroLevelCap: MacroLevelCap
+
+  // User/third-party macros (#93 / ADR-073 + #075/#076): may the tenant run NON-first-party macros?
+  // Requires this AND a tenant-admin allowlist (host-mediated gate; macros never self-authorize).
+  // first-party macros ignore this. Self-host UNLIMITED on; Cloud = business placeholder.
+  userMacros: boolean
 }
+
+// MacroTier standard layers, lowest (most portable) → highest (least portable); the level cap above
+// names the ceiling. Mirrors StandardLayer in the editor macro registry (kept in sync by review).
+export type MacroLevelCap = 'commonmark' | 'gfm' | 'directive'
 
 // Self-host / Community edition: never plan-limited.
 export const UNLIMITED: Entitlements = {
@@ -96,6 +111,8 @@ export const UNLIMITED: Entitlements = {
   auditLog: true,
   aiFeatures: true,
   apiRateLimit: { perKey: Infinity, perTenant: Infinity },
+  macroLevelCap: 'directive',
+  userMacros: true,
 }
 
 // NOTE (ADR-069 / #132): the Cloud plan table (`CLOUD_PLANS`) and its resolver

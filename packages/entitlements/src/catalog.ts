@@ -17,7 +17,7 @@
 
 import type { Entitlements } from './index.js'
 
-export type LeverUnit = 'boolean' | 'days' | 'bytes' | 'count' | 'rate'
+export type LeverUnit = 'boolean' | 'days' | 'bytes' | 'count' | 'rate' | 'enum'
 
 export interface LeverDoc {
   // Human title for the lever (docs heading / table row label).
@@ -118,6 +118,20 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     unit: 'boolean',
     enforcedAt: 'audit outbox enqueue (skipped when false)',
     downgrade: 'gated; EE-only (no audit ledger written for CE/free)',
+  },
+  macroLevelCap: {
+    title: 'Macro level cap',
+    summary: 'The highest MacroTier layer a tenant may persist (#93 / ADR-073). The host auto-demotes to it at persist time (server fortress); directive = no cap.',
+    unit: 'enum',
+    enforcedAt: 'persist-time normalization (auto-demote to min(lowest-representable, cap))',
+    downgrade: 'content normalizes to the cap layer (non-destructive, round-trips where representable)',
+  },
+  userMacros: {
+    title: 'User/third-party macros',
+    summary: 'Whether the tenant may run non-first-party macros (#93 / ADR-073). Requires this AND a tenant-admin allowlist; macros never self-authorize. First-party always allowed.',
+    unit: 'boolean',
+    enforcedAt: 'host-mediated macro permission gate (entitlement AND admin allowlist)',
+    downgrade: 'gated; first-party macros keep working',
   },
   apiRateLimit: {
     title: 'API rate limit',
