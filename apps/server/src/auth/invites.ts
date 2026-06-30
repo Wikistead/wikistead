@@ -45,7 +45,7 @@ function memberTuples(tenantId: string, sub: string, role: InviteRole) {
 // suspended/deactivated member stays billable, and whether release is immediate vs.
 // end-of-period, are BUSINESS-NUMBER questions (ADR-031); the mechanism counts live
 // member rows and can be refined to a `billable` predicate here without touching callers.
-async function billableMemberCount(sql: Sql): Promise<number> {
+export async function billableMemberCount(sql: Sql): Promise<number> {
   const [{ n }] = await sql<[{ n: string }]>`SELECT count(*)::text AS n FROM members`
   return Number(n)
 }
@@ -72,7 +72,7 @@ async function seatsReservable(sql: Sql): Promise<number> {
 // end-of-transaction, so concurrent accepts for the SAME tenant run one at a time —
 // turning count→compare→insert into an atomic decision (no "remaining=1, two accept,
 // both succeed" race). Mirrors provisioning.ts's bootstrap lock.
-async function lockSeats(sql: Sql, tenantId: string): Promise<void> {
+export async function lockSeats(sql: Sql, tenantId: string): Promise<void> {
   await sql`SELECT pg_advisory_xact_lock(hashtext(${'seats:' + tenantId})::bigint)`
 }
 
