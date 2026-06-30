@@ -1,12 +1,17 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { resolveEntitlements } from '@wikistead/entitlements'
+import { randomUUID } from 'node:crypto'
+import { resolveEntitlements, decideAllowance } from '@wikistead/entitlements'
 import { getAIProvider } from '@wikistead/hooks'
 import { emit } from '@wikistead/events'
 import { fgaClient } from '@wikistead/authz'
 import type { TenantDb } from '../db/index.js'
 import { bumpRateBucket } from '../rate-limit.js'
 import { gatherAuthorizedContext } from '../ai/context.js'
+import { recordUsage, getUsage, currentPeriodStart, estimateTokens } from '../usage.js'
+
+// The metered resource id for AI token consumption (#128 / ADR-082 — usage_counters).
+const AI_TOKENS = 'ai.tokens'
 
 // Per-tenant AI request cap — a runaway-bill FLOOR (ADR-077 forbids unbounded cost). This is
 // a coarse rate limit, NOT the full metered allowance + soft-cap + alerts (that is #128, which
@@ -100,13 +105,26 @@ export async function aiPlugin(app: FastifyInstance) {
       return reply.code(429).send({ error: 'ai rate limit exceeded' })
     }
 
+    // Metered soft-cap (#128 / ADR-082): refuse a NEW billable call once the period's ai.tokens usage
+    // has reached the plan allowance — BEFORE any egress (non-destructive: nothing already produced is
+    // touched). Self-host UNLIMITED → allowance Infinity → decideAllowance always allows (inert).
+    const period = currentPeriodStart()
+    const allowance = resolveEntitlements(req.tenant.plan).aiTokenAllowance
+    const usedBefore = await getUsage(req.db, AI_TOKENS, period)
+    if (!decideAllowance(usedBefore, allowance).allowed) {
+      return reply.code(402).send({ error: 'ai usage allowance reached for this period' })
+    }
+
     // FGA-scoped retrieval (the security core): only pages this member can view contribute.
     const { context, sources } = await gatherAuthorizedContext(
       { db: req.db, searchDriver: app.searchDriver, fga: fgaClient },
       { tenantId: req.tenant.id, userSub: req.user.sub, groups: req.user.groups, question },
     )
-    const { text } = await provider.complete({ prompt: question, context })
-    // TODO(#130/#128): meter token usage here (soft-cap + alerts) once the usage ledger lands.
+    const { text, tokens } = await provider.complete({ prompt: question, context })
+    // Meter the consumption (#128): the provider's token count is authoritative; estimate as fallback.
+    // A per-request source_id keeps recordUsage idempotent if this ever moves behind a retrying outbox.
+    const consumed = tokens ?? estimateTokens(question, context, text)
+    await recordUsage(req.db, AI_TOKENS, period, `ai:${randomUUID()}`, consumed)
     return { answer: text, sources }
   })
 }
