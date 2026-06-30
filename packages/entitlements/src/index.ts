@@ -54,6 +54,11 @@ export interface Entitlements {
   // (ADR-064 downgrade: three-point revoke — the entitlement is the one place this is decided).
   customDomain: boolean
 
+  // AI assists (#130 / ADR-077): gates the AI features (summarize/ask-KB/etc.). OFF by default
+  // except self-host UNLIMITED; AI is also OFF unless an AIProvider is registered (BYOK) — this
+  // flag is the PLAN lever, the registered provider is the deployment switch. Business placeholder.
+  aiFeatures: boolean
+
   // SAML SSO (#135 / ADR-067): gates tenant SAML config + login. EE tier (self-host EE on;
   // Cloud = top tier only — business placeholder). CE bundles no SAML; the provider loads only
   // under this entitlement. The gate reads this resolved boolean (entitlement⟂authz).
@@ -78,6 +83,7 @@ export const UNLIMITED: Entitlements = {
   apiAccess: true,
   customDomain: true,
   samlSso: true,
+  aiFeatures: true,
   apiRateLimit: { perKey: Infinity, perTenant: Infinity },
 }
 
