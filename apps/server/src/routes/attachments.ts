@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check } from '@wikistead/authz'
 import { assertPageViewable } from '../page-view-gate.js'
-import { resolveEntitlements } from '@wikistead/entitlements'
+import { resolveEntitlements, decideAllowance } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import { pool } from '../db/pool.js'
 import { makeS3Key } from '../storage/driver.js'
@@ -41,17 +41,19 @@ export async function presignAttachment(
   const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: args.pageId })
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
-  // Plan-gated storage quota: sum of CONFIRMED attachment sizes for the tenant.
-  // Pending uploads aren't counted until confirmed (size is unknown until then),
-  // so concurrent presigns can overshoot slightly — same count+insert race class
-  // as maxSpaces; acceptable for v1.
+  // Plan-gated storage quota — the storage consumer of the metered soft-cap substrate (#128 /
+  // ADR-082): storage reuses maxStorageBytes as its cap and the SHARED decideAllowance decision (new
+  // uploads refused at/over the cap, non-destructive — existing attachments are untouched). Usage =
+  // sum of CONFIRMED attachment sizes; pending uploads aren't counted until confirmed (size unknown
+  // until then), so concurrent presigns can overshoot slightly — same count+insert race class as
+  // maxSpaces; acceptable for v1. Infinity (self-host UNLIMITED) short-circuits the SUM (zero overhead).
   const quota = resolveEntitlements(args.plan).maxStorageBytes
   if (isFinite(quota)) {
     const [{ used }] = await db.sql<[{ used: string }]>`
       SELECT COALESCE(SUM(size_bytes), 0)::text AS used
       FROM attachments WHERE tenant_id = ${args.tenantId} AND status = 'confirmed'
     `
-    if (Number(used) >= quota) {
+    if (!decideAllowance(Number(used), quota).allowed) {
       throw Object.assign(new Error('storage quota exceeded'), { statusCode: 402 })
     }
   }
