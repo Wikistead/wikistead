@@ -58,6 +58,11 @@ export interface Entitlements {
   // Cloud top tier only — business placeholder. The provider/endpoints load only under this flag.
   scim: boolean
 
+  // Compliance audit log (#134 #177 / ADR-070): gates writing the durable, hash-chained audit_log
+  // (the transactional outbox enqueue is skipped when false). EE (self-host EE on; Cloud top tier
+  // only — business placeholder). CE/free tenants generate no audit ledger.
+  auditLog: boolean
+
   // AI assists (#130 / ADR-077): gates the AI features (summarize/ask-KB/etc.). OFF by default
   // except self-host UNLIMITED; AI is also OFF unless an AIProvider is registered (BYOK) — this
   // flag is the PLAN lever, the registered provider is the deployment switch. Business placeholder.
@@ -88,6 +93,7 @@ export const UNLIMITED: Entitlements = {
   customDomain: true,
   samlSso: true,
   scim: true,
+  auditLog: true,
   aiFeatures: true,
   apiRateLimit: { perKey: Infinity, perTenant: Infinity },
 }

@@ -112,6 +112,13 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     enforcedAt: 'tenant SAML config + /auth/saml',
     downgrade: 'gated; EE-only (the SP loads only under this entitlement)',
   },
+  auditLog: {
+    title: 'Compliance audit log',
+    summary: 'Durable, hash-chained audit ledger of authz/compliance operations (#134 #177 / ADR-070, EE).',
+    unit: 'boolean',
+    enforcedAt: 'audit outbox enqueue (skipped when false)',
+    downgrade: 'gated; EE-only (no audit ledger written for CE/free)',
+  },
   apiRateLimit: {
     title: 'API rate limit',
     summary: 'Authenticated API-key request rate per window — perKey (per-key fairness) and perTenant (all-keys ceiling), evaluated AND (the stricter trips first → 429) (#175 / ADR-063).',
