@@ -62,8 +62,21 @@ export const atomDelete: Extension = EditorState.transactionFilter.of((tr) => {
 // register with the whole atom source (linewise), cancel vim's pending operator via the PUBLIC
 // Vim.handleKey(cm,'<Esc>'), and swallow the key so vim's 1-line yank never runs. Everything
 // else (yw/y$/yj, 3yy, "ayy, yy on a normal line, insert/visual, vim off) is left to vim.
-// The atom-on-first-line block at the caret, if this is a plain (uncounted, default-register)
-// chord whose first key already set vim's `operator`. Returns the block + its full source range.
+// Which atom block (if any) the caret sits INSIDE, by source RANGE — not "first line only" (#91
+// atom-direction bug). Entering an atom from below lands the caret on its LAST line (`:::` end),
+// not its first; the old `lineAt(b.from) === caretLine` check missed that, so yy/dd silently fell
+// back to vim's 1-line version when the atom was entered upward. A caret anywhere in [from, to]
+// (any line of the atom) resolves to the whole atom, making yy/dd entry-direction-independent.
+// Pure (no view/vim) so it is unit-tested directly. Returns the first containing block.
+export function atomBlockAtCaret(
+  blocks: ReadonlyArray<{ from: number; to: number }> | undefined,
+  caret: number,
+): { from: number; to: number } | null {
+  return blocks?.find((bl) => caret >= bl.from && caret <= bl.to) ?? null;
+}
+
+// The atom block the caret sits inside, if this is a plain (uncounted, default-register) chord
+// whose first key already set vim's `operator`. Returns the block + its full source range.
 function atomChordTarget(view: EditorView, operator: "yank" | "delete"): { from: number; to: number } | null {
   const cm = getCM(view);
   const vim = cm?.state.vim;
@@ -73,10 +86,9 @@ function atomChordTarget(view: EditorView, operator: "yank" | "delete"): { from:
   if (is.registerName) return null; // "ayy / "add → named register, let vim handle
   if (is.prefixRepeat && is.prefixRepeat.length) return null; // 3yy / 3dd → counted, let vim handle
   const doc = view.state.doc;
-  const caretLine = doc.lineAt(view.state.selection.main.head);
   const blocks = view.state.field(livePreview, false)?.blocks;
-  const b = blocks?.find((bl) => doc.lineAt(bl.from).from === caretLine.from);
-  if (!b) return null; // not on an atom's first line → normal yy/dd
+  const b = atomBlockAtCaret(blocks, view.state.selection.main.head);
+  if (!b) return null; // caret not inside any atom → normal yy/dd
   return { from: b.from, to: Math.min(b.to + 1, doc.length) };
 }
 
