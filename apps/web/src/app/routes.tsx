@@ -71,19 +71,26 @@ const DISPLAYMODE_LS = "wks.editorDisplayMode";
 // The toolbar cycles all four display modes (ADR-056 phase 1: live/source/reading; ADR-078: wysiwyg).
 const CYCLE: DisplayMode[] = ["live", "source", "reading", "wysiwyg"];
 const nextMode = (m: DisplayMode): DisplayMode => CYCLE[(CYCLE.indexOf(m) + 1) % CYCLE.length] ?? "live";
+// #165/#166 switch feedback: a brief toast naming the mode entered. Display-only (no doc/offset/
+// presence). The reveal/hide itself is NOT animated (reveal-on-cursor fires per cursor move).
+const MODE_LABEL_KEY: Record<DisplayMode, string> = {
+  live: "page.modeLive", source: "page.modeSource", reading: "page.modeReading", wysiwyg: "page.modeWysiwyg",
+};
 const readLocalMode = (): DisplayMode => { try { const m = localStorage.getItem(DISPLAYMODE_LS); return (CYCLE as string[]).includes(m ?? "") ? (m as DisplayMode) : "live"; } catch { return "live"; } };
 const writeLocalMode = (m: DisplayMode) => { try { localStorage.setItem(DISPLAYMODE_LS, m); } catch { /* no storage */ } };
 // Guest (share-link, no member row): localStorage only.
 function useDisplayMode(): [DisplayMode, () => void] {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<DisplayMode>(readLocalMode);
   // Phase 1 cycles between the two implemented modes; reading/wysiwyg join the cycle later.
-  const cycle = useCallback(() => setMode((m) => { const next = nextMode(m); writeLocalMode(next); return next; }), []);
+  const cycle = useCallback(() => setMode((m) => { const next = nextMode(m); writeLocalMode(next); notify.info(t(MODE_LABEL_KEY[next])); return next; }), [t]);
   return [mode, cycle];
 }
 // Member (#164-3): the cross-device STARTUP pref is a MODE on Account → Editor — 'live'/'source'
 // (the mode wins at startup) or 'local' (follow this device's last toggle, via localStorage). The
 // toolbar toggle is always a device-local session switch. Mirrors useEditorKeymap.
 function useMemberDisplayMode(): [DisplayMode, () => void] {
+  const { t } = useTranslation();
   const settings = useAccountSettings();
   const [mode, setMode] = useState<DisplayMode>(readLocalMode);
   const pref = settings.data?.editorDisplayMode; // 'live' | 'source' | 'local' | undefined (loading)
@@ -93,11 +100,12 @@ function useMemberDisplayMode(): [DisplayMode, () => void] {
     else if (pref === "source") setMode("source");
     else setMode(readLocalMode()); // 'local'
   }, [pref]);
-  const cycle = useCallback(() => setMode((m) => { const next = nextMode(m); writeLocalMode(next); return next; }), []);
+  const cycle = useCallback(() => setMode((m) => { const next = nextMode(m); writeLocalMode(next); notify.info(t(MODE_LABEL_KEY[next])); return next; }), [t]);
   return [mode, cycle];
 }
 // editor.cycleDisplayMode (ADR-021 #21): window-level, event.code-matched, edit-only — mirrors
-// the vim-toggle shortcut. Rebindable; default Ctrl-E (Obsidian parity).
+// the vim-toggle shortcut. Rebindable; default Ctrl+Alt+E (#165/#166: plain Ctrl-E collided with
+// vim's scroll-down — moved off it so vim Ctrl-E scrolls without changing the mode).
 function useDisplayModeShortcut(cycle: () => void, enabled: boolean, chord: string) {
   useEffect(() => {
     if (!enabled) return;
