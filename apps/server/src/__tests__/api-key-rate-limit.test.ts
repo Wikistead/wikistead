@@ -66,3 +66,43 @@ describe('API key request rate limiting (#175)', () => {
     for (let i = 0; i < 8; i++) expect((await get(k.plaintext)).statusCode).toBe(200)
   })
 })
+
+// #126 (review rejection): apiAccess must be re-checked on the REQUEST path, not only at key
+// creation — a plan downgrade that strips apiAccess has to stop ALREADY-ISSUED keys immediately.
+describe('API key apiAccess request-path gate (#126)', () => {
+  it('apiAccess:true (default) lets a valid key through (200)', async () => {
+    const k = await freshKey()
+    await valkey.del(`apikey-rl:tenant:${TENANT}`)
+    expect((await get(k.plaintext)).statusCode).toBe(200)
+  })
+
+  it('downgraded plan (apiAccess:false) rejects an already-issued key with 403 BEFORE the rate limit (not 429); key row is NOT deleted', async () => {
+    const k = await freshKey()
+    await valkey.del(`apikey-rl:tenant:${TENANT}`)
+    registerEntitlementsResolver(() => ({ ...UNLIMITED, apiAccess: false }))
+    const res = await get(k.plaintext)
+    expect(res.statusCode).toBe(403)                         // gated, not 200 and not 429
+    expect((res.json() as { error: string }).error).toMatch(/not available/i)
+    const rows = await admin`SELECT 1 FROM api_keys WHERE id = ${k.id}` // non-destructive (ADR-064)
+    expect(rows.length).toBe(1)                              // key survives downgrade → re-upgrade restores
+  })
+
+  it('apiAccess 403 and read-only-scope 403 are distinct paths (different messages)', async () => {
+    const k = await freshKey() // scope: 'read'
+    await valkey.del(`apikey-rl:tenant:${TENANT}`)
+    // apiAccess:false on a GET (method allowed for a read key) → apiAccess 403, not the scope path
+    registerEntitlementsResolver(() => ({ ...UNLIMITED, apiAccess: false }))
+    const denied = await get(k.plaintext)
+    expect(denied.statusCode).toBe(403)
+    expect((denied.json() as { error: string }).error).toMatch(/not available/i)
+    // apiAccess:true + a read key on a WRITE → read-only 403 (scope path runs before apiAccess)
+    resetEntitlementsResolver()
+    const write = await app.inject({
+      method: 'POST', url: '/api-keys',
+      headers: { ...bearer(k.plaintext), 'content-type': 'application/json' },
+      payload: JSON.stringify({ name: 'x', scope: 'read' }),
+    })
+    expect(write.statusCode).toBe(403)
+    expect((write.json() as { error: string }).error).toMatch(/read-only/i)
+  })
+})

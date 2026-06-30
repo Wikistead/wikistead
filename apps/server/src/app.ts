@@ -84,7 +84,7 @@ declare module 'fastify' {
 
 // Build the Fastify app WITHOUT listening, so tests can drive it via app.inject
 // (the auth hook — cookie sessions, cross-tenant rejection — is HTTP-level and
-// must be exercised through real requests). The entry (index.ts) calls listen().
+// must be exercised through real requests). The entry (index.ts) calls listen.
 export async function buildApp(): Promise<FastifyInstance> {
   // Fail-closed at boot: refuse to start without a valid OIDC secret key (would
   // otherwise risk plaintext secret storage). See auth/secret-crypto.ts.
@@ -170,13 +170,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     if (req.routeOptions?.config?.public) return
 
     // ── Browser member path: host-only session cookie (BFF) ──────────────────
-    // Three cases, kept distinct:
-    //   (i)   no cookie            → fall through to Bearer (normal).
-    //   (ii)  cookie, tenant match → member session.
-    //   (iii) cookie, tenant MISMATCH → EXPLICIT reject + clear cookie. A
-    //         cross-tenant cookie is an anomaly (host-only should prevent it), so
-    //         we do NOT silently fall through — we reject so it is distinguishable
-    //         from a plain "no credentials" 401, and we clear the offending cookie.
+    // Three cases, kept distinct
+    // (i) no cookie → fall through to Bearer (normal).
+    // (ii) cookie, tenant match → member session.
+    // (iii) cookie, tenant MISMATCH → EXPLICIT reject + clear cookie. A
+    // cross-tenant cookie is an anomaly (host-only should prevent it), so
+    // we do NOT silently fall through — we reject so it is distinguishable
+    // from a plain "no credentials" 401, and we clear the offending cookie.
     const sid = req.cookies?.[SESSION_COOKIE]
     if (sid) {
       const sess = await readSession(valkey, sid)
@@ -253,10 +253,23 @@ export async function buildApp(): Promise<FastifyInstance> {
         await reply.code(403).send({ error: 'read-only API key' })
         return
       }
+      // apiAccess entitlement gate on the REQUEST path (#126 / ADR-063 2 / ADR-064 / ADR-072).
+      // createApiKey is gated at issue time, but a plan downgrade that strips apiAccess must ALSO
+      // stop already-issued keys — otherwise a downgraded tenant's old key keeps working (monotonic-
+      // deny violation). Resolved PER REQUEST so the downgrade takes effect immediately; the key row
+      // is NOT deleted (ADR-064 non-destructive — re-upgrade restores it). Evaluated BEFORE the rate
+      // limit so an unentitled key gets 403, not 429. (401=invalid key / 403=apiAccess off or
+      // read-only scope / 429=rate exceeded.)
+      const ent = resolveEntitlements(req.tenant.plan)
+      if (!ent.apiAccess) {
+        emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'api access not entitled' })
+        await reply.code(403).send({ error: 'API access is not available on this plan' })
+        return
+      }
       // Request rate limit (#175 / ADR-063): per-key (fairness) AND per-tenant (all-keys
       // ceiling), stricter trips first → 429. Limits resolve PER REQUEST so a downgrade takes
       // effect immediately; Infinity (self-host) short-circuits with no Valkey op.
-      const rl = resolveEntitlements(req.tenant.plan).apiRateLimit
+      const rl = ent.apiRateLimit
       if (rl.perKey !== Infinity || rl.perTenant !== Infinity) {
         const okKey = await bumpRateBucket(valkey, `apikey-rl:key:${apiUser.keyId}`, rl.perKey, API_RATE_LIMIT_WINDOW_S)
         const okTenant = await bumpRateBucket(valkey, `apikey-rl:tenant:${req.tenant.id}`, rl.perTenant, API_RATE_LIMIT_WINDOW_S)
