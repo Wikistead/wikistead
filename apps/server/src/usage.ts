@@ -1,5 +1,22 @@
 import type { TenantDb } from './db/index.js'
 
+// The billing-window anchor for `now` — the first day of its month, 'YYYY-MM-01' (UTC). All
+// increments/reads in a month share this period_start. Injectable `now` for tests. The exact anchor
+// (monthly) is a billing detail (ADR-004) that can change here without touching callers.
+export function currentPeriodStart(now: Date = new Date()): string {
+  const y = now.getUTCFullYear()
+  const m = String(now.getUTCMonth() + 1).padStart(2, '0')
+  return `${y}-${m}-01`
+}
+
+// Rough token estimate when a provider does not report its own usage (#128). ~4 chars/token is the
+// usual heuristic; deliberately a slight OVER-estimate (ceil) so metering never silently under-counts
+// a billable call. Used only as a fallback — a provider's reported token count is authoritative.
+export function estimateTokens(...parts: Array<string | undefined>): number {
+  const chars = parts.reduce((n, p) => n + (p ? p.length : 0), 0)
+  return Math.max(1, Math.ceil(chars / 4))
+}
+
 // Metered-usage ledger accessors (#128 / ADR-082). Tenant scoping is enforced by RLS on the caller's
 // TenantDb handle (app.tenant_id) — these functions never take a tenant id, so a caller structurally
 // cannot read or write another tenant's usage. recordUsage is IDEMPOTENT by source_id (the originating

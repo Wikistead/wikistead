@@ -5,8 +5,10 @@
 // first (AI is never an authz side-channel); the provider only completes over what it's handed.
 export interface AIProvider {
   readonly name: string
-  // Complete a prompt over already-authorized context. Returns the assistant text.
-  complete(input: { prompt: string; context?: string }): Promise<{ text: string }>
+  // Complete a prompt over already-authorized context. Returns the assistant text, and OPTIONALLY
+  // the token count consumed (#128 metering) — when present it is the authoritative metered amount;
+  // when absent the caller estimates. Optional so existing providers remain valid.
+  complete(input: { prompt: string; context?: string }): Promise<{ text: string; tokens?: number }>
 }
 
 let _provider: AIProvider | null = null
