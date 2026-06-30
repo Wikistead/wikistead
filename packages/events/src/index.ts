@@ -96,3 +96,8 @@ export function emit(event: DomainEvent): void {
     })
   }
 }
+
+// "Code is truth" docs (#139 / ADR-080 doc↔code linkage): the event catalog + its Markdown
+// generator. The Record<DomainEvent['type'], …> catalog enforces doc coverage at compile time.
+export { EVENT_CATALOG } from './catalog.js'
+export { renderEventsMarkdown } from './gen-doc.js'

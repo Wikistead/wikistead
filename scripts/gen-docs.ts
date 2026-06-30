@@ -12,6 +12,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { renderEntitlementsMarkdown } from '../packages/entitlements/src/index.js'
+import { renderEventsMarkdown } from '../packages/events/src/index.js'
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 
@@ -22,6 +23,11 @@ const SURFACES: { name: string; outPath: string; render: () => string }[] = [
     name: 'entitlement levers',
     outPath: join(root, 'docs/generated/entitlement-levers.md'),
     render: renderEntitlementsMarkdown,
+  },
+  {
+    name: 'domain events',
+    outPath: join(root, 'docs/generated/domain-events.md'),
+    render: renderEventsMarkdown,
   },
 ]
 
