@@ -68,6 +68,15 @@ export interface Entitlements {
   // flag is the PLAN lever, the registered provider is the deployment switch. Business placeholder.
   aiFeatures: boolean
 
+  // Metered AI-token allowance per billing window (#128 / ADR-082). The soft cap on AI consumption:
+  // when the period's usage (usage_counters 'ai.tokens') REACHES this, NEW AI calls are refused
+  // (non-destructive — existing content/usage untouched), with an alert fired before the wall. The
+  // server consults decideAllowance(getUsage(...), this) before a billable call and recordUsage after.
+  // Infinity = no cap (self-host UNLIMITED → metering inert, zero overhead). The NUMBER is a business
+  // placeholder; the lever shape + mechanism is what ships. entitlement⟂authz (resolved here, not
+  // scattered). Storage reuses maxStorageBytes as its meter cap; AI tokens is the first NEW metered lever.
+  aiTokenAllowance: number
+
   // SAML SSO (#135 / ADR-067): gates tenant SAML config + login. EE tier (self-host EE on;
   // Cloud = top tier only — business placeholder). CE bundles no SAML; the provider loads only
   // under this entitlement. The gate reads this resolved boolean (entitlement⟂authz).
@@ -110,6 +119,7 @@ export const UNLIMITED: Entitlements = {
   scim: true,
   auditLog: true,
   aiFeatures: true,
+  aiTokenAllowance: Infinity,
   apiRateLimit: { perKey: Infinity, perTenant: Infinity },
   macroLevelCap: 'directive',
   userMacros: true,
