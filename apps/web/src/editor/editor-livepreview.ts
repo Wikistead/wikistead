@@ -6,7 +6,8 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, checkboxControl, enterMacroCommand, type ImageResolver, type DiagramRenderer, type DisplayMode } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, macroLevelCap, checkboxControl, enterMacroCommand, type ImageResolver, type DiagramRenderer, type DisplayMode } from "./live-preview/decorations";
+import type { StandardLayer } from "./macros/registry";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette } from "./live-preview/palette";
@@ -59,7 +60,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; renderDiagram?: DiagramRenderer; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void } = {},
+  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; renderDiagram?: DiagramRenderer; macroLevelCap?: StandardLayer; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -137,6 +138,8 @@ export function mountLivePreview(
       ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
       // #140: host-mediated plantuml render (the macro never fetches — narrow host-API).
       ...(opts.renderDiagram ? [diagramRenderer.of(opts.renderDiagram)] : []),
+      // #93: tenant macro level-cap → the modal save demotes a tiered macro to within it.
+      ...(opts.macroLevelCap ? [macroLevelCap.of(opts.macroLevelCap)] : []),
       yCollab(ytext, provider.awareness),
       remoteCursors, // #8: avatar+name flags (additive overlay; yCollab untouched)
       // Slash command palette + floating selection toolbar (editable surface only; view

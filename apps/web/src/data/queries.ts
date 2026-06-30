@@ -500,7 +500,9 @@ export function useRemoveTenantLogo() {
 
 // Tenant entitlements (plan feature flags). Used for UI gating (e.g. show an
 // upgrade state for branding on Cloud free); the server stays the fortress.
-export interface EntitlementsDTO { branding: boolean }
+// macroLevelCap (#93 / ADR-073): the ceiling standard layer a tenant may persist
+// (commonmark < gfm < directive). The editor demotes a tiered macro to within it on save.
+export interface EntitlementsDTO { branding: boolean; macroLevelCap?: "commonmark" | "gfm" | "directive" }
 export function useEntitlements() {
   const { token } = useSession();
   return useQuery({

@@ -65,6 +65,9 @@ export interface EditorProps {
   vim?: boolean;
   // ADR-056 / #164: editor display mode (live/source/…), orthogonal to vim. Default "live".
   displayMode?: DisplayMode;
+  // #93 / ADR-073: tenant macro level-cap — the modal save demotes a tiered macro (e.g. :::table
+  // → pipe) to within it. Default "directive" (no cap). The server publishPage stays the fortress.
+  macroLevelCap?: "commonmark" | "gfm" | "directive";
   // Uploads a picked image and returns the ref+alt to insert. Omit to hide the
   // image button (e.g. guests, or a view-only surface).
   onUploadImage?: (file: File) => Promise<{ ref: string; alt: string } | null>;
@@ -113,7 +116,7 @@ function tint(color: string): string {
 // memo: the host (PageRoute) re-renders on its own state and on the published poll;
 // without memo those re-render <Editor> too, which the tree-move e2e forbids and
 // churns the editor. Props are referentially stable across host re-renders.
-export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
+export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", macroLevelCap = "directive", onUploadImage, inlineComments, anchorGetterRef, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
   const previewViewRef = useRef<EditorView | null>(null);
@@ -211,6 +214,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       readOnly: false,
       resolveImageUrl,
       renderDiagram,
+      macroLevelCap,
       uploadImage: onUploadImage,
       vim,
       vimCompartment,
@@ -240,7 +244,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     };
     // vim excluded (Compartment reconfigure, not a remount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, renderDiagram, onUploadImage]);
+  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, renderDiagram, macroLevelCap, onUploadImage]);
 
   // vim on/off: reconfigure the Compartment IN PLACE (no remount → collab/presence
   // untouched). Only meaningful on the edit surface.

@@ -121,7 +121,7 @@ import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, ApiError, type GuestToken } from "../data/apiClient";
-import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useEntitlements } from "../data/queries";
 import { ConfirmDialog } from "../ui/dialogs";
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport } from "../data/exportApi";
@@ -261,6 +261,7 @@ function PageRoute() {
   useVimToggleShortcut(toggleVim, editing, resolveKey("editor.toggleVim", keybindings)); // (#2)
   const [displayMode, cycleDisplayMode] = useMemberDisplayMode(); // ADR-056 / #164 (startup pref + device-local)
   useDisplayModeShortcut(cycleDisplayMode, editing, resolveKey("editor.cycleDisplayMode", keybindings));
+  const tenantMacroCap = useEntitlements().data?.macroLevelCap ?? "directive"; // #93: editor save demotes to within it
   const isDesktop = useMediaQuery("(min-width: 768px)"); // 3 floating groups vs one ⋯
   // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
   const publishState = !canEdit ? null : published?.publishedMd == null ? "draft" : published?.hasUnpublishedChanges ? "unpublished" : null;
@@ -352,7 +353,7 @@ function PageRoute() {
           {isDesktop && <div className="relative z-10 mx-auto flex w-full max-w-[740px] justify-end px-6"><PageStatus {...controls} /></div>}
           {/* Editor area is the positioning context for the floating ACTIONS/VIM groups. */}
           <div className="relative" style={{ flex: 1, minHeight: 0 }}>
-            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} macroLevelCap={tenantMacroCap} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
           </div>
         </div>
