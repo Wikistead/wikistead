@@ -14,6 +14,8 @@ import { flushDraft } from '../collab-flush.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { resolveEmbed, EmbedDeniedError } from '../embed-resolve.js'
+import { renderPlantuml } from '../plantuml-render.js'
+import { assertPageViewable } from '../page-view-gate.js'
 
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean }
 export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean }
@@ -912,6 +914,19 @@ export async function pagesPlugin(app: FastifyInstance) {
       }
       throw e
     }
+  })
+
+  // PlantUML render (#140 / ADR-074): host-mediated server render of a plantuml fence's source via
+  // the operator's Kroki/PlantUML endpoint. page-view gated (member or view-guest). 200 image/png on
+  // success; 204 = degrade-to-source (unconfigured / endpoint failure) so the macro shows the fence.
+  app.post<{ Params: { pageId: string }; Body: { source?: string } }>('/pages/:pageId/plantuml/render', { config: { guest: 'view' } }, async (req, reply) => {
+    const { subject, context } = principalForPage(req, req.params.pageId)
+    await assertPageViewable(app.fga, subject, req.params.pageId, context) // 403 if not a viewer
+    const source = req.body?.source
+    if (typeof source !== 'string' || !source.trim()) return reply.code(400).send({ error: 'source is required' })
+    const png = await renderPlantuml(source)
+    if (!png) return reply.code(204).send() // degrade: caller renders the source fence
+    return reply.header('content-type', 'image/png').send(png)
   })
 
   // ── per-page access (manage-gated; member-only, no guest config) ──────────

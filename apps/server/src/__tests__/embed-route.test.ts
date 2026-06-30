@@ -50,3 +50,23 @@ describe('GET /pages/:pageId/embed (#108 / ADR-071)', () => {
     expect((await embed()).statusCode).toBe(400)
   })
 })
+
+describe('POST /pages/:pageId/plantuml/render (#140 / ADR-074)', () => {
+  const render = (source?: string) =>
+    app.inject({
+      method: 'POST', url: `/pages/${pageId}/plantuml/render`,
+      headers: { host: HOST, authorization: 'Bearer dev-token', 'content-type': 'application/json' },
+      payload: JSON.stringify(source !== undefined ? { source } : {}),
+    })
+
+  it('degrades to 204 when no render endpoint is configured (operator opt-in not taken)', async () => {
+    delete process.env.PLANTUML_RENDER_URL // ensure unconfigured
+    const res = await render('@startuml\nA->B\n@enduml')
+    expect(res.statusCode).toBe(204) // caller renders the source fence
+  })
+
+  it('rejects an empty source (400)', async () => {
+    expect((await render('   ')).statusCode).toBe(400)
+    expect((await render()).statusCode).toBe(400)
+  })
+})
