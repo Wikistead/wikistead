@@ -134,3 +134,8 @@ export function resetEntitlementsResolver(): void {
   _resolver = () => UNLIMITED
   _registered = false
 }
+
+// "Code is truth" docs (#139 / ADR-080 doc↔code linkage): the lever catalog and
+// its Markdown generator. CE-only (never imports the Cloud plan table).
+export { LEVER_CATALOG, type LeverDoc, type LeverUnit } from './catalog.js'
+export { renderEntitlementsMarkdown } from './gen-doc.js'
