@@ -54,6 +54,10 @@ export interface Entitlements {
   // (ADR-064 downgrade: three-point revoke — the entitlement is the one place this is decided).
   customDomain: boolean
 
+  // SCIM provisioning (#134 / ADR-070): gates the SCIM token + endpoints (EE). Self-host EE on;
+  // Cloud top tier only — business placeholder. The provider/endpoints load only under this flag.
+  scim: boolean
+
   // AI assists (#130 / ADR-077): gates the AI features (summarize/ask-KB/etc.). OFF by default
   // except self-host UNLIMITED; AI is also OFF unless an AIProvider is registered (BYOK) — this
   // flag is the PLAN lever, the registered provider is the deployment switch. Business placeholder.
@@ -83,6 +87,7 @@ export const UNLIMITED: Entitlements = {
   apiAccess: true,
   customDomain: true,
   samlSso: true,
+  scim: true,
   aiFeatures: true,
   apiRateLimit: { perKey: Infinity, perTenant: Infinity },
 }

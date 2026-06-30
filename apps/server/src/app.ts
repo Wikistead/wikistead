@@ -45,6 +45,7 @@ import { customDomainsPlugin } from './routes/custom-domains.js'
 import { tenantSamlPlugin } from './routes/tenant-saml.js'
 import { samlAuthPlugin } from './routes/saml-auth.js'
 import { aiPlugin } from './routes/ai.js'
+import { scimTokensPlugin } from './routes/scim-tokens.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -297,6 +298,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(tenantSamlPlugin)
   await app.register(samlAuthPlugin)
   await app.register(aiPlugin)
+  await app.register(scimTokensPlugin)
   await app.register(spacesPlugin)
   await app.register(pagesPlugin)
   await app.register(billingPlugin)
