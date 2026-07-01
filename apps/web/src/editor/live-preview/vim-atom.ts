@@ -84,11 +84,14 @@ function atomChordTarget(view: EditorView, operator: "yank" | "delete"): { from:
   const is = vim.inputState;
   if (!is || is.operator !== operator) return null; // not the 2nd key of a bare yy/dd
   if (is.registerName) return null; // "ayy / "add → named register, let vim handle
-  if (is.prefixRepeat && is.prefixRepeat.length) return null; // 3yy / 3dd → counted, let vim handle
   const doc = view.state.doc;
   const blocks = view.state.field(livePreview, false)?.blocks;
   const b = atomBlockAtCaret(blocks, view.state.selection.main.head);
-  if (!b) return null; // caret not inside any atom → normal yy/dd
+  if (!b) return null; // caret not inside any atom → normal yy/dd (counts on normal lines untouched)
+  // #183 symptom A: a COUNT (3dd/3yy) used to fall through to vim, which tore the macro source mid-atom
+  // (broken `:::table` remnant). An atom is one indivisible unit (ADR-024 1b), so on an atom we take the
+  // WHOLE atom regardless of count — never split it. (Counting the atom as 1 of N blocks — 3dd = this
+  // atom + 2 more — is a v2 follow-up; v1 guarantees no syntax corruption, which was the bug.)
   return { from: b.from, to: Math.min(b.to + 1, doc.length) };
 }
 
