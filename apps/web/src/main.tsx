@@ -14,6 +14,8 @@ import "@fontsource/noto-sans-jp/700.css";
 // #173 / #158-C1: editor monospace font (OFL, self-hosted woff2 subset). Loads "UDEV Gothic" so the
 // editor's --font-mono renders it (full-width = 2×half-width → vim columns stay exact for Japanese).
 import "./assets/fonts/udev-gothic.css";
+// #190 / ADR-090: code face — Wikistead Mono (a Source Code Pro OFL subset). Drives --font-code.
+import "./assets/fonts/wikistead-mono.css";
 import "./styles/tokens.css";
 import "./styles/print.css";
 import "./styles/macro-modal.css";

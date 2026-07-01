@@ -201,12 +201,21 @@
   --space-6: 32px;
   --header-h: 40px;
   --sidebar-w: 260px;
-  /* #158-C1 fonts. UI = Inter (Latin) + Noto Sans JP (JP), self-hosted woff2 (OFL). Mono =
-     UDEV Gothic (OFL, UD-legible, full-width = 2× half-width → vim columns stay exact), now vendored
-     as a self-hosted woff2 subset (#173 — assets/fonts/udev-gothic.css, @font-face 400/700); it leads
-     the mono stack and falls back to a strict-monospace stack for any uncovered glyph. */
+  /* #158-C1 / #190 (ADR-090) fonts — three PURPOSE tokens (locale-defaulted, user-overridable):
+       --font-ui   : chrome/labels — Inter (Latin) + Noto Sans JP (JP), self-hosted woff2 (OFL). Fixed.
+       --font-body : editor/reading PROSE — locale default (JP=UDEV Gothic keeps the vim column grid;
+                     EN also monospace per #190 vim-first — both use the mono grid so vim columns line
+                     up in either locale). Overridden per-locale by [data-locale] below + per-user (JS).
+       --font-code : fenced/inline CODE — Wikistead Mono (a Source Code Pro OFL subset, plain monospace,
+                     no ligatures — #190), self-hosted woff2 (assets/fonts/wikistead-mono.css).
+     UDEV Gothic (OFL, UD-legible, full-width = 2× half-width → vim columns stay exact) is vendored as a
+     woff2 subset (#173). --font-mono is retained as a back-compat alias (→ --font-body) during migration.
+     Font (glyph) is ORTHOGONAL to #158-C2 code highlight (colour). */
   --font: "Inter", "Noto Sans JP", system-ui, sans-serif;
-  --font-mono: "UDEV Gothic", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-ui: var(--font);
+  --font-body: "UDEV Gothic", ui-monospace, SFMono-Regular, Menlo, monospace; /* default locale: JP */
+  --font-code: "Wikistead Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono: var(--font-body); /* #158-C1 alias, retained for migration → callers move to --font-body/-code */
 
   /* Type scale (Group C). Two tiers: reading/prose content is 16px (--text-body,
      inherited by the editor), the operating surface (sidebar, buttons, toolbar,
@@ -236,6 +245,15 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);     /* entrances (decelerate) */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);   /* general state changes */
   --ease-in: cubic-bezier(0.4, 0, 1, 1);         /* exits (accelerate) */
+}
+
+/* #190 / ADR-090 locale default for --font-body. The :root default is JP (UDEV Gothic, full-width
+   grid). English UI → prose ALSO uses the coding mono (Wikistead Mono): #190 is vim-first, so EN body
+   stays monospace to keep vim column alignment (no proportional face). Driven by <html lang> (i18n
+   sets it). A per-USER override (JS, --font-body/--font-code on <html>) wins over this — resolution
+   order user > locale-default (v1; the tenant layer is a future extension point). Token-driven only. */
+:root:lang(en) {
+  --font-body: var(--font-code);
 }
 
 /* Shared enter animations (global so CSS-module files can reference them by name).

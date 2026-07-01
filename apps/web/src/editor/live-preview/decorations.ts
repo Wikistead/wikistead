@@ -1159,7 +1159,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-emphasis": { fontStyle: "italic" },
   ".cm-lp-strike": { textDecoration: "line-through", opacity: "0.75" },
   ".cm-lp-inline-code": {
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    fontFamily: "var(--font-code)", // #190: code face (Wikistead Mono), distinct from prose --font-body
     background: "rgba(127,127,127,0.18)",
     borderRadius: "3px",
     padding: "0 3px",
@@ -1175,7 +1175,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-h5": { fontSize: "1.05em" },
   ".cm-lp-h6": { fontSize: "1em", opacity: "0.85" },
   ".cm-lp-code-line": {
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    fontFamily: "var(--font-code)", // #190: fenced code uses the code face, not prose --font-body
     background: "rgba(127,127,127,0.12)",
   },
   ".cm-lp-quote": {

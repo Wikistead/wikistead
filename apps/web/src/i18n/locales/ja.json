@@ -86,7 +86,12 @@
     "displayModeHint": "エディタの構文の見せ方：ライブはカーソル下だけ表示、ソースは常時表示。vim と直交。ローカルはこの端末のツールバー設定に従う。",
     "displayMode_local": "この端末（ツールバーに従う）",
     "displayMode_live": "常にライブ",
-    "displayMode_source": "常にソース"
+    "displayMode_source": "常にソース",
+    "bodyFont": "本文フォント",
+    "bodyFontHint": "エディタと閲覧の散文フォント（この端末）。「言語に従う」はロケール既定（日本語＝UDEV Gothic、英語＝Wikistead Mono）。コードは常にコーディングフォント。",
+    "bodyFont_locale": "言語に従う",
+    "bodyFont_udev": "UDEV Gothic（日本語グリッド）",
+    "bodyFont_mono": "Wikistead Mono（コーディング）"
   },
   "settings": {
     "back": "アプリに戻る",

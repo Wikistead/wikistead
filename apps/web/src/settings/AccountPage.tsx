@@ -5,6 +5,7 @@ import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useSession } from "../session/SessionProvider";
 import { useTheme, type Theme } from "../app/ThemeProvider";
+import { useFontBody, type FontBody } from "../app/FontProvider";
 import { Avatar } from "../ui/Avatar";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
@@ -168,6 +169,7 @@ function EditorTab() {
   const mode = settings.data?.editorKeymap ?? "local";
   const dmode = settings.data?.editorDisplayMode ?? "local"; // ADR-056 / #164 startup display mode
   const kb = settings.data?.keybindings ?? {};
+  const { fontBody, setFontBody } = useFontBody(); // #190 / ADR-090: device-local body-font override
   // Startup-mode preference (cross-device, server). 'local' follows this device's last
   // toolbar toggle; 'vim'/'default' force the startup state. The toolbar toggle
   // (Ctrl+Alt+V) still switches within a session regardless.
@@ -209,6 +211,27 @@ function EditorTab() {
               className="justify-start"
             >
               {t(`account.displayMode_${m}`)}
+            </Button>
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-8">
+        {/* #190 / ADR-090: personal body-font override (device-local). "locale" follows the UI
+            language default (JP=UDEV Gothic, EN=Wikistead Mono); the others force a face. */}
+        <label className="mb-1 block text-sm font-medium">{t("account.bodyFont")}</label>
+        <p className="mb-2 text-xs text-fg-dim">{t("account.bodyFontHint")}</p>
+        <div className="flex flex-col gap-2">
+          {(["locale", "udev", "mono"] as const).map((f) => (
+            <Button
+              key={f}
+              variant={fontBody === f ? "primary" : "default"}
+              onClick={() => setFontBody(f)}
+              data-testid={`account-bodyfont-${f}`}
+              aria-pressed={fontBody === f}
+              className="justify-start"
+            >
+              {t(`account.bodyFont_${f}`)}
             </Button>
           ))}
         </div>
