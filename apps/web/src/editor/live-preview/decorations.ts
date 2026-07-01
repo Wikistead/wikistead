@@ -529,6 +529,14 @@ function rangeRevealed(state: EditorState, from: number, to: number): boolean {
     state.selection.ranges.some((r) => r.from <= to && r.to >= from),
   );
 }
+// Source mode (#164/#165): syntax is ALWAYS raw. Unlike `rangeRevealed` (true for live+caret AND for
+// source), this is TRUE ONLY in source mode — used to force a BLOCK MACRO to show its raw `:::` source
+// (a non-revealOnCursor macro like :::table/:::note would otherwise keep rendering its widget in source
+// mode, so raw never showed — the #165 review bug). Non-macro syntax already goes raw via
+// hideMarker/lineRevealed. Read-only (reading) never reveals.
+function isSourceMode(state: EditorState): boolean {
+  return !state.readOnly && state.facet(displayMode) === "source";
+}
 function lineRevealed(state: EditorState, pos: number): boolean {
   const line = state.doc.lineAt(pos);
   return rangeRevealed(state, line.from, line.to);
@@ -620,6 +628,9 @@ const RENDERERS: BlockRenderer[] = [
       if (macro) {
         const from = doc.lineAt(node.from).from;
         const to = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1)).to;
+        // Source mode (#165): show the raw ``` fence, not the rendered widget (a fence macro is an
+        // atom that otherwise never auto-reveals, so source mode never showed its source without this).
+        if (isSourceMode(ctx.state)) return;
         // Folded → CM's fold placeholder owns the range. Caret inside → reveal raw
         // source (editable). Otherwise → the rendered macro (a collapsed block widget,
         // entered via blockEntry like table/image).
@@ -662,6 +673,10 @@ const RENDERERS: BlockRenderer[] = [
       if (!macro) return;
       const first = doc.lineAt(node.from);
       const lastLine = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1));
+      // Source mode (#165): show the RAW `:::` block — no widget, no callout box. Descend so the
+      // DirectiveMark + body render as raw editable markdown (hideMarker/lineRevealed already show raw
+      // in source). Without this a non-revealOnCursor macro kept rendering its widget in source mode.
+      if (isSourceMode(ctx.state)) return;
       if (macro.liveRender) {
         // BLOCK directive: render the body as a widget atom. :::table is entered explicitly
         // (modal, #86) so it never reveals here. A LAYOUT directive (#90 columns/tabs) sets
