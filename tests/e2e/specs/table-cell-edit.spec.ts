@@ -1,33 +1,36 @@
 import { test, expect } from "@playwright/test";
 import { enterEdit, openScratch, sleep } from "../helpers";
 
-// #86: cell TEXT editing in the modal table editor. Double-click a cell → it becomes
-// contenteditable IN PLACE (safe because the modal is OUTSIDE CodeMirror, so CM can't steal
-// the contentDOM focus). Enter commits; Shift+Enter inserts an in-cell newline (<br>) which
-// promotes the table to :::table; paste is forced to text/plain. The edit reaches the doc
-// only on the modal's Save.
-async function openTableModal(page: any) {
+// #154 (was #86): cell TEXT editing IN-EDITOR (no modal). A click on the table enters
+// render-active → the inline table editor mounts INSIDE CodeMirror on an atom root
+// (contenteditable=false, ADR-054 focus delegation), so the nested cell holds focus and CM
+// doesn't reclaim it. Double-click a cell → contenteditable IN PLACE. Enter commits the cell
+// DIRECTLY to the doc (one Y.Text edit via host.replaceSource — there is no Save button);
+// Shift+Enter inserts an in-cell newline (<br>) which promotes the table to :::table; paste is
+// forced to text/plain. Escape (when not typing in a cell) exits edit mode → the static render.
+async function openTableInline(page: any) {
   await page.click("[data-pane=preview] .cm-content");
   for (const l of ["| A | B |", "| --- | --- |", "| 1 | 2 |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
   await sleep(250);
   await page.locator("[data-pane=preview] table.cm-lp-table").click();
-  await expect(page.getByTestId("macro-modal")).toBeVisible();
+  // The inline editor mounts inside .cm-content — NO modal overlay.
   await expect(page.getByTestId("table-edit")).toBeVisible();
+  expect(await page.getByTestId("macro-modal").count()).toBe(0);
 }
 
-test("double-click a cell → type → Enter commits the new text (stays a pipe table)", async ({ browser }) => {
+test("double-click a cell → type → Enter commits the new text to the doc (stays a pipe table)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "celledit");
   await enterEdit(page);
-  await openTableModal(page);
+  await openTableInline(page);
 
   const cell = page.getByTestId("table-edit").locator("td").first(); // body cell "1"
   await cell.dblclick();
   await page.keyboard.press("Shift+Home"); // select the existing "1"
   await page.keyboard.type("hello");
-  await page.keyboard.press("Enter"); // commit the cell
+  await page.keyboard.press("Enter"); // commit the cell → the doc (no Save)
   await sleep(200);
-  await page.getByTestId("macro-modal-save").click(); // commit to the doc
+  await page.keyboard.press("Escape"); // exit edit mode → static render
   await sleep(200);
 
   // span/style-free → still a plain pipe table; the first body cell now reads "hello".
@@ -41,7 +44,7 @@ test("Shift+Enter inserts an in-cell newline → promotes to :::table with a <br
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "cellnewline");
   await enterEdit(page);
-  await openTableModal(page);
+  await openTableInline(page);
 
   const cell = page.getByTestId("table-edit").locator("td").first();
   await cell.dblclick();
@@ -49,9 +52,9 @@ test("Shift+Enter inserts an in-cell newline → promotes to :::table with a <br
   await page.keyboard.type("x");
   await page.keyboard.press("Shift+Enter"); // in-cell newline
   await page.keyboard.type("y");
-  await page.keyboard.press("Enter"); // commit the cell
+  await page.keyboard.press("Enter"); // commit the cell → the doc
   await sleep(200);
-  await page.getByTestId("macro-modal-save").click();
+  await page.keyboard.press("Escape"); // exit edit mode → static render
   await sleep(200);
 
   // a newline is pipe-inexpressible → :::table HTML with a <br> inside the cell.
@@ -62,23 +65,23 @@ test("Shift+Enter inserts an in-cell newline → promotes to :::table with a <br
   await expect(macroTable.locator("td").first()).toContainText("y");
 });
 
-test("Escape while editing a cell discards the typed text", async ({ browser }) => {
+test("Escape while editing a cell discards the typed text (stays in edit mode)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "celldiscard");
   await enterEdit(page);
-  await openTableModal(page);
+  await openTableInline(page);
 
   const cell = page.getByTestId("table-edit").locator("td").first();
   await cell.dblclick();
   await page.keyboard.press("Shift+Home");
   await page.keyboard.type("DISCARDME");
-  await page.keyboard.press("Escape"); // cancel the cell edit (not the modal)
+  await page.keyboard.press("Escape"); // cancel the cell edit (NOT the whole editor)
   await sleep(200);
-  // still in the modal (Escape cancelled only the cell), and the cell reverted to "1".
-  await expect(page.getByTestId("macro-modal")).toBeVisible();
+  // still IN the inline editor (Escape cancelled only the cell), and the cell reverted to "1".
+  await expect(page.getByTestId("table-edit")).toBeVisible();
   await expect(page.getByTestId("table-edit").locator("td").first()).toHaveText("1");
 
-  await page.getByTestId("macro-modal-save").click();
+  await page.keyboard.press("Escape"); // now exit the editor → static render
   await sleep(200);
   const tbl = page.locator("[data-pane=preview] table.cm-lp-table");
   await expect(tbl.locator("td").first()).toHaveText("1");

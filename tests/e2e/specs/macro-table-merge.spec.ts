@@ -35,8 +35,9 @@ test("pipe table → merge promotes to :::table → unmerge demotes back", async
   await page.getByTestId("table-merge").click();
   await sleep(200);
 
-  // Caret off the block → the promoted :::table renders with a colspan=2 cell.
-  await page.getByTestId("macro-modal-save").click();
+  // #154: merge commits per-op (host.replaceSource) — no Save. Escape exits the in-editor edit
+  // mode; the promoted :::table then renders with a colspan=2 cell.
+  await page.keyboard.press("Escape");
   await sleep(200);
   const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
   await expect(macroTable).toBeVisible();
@@ -49,7 +50,7 @@ test("pipe table → merge promotes to :::table → unmerge demotes back", async
   await page.getByTestId("table-unmerge").click();
   await sleep(200);
 
-  await page.getByTestId("macro-modal-save").click();
+  await page.keyboard.press("Escape"); // #154: per-op commit; Escape exits edit mode
   await sleep(200);
   // Demoted: no more :::table macro; a plain pipe table renders again.
   expect(await page.locator("[data-pane=preview] [data-testid=macro-table]").count()).toBe(0);

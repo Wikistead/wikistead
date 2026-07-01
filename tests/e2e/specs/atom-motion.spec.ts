@@ -298,7 +298,7 @@ test("a :::table widget is reused (not recreated) across selection changes", asy
   await sleep(150);
   await page.getByTestId("table-bg-green").click();
   await sleep(250);
-  await page.getByTestId("macro-modal-save").click(); // #86: commit the edit (Escape discards)
+  await page.keyboard.press("Escape"); // #154: bg colour commits per-op; Escape exits in-editor edit mode
   await sleep(300);
   await expect(page.locator("[data-pane=preview] [data-testid=macro-table]")).toBeVisible();
   // tag the node, then change the selection repeatedly below the table
