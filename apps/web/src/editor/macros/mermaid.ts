@@ -16,7 +16,10 @@ let mermaidP: Promise<typeof import("mermaid")["default"]> | null = null;
 function loadMermaid(theme: MacroContext["theme"]) {
   if (!mermaidP) {
     mermaidP = import("mermaid").then(({ default: mermaid }) => {
-      mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: theme === "dark" ? "dark" : "default" });
+      // suppressErrorRendering (#191): on a syntax error mermaid otherwise injects a "bomb" error
+      // diagram into the DOM (body), which accumulates on every re-render/keystroke. Suppress it —
+      // we render our own in-macro error message in the catch below.
+      mermaid.initialize({ startOnLoad: false, securityLevel: "strict", suppressErrorRendering: true, theme: theme === "dark" ? "dark" : "default" });
       return mermaid;
     });
   }
@@ -39,13 +42,19 @@ export const mermaidMacro: FenceMacro = {
     el.setAttribute("data-testid", "macro-mermaid");
     const code = body.trim();
     if (!code) return el;
+    const id = nextId();
     void loadMermaid(ctx.theme).then(async (mermaid) => {
       try {
-        const { svg } = await mermaid.render(nextId(), code);
+        const { svg } = await mermaid.render(id, code);
         el.innerHTML = svg; // sanitized by mermaid (securityLevel: strict)
       } catch {
         el.classList.add("cm-lp-macro-error");
-        el.textContent = "Invalid mermaid diagram";
+        el.textContent = "Invalid mermaid diagram"; // in-macro only (suppressErrorRendering stops the body bomb)
+      } finally {
+        // Belt-and-suspenders (#191): mermaid.render appends a temp measurement element with this id
+        // to the DOM; on an error path it can linger. Remove it so nothing accumulates outside the macro.
+        document.getElementById(id)?.remove();
+        document.getElementById("d" + id)?.remove(); // mermaid prefixes the error container with 'd'
       }
     });
     return el;
