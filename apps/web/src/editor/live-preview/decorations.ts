@@ -910,6 +910,38 @@ export const motionKeyTracker: Extension = Prec.highest(
   }),
 );
 
+// Pure atom-motion decision (#183 symptom C): given a one-line vertical step from `oldLine` to
+// `newLine` (dir ±1, 1-based) and the atom block ranges `atoms` (line spans), return the line to
+// REDIRECT the caret to, or null to accept CM's landing. Cases:
+//   1. caret ON an atom → step OFF to the line just outside it (down→last+1, up→first-1).
+//   2. caret just OUTSIDE, stepping INTO or PAST the atom → land on its near edge (down→first,
+//      up→last). The `into` part is the symptom-C fix: when the atom sits at EOF/BOF, CM can't land
+//      on a line PAST it (none exists), so it lands INSIDE (on last/first) — the old `>= last+1` /
+//      `<= first-1` test missed that, leaving the caret mid-atom and skipping the near edge asymmetrically.
+//   3. overshoot clamp: a tall atom strictly between old and new (caret not on it) → clamp to the
+//      adjacent line (one line per key), so the next key lands on it (case 2) and steps off (case 1).
+// Pure → unit-tested directly; symmetric up/down by construction.
+export function atomMotionTarget(
+  oldLine: number, newLine: number, dir: 1 | -1,
+  atoms: ReadonlyArray<{ first: number; last: number }>, totalLines: number,
+): number | null {
+  for (const { first, last } of atoms) {
+    if (oldLine >= first && oldLine <= last) { // 1. on the atom → step off (one stop)
+      const t = dir === 1 ? last + 1 : first - 1;
+      return t >= 1 && t <= totalLines && t !== oldLine ? t : null;
+    }
+    if (dir === 1 && oldLine === first - 1 && newLine >= first) return first; // 2. down into/past → first
+    if (dir === -1 && oldLine === last + 1 && newLine <= last) return last;   // 2. up into/past → last
+  }
+  const adj = oldLine + dir; // 3. overshoot clamp
+  if (adj >= 1 && adj <= totalLines && newLine !== adj) {
+    const lo = Math.min(oldLine, newLine), hi = Math.max(oldLine, newLine);
+    const crossed = atoms.some(({ first, last }) => first >= lo && last <= hi && !(oldLine >= first && oldLine <= last));
+    if (crossed) return adj;
+  }
+  return null;
+}
+
 export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   if (tr.docChanged || !tr.selection) return tr;
   const blocks = tr.startState.field(livePreview, false)?.blocks;
@@ -935,37 +967,9 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   //   2. caret OUTSIDE, a step that reached/over the atom (incl. an overshoot) → land ON it
   //      (one stop; down → first line, up → last line).
   if (lastVerticalStep) {
-    for (const b of blocks) {
-      const first = doc.lineAt(b.from).number;
-      const last = doc.lineAt(b.to).number;
-      if (oldLine >= first && oldLine <= last) {
-        const t = dir === 1 ? last + 1 : first - 1;
-        if (t >= 1 && t <= doc.lines && t !== oldLine) {
-          return { selection: EditorSelection.cursor(doc.line(t).from), scrollIntoView: true };
-        }
-        break; // on this atom, no line outside in that direction → leave as-is
-      }
-      if (dir === 1 && oldLine === first - 1 && newLine >= last + 1) {
-        return { selection: EditorSelection.cursor(doc.line(first).from), scrollIntoView: true };
-      }
-      if (dir === -1 && oldLine === last + 1 && newLine <= first - 1) {
-        return { selection: EditorSelection.cursor(doc.line(last).from), scrollIntoView: true };
-      }
-    }
-    // Case 3 — overshoot clamp: a vertical key whose motion CROSSED a tall atom (a block
-    // lies strictly between oldLine and newLine, caret not on it) must move exactly one
-    // line. A tall widget makes CM's visual vertical motion overshoot from a line that is
-    // not directly adjacent to the atom (e.g. k from two lines below). Clamp to the
-    // adjacent line; the next key then lands ON the atom (case 2) and steps off (case 1).
-    const adj = oldLine + dir;
-    if (adj >= 1 && adj <= doc.lines && newLine !== adj) {
-      const lo = Math.min(oldLine, newLine), hi = Math.max(oldLine, newLine);
-      const crossed = blocks.some((b) => {
-        const f = doc.lineAt(b.from).number, l = doc.lineAt(b.to).number;
-        return f >= lo && l <= hi && !(oldLine >= f && oldLine <= l);
-      });
-      if (crossed) return { selection: EditorSelection.cursor(doc.line(adj).from), scrollIntoView: true };
-    }
+    const atoms = blocks.map((b) => ({ first: doc.lineAt(b.from).number, last: doc.lineAt(b.to).number }));
+    const target = atomMotionTarget(oldLine, newLine, dir as 1 | -1, atoms, doc.lines);
+    if (target !== null) return { selection: EditorSelection.cursor(doc.line(target).from), scrollIntoView: true };
   }
   return tr;
 });
