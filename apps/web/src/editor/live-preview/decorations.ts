@@ -1192,7 +1192,14 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-callout": {
     borderLeft: "3px solid var(--accent, #4ea1ff)",
     background: "color-mix(in srgb, var(--accent, #4ea1ff) 8%, transparent)",
-    paddingLeft: "0.8em",
+    // #170 panel layout: a left gutter (position:relative anchors the absolutely-positioned icon into
+    // it) so the icon reads as a large panel column and the body text aligns to its right, not crammed
+    // beside a tiny glyph. NOTE: CM renders each callout line as a separate .cm-line, so pure CSS
+    // cannot vertically-center the icon against a MULTI-LINE body's combined height (that needs a
+    // single-container widget — the columns/tabs-style revealOnCursor conversion, a follow-up if the
+    // reviewer wants true centering over the gutter-panel). This lifts "small top-left / cheap".
+    position: "relative",
+    paddingLeft: "2.8em",
   },
   // Per-type accents (#150 → #158-C5 tokens). note/info ride the base accent; tip/warning/danger
   // ride semantic --callout-* tokens (tokens.css, light/dark + tenant-overridable) — no hardcodes.

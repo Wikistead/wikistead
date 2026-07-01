@@ -56,6 +56,17 @@ test(":::warning[label] renders the warning variant with icon + label header", a
   // #158-C4: the icon renders as a mask-image on ::before (Lucide SVG, currentColor-tinted).
   const beforeMask = await header.evaluate((el) => getComputedStyle(el, "::before").maskImage || getComputedStyle(el, "::before").webkitMaskImage);
   expect(beforeMask).toContain("svg"); // a mask-image SVG data URI is set (not "none")
+  // #170 panel layout: the icon is a LARGE gutter column (absolutely positioned in the callout's
+  // left padding), not a tiny inline glyph. Assert the panel geometry.
+  const iconStyle = await header.evaluate((el) => {
+    const b = getComputedStyle(el, "::before");
+    return { position: b.position, width: parseFloat(b.width) };
+  });
+  expect(iconStyle.position).toBe("absolute");     // in the gutter, not inline
+  expect(iconStyle.width).toBeGreaterThan(18);     // large (~1.5em ≈ 24px), not the old ~1em glyph
+  const boxPadLeft = await page.locator("[data-pane=preview] .cm-lp-callout-warning").first()
+    .evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft));
+  expect(boxPadLeft).toBeGreaterThan(28);          // the left gutter reserves the icon column
   const visible = await page.locator("[data-pane=preview] .cm-content").innerText();
   expect(visible).not.toContain(":::warning[Server down]"); // raw hidden (no linkification — #94)
 });
