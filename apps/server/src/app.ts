@@ -154,6 +154,21 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.get('/healthz', async () => ({ ok: true }))
   app.get('/readyz', async () => ({ ok: true }))
 
+  // Defense-in-depth security headers on EVERY response (#148 deploy-gate / ADR-039). The prod proxy
+  // is expected to set these too, but the SERVER is the fortress — it must not depend on a correctly
+  // configured proxy (a proxy misconfig would otherwise silently drop them). nosniff + Referrer-Policy
+  // are always safe; HSTS is sent ONLY over HTTPS (guarded by X-Forwarded-Proto/protocol) so dev HTTP
+  // / localhost is never HSTS-pinned. Applies to API JSON, errors, and 404s alike.
+  app.addHook('onSend', async (req, reply, payload) => {
+    reply.header('X-Content-Type-Options', 'nosniff')
+    reply.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+    const xfp = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim()
+    if (xfp === 'https' || req.protocol === 'https') {
+      reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+    }
+    return payload
+  })
+
   app.addHook('onRequest', async (req, reply) => {
     // Public / pre-session routes resolve their own tenant; no auth required.
     // /auth/login + /auth/callback (added in C3) establish the session, so they
