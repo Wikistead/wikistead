@@ -26,12 +26,16 @@ import { macroEdit } from "./live-preview/macro-edit";
 export const vimCompartmentContent = (on: boolean) => (on ? [vim(), vimEnabled.of(true)] : [vimEnabled.of(false)]);
 
 // Display-mode Compartment content (ADR-056 / #164). Reused by mount + the Editor's mode toggle.
-// Reading is read-only + non-editable (clean render, nothing reveals — rangeRevealed already
-// returns false under readOnly); the editing affordances (grips, checkbox toggles) gate themselves
-// on state.readOnly so they go inert. Live/Source stay editable.
+// Reading is READ-ONLY but stays EDITABLE-focusable (#165): it uses EditorState.readOnly (blocks doc
+// edits; nothing reveals since rangeRevealed returns false under readOnly, and grips/checkbox toggles
+// gate on state.readOnly so they go inert) — but NOT EditorView.editable.of(false). Making the view
+// non-editable removed the contentDOM's focusability, which disabled the vim keymap AND did not come
+// back when switching out of Reading (vim⟂mode invariant violated — #165 rebound). Keeping it editable
+// + readOnly means vim NAVIGATION (j/k/scroll) still works in Reading while edits stay blocked, and
+// vim fully survives Reading↔Live/Source. Live/Source are fully editable.
 export const displayModeContent = (m: DisplayMode) =>
   m === "reading"
-    ? [displayMode.of(m), EditorState.readOnly.of(true), EditorView.editable.of(false)]
+    ? [displayMode.of(m), EditorState.readOnly.of(true), EditorView.editable.of(true)]
     : [displayMode.of(m), EditorState.readOnly.of(false), EditorView.editable.of(true)];
 
 // Map vim za/zo/zc onto CodeMirror fold commands (codemirror-vim omits them) so vim
