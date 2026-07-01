@@ -51,10 +51,12 @@ export const mermaidMacro: FenceMacro = {
         el.classList.add("cm-lp-macro-error");
         el.textContent = "Invalid mermaid diagram"; // in-macro only (suppressErrorRendering stops the body bomb)
       } finally {
-        // Belt-and-suspenders (#191): mermaid.render appends a temp measurement element with this id
-        // to the DOM; on an error path it can linger. Remove it so nothing accumulates outside the macro.
-        document.getElementById(id)?.remove();
-        document.getElementById("d" + id)?.remove(); // mermaid prefixes the error container with 'd'
+        // Belt-and-suspenders (#191): mermaid.render appends a temp element PREFIXED with 'd' (d<id>)
+        // to the DOM for measurement; on an error path it can linger. Remove only THAT — never #<id>,
+        // which is the id of the RENDERED <svg> we assigned into `el` above (removing it deleted valid
+        // diagrams — #191 review regression: mermaid names the output svg `${id}`, so
+        // getElementById(id) found the real figure inside `el`, not a stray temp).
+        document.getElementById("d" + id)?.remove(); // mermaid prefixes the temp/error container with 'd'
       }
     });
     return el;
