@@ -1,5 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { atomBlockAtCaret } from "./vim-atom";
+import { atomBlockAtCaret, atomOpenLineTarget } from "./vim-atom";
+
+// #183 symptom B / o-O: plain o/O on an atom opens a new line AFTER (o) / BEFORE (O) the WHOLE atom,
+// never inside it. Pure offset math (lineAt mocked to the atom's first/last line bounds).
+describe("atomOpenLineTarget (#183 o/O on an atom)", () => {
+  // atom spans [10,30]; its first line is [8,15], its last line is [25,33].
+  const lineAt = (p: number) => (p === 30 ? { from: 25, to: 33 } : p === 10 ? { from: 8, to: 15 } : { from: p, to: p });
+  it("o opens BELOW the whole atom (at the last line's end), caret on the new line", () => {
+    expect(atomOpenLineTarget({ from: 10, to: 30 }, "o", lineAt)).toEqual({ insertAt: 33, caret: 34 });
+  });
+  it("O opens ABOVE the whole atom (at the first line's start), caret on the new line", () => {
+    expect(atomOpenLineTarget({ from: 10, to: 30 }, "O", lineAt)).toEqual({ insertAt: 8, caret: 8 });
+  });
+});
 
 // #91 atom-direction bug: yy/dd must grab the WHOLE atom regardless of which line the caret
 // entered on. Entering from below lands the caret on the atom's LAST line — the old "caret on the
