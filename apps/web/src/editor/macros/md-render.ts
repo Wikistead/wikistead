@@ -28,8 +28,22 @@ const HEADINGS: Record<string, string> = {
 };
 
 // Block dangerous schemes; allow everything else (relative, https, mailto, …). Never throws.
+// The blocklist POLICY is unchanged; this normalizes the URL the way a browser does BEFORE checking,
+// so the check can't be evaded and legit URLs aren't mangled:
+//   1. Strip a surrounding <…> (CommonMark angle-bracket destinations arrive WITH the brackets from
+//      the parser). Without this a legit `<https://x>` renders as the broken relative href `<https://x>`,
+//      and a `<javascript:…>` only failed to fire by accident (the literal `<` made it a relative URL).
+//   2. Remove the control chars a browser IGNORES inside a URL before evaluating the scheme
+//      (TAB/LF/CR/NUL + other C0/DEL) — otherwise `java⇥script:` would slip past the blocklist yet
+//      execute once the browser drops the tab. Matching the browser's normalization closes that.
 function safeHref(url: string): string | null {
-  return /^\s*(javascript|data|vbscript|file):/i.test(url) ? null : url.trim();
+  let u = url.trim();
+  if (u.length >= 2 && u.startsWith("<") && u.endsWith(">")) u = u.slice(1, -1); // angle-bracket destination
+  // eslint-disable-next-line no-control-regex -- deliberately stripping the control chars browsers ignore in URLs
+  u = u.replace(/[\u0000-\u001F\u007F]/g, ""); // C0 controls + DEL (incl. TAB/LF/CR/NUL)
+  if (/^\s*(javascript|data|vbscript|file):/i.test(u)) return null;
+  const trimmed = u.trim();
+  return trimmed || null;
 }
 
 const txt = (src: string, n: SNode) => src.slice(n.from, n.to);
