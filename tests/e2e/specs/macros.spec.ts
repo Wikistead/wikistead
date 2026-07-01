@@ -39,6 +39,10 @@ test("```mermaid macro: renders, folds/expands, round-trips raw source", async (
   await folded.click();
   await sleep(300);
   await expect(page.locator("[data-pane=preview] [data-testid=macro-mermaid]")).toBeVisible();
+  // #191 regression guard: the re-rendered diagram keeps its <svg> — the finally cleanup must remove
+  // ONLY the 'd'-prefixed temp, never #<id> (the rendered svg lives inside the macro; deleting it
+  // blanked valid diagrams on every render). If finally over-removed, this svg would be gone.
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-mermaid] svg")).toBeVisible({ timeout: 15000 });
 
   // Round-trip: caret into the block reveals the raw markdown (offset-invariant — the
   // canonical source was never mutated by rendering/folding).
