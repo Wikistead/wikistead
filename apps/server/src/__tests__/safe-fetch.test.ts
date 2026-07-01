@@ -2,7 +2,7 @@
 // + URL validation are the security core; verified with DISTINCT addresses (private/metadata/v6
 // blocked, public allowed) and an injected resolver so no real DNS/network is needed.
 import { describe, it, expect } from 'vitest'
-import { isBlockedIp, assertSafeUrl, resolveGuarded, pinnedLookup, readCapped } from '../safe-fetch.js'
+import { isBlockedIp, assertSafeUrl, resolveGuarded, pinnedLookup, readCapped, guardedFetch } from '../safe-fetch.js'
 
 async function* fromChunks(chunks: string[]): AsyncIterable<Uint8Array> {
   for (const c of chunks) yield new TextEncoder().encode(c)
@@ -82,6 +82,39 @@ describe('pinnedLookup — DNS-rebinding defense (ADR-083 #181)', () => {
     let got: unknown
     lookup('idp.example', { all: true }, (...a: unknown[]) => { got = a })
     expect(got).toEqual([null, [{ address: '2606:4700:4700::1111', family: 6 }]])
+  })
+})
+
+// #181 review (comment 347): the discovery-only fix left JWKS + token fetches unguarded — a legit
+// public discovery doc could point jwks_uri/token_endpoint at an internal address. guardedFetch is the
+// openid-client `customFetch` seam that re-validates EVERY issuer-derived fetch (discovery/jwks/token)
+// with the SAME guard. The security core = it REFUSES to make the request when the target is
+// non-https or resolves private (unless the operator opted in). Verified WITHOUT network via injected
+// DNS: a blocked target rejects before any socket opens.
+describe('guardedFetch — jwks/token fetches are guarded too (#181 review)', () => {
+  const resolve = (ips: string[]) => async () => ips
+  it('REFUSES an https jwks_uri/token_endpoint that resolves to an internal IP (the residual SSRF)', async () => {
+    const f = guardedFetch({ resolve: resolve(['169.254.169.254']) })
+    await expect(f('https://idp.example/jwks')).rejects.toMatchObject({ code: 'ssrf_blocked' })
+    const f2 = guardedFetch({ resolve: resolve(['10.0.0.9']) })
+    await expect(f2('https://idp.example/token', { method: 'POST', body: 'grant_type=authorization_code' })).rejects.toMatchObject({ code: 'ssrf_blocked' })
+  })
+  it('REFUSES a non-https jwks_uri (a discovery doc pointing http://internal/jwks)', async () => {
+    const f = guardedFetch({ resolve: resolve(['8.8.8.8']) })
+    await expect(f('http://idp.example/jwks')).rejects.toMatchObject({ code: 'scheme_blocked' })
+  })
+  it('PERMITS a private jwks/token target ONLY under the operator opt-in (self-hosted IdP key fetch)', async () => {
+    // The flag must govern jwks/token too, not just discovery, or a self-hosted private IdP login breaks
+    // at the key-fetch step. Prove the SSRF gate PASSES under allowPrivate without opening a real socket:
+    // pass an already-aborted signal — the gate runs first (would throw ssrf_blocked if it rejected the
+    // private IP), and only after passing does it honor the abort. So 'aborted' (not 'ssrf_blocked')
+    // proves the private target was ACCEPTED by the guard under the operator flag.
+    const aborted = AbortSignal.abort()
+    const f = guardedFetch({ resolve: resolve(['10.0.0.5']), allowPrivate: true })
+    await expect(f('https://keycloak.internal/jwks', { signal: aborted })).rejects.toMatchObject({ code: 'aborted' })
+    // And WITHOUT the flag the same private target is refused BEFORE the abort is even considered.
+    const g = guardedFetch({ resolve: resolve(['10.0.0.5']) })
+    await expect(g('https://keycloak.internal/jwks', { signal: aborted })).rejects.toMatchObject({ code: 'ssrf_blocked' })
   })
 })
 
