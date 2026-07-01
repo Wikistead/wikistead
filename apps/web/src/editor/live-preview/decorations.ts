@@ -10,7 +10,7 @@ import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme } 
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
-import { renderMarkdownToDom } from "../macros/md-render";
+import { renderMarkdownToDom, renderCalloutPanel } from "../macros/md-render";
 import { noteCalloutMacro } from "../macros/callout";
 import { openMacroModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost } from "./macro-edit";
@@ -62,7 +62,7 @@ if (import.meta.hot) import.meta.hot.accept(() => window.location.reload());
 // Obsidian-style live preview: hide/style markdown syntax via CodeMirror
 // decorations.
 //
-// INVARIANT (ADR-008 — the one non-obvious interaction in this surface):
+// INVARIANT (ADR-008 — the one non-obvious interaction in this surface)
 // decorations are DISPLAY-ONLY and OFFSET-INVARIANT. `Decoration.replace` hides
 // glyphs but never mutates the document; the CM doc stays 1:1 with the canonical
 // Y.Text (kept in sync by yCollab). Remote collaborators' carets are drawn at
@@ -90,7 +90,7 @@ const hrLine = Decoration.line({ attributes: { class: "cm-lp-hr" } });
 // mounting, edit-mode chrome appearing. When it does, CM's line geometry for everything
 // BELOW it goes stale and vim's visual-geometry j/k drift across that whole region. Observe
 // the widget's size and ask CM to re-measure on any change, so geometry always tracks the
-// real height — for ANY block widget, however its height changes. Disconnect in destroy().
+// real height — for ANY block widget, however its height changes. Disconnect in destroy.
 export function observeBlockResize(view: EditorView, dom: HTMLElement): ResizeObserver {
   const ro = new ResizeObserver(() => view.requestMeasure());
   ro.observe(dom);
@@ -112,14 +112,14 @@ const bullet = Decoration.replace({ widget: new BulletWidget() });
 
 // GFM task checkbox (ADR-019). The `[ ]`/`[x]` TaskMarker renders as a real checkbox
 // (reveal-on-cursor still shows the raw markers for editing). How a click is handled
-// depends on the surface, supplied via this facet:
-//   - { mode: "edit" }            editable draft surface → flip the char in the doc
-//                                 directly (a normal offset-invariant Y.Text edit).
-//   - { mode: "view", onToggle }  read-only published surface → the host persists it
-//                                 (flip the live draft over its collab connection +
-//                                 the no-revision endpoint). See Editor.tsx.
-//   - null                        no edit permission → rendered DISABLED (display only;
-//                                 the server is the bastion regardless — D3).
+// depends on the surface, supplied via this facet
+// - { mode: "edit" } editable draft surface → flip the char in the doc
+// directly (a normal offset-invariant Y.Text edit).
+// - { mode: "view", onToggle } read-only published surface → the host persists it
+// (flip the live draft over its collab connection +
+// the no-revision endpoint). See Editor.tsx.
+// - null no edit permission → rendered DISABLED (display only;
+// the server is the bastion regardless — D3).
 export type CheckboxControl =
   | { mode: "edit" }
   | { mode: "view"; onToggle: (index: number, from: number, checked: boolean) => void }
@@ -190,7 +190,7 @@ class CheckboxWidget extends WidgetType {
 const checkbox = (checked: boolean, from: number) =>
   Decoration.replace({ widget: new CheckboxWidget(checked, from) });
 
-// Image attachments are referenced in the canonical Y.Text by a STABLE id —
+// Image attachments are referenced in the canonical Y.Text by a STABLE id
 // ![alt](wks-attachment:<id>) — never by a presigned URL (those are short-lived
 // bearer tokens; persisting one in the CRDT/its revision history would both break
 // on expiry and leak a credential). The widget resolves the id to a fresh
@@ -298,7 +298,7 @@ function linkHref(src: string): string | null {
   return u;
 }
 
-// Renders a GFM table block as an HTML <table>. Cells are set via textContent —
+// Renders a GFM table block as an HTML <table>. Cells are set via textContent
 // NEVER innerHTML — so user-authored content cannot inject markup (no XSS). This
 // is display-only: it replaces the markdown range visually; the canonical Y.Text
 // is unchanged, and putting the cursor in the table reveals the raw markdown.
@@ -355,7 +355,7 @@ class TableWidget extends WidgetType {
 // (the ADR-054 focus-delegation guard, proven by the M1 spike): CM treats the block as atomic and
 // does NOT reclaim the nested cell's focus, so the inline editor owns all interaction and commits
 // via host.replaceSource (one offset-invariant Y.Text edit; the host auto-demotes pipe⟷:::table).
-// eq() is keyed on [from,to,source]: a commit rewrites the range → new key → remount from the
+// eq is keyed on [from,to,source]: a commit rewrites the range → new key → remount from the
 // canonical source (same lifecycle as the modal); between commits (typing in a cell = no doc
 // change) the widget is stable and keeps focus. Offset-invariant — replace never shifts offsets.
 class EditableTableWidget extends WidgetType {
@@ -370,7 +370,7 @@ class EditableTableWidget extends WidgetType {
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
     // Atom root guard (ADR-054): contenteditable=false so CM keeps the block atomic and does NOT
-    // reclaim the nested cell's focus. mount() owns the className/testid + appends the editor DOM.
+    // reclaim the nested cell's focus. mount owns the className/testid + appends the editor DOM.
     wrap.contentEditable = "false";
     this.ctrl = tableInlineEditor.mount(wrap, makeInnerEditHost(view, this.from, this.to, tableTier));
     this.ro = observeBlockResize(view, wrap);
@@ -442,7 +442,7 @@ class MacroWidget extends WidgetType {
       // #140 / ADR-074: host-mediated render. The macro returned its degrade DOM (the source fence);
       // for a host-renderable lang (plantuml) ask the injected renderer for image bytes and, on
       // success, swap the source for the image. null (unconfigured / failure / non-viewer 403) keeps
-      // the source — Open formats, never a broken embed. Fires ONCE per widget instance (eq() reuses
+      // the source — Open formats, never a broken embed. Fires ONCE per widget instance (eq reuses
       // the widget while name+body are stable, so there's no churn / re-fetch on every keystroke).
       const renderDiagram = view.state.facet(diagramRenderer);
       if (HOST_RENDERABLE.has(this.name) && renderDiagram !== noopDiagramRenderer) {
@@ -460,7 +460,7 @@ class MacroWidget extends WidgetType {
       // #108 / ADR-071: host-mediated transclude. The macro can't fetch (narrow host-API); the host
       // resolves the referenced page's markdown (authz re-checked server-side on the REF page) and
       // renders it in place, or an existence-hiding placeholder (null = denied/cycle/absent — all
-      // indistinguishable). Fires once per widget instance (eq() stable on name+body).
+      // indistinguishable). Fires once per widget instance (eq stable on name+body).
       const resolveTransclude = view.state.facet(transcludeResolver);
       if (this.name === "transclude" && resolveTransclude !== noopTranscludeResolver) {
         void resolveTransclude(this.body).then((content) => {
@@ -479,7 +479,7 @@ class MacroWidget extends WidgetType {
       }
     }
     if (!view.state.readOnly) {
-      // ADR-024: a click ENTERS the macro atom (the mouse path, same as Ctrl+Enter) —
+      // ADR-024: a click ENTERS the macro atom (the mouse path, same as Ctrl+Enter)
       // modal (Excalidraw) / inline cell-edit (table) / source reveal (mermaid). The fold
       // button stops propagation so its clicks don't enter. Offset-invariant.
       wrap.addEventListener("mousedown", (e) => {
@@ -562,6 +562,31 @@ class DetailsSummaryWidget extends WidgetType {
   ignoreEvent() { return false; }
 }
 
+// #170 / ADR-049 (Y): a typed callout renders as a single-container PANEL widget (enter-to-edit,
+// like columns/tabs/details) INSTEAD of the old always-inline per-line box. Caret-out → this panel
+// (icon large + vertically centred, variant title, nested Markdown body — the shared renderCalloutPanel
+// so the CM widget and nested renderer never drift); caret-in → the raw `:::` source (reveal-on-cursor,
+// per-line boxes below). Display-only / offset-invariant; a click enters (enterMacroAt → reveal raw).
+class CalloutWidget extends WidgetType {
+  private ro?: ResizeObserver;
+  constructor(readonly containerClass: string, readonly icon: string, readonly label: string, readonly body: string) { super(); }
+  eq(o: CalloutWidget) {
+    return o.containerClass === this.containerClass && o.icon === this.icon && o.label === this.label && o.body === this.body;
+  }
+  toDOM(view: EditorView) {
+    const el = renderCalloutPanel(this.containerClass, this.icon, this.label, this.body);
+    if (!view.state.readOnly) {
+      // A click enters the callout (place the caret in the block → reveal raw source for editing).
+      el.addEventListener("mousedown", (e) => { e.preventDefault(); enterMacroAt(view, view.posAtDOM(el)); view.focus(); });
+    }
+    // Height settles after the nested body renders → re-measure so lines below don't drift.
+    this.ro = observeBlockResize(view, el);
+    return el;
+  }
+  destroy() { this.ro?.disconnect(); this.ro = undefined; }
+  ignoreEvent() { return false; } // clicks pass through so the caret can enter → reveal raw
+}
+
 // A construct's syntax markers reveal (become editable raw text) when the main
 // selection touches the range the marker sits on — matching Obsidian's per-line
 // reveal. This only changes rendering, never offsets.
@@ -572,12 +597,12 @@ class DetailsSummaryWidget extends WidgetType {
 // first-line construct (a leading image, heading, or table) as raw markdown.
 // The per-mode syntax-reveal decision (ADR-056 / ADR-078), extracted PURE so it is unit-testable and
 // shared by the inline/block reveal (here) and math (math.ts) — the two must never diverge.
-//   readOnly (reading / view) → never reveal (clean render; nothing to edit).
-//   source                    → ALWAYS reveal (raw everywhere).
-//   wysiwyg                   → NEVER reveal (the inverse of source: markers stay hidden + atomic so
-//                               the doc always shows the rendered form; text stays editable, format
-//                               via toolbar / richEditUI). Opt-in (default is live).
-//   live                      → reveal only where the caret/selection overlaps the marker.
+// readOnly (reading / view) → never reveal (clean render; nothing to edit).
+// source → ALWAYS reveal (raw everywhere).
+// wysiwyg → NEVER reveal (the inverse of source: markers stay hidden + atomic so
+// the doc always shows the rendered form; text stays editable, format
+// via toolbar / richEditUI). Opt-in (default is live).
+// live → reveal only where the caret/selection overlaps the marker.
 export function syntaxRevealsAt(mode: DisplayMode, readOnly: boolean, underSelection: boolean): boolean {
   if (readOnly) return false;
   if (mode === "source") return true;
@@ -770,7 +795,23 @@ const RENDERERS: BlockRenderer[] = [
         return false;
       }
       if (macro.containerClass) {
-        // CONTAINER directive (callout): a CSS box over every line; content stays markdown.
+        // #170 / ADR-049 (Y): a typed callout (containerClass + icon) renders as a single-container
+        // PANEL widget when the caret is OUTSIDE — icon large + vertically centred, variant title,
+        // nested Markdown body (renderCalloutPanel, the shared renderer). Caret-in reveals the raw
+        // `:::` source (per-line boxes below) for editing = enter-to-edit, consistent with
+        // columns/tabs/details. addAtomic records it as a block for blockEntry motion.
+        if (macro.icon && !rangeRevealed(ctx.state, first.from, lastLine.to)) {
+          const bodyParts: string[] = [];
+          for (let n = first.number + 1; n < lastLine.number; n++) bodyParts.push(doc.line(n).text);
+          ctx.addAtomic(
+            Decoration.replace({ widget: new CalloutWidget(macro.containerClass, macro.icon, open!.label ?? "", bodyParts.join("\n")), block: true }),
+            first.from,
+            lastLine.to,
+          );
+          return false; // skip children — the panel owns the block
+        }
+        // CONTAINER directive (callout, caret-in = raw / details revealed): a CSS box over every
+        // line; content stays markdown (raw-editable under the cursor).
         const box = Decoration.line({ attributes: { class: macro.containerClass } });
         // The OPEN line renders a header when there is a leading [label] (#94) AND/OR the macro
         // has an icon (#150 typed callouts) — via CSS ::before(attr(data-icon) attr(data-label)),
@@ -940,7 +981,7 @@ function buildDecorations(state: EditorState): {
   };
 }
 
-// A StateField (NOT a ViewPlugin): block decorations — the table render uses one —
+// A StateField (NOT a ViewPlugin): block decorations — the table render uses one
 // may only be provided by a state field, not a plugin. Rebuilds on any doc change
 // (covers local edits AND remote Yjs updates applied by yCollab) and any selection
 // change (reveal-on-cursor). Provides the decoration set, the atomicRanges (so local
@@ -958,7 +999,7 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
     if (tr.startState.facet(displayMode) !== tr.state.facet(displayMode)) return buildDecorations(tr.state);
     // A fold toggle changes WHICH macro blocks render (folded → CM's placeholder owns
     // the range, so the macro widget must drop) but is neither a doc nor selection
-    // change — rebuild so isFolded() is re-evaluated and the stale widget is removed.
+    // change — rebuild so isFolded is re-evaluated and the stale widget is removed.
     for (const e of tr.effects) if (e.is(foldEffect) || e.is(unfoldEffect) || e.is(setMacroRenderActive)) return buildDecorations(tr.state);
     return value;
   },
@@ -968,7 +1009,7 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
   ],
 });
 
-// ADR-024 atom motion. Every block decoration (macro / table / image / hr) is an ATOM —
+// ADR-024 atom motion. Every block decoration (macro / table / image / hr) is an ATOM
 // a single motion stop. The caret cannot land INSIDE the replace widget's atomic range, so
 // a one-line vertical key (j/k/arrow) that would step from the line BEFORE the block to the
 // line AFTER it (CM's atomicRanges skip the whole widget in one key) is redirected to land
@@ -997,14 +1038,14 @@ export const motionKeyTracker: Extension = Prec.highest(
 
 // Pure atom-motion decision (#183 symptom C): given a one-line vertical step from `oldLine` to
 // `newLine` (dir ±1, 1-based) and the atom block ranges `atoms` (line spans), return the line to
-// REDIRECT the caret to, or null to accept CM's landing. Cases:
-//   1. caret ON an atom → step OFF to the line just outside it (down→last+1, up→first-1).
-//   2. caret just OUTSIDE, stepping INTO or PAST the atom → land on its near edge (down→first,
-//      up→last). The `into` part is the symptom-C fix: when the atom sits at EOF/BOF, CM can't land
-//      on a line PAST it (none exists), so it lands INSIDE (on last/first) — the old `>= last+1` /
-//      `<= first-1` test missed that, leaving the caret mid-atom and skipping the near edge asymmetrically.
-//   3. overshoot clamp: a tall atom strictly between old and new (caret not on it) → clamp to the
-//      adjacent line (one line per key), so the next key lands on it (case 2) and steps off (case 1).
+// REDIRECT the caret to, or null to accept CM's landing. Cases
+// 1. caret ON an atom → step OFF to the line just outside it (down→last+1, up→first-1).
+// 2. caret just OUTSIDE, stepping INTO or PAST the atom → land on its near edge (down→first,
+// up→last). The `into` part is the symptom-C fix: when the atom sits at EOF/BOF, CM can't land
+// on a line PAST it (none exists), so it lands INSIDE (on last/first) — the old `>= last+1` /
+// `<= first-1` test missed that, leaving the caret mid-atom and skipping the near edge asymmetrically.
+// 3. overshoot clamp: a tall atom strictly between old and new (caret not on it) → clamp to the
+// adjacent line (one line per key), so the next key lands on it (case 2) and steps off (case 1).
 // Pure → unit-tested directly; symmetric up/down by construction.
 export function atomMotionTarget(
   oldLine: number, newLine: number, dir: 1 | -1,
@@ -1045,12 +1086,12 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   // Atom motion is for a one-line KEY (j/k/arrow) only — GATED on a real vertical key so a
   // jump (gg/G/}) is never hijacked onto an atom (a jump's endpoints can coincide with an
   // atom's edges when the caret sits right beside it). Two cases, both explicit so a TALL
-  // widget's visual height can't make CM overshoot the adjacent line:
-  //   1. caret ON the atom → step OFF to the line just outside it (down → last+1, up →
-  //      first-1). This is the fix for the device bug: trusting CM's landing here overshot
-  //      past a tall macro by its rendered height.
-  //   2. caret OUTSIDE, a step that reached/over the atom (incl. an overshoot) → land ON it
-  //      (one stop; down → first line, up → last line).
+  // widget's visual height can't make CM overshoot the adjacent line
+  // 1. caret ON the atom → step OFF to the line just outside it (down → last+1, up →
+  // first-1). This is the fix for the device bug: trusting CM's landing here overshot
+  // past a tall macro by its rendered height.
+  // 2. caret OUTSIDE, a step that reached/over the atom (incl. an overshoot) → land ON it
+  // (one stop; down → first line, up → last line).
   if (lastVerticalStep) {
     const atoms = blocks.map((b) => ({ first: doc.lineAt(b.from).number, last: doc.lineAt(b.to).number }));
     const target = atomMotionTarget(oldLine, newLine, dir as 1 | -1, atoms, doc.lines);

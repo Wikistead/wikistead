@@ -1,13 +1,14 @@
 import { test, expect } from "@playwright/test";
 import { enterEdit, openScratch, sleep } from "../helpers";
 
-// M1 slice 2 (ADR-022) + #150 typed callouts (ADR-049): the ::: container directive path.
-// A typed callout (:::note/:::info/:::tip/:::warning/:::danger) renders as a styled box whose
-// content stays live-preview Markdown, the ::: fences hide (reveal-on-cursor), the source
-// round-trips, an unknown type falls back to note, and lookup is case-insensitive.
+// M1 slice 2 (ADR-022) + #150 typed callouts (ADR-049) + #170 Y: the ::: container directive path.
+// A typed callout (:::note/:::info/:::tip/:::warning/:::danger) renders as a single-container PANEL
+// widget (enter-to-edit, like columns/tabs): caret-OUT shows a flex 2-column panel (large icon +
+// variant title + nested Markdown body), caret-IN reveals the raw ::: source. An unknown type falls
+// back to note, and lookup is case-insensitive.
 //
 // REAL throwaway page so the transient presence caret can't ghost other demo specs.
-test(":::note directive: styled box, nested markdown, hide-fence + round-trip", async ({ browser }) => {
+test(":::note directive: panel widget, nested markdown, hide-fence + round-trip", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "callout");
   await enterEdit(page);
@@ -19,16 +20,17 @@ test(":::note directive: styled box, nested markdown, hide-fence + round-trip", 
   }
   await sleep(400);
 
-  const box = page.locator("[data-pane=preview] .cm-lp-callout").first();
-  await expect(box).toBeVisible();
-  // Content stays Markdown: the **bold** is decorated (nested parsing, not an opaque widget).
-  await expect(page.locator("[data-pane=preview] .cm-lp-strong")).toContainText("bold");
+  // Caret is below → the callout renders as a PANEL widget (not raw, not per-line boxes).
+  const panel = page.locator("[data-pane=preview] .cm-lp-callout-panel").first();
+  await expect(panel).toBeVisible();
+  // The body stays Markdown: the **bold** is rendered as a real <strong> inside the panel body.
+  await expect(panel.locator(".cm-lp-callout-panel-body strong")).toContainText("bold");
   const visible = await page.locator("[data-pane=preview] .cm-content").innerText();
   expect(visible).toContain("Heads up");
   expect(visible).not.toContain(":::note");
 
-  // Round-trip: caret onto the opening fence line reveals the raw ::: source.
-  await box.click();
+  // Round-trip: click the panel (enter) then caret onto the opening fence line reveals raw ::: source.
+  await panel.click();
   await page.keyboard.press("ArrowUp");
   await page.keyboard.press("ArrowUp");
   await page.keyboard.press("Home");
@@ -36,8 +38,9 @@ test(":::note directive: styled box, nested markdown, hide-fence + round-trip", 
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain(":::note");
 });
 
-// #150: each type renders its own modifier class + header icon; a [label] (#94) is the header.
-test(":::warning[label] renders the warning variant with icon + label header", async ({ browser }) => {
+// #150 / #170 Y: each type renders its own modifier class + a large icon column + a [label] (#94)
+// title, laid out as the flex panel (icon vertically centred, not a tiny top-left glyph).
+test(":::warning[label] renders the warning panel with a large icon column + title", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "callout-warning");
   await enterEdit(page);
@@ -49,30 +52,29 @@ test(":::warning[label] renders the warning variant with icon + label header", a
   }
   await sleep(400);
 
-  await expect(page.locator("[data-pane=preview] .cm-lp-callout-warning").first()).toBeVisible();
-  const header = page.locator("[data-pane=preview] .cm-lp-directive-label").first();
-  await expect(header).toHaveAttribute("data-label", "Server down"); // #94 label
-  await expect(header).toHaveAttribute("data-icon", "triangle-alert"); // #158-C4 Lucide icon name
-  // #158-C4: the icon renders as a mask-image on ::before (Lucide SVG, currentColor-tinted).
-  const beforeMask = await header.evaluate((el) => getComputedStyle(el, "::before").maskImage || getComputedStyle(el, "::before").webkitMaskImage);
-  expect(beforeMask).toContain("svg"); // a mask-image SVG data URI is set (not "none")
-  // #170 panel layout: the icon is a LARGE gutter column (absolutely positioned in the callout's
-  // left padding), not a tiny inline glyph. Assert the panel geometry.
-  const iconStyle = await header.evaluate((el) => {
-    const b = getComputedStyle(el, "::before");
-    return { position: b.position, width: parseFloat(b.width) };
-  });
-  expect(iconStyle.position).toBe("absolute");     // in the gutter, not inline
-  expect(iconStyle.width).toBeGreaterThan(18);     // large (~1.5em ≈ 24px), not the old ~1em glyph
-  const boxPadLeft = await page.locator("[data-pane=preview] .cm-lp-callout-warning").first()
-    .evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft));
-  expect(boxPadLeft).toBeGreaterThan(28);          // the left gutter reserves the icon column
+  const panel = page.locator("[data-pane=preview] .cm-lp-callout-warning.cm-lp-callout-panel").first();
+  await expect(panel).toBeVisible();
+  // #94 label → the panel title (variant-coloured), via textContent (XSS-safe).
+  const title = panel.locator(".cm-lp-callout-panel-title");
+  await expect(title).toHaveAttribute("data-label", "Server down");
+  await expect(title).toHaveText("Server down");
+  // #158-C4 icon: the masked Lucide SVG rides the icon column (mask-image, not "none").
+  const icon = panel.locator(".cm-lp-callout-panel-icon");
+  await expect(icon).toHaveAttribute("data-icon", "triangle-alert");
+  const mask = await icon.evaluate((el) => getComputedStyle(el).maskImage || getComputedStyle(el).webkitMaskImage);
+  expect(mask).toContain("svg"); // a mask-image SVG data URI is set
+  // #170 panel geometry: a LARGE icon column (~1.75em ≈ 28px), not the old ~1em glyph, and the panel
+  // lays out as a flex row (icon column beside the main column).
+  const geo = await icon.evaluate((el) => ({ w: parseFloat(getComputedStyle(el).width) }));
+  expect(geo.w).toBeGreaterThan(18);
+  const display = await panel.evaluate((el) => getComputedStyle(el).display);
+  expect(display).toBe("flex"); // the Y flex panel (not the old per-line boxes)
   const visible = await page.locator("[data-pane=preview] .cm-content").innerText();
   expect(visible).not.toContain(":::warning[Server down]"); // raw hidden (no linkification — #94)
 });
 
 // #150: an unknown type falls back to a note callout (Obsidian-compatible).
-test(":::foobar (unknown type) falls back to a note callout", async ({ browser }) => {
+test(":::foobar (unknown type) falls back to a note callout panel", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "callout-fallback");
   await enterEdit(page);
@@ -82,11 +84,11 @@ test(":::foobar (unknown type) falls back to a note callout", async ({ browser }
     await page.keyboard.press("Enter");
   }
   await sleep(400);
-  await expect(page.locator("[data-pane=preview] .cm-lp-callout-note").first()).toBeVisible();
+  await expect(page.locator("[data-pane=preview] .cm-lp-callout-note.cm-lp-callout-panel").first()).toBeVisible();
 });
 
 // #150: type id is case-insensitive (:::WARNING == :::warning).
-test(":::WARNING is case-insensitive (renders the warning variant)", async ({ browser }) => {
+test(":::WARNING is case-insensitive (renders the warning panel)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "callout-case");
   await enterEdit(page);
@@ -96,5 +98,5 @@ test(":::WARNING is case-insensitive (renders the warning variant)", async ({ br
     await page.keyboard.press("Enter");
   }
   await sleep(400);
-  await expect(page.locator("[data-pane=preview] .cm-lp-callout-warning").first()).toBeVisible();
+  await expect(page.locator("[data-pane=preview] .cm-lp-callout-warning.cm-lp-callout-panel").first()).toBeVisible();
 });

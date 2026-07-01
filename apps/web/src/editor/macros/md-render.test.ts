@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeAll } from "vitest";
-import { renderMarkdownToDom } from "./md-render";
+import { renderMarkdownToDom, renderCalloutPanel } from "./md-render";
 import { registerMacro } from "./registry";
 
 function root(src: string): HTMLElement {
@@ -151,5 +151,45 @@ describe("renderMarkdownToDom — nested macro dispatch (ADR-085 / #185)", () =>
     const d = root(":::adr085test\n<script>alert(1)</script>\n:::");
     expect(d.querySelector("script")).toBeNull();
     expect(d.querySelector(".adr085-rendered")?.textContent).toContain("<script>");
+  });
+});
+
+// #170 / ADR-049 (Y): a CONTAINER directive with an icon (a typed callout, no liveRender) renders
+// as the shared callout PANEL — icon + variant title + nested Markdown body — both as the CM widget
+// and via this nested dispatch (callouts inside transclude/columns). renderCalloutPanel is the single
+// source of truth.
+describe("callout panel (#170 案Y — containerClass dispatch + renderCalloutPanel)", () => {
+  beforeAll(() => {
+    registerMacro({
+      kind: "directive", name: "adr049callout", exportFidelity: "preserve",
+      containerClass: "cm-lp-callout cm-lp-callout-warning", icon: "triangle-alert",
+      htmlRender: (b) => `<div>${b}</div>`,
+    });
+  });
+
+  it("dispatches a nested typed callout to the PANEL (icon + title + body), not a generic box", () => {
+    const d = root(":::adr049callout[Heads up]\nbody **text**\n:::");
+    const panel = d.querySelector<HTMLElement>(".cm-lp-callout-panel");
+    expect(panel).not.toBeNull();
+    expect(d.querySelector(".cm-lp-md-directive")).toBeNull(); // NOT the generic fallback box
+    expect(panel!.querySelector(".cm-lp-callout-panel-icon")?.getAttribute("data-icon")).toBe("triangle-alert");
+    expect(panel!.querySelector(".cm-lp-callout-panel-title")?.textContent).toBe("Heads up");
+    // the body is rendered through renderMarkdownToDom → nested markdown is real (a <strong>, not raw **)
+    expect(panel!.querySelector(".cm-lp-callout-panel-body strong")?.textContent).toBe("text");
+  });
+
+  it("renders no title element when there is no [label]", () => {
+    const d = root(":::adr049callout\njust body\n:::");
+    expect(d.querySelector(".cm-lp-callout-panel")).not.toBeNull();
+    expect(d.querySelector(".cm-lp-callout-panel-title")).toBeNull(); // distinct from the labelled case
+    expect(d.querySelector(".cm-lp-callout-panel-body")?.textContent).toContain("just body");
+  });
+
+  it("renderCalloutPanel keeps the XSS boundary: a label + body script stay inert", () => {
+    const el = renderCalloutPanel("cm-lp-callout cm-lp-callout-note", "pencil", "<img src=x onerror=1>", "<script>alert(1)</script>");
+    expect(el.querySelector("script")).toBeNull();
+    expect(el.querySelector("img")).toBeNull();
+    // the label is set via textContent → the raw markup is literal text, never parsed
+    expect(el.querySelector(".cm-lp-callout-panel-title")?.textContent).toBe("<img src=x onerror=1>");
   });
 });

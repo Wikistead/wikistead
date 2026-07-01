@@ -29,13 +29,13 @@ const HEADINGS: Record<string, string> = {
 
 // Block dangerous schemes; allow everything else (relative, https, mailto, …). Never throws.
 // The blocklist POLICY is unchanged; this normalizes the URL the way a browser does BEFORE checking,
-// so the check can't be evaded and legit URLs aren't mangled:
-//   1. Strip a surrounding <…> (CommonMark angle-bracket destinations arrive WITH the brackets from
-//      the parser). Without this a legit `<https://x>` renders as the broken relative href `<https://x>`,
-//      and a `<javascript:…>` only failed to fire by accident (the literal `<` made it a relative URL).
-//   2. Remove the control chars a browser IGNORES inside a URL before evaluating the scheme
-//      (TAB/LF/CR/NUL + other C0/DEL) — otherwise `java⇥script:` would slip past the blocklist yet
-//      execute once the browser drops the tab. Matching the browser's normalization closes that.
+// so the check can't be evaded and legit URLs aren't mangled
+// 1. Strip a surrounding <…> (CommonMark angle-bracket destinations arrive WITH the brackets from
+// the parser). Without this a legit `<https://x>` renders as the broken relative href `<https://x>`,
+// and a `<javascript:…>` only failed to fire by accident (the literal `<` made it a relative URL).
+// 2. Remove the control chars a browser IGNORES inside a URL before evaluating the scheme
+// (TAB/LF/CR/NUL + other C0/DEL) — otherwise `java⇥script:` would slip past the blocklist yet
+// execute once the browser drops the tab. Matching the browser's normalization closes that.
 function safeHref(url: string): string | null {
   let u = url.trim();
   if (u.length >= 2 && u.startsWith("<") && u.endsWith(">")) u = u.slice(1, -1); // angle-bracket destination
@@ -130,6 +130,16 @@ function renderBlock(node: SNode, src: string, into: Node): void {
           return;
         } catch { /* a macro that throws must not break the render → fall through to the generic box */ }
       }
+      // #170 / ADR-049 (Y): a CONTAINER directive with an icon = a typed callout. It has no
+      // liveRender (its body stays Markdown), so render the shared callout PANEL (icon + title +
+      // nested body) — the single source of truth reused by the CM widget (decorations.ts) and here
+      // (nested callouts inside transclude/columns render as real panels, not a generic box).
+      if (macro?.containerClass && macro.icon) {
+        const lines = full.split("\n").slice(1);
+        if (lines.length && /^\s*:::+\s*$/.test(lines[lines.length - 1]!)) lines.pop();
+        into.appendChild(renderCalloutPanel(macro.containerClass, macro.icon, parsed?.label ?? "", lines.join("\n")));
+        return;
+      }
       const el = document.createElement("div"); el.className = "cm-lp-md-directive";
       renderBlocks(node, src, el); into.appendChild(el); return;
     }
@@ -153,4 +163,35 @@ export function renderMarkdownToDom(src: string): DocumentFragment {
   const frag = document.createDocumentFragment();
   renderBlocks(tree.topNode, src, frag);
   return frag;
+}
+
+// #170 / ADR-049 (Y): the shared callout PANEL renderer (single source of truth). A flex 2-column
+// panel — a large icon column (mask-image, currentColor-tinted, vertically centred against the whole
+// panel via CSS align-items) + a main column (variant-coloured title + nested Markdown body). Used by
+// the CM live widget (decorations.ts, top-level callouts) AND the nested dispatch above (callouts
+// inside transclude/columns), so both render identically. Display-only; XSS-safe (title via
+// textContent, body via the sanitized renderMarkdownToDom, icon via data-icon + CSS mask, no innerHTML).
+export function renderCalloutPanel(containerClass: string, icon: string, label: string, body: string): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = `${containerClass} cm-lp-callout-panel`;
+  wrap.setAttribute("data-testid", "callout-panel");
+  const ic = document.createElement("span");
+  ic.className = "cm-lp-callout-panel-icon";
+  ic.setAttribute("data-icon", icon);
+  wrap.appendChild(ic);
+  const main = document.createElement("div");
+  main.className = "cm-lp-callout-panel-main";
+  if (label) {
+    const title = document.createElement("div");
+    title.className = "cm-lp-callout-panel-title";
+    title.setAttribute("data-label", label);
+    title.textContent = label; // XSS-safe: text, never HTML
+    main.appendChild(title);
+  }
+  const bodyEl = document.createElement("div");
+  bodyEl.className = "cm-lp-callout-panel-body";
+  bodyEl.appendChild(renderMarkdownToDom(body)); // sanitized DOM (no innerHTML)
+  main.appendChild(bodyEl);
+  wrap.appendChild(main);
+  return wrap;
 }
