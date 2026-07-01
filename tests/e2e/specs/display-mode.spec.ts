@@ -106,3 +106,23 @@ test("#165: vim navigation survives a Reading round-trip (nav in Reading + resto
   await sleep(150);
   expect(await head()).toBe((lBefore ?? 1) + 1); // vim survived Reading → Live
 });
+
+// #174-#4 / #165: Reading is read-only, so clicking a table must NOT enter editing (the static
+// TableWidget's click handler still fires now that Reading stays focusable — openTableEditing guards
+// on state.readOnly). Regression guard: no in-editor table editor appears in Reading.
+test("#174: Reading blocks table editing (click does not open the in-editor editor)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "dispmode-readonly-table");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  for (const l of ["| A | B |", "| --- | --- |", "| 1 | 2 |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
+  await sleep(250);
+  await page.getByTestId("displaymode-reading").click();
+  await sleep(250);
+  // the table still renders (read view), but a click does not enter the editor.
+  const tbl = page.locator("[data-pane=preview] table.cm-lp-table");
+  await expect(tbl).toBeVisible();
+  await tbl.click();
+  await sleep(200);
+  expect(await page.getByTestId("table-edit").count()).toBe(0); // no in-editor editor in Reading
+});

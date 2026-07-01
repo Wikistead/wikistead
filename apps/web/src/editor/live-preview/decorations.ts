@@ -36,6 +36,9 @@ export const displayMode = Facet.define<DisplayMode, DisplayMode>({ combine: (v)
 // modes (the mouse is independent of vim; vim still reveals on the keyboard). Returns true
 // if it entered edit mode (caller preventDefaults so the caret isn't also placed).
 function openTableEditing(view: EditorView, pos: number): boolean {
+  // Reading mode is read-only (#165 keeps it focusable so vim navigates, so the static TableWidget's
+  // click handler still fires here — guard it): never enter table editing when read-only (#174-#4).
+  if (view.state.readOnly) return false;
   const tb = tableBlockAt(view.state, pos);
   if (!tb) return false;
   // vim × pipe table → reveal the raw GFM source (hand-typeable markdown stays keyboard-
@@ -777,7 +780,7 @@ const RENDERERS: BlockRenderer[] = [
         // pipe table, :::table HTML is not hand-typeable, so BOTH vim and non-vim use the editor
         // here (the M1 spike/ADR-054 proved focus delegation holds in vim too).
         const active = ctx.state.field(macroRenderActiveField, false);
-        if (macro.richEditUI?.present === "inline" && active && active.from <= from && active.to >= to) {
+        if (macro.richEditUI?.present === "inline" && active && active.from <= from && active.to >= to && !ctx.state.readOnly) {
           ctx.addAtomic(Decoration.replace({ widget: new EditableTableWidget(from, to, doc.sliceString(from, to)), block: true }), from, to);
           return false; // skip inner nodes — the inline editor owns the block
         }
@@ -913,7 +916,7 @@ const RENDERERS: BlockRenderer[] = [
       // WYSIWYG editor (#154, below). Only :::table/Excalidraw — non-typeable macros — never
       // reveal source (#5).
       const active = ctx.state.field(macroRenderActiveField, false);
-      if (active && active.from <= from && active.to >= to && !ctx.state.facet(vimEnabled)) {
+      if (active && active.from <= from && active.to >= to && !ctx.state.facet(vimEnabled) && !ctx.state.readOnly) {
         ctx.addAtomic(Decoration.replace({ widget: new EditableTableWidget(from, to, doc.sliceString(from, to)), block: true }), from, to);
         return;
       }
