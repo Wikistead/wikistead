@@ -3,7 +3,7 @@ import { resolveEntitlements } from '@wikistead/entitlements'
 // Host-mediated macro permission gate (#93 / ADR-073). The single place that decides whether a
 // macro of a given trust tier may run for a tenant — macros NEVER self-authorize (the host asks
 // this; a macro can't claim "I'm allowed"). Layered with #075 sandbox (this = "may it run", the
-// sandbox = "how it runs"). The level cap (macroLevelCap) is a separate, persist-time concern.
+// sandbox = "how it runs"). (A tenant macro level-cap lever was withdrawn — #93; not persisted here.)
 //
 //   first-party  → always allowed (platform-signed, ADR-076).
 //   user / third-party → require BOTH userMacros entitlement (plan includes user macros) AND the

@@ -89,21 +89,15 @@ export interface Entitlements {
   // The numbers are a business placeholder. Window = API_RATE_LIMIT_WINDOW_S (env, default 60).
   apiRateLimit: { perKey: number; perTenant: number }
 
-  // Tenant macro LEVEL CAP (#93 / ADR-073): the highest MacroTier standard layer the tenant may
-  // persist. The host auto-demotes to min(lowest-representable, this cap) — server is the fortress
-  // (persist-time normalize). 'directive' = no cap (top). Self-host UNLIMITED = 'directive'; a
-  // restricted tier could cap at 'gfm'/'commonmark' — business placeholder. entitlement⟂authz.
-  macroLevelCap: MacroLevelCap
+  // NOTE: a tenant macro LEVEL CAP lever was withdrawn (#93) — gating basic editor features (table
+  // merges/styles) behind a plan violates Community First. All plans get full editor features; the
+  // cap-free auto-demote to the lowest representable layer (Open formats) lives in the editor, not here.
 
   // User/third-party macros (#93 / ADR-073 + #075/#076): may the tenant run NON-first-party macros?
   // Requires this AND a tenant-admin allowlist (host-mediated gate; macros never self-authorize).
   // first-party macros ignore this. Self-host UNLIMITED on; Cloud = business placeholder.
   userMacros: boolean
 }
-
-// MacroTier standard layers, lowest (most portable) → highest (least portable); the level cap above
-// names the ceiling. Mirrors StandardLayer in the editor macro registry (kept in sync by review).
-export type MacroLevelCap = 'commonmark' | 'gfm' | 'directive'
 
 // Self-host / Community edition: never plan-limited.
 export const UNLIMITED: Entitlements = {
@@ -121,7 +115,6 @@ export const UNLIMITED: Entitlements = {
   aiFeatures: true,
   aiTokenAllowance: Infinity,
   apiRateLimit: { perKey: Infinity, perTenant: Infinity },
-  macroLevelCap: 'directive',
   userMacros: true,
 }
 

@@ -1,10 +1,14 @@
 import type { MacroTier, MacroLevel, StandardLayer } from "./registry";
 
-// Tenant macro level-cap demote logic (#93 / ADR-073) — PURE (no CM/DOM), the editor-side friendly
-// counterpart to the server publish fortress (markdownExceedsLevelCap). Operates only on the
-// MacroTier contract + the cap layer, so it is unit-testable without the editor runtime.
+// Auto-demote a macro to its LOWEST representable standard layer (ADR-025 Open formats) — PURE (no
+// CM/DOM), unit-testable without the editor runtime. Operates only on the MacroTier contract.
 //
-// Standard-layer ordering (most portable → least). The cap names the ceiling layer a tenant may use.
+// NOTE (#93): a TENANT macro level-cap (plan-driven ceiling) was WITHDRAWN — gating basic editor
+// features behind a plan violates Community First. The `cap` parameter is retained as a general
+// ceiling (callers pass 'directive' = no ceiling → the plain lowest-representable auto-demote), but no
+// tenant plan drives it anymore. Keep this logic; it is the ADR-025 auto-demote, NOT the removed cap.
+//
+// Standard-layer ordering (most portable → least). The cap names the highest layer that may be used.
 const LAYER_RANK: Record<StandardLayer, number> = { commonmark: 0, gfm: 1, directive: 2 };
 
 // The demote target for a level cap: the LOWEST level within the cap that can represent the source
@@ -25,4 +29,11 @@ export function targetCapLevel(tier: MacroTier, source: string, cap: StandardLay
 export function demoteToCapLevel(tier: MacroTier, source: string, cap: StandardLayer): string {
   const target = targetCapLevel(tier, source, cap);
   return target ? tier.toLevel(source, target) : source;
+}
+
+// Cap-free auto-demote (#93): normalize to the lowest representable layer with NO tenant ceiling
+// (ADR-025 Open formats). The editor's save path uses this — level-cap was withdrawn, so 'directive'
+// (the top layer) is always the ceiling.
+export function autoDemote(tier: MacroTier, source: string): string {
+  return demoteToCapLevel(tier, source, "directive");
 }
