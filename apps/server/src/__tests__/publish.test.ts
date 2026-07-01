@@ -11,8 +11,7 @@ import postgres from 'postgres'
 import * as Y from 'yjs'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
-import { fgaClient, deleteObjectTuples } from '@wikistead/authz'
-import { UNLIMITED, registerEntitlementsResolver, resetEntitlementsResolver } from '@wikistead/entitlements'
+import { fgaClient } from '@wikistead/authz'
 import { drainOutbox } from '../search/index.js'
 import { createSpace } from '../routes/spaces.js'
 import { createPage, publishPage, getPublished, getPage } from '../routes/pages.js'
@@ -117,27 +116,5 @@ describe('draft/publish editing model', () => {
   it('publish is edit-gated: a user without edit is rejected (403)', async () => {
     await expect(publishPage(db, fgaClient, app.searchDriver, app.storageDriver, { pageId, subject: 'user:pub-rando-xyz', createdBy: 'user:pub-rando-xyz' }))
       .rejects.toMatchObject({ statusCode: 403 })
-  })
-})
-
-describe('macro level-cap fortress (#93 / ADR-073)', () => {
-  it('rejects a publish whose Markdown exceeds the tenant cap; the default directive cap allows it', async () => {
-    const p = await createPage(db, fgaClient, app.searchDriver, { tenantId: TENANT, spaceId, userId: 'dev-user', title: 'cap-test' })
-    await setDraft(p.id, ':::note\nhi\n:::\n') // directive-layer content
-    try {
-      registerEntitlementsResolver(() => ({ ...UNLIMITED, macroLevelCap: 'gfm' })) // cap below directive
-      await expect(publishPage(db, fgaClient, app.searchDriver, app.storageDriver, { pageId: p.id, subject: 'user:dev-user', createdBy: 'user:dev-user', plan: 'x' }))
-        .rejects.toMatchObject({ statusCode: 422, code: 'macro_level_cap' }) // server fortress rejects over-cap
-    } finally {
-      resetEntitlementsResolver()
-    }
-    // default cap = directive (UNLIMITED) → the same content publishes
-    const r = await publishPage(db, fgaClient, app.searchDriver, app.storageDriver, { pageId: p.id, subject: 'user:dev-user', createdBy: 'user:dev-user', plan: 'x' })
-    expect(r.noop).toBe(false)
-    await app.searchDriver.deleteDoc(p.id).catch(() => {})
-    await deleteObjectTuples(fgaClient, `page:${p.id}`).catch(() => {})
-    await admin`DELETE FROM revisions WHERE page_id = ${p.id}`.catch(() => {})
-    await admin`DELETE FROM search_outbox WHERE page_id = ${p.id}`.catch(() => {})
-    await admin`DELETE FROM pages WHERE id = ${p.id}`.catch(() => {})
   })
 })

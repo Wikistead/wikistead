@@ -1,8 +1,7 @@
 import { EditorView } from "@codemirror/view";
 import type { FenceMacro, DirectiveMacro, MacroTheme } from "../macros/registry";
 import { macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
-import { macroLevelCap } from "./decorations";
-import { demoteToCapLevel } from "../macros/tier-cap";
+import { autoDemote } from "../macros/tier-cap";
 import { tableModalEditor, tableTier } from "../macros/table";
 
 // Rich-edit a macro block in a modal (ADR-022 Part 3 / #86 for the table). The overlay is plain
@@ -89,10 +88,10 @@ export function openMacroModal(
     const cur = resolve();
     if (!cur) return;
     if (cur.body !== originalBody) console.warn("macro block was edited concurrently; applying last write");
-    // Tier auto-demote on save, clamped to the tenant macro level-cap (#93 — open formats; cap
-    // "directive" default ⇒ plain lowest-representable demote). No tier (Excalidraw) → as-is.
+    // Tier auto-demote on save to the lowest representable layer (ADR-025 open formats; #93 — no
+    // tenant level-cap). No tier (Excalidraw) → as-is.
     let source = cur.wrap(getBody());
-    if (macro.tier) source = demoteToCapLevel(macro.tier, source, view.state.facet(macroLevelCap));
+    if (macro.tier) source = autoDemote(macro.tier, source);
     view.dispatch({ changes: { from: cur.from, to: cur.to, insert: source } });
   });
   void macro.richEditUI.editor.mount(frame.content, originalBody, { theme }).then((c) => {
@@ -112,7 +111,7 @@ export function openTableModal(view: EditorView, getPos: () => number, theme: Ma
   const frame = modalFrame(view, "Table", () => {
     const cur = tableBlockAt(view.state, getPos());
     if (!cur) return;
-    view.dispatch({ changes: { from: cur.from, to: cur.to, insert: demoteToCapLevel(tableTier, getBody(), view.state.facet(macroLevelCap)) } });
+    view.dispatch({ changes: { from: cur.from, to: cur.to, insert: autoDemote(tableTier, getBody()) } });
   });
   void tableModalEditor.mount(frame.content, originalSource, { theme }).then((c) => {
     getBody = () => c.getBody();
