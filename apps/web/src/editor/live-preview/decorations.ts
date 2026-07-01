@@ -1114,6 +1114,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-macro-wrap": { position: "relative", padding: "0.4em 0" },
   // ADR-024 atom selection: the caret resting on the atom rings it (selected as a unit).
   ".cm-lp-atom-sel": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "1px", borderRadius: "4px" },
+  // #174 / ADR-087: mouse HOVER shows a subtle block-boundary highlight on EVERY block macro
+  // (columns/tabs/table/mermaid/…), so a mouse user sees the block is an interactive unit — parity
+  // with the selection ring. `:not(.cm-lp-atom-sel)` so the accent selection ring wins when selected.
+  // Display-only (never edits/offsets).
+  ".cm-lp-macro-wrap:hover:not(.cm-lp-atom-sel)": { outline: "1px solid var(--border, #888)", outlineOffset: "1px", borderRadius: "4px" },
   ".cm-lp-macro": { display: "block", overflowX: "auto" },
   // pointer-events:none on the SVG so a click on the diagram falls through to the macro
   // container (CM then places the caret → reveal-on-cursor shows the raw source). An
