@@ -11,7 +11,9 @@ test("display-mode segment: direct switch live/source/reading (display-only)", a
   await openScratch(page, "dispmode");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.insertText(":::note\nhello body\n:::\n\nplain tail\n");
+  // A callout (:::note, container macro) AND a mermaid fence (a liveRender WIDGET macro) — #165: both
+  // must show RAW in Source mode. The widget macro is the one that regressed (it kept rendering).
+  await page.keyboard.insertText(":::note\nhello body\n:::\n\n```mermaid\ngraph TD; A-->B\n```\n\nplain tail\n");
   await sleep(300);
   await page.keyboard.press("Control+End"); // caret away from the callout so Live hides the fence
   await sleep(200);
@@ -26,14 +28,19 @@ test("display-mode segment: direct switch live/source/reading (display-only)", a
     await expect(segment).toHaveAttribute("data-mode", m);
   };
 
-  // Live: fence hidden; the surface is editable (grips present).
+  // Live: fence hidden; the surface is editable (grips present). The mermaid widget renders (its raw
+  // fence is NOT shown in live).
   await setMode("live");
   expect(await content()).not.toContain(":::note");
+  expect(await content()).not.toContain("```mermaid");
   expect(await grips.count()).toBeGreaterThan(0);
 
-  // Source: syntax always raw.
+  // Source: syntax always raw — BOTH the callout AND the liveRender widget macro (mermaid) show raw
+  // source (#165: the widget macro previously kept rendering in Source — regression guard).
   await setMode("source");
   expect(await content()).toContain(":::note");
+  expect(await content()).toContain("```mermaid");
+  expect(await content()).toContain("graph TD");
 
   // Reading: clean render (no syntax), read-only (contenteditable=false, no grips).
   await setMode("reading");
