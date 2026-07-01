@@ -27,6 +27,33 @@ export async function loadYdoc(tenantId: string, pageId: string): Promise<Uint8A
 
 export interface StoreResult {
   stored: boolean
+  // ADR-088 / #186: set when the write was REFUSED because it was an unloaded empty flush that would
+  // have wiped a non-empty page (distinct from a 0-row RLS/missing failure — here the row is kept).
+  blocked?: boolean
+}
+
+// ADR-088 / #186: is `incomingState` an UNLOADED empty flush over the (non-empty) `existingState`?
+// A writer that LOADED the existing doc and then cleared it carries the delete operations for the
+// existing content, so merging existing ⊕ incoming yields EMPTY (a real select-all-delete → ALLOW).
+// A fresh writer that never loaded it (init race / a bug producing an empty encode / a new doc
+// autosaving over a real page) has no such deletes, so the merge KEEPS the existing content (an
+// unloaded flush → REJECT: it would silently wipe the page). Distinguishes by Yjs CAUSALITY (the
+// merge result), NOT byte length — so a legitimate clear is allowed while a blind wipe is blocked.
+// PURE (real Yjs, no DB) → unit-testable. Returns false unless it is genuinely the dangerous
+// transition (incoming decodes empty AND existing is non-empty AND the merge stays non-empty).
+export function isUnloadedEmptyFlush(existingState: Uint8Array, incomingState: Uint8Array): boolean {
+  if (decodeContent(incomingState) !== '') return false // incoming isn't empty → not a wipe
+  const merged = new Y.Doc()
+  try {
+    Y.applyUpdate(merged, existingState)
+    if (merged.getText('content').toString() === '') return false // existing already empty → nothing to lose
+    Y.applyUpdate(merged, incomingState) // apply the writer's state ON TOP of the existing content
+    // Still non-empty ⇒ the incoming state did NOT delete the existing content ⇒ the writer never
+    // observed it ⇒ unloaded flush. Empty ⇒ the writer's own deletes removed it ⇒ a real clear.
+    return merged.getText('content').toString() !== ''
+  } finally {
+    merged.destroy()
+  }
 }
 
 // Save ydoc binary to Postgres and (conditionally) create a revision snapshot.
@@ -55,8 +82,25 @@ export async function storeYdoc(
   _createdBy?: string,
 ): Promise<StoreResult> {
   let stored = false
+  let blocked = false
   const md = decodeContent(state)
   await withTenant(tenantId, async (tx) => {
+    // Empty-overwrite guard (ADR-088 / #186): an EMPTY incoming state is the ONLY thing that can wipe a
+    // page, so the extra read + causal check run SOLELY on that (rare) branch — a normal non-empty write
+    // skips all of it (zero hot-path overhead beyond this emptiness check, per the ADR-088 review note).
+    if (md === '') {
+      const [existing] = await tx<[{ ydoc: Buffer | null }]>`SELECT ydoc FROM pages WHERE id = ${pageId}`
+      if (existing?.ydoc && existing.ydoc.length > 0 && isUnloadedEmptyFlush(new Uint8Array(existing.ydoc), state)) {
+        // The writer never observed the existing content — persisting its empty state would silently
+        // wipe the page. REFUSE and keep the existing bytes; emit the LOUD marker (ADR-058 style, no PII).
+        console.error(
+          `event=ydoc_empty_overwrite_blocked tenant=${tenantId} page=${pageId}` +
+          ` reason=unloaded_empty_flush_over_nonempty — kept existing bytes (no data loss)`,
+        )
+        blocked = true
+        return undefined // existing ydoc untouched; stored stays false
+      }
+    }
     const result = await tx`
       UPDATE pages
       SET ydoc = ${Buffer.from(state)}, updated_at = now(),
@@ -73,5 +117,5 @@ export async function storeYdoc(
     stored = true
     return undefined
   })
-  return { stored }
+  return { stored, blocked }
 }
