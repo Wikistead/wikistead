@@ -13,8 +13,10 @@ import type { StorageDriver } from '../storage/index.js'
 //         Branding is STRIPPED when the plan isn't entitled (a downgrade reverts to
 //         the default look; the stored values survive for a re-upgrade).
 //   WRITE PATCH /tenant/branding — tenant#admin AND entitlement-gated (403).
-// The tenant logo (upload + public byte delivery) is Phase 5d-2, pending the
-// multipart dependency; only accent + display name ship here.
+// The tenant logo (upload + public byte delivery) is Phase 5d-2 — implemented WITHOUT a multipart
+// dependency: the upload is base64-in-JSON (uploadTenantLogo below), MIME-sniffed (png/jpeg/webp only,
+// SVG excluded as a stored-XSS vector), size-capped, stored via the S3 abstraction, and served as
+// public bytes at GET /branding/logo (host-resolved, entitlement-stripped). #143.
 const DISPLAY_NAME_MAX = 64
 const LOGO_MAX_BYTES = 512 * 1024
 // Cap the raw JSON body BEFORE parse so a huge base64 string can't exhaust memory
