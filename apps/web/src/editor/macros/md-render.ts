@@ -1,5 +1,7 @@
 import { parser } from "@lezer/markdown";
-import { directiveExtension } from "./directive-parser";
+import { directiveExtension, parseDirectiveOpen } from "./directive-parser";
+import { findDirectiveMacro } from "./registry";
+import { currentMacroTheme } from "./theme";
 
 // #90 S0 (A′ shared) — render a Markdown source string to a SANITIZED DOM fragment, for use
 // INSIDE a block-widget macro (columns / tabs) that can't reach CodeMirror's own renderers (the
@@ -95,7 +97,25 @@ function renderBlock(node: SNode, src: string, into: Node): void {
       pre.appendChild(code); into.appendChild(pre); return;
     }
     case "HorizontalRule": into.appendChild(document.createElement("hr")); return;
-    case "Directive": { // nested container directive — render its inner blocks in a generic box
+    case "Directive": {
+      // ADR-085 shared macro renderer: dispatch a nested directive to its registered macro's
+      // liveRender (the SINGLE source of truth) so a `:::callout`/`:::columns` etc. INSIDE a
+      // transclude / column / tab renders as the real macro — not a generic box (#108, nested #90).
+      // Container macros call renderMarkdownToDom on their sub-bodies, so nesting recurses here to any
+      // depth. Unknown name / no liveRender / a macro that THROWS → the safe generic box (never break
+      // the whole render). liveRender only gets `{theme}` (ADR-024 narrow host-API) — display-only.
+      const full = src.slice(node.from, node.to);
+      const nl = full.indexOf("\n");
+      const parsed = parseDirectiveOpen(nl === -1 ? full : full.slice(0, nl));
+      const macro = parsed ? findDirectiveMacro(parsed.name) : undefined;
+      if (macro?.liveRender) {
+        const lines = full.split("\n").slice(1); // drop the opening ::: line
+        if (lines.length && /^\s*:::+\s*$/.test(lines[lines.length - 1]!)) lines.pop(); // drop close :::
+        try {
+          into.appendChild(macro.liveRender(lines.join("\n"), { theme: currentMacroTheme() }));
+          return;
+        } catch { /* a macro that throws must not break the render → fall through to the generic box */ }
+      }
       const el = document.createElement("div"); el.className = "cm-lp-md-directive";
       renderBlocks(node, src, el); into.appendChild(el); return;
     }
