@@ -86,7 +86,12 @@
     "displayModeHint": "How the editor opens its syntax: Live reveals it under the cursor, Source shows it always. Orthogonal to vim. Local follows this device.",
     "displayMode_local": "This device (follow toolbar)",
     "displayMode_live": "Always Live",
-    "displayMode_source": "Always Source"
+    "displayMode_source": "Always Source",
+    "bodyFont": "Body font",
+    "bodyFontHint": "The prose face in the editor and reading view (this device). Follow language uses the locale default (Japanese = UDEV Gothic, English = Wikistead Mono). Code always uses the coding face.",
+    "bodyFont_locale": "Follow language",
+    "bodyFont_udev": "UDEV Gothic (JP grid)",
+    "bodyFont_mono": "Wikistead Mono (coding)"
   },
   "settings": {
     "back": "Back to app",

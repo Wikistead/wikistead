@@ -1,0 +1,23 @@
+/* Wikistead Mono (OFL-1.1) — self-hosted CODE font (#190 / ADR-090). A subset of Adobe's Source
+ * Code Pro (the coding face approved on #190: OFL, no ligatures, plain monospace), delivered as a
+ * vendored woff2 subset (ASCII + Latin-1 + common punctuation/symbols) so it actually loads and
+ * stays tiny (~20 KB/weight); falls back to ui-monospace for any uncovered glyph. Because a subset
+ * is a Modified Version under OFL 1.1, the Reserved Font Name 'Source' is NOT used — the family is
+ * renamed to "Wikistead Mono" (OFL 1.1 clause 3; #190 RFN caution). Subset built with
+ * fonttools/pyftsubset from Source Code Pro TTF (release channel).
+ * Source + license: https://github.com/adobe-fonts/source-code-pro (SIL OFL 1.1) — see
+ * LICENSE-SourceCodePro.txt. Glyph face only; code highlight colour (#158-C2) is orthogonal. */
+@font-face {
+  font-family: "Wikistead Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./wikistead-mono-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Wikistead Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./wikistead-mono-Bold.woff2") format("woff2");
+}
