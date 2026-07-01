@@ -17,6 +17,7 @@
 import os from 'node:os'
 import postgres from 'postgres'
 import { emit } from '@wikistead/events'
+import { appendOperatorEntry } from '../audit/operator-ledger.js'
 
 export interface OidcDisableResult {
   tenantId: string
@@ -44,14 +45,27 @@ export async function disableTenantOidc(
   if (!oidc || oidc.enabled === false) {
     return { tenantId: tenant.id, slug: args.slug, hadConfig, changed: false }
   }
-  // Disable-only: preserve issuer/client/secret so recovery is a single re-enable.
-  await sql`UPDATE tenant_oidc SET enabled = false, updated_at = now() WHERE tenant_id = ${tenant.id}`
+  const at = new Date().toISOString()
+  // Disable-only (preserve issuer/client/secret so recovery is a single re-enable) AND the durable
+  // operator-ledger append in ONE transaction (ADR-089 / #179): if the ledger insert fails, the
+  // disable rolls back — no unrecorded use of a privileged operator action. The ledger records only
+  // integrity fields (never the config/secret), so it is safe to persist. Admin connection required
+  // (the operator_audit_log table is operator-only; migration 047).
+  await sql.begin(async (tx) => {
+    await tx`UPDATE tenant_oidc SET enabled = false, updated_at = now() WHERE tenant_id = ${tenant.id}`
+    await appendOperatorEntry(tx, {
+      actor: `operator:${args.operator}`,
+      action: 'tenant.oidc_recovered',
+      target: `tenant:${tenant.id}`,
+      at,
+    })
+  })
+  // Defense-in-depth / real-time alerting (NOT the durable record — that is the ledger above).
   emit({ type: 'tenant.oidc_recovered', tenantId: tenant.id, operator: args.operator })
-  // Structured audit line (who/when/tenant) — break-glass is a privileged action and
-  // must be traceable even where the event bus has no persistent subscriber yet.
+  // Structured log line (who/when/tenant) — a second, human-greppable trace.
   console.log(
     `[break-glass] tenant.oidc_recovered tenant=${tenant.id} slug=${args.slug} ` +
-      `operator=${args.operator} at=${new Date().toISOString()}`,
+      `operator=${args.operator} at=${at}`,
   )
   return { tenantId: tenant.id, slug: args.slug, hadConfig, changed: true }
 }
