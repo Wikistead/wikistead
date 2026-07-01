@@ -221,12 +221,14 @@ export const tableInlineEditor: InlineEditor = {
     htr.appendChild(addColCell);
     table.appendChild(htr);
 
-    // Cell text editing (#86): double-click a cell to type into it. The cell becomes
-    // contenteditable IN PLACE — this is safe because the whole editor lives in the modal
-    // overlay, OUTSIDE CodeMirror, so CM can't steal the contentDOM focus (the bug that sank
-    // the in-CM attempt). Enter commits; Shift+Enter inserts an in-cell <br>; paste is forced
-    // to text/plain; blur commits. Every commit rewrites the block via apply (one Y.Text
-    // edit) and remounts, so the grid/handles/selection rebuild from the canonical source.
+    // Cell text editing (#86 / #154): double-click a cell to type into it. The cell becomes
+    // contenteditable IN PLACE. Focus is handed over via host.beginTextEdit — a plain focus in the
+    // MODAL path (no CM), but the CM focus-DELEGATION guard in the in-editor path (#153/ADR-054
+    // root contenteditable=false + ignoreEvent means CM won't reclaim the nested island's focus), so
+    // the same editor works BOTH in the modal and inline in CodeMirror. Enter commits; Shift+Enter
+    // inserts an in-cell <br>; paste is forced to text/plain; blur commits. Every commit rewrites the
+    // block via apply (one Y.Text edit) and remounts from the canonical source.
+    let editHandle: { end(): void } | null = null;
     const beginEdit = (el: HTMLElement, r: number, c: number) => {
       const cur = grid[r]?.[c];
       if (!cur || editing) return;
@@ -238,7 +240,7 @@ export const tableInlineEditor: InlineEditor = {
       setCellText(el, cur.text);
       el.contentEditable = "true";
       el.classList.add("cm-lp-cell-editing");
-      el.focus();
+      editHandle = host.beginTextEdit(el); // #154: focus via the host (CM-safe in the inline path)
       const range = document.createRange();
       range.selectNodeContents(el);
       range.collapse(false); // caret at end
@@ -251,6 +253,8 @@ export const tableInlineEditor: InlineEditor = {
         el.removeEventListener("blur", onBlur);
         el.removeEventListener("keydown", onKey);
         el.removeEventListener("paste", onPaste);
+        editHandle?.end(); // #154: hand focus back (view.focus() inline; no-op in the modal)
+        editHandle = null;
         if (!commit) { apply(grid); return; } // Esc → discard: remount from the current grid
         const text = stripZeroWidth(cellElToText(el));
         const next: Grid = grid.map((row) => row.map((cl) => (cl ? { ...cl } : null)));

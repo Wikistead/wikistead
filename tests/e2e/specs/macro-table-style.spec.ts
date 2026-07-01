@@ -7,11 +7,12 @@ async function pipeTableInEdit(page: any) {
   await page.click("[data-pane=preview] .cm-content");
   for (const l of ["| A | B |", "| --- | --- |", "| 1 | 2 |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
   await sleep(250);
-  // #86: a click on the table opens the MODAL table editor (outside CM); the editor
-  // (table-edit) lives inside it. Edits commit to the doc only on the modal's Save.
+  // #154: a click on the table enters render-active → the IN-EDITOR table editor (table-edit)
+  // mounts inside CodeMirror (no modal). Each op commits to the doc per-op (host.replaceSource);
+  // Escape exits edit mode → the static render.
   await page.locator("[data-pane=preview] table.cm-lp-table").click();
-  await expect(page.getByTestId("macro-modal")).toBeVisible();
   await expect(page.getByTestId("table-edit")).toBeVisible();
+  expect(await page.getByTestId("macro-modal").count()).toBe(0);
 }
 
 test("align: select a cell, Align Center → promotes to :::table with text-align", async ({ browser }) => {
@@ -25,7 +26,7 @@ test("align: select a cell, Align Center → promotes to :::table with text-alig
   await page.getByTestId("table-align-center").click();
   await sleep(200);
 
-  await page.getByTestId("macro-modal-save").click();
+  await page.keyboard.press("Escape"); // #154: per-op commit; Escape exits in-editor edit mode
   await sleep(200);
   const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
   await expect(macroTable).toBeVisible(); // promoted to :::table
@@ -42,7 +43,7 @@ test("color: select a cell, pick a background preset → promotes with backgroun
   await page.getByTestId("table-bg-green").click();
   await sleep(200);
 
-  await page.getByTestId("macro-modal-save").click();
+  await page.keyboard.press("Escape"); // #154: per-op commit; Escape exits in-editor edit mode
   await sleep(200);
   const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
   await expect(macroTable).toBeVisible();
@@ -63,7 +64,7 @@ test("width: drag a column border → promotes with a width style", async ({ bro
   await page.mouse.up();
   await sleep(200);
 
-  await page.getByTestId("macro-modal-save").click();
+  await page.keyboard.press("Escape"); // #154: per-op commit; Escape exits in-editor edit mode
   await sleep(200);
   const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
   await expect(macroTable).toBeVisible();
@@ -81,8 +82,7 @@ test("multi-column resize: live preview matches commit (no jump) + all selected 
   for (const l of ["| A | B | C |", "| - | - | - |", "| 1 | 2 | 3 |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
   await sleep(250);
   await page.locator("[data-pane=preview] table.cm-lp-table").click();
-  await expect(page.getByTestId("macro-modal")).toBeVisible();
-  await expect(page.getByTestId("table-edit")).toBeVisible();
+  await expect(page.getByTestId("table-edit")).toBeVisible(); // #154: in-editor, no modal
 
   const grid = page.locator("[data-testid=table-edit] table.cm-lp-table-grid");
   const before = (await grid.boundingBox())!.width;
@@ -103,7 +103,7 @@ test("multi-column resize: live preview matches commit (no jump) + all selected 
   expect(committedW).toBeGreaterThan(before + 40); // multiple columns grew (not just one)
   expect(Math.abs(committedW - previewW)).toBeLessThanOrEqual(8); // no jump: preview == commit
 
-  await page.getByTestId("macro-modal-save").click();
+  await page.keyboard.press("Escape"); // #154: per-op commit; Escape exits in-editor edit mode
   await sleep(200);
   const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
   await expect(macroTable).toBeVisible();
@@ -120,7 +120,7 @@ test("header: toggle a body cell to header (th) → promotes with a body <th>", 
   await page.getByTestId("table-header").click();
   await sleep(200);
 
-  await page.getByTestId("macro-modal-save").click();
+  await page.keyboard.press("Escape"); // #154: per-op commit; Escape exits in-editor edit mode
   await sleep(200);
   const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
   await expect(macroTable).toBeVisible();
@@ -172,7 +172,7 @@ test("column handle selects the whole column; color applies to all its cells", a
   await page.getByTestId("table-bg-blue").click();
   await sleep(200);
 
-  await page.getByTestId("macro-modal-save").click();
+  await page.keyboard.press("Escape"); // #154: per-op commit; Escape exits in-editor edit mode
   await sleep(200);
   const macroTable = page.locator("[data-pane=preview] [data-testid=macro-table]");
   await expect(macroTable).toBeVisible();
@@ -206,7 +206,7 @@ test("the trailing + adds a column and a row (stays Tier-1 pipe)", async ({ brow
   await sleep(150);
   await expect(page.getByTestId("table-row-select-2")).toBeVisible(); // 3rd row now exists
 
-  await page.getByTestId("macro-modal-save").click();
+  await page.keyboard.press("Escape"); // #154: per-op commit; Escape exits in-editor edit mode
   await sleep(200);
   // Span-free + style-free → still a GFM pipe table (no :::table promotion).
   await expect(page.locator("[data-pane=preview] [data-testid=macro-table]")).toHaveCount(0);

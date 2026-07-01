@@ -12,8 +12,11 @@ import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
 import { renderMarkdownToDom } from "../macros/md-render";
 import { noteCalloutMacro } from "../macros/callout";
-import { openMacroModal, openTableModal } from "./macro-modal";
-import { macroRenderActiveField, setMacroRenderActive } from "./macro-edit";
+import { openMacroModal } from "./macro-modal";
+import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost } from "./macro-edit";
+import { tableInlineEditor } from "./table-edit";
+import { tableTier } from "../macros/table";
+import type { InlineController } from "../macros/registry";
 
 // Whether the vim keymap is active. Set from the vim Compartment (Editor.tsx). Macros no
 // longer reveal-on-cursor (ADR-024: atoms are entered explicitly), so this no longer gates
@@ -36,14 +39,16 @@ function openTableEditing(view: EditorView, pos: number): boolean {
   const tb = tableBlockAt(view.state, pos);
   if (!tb) return false;
   // vim × pipe table → reveal the raw GFM source (hand-typeable markdown stays keyboard-
-  // editable). Otherwise (a :::table directive, or any non-vim surface) open the MODAL table
-  // editor (#86) — never a contenteditable inside CM, which would fight CM for focus (ADR-013).
+  // editable; the pipe renderer shows raw while the caret is in range). Otherwise (a :::table
+  // directive, or any non-vim surface) → mark the block render-active so the renderer swaps in the
+  // in-editor WYSIWYG table editor (#154). The M1 spike (ADR-054) proved the nested contenteditable
+  // holds focus inside an atomic widget — CM no longer fights it, so the old modal detour is gone.
   if (view.state.facet(vimEnabled) && tb.tier === "pipe") {
     view.dispatch({ selection: EditorSelection.cursor(tb.from), effects: setMacroRenderActive.of({ from: tb.from, to: tb.to }) });
-    view.focus();
   } else {
-    openTableModal(view, () => tb.from, currentMacroTheme());
+    view.dispatch({ effects: setMacroRenderActive.of({ from: tb.from, to: tb.to }) });
   }
+  view.focus();
   return true;
 }
 
@@ -340,6 +345,45 @@ class TableWidget extends WidgetType {
   }
   ignoreEvent() {
     return false; // let clicks through so the cursor can enter (→ reveal raw)
+  }
+}
+
+// #154 / ADR-025: in-editor WYSIWYG table editing. When a table block is render-active
+// (macroRenderActiveField, set by a non-vim click/entry — openTableEditing), the table renders
+// as a LIVE inline editor (tableInlineEditor) mounted on a host-managed island IN PLACE OF the
+// static read-only widget or the old modal. The atom root is contenteditable=false + ignoreEvent
+// (the ADR-054 focus-delegation guard, proven by the M1 spike): CM treats the block as atomic and
+// does NOT reclaim the nested cell's focus, so the inline editor owns all interaction and commits
+// via host.replaceSource (one offset-invariant Y.Text edit; the host auto-demotes pipe⟷:::table).
+// eq() is keyed on [from,to,source]: a commit rewrites the range → new key → remount from the
+// canonical source (same lifecycle as the modal); between commits (typing in a cell = no doc
+// change) the widget is stable and keeps focus. Offset-invariant — replace never shifts offsets.
+class EditableTableWidget extends WidgetType {
+  private ctrl?: InlineController;
+  private ro?: ResizeObserver;
+  constructor(readonly from: number, readonly to: number, readonly source: string) {
+    super();
+  }
+  eq(o: EditableTableWidget) {
+    return o.from === this.from && o.to === this.to && o.source === this.source;
+  }
+  toDOM(view: EditorView) {
+    const wrap = document.createElement("div");
+    // Atom root guard (ADR-054): contenteditable=false so CM keeps the block atomic and does NOT
+    // reclaim the nested cell's focus. mount() owns the className/testid + appends the editor DOM.
+    wrap.contentEditable = "false";
+    this.ctrl = tableInlineEditor.mount(wrap, makeInnerEditHost(view, this.from, this.to, tableTier));
+    this.ro = observeBlockResize(view, wrap);
+    return wrap;
+  }
+  destroy() {
+    this.ctrl?.destroy();
+    this.ctrl = undefined;
+    this.ro?.disconnect();
+    this.ro = undefined;
+  }
+  ignoreEvent() {
+    return true; // the inline editor owns interaction inside the island; CM must not process its events
   }
 }
 
@@ -697,12 +741,21 @@ const RENDERERS: BlockRenderer[] = [
       if (isSourceMode(ctx.state)) return;
       if (macro.liveRender) {
         // BLOCK directive: render the body as a widget atom. :::table is entered explicitly
-        // (modal, #86) so it never reveals here. A LAYOUT directive (#90 columns/tabs) sets
+        // (#86) so it never reveals here. A LAYOUT directive (#90 columns/tabs) sets
         // revealOnCursor: while the caret is inside, reveal the WHOLE raw block (return false →
         // skip the inner :::column/:::tab so it's plain editable source); otherwise render the
         // widget AND skip the inner directives (they live inside the atom — no double-render).
         const from = first.from;
         const to = lastLine.to;
+        // #154: an inline-richEditUI directive (:::table) that is render-active → the in-editor
+        // WYSIWYG editor over the WHOLE block (host.getSource parses the :::table fences). Unlike a
+        // pipe table, :::table HTML is not hand-typeable, so BOTH vim and non-vim use the editor
+        // here (the M1 spike/ADR-054 proved focus delegation holds in vim too).
+        const active = ctx.state.field(macroRenderActiveField, false);
+        if (macro.richEditUI?.present === "inline" && active && active.from <= from && active.to >= to) {
+          ctx.addAtomic(Decoration.replace({ widget: new EditableTableWidget(from, to, doc.sliceString(from, to)), block: true }), from, to);
+          return false; // skip inner nodes — the inline editor owns the block
+        }
         if (macro.revealOnCursor && rangeRevealed(ctx.state, from, to)) return false;
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
@@ -815,8 +868,14 @@ const RENDERERS: BlockRenderer[] = [
       // transaction filter redirects motion that would skip it INTO it, then these lines
       // are real and j/k/arrows traverse them one at a time.
       // GFM pipe table: vim reveals raw source on cursor (openTableEditing puts the caret in
-      // range → rangeRevealed true); a click/Ctrl+Enter opens the MODAL editor (#86). Only
-      // :::table/Excalidraw — non-typeable macros — never reveal source (#5).
+      // range → rangeRevealed true). A non-vim click/Ctrl+Enter → render-active → the in-editor
+      // WYSIWYG editor (#154, below). Only :::table/Excalidraw — non-typeable macros — never
+      // reveal source (#5).
+      const active = ctx.state.field(macroRenderActiveField, false);
+      if (active && active.from <= from && active.to >= to && !ctx.state.facet(vimEnabled)) {
+        ctx.addAtomic(Decoration.replace({ widget: new EditableTableWidget(from, to, doc.sliceString(from, to)), block: true }), from, to);
+        return;
+      }
       if (rangeRevealed(ctx.state, from, to)) return;
       ctx.addAtomic(Decoration.replace({ widget: new TableWidget(doc.sliceString(from, to)), block: true }), from, to);
     },

@@ -89,7 +89,7 @@ export const tableMacro: DirectiveMacro = {
   kind: "directive",
   name: "table",
   exportFidelity: "preserve", // HTML is standard Markdown; round-trips verbatim
-  richEditUI: { present: "modal", editor: tableModalEditor }, // #86: whole-table editing in a modal (outside CM)
+  richEditUI: { present: "inline", editor: tableInlineEditor }, // #154: in-editor WYSIWYG table editing (was #86 modal)
   tier: tableTier, // ADR-025 step 3: host auto-demotes pipe ⟷ :::table
   liveRender: (body) => {
     const el = renderHtmlTable(body);
