@@ -6,6 +6,15 @@ import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel } from "../components/ui/dropdown-menu";
 import { useDirty, type DirtySignal } from "../editor/dirtySignal";
 
+// #165 display-mode segment: icon-only entries, in cycle order (matches Ctrl+Alt+E). Icons mirror the
+// per-mode glyphs used elsewhere (Live=Eye, Source=Code, Reading=BookOpen, WYSIWYG=Sparkles).
+const DISPLAY_MODES = [
+  { mode: "live" as const, Icon: Eye, labelKey: "page.modeLive" },
+  { mode: "source" as const, Icon: Code, labelKey: "page.modeSource" },
+  { mode: "reading" as const, Icon: BookOpen, labelKey: "page.modeReading" },
+  { mode: "wysiwyg" as const, Icon: Sparkles, labelKey: "page.modeWysiwyg" },
+];
+
 // The old full-width top bar is gone. Its controls float, FRAMELESS, as individual round
 // icon buttons (no group panel/board — that ate body width) at natural spots: page STATUS
 // under the title, ACTIONS bottom-right, the VIM toggle bottom-left. Narrow screens
@@ -24,9 +33,12 @@ export interface PageControlsProps {
   publishing?: boolean;
   vim?: boolean;
   onToggleVim?: () => void;
-  // ADR-056 / #164: editor display mode + cycle (live ⇄ source in phase 1). Edit-only.
+  // ADR-056 / #164: editor display mode. Edit-only. The segmented selector switches DIRECTLY
+  // (onSetDisplayMode); the keyboard shortcut cycles (onCycleDisplayMode, Ctrl+Alt+E). #165: the
+  // current mode is always visible (segment highlight) so there is NO per-switch toast.
   displayMode?: "live" | "source" | "reading" | "wysiwyg";
   onCycleDisplayMode?: () => void;
+  onSetDisplayMode?: (m: "live" | "source" | "reading" | "wysiwyg") => void;
   onShare?: () => void;
   commentsOpen?: boolean;
   onToggleComments?: () => void;
@@ -122,13 +134,8 @@ export function PageStatus(p: PageControlsProps) {
 // (state reads at a glance). ──────────────────────────────────────────────────────────
 export function PageVim(p: PageControlsProps) {
   const { t } = useTranslation();
-  if (!p.editing || (!p.onToggleVim && !p.onCycleDisplayMode)) return null;
+  if (!p.editing || (!p.onToggleVim && !p.onCycleDisplayMode && !p.onSetDisplayMode)) return null;
   const dm = p.displayMode ?? "live";
-  const modeIcon = dm === "source" ? <Code size={14} className="text-[var(--accent)]" />
-    : dm === "reading" ? <BookOpen size={14} className="text-[var(--accent)]" />
-    : dm === "wysiwyg" ? <Sparkles size={14} className="text-[var(--accent)]" />
-    : <Eye size={14} className="text-fg-dim" />;
-  const modeLabel = t(dm === "source" ? "page.modeSource" : dm === "reading" ? "page.modeReading" : dm === "wysiwyg" ? "page.modeWysiwyg" : "page.modeLive");
   return (
     <div className="pointer-events-none absolute bottom-4 left-4 z-10 flex items-center gap-2">
       {p.onToggleVim && (
@@ -142,19 +149,25 @@ export function PageVim(p: PageControlsProps) {
           </span>
         </button>
       )}
-      {/* ADR-056 / #164: display-mode toggle (live ⇄ source). A pill that shows + cycles the mode. */}
-      {p.onCycleDisplayMode && (
-        <button type="button" data-testid="displaymode-toggle" data-mode={dm}
-          title={t("page.displayMode")} aria-label={t("page.displayMode")} onClick={p.onCycleDisplayMode}
-          className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] px-3 py-1.5 text-xs font-medium shadow-md backdrop-blur transition-colors hover:bg-panel-2">
-          {/* #165/#166 switch feedback: key={dm} remounts the label on each mode change so it briefly
-              fades/zooms in — a glance-able "mode changed" cue. Toolbar-only; never touches the editor
-              surface (reveal-on-cursor stays un-animated). */}
-          <span key={dm} className="inline-flex items-center gap-2 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200">
-            {modeIcon}
-            <span>{modeLabel}</span>
-          </span>
-        </button>
+      {/* ADR-056 / #164 · #165: display-mode SEGMENT — icon-only buttons, current highlighted, one
+          click switches DIRECTLY. The current mode is always visible (highlight) so there is NO
+          per-switch toast. The Ctrl+Alt+E shortcut still CYCLES (onCycleDisplayMode). Toolbar-only —
+          display-mode is display-only (never touches doc/offset/presence; reveal-on-cursor un-animated). */}
+      {p.onSetDisplayMode && (
+        <div role="radiogroup" aria-label={t("page.displayMode")} data-testid="displaymode-segment" data-mode={dm}
+          className="pointer-events-auto inline-flex items-center gap-0.5 rounded-full bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] p-1 shadow-md backdrop-blur">
+          {DISPLAY_MODES.map(({ mode, Icon, labelKey }) => {
+            const active = dm === mode;
+            return (
+              <button key={mode} type="button" role="radio" aria-checked={active}
+                data-testid={`displaymode-${mode}`} data-active={active}
+                title={t(labelKey)} aria-label={t(labelKey)} onClick={() => p.onSetDisplayMode!(mode)}
+                className={`inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors ${active ? "bg-[var(--accent)] text-white" : "text-fg-dim hover:bg-panel-2"}`}>
+                <Icon size={14} />
+              </button>
+            );
+          })}
+        </div>
       )}
     </div>
   );

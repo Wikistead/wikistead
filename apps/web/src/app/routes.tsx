@@ -71,26 +71,23 @@ const DISPLAYMODE_LS = "wks.editorDisplayMode";
 // The toolbar cycles all four display modes (ADR-056 phase 1: live/source/reading; ADR-078: wysiwyg).
 const CYCLE: DisplayMode[] = ["live", "source", "reading", "wysiwyg"];
 const nextMode = (m: DisplayMode): DisplayMode => CYCLE[(CYCLE.indexOf(m) + 1) % CYCLE.length] ?? "live";
-// #165/#166 switch feedback: a brief toast naming the mode entered. Display-only (no doc/offset/
-// presence). The reveal/hide itself is NOT animated (reveal-on-cursor fires per cursor move).
-const MODE_LABEL_KEY: Record<DisplayMode, string> = {
-  live: "page.modeLive", source: "page.modeSource", reading: "page.modeReading", wysiwyg: "page.modeWysiwyg",
-};
 const readLocalMode = (): DisplayMode => { try { const m = localStorage.getItem(DISPLAYMODE_LS); return (CYCLE as string[]).includes(m ?? "") ? (m as DisplayMode) : "live"; } catch { return "live"; } };
 const writeLocalMode = (m: DisplayMode) => { try { localStorage.setItem(DISPLAYMODE_LS, m); } catch { /* no storage */ } };
+// #165: NO switch toast. The current mode is ALWAYS visible in the segmented mode-selector (PageControls),
+// so a per-switch toast is redundant AND hid content; it also double-fired (a side effect inside the
+// setState updater is re-run under React StrictMode). `cycle` (Ctrl+Alt+E) and direct `set` (segment
+// click) both just change the device-local mode. Display-only (no doc/offset/presence).
 // Guest (share-link, no member row): localStorage only.
-function useDisplayMode(): [DisplayMode, () => void] {
-  const { t } = useTranslation();
+function useDisplayMode(): [DisplayMode, () => void, (m: DisplayMode) => void] {
   const [mode, setMode] = useState<DisplayMode>(readLocalMode);
-  // Phase 1 cycles between the two implemented modes; reading/wysiwyg join the cycle later.
-  const cycle = useCallback(() => setMode((m) => { const next = nextMode(m); writeLocalMode(next); notify.info(t(MODE_LABEL_KEY[next])); return next; }), [t]);
-  return [mode, cycle];
+  const set = useCallback((next: DisplayMode) => { writeLocalMode(next); setMode(next); }, []);
+  const cycle = useCallback(() => setMode((m) => { const next = nextMode(m); writeLocalMode(next); return next; }), []);
+  return [mode, cycle, set];
 }
 // Member (#164-3): the cross-device STARTUP pref is a MODE on Account → Editor — 'live'/'source'
 // (the mode wins at startup) or 'local' (follow this device's last toggle, via localStorage). The
 // toolbar toggle is always a device-local session switch. Mirrors useEditorKeymap.
-function useMemberDisplayMode(): [DisplayMode, () => void] {
-  const { t } = useTranslation();
+function useMemberDisplayMode(): [DisplayMode, () => void, (m: DisplayMode) => void] {
   const settings = useAccountSettings();
   const [mode, setMode] = useState<DisplayMode>(readLocalMode);
   const pref = settings.data?.editorDisplayMode; // 'live' | 'source' | 'local' | undefined (loading)
@@ -100,8 +97,9 @@ function useMemberDisplayMode(): [DisplayMode, () => void] {
     else if (pref === "source") setMode("source");
     else setMode(readLocalMode()); // 'local'
   }, [pref]);
-  const cycle = useCallback(() => setMode((m) => { const next = nextMode(m); writeLocalMode(next); notify.info(t(MODE_LABEL_KEY[next])); return next; }), [t]);
-  return [mode, cycle];
+  const set = useCallback((next: DisplayMode) => { writeLocalMode(next); setMode(next); }, []);
+  const cycle = useCallback(() => setMode((m) => { const next = nextMode(m); writeLocalMode(next); return next; }), []);
+  return [mode, cycle, set];
 }
 // editor.cycleDisplayMode (ADR-021 #21): window-level, event.code-matched, edit-only — mirrors
 // the vim-toggle shortcut. Rebindable; default Ctrl+Alt+E (#165/#166: plain Ctrl-E collided with
@@ -267,7 +265,7 @@ function PageRoute() {
   const [vim, toggleVim] = useEditorKeymap(); // member: startup-mode pref + device-local toggle
   const keybindings = useAccountSettings().data?.keybindings; // ADR-021 overrides ({} default)
   useVimToggleShortcut(toggleVim, editing, resolveKey("editor.toggleVim", keybindings)); // (#2)
-  const [displayMode, cycleDisplayMode] = useMemberDisplayMode(); // ADR-056 / #164 (startup pref + device-local)
+  const [displayMode, cycleDisplayMode, setDisplayMode] = useMemberDisplayMode(); // ADR-056 / #164 (startup pref + device-local)
   useDisplayModeShortcut(cycleDisplayMode, editing, resolveKey("editor.cycleDisplayMode", keybindings));
   const isDesktop = useMediaQuery("(min-width: 768px)"); // 3 floating groups vs one ⋯
   // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
@@ -329,6 +327,7 @@ function PageRoute() {
     onToggleVim: toggleVim,
     displayMode,
     onCycleDisplayMode: cycleDisplayMode,
+    onSetDisplayMode: setDisplayMode,
     // Share + Delete are manage-only (FGA): undefined when the user can't manage, so the
     // ⋯ items / Share button don't render. The server re-checks and 403s regardless
     // (two-layer authz — UI suppression + server enforcement). #4.
@@ -501,7 +500,7 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
   const [editing, setEditing] = useState(false);
   const [vim, toggleVim] = useVimPref();
   useVimToggleShortcut(toggleVim, editing, resolveKey("editor.toggleVim", undefined)); // guest: default chord
-  const [displayMode, cycleDisplayMode] = useDisplayMode(); // ADR-056 / #164 (device-local; guests have no server profile)
+  const [displayMode, cycleDisplayMode, setDisplayMode] = useDisplayMode(); // ADR-056 / #164 (device-local; guests have no server profile)
   useDisplayModeShortcut(cycleDisplayMode, editing, resolveKey("editor.cycleDisplayMode", undefined));
   const isDesktop = useMediaQuery("(min-width: 768px)");
 
@@ -534,6 +533,7 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
     onToggleVim: toggleVim,
     displayMode,
     onCycleDisplayMode: cycleDisplayMode,
+    onSetDisplayMode: setDisplayMode,
     canPublish: true,
     onPublish: canEdit ? () => void onPublish() : undefined,
     publishing,
