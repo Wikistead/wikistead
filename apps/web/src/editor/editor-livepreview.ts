@@ -105,19 +105,32 @@ export function mountLivePreview(
       // DEV-only probe: expose the caret's doc line + selection offsets so e2e can
       // assert motion / selection extent. Stripped from prod builds.
       ...(import.meta.env.DEV ? [EditorView.updateListener.of((u) => {
-        const w = window as Window & { __lpHeadLine?: number; __lpSel?: { from: number; to: number; head: number; anchor: number }; __lpBlocks?: { fromLine: number; toLine: number }[]; __lpVimInsert?: boolean };
+        const w = window as Window & { __lpHeadLine?: number; __lpHeadLineLog?: number[]; __lpSel?: { from: number; to: number; head: number; anchor: number }; __lpBlocks?: { fromLine: number; toLine: number }[]; __lpMathAtoms?: { fromLine: number; toLine: number }[]; __lpVimInsert?: boolean };
         if (u.selectionSet) {
           const s = u.state.selection.main;
           w.__lpHeadLine = u.state.doc.lineAt(s.head).number;
           w.__lpSel = { from: s.from, to: s.to, head: s.head, anchor: s.anchor };
+          // #183 diagnosis: a rolling log of the caret's LINE across moves, so pressing j/k a few
+          // times yields the exact transition sequence (e.g. [1,2,3,4,6] shows line 5 was skipped)
+          // WITHOUT hand-noting each step. Bounded so it can't grow unbounded. (window.__lpHeadLineLog
+          // = [] to reset before a measurement.)
+          (w.__lpHeadLineLog ??= []).push(w.__lpHeadLine);
+          if (w.__lpHeadLineLog.length > 60) w.__lpHeadLineLog.shift();
         }
         // vim mode (insert/normal): macro entry must land in vim NORMAL (ADR-024 — entering
         // a macro = the vim normal world; `i` then inserts). Lets a spec assert no forced insert.
         w.__lpVimInsert = !!getCM(u.view)?.state.vim?.insertMode;
-        // Expose the atom block ranges (in LINE numbers) so a trace can verify a macro's
-        // atom covers its WHOLE fence, not just one line.
+        // Expose the atom block ranges (LINE numbers) so a trace can verify a macro's atom covers its
+        // WHOLE fence, not just one line. #183: math ($$ display) atoms live in a SEPARATE field
+        // (mathField) that blockEntry does NOT read (its motion model uses only livePreview.blocks) —
+        // expose them separately so a device trace shows whether a skipped line sits at a MATH atom
+        // (the likely root: blockEntry's atom model diverges from CM's real atomicRanges when math is present).
         const bs = u.state.field(livePreview, false)?.blocks ?? [];
         w.__lpBlocks = bs.map((b) => ({ fromLine: u.state.doc.lineAt(b.from).number, toLine: u.state.doc.lineAt(b.to).number }));
+        const mathAtomic = u.state.field(mathField, false)?.atomic;
+        const mathRanges: { fromLine: number; toLine: number }[] = [];
+        mathAtomic?.between(0, u.state.doc.length, (from, to) => { mathRanges.push({ fromLine: u.state.doc.lineAt(from).number, toLine: u.state.doc.lineAt(to).number }); });
+        w.__lpMathAtoms = mathRanges;
       })] : []),
       // M1 focus-delegation SPIKE (#153 / ADR-054) — DEV/e2e only, never in prod. Activated by the
       // literal token `@SPIKE@` in the doc. Strip from prod builds.
