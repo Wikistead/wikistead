@@ -3,6 +3,7 @@
 // verification, code exchange, id_token signature/iss/aud/exp validation — which
 // we deliberately do NOT hand-roll.
 import * as oidc from 'openid-client'
+import { guardedFetch } from '../safe-fetch.js'
 
 // clientSecret is the DECRYPTED value (loaders decrypt tenant_oidc; the platform
 // config reads it from env in plaintext). null = public/PKCE client.
@@ -57,11 +58,27 @@ export function loadPlatformOidc(): TenantOidcConfig | null {
   }
 }
 
-// allowInsecureRequests is enabled ONLY for http issuers (local/test). Production
-// issuers are https and get the default (TLS-required) behavior.
+// SSRF hardening (ADR-083 / #181 review): openid-client makes THREE issuer-derived fetches — discovery,
+// JWKS (id_token signature keys), token endpoint — and `customFetch` is assigned to the Configuration so
+// ALL of them go through one guard. `guardedFetch` re-validates each URL (https-only, every resolved IP
+// public unless the operator opted in) and pins the socket to the validated IP. This closes the hole the
+// discovery-only fix left: a legit public discovery doc could aim `jwks_uri`/`token_endpoint` at an
+// internal address, and the unguarded key/token fetch would reach it. The `OIDC_ALLOW_PRIVATE_ISSUER`
+// operator flag now governs discovery AND jwks AND token uniformly (self-hosted private IdP key fetch
+// works only under the same opt-in). Read at call time (per deployment/test), not module load.
+//
+// http:// issuers are local/test ONLY — a tenant admin CANNOT save one (validateIssuer / safeFetchJson
+// is https-only, so an enabled tenant issuer is always https). The only http issuers are the operator's
+// env-configured PLATFORM IdP or tests, so that path keeps openid-client's default fetch + the explicit
+// allowInsecureRequests opt-in; it is not attacker-reachable and needs no IP guard.
 async function discover(cfg: TenantOidcConfig): Promise<oidc.Configuration> {
-  const options = cfg.issuer.startsWith('http://') ? { execute: [oidc.allowInsecureRequests] } : undefined
-  return oidc.discovery(new URL(cfg.issuer), cfg.clientId, cfg.clientSecret ?? undefined, undefined, options)
+  if (cfg.issuer.startsWith('http://')) {
+    return oidc.discovery(new URL(cfg.issuer), cfg.clientId, cfg.clientSecret ?? undefined, undefined, { execute: [oidc.allowInsecureRequests] })
+  }
+  const allowPrivate = process.env.OIDC_ALLOW_PRIVATE_ISSUER === '1'
+  return oidc.discovery(new URL(cfg.issuer), cfg.clientId, cfg.clientSecret ?? undefined, undefined, {
+    [oidc.customFetch]: guardedFetch({ allowPrivate }) as unknown as oidc.CustomFetch,
+  })
 }
 
 export interface LoginRedirect {

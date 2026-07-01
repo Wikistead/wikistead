@@ -141,3 +141,66 @@ export async function safeFetchJson(
     throw Object.assign(new Error('response was not valid JSON'), { statusCode: 502, code: 'invalid_json' })
   }
 }
+
+// Normalize a Fetch BodyInit that openid-client hands us into something node:https can write.
+// openid-client's token exchange sends a form body (string | URLSearchParams); GET requests have none.
+function normalizeBody(body: unknown): string | Buffer | undefined {
+  if (body == null) return undefined
+  if (typeof body === 'string') return body
+  if (body instanceof URLSearchParams) return body.toString()
+  if (body instanceof Uint8Array) return Buffer.from(body)
+  if (body instanceof ArrayBuffer) return Buffer.from(new Uint8Array(body))
+  return String(body)
+}
+
+// A Fetch-API-compatible function for openid-client's `customFetch` seam (ADR-083 / #181 review). The
+// login flow (openid-client) makes THREE issuer-derived fetches — discovery, JWKS (id_token signature
+// keys), and the token endpoint — and `customFetch` is assigned to the resolved Configuration so ONE
+// function guards ALL of them. This closes the SSRF the discovery-only fix left open: a legit public
+// discovery doc could point `jwks_uri` / `token_endpoint` at an INTERNAL address and the unguarded key/
+// token fetch would reach it. Every call re-validates its URL (https-only, all resolved IPs public
+// unless the operator opted in) and PINS the socket to the validated IP (no DNS rebinding) — so the
+// `OIDC_ALLOW_PRIVATE_ISSUER` flag now governs discovery AND jwks AND token uniformly (a self-hosted
+// private IdP's key fetch works only under the same operator opt-in, not just its discovery).
+//
+// Unlike safeFetch (embed fetches, which STRIP credentials), this FORWARDS the caller's headers/body:
+// openid-client's client-auth Authorization header + the token-exchange form body are credentials the
+// client legitimately presents TO the IdP, not a leak to a third party. Redirects are NOT auto-followed
+// (returned as-is for the caller's `redirect: 'manual'`); if the caller ever followed one it would
+// re-enter this guard. The body is capped (no OOM from a hostile token/JWKS endpoint).
+export function guardedFetch(
+  guard: GuardOpts & { maxBytes?: number; timeoutMs?: number } = {},
+): (url: string | URL, options?: { method?: string; headers?: Record<string, string>; body?: unknown; redirect?: string; signal?: AbortSignal | null }) => Promise<Response> {
+  return async (rawUrl, options = {}) => {
+    const { url, ips } = await resolveGuarded(String(rawUrl), guard) // https-only + SSRF + returns IPs to pin
+    // The SSRF gate runs FIRST (above) so it can never be bypassed; only then honor an already-aborted
+    // signal (openid-client's timeout) without opening a socket.
+    if (options.signal?.aborted) throw Object.assign(new Error('aborted'), { code: 'aborted' })
+    const maxBytes = guard.maxBytes ?? 512 * 1024
+    const timeoutMs = guard.timeoutMs ?? 8000
+    const method = (options.method ?? 'GET').toUpperCase()
+    const headers: Record<string, string> = { ...(options.headers ?? {}) }
+    const body = normalizeBody(options.body)
+    if (body != null) headers['content-length'] = String(Buffer.byteLength(body)) // node:https: set len (avoid chunked)
+    return new Promise<Response>((resolve, reject) => {
+      const req = httpsRequest(url, { method, headers, lookup: pinnedLookup(ips) as never }, (res) => {
+        readCapped(res, maxBytes).then(
+          (text) => {
+            const h = new Headers()
+            for (const [k, v] of Object.entries(res.headers)) {
+              if (Array.isArray(v)) for (const vv of v) h.append(k, vv)
+              else if (v != null) h.set(k, String(v))
+            }
+            resolve(new Response(text, { status: res.statusCode ?? 502, statusText: res.statusMessage ?? '', headers: h }))
+          },
+          (e) => { res.destroy(); reject(e) },
+        )
+      })
+      req.on('error', reject)
+      req.setTimeout(timeoutMs, () => req.destroy(Object.assign(new Error('timeout'), { statusCode: 504, code: 'timeout' })))
+      if (options.signal) options.signal.addEventListener('abort', () => req.destroy(Object.assign(new Error('aborted'), { code: 'aborted' })), { once: true })
+      if (body != null) req.write(body)
+      req.end()
+    })
+  }
+}
