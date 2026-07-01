@@ -61,6 +61,32 @@ describe("renderMarkdownToDom (#90 S0)", () => {
     expect(a?.getAttribute("rel")).toBe("noopener noreferrer nofollow");
   });
 
+  it("unwraps an angle-bracket destination <…> to a real href (was a broken relative link)", () => {
+    // CommonMark angle-bracket destinations arrive from the parser WITH the brackets; a legit
+    // <https://e.com> must render as href=https://e.com, not the broken relative href "<https://e.com>".
+    const d = root("[x](<https://e.com/a b>)"); // spaces are why one uses <…> in the first place
+    expect(d.querySelector("a")?.getAttribute("href")).toBe("https://e.com/a b");
+  });
+
+  it("blocks a dangerous scheme wrapped in <…> (no longer relies on the accidental '<' neutering)", () => {
+    const d = root("[x](<javascript:alert(1)>)");
+    expect(d.querySelector("a")).toBeNull(); // brackets stripped → scheme check sees javascript: → dropped
+    expect(d.textContent).toContain("x");
+  });
+
+  it("blocks scheme-evasion by CONTROL CHARS a browser strips (TAB/NUL/CR inside the scheme)", () => {
+    // A browser removes TAB/LF/CR/NUL from a URL before evaluating the scheme, so `java<TAB>script:` runs.
+    // safeHref must normalize the same way; each variant must be dropped (distinct payloads).
+    for (const [label, src] of [
+      ["tab", "[x](<java\u0009script:alert(1)>)"],
+      ["nul", "[x](<java\u0000script:alert(1)>)"],
+      ["cr", "[x](<java\u000Dscript:alert(1)>)"],
+    ] as const) {
+      const d = root(src);
+      expect(d.querySelector("a"), `${label}: control-char evasion must be dropped`).toBeNull();
+    }
+  });
+
   it("renders raw HTML as LITERAL TEXT — no script/img element, no execution (XSS boundary)", () => {
     const d = root("<script>alert(1)</script>\n\nhi <img src=x onerror=alert(1)> there");
     expect(d.querySelector("script")).toBeNull();
