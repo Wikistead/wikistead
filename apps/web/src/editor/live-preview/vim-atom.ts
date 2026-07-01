@@ -75,6 +75,23 @@ export function atomBlockAtCaret(
   return blocks?.find((bl) => caret >= bl.from && caret <= bl.to) ?? null;
 }
 
+// Where a plain vim `o`/`O` on an atom must open the new line (#183 symptom B / o-O): `o` opens AFTER
+// the WHOLE atom, `O` BEFORE it — never INSIDE (which would split a multi-line macro and leave the
+// caret at the atom's visual edge, "on its right"). Returns the doc offset to insert "\n" at, and the
+// caret offset for the new empty line. Pure (offsets only) → unit-tested. `lineAt` is doc.lineAt.
+export function atomOpenLineTarget(
+  atom: { from: number; to: number },
+  open: "o" | "O",
+  lineAt: (pos: number) => { from: number; to: number },
+): { insertAt: number; caret: number } {
+  if (open === "o") {
+    const at = lineAt(atom.to).to; // end of the atom's LAST line → newline opens the line below it
+    return { insertAt: at, caret: at + 1 }; // caret on the new empty line (after the inserted \n)
+  }
+  const at = lineAt(atom.from).from; // start of the atom's FIRST line → newline opens the line above it
+  return { insertAt: at, caret: at }; // caret on the new empty line (the atom shifts down)
+}
+
 // The atom block the caret sits inside, if this is a plain (uncounted, default-register) chord
 // whose first key already set vim's `operator`. Returns the block + its full source range.
 function atomChordTarget(view: EditorView, operator: "yank" | "delete"): { from: number; to: number } | null {
@@ -129,6 +146,23 @@ export const atomYank: Extension = ViewPlugin.define((view) => {
       Vim.handleKey(cm!, "<Esc>", "mapping"); // back to normal (cancel the pending delete operator)
       e.preventDefault();
       e.stopImmediatePropagation(); // vim must NOT also see this 2nd d
+    } else if (e.key === "o" || e.key === "O") {
+      // #183 symptom B / o-O: plain o/O with the caret ON an atom must open a line AFTER (o) / BEFORE
+      // (O) the WHOLE atom — vim's own o/O would open INSIDE it (splitting a multi-line macro) or leave
+      // the caret at the atom's edge ("on its right"). Only plain o/O in NORMAL mode on an atom; a
+      // count / operator-pending / insert/visual / not-on-atom falls through to vim unchanged.
+      const vim = cm?.state.vim;
+      if (!vim || vim.insertMode || vim.visualMode) return;
+      const is = vim.inputState;
+      if (is && (is.operator || is.registerName || (is.prefixRepeat && is.prefixRepeat.length))) return;
+      const b = atomBlockAtCaret(view.state.field(livePreview, false)?.blocks, view.state.selection.main.head);
+      if (!b) return; // not on an atom → let vim do a normal o/O
+      const doc = view.state.doc;
+      const { insertAt, caret } = atomOpenLineTarget({ from: b.from, to: b.to }, e.key as "o" | "O", (p) => doc.lineAt(p));
+      view.dispatch({ changes: { from: insertAt, insert: "\n" }, selection: EditorSelection.cursor(caret) });
+      Vim.handleKey(cm!, "i", "mapping"); // enter insert mode ON the new empty line (below/above the atom)
+      e.preventDefault();
+      e.stopImmediatePropagation(); // vim must NOT run its own o/O (would open inside the atom)
     }
   };
   view.contentDOM.addEventListener("keydown", onKeydown, true); // capture: before vim's handler
