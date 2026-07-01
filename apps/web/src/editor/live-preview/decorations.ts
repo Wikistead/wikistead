@@ -444,6 +444,24 @@ class MacroWidget extends WidgetType {
         view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)) });
         view.focus();
       });
+      // #174 / ADR-087: an explicit EDIT button — the visible affordance for the block's rich UI. It
+      // appears on mouse hover AND when the atom is SELECTED (caret-entry, cm-lp-atom-sel), so a vim/
+      // keyboard user can SEE how to reach the table/columns/tabs rich UI (same target as a click or
+      // Ctrl+Enter → enterMacroAt). Only for macros that HAVE a rich UI. Offset-invariant (never edits).
+      if (this.macro.richEditUI) {
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.className = "cm-lp-macro-edit";
+        edit.title = "Edit";
+        edit.textContent = "✎";
+        edit.setAttribute("data-testid", "macro-edit");
+        edit.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          enterMacroAt(view, view.posAtDOM(wrap));
+        });
+        wrap.appendChild(edit);
+      }
       if (this.foldable) {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -1126,7 +1144,9 @@ export const livePreviewTheme = EditorView.baseTheme({
   },
   ".cm-lp-macro-fold": { right: "4px" },
   ".cm-lp-macro-edit": { right: "30px" }, // sits left of the fold button
-  ".cm-lp-macro-wrap:hover .cm-lp-macro-fold, .cm-lp-macro-wrap:hover .cm-lp-macro-edit": { opacity: "1" },
+  // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
+  // keyboard/vim user sees the edit affordance without a mouse).
+  ".cm-lp-macro-wrap:hover .cm-lp-macro-fold, .cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-fold, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit": { opacity: "1" },
   ".cm-lp-excalidraw svg": { maxWidth: "100%", height: "auto", pointerEvents: "none" },
   // Empty-macro placeholder (#3): a clearly-bounded dashed block so the user SEES that a
   // macro widget occupies the line (matches the caret's block-motion behavior).
