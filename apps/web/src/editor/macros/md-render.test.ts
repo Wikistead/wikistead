@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { renderMarkdownToDom } from "./md-render";
+import { registerMacro } from "./registry";
 
 function root(src: string): HTMLElement {
   const d = document.createElement("div");
@@ -80,5 +81,49 @@ describe("renderMarkdownToDom (#90 S0)", () => {
     expect(code).not.toBeNull();
     expect(code?.textContent).toContain("const x = 1 < 2;");
     expect(code?.querySelector("*")).toBeNull(); // plain text, no nested HTML
+  });
+});
+
+// ADR-085 shared macro renderer: renderMarkdownToDom dispatches a nested directive to its registered
+// macro's liveRender (single source of truth), so macros render inside transclude / columns / tabs
+// (#108, nested #90) — not a generic box. Unknown / throwing → the safe generic box.
+describe("renderMarkdownToDom — nested macro dispatch (ADR-085 / #185)", () => {
+  beforeAll(() => {
+    document.documentElement.dataset.theme = "light"; // currentMacroTheme() → 'light' (no matchMedia)
+    registerMacro({
+      kind: "directive", name: "adr085test", exportFidelity: "degrade",
+      htmlRender: (b) => `<div class="x">${b}</div>`,
+      liveRender: (body) => { const d = document.createElement("div"); d.className = "adr085-rendered"; d.textContent = body; return d; },
+    });
+    registerMacro({
+      kind: "directive", name: "adr085throw", exportFidelity: "degrade",
+      htmlRender: () => "", liveRender: () => { throw new Error("boom"); },
+    });
+  });
+
+  it("dispatches a known directive to its macro's liveRender (not a generic box)", () => {
+    const d = root(":::adr085test\nhello body\n:::");
+    const rendered = d.querySelector(".adr085-rendered");
+    expect(rendered).not.toBeNull();
+    expect(rendered?.textContent).toBe("hello body"); // the inner body (between the ::: markers)
+    expect(d.querySelector(".cm-lp-md-directive")).toBeNull(); // NOT the generic fallback box
+  });
+
+  it("falls back to the generic box for an UNKNOWN directive", () => {
+    const d = root(":::totallyunknownxyz\nfoo\n:::");
+    expect(d.querySelector(".cm-lp-md-directive")).not.toBeNull();
+    expect(d.querySelector(".adr085-rendered")).toBeNull();
+  });
+
+  it("falls back to the generic box when the macro liveRender THROWS (never breaks the render)", () => {
+    const d = root(":::adr085throw\nx\n:::");
+    expect(d.querySelector(".cm-lp-md-directive")).not.toBeNull(); // degraded safely, no exception
+  });
+
+  it("keeps the XSS boundary: raw HTML in a dispatched macro's body stays literal via the macro", () => {
+    // The dispatched macro sets textContent(body); a <script> in the body is inert literal text.
+    const d = root(":::adr085test\n<script>alert(1)</script>\n:::");
+    expect(d.querySelector("script")).toBeNull();
+    expect(d.querySelector(".adr085-rendered")?.textContent).toContain("<script>");
   });
 });
