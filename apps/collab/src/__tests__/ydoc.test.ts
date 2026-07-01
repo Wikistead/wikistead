@@ -139,6 +139,41 @@ describe('storeYdoc', () => {
   })
 })
 
+// ── Empty-overwrite guard (ADR-088 / #186): a data-loss bastion ─────────
+
+describe('storeYdoc empty-overwrite guard (ADR-088 / #186)', () => {
+  it('BLOCKS an unloaded empty flush over a non-empty page and KEEPS the existing bytes', async () => {
+    // Seed a non-empty page.
+    const real = new Y.Doc(); real.getText('content').insert(0, 'do not lose me')
+    expect((await storeYdoc(TENANT, testPageId, Y.encodeStateAsUpdate(real))).stored).toBe(true)
+
+    // A FRESH doc that never loaded the page autosaves its empty state → must be refused.
+    const res = await storeYdoc(TENANT, testPageId, Y.encodeStateAsUpdate(new Y.Doc()))
+    expect(res.stored).toBe(false)
+    expect(res.blocked).toBe(true)
+
+    // The existing content survives (not wiped).
+    const binary = await loadYdoc(TENANT, testPageId)
+    const check = new Y.Doc(); Y.applyUpdate(check, binary!)
+    expect(check.getText('content').toString()).toBe('do not lose me')
+  })
+
+  it('ALLOWS a legitimate clear from a doc that loaded the page (page becomes empty)', async () => {
+    const real = new Y.Doc(); real.getText('content').insert(0, 'clear me legitimately')
+    await storeYdoc(TENANT, testPageId, Y.encodeStateAsUpdate(real))
+
+    // Load, then select-all-delete → a genuine clear must be persisted (positive control).
+    const loaded = new Y.Doc(); Y.applyUpdate(loaded, (await loadYdoc(TENANT, testPageId))!)
+    const t = loaded.getText('content'); t.delete(0, t.length)
+    const res = await storeYdoc(TENANT, testPageId, Y.encodeStateAsUpdate(loaded))
+    expect(res.stored).toBe(true)
+    expect(res.blocked).toBeFalsy()
+
+    const check = new Y.Doc(); Y.applyUpdate(check, (await loadYdoc(TENANT, testPageId))!)
+    expect(check.getText('content').toString()).toBe('')
+  })
+})
+
 // ── Round-trip: store then load into a fresh Y.Doc ──────────────────────
 
 describe('ydoc round-trip', () => {
