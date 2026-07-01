@@ -54,7 +54,7 @@ beforeAll(async () => {
 
   // Write the public tuple
   await writeTuples(fgaClient, [
-    { user: 'user:*', relation: 'view', object: `page:${publicPageId}` },
+    { user: 'user:*', relation: 'view_base', object: `page:${publicPageId}` },
   ])
 
   // Private page: no user:* tuple
@@ -65,7 +65,7 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  await deleteTuples(fgaClient, [{ user: 'user:*', relation: 'view', object: `page:${publicPageId}` }])
+  await deleteTuples(fgaClient, [{ user: 'user:*', relation: 'view_base', object: `page:${publicPageId}` }])
   await deletePage(db, fgaClient, driver, { pageId: publicPageId, userId: 'dev-user' })
   await deletePage(db, fgaClient, driver, { pageId: privatePageId, userId: 'dev-user' })
   await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user' })
@@ -90,11 +90,11 @@ describe('user:anonymous principal semantics', () => {
   it('user:anonymous cannot view private page even after deleting public grant (revocation)', async () => {
     // Write, verify true, delete, verify false
     const pageId = publicPageId  // already has grant; test deletion
-    await deleteTuples(fgaClient, [{ user: 'user:*', relation: 'view', object: `page:${pageId}` }])
+    await deleteTuples(fgaClient, [{ user: 'user:*', relation: 'view_base', object: `page:${pageId}` }])
     expect(await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: pageId })).toBe(false)
 
     // Restore for subsequent tests
-    await writeTuples(fgaClient, [{ user: 'user:*', relation: 'view', object: `page:${pageId}` }])
+    await writeTuples(fgaClient, [{ user: 'user:*', relation: 'view_base', object: `page:${pageId}` }])
     expect(await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: pageId })).toBe(true)
   })
 })
@@ -140,7 +140,7 @@ describe('public page rendering', () => {
       INSERT INTO pages (tenant_id, space_id, title)
       VALUES ('tenant_acme', ${acmeSpaceId}, 'Acme Public Page') RETURNING id
     `
-    await writeTuples(fgaClient, [{ user: 'user:*', relation: 'view', object: `page:${acmePageId}` }])
+    await writeTuples(fgaClient, [{ user: 'user:*', relation: 'view_base', object: `page:${acmePageId}` }])
 
     try {
       // FGA says the acme page is public (user:anonymous can view it)
@@ -155,7 +155,7 @@ describe('public page rendering', () => {
 
       expect(row).toBeNull()
     } finally {
-      await deleteTuples(fgaClient, [{ user: 'user:*', relation: 'view', object: `page:${acmePageId}` }])
+      await deleteTuples(fgaClient, [{ user: 'user:*', relation: 'view_base', object: `page:${acmePageId}` }])
       await adminPool`DELETE FROM spaces WHERE id = ${acmeSpaceId}`
     }
   })
@@ -238,14 +238,14 @@ describe('loadPublicChildTree leak safety', () => {
     // Public (user:*) grants: P, C1, Cpub2, G1, G2. NOT Cmid/G3/C2 (no grant) and NOT
     // Cshare (share-link only). G2 is granted public on its own, yet must stay hidden because
     // the only path to it runs through the private C2.
-    await writeTuples(fgaClient, [P, C1, Cpub2, G1, G2].map((id) => ({ user: 'user:*', relation: 'view', object: `page:${id}` })))
+    await writeTuples(fgaClient, [P, C1, Cpub2, G1, G2].map((id) => ({ user: 'user:*', relation: 'view_base', object: `page:${id}` })))
     // Cshare is genuinely viewable — but only by a share_link principal, never by ANON.
-    await writeTuples(fgaClient, [{ user: SHARE, relation: 'view', object: `page:${Cshare}` }])
+    await writeTuples(fgaClient, [{ user: SHARE, relation: 'view_base', object: `page:${Cshare}` }])
   })
 
   afterAll(async () => {
-    await deleteTuples(fgaClient, [P, C1, Cpub2, G1, G2].map((id) => ({ user: 'user:*', relation: 'view', object: `page:${id}` })))
-    await deleteTuples(fgaClient, [{ user: SHARE, relation: 'view', object: `page:${Cshare}` }])
+    await deleteTuples(fgaClient, [P, C1, Cpub2, G1, G2].map((id) => ({ user: 'user:*', relation: 'view_base', object: `page:${id}` })))
+    await deleteTuples(fgaClient, [{ user: SHARE, relation: 'view_base', object: `page:${Cshare}` }])
     // delete leaves first (children before parents) so the parent_id tree stays consistent
     for (const id of [G1, G3, G2, C1, Cmid, Cpub2, Cshare, C2, P]) {
       await deletePage(db, fgaClient, driver, { pageId: id, userId: 'dev-user' })

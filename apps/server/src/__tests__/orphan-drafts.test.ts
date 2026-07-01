@@ -89,7 +89,7 @@ describe('listOrphanDrafts (#99 / ADR-061 read side)', () => {
     // and a live VIEWER (non-creator path): creator tuple gone but a live member holds view
     const shared = await mkPage('live-viewer')
     await deleteObjectTuples(fgaClient, `page:${shared}`)
-    await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'view', object: `page:${shared}` }]) // dev-user is live
+    await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'view_base', object: `page:${shared}` }]) // dev-user is live
     expect(await ids()).not.toContain(shared)
   })
 

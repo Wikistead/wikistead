@@ -56,20 +56,21 @@ function toShareLink(r: ShareLinkRow): ShareLink {
 }
 
 // The FGA relation a share link writes, by resource kind + capability:
-//  - page: view -> 'view', edit -> 'edit' (both shareable).
-//  - space: view-only -> 'viewer' (ADR-038: a space link opens the whole space READ-only;
-//    space#editor has no share_link, so guests never edit via a space link). An edit space
-//    link is rejected.
-function relationForResource(type: ResourceRef['type'], capability: Capability): 'view' | 'comment' | 'edit' | 'viewer' {
+//  - page: view -> 'view_base' (#100/ADR-029: `view` is computed = view_base or comment; direct view
+//    grants go to the view_base leaf), edit -> 'edit'. Links carry view/edit ONLY — commenting is a
+//    RESOURCE setting (space#comment_open), NOT a link capability, so a guest comments via a VIEW
+//    link + comments being open, never via a comment link.
+//  - space: view-only -> 'viewer' (ADR-038: a space link opens the whole space READ-only; space#editor
+//    has no share_link, so guests never edit via a space link). An edit space link is rejected.
+function relationForResource(type: ResourceRef['type'], capability: Capability): 'view_base' | 'edit' | 'viewer' {
   if (type === 'space') {
     if (capability !== 'view') throw Object.assign(new Error('space links are view-only'), { statusCode: 400 })
     return 'viewer'
   }
-  // page: view / comment (#100) / edit are shareable; manage is not.
-  if (capability !== 'view' && capability !== 'comment' && capability !== 'edit') {
-    throw Object.assign(new Error('capability must be view, comment, or edit'), { statusCode: 400 })
-  }
-  return capability
+  // page: view / edit are shareable; comment is the resource's setting (#100), manage is not.
+  if (capability === 'view') return 'view_base'
+  if (capability === 'edit') return 'edit'
+  throw Object.assign(new Error('capability must be view or edit'), { statusCode: 400 })
 }
 
 const guestCfg = {

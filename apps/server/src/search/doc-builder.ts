@@ -58,7 +58,11 @@ export async function buildSearchDoc(
   for (const { key } of pageTuples ?? []) {
     if (!key) continue
     if (key.relation === 'space' && key.user === `space:${page.space_id}`) { linkedToSpace = true; continue }
-    if (!['manage', 'edit', 'view'].includes(key.relation)) continue
+    // #100 / ADR-029: `view` is now a computed relation (view_base or comment); direct page view
+    // grants live on `view_base`, so read THAT for the viewer set + is_public (view_base@user:*). A
+    // direct `comment` grant also confers view (comment ⊃ view), so a comment-granted member is a
+    // viewer too. `comment_open`/`view` (computed) are NOT read here — only direct grants denormalize.
+    if (!['manage', 'edit', 'view_base', 'comment'].includes(key.relation)) continue
     categorize(key.user, viewerUsers, viewerGroups, setPublic)
   }
 

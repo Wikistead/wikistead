@@ -378,6 +378,56 @@ export async function listSpaceAccess(
   return out
 }
 
+// Comment AUDIENCE setting (#100 / ADR-029) — a resource setting, not a link capability. Toggling it
+// writes/deletes the wildcard `space:<id>#comment_open@{share_link:*, user:*}` tuples (is_public-style;
+// FGA is the source of truth), which the page `comment` relation intersects with `view_base`. Pages
+// inherit `comment_open from space` (space is the only inheritance level). No reindex needed: the VIEW
+// audience is unchanged (viewers already view via view_base; comment_open only opens commenting).
+async function readCommentOpen(fga: OpenFgaClient, spaceId: string): Promise<{ guests: boolean; members: boolean }> {
+  const { tuples } = await fga.read({ object: `space:${spaceId}` })
+  let guests = false, members = false
+  for (const { key } of tuples ?? []) {
+    if (key?.relation !== 'comment_open') continue
+    if (key.user === 'share_link:*') guests = true
+    else if (key.user === 'user:*') members = true
+  }
+  return { guests, members }
+}
+
+export async function getSpaceCommentOpen(
+  fga: OpenFgaClient,
+  args: { spaceId: string; userId: string },
+): Promise<{ guests: boolean; members: boolean }> {
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  return readCommentOpen(fga, args.spaceId)
+}
+
+// Set the comment audience(s). Idempotent: reads the current wildcards and writes only the missing /
+// deletes only the present ones (writeTuples/deleteTuples are not idempotent on their own). `guests`
+// toggles `share_link:*`, `members` toggles `user:*`; an undefined field is left unchanged.
+export async function setSpaceCommentOpen(
+  fga: OpenFgaClient,
+  args: { spaceId: string; userId: string; guests?: boolean; members?: boolean },
+): Promise<{ guests: boolean; members: boolean }> {
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  const cur = await readCommentOpen(fga, args.spaceId)
+  const writes: { user: string; relation: string; object: string }[] = []
+  const deletes: { user: string; relation: string; object: string }[] = []
+  const obj = `space:${args.spaceId}`
+  const apply = (want: boolean | undefined, have: boolean, user: string) => {
+    if (want === undefined || want === have) return
+    ;(want ? writes : deletes).push({ user, relation: 'comment_open', object: obj })
+  }
+  apply(args.guests, cur.guests, 'share_link:*')
+  apply(args.members, cur.members, 'user:*')
+  if (deletes.length) await deleteTuples(fga, deletes)
+  if (writes.length) await writeTuples(fga, writes)
+  return {
+    guests: args.guests ?? cur.guests,
+    members: args.members ?? cur.members,
+  }
+}
+
 // Tenant group-name source for the group-grant picker (#163 / ADR-053). The set of group names
 // seen across the tenant's members (IdP-imported via members.groups, #111 — no manual group CRUD).
 // manage-gated like the grant itself: group NAMES can themselves be sensitive (existence leak), so
@@ -470,6 +520,18 @@ export async function spacesPlugin(app: FastifyInstance) {
       grantee, capability: req.body?.relation ?? '', plan: req.tenant.plan,
     })
     return reply.code(204).send()
+  })
+
+  // Comment audience setting (#100 / ADR-029): read + toggle who may comment on this space's pages —
+  // guests (any view link) and/or public members. manage-gated (it's an administrative setting).
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/comment-open', async (req) => {
+    return getSpaceCommentOpen(app.fga, { spaceId: req.params.spaceId, userId: req.user.sub })
+  })
+  app.patch<{ Params: { spaceId: string }; Body: { guests?: boolean; members?: boolean } }>('/spaces/:spaceId/comment-open', async (req) => {
+    return setSpaceCommentOpen(app.fga, {
+      spaceId: req.params.spaceId, userId: req.user.sub,
+      guests: req.body?.guests, members: req.body?.members,
+    })
   })
 
   // Tenant group-name source for the group-grant picker (#163). manage-gated (group names can be

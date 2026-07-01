@@ -223,7 +223,11 @@
     "typeUser": "メンバー",
     "typeGroup": "グループ",
     "selectGroup": "グループを選択",
-    "noGroups": "グループがありません（IdP から取り込み）"
+    "noGroups": "グループがありません（IdP から取り込み）",
+    "commentAudienceTitle": "コメント",
+    "commentAudienceBody": "このスペースのページへのコメントを許可します。メンバー個別のコメント付与は各ページで設定します。ここのトグルは対象全体にコメントを開放します。",
+    "commentGuests": "閲覧リンクのゲストがコメント可",
+    "commentMembers": "閲覧できる全員（公開）がコメント可"
   },
   "auth": {
     "signInTitle": "wikistead にサインイン",
@@ -335,6 +339,7 @@
     "memberPlaceholder": "メンバー ID",
     "relation": "権限",
     "view": "閲覧",
+    "comment": "コメント",
     "edit": "編集",
     "manage": "管理",
     "add": "追加",

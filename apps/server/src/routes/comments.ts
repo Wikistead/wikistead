@@ -154,7 +154,7 @@ export async function commentsPlugin(app: FastifyInstance) {
   // Start a thread (page or inline) with its first comment. page#comment required.
   app.post<{ Params: { pageId: string }; Body: { body?: string; kind?: string; anchorStart?: string; anchorEnd?: string; quotedText?: string; mentions?: string[] } }>(
     '/pages/:pageId/comments',
-    { config: { guest: 'comment' } },
+    { config: { guest: 'view' } },
     async (req, reply) => {
       const actor = await requirePage(req, reply, req.params.pageId, 'comment')
       if (!actor) return
@@ -179,7 +179,7 @@ export async function commentsPlugin(app: FastifyInstance) {
   )
 
   // Reply to a thread. page#comment on the thread's page required.
-  app.post<{ Params: { threadId: string }; Body: { body?: string; mentions?: string[] } }>('/comments/threads/:threadId/comments', { config: { guest: 'comment' } }, async (req, reply) => {
+  app.post<{ Params: { threadId: string }; Body: { body?: string; mentions?: string[] } }>('/comments/threads/:threadId/comments', { config: { guest: 'view' } }, async (req, reply) => {
     const t = await threadPage(req, req.params.threadId)
     if (!t) return reply.code(404).send({ error: 'not found' })
     const actor = await requirePage(req, reply, t.pageId, 'comment')

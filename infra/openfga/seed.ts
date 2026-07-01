@@ -35,7 +35,7 @@ import type { TupleKey, TupleKeyWithoutCondition } from '@openfga/sdk'
   // Tuple written WITHOUT condition → link never expires.
   // Revoke by deleting this tuple; enforced at next onAuthenticate call.
   await writeIdempotent([
-    { user: 'share_link:demo_view_perm', relation: 'view', object: 'page:demo' },
+    { user: 'share_link:demo_view_perm', relation: 'view_base', object: 'page:demo' }, // #100: direct view grant → view_base leaf
   ])
   console.log('wrote: non-expiring view share_link (demo_view_perm)')
 

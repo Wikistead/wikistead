@@ -371,7 +371,7 @@ export interface PageMeta {
 }
 
 // ── per-page access (Phase 4) ──────────────────────────────────────────────
-export type PageRelation = "view" | "edit" | "manage";
+export type PageRelation = "view" | "comment" | "edit" | "manage"; // #100: per-member page comment grant
 export interface PageGrant { grantee: string; relation: PageRelation; groupName?: string }
 
 export function usePageAccess(pageId: string, enabled = true) {
@@ -457,6 +457,28 @@ export function useRevokeSpaceAccess(spaceId: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["space-access", spaceId] }),
   });
 }
+// Space comment-audience setting (#100 / ADR-029): who may comment on the space's pages — guests
+// (any view link) and/or public members. manage-gated. Toggling writes/deletes the wildcard
+// comment_open tuples; page `comment` derives from it. Default OFF (anti-grief).
+export interface CommentOpenDTO { guests: boolean; members: boolean }
+export function useCommentOpen(spaceId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["comment-open", spaceId],
+    queryFn: () => apiFetch<CommentOpenDTO>(`/spaces/${encodeURIComponent(spaceId)}/comment-open`, token),
+    enabled: enabled && spaceId.length > 0,
+  });
+}
+export function useSetCommentOpen(spaceId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { guests?: boolean; members?: boolean }) =>
+      apiFetch<CommentOpenDTO>(`/spaces/${encodeURIComponent(spaceId)}/comment-open`, token, { method: "PATCH", body: JSON.stringify(args) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["comment-open", spaceId] }),
+  });
+}
+
 // Tenant branding (Phase 5d). GET /branding is PUBLIC (resolved from the Host) so
 // it works for members, guests, and unauthenticated visitors — it drives the header
 // wordmark and the tenant layer of the accent cascade. The server strips branding

@@ -122,7 +122,7 @@ describe('time-bounded share_link', () => {
     await writeTuples(fgaClient, [
       {
         user: 'share_link:condition_write_test',
-        relation: 'view',
+        relation: 'view_base', // #100: direct view grant → view_base leaf (view is computed)
         object: 'page:demo',
         condition: { name: 'non_expired', context: { expires_at: expiresAt } },
       },
@@ -131,7 +131,7 @@ describe('time-bounded share_link', () => {
       await check(fgaClient, 'share_link:condition_write_test', 'view', page('demo'), { current_time: now() }),
     ).toBe(true)
     // cleanup
-    await deleteTuples(fgaClient, [{ user: 'share_link:condition_write_test', relation: 'view', object: 'page:demo' }])
+    await deleteTuples(fgaClient, [{ user: 'share_link:condition_write_test', relation: 'view_base', object: 'page:demo' }])
   })
 })
 
@@ -141,7 +141,7 @@ describe('share_link revocation', () => {
   it('deleting a share_link tuple is immediately reflected in subsequent checks', async () => {
     // Write a permanent view link for a test page.
     await writeTuples(fgaClient, [
-      { user: 'share_link:revoke_test', relation: 'view', object: 'page:demo' },
+      { user: 'share_link:revoke_test', relation: 'view_base', object: 'page:demo' },
     ])
     expect(
       await check(fgaClient, 'share_link:revoke_test', 'view', page('demo'), { current_time: now() }),
@@ -149,7 +149,7 @@ describe('share_link revocation', () => {
 
     // Revoke by deleting the tuple.
     await deleteTuples(fgaClient, [
-      { user: 'share_link:revoke_test', relation: 'view', object: 'page:demo' },
+      { user: 'share_link:revoke_test', relation: 'view_base', object: 'page:demo' },
     ])
 
     // The next FGA check — which is what onAuthenticate runs on every new
