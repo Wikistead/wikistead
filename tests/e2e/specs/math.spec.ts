@@ -60,9 +60,9 @@ test("Source display mode shows raw TeX (math.ts respects displayMode)", async (
   const content = () => page.locator("[data-pane=preview] .cm-content").innerText();
   // Live (default): rendered, raw hidden.
   expect(await content()).not.toContain("E=mc^2");
-  // → Source: raw TeX shown even though the caret is elsewhere.
-  const toggle = page.getByTestId("displaymode-toggle");
-  for (let i = 0; i < 3 && (await toggle.getAttribute("data-mode")) !== "source"; i++) { await toggle.click(); await sleep(150); }
+  // → Source: raw TeX shown even though the caret is elsewhere (#165: direct segment switch).
+  await page.getByTestId("displaymode-source").click(); await sleep(200);
+  await expect(page.getByTestId("displaymode-segment")).toHaveAttribute("data-mode", "source");
   await page.keyboard.press("Control+End"); await sleep(200);
   expect(await content()).toContain("E=mc^2"); // force-revealed in Source
 });
