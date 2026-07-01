@@ -32,14 +32,20 @@ function targetUnder(view: EditorView, clientX: number, clientY: number): number
 }
 
 // Start dragging the block anchored at `srcFrom` (re-resolved at drop so a concurrent insert
-// above can't move the wrong block — anti-test #1).
-function startDrag(view: EditorView, srcFrom: number, e: PointerEvent): void {
+// above can't move the wrong block — anti-test #1). Pointer events are CAPTURED to the grip (#84):
+// a page has block widgets (Excalidraw/mermaid/table) whose iframes/DOM otherwise SWALLOW pointermove
+// once the pointer crosses them, so a plain window listener silently stops tracking mid-drag ("nothing
+// moves") and the widget's own click (e.g. the Excalidraw modal) fires. setPointerCapture routes every
+// pointermove/up to the grip until release, so the drag tracks over any widget and never triggers it.
+function startDrag(view: EditorView, srcFrom: number, e: PointerEvent, grip: HTMLElement): void {
   e.preventDefault()
   e.stopPropagation()
+  try { grip.setPointerCapture(e.pointerId) } catch { /* capture unsupported — degrade to element events */ }
   const move = (ev: PointerEvent) => view.dispatch({ effects: setDropTarget.of(targetUnder(view, ev.clientX, ev.clientY)) })
   const up = (ev: PointerEvent) => {
-    window.removeEventListener("pointermove", move)
-    window.removeEventListener("pointerup", up)
+    grip.removeEventListener("pointermove", move)
+    grip.removeEventListener("pointerup", up)
+    try { grip.releasePointerCapture(ev.pointerId) } catch { /* already released */ }
     view.dispatch({ effects: setDropTarget.of(null) }) // clear the indicator
     const src = blockRangeAt(view.state, srcFrom) // re-resolve against the CURRENT doc
     if (!src) return
@@ -47,8 +53,9 @@ function startDrag(view: EditorView, srcFrom: number, e: PointerEvent): void {
     const res = computeBlockMove(view.state.doc, src, target)
     if (res) view.dispatch({ changes: res.changes }) // ONE transaction = one Yjs op
   }
-  window.addEventListener("pointermove", move)
-  window.addEventListener("pointerup", up)
+  // Captured pointer events dispatch to the grip element, so listen THERE (not window).
+  grip.addEventListener("pointermove", move)
+  grip.addEventListener("pointerup", up)
 }
 
 class GripMarker extends GutterMarker {
@@ -60,7 +67,7 @@ class GripMarker extends GutterMarker {
     el.textContent = "⠿"
     el.title = "Drag to move this block"
     el.setAttribute("data-testid", "block-grip")
-    el.addEventListener("pointerdown", (e) => startDrag(this.view, this.from, e))
+    el.addEventListener("pointerdown", (e) => startDrag(this.view, this.from, e, el))
     return el
   }
 }
