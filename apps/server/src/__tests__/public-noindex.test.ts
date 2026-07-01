@@ -20,7 +20,7 @@ let indexablePageId: string
 async function mkPage(noindex: boolean): Promise<string> {
   const [{ id }] = await admin<[{ id: string }]>`
     INSERT INTO pages (tenant_id, space_id, title, noindex) VALUES (${tenantId}, ${spaceId}, 'P', ${noindex}) RETURNING id`
-  await writeTuples(fgaClient, [{ user: 'user:*', relation: 'view', object: `page:${id}` }])
+  await writeTuples(fgaClient, [{ user: 'user:*', relation: 'view_base', object: `page:${id}` }])
   return id
 }
 
@@ -39,7 +39,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await app.close()
   for (const id of [noindexPageId, indexablePageId]) {
-    await deleteTuples(fgaClient, [{ user: 'user:*', relation: 'view', object: `page:${id}` }]).catch(() => {})
+    await deleteTuples(fgaClient, [{ user: 'user:*', relation: 'view_base', object: `page:${id}` }]).catch(() => {})
   }
   await admin`DELETE FROM pages WHERE tenant_id = ${tenantId}`.catch(() => {})
   await admin`DELETE FROM spaces WHERE tenant_id = ${tenantId}`.catch(() => {})

@@ -89,6 +89,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             size="sm"
             options={[
               { value: "view", label: t("permissions.view") },
+              { value: "comment", label: t("permissions.comment") }, // #100: per-member comment grant
               { value: "edit", label: t("permissions.edit") },
               { value: "manage", label: t("permissions.manage") },
             ]}

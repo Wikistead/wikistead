@@ -93,7 +93,7 @@ describe('share link security', () => {
   it('FGA is the authoritative gate: tuple gone but DB still active -> no token', async () => {
     const link = await createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null })
     // Simulate DB/FGA divergence: delete the grant WITHOUT stamping revoked_at.
-    await deleteTuples(fgaClient, [{ user: `share_link:${link.id}`, relation: 'view', object: `page:${pageId}` }])
+    await deleteTuples(fgaClient, [{ user: `share_link:${link.id}`, relation: 'view_base', object: `page:${pageId}` }])
     const [row] = await db.sql<{ revoked_at: Date | null }[]>`SELECT revoked_at FROM share_links WHERE id = ${link.id}`
     expect(row.revoked_at).toBeNull() // DB still thinks it is active (anti-trivial)
     // ...yet the FGA gate refuses to mint.

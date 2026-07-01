@@ -427,12 +427,27 @@ export async function getPublished(
 // may grant/revoke/list, so the permission structure is never shown to — or handed
 // out by — someone without authority. A grantee is a member (user:<sub>) or a group
 // (group:<id>#member); share_link / wildcard subjects are not grantable here.
-export type PageRelation = 'view' | 'edit' | 'manage'
-const PAGE_RELATIONS: PageRelation[] = ['view', 'edit', 'manage']
+// User-facing page capabilities. #100/ADR-029 adds `comment` (a per-member comment grant, member
+// granularity). NOTE: `view` is a COMPUTED FGA relation now (view_base or comment) — a direct view
+// grant is written to `view_base`, so the API capability ('view') maps to the FGA relation below.
+export type PageRelation = 'view' | 'comment' | 'edit' | 'manage'
+const PAGE_RELATIONS: PageRelation[] = ['view', 'comment', 'edit', 'manage']
+
+// capability → FGA relation to WRITE (view → view_base leaf; the rest are identity).
+function fgaRelationForCap(cap: PageRelation): 'view_base' | 'comment' | 'edit' | 'manage' {
+  return cap === 'view' ? 'view_base' : cap
+}
+// FGA relation (as stored/read) → user-facing capability; null for non-grant relations (space/parent/
+// comment_open/view). view_base surfaces as 'view'.
+function capForFgaRelation(rel: string): PageRelation | null {
+  if (rel === 'view_base') return 'view'
+  if (rel === 'comment' || rel === 'edit' || rel === 'manage') return rel
+  return null
+}
 
 function validateGrant(grantee: string, relation: string): asserts relation is PageRelation {
   if (!PAGE_RELATIONS.includes(relation as PageRelation)) {
-    throw Object.assign(new Error('relation must be view, edit, or manage'), { statusCode: 400 })
+    throw Object.assign(new Error('relation must be view, comment, edit, or manage'), { statusCode: 400 })
   }
   // Only real principals: a member or a group's member-set. NOT share_link, user:*,
   // page:, space: — those are not hand-grantable per-page access.
@@ -460,7 +475,7 @@ export async function grantPageAccess(
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.access_granted', target: `page:${args.pageId}` })
     }
     const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
-    await writeTuples(fga, [{ user: args.grantee, relation: args.relation, object: `page:${args.pageId}` }])
+    await writeTuples(fga, [{ user: args.grantee, relation: fgaRelationForCap(args.relation as PageRelation), object: `page:${args.pageId}` }])
     return o
   })
   // Reindex so the new grantee appears in the search viewer set (post-commit; FGA now set).
@@ -482,7 +497,7 @@ export async function revokePageAccess(
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.access_revoked', target: `page:${args.pageId}` })
     }
     const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
-    await deleteTuples(fga, [{ user: args.grantee, relation: args.relation, object: `page:${args.pageId}` }])
+    await deleteTuples(fga, [{ user: args.grantee, relation: fgaRelationForCap(args.relation as PageRelation), object: `page:${args.pageId}` }])
     return o
   })
   // Reindex so the revoked grantee drops out of the search viewer set immediately
@@ -503,11 +518,12 @@ export async function listPageAccess(
   const byId = groupNameByFgaId(args.tenantId, names)
   const out: { grantee: string; relation: PageRelation; groupName?: string }[] = []
   for (const { key } of tuples ?? []) {
-    if (!key || !PAGE_RELATIONS.includes(key.relation as PageRelation)) continue
+    const cap = key ? capForFgaRelation(key.relation) : null
+    if (!key || !cap) continue // maps view_base→view, comment/edit/manage; skips space/view/comment_open
     // Direct member/group grants only — never expose share_link or the space link.
     if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
     const groupName = resolveGroupName(key.user, byId)
-    out.push({ grantee: key.user, relation: key.relation as PageRelation, ...(groupName ? { groupName } : {}) })
+    out.push({ grantee: key.user, relation: cap, ...(groupName ? { groupName } : {}) })
   }
   return out
 }

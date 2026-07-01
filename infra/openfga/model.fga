@@ -50,6 +50,13 @@ type space
     # TODO(phase: guest): implement space-scoped share link issuance API.
     define viewer: [user, group#member, user:*, share_link, share_link with non_expired] or editor
     define admin: admin from tenant
+    # Comment AUDIENCE switch at the space level (#100 / ADR-029 Option B). Toggling comments on a
+    # space writes/deletes these wildcard tuples (is_public-style; FGA stays the source of truth):
+    #   comment_open@user:*       → members / public viewers may comment on the space's pages
+    #   comment_open@share_link:* → guests (ANY view link) may comment on the space's pages
+    # Pages inherit this (comment_open from space). Space is the only inheritance level (no per-page
+    # override in v1 — that would need non-monotonic deny; deferred). Default OFF (anti-grief).
+    define comment_open: [user:*, share_link:*]
 
 # share_link has no relations — the link identity is the principal.
 # Its capability and expiry live in the page relation tuples.
@@ -68,13 +75,22 @@ type page
     #   share_link with non_expired — time-bounded link (tuple written with condition)
     # OpenFGA requires both to be declared to allow either form.
     define edit: [user, group#member, share_link, share_link with non_expired] or manage or editor from space
-    # Guest (share-link) commenting (#100 / ADR-029): comment is independently grantable to a
-    # share_link (permanent + non_expired forms, like edit/view), so a comment-link guest can
-    # comment AND view (view includes `or comment`) but NOT edit. edit ⊃ comment ⊃ view holds.
-    # NOT granted to user:* (no anonymous commenting — only an explicit comment link).
-    define comment: [user, group#member, share_link, share_link with non_expired] or edit
-    # user:* here means public page — keep in sync with search is_public.
-    define view: [user, group#member, user:*, share_link, share_link with non_expired] or comment or viewer from space
+
+    # Commenting authorization (#100 / ADR-029 Option B) — a RESOURCE SETTING, not a link capability.
+    # Split view into `view_base` (the direct view grants — the leaf) so `comment` can intersect on it
+    # without the view→comment→view cycle. Links carry view/edit ONLY; a guest comments via a VIEW
+    # link + comments being open (view_base and comment_open), never via a comment link.
+    #
+    # view_base: direct view grants ONLY (user:* here = public page — keep in sync with search is_public).
+    define view_base: [user, group#member, user:*, share_link, share_link with non_expired] or viewer from space
+    # comment audience gate, space-inherited (the write/delete switch lives on space#comment_open).
+    define comment_open: [user:*, share_link:*] or comment_open from space
+    # explicit per-principal comment grant (member/group granularity)  ∪  edit  ∪  the audience gate.
+    # A specific member may be granted comment even when the audience toggle is off.
+    define comment: [user, group#member] or edit or (view_base and comment_open)
+    # view = direct viewers OR anyone who can comment (commenters can view). Acyclic:
+    # comment → {view_base, comment_open, edit}; view → {view_base, comment}; view_base is a leaf.
+    define view: view_base or comment
 
 # Evaluated at check time using current_time from the check context.
 # expires_at is stored in the tuple condition context at write time.

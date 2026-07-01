@@ -5,6 +5,7 @@ import { X } from "lucide-react";
 import { Input } from "../ui/Input";
 import {
   useSpaceAccess, useGrantSpaceAccess, useRevokeSpaceAccess, useMemberCandidates, useTenantGroups,
+  useCommentOpen, useSetCommentOpen,
   type PageRelation,
 } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
@@ -24,6 +25,13 @@ export function SpaceMembersTab() {
   const access = useSpaceAccess(spaceId);
   const grant = useGrantSpaceAccess(spaceId);
   const revoke = useRevokeSpaceAccess(spaceId);
+  const commentOpen = useCommentOpen(spaceId);
+  const setCommentOpen = useSetCommentOpen(spaceId);
+  const toggleCommentOpen = (key: "guests" | "members", value: boolean) =>
+    setCommentOpen.mutate({ [key]: value }, {
+      onSuccess: () => notify.success(t("toast.saved")),
+      onError: () => notify.error(t("toast.actionFailed")),
+    });
 
   const [mode, setMode] = useState<"user" | "group">("user");
   const [query, setQuery] = useState("");
@@ -138,6 +146,30 @@ export function SpaceMembersTab() {
           </div>
         ))}
         {grants.length === 0 && <p className="text-sm text-fg-dim">{t("spaceMembers.empty")}</p>}
+      </div>
+
+      {/* #100 / ADR-029: comment AUDIENCE toggles — who may comment on this space's pages. A resource
+          setting (space#comment_open), separate from the per-member grants above. Default OFF. */}
+      <div className="mt-8 border-t border-border pt-4" data-testid="comment-open">
+        <h3 className="mt-0 text-sm font-medium">{t("spaceMembers.commentAudienceTitle")}</h3>
+        <p className="mt-0 mb-3 text-sm text-fg-dim">{t("spaceMembers.commentAudienceBody")}</p>
+        {([
+          { key: "guests" as const, label: t("spaceMembers.commentGuests"), testId: "comment-open-guests" },
+          { key: "members" as const, label: t("spaceMembers.commentMembers"), testId: "comment-open-members" },
+        ]).map(({ key, label: lbl, testId }) => {
+          const on = !!commentOpen.data?.[key];
+          return (
+            <label key={key} className="mb-2 flex items-center gap-2 text-sm">
+              <button type="button" role="switch" aria-checked={on} data-testid={testId} data-on={on}
+                disabled={commentOpen.isLoading || setCommentOpen.isPending}
+                onClick={() => toggleCommentOpen(key, !on)}
+                className={`relative inline-block h-4 w-7 flex-none rounded-full transition-colors ${on ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}>
+                <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${on ? "left-[14px]" : "left-0.5"}`} />
+              </button>
+              <span>{lbl}</span>
+            </label>
+          );
+        })}
       </div>
     </div>
   );

@@ -223,7 +223,11 @@
     "typeUser": "Member",
     "typeGroup": "Group",
     "selectGroup": "Select a group",
-    "noGroups": "No groups (imported from your IdP)"
+    "noGroups": "No groups (imported from your IdP)",
+    "commentAudienceTitle": "Commenting",
+    "commentAudienceBody": "Allow commenting on this space's pages. A per-member comment grant is set on each page; these toggles open commenting to a whole audience.",
+    "commentGuests": "Guests with a view link may comment",
+    "commentMembers": "Anyone who can view (public) may comment"
   },
   "auth": {
     "signInTitle": "Sign in to wikistead",
@@ -335,6 +339,7 @@
     "memberPlaceholder": "member id",
     "relation": "Relation",
     "view": "view",
+    "comment": "comment",
     "edit": "edit",
     "manage": "manage",
     "add": "Add",
