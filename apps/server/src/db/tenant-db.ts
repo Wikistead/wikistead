@@ -1,6 +1,7 @@
 import type { Sql } from 'postgres'
 import type { Tenant } from '@wikistead/types'
 import { pool } from './pool.js'
+import { acquireNamespace } from './namespace.js'
 
 // The only DB interface features ever see. Isolation strategy is invisible here.
 export interface TenantDb {
@@ -19,7 +20,8 @@ export async function acquireTenantDb(tenant: Tenant): Promise<TenantDb> {
   switch (tenant.isolation) {
     case 'logical':
       return acquireLogical(tenant)
-    // TODO(phase: tenancy-namespace): case 'namespace': return acquireNamespace(tenant)
+    case 'namespace':
+      return acquireNamespace(tenant) // ADR-047 / #117: dedicated schema per promoted tenant
     default:
       throw new Error(`unsupported isolation strategy: ${tenant.isolation}`)
   }
