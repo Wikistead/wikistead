@@ -1,6 +1,6 @@
 import { parser } from "@lezer/markdown";
 import { directiveExtension, parseDirectiveOpen } from "./directive-parser";
-import { findDirectiveMacro } from "./registry";
+import { findDirectiveMacro, findFenceMacro } from "./registry";
 import { currentMacroTheme } from "./theme";
 
 // #90 S0 (A′ shared) — render a Markdown source string to a SANITIZED DOM fragment, for use
@@ -105,9 +105,26 @@ function renderBlock(node: SNode, src: string, into: Node): void {
     case "OrderedList": { const el = document.createElement("ol"); renderBlocks(node, src, el); into.appendChild(el); return; }
     case "ListItem": { const el = document.createElement("li"); renderBlocks(node, src, el); into.appendChild(el); return; }
     case "FencedCode": case "CodeBlock": {
-      const pre = document.createElement("pre"); const code = document.createElement("code");
       const t = node.getChild("CodeText");
-      code.textContent = t ? txt(src, t) : "";
+      const body = t ? txt(src, t) : "";
+      // ADR-085 shared macro renderer: a FENCE whose info string names a registered fence macro
+      // (```mermaid / ```excalidraw …) dispatches to its liveRender — the SINGLE source of truth
+      // so a diagram fence INSIDE a transclude / column / tab renders as the real macro, not a raw
+      // <pre><code> (completes the client dispatch for BOTH macro shapes: directive above, fence here).
+      // Only FencedCode carries an info string (indented CodeBlock never does). Unknown lang / no
+      // liveRender / a macro that THROWS → the plain <pre><code> below (never break the whole render).
+      // liveRender only gets `{theme}` (ADR-024 narrow host-API) — display-only.
+      if (node.name === "FencedCode") {
+        const info = node.getChild("CodeInfo");
+        const lang = info ? txt(src, info).trim().split(/\s+/)[0] : null;
+        const macro = lang ? findFenceMacro(lang) : undefined;
+        if (macro?.liveRender) {
+          try { into.appendChild(macro.liveRender(body, { theme: currentMacroTheme() })); return; }
+          catch { /* a macro that throws must not break the render → fall through to plain code */ }
+        }
+      }
+      const pre = document.createElement("pre"); const code = document.createElement("code");
+      code.textContent = body;
       pre.appendChild(code); into.appendChild(pre); return;
     }
     case "HorizontalRule": into.appendChild(document.createElement("hr")); return;

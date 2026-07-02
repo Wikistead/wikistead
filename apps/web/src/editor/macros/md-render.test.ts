@@ -146,6 +146,49 @@ describe("renderMarkdownToDom — nested macro dispatch (ADR-085 / #185)", () =>
     expect(d.querySelector(".cm-lp-md-directive")).not.toBeNull(); // degraded safely, no exception
   });
 
+  // ADR-085 v1: the SAME dispatch for the FENCE macro shape (```lang), so a diagram fence nested in
+  // transclude/columns renders as the real macro — not a raw <pre><code>. Completes client dispatch
+  // for both macro shapes (directive above + fence here). Register a fence macro to exercise it.
+  it("dispatches a known FENCE macro to its liveRender (not a raw <pre><code>)", () => {
+    registerMacro({
+      kind: "fence", lang: "adr085fence", exportFidelity: "degrade", summary: () => "fence",
+      htmlRender: (b) => `<div>${b}</div>`,
+      liveRender: (body) => { const d = document.createElement("div"); d.className = "adr085-fence"; d.textContent = body; return d; },
+    });
+    const d = root("```adr085fence\ndiagram body\n```");
+    const rendered = d.querySelector(".adr085-fence");
+    expect(rendered).not.toBeNull();
+    expect(rendered?.textContent).toBe("diagram body"); // the fence body (between the ``` markers)
+    expect(d.querySelector("pre > code")).toBeNull(); // NOT the raw code fallback
+  });
+
+  it("falls back to <pre><code> for an UNKNOWN fence language (plain code block preserved)", () => {
+    const d = root("```totallyunknownlang\nconst x = 1;\n```");
+    const code = d.querySelector("pre > code");
+    expect(code).not.toBeNull();
+    expect(code?.textContent).toContain("const x = 1;");
+    expect(d.querySelector(".adr085-fence")).toBeNull();
+  });
+
+  it("falls back to <pre><code> when a fence macro liveRender THROWS (never breaks the render)", () => {
+    registerMacro({
+      kind: "fence", lang: "adr085fencethrow", exportFidelity: "degrade", summary: () => "",
+      htmlRender: () => "", liveRender: () => { throw new Error("boom"); },
+    });
+    const d = root("```adr085fencethrow\nkaboom\n```");
+    const code = d.querySelector("pre > code");
+    expect(code).not.toBeNull(); // degraded safely to plain code, no exception thrown
+    expect(code?.textContent).toContain("kaboom");
+  });
+
+  it("an INDENTED code block (no info string) never dispatches to a fence macro", () => {
+    // Only a fenced ```lang block carries an info string; an indented CodeBlock must stay plain code
+    // even if its first token happens to match a registered fence lang.
+    const d = root("    adr085fence not a fence\n    still code\n");
+    expect(d.querySelector(".adr085-fence")).toBeNull();
+    expect(d.querySelector("pre > code")).not.toBeNull();
+  });
+
   it("keeps the XSS boundary: raw HTML in a dispatched macro's body stays literal via the macro", () => {
     // The dispatched macro sets textContent(body); a <script> in the body is inert literal text.
     const d = root(":::adr085test\n<script>alert(1)</script>\n:::");
