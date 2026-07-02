@@ -74,14 +74,9 @@ export interface MacroDirective {
 
 // The macro directive block (:::name … :::) covering `pos`, or null. Used by the
 // reveal↔render mechanism / table render. body = content lines between the fences.
-export function directiveMacroAt(state: EditorState, pos: number): MacroDirective | null {
-  let node: ReturnType<ReturnType<typeof syntaxTree>["resolveInner"]> | null = syntaxTree(state).resolveInner(pos, 1);
-  while (node && node.name !== "Directive") node = node.parent;
-  if (!node) {
-    node = syntaxTree(state).resolveInner(pos, -1);
-    while (node && node.name !== "Directive") node = node.parent;
-  }
-  if (!node) return null;
+// Map a `Directive` syntax node → a resolved MacroDirective (null if the open line doesn't name a
+// registered directive macro). Shared by directiveMacroAt (innermost) and directiveChainAt (nesting).
+function nodeToDirective(state: EditorState, node: { from: number; to: number }): MacroDirective | null {
   const doc = state.doc;
   const open = parseDirectiveOpen(doc.lineAt(node.from).text);
   if (!open) return null;
@@ -90,10 +85,48 @@ export function directiveMacroAt(state: EditorState, pos: number): MacroDirectiv
   const from = doc.lineAt(node.from).from;
   const lastLine = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1));
   const firstLine = doc.lineAt(node.from);
-  // body = lines strictly between the opening and closing fence lines
-  const parts: string[] = [];
+  const parts: string[] = []; // body = lines strictly between the opening and closing fence lines
   for (let n = firstLine.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
   return { from, to: lastLine.to, name: open.name, macro, body: parts.join("\n") };
+}
+
+export function directiveMacroAt(state: EditorState, pos: number): MacroDirective | null {
+  let node: ReturnType<ReturnType<typeof syntaxTree>["resolveInner"]> | null = syntaxTree(state).resolveInner(pos, 1);
+  while (node && node.name !== "Directive") node = node.parent;
+  if (!node) {
+    node = syntaxTree(state).resolveInner(pos, -1);
+    while (node && node.name !== "Directive") node = node.parent;
+  }
+  if (!node) return null;
+  return nodeToDirective(state, node);
+}
+
+// #196 / ADR-092: the NESTING CHAIN of directive macros containing `pos`, OUTERMOST first → INNERMOST
+// last (the last element === directiveMacroAt). This is the foundation for "innermost-wins" reveal: a
+// container renders as a panel while only the innermost macro the caret is in reveals its raw source.
+// Pure (syntax tree only). Directives whose open line names no registered macro are skipped (a plain
+// nested block is not a macro layer). Empty when the caret is in no directive.
+export function directiveChainAt(state: EditorState, pos: number): MacroDirective[] {
+  const tree = syntaxTree(state);
+  type Node = ReturnType<typeof tree.resolveInner>;
+  // At a boundary the forward resolve may sit outside the block; fall back to the backward resolve if
+  // no Directive ancestor is found on the forward side.
+  const collect = (start: Node): { from: number; to: number }[] => {
+    const out: { from: number; to: number }[] = [];
+    let n: Node | null = start;
+    while (n) {
+      if (n.name === "Directive") out.push({ from: n.from, to: n.to });
+      n = n.parent;
+    }
+    return out;
+  };
+  let dirs = collect(tree.resolveInner(pos, 1));
+  if (dirs.length === 0) dirs = collect(tree.resolveInner(pos, -1));
+  // `dirs` is innermost-first (walked up from the caret) → reverse to outermost-first, then resolve.
+  return dirs
+    .reverse()
+    .map((n) => nodeToDirective(state, n))
+    .filter((d): d is MacroDirective => d !== null);
 }
 
 export interface TableBlock {

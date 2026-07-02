@@ -200,7 +200,7 @@ describe("callout panel (#170 案Y — containerClass dispatch + renderCalloutPa
     const d = root(":::adr049callout\n[click](javascript:alert(1))\n:::");
     const panel = d.querySelector<HTMLElement>(".cm-lp-callout-panel");
     expect(panel).not.toBeNull();
-    const bad = [...panel!.querySelectorAll("a")].find((a) => (a.getAttribute("href") ?? "").toLowerCase().includes("javascript"));
+    const bad = Array.from(panel!.querySelectorAll("a")).find((a) => (a.getAttribute("href") ?? "").toLowerCase().includes("javascript"));
     expect(bad).toBeUndefined(); // the javascript: scheme is dropped; text may remain, the href does not
     expect(panel!.querySelector(".cm-lp-callout-panel-body")?.textContent).toContain("click"); // text kept
   });
