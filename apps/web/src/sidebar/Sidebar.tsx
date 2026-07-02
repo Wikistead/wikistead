@@ -157,9 +157,10 @@ export function Sidebar() {
         ref={dragHandle}
         style={style}
         className={cn(
-          // Inset, rounded highlight (mx) with inner padding so the selected/hover fill
-          // isn't edge-to-edge cramped (Notion/Outline-style). px gives the label room.
-          "group mx-1.5 flex cursor-pointer select-none items-center gap-1.5 rounded-md px-2 transition-colors duration-[120ms]",
+          // #193: the WHOLE row is the click + hover target (Notion-style) — w-full so the empty
+          // space past the label is clickable too (was content-width → only the text reacted), with
+          // an 8px-radius (rounded-lg) hover/selected fill spanning the full row. px gives label room.
+          "group flex w-full cursor-pointer select-none items-center gap-1.5 rounded-lg px-2 transition-colors duration-[120ms]",
           selected
             ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium"
             : "hover:bg-panel-2",
@@ -175,7 +176,7 @@ export function Sidebar() {
         <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{d.name || t("common.untitled")}</span>
         {/* 3-state: Draft (never published) / Unpublished changes / clean (nothing). */}
         {!d.published ? (
-          <span className="mx-1 flex-none rounded border border-border px-[5px] py-0.5 text-[10px] leading-none text-fg-dim" data-testid="tree-draft-badge" title={t("sidebar.draftTitle")}>{t("sidebar.draft")}</span>
+          <span className="mx-1 flex-none rounded border border-border px-[5px] py-0.5 text-[length:var(--text-xs)] leading-none text-fg-dim" data-testid="tree-draft-badge" title={t("sidebar.draftTitle")}>{t("sidebar.draft")}</span>
         ) : d.unpublished ? (
           <span className="mx-1 h-1.5 w-1.5 flex-none rounded-full bg-[var(--accent)]" data-testid="unpublished-dot" title={t("sidebar.unpublished")} aria-label={t("sidebar.unpublished")} />
         ) : null}
@@ -198,7 +199,7 @@ export function Sidebar() {
 
   const headerBtn = "flex cursor-pointer rounded-sm p-1 text-fg-dim transition-colors duration-[120ms] hover:bg-panel-2 hover:text-foreground";
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden text-[15px]" data-testid="sidebar">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden text-[length:var(--text-ui)]" data-testid="sidebar">
       {/* Space switcher — the space is a separate layer, not a tree root. */}
       <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
         <DropdownMenu modal={false}>
