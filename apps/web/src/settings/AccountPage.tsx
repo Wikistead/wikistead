@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Navigate, Outlet, Route } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { IdCard, SquarePen, Palette } from "lucide-react";
 import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useSession } from "../session/SessionProvider";
@@ -22,10 +23,28 @@ import { SettingsShell, type SettingsTab } from "./SettingsShell";
 function useAccountTabs(): SettingsTab[] {
   const { t } = useTranslation();
   return [
-    { key: "profile", label: t("accountNav.profile"), to: "/settings/account", end: true },
-    { key: "editor", label: t("accountNav.editor"), to: "/settings/account/editor" },
-    { key: "theme", label: t("accountNav.theme"), to: "/settings/account/theme" },
+    { key: "profile", label: t("accountNav.profile"), to: "/settings/account", end: true, icon: IdCard },
+    { key: "editor", label: t("accountNav.editor"), to: "/settings/account/editor", icon: SquarePen },
+    { key: "theme", label: t("accountNav.theme"), to: "/settings/account/theme", icon: Palette },
   ];
+}
+
+// #194 (A / ADR-052): a settings page shell — a centered column with a page heading + description,
+// and each setting grouped into a card (surface-2, hairline border, 12px radius) so the screen reads
+// structured (Linear-style) rather than bare full-width rows. Token-driven; visual only.
+function SettingsPage({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+  return (
+    <div className="mx-auto max-w-[560px] px-6 py-8">
+      <h2 className="mt-0 mb-1 text-[length:var(--text-xl)] font-medium text-foreground">{title}</h2>
+      {description && <p className="mb-6 text-[length:var(--text-ui)] text-fg-dim">{description}</p>}
+      <div className="flex flex-col gap-4">{children}</div>
+    </div>
+  );
+}
+function SettingsCard({ children, testid }: { children: ReactNode; testid?: string }) {
+  return (
+    <section className="rounded-xl border border-border bg-panel-2 p-5" data-testid={testid}>{children}</section>
+  );
 }
 
 const fileToBase64 = (file: File): Promise<string> =>
@@ -69,10 +88,9 @@ function ProfileTab() {
   };
 
   return (
-    <div className="max-w-[560px] px-6 py-8" data-testid="account-profile">
-      <h2 className="mt-0 text-foreground">{t("accountNav.profile")}</h2>
-
-      <section className="mb-8">
+    <div data-testid="account-profile">
+    <SettingsPage title={t("accountNav.profile")} description={t("account.profileHint")}>
+      <SettingsCard>
         <label className="mb-1 block text-sm font-medium">{t("account.displayName")}</label>
         <p className="mb-2 text-xs text-fg-dim">{t("account.displayNameHint")}</p>
         <div className="flex items-center gap-2">
@@ -89,9 +107,9 @@ function ProfileTab() {
             {t("account.resetToIdp", { name: settings.data?.oidcDisplayName ?? sub ?? "" })}
           </button>
         )}
-      </section>
+      </SettingsCard>
 
-      <section>
+      <SettingsCard>
         <label className="mb-1 block text-sm font-medium">{t("account.avatar")}</label>
         <p className="mb-2 text-xs text-fg-dim">{t("account.avatarHint")}</p>
         <div className="flex items-center gap-3">
@@ -113,7 +131,8 @@ function ProfileTab() {
             </Button>
           )}
         </div>
-      </section>
+      </SettingsCard>
+    </SettingsPage>
     </div>
   );
 }
@@ -177,8 +196,9 @@ function EditorTab() {
   const saveKb = (id: string, chord: string) => update.mutate({ keybindings: { ...kb, [id]: chord } });
   const resetKb = (id: string) => { const next = { ...kb }; delete next[id]; update.mutate({ keybindings: next }); };
   return (
-    <div className="max-w-[560px] px-6 py-8" data-testid="account-editor">
-      <h2 className="mt-0 text-foreground">{t("accountNav.editor")}</h2>
+    <div data-testid="account-editor">
+    <SettingsPage title={t("accountNav.editor")} description={t("account.editorHint")}>
+      <SettingsCard>
       <label className="mb-1 block text-sm font-medium">{t("account.keymap")}</label>
       <p className="mb-2 text-xs text-fg-dim">{t("account.keymapHint")}</p>
       <div className="flex flex-col gap-2">
@@ -195,8 +215,9 @@ function EditorTab() {
           </Button>
         ))}
       </div>
+      </SettingsCard>
 
-      <section className="mt-8">
+      <SettingsCard>
         {/* ADR-056 / #164: startup display mode (live/source/local), orthogonal to the keymap. */}
         <label className="mb-1 block text-sm font-medium">{t("account.displayMode")}</label>
         <p className="mb-2 text-xs text-fg-dim">{t("account.displayModeHint")}</p>
@@ -214,9 +235,9 @@ function EditorTab() {
             </Button>
           ))}
         </div>
-      </section>
+      </SettingsCard>
 
-      <section className="mt-8">
+      <SettingsCard>
         {/* #190 / ADR-090: personal body-font override (device-local). "locale" follows the UI
             language default (JP=UDEV Gothic, EN=Wikistead Mono); the others force a face. */}
         <label className="mb-1 block text-sm font-medium">{t("account.bodyFont")}</label>
@@ -235,15 +256,16 @@ function EditorTab() {
             </Button>
           ))}
         </div>
-      </section>
+      </SettingsCard>
 
-      <section className="mt-8">
+      <SettingsCard>
         <label className="mb-1 block text-sm font-medium">{t("account.shortcuts")}</label>
         <p className="mb-2 text-xs text-fg-dim">{t("account.shortcutsHint")}</p>
         <div className="flex flex-col gap-2">
           {COMMANDS.map((c) => <ShortcutRow key={c.id} cmd={c} keybindings={kb} onSave={saveKb} onReset={resetKb} />)}
         </div>
-      </section>
+      </SettingsCard>
+    </SettingsPage>
     </div>
   );
 }
@@ -252,9 +274,9 @@ function ThemeTab() {
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme(); // reuse the existing device-local control
   return (
-    <div className="max-w-[560px] px-6 py-8" data-testid="account-theme">
-      <h2 className="mt-0 text-foreground">{t("accountNav.theme")}</h2>
-      <p className="mb-2 text-xs text-fg-dim">{t("account.themeHint")}</p>
+    <div data-testid="account-theme">
+    <SettingsPage title={t("accountNav.theme")} description={t("account.themeHint")}>
+      <SettingsCard>
       <div className="flex gap-2">
         {(["light", "dark", "system"] as const).map((th: Theme) => (
           <Button
@@ -268,6 +290,8 @@ function ThemeTab() {
           </Button>
         ))}
       </div>
+      </SettingsCard>
+    </SettingsPage>
     </div>
   );
 }
