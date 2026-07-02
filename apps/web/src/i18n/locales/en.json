@@ -12,7 +12,6 @@
   "toc": {
     "title": "On this page",
     "empty": "No headings yet",
-    "depthTitle": "Show headings up to H{{n}}",
     "toggle": "Table of contents"
   },
   "collab": {
@@ -99,7 +98,16 @@
     "bodyFontHint": "The prose face in the editor and reading view (this device). Follow language uses the locale default (Japanese = UDEV Gothic, English = Wikistead Mono). Code always uses the coding face.",
     "bodyFont_locale": "Follow language",
     "bodyFont_udev": "UDEV Gothic (JP grid)",
-    "bodyFont_mono": "Wikistead Mono (coding)"
+    "bodyFont_mono": "Wikistead Mono (coding)",
+    "toc": "Table of contents",
+    "tocHint": "Show an outline of the page's headings.",
+    "toc_on": "Shown",
+    "toc_off": "Hidden",
+    "tocDepth": "Outline depth",
+    "tocDepthHint": "How many heading levels the outline includes.",
+    "tocDepth_1": "H1 only",
+    "tocDepth_3": "H1–H3",
+    "tocDepth_6": "All headings"
   },
   "settings": {
     "back": "Back to app",

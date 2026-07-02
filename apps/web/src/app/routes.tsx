@@ -206,12 +206,18 @@ function PageRoute() {
   const anchorGetterRef = useRef<AnchorGetter | null>(null);
   // #192 / ADR-091: table of contents. Headings + active section come from the editor (stable
   // callbacks so <Editor>'s memo isn't defeated); the rail's clicks jump via tocJumpRef.
-  const { on: tocOn, setOn: setTocOn, depth: tocDepth, setDepth: setTocDepth } = useTocPref();
+  const { on: tocOn, setOn: setTocOn, depth: tocDepth } = useTocPref();
   const [headings, setHeadings] = useState<Heading[]>([]);
   const [activeHeading, setActiveHeading] = useState<number | null>(null);
   const tocJumpRef = useRef<((from: number) => void) | null>(null);
   const onHeadings = useCallback((h: Heading[]) => setHeadings(h), []);
   const onActiveHeading = useCallback((f: number | null) => setActiveHeading(f), []);
+  // #192: scroll-activity fan-out — the editor fires onScrollActivity on each scroll; the narrow-screen
+  // TOC overlay subscribes to show itself while scrolling. A ref'd Set (not state) so scrolling never
+  // re-renders the route; the callbacks are stable so <Editor>'s memo holds.
+  const tocScrollListeners = useRef(new Set<() => void>());
+  const onScrollActivity = useCallback(() => { tocScrollListeners.current.forEach((fn) => fn()); }, []);
+  const subscribeTocScroll = useCallback((fn: () => void) => { tocScrollListeners.current.add(fn); return () => { tocScrollListeners.current.delete(fn); }; }, []);
   // External dirty store (instant Publish enable) — read only by PageToolbar, written
   // only by the editor's Y.Text observer; never re-renders PageRoute/Editor.
   const dirtySig = useRef(createDirtySignal()).current;
@@ -372,11 +378,14 @@ function PageRoute() {
           {isDesktop && <div className="relative z-10 mx-auto flex w-full max-w-[740px] justify-end px-6"><PageStatus {...controls} /></div>}
           {/* Editor area is the positioning context for the floating ACTIONS/VIM groups. */}
           <div className="relative" style={{ flex: 1, minHeight: 0 }}>
-            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} tocJumpRef={tocJumpRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
+            {/* #192: narrow screens get the TOC as a scroll-triggered blurred overlay over the content. */}
+            {!isDesktop && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="overlay" subscribeScroll={subscribeTocScroll} />}
           </div>
         </div>
-        {isDesktop && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} onSetDepth={setTocDepth} onClose={() => setTocOn(false)} />}
+        {/* #192: wide screens get the always-on rail that blends into the background beside the content. */}
+        {isDesktop && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="rail" />}
         {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={page?.canComment ?? capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} />}
         {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} onCompare={openDiff} onClose={closeHistory} />}
         {pageId && attachmentsOpen && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} onClose={closeAttachments} />}
@@ -517,12 +526,15 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
   const [commentsOpen, setCommentsOpen] = useState(false);
   const anchorGetterRef = useRef<AnchorGetter | null>(null);
   // #192 / ADR-091: TOC for guests too (device-local pref).
-  const { on: tocOn, setOn: setTocOn, depth: tocDepth, setDepth: setTocDepth } = useTocPref();
+  const { on: tocOn, setOn: setTocOn, depth: tocDepth } = useTocPref();
   const [headings, setHeadings] = useState<Heading[]>([]);
   const [activeHeading, setActiveHeading] = useState<number | null>(null);
   const tocJumpRef = useRef<((from: number) => void) | null>(null);
   const onHeadings = useCallback((h: Heading[]) => setHeadings(h), []);
   const onActiveHeading = useCallback((f: number | null) => setActiveHeading(f), []);
+  const tocScrollListeners = useRef(new Set<() => void>()); // #192 scroll fan-out (see PageRoute)
+  const onScrollActivity = useCallback(() => { tocScrollListeners.current.forEach((fn) => fn()); }, []);
+  const subscribeTocScroll = useCallback((fn: () => void) => { tocScrollListeners.current.add(fn); return () => { tocScrollListeners.current.delete(fn); }; }, []);
   const canEdit = capability === "edit";
   const [editing, setEditing] = useState(false);
   const [vim, toggleVim] = useVimPref();
@@ -581,11 +593,12 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
         )}
         <div className="relative flex min-h-0" style={{ flex: 1 }}>
           <div className="relative min-w-0 flex-1">
-            <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} tocJumpRef={tocJumpRef} />
+            <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} />
             <div className="pointer-events-none absolute right-3 top-3 z-10"><PageStatus {...controls} /></div>
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
+            {!isDesktop && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="overlay" subscribeScroll={subscribeTocScroll} />}
           </div>
-          {isDesktop && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} onSetDepth={setTocDepth} onClose={() => setTocOn(false)} />}
+          {isDesktop && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="rail" />}
           {commentsOpen && <CommentsPanel pageId={pageId} canComment={canComment} anchorGetterRef={anchorGetterRef} onClose={() => setCommentsOpen(false)} />}
         </div>
       </div>
