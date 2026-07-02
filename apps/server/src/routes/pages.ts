@@ -19,7 +19,7 @@ import { renderPlantuml } from '../plantuml-render.js'
 import { assertPageViewable } from '../page-view-gate.js'
 
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean }
-export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean }
+export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean; canComment?: boolean }
 function toPage(r: PageRow): Page {
   // hasUnpublishedChanges + published are only present when the SELECT included the
   // columns (listPages); together they drive the sidebar's 3-state badge
@@ -210,7 +210,12 @@ export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: 
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
   // canManage gates the permission UI (server re-checks on the access endpoints).
   const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: args.pageId })
-  return { ...toPage(row), capability: access.readOnly ? 'view' : 'edit', canManage }
+  // canComment gates the comment COMPOSER (#100): true for edit, an explicit comment grant, OR a
+  // viewer when the space's comment_open is on (view_base and comment_open). view/edit is capability;
+  // comment is a distinct capability the UI needs to show the composer to comment-capable viewers.
+  // Convenience only — the comment routes re-check FGA (the fortress), so a forged composer can't post.
+  const canComment = await check(fga, `user:${args.userId}`, 'comment', { type: 'page', id: args.pageId })
+  return { ...toPage(row), capability: access.readOnly ? 'view' : 'edit', canManage, canComment }
 }
 
 // Update title. Outbox entry written in the same tx as the UPDATE.
@@ -409,7 +414,7 @@ export async function getPublished(
   // subject is the FGA principal ("user:<sub>" | "share_link:<id>"); guests pass a
   // context so the share_link's non_expired condition is evaluated (expired = denied).
   args: { pageId: string; subject: string; context?: { current_time: string } },
-): Promise<{ publishedMd: string | null; publishedAt: Date | null; hasUnpublishedChanges: boolean }> {
+): Promise<{ publishedMd: string | null; publishedAt: Date | null; hasUnpublishedChanges: boolean; canComment: boolean }> {
   const canView = await check(fga, args.subject, 'view', { type: 'page', id: args.pageId }, args.context)
   if (!canView) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
   const [row] = await db.sql<[{ published_md: string | null; published_at: Date | null; ydoc: Buffer | null }]>`
@@ -417,7 +422,11 @@ export async function getPublished(
   `
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const hasUnpublishedChanges = decodeYdocContent(row.ydoc) !== (row.published_md ?? '')
-  return { publishedMd: row.published_md, publishedAt: row.published_at, hasUnpublishedChanges }
+  // canComment (#100): does THIS principal (member or view-guest) have the comment capability on the
+  // page (comment_open on + view, an explicit comment grant, or edit)? The guest page uses it to show
+  // the comment composer. Convenience only — the comment routes re-check FGA (fortress).
+  const canComment = await check(fga, args.subject, 'comment', { type: 'page', id: args.pageId }, args.context)
+  return { publishedMd: row.published_md, publishedAt: row.published_at, hasUnpublishedChanges, canComment }
 }
 
 // ── per-page access grant/revoke/list (Phase 4b) ────────────────────────────

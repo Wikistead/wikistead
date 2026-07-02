@@ -368,6 +368,7 @@ export interface PageMeta {
   capability: "view" | "edit";
   hasUnpublishedChanges?: boolean;
   canManage?: boolean; // gates the per-page permission UI (server re-checks)
+  canComment?: boolean; // #100: comment capability (comment_open/grant/edit) — gates the comment composer
 }
 
 // ── per-page access (Phase 4) ──────────────────────────────────────────────

@@ -363,7 +363,7 @@ function PageRoute() {
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
           </div>
         </div>
-        {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} />}
+        {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={page?.canComment ?? capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} />}
         {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} onCompare={openDiff} onClose={closeHistory} />}
         {pageId && attachmentsOpen && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} onClose={closeAttachments} />}
       </div>
@@ -496,6 +496,12 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
   const [guest] = useState(() => ({ name: t("collab.guest"), color: colorFromString(`guest-${Math.random()}`), picture: null }));
   const [publishedMd, setPublishedMd] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
+  // #100: guest commenting — canComment (comment_open on the page) decides the composer; comments are
+  // page-level for a guest (no inline anchoring — the guest editor isn't wired for anchors). The
+  // panel reads/posts with the guest token (routes are guest:'view', re-checked by FGA).
+  const [canComment, setCanComment] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const anchorGetterRef = useRef<AnchorGetter | null>(null);
   const canEdit = capability === "edit";
   const [editing, setEditing] = useState(false);
   const [vim, toggleVim] = useVimPref();
@@ -505,8 +511,8 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
   const isDesktop = useMediaQuery("(min-width: 768px)");
 
   const reloadPublished = useCallback(() => {
-    apiFetch<{ publishedMd: string | null }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
-      .then((r) => setPublishedMd(r?.publishedMd ?? null))
+    apiFetch<{ publishedMd: string | null; canComment?: boolean }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
+      .then((r) => { setPublishedMd(r?.publishedMd ?? null); setCanComment(!!r?.canComment); })
       .catch(() => { /* denied/expired → empty view */ });
   }, [pageId, token]);
   useEffect(() => { reloadPublished(); }, [reloadPublished]);
@@ -537,6 +543,10 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
     canPublish: true,
     onPublish: canEdit ? () => void onPublish() : undefined,
     publishing,
+    // #100: comments toggle — shown to any guest who can VIEW (reading is guest:'view'); the composer
+    // inside the panel is gated on canComment (comment_open). openComments count is member-only chrome.
+    commentsOpen,
+    onToggleComments: () => setCommentsOpen((o) => !o),
   };
   return (
     <AppShell>
@@ -546,9 +556,13 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
             ← {t("share.backToSpace")}
           </button>
         )}
-        <div className="relative" style={{ flex: 1, minHeight: 0 }}>
-          <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} />
-          {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
+        <div className="relative flex min-h-0" style={{ flex: 1 }}>
+          <div className="relative min-w-0 flex-1">
+            <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} />
+            <div className="pointer-events-none absolute right-3 top-3 z-10"><PageStatus {...controls} /></div>
+            {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
+          </div>
+          {commentsOpen && <CommentsPanel pageId={pageId} canComment={canComment} anchorGetterRef={anchorGetterRef} onClose={() => setCommentsOpen(false)} />}
         </div>
       </div>
     </AppShell>
