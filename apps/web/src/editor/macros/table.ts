@@ -1,4 +1,5 @@
 import type { DirectiveMacro, MacroTier, MacroLevel, MacroModalEditor, InnerEditHost, InlineController } from "./registry";
+import { asMacroSource } from "./registry";
 import { parseHtml, styleToCss, parseTableSource, toHtml, toPipe, representableAsPipe, type Grid } from "./table-model";
 import { setCellText } from "./table-cell-dom";
 import { tableInlineEditor } from "../live-preview/table-edit";
@@ -19,7 +20,7 @@ export const tableTier: MacroTier = {
   },
   toLevel(source, level) {
     const grid = parseTableSource(source);
-    return level.id === PIPE.id ? toPipe(grid) : ":::table\n" + toHtml(grid) + "\n:::";
+    return asMacroSource(level.id === PIPE.id ? toPipe(grid) : ":::table\n" + toHtml(grid) + "\n:::");
   },
 };
 

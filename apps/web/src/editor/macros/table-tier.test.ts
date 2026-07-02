@@ -2,14 +2,15 @@ import { describe, it, expect } from "vitest";
 import { tableTier } from "./table";
 import { applyTier } from "../live-preview/macro-edit";
 import { demoteToCapLevel } from "./tier-cap";
+import { asMacroSource } from "./registry";
 
 // ADR-025 step 3: the table MacroTier (pipe ⟷ :::table) + the host's auto-demote (applyTier).
 // The tier IS the promote/demote rule, now declared as data the host applies — the editor
 // hands over a lossless :::table source and the host levels it.
 
-const SIMPLE_PIPE = "| A | B |\n| --- | --- |\n| 1 | 2 |";
-const MERGED = ':::table\n<table><tr><td colspan="2">X</td></tr><tr><td>a</td><td>b</td></tr></table>\n:::';
-const STYLED = ':::table\n<table><tr><td style="background:#fee">x</td><td>y</td></tr></table>\n:::';
+const SIMPLE_PIPE = asMacroSource("| A | B |\n| --- | --- |\n| 1 | 2 |");
+const MERGED = asMacroSource(':::table\n<table><tr><td colspan="2">X</td></tr><tr><td>a</td><td>b</td></tr></table>\n:::');
+const STYLED = asMacroSource(':::table\n<table><tr><td style="background:#fee">x</td><td>y</td></tr></table>\n:::');
 
 const [PIPE, HTML] = tableTier.levels;
 
@@ -41,7 +42,7 @@ describe("tableTier", () => {
 
 describe("applyTier (host auto-demote)", () => {
   it("demotes a lossless :::table of a simple grid down to a pipe table", () => {
-    const lossless = ':::table\n<table><tr><td>A</td><td>B</td></tr><tr><td>1</td><td>2</td></tr></table>\n:::';
+    const lossless = asMacroSource(':::table\n<table><tr><td>A</td><td>B</td></tr><tr><td>1</td><td>2</td></tr></table>\n:::');
     const out = applyTier(tableTier, lossless);
     expect(out).not.toContain(":::table"); // demoted to the lowest level (open format)
     expect(out).toContain("| A | B |");

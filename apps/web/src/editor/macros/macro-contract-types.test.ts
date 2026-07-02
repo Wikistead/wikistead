@@ -1,7 +1,17 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from "vitest";
-import type { DirectiveMacro, MacroContext, InnerEditHost } from "./registry";
+import type { DirectiveMacro, MacroContext, InnerEditHost, MacroSource } from "./registry";
+import { asMacroSource } from "./registry";
 import { unsafeHtml } from "./safe-html";
+
+// ADR-045 / #88 (item 3) — MacroSource is a NOMINAL brand: a plain string cannot flow into a
+// MacroSource slot at the host↔macro boundary without going through asMacroSource. If the brand is
+// removed (MacroSource aliased back to string), the @ts-expect-error stops erroring and typecheck
+// fails. A branded value is still usable AS a string (it extends string).
+// @ts-expect-error — a raw string is not assignable to MacroSource (must brand via asMacroSource).
+const _rawNotSource: MacroSource = "plain string";
+const _branded: MacroSource = asMacroSource("branded"); // OK: the one producer
+const _sourceIsString: string = _branded; // OK: MacroSource extends string (usable everywhere a string is)
 
 // ADR-045 / #88 (item 4) — TYPE-LEVEL assertions that the macro host-API stays NARROW (ADR-024: a
 // macro sees {theme} ONLY; an inline editor sees the small InnerEditHost — never EditorView/
@@ -69,5 +79,8 @@ describe("DirectiveMacro discriminated union (ADR-045 #88 item 2)", () => {
   });
   it("keeps the macro host-API narrow (MacroContext={theme}, InnerEditHost small) — see Exact<> checks", () => {
     expect([_ctxKeysExact, _hostKeysExact, _noView, _hostNoView].every((v) => v === true)).toBe(true);
+  });
+  it("brands MacroSource nominally (raw string rejected, branded value is still a string)", () => {
+    expect([_rawNotSource, _branded, _sourceIsString].every((v) => typeof v === "string")).toBe(true);
   });
 });

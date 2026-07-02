@@ -1,5 +1,6 @@
 import { mergeRect, unmergeAt, toHtml, styleToCss, insertColAt, insertRowAt, deleteColAt, deleteRowAt, parseTableSource, type Grid, type CellStyle } from "../macros/table-model";
 import type { InnerEditHost, InlineEditor, InlineController } from "../macros/registry";
+import { asMacroSource } from "../macros/registry";
 import { setCellText, cellElToText, insertBrAtCaret, insertTextAtCaret, stripZeroWidth } from "../macros/table-cell-dom";
 
 // Spreadsheet-style column label: A, B … Z, AA, AB … (so the handle band reads like a
@@ -348,7 +349,7 @@ export const tableInlineEditor: InlineEditor = {
       // span/style/complex-header free. The editor no longer decides pipe-vs-:::table.
       // STAY in edit mode: host.replaceSource re-points render-active at the rewritten range
       // (per-op LWW; the user exits only via Done/Esc — ADR-022 review #2).
-      host.replaceSource(":::table\n" + toHtml(next) + "\n:::");
+      host.replaceSource(asMacroSource(":::table\n" + toHtml(next) + "\n:::"));
     };
     // Show/position the floating toolbar above the first selected cell; hide when nothing
     // is selected (#1 — contextual, not always-on).
