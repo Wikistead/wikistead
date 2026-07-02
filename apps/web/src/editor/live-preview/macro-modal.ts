@@ -2,6 +2,7 @@ import { EditorView } from "@codemirror/view";
 import type { FenceMacro, DirectiveMacro, MacroTheme } from "../macros/registry";
 import { macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
 import { autoDemote } from "../macros/tier-cap";
+import { ephemeralCollab } from "./decorations";
 import { tableModalEditor, tableTier } from "../macros/table";
 
 // Rich-edit a macro block in a modal (ADR-022 Part 3 / #86 for the table). The overlay is plain
@@ -94,9 +95,14 @@ export function openMacroModal(
     if (macro.tier) source = autoDemote(macro.tier, source);
     view.dispatch({ changes: { from: cur.from, to: cur.to, insert: source } });
   });
-  void macro.richEditUI.editor.mount(frame.content, originalBody, { theme }).then((c) => {
+  // #92 / ADR-093: for a collab-capable modal (excalidraw), open the host's ephemeral room (keyed by the
+  // block's anchor = its from-offset, consistent across concurrent editors of the same block state) and
+  // hand the session to mount. The macro's own API stays {theme}; collab is this separate host channel.
+  const collabFactory = macro.richEditUI.collab ? view.state.facet(ephemeralCollab) : null;
+  const session = collabFactory ? collabFactory(String(start.from)) : undefined;
+  void macro.richEditUI.editor.mount(frame.content, originalBody, { theme }, session).then((c) => {
     getBody = () => c.getBody();
-    frame.onMounted(() => c.destroy());
+    frame.onMounted(() => { c.destroy(); session?.destroy(); });
   });
 }
 

@@ -66,6 +66,13 @@ export function readSceneElements(doc: Y.Doc): ExElement[] {
   return out;
 }
 
+// ALL elements in the map INCLUDING isDeleted tombstones — for feeding Excalidraw's updateScene, which
+// needs the deleted elements (isDeleted:true) present to reconcile a remote deletion (readSceneElements
+// drops them for the clean fence flush, but the live scene needs them to converge).
+export function allElements(doc: Y.Doc): ExElement[] {
+  return [...elementsMap(doc).values()];
+}
+
 // Merge two element arrays by the version rule (used to prove convergence + seed/flush). Order-
 // independent: merge(a,b) and merge(b,a) yield the same element set.
 export function reconcile(a: readonly ExElement[], b: readonly ExElement[]): ExElement[] {

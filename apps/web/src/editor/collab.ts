@@ -38,3 +38,31 @@ export function connect(opts: { url: string; docName: string; token: string }) {
 
   return { doc, provider, socket, ytext, disconnect };
 }
+
+// #92 / ADR-093: an EPHEMERAL collab session for level-2 Excalidraw co-editing. Connects to the
+// page's ephemeral room `t:<tenant>:p:<pageId>:x:<anchor>` (the collab server admits it with the same
+// page-EDIT authority and NEVER persists it — the scene is flushed to the fence on close). Returns a
+// fresh Y.Doc (scene lives in a Y.Map, not the page Y.Text) + awareness (who's drawing) + a destroy().
+// This is a HOST-provided seam (the excalidraw macro receives it, keeping MacroContext={theme} narrow).
+export interface EphemeralSession {
+  doc: Y.Doc;
+  awareness: HocuspocusProvider["awareness"];
+  destroy: () => void;
+}
+export function connectEphemeral(opts: { url: string; docName: string; anchor: string; token: string }): EphemeralSession {
+  const doc = new Y.Doc();
+  const socket = new HocuspocusProviderWebsocket({ url: opts.url });
+  const provider = new HocuspocusProvider({
+    websocketProvider: socket,
+    name: `${opts.docName}:x:${opts.anchor}`, // the ephemeral room (server: parseDocName ⇒ ephemeral)
+    document: doc,
+    token: opts.token,
+  });
+  const destroy = () => {
+    try { provider.awareness?.setLocalState(null); } catch { /* gone */ }
+    provider.destroy();
+    socket.destroy();
+    doc.destroy();
+  };
+  return { doc, awareness: provider.awareness, destroy };
+}

@@ -215,6 +215,15 @@ const noopDiagramRenderer: DiagramRenderer = async () => null;
 export const diagramRenderer = Facet.define<DiagramRenderer, DiagramRenderer>({
   combine: (values) => values[0] ?? noopDiagramRenderer,
 });
+
+// #92 / ADR-093: host-provided EPHEMERAL collab seam for level-2 macro co-editing (Excalidraw). The
+// macro's own host-API stays {theme} (ADR-023 trust boundary is NOT widened); collab is a SEPARATE,
+// host-only channel injected here and handed to a collab-capable modal by openMacroModal. null ⇒ no
+// collab (single-user modal, the M1 behaviour). The factory opens a room keyed by the macro's anchor.
+export type EphemeralCollabFactory = (anchor: string) => import("../macros/registry").HostEphemeralCollab;
+export const ephemeralCollab = Facet.define<EphemeralCollabFactory, EphemeralCollabFactory | null>({
+  combine: (values) => (values.length ? values[values.length - 1]! : null),
+});
 // Macros whose body is rendered by the host (not bundled / not the macro). Others ignore the renderer.
 const HOST_RENDERABLE = new Set(["plantuml"]);
 
