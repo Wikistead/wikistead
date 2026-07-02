@@ -27,10 +27,17 @@ export interface AuthResult {
   readOnly: boolean;
 }
 
-export function parseDocName(name: string): { tenantId: string; pageId: string } {
+// #92 / ADR-093: an EPHEMERAL room for level-2 Excalidraw co-editing is `t:<tenant>:p:<pageId>:x:<anchor>`.
+// It resolves to the SAME page as the normal room but is never persisted (index.ts) and requires EDIT
+// (co-editing the drawing = editing the page). pageIds are colon-free uuids, so the `:x:` suffix is an
+// unambiguous discriminant; the ephemeral pattern is tested FIRST (the page pattern's greedy tail would
+// otherwise swallow it).
+export function parseDocName(name: string): { tenantId: string; pageId: string; ephemeral: boolean } {
+  const ex = /^t:(.+?):p:(.+?):x:.+$/.exec(name);
+  if (ex) return { tenantId: ex[1], pageId: ex[2], ephemeral: true };
   const m = /^t:(.+?):p:(.+)$/.exec(name);
   if (!m) throw new Error(`bad document name: ${name}`);
-  return { tenantId: m[1], pageId: m[2] };
+  return { tenantId: m[1], pageId: m[2], ephemeral: false };
 }
 
 function assert(cond: unknown, msg: string): asserts cond {
@@ -39,7 +46,7 @@ function assert(cond: unknown, msg: string): asserts cond {
 
 export async function authenticate(args: { token: string; documentName: string }): Promise<AuthResult> {
   // Never trust documentName — re-derive tenant + page and authorize against them.
-  const { tenantId, pageId } = parseDocName(args.documentName);
+  const { tenantId, pageId, ephemeral } = parseDocName(args.documentName);
   const token = args.token;
 
   // Dev-only bypass (disabled in production at the env level).
@@ -60,19 +67,22 @@ export async function authenticate(args: { token: string; documentName: string }
       assert(c.resource.type === "space", "unsupported resource");
     }
     const capability = c.resource.type === "space" ? "view" : c.capability;
-    // JWT asserts intent; OpenFGA asserts authority (revoked/expired links fail here). For a
-    // space token this resolves via viewer-from-space, granting only published pages in S and
-    // never a page in another space / a draft / after revoke. In the collab room only EDIT is
-    // writable; a view OR comment guest joins read-only (a comment guest comments via the HTTP
-    // API, not by editing the doc) — so the FGA check is 'edit' only for an edit token.
+    // #92: an EPHEMERAL Excalidraw room is co-editing → it requires EDIT (a view/comment guest cannot
+    // join it). Otherwise: only EDIT is writable; a view OR comment guest joins read-only (a comment
+    // guest comments via the HTTP API, not by editing the doc) — so the FGA check is 'edit' for an edit
+    // token (or any ephemeral join), else 'view'. JWT asserts intent; OpenFGA asserts authority
+    // (revoked/expired links fail here). A space token resolves via viewer-from-space (published pages
+    // in S only, never another space / a draft / after revoke) and is view-only (so never ephemeral).
+    const needEdit = ephemeral || capability === "edit";
     const allowed = await check(
       fgaClient,
       `share_link:${c.shareLinkId}`,
-      capability === "edit" ? "edit" : "view",
+      needEdit ? "edit" : "view",
       { type: "page", id: pageId },
       { current_time: new Date().toISOString() },
     );
     assert(allowed, "share_link access denied or expired");
+    if (ephemeral) assert(capability === "edit", "ephemeral room requires an edit link");
     return {
       principal: { kind: "guest", tenantId, shareLinkId: c.shareLinkId, capability },
       readOnly: capability !== "edit",
@@ -86,6 +96,7 @@ export async function authenticate(args: { token: string; documentName: string }
     assert(c.tenantId === tenantId, "tenant mismatch");
     const access = await checkMemberAccess(fgaClient, c.sub, { type: "page", id: pageId });
     assert(access !== null, "member has no access to this page");
+    if (ephemeral) assert(!access.readOnly, "ephemeral room requires edit"); // #92: co-editing = edit
     return {
       principal: { kind: "member", tenantId, userId: c.sub, groups: c.groups },
       readOnly: access.readOnly,
@@ -96,5 +107,6 @@ export async function authenticate(args: { token: string; documentName: string }
   const m = await verifyMember(token);
   const access = await checkMemberAccess(fgaClient, m.sub, { type: "page", id: pageId });
   assert(access !== null, "member has no access to this page");
+  if (ephemeral) assert(!access.readOnly, "ephemeral room requires edit"); // #92: co-editing = edit
   return { principal: { kind: "member", tenantId, userId: m.sub, groups: m.groups }, readOnly: access.readOnly };
 }

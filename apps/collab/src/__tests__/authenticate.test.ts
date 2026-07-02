@@ -157,3 +157,33 @@ describe("collab authenticate — space share-link token (#104)", () => {
     }
   });
 });
+
+// #92 / ADR-093: the EPHEMERAL Excalidraw room (t:<tenant>:p:<pageId>:x:<anchor>). Co-editing a drawing
+// is editing the page → the room REQUIRES edit (a view-only principal is denied), reuses the page's FGA
+// authority, and enforces tenant isolation exactly like the normal room.
+describe("collab authenticate — ephemeral Excalidraw room (#92)", () => {
+  const EX = "t:tenant_dev:p:demo:x:anchor-1"; // ephemeral room for demo's excalidraw macro
+  const VO = "collab-exview-92";
+  const voTuple = { user: `user:${VO}`, relation: "view_base", object: "page:demo" };
+
+  it("admits an EDIT member (co-editing = edit; dev-user manages demo_space)", async () => {
+    const token = await mintMemberCollabToken(cfg, { tenantId: "tenant_dev", sub: "dev-user", groups: [] });
+    const r = await authenticate({ token, documentName: EX });
+    expect(r.readOnly).toBe(false);
+  });
+
+  it("DENIES a view-only member (the ephemeral room requires edit)", async () => {
+    await writeTuples(fgaClient, [voTuple]);
+    try {
+      const token = await mintMemberCollabToken(cfg, { tenantId: "tenant_dev", sub: VO, groups: [] });
+      await expect(authenticate({ token, documentName: EX })).rejects.toThrow(/edit/);
+    } finally {
+      await deleteTuples(fgaClient, [voTuple]).catch(() => {});
+    }
+  });
+
+  it("enforces tenant isolation for the ephemeral room (cross-tenant rejected)", async () => {
+    const token = await mintMemberCollabToken(cfg, { tenantId: "tenant_acme", sub: "dev-user", groups: [] });
+    await expect(authenticate({ token, documentName: EX })).rejects.toThrow(/tenant mismatch/);
+  });
+});
