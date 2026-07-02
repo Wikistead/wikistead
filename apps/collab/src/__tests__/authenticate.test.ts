@@ -5,7 +5,7 @@ import { describe, it, expect, afterAll } from "vitest";
 import { mintMemberCollabToken, mintGuestToken } from "@wikistead/auth";
 import type { Capability } from "@wikistead/types";
 import { fgaClient, writeTuples, deleteTuples } from "@wikistead/authz";
-import { authenticate } from "../authenticate.js";
+import { authenticate, parseDocName } from "../authenticate.js";
 
 const cfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 };
 const DOC = "t:tenant_dev:p:demo"; // dev-user is manager of demo_space (fga:seed)
@@ -185,5 +185,27 @@ describe("collab authenticate — ephemeral Excalidraw room (#92)", () => {
   it("enforces tenant isolation for the ephemeral room (cross-tenant rejected)", async () => {
     const token = await mintMemberCollabToken(cfg, { tenantId: "tenant_acme", sub: "dev-user", groups: [] });
     await expect(authenticate({ token, documentName: EX })).rejects.toThrow(/tenant mismatch/);
+  });
+});
+
+// #92 / ADR-093: parseDocName's `ephemeral` discriminant is the foundation of BOTH the auth gate
+// (ephemeral ⇒ requires edit) and the persistence skip (ephemeral ⇒ fetch null / store no-op). It must
+// tell a normal page room from an ephemeral one and reject garbage — colon-free uuids make `:x:`
+// unambiguous, and the ephemeral pattern is matched before the page pattern's greedy tail.
+describe("parseDocName (ephemeral discriminant, #92)", () => {
+  it("parses a normal page room (ephemeral=false)", () => {
+    expect(parseDocName("t:tenant_dev:p:demo")).toEqual({ tenantId: "tenant_dev", pageId: "demo", ephemeral: false });
+  });
+  it("parses an ephemeral room to the SAME page (ephemeral=true, anchor ignored)", () => {
+    expect(parseDocName("t:tenant_dev:p:demo:x:anchor-1")).toEqual({ tenantId: "tenant_dev", pageId: "demo", ephemeral: true });
+  });
+  it("does not misread a page room as ephemeral, nor an ephemeral room as a page with a weird id", () => {
+    expect(parseDocName("t:acme:p:11111111-2222-3333").ephemeral).toBe(false);
+    const e = parseDocName("t:acme:p:11111111-2222-3333:x:z9");
+    expect(e).toEqual({ tenantId: "acme", pageId: "11111111-2222-3333", ephemeral: true }); // page id intact
+  });
+  it("throws on a malformed name (never silently admits garbage)", () => {
+    expect(() => parseDocName("not-a-doc")).toThrow(/bad document name/);
+    expect(() => parseDocName("t:x:q:y")).toThrow(/bad document name/);
   });
 });
