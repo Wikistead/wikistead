@@ -1,7 +1,8 @@
 import { StateField, StateEffect, Prec, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { currentMacroTheme } from "../macros/theme";
-import type { InnerEditHost, MacroTier, MacroLevel } from "../macros/registry";
+import type { InnerEditHost, MacroTier, MacroLevel, MacroSource } from "../macros/registry";
+import { asMacroSource } from "../macros/registry";
 
 // Inline rich-edit state for macros (ADR-022 Part 11, mode-based). The editor is entered
 // by a mouse CLICK on the macro (handled in decorations.ts) — there is no Ctrl+Enter
@@ -48,7 +49,7 @@ export const macroEdit: Extension = [macroRenderActiveField, escExit];
 // allowed. Today no caller sets it, so the true lowest representable level always wins; a
 // later restriction ADR will supply a real cap (plan/policy) plus its UI and enforcement.
 // If nothing at or below the cap can represent the source, we best-effort write at the cap.
-export function applyTier(tier: MacroTier, source: string, cap?: MacroLevel): string {
+export function applyTier(tier: MacroTier, source: MacroSource, cap?: MacroLevel): MacroSource {
   const levels = tier.levels;
   const capIdx = cap ? Math.max(0, levels.findIndex((l) => l.id === cap.id)) : levels.length - 1;
   for (let i = 0; i <= capIdx; i++) {
@@ -75,8 +76,8 @@ export function makeInnerEditHost(
 ): InnerEditHost {
   return {
     theme: currentMacroTheme(),
-    getSource: () => view.state.doc.sliceString(from, Math.min(to, view.state.doc.length)),
-    replaceSource: (next: string) => {
+    getSource: () => asMacroSource(view.state.doc.sliceString(from, Math.min(to, view.state.doc.length))),
+    replaceSource: (next: MacroSource) => {
       const leveled = tier ? applyTier(tier, next, levelCap) : next;
       view.dispatch({ changes: { from, to, insert: leveled }, effects: setMacroRenderActive.of({ from, to: from + leveled.length }) });
       view.focus();

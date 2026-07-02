@@ -16,6 +16,18 @@ import type { SafeHtml } from "./safe-html";
 
 export type MacroTheme = "light" | "dark";
 
+// MacroSource (ADR-045 / #88 item 3) — a nominal brand for the canonical source text that crosses
+// the host↔macro boundary (InnerEditHost / MacroModalEditor / MacroTier). It is still a string at
+// runtime (parse/slice/concat all work), but a plain string is NOT assignable to a MacroSource slot
+// without going through `asMacroSource`, so the host and a macro can't accidentally swap macro source
+// for some other string at the boundary. The host is the producer (it extracts the body from the
+// doc); a macro that returns rewritten source (tier.toLevel, getSource, getBody) brands its output.
+declare const MACRO_SOURCE: unique symbol;
+export type MacroSource = string & { readonly [MACRO_SOURCE]: true };
+export function asMacroSource(s: string): MacroSource {
+  return s as MacroSource;
+}
+
 // How a macro appears in the `/` slash palette (ADR-017/018): one registration ⇒ the
 // macro is insertable. labelKey is an i18n key; insert is the template; caret is the
 // offset within it to place the cursor after insert.
@@ -36,7 +48,7 @@ export interface MacroContext {
 // OUTSIDE CodeMirror (so an embedded React editor like Excalidraw never enters CM —
 // ADR-013) and returns the edited body to write back to the macro's source range.
 export interface MacroModalController {
-  getBody(): string; // current serialized body, written back on save
+  getBody(): MacroSource; // current serialized body, written back on save
   destroy(): void; // unmount / cleanup
 }
 // #92 / ADR-093: a HOST-provided ephemeral collab session for level-2 co-editing (Excalidraw). It is
@@ -53,7 +65,7 @@ export interface MacroModalEditor {
   // May be async — the editor (e.g. Excalidraw) is lazy-loaded. `hostCollab` is optional + host-only
   // (present only for a collab-capable macro when the host injects the ephemeral seam); macros that
   // don't co-edit ignore it, keeping the {theme} boundary intact.
-  mount(container: HTMLElement, body: string, ctx: MacroContext, hostCollab?: HostEphemeralCollab): Promise<MacroModalController>;
+  mount(container: HTMLElement, body: MacroSource, ctx: MacroContext, hostCollab?: HostEphemeralCollab): Promise<MacroModalController>;
 }
 // ADR-025: the narrow host an INLINE rich-editor (e.g. table) talks to. Like MacroContext
 // it exposes NO editor / Yjs / app internals — only the macro's own source + theme + a
@@ -62,8 +74,8 @@ export interface MacroModalEditor {
 // owns enter/exit. Keeps the ADR-023 trust boundary for inline editing (incl. future plugins).
 export interface InnerEditHost {
   readonly theme: MacroTheme;
-  getSource(): string; // the macro's current body (source text)
-  replaceSource(next: string): void; // commit a new body
+  getSource(): MacroSource; // the macro's current body (source text)
+  replaceSource(next: MacroSource): void; // commit a new body
   exit(): void; // leave inline edit (Done / Esc)
   // #153 / ADR-054 (M1 spike GO): delegate focus to a host-managed editable element for in-editor
   // WYSIWYG cell editing. The host (which holds the EditorView) focuses `target` and, while
@@ -106,9 +118,9 @@ export interface MacroLevel {
 export interface MacroTier {
   readonly levels: readonly MacroLevel[]; // ordered LOWEST (most standard) → highest
   // Can `source` be written at `level` with NO loss? (e.g. a merged table can't be pipe)
-  canRepresentAt(source: string, level: MacroLevel): boolean;
+  canRepresentAt(source: MacroSource, level: MacroLevel): boolean;
   // Re-serialize `source` at `level` (round-trips through the macro's own model).
-  toLevel(source: string, level: MacroLevel): string;
+  toLevel(source: MacroSource, level: MacroLevel): MacroSource;
 }
 
 export interface FenceMacro {

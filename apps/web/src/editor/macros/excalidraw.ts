@@ -1,4 +1,5 @@
-import type { FenceMacro, MacroContext, MacroModalController, HostEphemeralCollab } from "./registry";
+import type { FenceMacro, MacroContext, MacroModalController, HostEphemeralCollab, MacroSource } from "./registry";
+import { asMacroSource } from "./registry";
 import { writeLocalElements, readSceneElements, allElements, reconcile, elementsMap } from "./excalidraw-collab";
 import { html } from "./safe-html";
 
@@ -70,10 +71,10 @@ export const excalidrawMacro: FenceMacro = {
     present: "modal",
     collab: true, // #92 / ADR-093: opt into the host's ephemeral collab seam (level-2 co-editing)
     editor: {
-      async mount(container: HTMLElement, body: string, ctx: MacroContext, hostCollab?: HostEphemeralCollab): Promise<MacroModalController> {
+      async mount(container: HTMLElement, body: MacroSource, ctx: MacroContext, hostCollab?: HostEphemeralCollab): Promise<MacroModalController> {
         const [{ React, createRoot }, excal] = await Promise.all([loadReact(), loadExcalidraw()]);
         const scene = parseScene(body);
-        let current = body; // latest serialized scene (written back on save)
+        let current: MacroSource = body; // latest serialized scene (written back on save)
         const root = createRoot(container);
         // #92: ephemeral collab (ADR-093). While the modal is open, scene elements sync through the
         // host's ephemeral Y.Doc (a Y.Map keyed by element id, merged by version — excalidraw-collab).
@@ -87,7 +88,7 @@ export const excalidrawMacro: FenceMacro = {
 
         const onChange = (elements: any, appState: any, files: any) => {
           try {
-            current = excal.serializeAsJSON(elements, appState, files, "local");
+            current = asMacroSource(excal.serializeAsJSON(elements, appState, files, "local"));
           } catch {
             /* keep the last good serialization */
           }
@@ -124,7 +125,7 @@ export const excalidrawMacro: FenceMacro = {
           // clean of tombstones (readSceneElements), so the fence holds the final drawing.
           getBody: () => {
             if (doc && api) {
-              try { return excal.serializeAsJSON(readSceneElements(doc) as any, api.getAppState(), api.getFiles(), "local"); } catch { /* fall through */ }
+              try { return asMacroSource(excal.serializeAsJSON(readSceneElements(doc) as any, api.getAppState(), api.getFiles(), "local")); } catch { /* fall through */ }
             }
             return current;
           },

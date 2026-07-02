@@ -1,4 +1,4 @@
-import type { MacroTier, MacroLevel, StandardLayer } from "./registry";
+import type { MacroTier, MacroLevel, StandardLayer, MacroSource } from "./registry";
 
 // Auto-demote a macro to its LOWEST representable standard layer (ADR-025 Open formats) — PURE (no
 // CM/DOM), unit-testable without the editor runtime. Operates only on the MacroTier contract.
@@ -16,7 +16,7 @@ const LAYER_RANK: Record<StandardLayer, number> = { commonmark: 0, gfm: 1, direc
 // NO level within the cap can represent it losslessly, the HIGHEST level within the cap — ADR-073's
 // default is NORMALIZE (accept a lossy demote), not reject. null when the tier has no level within
 // the cap (the caller leaves the source unchanged).
-export function targetCapLevel(tier: MacroTier, source: string, cap: StandardLayer): MacroLevel | null {
+export function targetCapLevel(tier: MacroTier, source: MacroSource, cap: StandardLayer): MacroLevel | null {
   const withinCap = tier.levels.filter((l) => LAYER_RANK[l.layer] <= LAYER_RANK[cap]);
   if (withinCap.length === 0) return null;
   const representable = withinCap.filter((l) => tier.canRepresentAt(source, l)); // levels: lowest → highest
@@ -26,7 +26,7 @@ export function targetCapLevel(tier: MacroTier, source: string, cap: StandardLay
 // Normalize the source to within the cap, returning the (possibly rewritten) source — a no-op when
 // the tier has no level within the cap. The HOST calls this on persist/render; the server fortress
 // (#93 publishPage) remains the authoritative bastion against a bypassing client.
-export function demoteToCapLevel(tier: MacroTier, source: string, cap: StandardLayer): string {
+export function demoteToCapLevel(tier: MacroTier, source: MacroSource, cap: StandardLayer): MacroSource {
   const target = targetCapLevel(tier, source, cap);
   return target ? tier.toLevel(source, target) : source;
 }
@@ -34,6 +34,6 @@ export function demoteToCapLevel(tier: MacroTier, source: string, cap: StandardL
 // Cap-free auto-demote (#93): normalize to the lowest representable layer with NO tenant ceiling
 // (ADR-025 Open formats). The editor's save path uses this — level-cap was withdrawn, so 'directive'
 // (the top layer) is always the ceiling.
-export function autoDemote(tier: MacroTier, source: string): string {
+export function autoDemote(tier: MacroTier, source: MacroSource): MacroSource {
   return demoteToCapLevel(tier, source, "directive");
 }

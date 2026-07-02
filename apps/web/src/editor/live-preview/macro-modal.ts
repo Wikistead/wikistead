@@ -1,5 +1,6 @@
 import { EditorView } from "@codemirror/view";
-import type { FenceMacro, DirectiveMacro, MacroTheme } from "../macros/registry";
+import type { FenceMacro, DirectiveMacro, MacroTheme, MacroSource } from "../macros/registry";
+import { asMacroSource } from "../macros/registry";
 import { macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
 import { autoDemote } from "../macros/tier-cap";
 import { ephemeralCollab } from "./decorations";
@@ -84,14 +85,14 @@ export function openMacroModal(
   const start = resolve();
   if (!start) return;
   const originalBody = start.body;
-  let getBody: () => string = () => originalBody;
+  let getBody: () => MacroSource = () => asMacroSource(originalBody);
   const frame = modalFrame(view, "summary" in macro ? macro.summary(originalBody) : macro.name, () => {
     const cur = resolve();
     if (!cur) return;
     if (cur.body !== originalBody) console.warn("macro block was edited concurrently; applying last write");
     // Tier auto-demote on save to the lowest representable layer (ADR-025 open formats; #93 — no
     // tenant level-cap). No tier (Excalidraw) → as-is.
-    let source = cur.wrap(getBody());
+    let source = asMacroSource(cur.wrap(getBody()));
     if (macro.tier) source = autoDemote(macro.tier, source);
     view.dispatch({ changes: { from: cur.from, to: cur.to, insert: source } });
   });
@@ -100,7 +101,7 @@ export function openMacroModal(
   // hand the session to mount. The macro's own API stays {theme}; collab is this separate host channel.
   const collabFactory = macro.richEditUI.collab ? view.state.facet(ephemeralCollab) : null;
   const session = collabFactory ? collabFactory(String(start.from)) : undefined;
-  void macro.richEditUI.editor.mount(frame.content, originalBody, { theme }, session).then((c) => {
+  void macro.richEditUI.editor.mount(frame.content, asMacroSource(originalBody), { theme }, session).then((c) => {
     getBody = () => c.getBody();
     frame.onMounted(() => { c.destroy(); session?.destroy(); });
   });
@@ -112,8 +113,8 @@ export function openMacroModal(
 export function openTableModal(view: EditorView, getPos: () => number, theme: MacroTheme): void {
   const start = tableBlockAt(view.state, getPos());
   if (!start) return;
-  const originalSource = view.state.sliceDoc(start.from, start.to);
-  let getBody: () => string = () => originalSource;
+  const originalSource = asMacroSource(view.state.sliceDoc(start.from, start.to));
+  let getBody: () => MacroSource = () => originalSource;
   const frame = modalFrame(view, "Table", () => {
     const cur = tableBlockAt(view.state, getPos());
     if (!cur) return;
