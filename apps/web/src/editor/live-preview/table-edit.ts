@@ -3,6 +3,19 @@ import type { InnerEditHost, InlineEditor, InlineController } from "../macros/re
 import { asMacroSource } from "../macros/registry";
 import { setCellText, cellElToText, insertBrAtCaret, insertTextAtCaret, stripZeroWidth } from "../macros/table-cell-dom";
 
+// #154: the uniform multi-select resize size — PURE so it is unit-testable (the previous impl set
+// every selected column to draggedWidth+delta, ballooning the block so the dragged edge didn't track
+// the pointer). `per` = the size EACH of the `n` affected columns/rows takes so the block's dragged
+// (right/bottom) edge lands exactly at `pointer`: (pointer − blockStart) / n. Clamped to `min`, and
+// (columns) to maxBlock/n so the whole table can't overflow the visible width (#5). n=1 → the single
+// column/row's edge follows the pointer (the prior single-resize behaviour).
+export function uniformResizeSize(pointer: number, blockStart: number, n: number, min: number, maxBlock: number): number {
+  let per = Math.round((pointer - blockStart) / n);
+  per = Math.max(min, per);
+  if (per * n > maxBlock) per = Math.floor(maxBlock / n);
+  return per;
+}
+
 // Spreadsheet-style column label: A, B … Z, AA, AB … (so the handle band reads like a
 // spreadsheet header — unmistakably NOT a data cell, #2).
 function colLabel(n: number): string {
@@ -146,28 +159,32 @@ export const tableInlineEditor: InlineEditor = {
     const selectAll = () => { selected.clear(); selMode = "cells"; selCol = -1; selRow = -1; grid.forEach((row, r) => row.forEach((cell, c) => { if (cell) selected.add(`${r},${c}`); })); applySel(); };
 
     // A border drag handle: tracks the pointer, previews the size, commits on release.
-    // ADR-041 / #146 (option B): the live preview sizes the SAME set of cells the commit will
-    // apply (`previewEls` = a cell of every affected column/row). When a multi-cell selection
-    // includes the dragged cell, that set is every selected column/row (uniform resize); else
-    // it is just the grabbed one. This kills the bug where the preview moved one column but the
-    // commit resized all selected → the table jumped on release.
-    const dragSize = (e: PointerEvent, axis: "x" | "y", ref: HTMLElement, previewEls: HTMLElement[], commit: (px: number) => void) => {
+    // #154 (revised): a UNIFORM multi-select resize whose DRAGGED EDGE follows the pointer, like a
+    // spreadsheet. The `n` affected columns/rows (previewEls = every cell of each) all take the SAME
+    // size, chosen so the block's dragged (right/bottom) edge sits exactly at the pointer
+    // size = (pointer − blockStart) / n
+    // The block's start edge is frozen at drag-start (columns/rows before the block are unaffected, so
+    // it never moves). For a single column/row (n=1) this reduces to "that one edge follows the
+    // pointer" — the previous single-resize behaviour, unchanged. previewEls == the exact cells the
+    // commit writes, so the preview never jumps on release (#146 / ADR-041).
+    const dragSize = (e: PointerEvent, axis: "x" | "y", previewEls: HTMLElement[], n: number, commit: (px: number) => void) => {
       const target = e.target as HTMLElement;
-      const start = axis === "x" ? e.clientX : e.clientY;
-      const startSize = axis === "x" ? ref.getBoundingClientRect().width : ref.getBoundingClientRect().height;
       target.setPointerCapture(e.pointerId);
-      // #5: a column grows only until the TABLE fills the visible width, then it STOPS — it
-      // never steals width from the neighbouring columns. The visible width is the editor
-      // container's width (VIEW-FREE — no EditorView.scrollDOM).
-      const tableEl = ref.closest("table");
-      const slackX = tableEl ? Math.max(0, container.clientWidth - 24 - tableEl.getBoundingClientRect().width) : 0;
-      const maxW = startSize + slackX;
-      const size = (ev: PointerEvent) => {
-        const raw = Math.round(startSize + ((axis === "x" ? ev.clientX : ev.clientY) - start));
-        return axis === "x" ? Math.min(maxW, Math.max(40, raw)) : Math.max(24, raw);
-      };
-      // #4: a row's live height follows only if EVERY cell in it follows. Here every cell of
-      // every affected column/row follows, so the preview == what commit writes (no jump).
+      const startEdge = (el: HTMLElement) => (axis === "x" ? el.getBoundingClientRect().left : el.getBoundingClientRect().top);
+      const endEdge = (el: HTMLElement) => (axis === "x" ? el.getBoundingClientRect().right : el.getBoundingClientRect().bottom);
+      const blockStart = Math.min(...previewEls.map(startEdge)); // left/top of the leftmost/topmost affected col/row
+      const blockSize0 = Math.max(...previewEls.map(endEdge)) - blockStart; // current total size of the affected block
+      const min = axis === "x" ? 40 : 24;
+      // #5 (x only): the table grows only until it fills the visible width, then STOPS (never steals
+      // from neighbouring columns). Cap the block's TOTAL size so the whole table can't exceed the
+      // container width (VIEW-FREE — the editor container, not EditorView.scrollDOM).
+      const tableEl = previewEls[0]?.closest("table");
+      const maxBlock = axis === "x" && tableEl
+        ? Math.max(n * min, container.clientWidth - 24 - (tableEl.getBoundingClientRect().width - blockSize0))
+        : Infinity;
+      const size = (ev: PointerEvent) => uniformResizeSize(axis === "x" ? ev.clientX : ev.clientY, blockStart, n, min, maxBlock);
+      // Every cell of every affected column/row takes the uniform size, so the preview == what commit
+      // writes (no jump on release), and multi-select columns/rows are equalised.
       const move = (ev: PointerEvent) => {
         const s = size(ev) + "px";
         for (const el of previewEls) { if (axis === "x") el.style.width = s; else el.style.height = s; }
@@ -302,11 +319,11 @@ export const tableInlineEditor: InlineEditor = {
         // never start a selection. testid only on the representative cell per col/row.
         el.appendChild(resizeHandle("cm-lp-col-resize", r === 0 ? "table-col-resize-" + c : "", (e) => {
           const cols = dragCols(c); // affected set, fixed at drag start (selection can't change mid-drag)
-          dragSize(e, "x", el, cols.flatMap(colCellsOf), (px) => applyColWidths(cols, px + "px"));
+          dragSize(e, "x", cols.flatMap(colCellsOf), cols.length, (px) => applyColWidths(cols, px + "px"));
         }));
         el.appendChild(resizeHandle("cm-lp-row-resize", c === 0 ? "table-row-resize-" + r : "", (e) => {
           const rows = dragRows(r);
-          dragSize(e, "y", el, rows.flatMap(rowCellsOf), (px) => applyRowHeights(rows, px + "px"));
+          dragSize(e, "y", rows.flatMap(rowCellsOf), rows.length, (px) => applyRowHeights(rows, px + "px"));
         }));
         // Rectangular drag-select: pointerdown anchors here; moving extends the rectangle.
         el.addEventListener("pointerdown", (e) => {
