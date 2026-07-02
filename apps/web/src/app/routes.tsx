@@ -116,6 +116,9 @@ import { PageTitle } from "./PageTitle";
 import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
 import { CommentsPanel } from "../comments/CommentsPanel";
+import { Toc } from "../toc/Toc";
+import { useTocPref } from "../toc/useTocPref";
+import type { Heading } from "../editor/headings";
 import { HistoryPanel } from "../history/HistoryPanel";
 import { DiffModal } from "../history/DiffModal";
 import { PermissionsDialog } from "../ui/PermissionsDialog";
@@ -201,6 +204,14 @@ function PageRoute() {
   // Inline threads (with anchors) become editor highlights; the panel builds inline
   // threads from the editor's current selection via this anchor getter.
   const anchorGetterRef = useRef<AnchorGetter | null>(null);
+  // #192 / ADR-091: table of contents. Headings + active section come from the editor (stable
+  // callbacks so <Editor>'s memo isn't defeated); the rail's clicks jump via tocJumpRef.
+  const { on: tocOn, setOn: setTocOn, depth: tocDepth, setDepth: setTocDepth } = useTocPref();
+  const [headings, setHeadings] = useState<Heading[]>([]);
+  const [activeHeading, setActiveHeading] = useState<number | null>(null);
+  const tocJumpRef = useRef<((from: number) => void) | null>(null);
+  const onHeadings = useCallback((h: Heading[]) => setHeadings(h), []);
+  const onActiveHeading = useCallback((f: number | null) => setActiveHeading(f), []);
   // External dirty store (instant Publish enable) — read only by PageToolbar, written
   // only by the editor's Y.Text observer; never re-renders PageRoute/Editor.
   const dirtySig = useRef(createDirtySignal()).current;
@@ -336,6 +347,8 @@ function PageRoute() {
     commentsOpen,
     onToggleComments: toggleComments,
     openComments,
+    tocOpen: tocOn,
+    onToggleToc: () => setTocOn(!tocOn),
     onHistory: toggleHistory,
     onAttachments: toggleAttachments,
     onExport: () => { if (pageId) void downloadPageExport(token, pageId); },
@@ -359,10 +372,11 @@ function PageRoute() {
           {isDesktop && <div className="relative z-10 mx-auto flex w-full max-w-[740px] justify-end px-6"><PageStatus {...controls} /></div>}
           {/* Editor area is the positioning context for the floating ACTIONS/VIM groups. */}
           <div className="relative" style={{ flex: 1, minHeight: 0 }}>
-            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} tocJumpRef={tocJumpRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
           </div>
         </div>
+        {isDesktop && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} onSetDepth={setTocDepth} onClose={() => setTocOn(false)} />}
         {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={page?.canComment ?? capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} />}
         {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} onCompare={openDiff} onClose={closeHistory} />}
         {pageId && attachmentsOpen && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} onClose={closeAttachments} />}
@@ -502,6 +516,13 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
   const [canComment, setCanComment] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const anchorGetterRef = useRef<AnchorGetter | null>(null);
+  // #192 / ADR-091: TOC for guests too (device-local pref).
+  const { on: tocOn, setOn: setTocOn, depth: tocDepth, setDepth: setTocDepth } = useTocPref();
+  const [headings, setHeadings] = useState<Heading[]>([]);
+  const [activeHeading, setActiveHeading] = useState<number | null>(null);
+  const tocJumpRef = useRef<((from: number) => void) | null>(null);
+  const onHeadings = useCallback((h: Heading[]) => setHeadings(h), []);
+  const onActiveHeading = useCallback((f: number | null) => setActiveHeading(f), []);
   const canEdit = capability === "edit";
   const [editing, setEditing] = useState(false);
   const [vim, toggleVim] = useVimPref();
@@ -547,6 +568,8 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
     // inside the panel is gated on canComment (comment_open). openComments count is member-only chrome.
     commentsOpen,
     onToggleComments: () => setCommentsOpen((o) => !o),
+    tocOpen: tocOn,
+    onToggleToc: () => setTocOn(!tocOn),
   };
   return (
     <AppShell>
@@ -558,10 +581,11 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
         )}
         <div className="relative flex min-h-0" style={{ flex: 1 }}>
           <div className="relative min-w-0 flex-1">
-            <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} />
+            <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} tocJumpRef={tocJumpRef} />
             <div className="pointer-events-none absolute right-3 top-3 z-10"><PageStatus {...controls} /></div>
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
           </div>
+          {isDesktop && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} onSetDepth={setTocDepth} onClose={() => setTocOn(false)} />}
           {commentsOpen && <CommentsPanel pageId={pageId} canComment={canComment} anchorGetterRef={anchorGetterRef} onClose={() => setCommentsOpen(false)} />}
         </div>
       </div>

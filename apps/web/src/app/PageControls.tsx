@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Eye, Code, BookOpen, Sparkles } from "lucide-react";
+import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Eye, Code, BookOpen, Sparkles, List } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui/Button";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
@@ -43,6 +43,8 @@ export interface PageControlsProps {
   commentsOpen?: boolean;
   onToggleComments?: () => void;
   openComments?: number;
+  tocOpen?: boolean; // #192: table-of-contents rail toggle
+  onToggleToc?: () => void;
   onHistory?: () => void;
   onAttachments?: () => void;
   onExport?: () => void;
@@ -111,11 +113,19 @@ function runOverflow(p: PageControlsProps, v: string) {
 // ── STATUS: under the title, right-aligned (draft / unpublished text + comments btn) ──
 export function PageStatus(p: PageControlsProps) {
   const { t } = useTranslation();
-  if (!p.publishState && !p.onToggleComments) return null;
+  if (!p.publishState && !p.onToggleComments && !p.onToggleToc) return null;
   return (
     <div className="pointer-events-auto flex items-center gap-2" data-testid="page-status">
       {p.publishState === "draft" && <span className="text-xs text-fg-dim" data-testid="draft-badge">{t("page.draft")}</span>}
       {p.publishState === "unpublished" && <span className="text-xs text-[var(--accent)]" data-testid="unpublished-badge">{t("page.unpublishedChanges")}</span>}
+      {p.onToggleToc && (
+        <RoundBtn
+          label={t("toc.toggle")}
+          testId="toc-toggle"
+          onClick={p.onToggleToc}
+          icon={<List size={16} />}
+        />
+      )}
       {p.onToggleComments && (
         <RoundBtn
           label={t("page.comments")}
