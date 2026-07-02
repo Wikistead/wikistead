@@ -192,4 +192,16 @@ describe("callout panel (#170 案Y — containerClass dispatch + renderCalloutPa
     // the label is set via textContent → the raw markup is literal text, never parsed
     expect(el.querySelector(".cm-lp-callout-panel-title")?.textContent).toBe("<img src=x onerror=1>");
   });
+
+  // #170 XSS via the DISPATCH path (not just renderCalloutPanel directly): a callout reached through
+  // renderMarkdownToDom must sanitize its body — a javascript: link in the body renders NO anchor with
+  // that href (the shared renderer's scheme allowlist applies inside the panel body too).
+  it("the dispatch path sanitizes a dangerous href in the callout body (no javascript: anchor)", () => {
+    const d = root(":::adr049callout\n[click](javascript:alert(1))\n:::");
+    const panel = d.querySelector<HTMLElement>(".cm-lp-callout-panel");
+    expect(panel).not.toBeNull();
+    const bad = [...panel!.querySelectorAll("a")].find((a) => (a.getAttribute("href") ?? "").toLowerCase().includes("javascript"));
+    expect(bad).toBeUndefined(); // the javascript: scheme is dropped; text may remain, the href does not
+    expect(panel!.querySelector(".cm-lp-callout-panel-body")?.textContent).toContain("click"); // text kept
+  });
 });
