@@ -1318,8 +1318,10 @@ export const livePreviewTheme = EditorView.baseTheme({
   // (the fence lines are hidden → empty padding rows inside the box). The content
   // stays live-preview Markdown.
   ".cm-lp-callout": {
-    borderLeft: "3px solid var(--accent, #4ea1ff)",
-    background: "color-mix(in srgb, var(--accent, #4ea1ff) 8%, transparent)",
+    // #199: the DEFAULT bar/tint is the neutral note hue, NOT the tenant --accent (a callout's colour
+    // is semantic; accent-driven info/note lost their meaning). Every type overrides below.
+    borderLeft: "3px solid var(--callout-note, #6e7781)",
+    background: "color-mix(in srgb, var(--callout-note, #6e7781) 8%, transparent)",
     // #170 panel layout: a left gutter (position:relative anchors the absolutely-positioned icon into
     // it) so the icon reads as a large panel column and the body text aligns to its right, not crammed
     // beside a tiny glyph. NOTE: CM renders each callout line as a separate .cm-line, so pure CSS
@@ -1329,8 +1331,11 @@ export const livePreviewTheme = EditorView.baseTheme({
     position: "relative",
     paddingLeft: "2.8em",
   },
-  // Per-type accents (#150 → #158-C5 tokens). note/info ride the base accent; tip/warning/danger
-  // ride semantic --callout-* tokens (tokens.css, light/dark + tenant-overridable) — no hardcodes.
+  // Per-type accents (#150 → #158-C5 tokens; #199). Every type rides its FIXED semantic --callout-*
+  // token (tokens.css, light/dark only) — never the tenant --accent, so a callout's colour keeps its
+  // meaning (info=blue, note=grey, tip=green, warning=yellow, danger=red).
+  ".cm-lp-callout-note": { borderLeftColor: "var(--callout-note, #6e7781)", background: "color-mix(in srgb, var(--callout-note, #6e7781) 8%, transparent)" },
+  ".cm-lp-callout-info": { borderLeftColor: "var(--callout-info, #0969da)", background: "color-mix(in srgb, var(--callout-info, #0969da) 10%, transparent)" },
   ".cm-lp-callout-tip": { borderLeftColor: "var(--callout-tip, #2ea043)", background: "color-mix(in srgb, var(--callout-tip, #2ea043) 10%, transparent)" },
   ".cm-lp-callout-warning": { borderLeftColor: "var(--callout-warning, #d29922)", background: "color-mix(in srgb, var(--callout-warning, #d29922) 13%, transparent)" },
   ".cm-lp-callout-danger": { borderLeftColor: "var(--callout-danger, #cf222e)", background: "color-mix(in srgb, var(--callout-danger, #cf222e) 10%, transparent)" },

@@ -110,12 +110,15 @@
   --accent-fg: #ffffff; /* text/icon on an accent fill */
   --danger: #cf222e;    /* destructive actions (delete / remove / revoke) */
   --danger-fg: #ffffff;
-  /* Callout accents (#158-C5 / ADR-052): semantic tokens so per-type callout colours are no
-     longer hardcoded (#150). note/info ride --accent; danger rides --danger; tip/warning get
-     their own hues. tenant themes / dark override these. C2 (syntax) + C3 (math) add their own. */
-  --callout-tip: #2ea043;
-  --callout-warning: #d29922;
-  --callout-danger: var(--danger);
+  /* Callout accents (#158-C5 / ADR-052; #199): per-type callout colours are FIXED SEMANTIC hues, NOT
+     the tenant --accent. A callout's colour carries meaning (info=blue, note=grey, tip=green,
+     warning=yellow, danger=red); riding --accent made info/note change with the tenant theme and lose
+     that meaning (#199). Only light/dark tune these (see the dark override); the accent never does. */
+  --callout-info: #0969da;   /* blue — informational */
+  --callout-note: #6e7781;   /* grey — neutral note */
+  --callout-tip: #2ea043;    /* green — success/tip */
+  --callout-warning: #d29922;/* yellow — caution */
+  --callout-danger: var(--danger); /* red — danger (a fixed semantic token, not the accent) */
   /* Syntax highlight (#158-C2 / ADR-052): Everforest LIGHT (medium) hues as semantic tokens —
      code-fence highlighting consumes these so the palette is themeable (Neovim-consistent). */
   --hl-keyword: #f85552;   /* red */
@@ -151,7 +154,10 @@
   --accent-fg: #06243f;
   --danger: #f0584d;
   --danger-fg: #ffffff;
-  /* Dark-tuned callout hues (#158-C5): brighter so the tinted box + bar stay legible on dark. */
+  /* Dark-tuned callout hues (#158-C5 / #199): brighter so the tinted box + bar stay legible on dark.
+     Still FIXED semantic hues — never the accent. */
+  --callout-info: #4493f8;
+  --callout-note: #9198a1;
   --callout-tip: #3fb950;
   --callout-warning: #e3b341;
   --callout-danger: var(--danger);
