@@ -1,8 +1,5 @@
 import type { FenceMacro } from "./registry";
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
+import { html } from "./safe-html";
 
 // ```plantuml — PlantUML is GPL and needs a JRE, so it is NEVER bundled (ADR-011/ADR-074). The
 // DEFAULT render is DEGRADE-TO-SOURCE: the fence shows its source verbatim (a code block), always
@@ -28,5 +25,5 @@ export const plantumlMacro: FenceMacro = {
     return el;
   },
   // Static export degrades to the source (an external-render-enabled viewer can process it later).
-  htmlRender: (body) => `<pre class="plantuml">${escapeHtml(body)}</pre>`,
+  htmlRender: (body) => html`<pre class="plantuml">${body}</pre>`,
 };

@@ -1,16 +1,13 @@
 import type { DirectiveMacro } from "./registry";
 import { renderMarkdownToDom } from "./md-render";
 import { parseDirectiveOpen, isDirectiveClose } from "./directive-parser";
+import { html, joinSafe } from "./safe-html";
 
 // M2 layout directives (#90, ADR-043 A′): columns / tabs. These need a side-by-side / tab frame
 // that CodeMirror line decorations can't provide, so they render as a BLOCK-WIDGET ATOM (the
 // table/mermaid model) that lays out its inner :::column / :::tab items, rendering each item's
 // Markdown via the sanitized S0 renderer (the widget can't reach CM's renderers). Editing is
 // reveal-on-cursor (revealOnCursor: the whole raw block shows while the caret is inside).
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 // Split a layout directive's body into its inner :::name items. Depth-tracking (push on any
 // nested open, pop on a close) so a nested directive INSIDE an item (e.g. a callout in a column)
@@ -65,9 +62,9 @@ export const columnsMacro: DirectiveMacro = {
   },
   // M3 export wrapper (inner Markdown rendered server-side; escape as the safe fallback).
   htmlRender: (body) =>
-    `<div class="columns">${parseLayoutItems(body, "column")
-      .map((c) => `<div class="column">\n\n${escapeHtml(c.content)}\n\n</div>`)
-      .join("")}</div>`,
+    html`<div class="columns">${joinSafe(
+      parseLayoutItems(body, "column").map((c) => html`<div class="column">\n\n${c.content}\n\n</div>`),
+    )}</div>`,
 };
 
 export const detailsMacro: DirectiveMacro = {
@@ -83,7 +80,7 @@ export const detailsMacro: DirectiveMacro = {
     caret: 20, // ":::details[Summary]\n" → the blank body line
   },
   // M3 export (the [label] summary lives on the fence line, not in body → generic for now).
-  htmlRender: (body) => `<details><summary>Details</summary>\n\n${escapeHtml(body)}\n\n</details>`,
+  htmlRender: (body) => html`<details><summary>Details</summary>\n\n${body}\n\n</details>`,
 };
 
 export const tabsMacro: DirectiveMacro = {
@@ -129,7 +126,9 @@ export const tabsMacro: DirectiveMacro = {
     return wrap;
   },
   htmlRender: (body) =>
-    `<div class="tabs">${parseLayoutItems(body, "tab")
-      .map((t, i) => `<section class="tab" data-label="${escapeHtml(t.label || `Tab ${i + 1}`)}">\n\n${escapeHtml(t.content)}\n\n</section>`)
-      .join("")}</div>`,
+    html`<div class="tabs">${joinSafe(
+      parseLayoutItems(body, "tab").map(
+        (t, i) => html`<section class="tab" data-label="${t.label || `Tab ${i + 1}`}">\n\n${t.content}\n\n</section>`,
+      ),
+    )}</div>`,
 };

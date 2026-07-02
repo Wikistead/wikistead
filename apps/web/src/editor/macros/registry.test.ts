@@ -26,7 +26,7 @@ describe("macro registry", () => {
   });
 
   it("mermaid htmlRender escapes its body (XSS-safe static export)", () => {
-    const html = mermaidMacro.htmlRender("<script>alert(1)</script>");
+    const html = mermaidMacro.htmlRender("<script>alert(1)</script>").toString();
     expect(html).not.toContain("<script>");
     expect(html).toContain("&lt;script&gt;");
   });
@@ -44,7 +44,7 @@ describe("macro registry", () => {
   });
 
   it("plantuml htmlRender escapes its body (XSS-safe static export)", () => {
-    const html = plantumlMacro.htmlRender("<script>alert(1)</script>");
+    const html = plantumlMacro.htmlRender("<script>alert(1)</script>").toString();
     expect(html).not.toContain("<script>");
     expect(html).toContain("&lt;script&gt;");
   });
@@ -78,7 +78,7 @@ describe("macro registry", () => {
   });
 
   it("callout htmlRender escapes its body (XSS-safe wrapper)", () => {
-    expect(noteCalloutMacro.htmlRender("<img src=x onerror=1>")).not.toContain("<img");
+    expect(noteCalloutMacro.htmlRender("<img src=x onerror=1>").toString()).not.toContain("<img");
   });
 });
 

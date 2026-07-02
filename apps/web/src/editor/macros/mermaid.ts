@@ -1,4 +1,5 @@
 import type { FenceMacro, MacroContext } from "./registry";
+import { html } from "./safe-html";
 
 // The first macro: ```mermaid renders a diagram. It proves the registry pipeline
 // (register -> liveRender -> fold -> Markdown round-trip) on the code-fence path,
@@ -24,10 +25,6 @@ function loadMermaid(theme: MacroContext["theme"]) {
     });
   }
   return mermaidP;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 export const mermaidMacro: FenceMacro = {
@@ -64,5 +61,5 @@ export const mermaidMacro: FenceMacro = {
   // M3 wires HTML export server-side. mermaid renders in the browser, so the static
   // form is the source in a <pre class="mermaid"> (a mermaid-enabled HTML viewer
   // renders it; any other shows the code). XSS-safe: the body is escaped.
-  htmlRender: (body) => `<pre class="mermaid">${escapeHtml(body)}</pre>`,
+  htmlRender: (body) => html`<pre class="mermaid">${body}</pre>`,
 };

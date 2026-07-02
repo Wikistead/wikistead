@@ -1,4 +1,5 @@
 import type { DirectiveMacro } from "./registry";
+import { html } from "./safe-html";
 
 // Typed callouts (#150 / ADR-049). Obsidian/GitHub-style admonitions, replacing the single
 // `:::callout`. Syntax A: each type is its own directive name (`:::note` / `:::info` / `:::tip`
@@ -8,10 +9,6 @@ import type { DirectiveMacro } from "./registry";
 // (`:::foobar`) falls back to `note` (Obsidian-compatible) — see `noteCalloutMacro` + the
 // directive renderer. Each type carries a Lucide icon NAME (#158-C4): the open-line header
 // renders it as a mask-image SVG (currentColor-tinted, ISC, no new dep) — see decorations.ts.
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 interface CalloutSpec {
   type: "note" | "info" | "tip" | "warning" | "danger";
@@ -44,7 +41,7 @@ function makeCallout(spec: CalloutSpec): DirectiveMacro {
       caret: spec.type.length + 4, // ":::" + type + "\n" → the blank body line
     },
     // M3 wires HTML export server-side; this supplies the wrapper. Escaping keeps it XSS-safe.
-    htmlRender: (body) => `<div class="callout callout-${spec.type}">\n\n${escapeHtml(body)}\n\n</div>`,
+    htmlRender: (body) => html`<div class="callout callout-${spec.type}">\n\n${body}\n\n</div>`,
   };
 }
 
