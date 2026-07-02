@@ -9,7 +9,7 @@ import { Redis } from "@hocuspocus/extension-redis";
 import { Database } from "@hocuspocus/extension-database";
 import IORedis from "ioredis";
 import { docName } from "@wikistead/types";
-import { loadYdoc, storeYdoc } from "./ydoc.js";
+import { loadYdoc, storeYdoc, compactIfBloated } from "./ydoc.js";
 import { authenticate, parseDocName } from "./authenticate.js";
 import { selectGuestConnectionsToClose, parseRevokeMessage } from "./revoke.js";
 
@@ -34,7 +34,24 @@ const server = new Hocuspocus({
     new Database({
       fetch: async ({ documentName }) => {
         const { tenantId, pageId } = parseDocName(documentName);
-        return loadYdoc(tenantId, pageId);
+        const state = await loadYdoc(tenantId, pageId);
+        if (!state) return state;
+        // #120 / ADR-040 (option 2): compact accumulated restore tombstones at COLD LOAD. fetch runs when
+        // the doc is loaded from persistence — i.e. it is NOT resident on this pod (Hocuspocus keeps a
+        // loaded doc in memory and only re-fetches after it has been unloaded), so re-encoding here is
+        // safe: the connecting client receives the compacted state as its baseline and there is no
+        // resident doc whose (old client-id/clock) state would fail to merge. Only rewrites when the
+        // stored state is bloated (compactIfBloated returns null otherwise → normal docs untouched).
+        // Persist the compacted bytes so the DB baseline shrinks (same content → the unpublished badge
+        // is unaffected). NOTE (multi-pod): with the Valkey/redis extension another POD could have the
+        // doc resident; a cross-pod "zero connections" gate (ADR-040 option 1) would be needed there — a
+        // documented follow-up. Single-pod (the self-host default) is safe.
+        const compacted = compactIfBloated(state);
+        if (compacted) {
+          await storeYdoc(tenantId, pageId, compacted);
+          return compacted;
+        }
+        return state;
       },
       store: async ({ documentName, state, context }) => {
         const { tenantId, pageId } = parseDocName(documentName);

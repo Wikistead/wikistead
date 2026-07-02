@@ -13,6 +13,40 @@ function decodeContent(state: Uint8Array): string {
   return doc.getText('content').toString()
 }
 
+// #120 / ADR-040 (option 2): tombstone compaction. Repeated restores (delete-all + insert, append-only)
+// grow pages.ydoc with STRUCTURAL deletion markers (item id/clock) even though gc:true reclaims the
+// deleted CONTENT. A true compaction = re-encode a FRESH doc from the current text, dropping the
+// tombstones. This changes the internal client-id/clock, so a client still holding the OLD doc could
+// not merge it (desync) — it is therefore ONLY safe when NO client is connected. The caller (collab
+// fetch/onLoadDocument) runs this exactly at load, before any client is served, and only when the
+// document is not already open (see index.ts). PURE (real Yjs, no DB) → unit-testable.
+//
+// Returns a compacted state ONLY when it is worth it: the stored state is large (over MIN_BYTES) AND
+// re-encoding shrinks it meaningfully (<= SHRINK_RATIO of the original). Otherwise null (leave as-is,
+// so a normal doc with few tombstones is never needlessly rewritten). The content is preserved exactly
+// (single 'content' Y.Text — the canonical form; round-trip identical).
+const COMPACT_MIN_BYTES = 128 * 1024 // don't bother compacting small docs (tombstone overhead is minor)
+const COMPACT_SHRINK_RATIO = 0.75 // only replace when the re-encode is a real win (drops enough tombstones)
+export function compactIfBloated(state: Uint8Array): Uint8Array | null {
+  if (state.length < COMPACT_MIN_BYTES) return null
+  const src = new Y.Doc()
+  let compacted: Uint8Array
+  try {
+    Y.applyUpdate(src, state)
+    const text = src.getText('content').toString()
+    const fresh = new Y.Doc()
+    try {
+      fresh.getText('content').insert(0, text) // fresh baseline — no delete tombstones
+      compacted = Y.encodeStateAsUpdate(fresh)
+    } finally {
+      fresh.destroy()
+    }
+  } finally {
+    src.destroy()
+  }
+  return compacted.length <= state.length * COMPACT_SHRINK_RATIO ? compacted : null
+}
+
 export async function loadYdoc(tenantId: string, pageId: string): Promise<Uint8Array | null> {
   let result: Uint8Array | null = null
   await withTenant(tenantId, async (tx) => {
