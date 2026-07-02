@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { renderMarkdownToDom, renderCalloutPanel } from "./md-render";
 import { registerMacro } from "./registry";
+import { html, unsafeHtml } from "./safe-html";
 
 function root(src: string): HTMLElement {
   const d = document.createElement("div");
@@ -118,12 +119,12 @@ describe("renderMarkdownToDom — nested macro dispatch (ADR-085 / #185)", () =>
     document.documentElement.dataset.theme = "light"; // currentMacroTheme() → 'light' (no matchMedia)
     registerMacro({
       kind: "directive", name: "adr085test", exportFidelity: "degrade",
-      htmlRender: (b) => `<div class="x">${b}</div>`,
+      htmlRender: (b) => html`<div class="x">${b}</div>`,
       liveRender: (body) => { const d = document.createElement("div"); d.className = "adr085-rendered"; d.textContent = body; return d; },
     });
     registerMacro({
       kind: "directive", name: "adr085throw", exportFidelity: "degrade",
-      htmlRender: () => "", liveRender: () => { throw new Error("boom"); },
+      htmlRender: () => unsafeHtml(""), liveRender: () => { throw new Error("boom"); },
     });
   });
 
@@ -152,7 +153,7 @@ describe("renderMarkdownToDom — nested macro dispatch (ADR-085 / #185)", () =>
   it("dispatches a known FENCE macro to its liveRender (not a raw <pre><code>)", () => {
     registerMacro({
       kind: "fence", lang: "adr085fence", exportFidelity: "degrade", summary: () => "fence",
-      htmlRender: (b) => `<div>${b}</div>`,
+      htmlRender: (b) => html`<div>${b}</div>`,
       liveRender: (body) => { const d = document.createElement("div"); d.className = "adr085-fence"; d.textContent = body; return d; },
     });
     const d = root("```adr085fence\ndiagram body\n```");
@@ -173,7 +174,7 @@ describe("renderMarkdownToDom — nested macro dispatch (ADR-085 / #185)", () =>
   it("falls back to <pre><code> when a fence macro liveRender THROWS (never breaks the render)", () => {
     registerMacro({
       kind: "fence", lang: "adr085fencethrow", exportFidelity: "degrade", summary: () => "",
-      htmlRender: () => "", liveRender: () => { throw new Error("boom"); },
+      htmlRender: () => unsafeHtml(""), liveRender: () => { throw new Error("boom"); },
     });
     const d = root("```adr085fencethrow\nkaboom\n```");
     const code = d.querySelector("pre > code");
@@ -206,7 +207,7 @@ describe("callout panel (#170 案Y — containerClass dispatch + renderCalloutPa
     registerMacro({
       kind: "directive", name: "adr049callout", exportFidelity: "preserve",
       containerClass: "cm-lp-callout cm-lp-callout-warning", icon: "triangle-alert",
-      htmlRender: (b) => `<div>${b}</div>`,
+      htmlRender: (b) => html`<div>${b}</div>`,
     });
   });
 

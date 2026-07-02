@@ -12,6 +12,8 @@
 // same narrow API, so opening the registry to user macros later (Stage 2: sandbox)
 // is *enforcing* a boundary first-party code already respects — not redrawing it.
 
+import type { SafeHtml } from "./safe-html";
+
 export type MacroTheme = "light" | "dark";
 
 // How a macro appears in the `/` slash palette (ADR-017/018): one registration ⇒ the
@@ -117,9 +119,10 @@ export interface FenceMacro {
   // in asynchronously INTO the returned element (like the image widget), but returns
   // synchronously so the CodeMirror widget stays sync. Returns display DOM only.
   liveRender(body: string, ctx: MacroContext): HTMLElement;
-  // Static HTML for export / SSR (wired server-side in M3). Defined now so the
-  // contract is complete. MUST be XSS-safe (escape/sanitize its own output).
-  htmlRender(body: string): string;
+  // Static HTML for export / SSR (wired server-side in M3). Returns SafeHtml (ADR-045 / #88):
+  // XSS-safety is enforced by the TYPE — the body must be built via html``/unsafeHtml, not raw
+  // string concatenation. The server pipeline (#85) reads `.value`.
+  htmlRender(body: string): SafeHtml;
   // One-line label for the folded summary ("▶ <summary>").
   summary(body: string): string;
   // REQUIRED on every macro (ADR-022 — degradation is never silent). "preserve" =
@@ -160,8 +163,9 @@ export interface DirectiveMacro {
   // layout directives (columns/tabs) so editing is reveal-on-cursor, not a modal.
   readonly revealOnCursor?: boolean;
   // Static HTML for export / SSR (M3): wrap the rendered body. The inner Markdown is
-  // rendered by the server pipeline; this supplies the wrapper. MUST be XSS-safe.
-  htmlRender(body: string): string;
+  // rendered by the server pipeline; this supplies the wrapper. Returns SafeHtml (ADR-045 /
+  // #88) — XSS-safety enforced by the type (build via html``/unsafeHtml, never raw concat).
+  htmlRender(body: string): SafeHtml;
   readonly exportFidelity: "preserve" | "degrade";
   readonly richEditUI?: RichEditUI;
   // Tier levels for host auto-demote (ADR-025 step 3). The table declares this (pipe ⟷

@@ -4,6 +4,7 @@ import { EditorState } from "@codemirror/state";
 import { markdownExtension } from "../markdown-config";
 import { registerMacro } from "./registry";
 import { directiveChainAt, directiveMacroAt } from "./fence";
+import { unsafeHtml } from "./safe-html";
 
 // #196 / ADR-092: directiveChainAt returns the nesting chain of registered directive macros containing
 // a position, OUTERMOST first → INNERMOST last (foundation for innermost-wins reveal). Verify: empty
@@ -15,8 +16,8 @@ const at = (doc: string, needle: string) => doc.indexOf(needle) + 1; // a pos in
 describe("directiveChainAt (#196 nesting chain)", () => {
   beforeAll(() => {
     // two registered macros so both nesting layers resolve (unregistered directives are skipped).
-    registerMacro({ kind: "directive", name: "chout", exportFidelity: "preserve", containerClass: "cm-lp-chout", icon: "info", htmlRender: (b) => b });
-    registerMacro({ kind: "directive", name: "chin", exportFidelity: "preserve", containerClass: "cm-lp-chin", icon: "info", htmlRender: (b) => b });
+    registerMacro({ kind: "directive", name: "chout", exportFidelity: "preserve", containerClass: "cm-lp-chout", icon: "info", htmlRender: (b) => unsafeHtml(b) });
+    registerMacro({ kind: "directive", name: "chin", exportFidelity: "preserve", containerClass: "cm-lp-chin", icon: "info", htmlRender: (b) => unsafeHtml(b) });
   });
 
   it("returns [] when the caret is in no directive", () => {
