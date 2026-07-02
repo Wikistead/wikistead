@@ -1,6 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, type MutableRefObject } from "react";
-import { Compartment } from "@codemirror/state";
-import type { EditorView } from "@codemirror/view";
+import { Compartment, StateEffect } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import { headingsExtension, extractHeadings, type Heading } from "./headings";
 import { connect } from "./collab";
 import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayModeContent } from "./editor-livepreview";
 import type { DisplayMode } from "./live-preview/decorations";
@@ -74,6 +75,12 @@ export interface EditorProps {
   // The host sets this ref to a getter that builds an anchor from the current
   // selection (for "Add comment on selection"). Null when nothing is selected.
   anchorGetterRef?: MutableRefObject<AnchorGetter | null>;
+  // #192 / ADR-091: table of contents. onHeadings fires with the doc's headings (initial + each edit);
+  // onActiveHeading reports the topmost visible heading on scroll (scroll-spy); tocJumpRef is set to a
+  // "scroll to this heading offset" function the TOC rail calls. All display-only (read state / scroll).
+  onHeadings?: (headings: Heading[]) => void;
+  onActiveHeading?: (from: number | null) => void;
+  tocJumpRef?: MutableRefObject<((from: number) => void) | null>;
   // External "unpublished changes" store written here (edit mode) and read only by
   // the publish control — NOT React state, so writing it never re-renders the editor
   // or its host (keeps it off the presence path). The canonical Y.Text IS the
@@ -114,7 +121,49 @@ function tint(color: string): string {
 // memo: the host (PageRoute) re-renders on its own state and on the published poll;
 // without memo those re-render <Editor> too, which the tree-move e2e forbids and
 // churns the editor. Props are referentially stable across host re-renders.
-export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
+// #192 / ADR-091: wire the TOC into a mounted CM view (edit OR published surface): headings extension
+// (initial + on-edit), a jump function (scroll to a heading offset), and scroll-spy (report the topmost
+// visible heading). All display-only. Returns a cleanup. Adds the headings listener via appendConfig so
+// the mount functions don't need to know about the TOC.
+function wireToc(
+  view: EditorView,
+  opts: { onHeadings?: (h: Heading[]) => void; onActiveHeading?: (from: number | null) => void; tocJumpRef?: MutableRefObject<((from: number) => void) | null> },
+): () => void {
+  const cleanups: (() => void)[] = [];
+  if (opts.onHeadings) view.dispatch({ effects: StateEffect.appendConfig.of(headingsExtension(opts.onHeadings)) });
+  if (opts.tocJumpRef) {
+    const ref = opts.tocJumpRef;
+    ref.current = (from: number) => {
+      const pos = Math.min(from, view.state.doc.length);
+      view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "start" }) });
+      if (!view.state.readOnly) view.focus();
+    };
+    cleanups.push(() => { ref.current = null; });
+  }
+  if (opts.onActiveHeading) {
+    const report = opts.onActiveHeading;
+    let raf = 0;
+    const compute = () => {
+      raf = 0;
+      const top = view.scrollDOM.getBoundingClientRect().top;
+      const hs = extractHeadings(view.state);
+      let active: number | null = hs.length ? hs[0]!.from : null;
+      for (const h of hs) {
+        const c = view.coordsAtPos(h.from);
+        if (c && c.top <= top + 48) active = h.from; // last heading at/above the top band
+        else if (c) break;
+      }
+      report(active);
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(compute); };
+    view.scrollDOM.addEventListener("scroll", onScroll, { passive: true });
+    cleanups.push(() => { view.scrollDOM.removeEventListener("scroll", onScroll); if (raf) cancelAnimationFrame(raf); });
+    raf = requestAnimationFrame(compute); // initial active
+  }
+  return () => cleanups.forEach((c) => c());
+}
+
+export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, onHeadings, onActiveHeading, tocJumpRef, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
   const previewViewRef = useRef<EditorView | null>(null);
@@ -201,7 +250,9 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       views.push(v);
       previewViewRef.current = v;
       if (anchorGetterRef) anchorGetterRef.current = null;
+      const tocCleanup = wireToc(v, { onHeadings, onActiveHeading, tocJumpRef }); // #192 TOC (reading/view surface)
       return () => {
+        tocCleanup();
         views.forEach((x) => x.destroy());
         previewViewRef.current = null;
         previewHost.replaceChildren();
@@ -236,8 +287,10 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       };
     }
     pushHighlights(previewView);
+    const tocCleanup = wireToc(previewView, { onHeadings, onActiveHeading, tocJumpRef }); // #192 TOC (edit surface)
 
     return () => {
+      tocCleanup();
       views.forEach((v) => v.destroy());
       previewViewRef.current = null;
       if (anchorGetterRef) anchorGetterRef.current = null;

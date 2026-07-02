@@ -9,6 +9,12 @@
     "on": "ON",
     "off": "OFF"
   },
+  "toc": {
+    "title": "On this page",
+    "empty": "No headings yet",
+    "depthTitle": "Show headings up to H{{n}}",
+    "toggle": "Table of contents"
+  },
   "collab": {
     "guest": "Guest"
   },

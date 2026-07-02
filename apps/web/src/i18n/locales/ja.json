@@ -9,6 +9,12 @@
     "on": "ON",
     "off": "OFF"
   },
+  "toc": {
+    "title": "このページの目次",
+    "empty": "見出しがありません",
+    "depthTitle": "H{{n}} までの見出しを表示",
+    "toggle": "目次"
+  },
   "collab": {
     "guest": "ゲスト"
   },
