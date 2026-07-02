@@ -1,7 +1,24 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from "vitest";
-import type { DirectiveMacro } from "./registry";
+import type { DirectiveMacro, MacroContext, InnerEditHost } from "./registry";
 import { unsafeHtml } from "./safe-html";
+
+// ADR-045 / #88 (item 4) — TYPE-LEVEL assertions that the macro host-API stays NARROW (ADR-024: a
+// macro sees {theme} ONLY; an inline editor sees the small InnerEditHost — never EditorView/
+// EditorState/Yjs/session/DB/FGA). If someone widens MacroContext or InnerEditHost (adding, say, a
+// `view` field), these Exact<> checks flip to false and typecheck fails — the trust boundary can't
+// be quietly broadened. This is the compile-time half of the sandbox boundary the ADR wants locked
+// BEFORE user macros (Stage 2). Assertions run when tsc type-checks this file.
+type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+// A macro's render context is EXACTLY {theme} — no more keys.
+const _ctxKeysExact: Exact<keyof MacroContext, "theme"> = true;
+// The inline-edit host is EXACTLY its narrow surface — theme + the four source/lifecycle methods.
+const _hostKeysExact: Exact<keyof InnerEditHost, "theme" | "getSource" | "replaceSource" | "exit" | "beginTextEdit"> = true;
+// Neither the context nor the host may expose an editor/CRDT/session handle (spot-check the names a
+// widening would most plausibly add — each must be `never`, i.e. absent).
+const _noView: Exact<Extract<keyof MacroContext, "view" | "state" | "doc" | "ydoc" | "session">, never> = true;
+const _hostNoView: Exact<Extract<keyof InnerEditHost, "view" | "state" | "dispatch" | "ydoc">, never> = true;
 
 // ADR-045 / #88 (item 2) — TYPE-LEVEL anti-tests for the DirectiveMacro discriminated union. These
 // assert at COMPILE time (tsc runs over test files) that the container/block exclusivity is enforced
@@ -49,5 +66,8 @@ describe("DirectiveMacro discriminated union (ADR-045 #88 item 2)", () => {
   it("compiles the valid container/block shapes and rejects the invalid ones (see @ts-expect-error)", () => {
     // Reference the bindings so they aren't elided; the assertions that matter ran at compile time.
     expect([container, block, both, blockWithIcon, containerWithReveal].every((m) => m.kind === "directive")).toBe(true);
+  });
+  it("keeps the macro host-API narrow (MacroContext={theme}, InnerEditHost small) — see Exact<> checks", () => {
+    expect([_ctxKeysExact, _hostKeysExact, _noView, _hostNoView].every((v) => v === true)).toBe(true);
   });
 });
