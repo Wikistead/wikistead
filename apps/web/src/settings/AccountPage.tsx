@@ -35,7 +35,10 @@ function useAccountTabs(): SettingsTab[] {
 // structured (Linear-style) rather than bare full-width rows. Token-driven; visual only.
 function SettingsPage({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
-    <div className="mx-auto max-w-[560px] px-6 py-8">
+    // #194 (revised): the readable column is LEFT-aligned right after the rail (with comfortable
+    // padding), not centered in the pane — so there is no awkward gap between the rail and the
+    // content, nor dead space on both sides. max-width still caps line length for readability.
+    <div className="max-w-[600px] px-8 py-8">
       <h2 className="mt-0 mb-1 text-[length:var(--text-xl)] font-medium text-foreground">{title}</h2>
       {description && <p className="mb-6 text-[length:var(--text-ui)] text-fg-dim">{description}</p>}
       <div className="flex flex-col gap-4">{children}</div>

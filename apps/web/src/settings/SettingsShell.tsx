@@ -37,10 +37,12 @@ export function SettingsShell({
 }) {
   const { t } = useTranslation();
   return (
-    // Center the whole settings block (rail + content) with a max width, so it doesn't
-    // hug the left edge / shift by viewport width and stays consistent across every
-    // settings screen (Account / Admin / Space) — Notion/Confluence-style centered panel.
-    <div className="mx-auto grid h-full min-h-0 w-full max-w-[1100px] grid-cols-[220px_1fr]">
+    // #194 (revised): the rail sits FLUSH to the left edge and the content pane fills the rest of the
+    // width — Linear-style. The previous `mx-auto max-w-[1100px]` centered the whole rail+content
+    // block, leaving an awkward gap to the LEFT of the rail and between the rail and the content on
+    // wide screens. Readability is kept by the content column's own max-width (SettingsPage), not by
+    // centering the whole screen.
+    <div className="grid h-full min-h-0 w-full grid-cols-[240px_1fr]">
       <nav className="box-border flex flex-col gap-0.5 overflow-y-auto border-r border-border bg-panel p-3" aria-label={title}>
         <NavLink to="/" className={backLink} data-testid="settings-back">
           <ArrowLeft size={14} /> {t("settings.back")}
