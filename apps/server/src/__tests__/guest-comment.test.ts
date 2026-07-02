@@ -96,4 +96,19 @@ describe('#100 guest commenting (view link + comment_open)', () => {
     const res = await app.inject({ method: 'POST', url: `/pages/some-other-page/comments`, headers: H(viewTok), payload: { body: 'x' } })
     expect(res.statusCode).toBe(403) // token resource is bound to PAGE
   })
+
+  // #100 UI: the guest page reads canComment from /published to decide whether to show the composer.
+  // It must track comment_open (distinct true/false) so the composer appears only when guests may post.
+  it('the /published endpoint reports canComment for the guest, tracking comment_open', async () => {
+    const open = await app.inject({ method: 'GET', url: `/pages/${PAGE}/published`, headers: H(viewTok) })
+    expect(open.statusCode).toBe(200)
+    expect((open.json() as { canComment: boolean }).canComment).toBe(true) // open → composer shows
+    await setCommentsOpen(false)
+    try {
+      const closed = await app.inject({ method: 'GET', url: `/pages/${PAGE}/published`, headers: H(viewTok) })
+      expect((closed.json() as { canComment: boolean }).canComment).toBe(false) // closed → no composer (view still 200)
+    } finally {
+      await setCommentsOpen(true)
+    }
+  })
 })
