@@ -33,7 +33,10 @@ const server = new Hocuspocus({
     // re-check authorization but inherits the tenant boundary from documentName.
     new Database({
       fetch: async ({ documentName }) => {
-        const { tenantId, pageId } = parseDocName(documentName);
+        const { tenantId, pageId, ephemeral } = parseDocName(documentName);
+        if (ephemeral) return null; // #92 / ADR-093: ephemeral Excalidraw room — never persisted; the
+        // first client seeds it from the fence JSON, and the final scene is flushed to the page's
+        // Y.Text fence (not here) on modal close. Empty initial state = seed-on-join.
         const state = await loadYdoc(tenantId, pageId);
         if (!state) return state;
         // #120 / ADR-040 (option 2): compact accumulated restore tombstones at COLD LOAD. fetch runs when
@@ -54,7 +57,8 @@ const server = new Hocuspocus({
         return state;
       },
       store: async ({ documentName, state, context }) => {
-        const { tenantId, pageId } = parseDocName(documentName);
+        const { tenantId, pageId, ephemeral } = parseDocName(documentName);
+        if (ephemeral) return; // #92: ephemeral Excalidraw room is never persisted (flushed to the fence)
         const p = (context as any)?.principal;
         const createdBy = p?.kind === "member"  ? `user:${p.userId}`
                         : p?.kind === "guest"   ? `guest:${p.shareLinkId}`
