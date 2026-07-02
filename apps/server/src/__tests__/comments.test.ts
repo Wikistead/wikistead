@@ -79,6 +79,18 @@ describe('comment authz matrix', () => {
     expect((await post('viewer', `/pages/${PAGE}/comments`, { body: 'hi' })).statusCode).toBe(403)
   })
 
+  // #100: getPage.canComment gates the comment COMPOSER in the UI. It must mirror the actual comment
+  // capability (distinct true/false) — a comment grant/edit → true, a view-only member → false — so a
+  // viewer never sees a composer that would only 403 (and the server re-checks: the 403 above proves it).
+  it('getPage.canComment reflects the comment capability: commenter true, view-only false', async () => {
+    const commenter = await get('author', `/pages/${PAGE}`)
+    expect(commenter.statusCode).toBe(200)
+    expect((commenter.json() as { canComment: boolean }).canComment).toBe(true) // comment grant → composer shown
+    const viewer = await get('viewer', `/pages/${PAGE}`)
+    expect(viewer.statusCode).toBe(200)
+    expect((viewer.json() as { canComment: boolean }).canComment).toBe(false) // view-only → no composer
+  })
+
   it('a commenter creates a thread; viewers and the author then see it', async () => {
     const res = await post('author', `/pages/${PAGE}/comments`, { body: 'first comment' })
     expect(res.statusCode).toBe(201)
