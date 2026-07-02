@@ -367,32 +367,48 @@ class TableWidget extends WidgetType {
 // (the ADR-054 focus-delegation guard, proven by the M1 spike): CM treats the block as atomic and
 // does NOT reclaim the nested cell's focus, so the inline editor owns all interaction and commits
 // via host.replaceSource (one offset-invariant Y.Text edit; the host auto-demotes pipe⟷:::table).
-// eq is keyed on [from,to,source]: a commit rewrites the range → new key → remount from the
-// canonical source (same lifecycle as the modal); between commits (typing in a cell = no doc
-// change) the widget is stable and keeps focus. Offset-invariant — replace never shifts offsets.
+// eq is keyed on [from,to,source]: a commit rewrites the range → not eq. But instead of letting CM
+// DESTROY + rebuild the widget on every commit (which, unlike the modal's stable overlay, flashes the
+// grid through an unstyled frame → the multi-col RESIZE "jump" on release, #154 rebound), updateDOM
+// re-renders the inline editor IN PLACE into the SAME dom (mirroring the modal's render). CM reuses
+// the node, so a resize commit shows the committed widths without a re-mount transient. The controller
+// + ResizeObserver live ON the dom so updateDOM/destroy can reach them across the widget's identity
+// change. Offset-invariant — replace never shifts offsets.
+interface TableDom extends HTMLDivElement { __tableCtrl?: InlineController; __tableRo?: ResizeObserver }
 class EditableTableWidget extends WidgetType {
-  private ctrl?: InlineController;
-  private ro?: ResizeObserver;
   constructor(readonly from: number, readonly to: number, readonly source: string) {
     super();
   }
   eq(o: EditableTableWidget) {
     return o.from === this.from && o.to === this.to && o.source === this.source;
   }
+  private mountInto(dom: TableDom, view: EditorView) {
+    dom.__tableCtrl?.destroy();
+    dom.replaceChildren(); // clear the previous grid before mounting fresh (mount appends, doesn't clear)
+    dom.__tableCtrl = tableInlineEditor.mount(dom, makeInnerEditHost(view, this.from, this.to, tableTier));
+  }
   toDOM(view: EditorView) {
-    const wrap = document.createElement("div");
+    const wrap = document.createElement("div") as TableDom;
     // Atom root guard (ADR-054): contenteditable=false so CM keeps the block atomic and does NOT
     // reclaim the nested cell's focus. mount owns the className/testid + appends the editor DOM.
     wrap.contentEditable = "false";
-    this.ctrl = tableInlineEditor.mount(wrap, makeInnerEditHost(view, this.from, this.to, tableTier));
-    this.ro = observeBlockResize(view, wrap);
+    this.mountInto(wrap, view);
+    wrap.__tableRo = observeBlockResize(view, wrap);
     return wrap;
   }
-  destroy() {
-    this.ctrl?.destroy();
-    this.ctrl = undefined;
-    this.ro?.disconnect();
-    this.ro = undefined;
+  // #154 rebound: re-render in place on a commit (source change) instead of a destroy+recreate — no
+  // grid flash, so the resize preview == commit (no jump on release). The ResizeObserver on the same
+  // node is kept. Returning true tells CM to reuse the dom.
+  updateDOM(dom: HTMLElement, view: EditorView) {
+    this.mountInto(dom as TableDom, view);
+    return true;
+  }
+  destroy(dom: HTMLElement) {
+    const d = dom as TableDom;
+    d.__tableCtrl?.destroy();
+    d.__tableCtrl = undefined;
+    d.__tableRo?.disconnect();
+    d.__tableRo = undefined;
   }
   ignoreEvent() {
     return true; // the inline editor owns interaction inside the island; CM must not process its events
