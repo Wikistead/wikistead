@@ -138,30 +138,18 @@ export interface FenceMacro {
   readonly slash?: MacroSlash; // appears in the `/` palette
 }
 
-// A container directive (:::name … :::). Unlike a fence macro, its body stays
-// Markdown (parsed as nested nodes, decorated by the existing live-preview renderers),
-// so a directive macro does NOT return a widget — it styles the CONTAINER. M1 needs
-// only a CSS class for the box; a leading label / custom header comes later.
-export interface DirectiveMacro {
+// A directive macro (:::name … :::). Unlike a fence macro, its body stays Markdown (parsed as
+// nested nodes, decorated by the existing live-preview renderers). It renders one of TWO mutually
+// exclusive ways — a CONTAINER (a CSS box whose content stays Markdown, e.g. a callout) or a BLOCK
+// (a display widget built from the body, e.g. the HTML table). ADR-045 / #88 makes that exclusivity
+// a TYPE, not a comment: the two shapes are a discriminated union, so a macro CANNOT declare both
+// `containerClass` and `liveRender` (a real registration bug — which mode does it render?) and the
+// mode-specific fields (icon/collapsible vs revealOnCursor) can't cross to the wrong mode. Every
+// field is present on both members (as its real type or `never`), so reading `macro.containerClass`
+// / `macro.liveRender` on the union stays ergonomic for the renderers that branch on them.
+interface DirectiveMacroBase {
   readonly kind: "directive";
   readonly name: string; // :::name
-  // A directive renders one of two ways (mutually exclusive):
-  //  - containerClass: a CONTAINER (callout) — a CSS box over its lines; the content
-  //    stays Markdown (nested), the ::: markers hide (reveal-on-cursor); OR
-  //  - liveRender: a BLOCK (table) — render the body (e.g. an HTML <table>) as a
-  //    display widget (reveal-on-cursor shows the raw source), like a fence macro.
-  readonly containerClass?: string;
-  // Optional header icon for a container directive (#150 typed callouts). When set, the open
-  // line always renders a header (icon [+ label]); display-only, shown via data-icon.
-  readonly icon?: string;
-  // #90 details: a collapsible container — caret-away collapses to a "▸ summary" bar (one block
-  // widget), caret-in reveals the raw source (reveal-on-cursor). Pairs with containerClass.
-  readonly collapsible?: boolean;
-  readonly liveRender?: (body: string, ctx: MacroContext) => HTMLElement;
-  // #90 (A′): a liveRender directive that REVEALS its raw source when the caret is inside its
-  // range (like the GFM table / mermaid atoms) instead of being entered explicitly. Used by the
-  // layout directives (columns/tabs) so editing is reveal-on-cursor, not a modal.
-  readonly revealOnCursor?: boolean;
   // Static HTML for export / SSR (M3): wrap the rendered body. The inner Markdown is
   // rendered by the server pipeline; this supplies the wrapper. Returns SafeHtml (ADR-045 /
   // #88) — XSS-safety enforced by the type (build via html``/unsafeHtml, never raw concat).
@@ -173,15 +161,92 @@ export interface DirectiveMacro {
   readonly tier?: MacroTier;
   readonly slash?: MacroSlash; // appears in the `/` palette
 }
+// CONTAINER (callout / details): a CSS box over its lines; the content stays Markdown (nested),
+// the ::: markers hide (reveal-on-cursor). No liveRender.
+export interface ContainerDirectiveMacro extends DirectiveMacroBase {
+  readonly containerClass: string;
+  // Optional header icon (#150 typed callouts). When set, the open line always renders a header
+  // (icon [+ label]); display-only, shown via data-icon.
+  readonly icon?: string;
+  // #90 details: a collapsible container — caret-away collapses to a "▸ summary" bar (one block
+  // widget), caret-in reveals the raw source (reveal-on-cursor). Pairs with containerClass.
+  readonly collapsible?: boolean;
+  readonly liveRender?: never;
+  readonly revealOnCursor?: never;
+}
+// BLOCK (table / columns / tabs / transclude): render the body as a display widget (like a fence
+// macro). No containerClass.
+export interface BlockDirectiveMacro extends DirectiveMacroBase {
+  readonly liveRender: (body: string, ctx: MacroContext) => HTMLElement;
+  // #90 (A′): REVEAL the raw source when the caret is inside the range (like the GFM table /
+  // mermaid atoms) instead of entering explicitly. Used by the layout directives (columns/tabs).
+  readonly revealOnCursor?: boolean;
+  readonly containerClass?: never;
+  readonly icon?: never;
+  readonly collapsible?: never;
+}
+export type DirectiveMacro = ContainerDirectiveMacro | BlockDirectiveMacro;
 
 export type Macro = FenceMacro | DirectiveMacro;
 
 const FENCE_MACROS = new Map<string, FenceMacro>();
 const DIRECTIVE_MACROS = new Map<string, DirectiveMacro>();
 
-// Register a macro. Throws on a duplicate claim so a real collision (two macros for the
-// same fence language / directive name) fails loud at startup rather than shadowing.
+// A fence lang / directive name must be a single token: the fence info-string parser matches
+// [A-Za-z0-9_+-] and the directive name is a bare word, so anything else (spaces, colons, empty)
+// could never be looked up — or worse, silently shadow. Reject it at registration.
+const MACRO_NAME_RE = /^[A-Za-z0-9_+-]+$/;
+
+// Runtime validation of a macro registration (ADR-045 / #88 item 5). The TYPES are the first line
+// of defense for first-party TS code; this is the fortress for a registration that reaches the
+// registry with the types bypassed (a JS caller, or a future user-macro sandbox loading untrusted
+// descriptors). It re-checks the same invariants the union encodes — exclusive render mode, a valid
+// single-token name, the required render/export/summary members — so a malformed macro fails LOUD at
+// register time instead of rendering nothing (or the wrong mode) later. Never widens the trust
+// boundary; it only rejects.
+function validateMacro(macro: Macro): void {
+  // Validate through a LOOSE view: the point of item 5 is to guard registrations that reached here
+  // with the types bypassed, so we must not let TS's narrowing of the (trusted) union assume fields
+  // are well-formed. Every check is a runtime `typeof`.
+  const m = macro as {
+    kind?: unknown; exportFidelity?: unknown; htmlRender?: unknown; summary?: unknown;
+    lang?: unknown; name?: unknown; containerClass?: unknown; liveRender?: unknown;
+    richEditUI?: { present?: unknown; editor?: { mount?: unknown } };
+  };
+  if (m.kind !== "fence" && m.kind !== "directive")
+    throw new Error(`macro.kind must be "fence" or "directive" (got ${JSON.stringify(m.kind)})`);
+  if (m.exportFidelity !== "preserve" && m.exportFidelity !== "degrade")
+    throw new Error(`macro exportFidelity must be "preserve" | "degrade" (got ${JSON.stringify(m.exportFidelity)})`);
+  if (typeof m.htmlRender !== "function") throw new Error("macro htmlRender must be a function");
+  const rich = m.richEditUI;
+  if (rich !== undefined) {
+    if (rich.present !== "modal" && rich.present !== "inline")
+      throw new Error(`macro richEditUI.present must be "modal" | "inline" (got ${JSON.stringify(rich.present)})`);
+    if (!rich.editor || typeof rich.editor.mount !== "function")
+      throw new Error("macro richEditUI.editor must expose a mount() function");
+  }
+  if (m.kind === "fence") {
+    if (typeof m.lang !== "string" || !MACRO_NAME_RE.test(m.lang))
+      throw new Error(`invalid fence macro lang: ${JSON.stringify(m.lang)} (must match ${MACRO_NAME_RE})`);
+    if (typeof m.liveRender !== "function") throw new Error(`fence macro "${m.lang}" must define liveRender`);
+    if (typeof m.summary !== "function") throw new Error(`fence macro "${m.lang}" must define summary`);
+  } else {
+    if (typeof m.name !== "string" || !MACRO_NAME_RE.test(m.name))
+      throw new Error(`invalid directive macro name: ${JSON.stringify(m.name)} (must match ${MACRO_NAME_RE})`);
+    const hasContainer = typeof m.containerClass === "string";
+    const hasBlock = typeof m.liveRender === "function";
+    if (hasContainer && hasBlock)
+      throw new Error(`directive macro "${m.name}" declares BOTH containerClass and liveRender — pick one render mode`);
+    if (!hasContainer && !hasBlock)
+      throw new Error(`directive macro "${m.name}" declares neither containerClass nor liveRender — needs one render mode`);
+  }
+}
+
+// Register a macro. Validates the registration (ADR-045 item 5) then throws on a duplicate claim so
+// a real collision (two macros for the same fence language / directive name) fails loud at startup
+// rather than shadowing.
 export function registerMacro(macro: Macro): void {
+  validateMacro(macro);
   if (macro.kind === "fence") {
     const lang = macro.lang.toLowerCase();
     if (FENCE_MACROS.has(lang)) throw new Error(`duplicate fence macro for language: ${lang}`);
