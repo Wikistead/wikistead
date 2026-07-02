@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ComponentType, ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react";
@@ -8,6 +8,9 @@ export interface SettingsTab {
   key: string;
   label: string;
   to: string;
+  // #194: a Lucide icon for the rail (aligns with the app-wide Lucide set — ADR-052). Optional so
+  // existing callers without icons still render (label-only).
+  icon?: ComponentType<{ size?: number | string; className?: string }>;
   // A tab whose feature ships in a later subphase: shown but routed to a "coming
   // soon" placeholder, so the IA (vertical tab rail) stands before the contents do.
   soon?: boolean;
@@ -49,12 +52,13 @@ export function SettingsShell({
             to={tab.to}
             end={tab.end}
             className={({ isActive }) => cn(
-              "flex items-center justify-between gap-2 rounded-md px-2 py-[7px] text-[length:var(--text-ui)] text-foreground no-underline hover:bg-panel-2",
+              "flex items-center gap-2 rounded-md px-2 py-[7px] text-[length:var(--text-ui)] text-foreground no-underline hover:bg-panel-2",
               isActive && "bg-panel-2 font-semibold shadow-[inset_2px_0_0_var(--accent)]",
             )}
             data-testid={`settings-tab-${tab.key}`}
           >
-            <span>{tab.label}</span>
+            {tab.icon && <tab.icon size={16} className="flex-none text-fg-dim" />}
+            <span className="flex-1">{tab.label}</span>
             {tab.soon && <span className="rounded-full border border-border px-1.5 text-[10px] leading-4 text-fg-dim">{t("settings.soon")}</span>}
           </NavLink>
         ))}

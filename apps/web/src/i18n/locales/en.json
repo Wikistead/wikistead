@@ -55,6 +55,8 @@
     "theme": "Theme"
   },
   "account": {
+    "profileHint": "Your identity across the workspace — how collaborators see you.",
+    "editorHint": "How the editor behaves for you: keymap, startup mode, fonts, and shortcuts.",
     "displayName": "Display name",
     "displayNameHint": "Overrides the name from your identity provider. It is shown to collaborators.",
     "resetToIdp": "Reset to \"{{name}}\"",

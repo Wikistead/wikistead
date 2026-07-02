@@ -55,6 +55,8 @@
     "theme": "テーマ"
   },
   "account": {
+    "profileHint": "ワークスペース上のあなたの識別情報＝共同編集者からの見え方。",
+    "editorHint": "エディタの挙動：キーマップ・起動モード・フォント・ショートカット。",
     "displayName": "表示名",
     "displayNameHint": "ID プロバイダの名前を上書きします。共同編集者に表示されます。",
     "resetToIdp": "「{{name}}」に戻す",
