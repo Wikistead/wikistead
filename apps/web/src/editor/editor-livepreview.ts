@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, checkboxControl, enterMacroCommand, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, checkboxControl, enterMacroCommand, ephemeralCollab, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette } from "./live-preview/palette";
@@ -63,7 +63,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void } = {},
+  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -156,6 +156,8 @@ export function mountLivePreview(
       ...(opts.renderDiagram ? [diagramRenderer.of(opts.renderDiagram)] : []),
       // #108: host-mediated transclude (the :::transclude macro never fetches — narrow host-API).
       ...(opts.resolveTransclude ? [transcludeResolver.of(opts.resolveTransclude)] : []),
+      // #92: host ephemeral-collab seam for a collab-capable modal (excalidraw); {theme} stays narrow.
+      ...(opts.ephemeralCollab ? [ephemeralCollab.of(opts.ephemeralCollab)] : []),
       yCollab(ytext, provider.awareness),
       remoteCursors, // #8: avatar+name flags (additive overlay; yCollab untouched)
       // Slash command palette + floating selection toolbar (editable surface only; view

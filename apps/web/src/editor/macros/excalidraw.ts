@@ -1,4 +1,5 @@
-import type { FenceMacro, MacroContext, MacroModalController } from "./registry";
+import type { FenceMacro, MacroContext, MacroModalController, HostEphemeralCollab } from "./registry";
+import { writeLocalElements, readSceneElements, allElements, reconcile, elementsMap } from "./excalidraw-collab";
 
 // ```excalidraw — body is an Excalidraw scene JSON. The PREVIEW (liveRender) uses
 // Excalidraw's NON-React exportToSvg, so no React enters CodeMirror (ADR-013). The
@@ -66,27 +67,68 @@ export const excalidrawMacro: FenceMacro = {
   htmlRender: () => `<div class="excalidraw-drawing">[Excalidraw drawing]</div>`,
   richEditUI: {
     present: "modal",
+    collab: true, // #92 / ADR-093: opt into the host's ephemeral collab seam (level-2 co-editing)
     editor: {
-      async mount(container: HTMLElement, body: string, ctx: MacroContext): Promise<MacroModalController> {
+      async mount(container: HTMLElement, body: string, ctx: MacroContext, hostCollab?: HostEphemeralCollab): Promise<MacroModalController> {
         const [{ React, createRoot }, excal] = await Promise.all([loadReact(), loadExcalidraw()]);
         const scene = parseScene(body);
         let current = body; // latest serialized scene (written back on save)
         const root = createRoot(container);
+        // #92: ephemeral collab (ADR-093). While the modal is open, scene elements sync through the
+        // host's ephemeral Y.Doc (a Y.Map keyed by element id, merged by version — excalidraw-collab).
+        // Local edits → writeLocalElements; remote map changes → updateScene(reconcile). `applyingRemote`
+        // breaks the updateScene→onChange echo. On close the merged scene is flushed to the fence (getBody)
+        // and the room is torn down by the host. No collab session → the M1 single-user modal.
+        const doc = hostCollab?.doc;
+        let api: any = null;
+        let applyingRemote = false;
+        let unobserve: (() => void) | null = null;
+
         const onChange = (elements: any, appState: any, files: any) => {
           try {
             current = excal.serializeAsJSON(elements, appState, files, "local");
           } catch {
             /* keep the last good serialization */
           }
+          if (doc && !applyingRemote) writeLocalElements(doc, elements); // includes isDeleted → deletions propagate
         };
+
         root.render(
           React.createElement(excal.Excalidraw as any, {
             initialData: { elements: scene.elements, appState: { ...scene.appState, theme: ctx.theme }, files: scene.files, scrollToContent: true },
             onChange,
             theme: ctx.theme,
+            ...(doc ? { excalidrawAPI: (a: any) => { api = a; } } : {}),
           }),
         );
-        return { getBody: () => current, destroy: () => root.unmount() };
+
+        if (doc) {
+          const map = elementsMap(doc);
+          const getAll = () => (api?.getSceneElementsIncludingDeleted?.() ?? api?.getSceneElements?.() ?? []);
+          const applyRemote = () => {
+            if (!api) { requestAnimationFrame(applyRemote); return; }
+            applyingRemote = true;
+            try { api.updateScene({ elements: reconcile(getAll(), allElements(doc)) as any }); }
+            finally { applyingRemote = false; }
+          };
+          if (map.size === 0) writeLocalElements(doc, scene.elements); // first joiner seeds from the fence
+          else applyRemote(); // a later joiner adopts the shared scene
+          const obs = () => { if (!applyingRemote) applyRemote(); };
+          map.observe(obs);
+          unobserve = () => map.unobserve(obs);
+        }
+
+        return {
+          // On close, flush the CONVERGED scene from the shared doc (last write wins across editors),
+          // clean of tombstones (readSceneElements), so the fence holds the final drawing.
+          getBody: () => {
+            if (doc && api) {
+              try { return excal.serializeAsJSON(readSceneElements(doc) as any, api.getAppState(), api.getFiles(), "local"); } catch { /* fall through */ }
+            }
+            return current;
+          },
+          destroy: () => { unobserve?.(); root.unmount(); },
+        };
       },
     },
   },

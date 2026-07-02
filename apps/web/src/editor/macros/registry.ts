@@ -37,9 +37,21 @@ export interface MacroModalController {
   getBody(): string; // current serialized body, written back on save
   destroy(): void; // unmount / cleanup
 }
+// #92 / ADR-093: a HOST-provided ephemeral collab session for level-2 co-editing (Excalidraw). It is
+// passed as a SEPARATE optional argument to mount — NOT folded into MacroContext — so the general macro
+// trust boundary ({theme}) is unchanged; only a collab-capable modal (excalidraw) reads it, and only
+// the host ever supplies it. The scene lives in `doc` (a Y.Map, not the page Y.Text); destroy() tears
+// the room down (the final scene is flushed to the fence via getBody on modal close).
+export interface HostEphemeralCollab {
+  readonly doc: import("yjs").Doc;
+  readonly awareness?: unknown;
+  destroy(): void;
+}
 export interface MacroModalEditor {
-  // May be async — the editor (e.g. Excalidraw) is lazy-loaded.
-  mount(container: HTMLElement, body: string, ctx: MacroContext): Promise<MacroModalController>;
+  // May be async — the editor (e.g. Excalidraw) is lazy-loaded. `hostCollab` is optional + host-only
+  // (present only for a collab-capable macro when the host injects the ephemeral seam); macros that
+  // don't co-edit ignore it, keeping the {theme} boundary intact.
+  mount(container: HTMLElement, body: string, ctx: MacroContext, hostCollab?: HostEphemeralCollab): Promise<MacroModalController>;
 }
 // ADR-025: the narrow host an INLINE rich-editor (e.g. table) talks to. Like MacroContext
 // it exposes NO editor / Yjs / app internals — only the macro's own source + theme + a
@@ -70,7 +82,9 @@ export interface InlineEditor {
   mount(container: HTMLElement, host: InnerEditHost): InlineController;
 }
 export type RichEditUI =
-  | { readonly present: "modal"; readonly editor: MacroModalEditor }
+  // `collab: true` (modal only, #92) opts the macro into the host's ephemeral collab seam — the host
+  // opens an ephemeral room and passes the session to mount's `hostCollab`. Others get single-user.
+  | { readonly present: "modal"; readonly editor: MacroModalEditor; readonly collab?: boolean }
   | { readonly present: "inline"; readonly editor: InlineEditor };
 
 // ADR-025 step 3: a macro's source can often be written at more than one "level" — a

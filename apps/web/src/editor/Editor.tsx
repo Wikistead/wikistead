@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, type MutableRefObjec
 import { Compartment, StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { headingsExtension, extractHeadings, type Heading } from "./headings";
-import { connect } from "./collab";
+import { connect, connectEphemeral } from "./collab";
 import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayModeContent } from "./editor-livepreview";
 import type { DisplayMode } from "./live-preview/decorations";
 import { makeImageResolver } from "./image-resolver";
@@ -274,6 +274,9 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       displayModeCompartment,
       onExitEdit,
       onPublish,
+      // #92 / ADR-093: the host ephemeral-collab seam — opens a non-persisted room for a co-editing
+      // macro modal (excalidraw). Keyed by docName + the macro's anchor; token/url from the same collab.
+      ephemeralCollab: (anchor: string) => connectEphemeral({ url: collabUrl, docName, anchor, token }),
     });
     views.push(previewView);
     previewViewRef.current = previewView;
