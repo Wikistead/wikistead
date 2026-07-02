@@ -80,6 +80,7 @@ export interface EditorProps {
   // "scroll to this heading offset" function the TOC rail calls. All display-only (read state / scroll).
   onHeadings?: (headings: Heading[]) => void;
   onActiveHeading?: (from: number | null) => void;
+  onScrollActivity?: () => void; // #192: fires on each editor scroll (drives the narrow TOC overlay)
   tocJumpRef?: MutableRefObject<((from: number) => void) | null>;
   // External "unpublished changes" store written here (edit mode) and read only by
   // the publish control — NOT React state, so writing it never re-renders the editor
@@ -127,7 +128,7 @@ function tint(color: string): string {
 // the mount functions don't need to know about the TOC.
 function wireToc(
   view: EditorView,
-  opts: { onHeadings?: (h: Heading[]) => void; onActiveHeading?: (from: number | null) => void; tocJumpRef?: MutableRefObject<((from: number) => void) | null> },
+  opts: { onHeadings?: (h: Heading[]) => void; onActiveHeading?: (from: number | null) => void; onScrollActivity?: () => void; tocJumpRef?: MutableRefObject<((from: number) => void) | null> },
 ): () => void {
   const cleanups: (() => void)[] = [];
   if (opts.onHeadings) view.dispatch({ effects: StateEffect.appendConfig.of(headingsExtension(opts.onHeadings)) });
@@ -140,11 +141,13 @@ function wireToc(
     };
     cleanups.push(() => { ref.current = null; });
   }
-  if (opts.onActiveHeading) {
+  if (opts.onActiveHeading || opts.onScrollActivity) {
     const report = opts.onActiveHeading;
+    const activity = opts.onScrollActivity;
     let raf = 0;
     const compute = () => {
       raf = 0;
+      if (!report) return;
       const top = view.scrollDOM.getBoundingClientRect().top;
       const hs = extractHeadings(view.state);
       let active: number | null = hs.length ? hs[0]!.from : null;
@@ -155,15 +158,18 @@ function wireToc(
       }
       report(active);
     };
-    const onScroll = () => { if (!raf) raf = requestAnimationFrame(compute); };
+    const onScroll = () => {
+      activity?.(); // #192: drive the narrow-screen TOC overlay's "visible while scrolling"
+      if (report && !raf) raf = requestAnimationFrame(compute);
+    };
     view.scrollDOM.addEventListener("scroll", onScroll, { passive: true });
     cleanups.push(() => { view.scrollDOM.removeEventListener("scroll", onScroll); if (raf) cancelAnimationFrame(raf); });
-    raf = requestAnimationFrame(compute); // initial active
+    if (report) raf = requestAnimationFrame(compute); // initial active
   }
   return () => cleanups.forEach((c) => c());
 }
 
-export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, onHeadings, onActiveHeading, tocJumpRef, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
+export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, onHeadings, onActiveHeading, onScrollActivity, tocJumpRef, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
   const previewViewRef = useRef<EditorView | null>(null);
@@ -250,7 +256,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       views.push(v);
       previewViewRef.current = v;
       if (anchorGetterRef) anchorGetterRef.current = null;
-      const tocCleanup = wireToc(v, { onHeadings, onActiveHeading, tocJumpRef }); // #192 TOC (reading/view surface)
+      const tocCleanup = wireToc(v, { onHeadings, onActiveHeading, onScrollActivity, tocJumpRef }); // #192 TOC (reading/view surface)
       return () => {
         tocCleanup();
         views.forEach((x) => x.destroy());
@@ -290,7 +296,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       };
     }
     pushHighlights(previewView);
-    const tocCleanup = wireToc(previewView, { onHeadings, onActiveHeading, tocJumpRef }); // #192 TOC (edit surface)
+    const tocCleanup = wireToc(previewView, { onHeadings, onActiveHeading, onScrollActivity, tocJumpRef }); // #192 TOC (edit surface)
 
     return () => {
       tocCleanup();

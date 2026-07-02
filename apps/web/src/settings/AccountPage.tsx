@@ -7,6 +7,7 @@ import { LoginScreen } from "../app/LoginScreen";
 import { useSession } from "../session/SessionProvider";
 import { useTheme, type Theme } from "../app/ThemeProvider";
 import { useFontBody, type FontBody } from "../app/FontProvider";
+import { useTocPref } from "../toc/useTocPref";
 import { Avatar } from "../ui/Avatar";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
@@ -189,6 +190,7 @@ function EditorTab() {
   const dmode = settings.data?.editorDisplayMode ?? "local"; // ADR-056 / #164 startup display mode
   const kb = settings.data?.keybindings ?? {};
   const { fontBody, setFontBody } = useFontBody(); // #190 / ADR-090: device-local body-font override
+  const { on: tocOn, setOn: setTocOn, depth: tocDepth, setDepth: setTocDepth } = useTocPref(); // #192: TOC on/off + depth moved here from the rail
   // Startup-mode preference (cross-device, server). 'local' follows this device's last
   // toolbar toggle; 'vim'/'default' force the startup state. The toolbar toggle
   // (Ctrl+Alt+V) still switches within a session regardless.
@@ -253,6 +255,43 @@ function EditorTab() {
               className="justify-start"
             >
               {t(`account.bodyFont_${f}`)}
+            </Button>
+          ))}
+        </div>
+      </SettingsCard>
+
+      <SettingsCard>
+        {/* #192 / ADR-091: table-of-contents on/off + depth (device-local). Moved out of the TOC rail
+            so the rail stays clean; the rail just filters by this depth. */}
+        <label className="mb-1 block text-sm font-medium">{t("account.toc")}</label>
+        <p className="mb-2 text-xs text-fg-dim">{t("account.tocHint")}</p>
+        <div className="mb-4 flex flex-col gap-2">
+          {([["on", true], ["off", false]] as const).map(([k, v]) => (
+            <Button
+              key={k}
+              variant={tocOn === v ? "primary" : "default"}
+              onClick={() => setTocOn(v)}
+              data-testid={`account-toc-${k}`}
+              aria-pressed={tocOn === v}
+              className="justify-start"
+            >
+              {t(`account.toc_${k}`)}
+            </Button>
+          ))}
+        </div>
+        <label className="mb-1 block text-sm font-medium">{t("account.tocDepth")}</label>
+        <p className="mb-2 text-xs text-fg-dim">{t("account.tocDepthHint")}</p>
+        <div className="flex flex-col gap-2">
+          {([1, 3, 6] as const).map((d) => (
+            <Button
+              key={d}
+              variant={tocDepth === d ? "primary" : "default"}
+              onClick={() => setTocDepth(d)}
+              data-testid={`account-tocdepth-${d}`}
+              aria-pressed={tocDepth === d}
+              className="justify-start"
+            >
+              {t(`account.tocDepth_${d}`)}
             </Button>
           ))}
         </div>

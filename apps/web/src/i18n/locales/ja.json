@@ -12,7 +12,6 @@
   "toc": {
     "title": "このページの目次",
     "empty": "見出しがありません",
-    "depthTitle": "H{{n}} までの見出しを表示",
     "toggle": "目次"
   },
   "collab": {
@@ -99,7 +98,16 @@
     "bodyFontHint": "エディタと閲覧の散文フォント（この端末）。「言語に従う」はロケール既定（日本語＝UDEV Gothic、英語＝Wikistead Mono）。コードは常にコーディングフォント。",
     "bodyFont_locale": "言語に従う",
     "bodyFont_udev": "UDEV Gothic（日本語グリッド）",
-    "bodyFont_mono": "Wikistead Mono（コーディング）"
+    "bodyFont_mono": "Wikistead Mono（コーディング）",
+    "toc": "目次",
+    "tocHint": "ページの見出しのアウトラインを表示します。",
+    "toc_on": "表示",
+    "toc_off": "非表示",
+    "tocDepth": "目次の深さ",
+    "tocDepthHint": "目次に含める見出しレベルの数。",
+    "tocDepth_1": "H1 のみ",
+    "tocDepth_3": "H1〜H3",
+    "tocDepth_6": "すべての見出し"
   },
   "settings": {
     "back": "アプリに戻る",
