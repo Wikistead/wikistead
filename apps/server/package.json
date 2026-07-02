@@ -19,6 +19,7 @@
     "revisions:gc": "tsx --env-file=../../.env src/scripts/revisions-gc.ts",
     "revisions:backfill": "tsx --env-file=../../.env src/scripts/revisions-backfill.ts",
     "plan:reconcile": "tsx --env-file=../../.env src/scripts/plan-reconcile.ts",
+    "tenant:promote": "tsx --env-file=../../.env src/scripts/promote-tenant.ts",
     "test": "vitest run"
   },
   "dependencies": {
