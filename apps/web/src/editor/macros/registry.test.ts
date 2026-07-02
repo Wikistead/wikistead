@@ -82,6 +82,42 @@ describe("macro registry", () => {
   });
 });
 
+// ADR-045 / #88 item 5 — registerMacro's RUNTIME fortress for registrations that reach the registry
+// with the types bypassed (a JS caller / future untrusted descriptor). Each malformed shape must
+// throw a DISTINCT, descriptive error at register time — not shadow, not render the wrong mode, not
+// fail silently later. Cast through `any` on purpose: these inputs are exactly the ones the compiler
+// would reject, and we are asserting the runtime catches them too.
+describe("registerMacro runtime validation (ADR-045 #88 item 5)", () => {
+  const base = { exportFidelity: "preserve", htmlRender: () => "" };
+  it("rejects an invalid directive name (spaces/colons/empty never match the parser)", () => {
+    expect(() => registerMacro({ kind: "directive", name: "has space", containerClass: "x", ...base } as any)).toThrow(/invalid directive macro name/);
+    expect(() => registerMacro({ kind: "directive", name: "", containerClass: "x", ...base } as any)).toThrow(/invalid directive macro name/);
+  });
+  it("rejects an invalid fence lang", () => {
+    expect(() => registerMacro({ kind: "fence", lang: "c++ x", liveRender: () => document.createElement("div"), summary: () => "", ...base } as any)).toThrow(/invalid fence macro lang/);
+  });
+  it("rejects a directive that declares BOTH containerClass and liveRender (ambiguous mode)", () => {
+    expect(() => registerMacro({ kind: "directive", name: "bothmodes", containerClass: "x", liveRender: () => document.createElement("div"), ...base } as any)).toThrow(/BOTH containerClass and liveRender/);
+  });
+  it("rejects a directive that declares NEITHER render mode", () => {
+    expect(() => registerMacro({ kind: "directive", name: "nomode", ...base } as any)).toThrow(/neither containerClass nor liveRender/);
+  });
+  it("rejects a bad exportFidelity", () => {
+    expect(() => registerMacro({ kind: "directive", name: "badfidelity", containerClass: "x", htmlRender: () => "", exportFidelity: "lossy" } as any)).toThrow(/exportFidelity/);
+  });
+  it("rejects a fence macro missing summary / liveRender", () => {
+    expect(() => registerMacro({ kind: "fence", lang: "nosummary", liveRender: () => document.createElement("div"), ...base } as any)).toThrow(/must define summary/);
+    expect(() => registerMacro({ kind: "fence", lang: "norender", summary: () => "", ...base } as any)).toThrow(/must define liveRender/);
+  });
+  it("rejects a richEditUI with a bad present / missing editor.mount", () => {
+    expect(() => registerMacro({ kind: "directive", name: "badrich", containerClass: "x", ...base, richEditUI: { present: "popup", editor: {} } } as any)).toThrow(/richEditUI\.present/);
+    expect(() => registerMacro({ kind: "directive", name: "badrich2", containerClass: "x", ...base, richEditUI: { present: "modal", editor: {} } } as any)).toThrow(/richEditUI\.editor/);
+  });
+  it("rejects an unknown kind", () => {
+    expect(() => registerMacro({ kind: "widget", name: "x", ...base } as any)).toThrow(/kind must be/);
+  });
+});
+
 describe("fence parsing", () => {
   it("reads the info string (lang) from the opening fence", () => {
     expect(fenceLang("```mermaid")).toBe("mermaid");
