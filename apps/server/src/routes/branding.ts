@@ -10,9 +10,12 @@ import type { StorageDriver } from '../storage/index.js'
 // Tenant branding (Phase 5d). Asymmetric by design:
 //   READ  GET /branding — PUBLIC (tenant resolved from Host; no auth). Visible to
 //         members, guests, and unauthenticated visitors of the tenant's pages.
-//         Branding is STRIPPED when the plan isn't entitled (a downgrade reverts to
-//         the default look; the stored values survive for a re-upgrade).
-//   WRITE PATCH /tenant/branding — tenant#admin AND entitlement-gated (403).
+//         displayName + accentKey are BASIC (all plans — a name and theme colour are not a
+//         paywalled feature). Only the ORIGINAL LOGO is entitlement-gated (Pro/EE value): the
+//         logoUrl is stripped when not entitled (#143). Downgrade is NON-DESTRUCTIVE — the stored
+//         logo survives, only its delivery stops, so a re-upgrade restores it (ADR-064).
+//   WRITE PATCH /tenant/branding (name + colour) — tenant#admin only, ALL plans.
+//         POST/DELETE /tenant/branding/logo — tenant#admin AND entitlement-gated (403).
 // The tenant logo (upload + public byte delivery) is Phase 5d-2 — implemented WITHOUT a multipart
 // dependency: the upload is base64-in-JSON (uploadTenantLogo below), MIME-sniffed (png/jpeg/webp only,
 // SVG excluded as a stored-XSS vector), size-capped, stored via the S3 abstraction, and served as
@@ -36,17 +39,18 @@ function sniffImage(b: Uint8Array): { mime: string; ext: string } | null {
   return null
 }
 
-// Read the public branding for the (RLS-scoped) tenant, stripped when not entitled.
-// logoUrl is a stable per-origin path (GET /branding/logo) — never a tenant-id URL.
+// Read the public branding for the (RLS-scoped) tenant. displayName + accentKey are BASIC (all
+// plans); only logoUrl is entitlement-gated (stripped when not entitled — but the stored logo_key
+// survives, so a re-upgrade restores it). logoUrl is a stable per-origin path — never a tenant-id URL.
 export async function getTenantBranding(db: TenantDb, plan: string): Promise<TenantBranding> {
-  if (!resolveEntitlements(plan).branding) return { displayName: null, accentKey: null, logoUrl: null }
   const [row] = await db.sql<{ accent_key: string | null; display_name: string | null; logo_key: string | null }[]>`
     SELECT accent_key, display_name, logo_key FROM tenant_settings LIMIT 1
   `
+  const entitled = resolveEntitlements(plan).branding
   return {
     displayName: row?.display_name ?? null,
     accentKey: row?.accent_key ?? null,
-    logoUrl: row?.logo_key ? '/branding/logo' : null,
+    logoUrl: entitled && row?.logo_key ? '/branding/logo' : null, // logo only (name/colour are basic)
   }
 }
 
@@ -104,14 +108,14 @@ export async function clearTenantLogo(
   emit({ type: 'tenant.branding_updated', tenantId: args.tenantId, actorId: args.userId })
 }
 
-// Set the tenant branding. tenant#admin AND entitlement gated (mirrors members.ts).
+// Set the tenant display name + accent colour. tenant#admin only — BASIC (all plans, #143): a name
+// and theme colour are not paywalled. (The original-logo upload IS entitlement-gated; see setTenantLogo.)
 export async function updateTenantBranding(
   db: TenantDb,
   fga: OpenFgaClient,
   args: { tenantId: string; userId: string; plan: string; accentKey: string | null; displayName: string | null },
 ): Promise<void> {
   await requireTenantAdmin(fga, args.userId, args.tenantId)
-  requireBrandingEntitlement(args.plan)
   if (args.accentKey !== null && !isAccentKey(args.accentKey)) {
     throw Object.assign(new Error('unknown accent'), { statusCode: 400 })
   }
