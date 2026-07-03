@@ -21,9 +21,8 @@ const tabCls = "rounded-[5px] px-2.5 py-[3px] text-xs text-fg-dim aria-[pressed=
 // Composer with @mention autocomplete. Suggestions come from the page-scoped
 // mentionable directory (server limits it to members who can VIEW this page), so a
 // member who can't see the page never appears as a suggestion.
-function Composer({ pageId, onSubmit, placeholder }: { pageId: string; onSubmit: (body: string, mentions: string[]) => void; placeholder: string }) {
+function Composer({ pageId, token, onSubmit, placeholder }: { pageId: string; token: string; onSubmit: (body: string, mentions: string[]) => void; placeholder: string }) {
   const { t } = useTranslation();
-  const { token } = useSession();
   const [text, setText] = useState("");
   const [suggest, setSuggest] = useState<Mentionable[]>([]);
   const dir = useRef<Mentionable[] | null>(null);
@@ -80,12 +79,16 @@ function Composer({ pageId, onSubmit, placeholder }: { pageId: string; onSubmit:
   );
 }
 
-export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose }: { pageId: string; canComment: boolean; anchorGetterRef: MutableRefObject<AnchorGetter | null>; onClose: () => void }) {
+export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, token }: { pageId: string; canComment: boolean; anchorGetterRef: MutableRefObject<AnchorGetter | null>; onClose: () => void; token?: string }) {
   const { t: tr } = useTranslation(); // `t` is used as the thread loop var below
-  const { sub: me } = useSession();
+  const { sub: me, token: sessionToken } = useSession();
+  // #100 (authz): in a GUEST view `token` is the guest share token, so comment read/write runs as the
+  // guest — not the app SessionProvider's member/dev token (which in dev is the dev-user bypass, the
+  // path that let a "guest" delete a member's comment). Members pass no token → the session is used.
+  const authToken = token ?? sessionToken;
   useEscClose(onClose);
-  const { data: threads } = useComments(pageId);
-  const { createThread, reply, setStatus, remove } = useCommentMutations(pageId);
+  const { data: threads } = useComments(pageId, authToken);
+  const { createThread, reply, setStatus, remove } = useCommentMutations(pageId, authToken);
   const [tab, setTab] = useState<"open" | "resolved">("open");
   const [inlineHint, setInlineHint] = useState<string | null>(null);
 
@@ -145,7 +148,7 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose }: 
             ))}
             {canComment && (
               <>
-                <Composer pageId={pageId} placeholder={tr("commentsPanel.reply")} onSubmit={(body, mentions) => reply.mutate({ threadId: t.id, body, mentions })} />
+                <Composer pageId={pageId} token={authToken} placeholder={tr("commentsPanel.reply")} onSubmit={(body, mentions) => reply.mutate({ threadId: t.id, body, mentions })} />
                 <div className="flex items-center gap-2">
                   <Button
                     variant="ghost"
@@ -164,7 +167,7 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose }: 
 
       {canComment && tab === "open" && (
         <div className="flex flex-col gap-2">
-          <Composer pageId={pageId} placeholder={tr("commentsPanel.pagePlaceholder")} onSubmit={(body, mentions) => createThread.mutate({ body, kind: "page", mentions })} />
+          <Composer pageId={pageId} token={authToken} placeholder={tr("commentsPanel.pagePlaceholder")} onSubmit={(body, mentions) => createThread.mutate({ body, kind: "page", mentions })} />
         </div>
       )}
     </aside>
