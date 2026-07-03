@@ -201,17 +201,22 @@ test("drag-selecting a whole column applies colour to all its cells (#197)", asy
 // #197: the spreadsheet A/B/1/2 labels + select handles are REMOVED (drag-select replaces them), so
 // the old "labels show A/B/C, 1/2/3" test is gone by design.
 
-// #1: append a column / row at the end via the trailing "+" handles; stays a pipe table.
-test("the trailing + adds a column and a row (stays Tier-1 pipe)", async ({ browser }) => {
+// #197 (comment 638): insert a column / row via the SELECTED CELL's op toolbar (the standalone "+"
+// bars were removed); any cell selection targets its column + row. Stays a pipe table.
+test("insert a column and a row from a selected cell's ops (stays Tier-1 pipe)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "tableadd");
   await enterEdit(page);
   await pipeTableInEdit(page); // 2 cols × (header + 1 body row)
 
-  await page.getByTestId("table-add-col").click();
+  await dragCells(page, "1,1", "1,1"); // select a single body cell → its col + row ops show
+  await sleep(120);
+  await page.getByTestId("table-col-insert-after").click();
   await sleep(150);
   expect(await colCount(page)).toBe(3); // #197: 3rd column now exists (counted from data cells)
-  await page.getByTestId("table-add-row").click();
+  await dragCells(page, "1,0", "1,0");
+  await sleep(120);
+  await page.getByTestId("table-row-insert-below").click();
   await sleep(150);
   expect(await rowCount(page)).toBe(3); // 3rd row now exists
 
