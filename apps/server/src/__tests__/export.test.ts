@@ -171,6 +171,20 @@ describe('buildHtmlExport', () => {
     expect(res!.body).toContain('Child page body') // the published_md was rendered
   })
 
+  it('ships the editor-matching stylesheet so the export looks like the app (#85 bounce 635)', async () => {
+    const res = await buildHtmlExport(db, fgaClient, { userId: USER, pageId: CHILD })
+    const css = res!.body
+    // callouts reproduce the editor look: per-type colour + a masked icon (the ⚠ etc.)
+    expect(css).toContain('.callout-warning')
+    expect(css).toContain('--callout-warning')
+    expect(css).toContain('mask:var(--cb-icon)')
+    // headings match the editor sizes/colour (not plain text)
+    expect(css).toContain('.wks-export h1{font-size:1.8em}')
+    expect(css).toContain('--head') // heading colour token (green, like the editor)
+    // dark theme is handled
+    expect(css).toContain('prefers-color-scheme:dark')
+  })
+
   it('neutralises raw XSS from published_md end-to-end (render → sanitize)', async () => {
     const res = await buildHtmlExport(db, fgaClient, { userId: USER, pageId: XSS })
     const html = res!.body
