@@ -471,7 +471,7 @@
     "excalidraw": "Excalidraw drawing",
     "mermaid": "Mermaid diagram",
     "plantuml": "PlantUML diagram",
-    "transclude": "Transclude a page",
+    "transclude": "Embed a page",
     "callout": {
       "note": "Note callout",
       "info": "Info callout",
