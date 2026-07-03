@@ -63,7 +63,21 @@ const server = new Hocuspocus({
         const createdBy = p?.kind === "member"  ? `user:${p.userId}`
                         : p?.kind === "guest"   ? `guest:${p.shareLinkId}`
                         : undefined;
-        await storeYdoc(tenantId, pageId, state, createdBy);
+        const result = await storeYdoc(tenantId, pageId, state, createdBy);
+        // #114 / ADR-058: a store that EXHAUSTED its 0-row retries means the draft did NOT persist (the
+        // page was deleted, or a stuck RLS gap) and the persisted checkpoint (pages.ydoc) did NOT advance
+        // — the 0-row UPDATE changed nothing. Do NOT leave clients editing into a void that silently
+        // drops on reconnect: disconnect them. On reconnect, onLoadDocument reloads the last GOOD
+        // pages.ydoc and onAuthenticate re-checks FGA (404-ing a truly-deleted page). `blocked` (an
+        // empty-overwrite REFUSED, existing bytes kept) is NOT data loss → those clients stay connected.
+        if (!result.stored && !result.blocked) {
+          const document = server.documents.get(documentName);
+          if (document) {
+            for (const conn of document.getConnections()) {
+              try { conn.close(); } catch (err) { console.error(`[ydoc:store] disconnect failed for ${documentName}:`, err); }
+            }
+          }
+        }
       },
     }),
   ],

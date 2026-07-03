@@ -7,6 +7,10 @@ import postgres from 'postgres'
 import { loadYdoc, storeYdoc } from '../ydoc.js'
 import { pool } from '../db.js'
 
+// #114: shrink the 0-row retry backoff so the retry-exhaustion paths (cross-tenant / deleted page)
+// run fast instead of the production 500ms→2s ladder. storeBackoffMs reads this at call time.
+process.env.YDOC_STORE_BACKOFF_MS = '1'
+
 // Admin pool: bypasses RLS for test setup / teardown.
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
 
@@ -136,6 +140,79 @@ describe('storeYdoc', () => {
     } finally {
       await adminPool`DELETE FROM spaces WHERE id = ${acmeSpace}`
     }
+  })
+})
+
+// ── 0-row retry / exhaustion (ADR-058 / #114): bounded, honest, non-destructive ─────────
+
+describe('storeYdoc 0-row retry + exhaustion (ADR-058 / #114)', () => {
+  it('exhausts bounded retries on a persistent 0-row and returns stored=false WITHOUT advancing the checkpoint', async () => {
+    // A cross-tenant page: RLS blocks the UPDATE on EVERY attempt (persistent 0-row), so the retries
+    // exhaust and stored=false. Crucially the stored bytes must be UNCHANGED (the 0-row UPDATE wrote
+    // nothing) — the persisted checkpoint never advances on failure.
+    const [{ id: acmeSpace }] = await adminPool<[{ id: string }]>`
+      INSERT INTO spaces (tenant_id, name) VALUES ('tenant_acme', 'ydoc-114-checkpoint-space') RETURNING id
+    `
+    const [{ id: acmePage }] = await adminPool<[{ id: string }]>`
+      INSERT INTO pages (tenant_id, space_id, title, ydoc)
+      VALUES ('tenant_acme', ${acmeSpace}, 'checkpoint', ${Buffer.from(Y.encodeStateAsUpdate((() => { const d = new Y.Doc(); d.getText('content').insert(0, 'ORIGINAL'); return d })()))})
+      RETURNING id
+    `
+    try {
+      const intruder = new Y.Doc(); intruder.getText('content').insert(0, 'should not land')
+      const res = await storeYdoc(TENANT, acmePage, Y.encodeStateAsUpdate(intruder)) // wrong tenant → 0-row
+      expect(res.stored).toBe(false)
+      expect(res.blocked).toBeFalsy() // a real 0-row, NOT an empty-overwrite block
+
+      // Checkpoint non-advance: the acme page still holds ORIGINAL (read via admin, bypassing RLS).
+      const [{ ydoc }] = await adminPool<[{ ydoc: Buffer }]>`SELECT ydoc FROM pages WHERE id = ${acmePage}`
+      const check = new Y.Doc(); Y.applyUpdate(check, new Uint8Array(ydoc))
+      expect(check.getText('content').toString()).toBe('ORIGINAL')
+    } finally {
+      await adminPool`DELETE FROM spaces WHERE id = ${acmeSpace}`
+    }
+  })
+
+  it('a page DELETED mid-session does not loop forever — retries are bounded and it returns stored=false', async () => {
+    // Seed a page, then delete it (as if removed mid-session), then store → the UPDATE hits 0 rows on
+    // every bounded attempt. The test COMPLETING (does not hang) is the proof retries can't run away.
+    const [{ id: sid }] = await adminPool<[{ id: string }]>`
+      INSERT INTO spaces (tenant_id, name) VALUES (${TENANT}, 'ydoc-114-deleted-space') RETURNING id
+    `
+    const [{ id: pid }] = await adminPool<[{ id: string }]>`
+      INSERT INTO pages (tenant_id, space_id, title) VALUES (${TENANT}, ${sid}, 'deleted-mid-session') RETURNING id
+    `
+    await adminPool`DELETE FROM pages WHERE id = ${pid}` // gone mid-session
+    try {
+      const doc = new Y.Doc(); doc.getText('content').insert(0, 'edits after delete')
+      const res = await storeYdoc(TENANT, pid, Y.encodeStateAsUpdate(doc))
+      expect(res.stored).toBe(false)
+    } finally {
+      await adminPool`DELETE FROM spaces WHERE id = ${sid}`
+    }
+  }, 10_000)
+
+  it('the exhaustion marker carries NO document content (no PII in logs)', async () => {
+    const [{ id: acmeSpace }] = await adminPool<[{ id: string }]>`
+      INSERT INTO spaces (tenant_id, name) VALUES ('tenant_acme', 'ydoc-114-pii-space') RETURNING id
+    `
+    const [{ id: acmePage }] = await adminPool<[{ id: string }]>`
+      INSERT INTO pages (tenant_id, space_id, title) VALUES ('tenant_acme', ${acmeSpace}, 'pii') RETURNING id
+    `
+    const SECRET = 'TOP_SECRET_DRAFT_CONTENT_42'
+    const logged: string[] = []
+    const orig = console.error
+    console.error = (...args: unknown[]) => { logged.push(args.map(String).join(' ')) }
+    try {
+      const doc = new Y.Doc(); doc.getText('content').insert(0, SECRET)
+      await storeYdoc(TENANT, acmePage, Y.encodeStateAsUpdate(doc)) // cross-tenant → exhausts → marker
+    } finally {
+      console.error = orig
+      await adminPool`DELETE FROM spaces WHERE id = ${acmeSpace}`
+    }
+    const marker = logged.find((l) => l.includes('ydoc_store_0row_exhausted'))
+    expect(marker).toBeDefined() // the stable structured marker fired
+    expect(logged.join('\n')).not.toContain(SECRET) // …but never leaks the draft text
   })
 })
 
