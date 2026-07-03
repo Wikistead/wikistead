@@ -5,6 +5,7 @@ import { headingsExtension, extractHeadings, type Heading } from "./headings";
 import { connect, connectEphemeral } from "./collab";
 import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayModeContent } from "./editor-livepreview";
 import type { DisplayMode } from "./live-preview/decorations";
+import { makeMacroPresence } from "./macro-presence";
 import { makeImageResolver } from "./image-resolver";
 import { makeDiagramRenderer } from "./diagram-renderer";
 import { makeTranscludeResolver } from "./transclude-resolver";
@@ -283,6 +284,9 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       // #92 / ADR-093: the host ephemeral-collab seam — opens a non-persisted room for a co-editing
       // macro modal (excalidraw). Keyed by docName + the macro's anchor; token/url from the same collab.
       ephemeralCollab: (anchor: string) => connectEphemeral({ url: collabUrl, docName, anchor, token }),
+      // #92 presence: publish "editing this macro" onto the page awareness so co-editors see a badge
+      // at the macro's anchor while its modal is open (they'd otherwise see this user vanish).
+      macroPresence: c.provider.awareness ? makeMacroPresence(c.provider.awareness) : undefined,
     });
     views.push(previewView);
     previewViewRef.current = previewView;

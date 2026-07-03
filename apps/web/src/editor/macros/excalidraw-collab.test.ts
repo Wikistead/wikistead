@@ -33,6 +33,23 @@ describe("writeLocalElements + readSceneElements (Y.Map merge)", () => {
     expect(readSceneElements(shared)[0]!.text).toBe("B");
   });
 
+  it("re-syncs an element MUTATED IN PLACE — a freedraw stroke grows its points on the SAME ref (#92)", () => {
+    // The bounce bug: Excalidraw mutates the same element object as a stroke grows (points += , version++).
+    // Storing the live reference made map.get(id)===incoming, so the version always tied and only the
+    // first write (the stroke's START point) ever synced. Snapshotting decouples them.
+    const shared = new Y.Doc();
+    const live: ExElement = { id: "f", version: 1, versionNonce: 10, points: [[0, 0]] };
+    expect(writeLocalElements(shared, [live])).toBe(1); // first write = the stroke's start point
+    // Excalidraw grows the SAME object as the freedraw continues:
+    live.points = [[0, 0], [1, 1], [2, 2]];
+    live.version = 2; live.versionNonce = 20;
+    expect(writeLocalElements(shared, [live])).toBe(1); // MUST re-sync (was 0 = the bug: never propagated)
+    expect(readSceneElements(shared)[0]!.points).toEqual([[0, 0], [1, 1], [2, 2]]); // growth reached the map
+    // snapshot decoupling: mutating the live ref AFTER a write does not silently alter the stored copy
+    (live.points as number[][]).push([3, 3]);
+    expect(readSceneElements(shared)[0]!.points).toEqual([[0, 0], [1, 1], [2, 2]]); // still the snapshot
+  });
+
   it("a delete (isDeleted) tombstone drops the element from the scene and is not resurrected", () => {
     const shared = new Y.Doc();
     writeLocalElements(shared, [el("y", 1, { text: "keep" }), el("z", 1, { text: "gone" })]);

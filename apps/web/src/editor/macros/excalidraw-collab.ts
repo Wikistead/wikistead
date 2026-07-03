@@ -32,9 +32,20 @@ export function shouldReplace(existing: ExElement | undefined, incoming: ExEleme
   return (incoming.versionNonce ?? 0) > (existing.versionNonce ?? 0);
 }
 
+// A detached snapshot of an element. CRITICAL (#92): Excalidraw MUTATES its elements IN PLACE (a
+// freedraw stroke grows its `points` array and bumps `version` on the SAME object). If we stored the
+// live reference in the Y.Map, `map.get(id)` would return that very object, so on the next write
+// existing===incoming and the version comparison always ties → nothing after the first write ever
+// syncs (the peer sees only the stroke's start point). Storing a CLONE decouples the map's copy from
+// the live object, so a grown element (higher version) is detected and re-written.
+function snapshot(el: ExElement): ExElement {
+  return structuredClone(el);
+}
+
 // Write local elements into the shared map, but ONLY those that are newer than what's there (so we
 // don't clobber a concurrent peer's higher-version edit, and don't churn the doc with no-op writes).
-// One Yjs transaction (atomic). Returns the number of elements actually written.
+// Stored as a snapshot (see above) so in-place Excalidraw mutations still propagate. One Yjs
+// transaction (atomic). Returns the number of elements actually written.
 export function writeLocalElements(doc: Y.Doc, elements: readonly ExElement[]): number {
   const map = elementsMap(doc);
   let written = 0;
@@ -42,7 +53,7 @@ export function writeLocalElements(doc: Y.Doc, elements: readonly ExElement[]): 
     for (const el of elements) {
       if (!el?.id) continue;
       if (shouldReplace(map.get(el.id), el)) {
-        map.set(el.id, el);
+        map.set(el.id, snapshot(el));
         written++;
       }
     }

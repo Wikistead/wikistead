@@ -1,10 +1,12 @@
 import { syntaxTree, foldedRanges, foldEffect, unfoldEffect } from "@codemirror/language";
-import { Facet, StateField, EditorState, EditorSelection, Prec, type Range, type Extension } from "@codemirror/state";
+import { Facet, StateField, StateEffect, EditorState, EditorSelection, Prec, type Range, type Extension } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
   EditorView,
   WidgetType,
+  ViewPlugin,
+  type ViewUpdate,
 } from "@codemirror/view";
 import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme } from "../macros/registry";
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
@@ -224,6 +226,99 @@ export type EphemeralCollabFactory = (anchor: string) => import("../macros/regis
 export const ephemeralCollab = Facet.define<EphemeralCollabFactory, EphemeralCollabFactory | null>({
   combine: (values) => (values.length ? values[values.length - 1]! : null),
 });
+
+// #92 presence: while a user has a macro's modal (Excalidraw) open they leave the page's live-preview
+// surface, so their page cursor/avatar vanishes and peers see them "nowhere". This host seam bridges
+// the fact "I'm editing the macro at <anchor>" onto the PAGE awareness: the modal calls set(anchor) on
+// open and set(null) on close; peers read peers and a badge is drawn at that macro's anchor. It is a
+// SEPARATE, host-only channel (like ephemeralCollab) — the macro host-API stays {theme} (ADR-023). All
+// display-only; it never touches the doc/offset, only awareness (additive field — yCollab ignores it).
+export interface MacroPresencePeer {
+  readonly anchor: string; // the macro block's doc-offset key (String(from)), same as the ephemeral room
+  readonly name: string;
+  readonly color: string;
+}
+export interface MacroPresence {
+  set(anchor: string | null): void; // I am (anchor) / am not (null) editing a macro's modal
+  peers(): MacroPresencePeer[]; // remote peers currently editing a macro's modal
+  subscribe(cb: () => void): () => void; // notify when peers change (to redraw); returns an unsubscribe
+}
+export const macroPresence = Facet.define<MacroPresence, MacroPresence | null>({
+  combine: (values) => (values.length ? values[values.length - 1]! : null),
+});
+
+// Force a presence redraw when awareness changes (independent of doc edits).
+const redrawMacroPresence = StateEffect.define<null>();
+
+// The peer badge shown at a macro's anchor: one coloured dot per remote editor + a count and an
+// "editing" label. Display-only (contenteditable=false, ignoreEvent) so it never enters the atom.
+class MacroPresenceWidget extends WidgetType {
+  constructor(readonly peers: MacroPresencePeer[]) { super(); }
+  eq(other: MacroPresenceWidget) {
+    return this.peers.length === other.peers.length &&
+      this.peers.every((p, i) => p.name === other.peers[i]!.name && p.color === other.peers[i]!.color);
+  }
+  toDOM() {
+    const wrap = document.createElement("span");
+    wrap.className = "cm-lp-macro-presence";
+    wrap.contentEditable = "false";
+    wrap.setAttribute("data-testid", "macro-presence");
+    for (const p of this.peers) {
+      const dot = document.createElement("span");
+      dot.className = "cm-lp-macro-presence-dot";
+      dot.style.background = p.color;
+      dot.title = p.name;
+      wrap.appendChild(dot);
+    }
+    const label = document.createElement("span");
+    label.className = "cm-lp-macro-presence-label";
+    const names = this.peers.map((p) => p.name).join(", ");
+    label.textContent = this.peers.length === 1 ? `${names} editing` : `${this.peers.length} editing`;
+    wrap.appendChild(label);
+    return wrap;
+  }
+  ignoreEvent() { return true; }
+}
+
+function buildMacroPresence(view: EditorView): DecorationSet {
+  const pres = view.state.facet(macroPresence);
+  if (!pres) return Decoration.none;
+  const byAnchor = new Map<string, MacroPresencePeer[]>();
+  for (const p of pres.peers()) {
+    const a = byAnchor.get(p.anchor);
+    if (a) a.push(p); else byAnchor.set(p.anchor, [p]);
+  }
+  const docLen = view.state.doc.length;
+  const ranges: Range<Decoration>[] = [];
+  for (const [anchor, peers] of byAnchor) {
+    const at = Number(anchor);
+    if (!Number.isFinite(at) || at < 0 || at > docLen) continue; // stale anchor (doc changed) → skip
+    ranges.push(Decoration.widget({ widget: new MacroPresenceWidget(peers), side: -1 }).range(at));
+  }
+  ranges.sort((a, b) => a.from - b.from);
+  return Decoration.set(ranges, true);
+}
+
+// Renders remote macro-edit presence badges and redraws them when the page awareness changes (via the
+// host's subscribe) or the doc shifts. Additive overlay; never on the doc/offset/collab-sync path.
+export const macroPresencePlugin = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    unsub: () => void;
+    constructor(view: EditorView) {
+      this.decorations = buildMacroPresence(view);
+      const pres = view.state.facet(macroPresence);
+      this.unsub = pres ? pres.subscribe(() => view.dispatch({ effects: redrawMacroPresence.of(null) })) : () => {};
+    }
+    update(u: ViewUpdate) {
+      if (u.docChanged || u.transactions.some((t) => t.effects.some((e) => e.is(redrawMacroPresence)))) {
+        this.decorations = buildMacroPresence(u.view);
+      }
+    }
+    destroy() { this.unsub(); }
+  },
+  { decorations: (v) => v.decorations },
+);
 // Macros whose body is rendered by the host (not bundled / not the macro). Others ignore the renderer.
 const HOST_RENDERABLE = new Set(["plantuml"]);
 
@@ -1248,6 +1343,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   // Display-only (never edits/offsets).
   ".cm-lp-macro-wrap:hover:not(.cm-lp-atom-sel)": { outline: "1px solid var(--border, #888)", outlineOffset: "1px", borderRadius: "4px" },
   ".cm-lp-macro": { display: "block", overflowX: "auto" },
+  // #92 presence badge: a small "N editing" pill with a coloured dot per remote editor, drawn just
+  // before a macro whose modal a peer has open. Display-only; sits inline at the anchor.
+  ".cm-lp-macro-presence": { display: "inline-flex", alignItems: "center", gap: "0.25em", margin: "0 0.35em 0 0", padding: "0.05em 0.4em", borderRadius: "999px", background: "var(--panel-2, #2d2d2e)", border: "1px solid var(--border, #3a3a3a)", fontSize: "0.75em", verticalAlign: "middle", userSelect: "none" },
+  ".cm-lp-macro-presence-dot": { display: "inline-block", width: "0.6em", height: "0.6em", borderRadius: "50%", flex: "0 0 auto" },
+  ".cm-lp-macro-presence-label": { color: "var(--fg-dim, #9a9a9a)", whiteSpace: "nowrap" },
   // pointer-events:none on the SVG so a click on the diagram falls through to the macro
   // container (CM then places the caret → reveal-on-cursor shows the raw source). An
   // SVG-internal click can't be mapped to a doc position, so without this clicking a
