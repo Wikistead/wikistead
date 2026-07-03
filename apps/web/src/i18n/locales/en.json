@@ -473,6 +473,7 @@
     "mermaid": "Mermaid diagram",
     "plantuml": "PlantUML diagram",
     "transclude": "Embed a page",
+    "embed": "Embed external content",
     "callout": {
       "note": "Note callout",
       "info": "Info callout",

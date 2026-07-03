@@ -473,6 +473,7 @@
     "mermaid": "Mermaid 図",
     "plantuml": "PlantUML 図",
     "transclude": "ページを埋め込む",
+    "embed": "外部コンテンツを埋め込む",
     "callout": {
       "note": "ノート（callout）",
       "info": "インフォ（callout）",

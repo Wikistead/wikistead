@@ -942,6 +942,16 @@ export async function pagesPlugin(app: FastifyInstance) {
     }
   })
 
+  // #108 / ADR-071 (comment 551): the tenant's external-embed host allowlist for the CLIENT-side
+  // iframe embed. The approved approach for external URL embeds is a client-direct sandboxed iframe
+  // for allowlisted hosts (no server proxy → no SSRF surface for that path); the client needs the
+  // allowlist to decide iframe-vs-degrade. Public + host-resolved (the allowlist is operator config,
+  // not sensitive); default empty ⇒ no external embed (operator opt-in).
+  app.get('/embed/providers', { config: { public: true } }, async (req) => {
+    const [row] = await req.db.sql<{ embed_providers: string[] }[]>`SELECT embed_providers FROM tenant_settings LIMIT 1`
+    return { providers: row?.embed_providers ?? [] }
+  })
+
   // Internal transclude resolve (#108 / ADR-071): return the REFERENCED page's published content for
   // a viewer who can see it. resolveTranscludeRef re-checks `view` on the REF page itself (the host
   // page's view is NOT enough — monotonic deny) and returns an IDENTICAL 'denied' for unviewable /
