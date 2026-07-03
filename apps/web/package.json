@@ -43,6 +43,7 @@
     "@radix-ui/react-select": "^2.3.1",
     "@replit/codemirror-vim": "^6.2.0",
     "@tanstack/react-query": "^5.101.0",
+    "@wikistead/macro-render": "workspace:*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

@@ -1,0 +1,82 @@
+import { describe, it, expect } from "vitest";
+import { renderMarkdownToHtml, html, type MacroHtmlRegistry } from "@wikistead/macro-render";
+
+// #85 / ADR-059+085: the DOM-free server-side markdown → HTML renderer (published/static export). It
+// mirrors the editor's DOM renderer from the SAME grammar + macro contract, emits SafeHtml (the #88 XSS
+// boundary), dispatches macros via an injected registry, and badges exportFidelity="degrade" blocks.
+const out = (src: string, macros?: MacroHtmlRegistry) => renderMarkdownToHtml(src, macros).value;
+
+describe("renderMarkdownToHtml — standard markdown (#85)", () => {
+  it("renders headings, paragraphs, inline emphasis/code and lists", () => {
+    const h = out("# Title\n\npara **bold** _i_ `c`\n\n- a\n- b\n");
+    expect(h).toContain("<h1>Title</h1>");
+    expect(h).toContain("<strong>bold</strong>");
+    expect(h).toContain("<em>i</em>");
+    expect(h).toContain("<code>c</code>");
+    expect(h).toContain("<ul><li><p>a</p></li>\n<li><p>b</p></li></ul>"); // @lezer wraps item content in <p>
+  });
+
+  it("renders a safe link and rel-hardens it", () => {
+    const h = out("[text](https://example.com)");
+    expect(h).toContain('<a href="https://example.com" rel="noopener noreferrer nofollow">text</a>');
+  });
+
+  it("renders a plain code fence as <pre><code> (escaped)", () => {
+    const h = out("```\n<not a tag>\n```");
+    expect(h).toContain("<pre><code>&lt;not a tag&gt;");
+  });
+});
+
+describe("renderMarkdownToHtml — XSS boundary (#88)", () => {
+  it("escapes raw HTML in text (never emits live markup)", () => {
+    const h = out("hello <img src=x onerror=alert(1)> world");
+    expect(h).not.toContain("<img src=x");
+    expect(h).toContain("&lt;img src=x onerror=alert(1)&gt;");
+  });
+
+  it("neutralises a javascript: link URL (renders as a non-link span)", () => {
+    const h = out("[click](javascript:alert(1))");
+    expect(h).not.toContain("href=\"javascript:");
+    expect(h).toContain("<span>click</span>"); // href rejected → not an anchor
+  });
+});
+
+// A registry with a preserve macro, a degrade macro, and a throwing macro.
+const macros: MacroHtmlRegistry = {
+  fence: (lang) =>
+    lang === "keepme" ? { exportFidelity: "preserve", htmlRender: (b) => html`<figure class="keep">${b}</figure>` }
+    : lang === "boom" ? { exportFidelity: "degrade", htmlRender: () => { throw new Error("nope"); } }
+    : undefined,
+  directive: (name) =>
+    name === "simplified" ? { exportFidelity: "degrade", htmlRender: (b) => html`<div class="s">${b}</div>` }
+    : undefined,
+};
+
+describe("renderMarkdownToHtml — macro dispatch + fidelity (#85)", () => {
+  it("dispatches a fence macro to its htmlRender; preserve fidelity has NO badge", () => {
+    const h = out("```keepme\ndiagram source\n```", macros);
+    expect(h).toContain('<figure class="keep">diagram source</figure>');
+    expect(h).not.toContain("wks-fidelity-degrade"); // preserve → plain, no badge
+  });
+
+  it("wraps a DEGRADE directive macro with a fidelity badge (ADR-059 (c))", () => {
+    const h = out(":::simplified\nbody text\n:::", macros);
+    expect(h).toContain('data-fidelity="degrade"');
+    expect(h).toContain('data-macro="simplified"');
+    expect(h).toContain("wks-fidelity-badge"); // the "simplified for export" indicator
+    expect(h).toContain('<div class="s">body text</div>'); // the macro's own output, inside the wrapper
+  });
+
+  it("a macro that THROWS falls back to plain code and never breaks the render", () => {
+    const h = out("intro\n\n```boom\nx\n```\n\nafter", macros);
+    expect(h).toContain("<pre><code>x"); // fell back to plain code
+    expect(h).toContain("<p>intro</p>");
+    expect(h).toContain("<p>after</p>"); // surrounding content still rendered
+  });
+
+  it("an UNKNOWN directive renders as a generic box (content preserved), not dropped", () => {
+    const h = out(":::whoknows\nkept content\n:::", macros);
+    expect(h).toContain('<div class="wks-directive">');
+    expect(h).toContain("kept content");
+  });
+});
