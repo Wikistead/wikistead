@@ -102,6 +102,9 @@ importers:
       '@wikistead/hooks':
         specifier: workspace:^
         version: link:../../packages/hooks
+      '@wikistead/macro-render':
+        specifier: workspace:^
+        version: link:../../packages/macro-render
       '@wikistead/types':
         specifier: workspace:*
         version: link:../../packages/types

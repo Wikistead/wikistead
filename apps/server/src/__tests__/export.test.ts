@@ -10,6 +10,7 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalStorageDriver } from '../storage/index.js'
 import { buildExport } from '../export/index.js'
+import { buildHtmlExport } from '../render/html-export.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -21,7 +22,7 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 let db: TenantDb
 // ids
 const SPACE = 'exp-space'
-const ROOT = 'exp-root', CHILD = 'exp-child', HIDDEN = 'exp-hidden', OTHER = 'exp-other'
+const ROOT = 'exp-root', CHILD = 'exp-child', HIDDEN = 'exp-hidden', OTHER = 'exp-other', XSS = 'exp-xss'
 const ATT = 'exp-att-ok', FORBIDDEN_ATT = 'exp-att-forbidden'
 const USER = 'exp-user'
 
@@ -29,6 +30,7 @@ const ydoc = (text: string) => Buffer.from(Y.encodeStateAsUpdate((() => { const 
 const grants = [
   { user: `user:${USER}`, relation: 'view_base', object: `page:${ROOT}` },
   { user: `user:${USER}`, relation: 'view_base', object: `page:${CHILD}` },
+  { user: `user:${USER}`, relation: 'view_base', object: `page:${XSS}` },
   // NOTE: no grants for HIDDEN or OTHER → not viewable by USER.
 ]
 
@@ -47,11 +49,31 @@ beforeAll(async () => {
   // fixtures set published_md to the body (the draft/publish model: a page must be
   // published to export). ydoc is set too, mirroring a real published page.
   const childBody = '## Child page body', hiddenBody = '## secret child body', otherBody = '## other'
+  // A page whose PUBLISHED markdown carries raw XSS — the HTML export must neutralise it end-to-end
+  // (proving the render→sanitize path, not just the sanitizer unit).
+  // Raw HTML (escaped by the renderer) + a `:::table` whose cell carries a <script> (the table
+  // macro emits trusted HTML via unsafeHtml → the FINAL sanitizer must still strip it: raw
+  // passthrough is zero even through the trusted-HTML path).
+  const xssBody = [
+    '# Hello',
+    '',
+    '<img src=x onerror="steal()">',
+    '',
+    '[link](javascript:alert(1))',
+    '',
+    ':::table',
+    '| a | b |',
+    '| - | - |',
+    '| <script>alert(document.cookie)</script> | ok |',
+    ':::',
+    '',
+  ].join('\n')
   await admin`INSERT INTO pages (id, tenant_id, space_id, parent_id, title, ydoc, published_md) VALUES
     (${ROOT},   ${TENANT}, ${SPACE}, NULL,    'Root Page',   ${ydoc(rootBody)},   ${rootBody}),
     (${CHILD},  ${TENANT}, ${SPACE}, ${ROOT}, 'Child Page',  ${ydoc(childBody)},  ${childBody}),
     (${HIDDEN}, ${TENANT}, ${SPACE}, ${ROOT}, 'Secret Child',${ydoc(hiddenBody)}, ${hiddenBody}),
-    (${OTHER},  ${TENANT}, ${SPACE}, NULL,    'Other Page',  ${ydoc(otherBody)},  ${otherBody})
+    (${OTHER},  ${TENANT}, ${SPACE}, NULL,    'Other Page',  ${ydoc(otherBody)},  ${otherBody}),
+    (${XSS},    ${TENANT}, ${SPACE}, NULL,    'XSS Page',    ${ydoc(xssBody)},    ${xssBody})
     ON CONFLICT (id) DO NOTHING`
   // ATT belongs to ROOT (viewable). FORBIDDEN_ATT belongs to OTHER (not viewable).
   // ATT's filename is a zip-slip attempt.
@@ -67,7 +89,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await deleteTuples(fgaClient, grants).catch(() => {})
   await admin`DELETE FROM attachments WHERE tenant_id = ${TENANT} AND id LIKE 'exp-att%'`.catch(() => {})
-  await admin`DELETE FROM pages WHERE id IN (${ROOT}, ${CHILD}, ${HIDDEN}, ${OTHER})`.catch(() => {})
+  await admin`DELETE FROM pages WHERE id IN (${ROOT}, ${CHILD}, ${HIDDEN}, ${OTHER}, ${XSS})`.catch(() => {})
   await admin`DELETE FROM spaces WHERE id = ${SPACE}`.catch(() => {})
   await db.release()
   await admin.end()
@@ -119,5 +141,41 @@ describe('buildExport', () => {
     expect(res!.filename).toMatch(/\.md$/)
     expect(res!.contentType).toContain('text/markdown')
     expect(strFromU8(res!.body)).toContain('Child page body')
+  })
+})
+
+// #85 / ADR-059: single-page HTML export through the shared render→sanitize path. Authz mirrors the
+// Markdown export (view-gated → null → 404); the final sanitizer neutralises raw XSS end-to-end.
+describe('buildHtmlExport', () => {
+  it('returns null when the page is not viewable (→ 404)', async () => {
+    expect(await buildHtmlExport(db, fgaClient, { userId: 'nobody-xyz', pageId: ROOT })).toBeNull()
+  })
+
+  it('does not export a page the user cannot view (no leak of OTHER / HIDDEN)', async () => {
+    expect(await buildHtmlExport(db, fgaClient, { userId: USER, pageId: OTHER })).toBeNull()
+    expect(await buildHtmlExport(db, fgaClient, { userId: USER, pageId: HIDDEN })).toBeNull()
+  })
+
+  it('renders a viewable page to an HTML document (published content, shared renderer)', async () => {
+    const res = await buildHtmlExport(db, fgaClient, { userId: USER, pageId: CHILD })
+    expect(res!.contentType).toContain('text/html')
+    expect(res!.filename).toMatch(/\.html$/)
+    expect(res!.body).toContain('<!doctype html>')
+    expect(res!.body).toContain('Child page body') // the published_md was rendered
+  })
+
+  it('neutralises raw XSS from published_md end-to-end (render → sanitize)', async () => {
+    const res = await buildHtmlExport(db, fgaClient, { userId: USER, pageId: XSS })
+    const html = res!.body
+    const lc = html.toLowerCase()
+    expect(html).toContain('Hello') // benign content survives
+    // No EXECUTABLE script tag anywhere (a `:::table` cell script must not survive the final pass —
+    // proving raw passthrough is zero even through the trusted table-HTML path).
+    expect(lc).not.toContain('<script')
+    expect(html).not.toContain('document.cookie')
+    // Raw inline HTML from markdown is escaped to inert text (never a live onerror-bearing element).
+    expect(lc).not.toContain('<img src=x onerror')
+    // A `javascript:` link href is dropped by the renderer's scheme allowlist.
+    expect(lc).not.toContain('javascript:')
   })
 })
