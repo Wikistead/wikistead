@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderMarkdownToHtml, html, type MacroHtmlRegistry } from "@wikistead/macro-render";
+import { renderMarkdownToHtml, html, builtinMacroRegistry, type MacroHtmlRegistry } from "@wikistead/macro-render";
 
 // #85 / ADR-059+085: the DOM-free server-side markdown → HTML renderer (published/static export). It
 // mirrors the editor's DOM renderer from the SAME grammar + macro contract, emits SafeHtml (the #88 XSS
@@ -78,5 +78,28 @@ describe("renderMarkdownToHtml — macro dispatch + fidelity (#85)", () => {
     const h = out(":::whoknows\nkept content\n:::", macros);
     expect(h).toContain('<div class="wks-directive">');
     expect(h).toContain("kept content");
+  });
+});
+
+// #85 slice 2: the SERVER export dispatches the real built-in M2 directive htmlRenders (single source
+// of truth in @wikistead/macro-render — the same code the editor uses), via builtinMacroRegistry().
+describe("renderMarkdownToHtml — built-in M2 directives (#85 slice 2)", () => {
+  const reg = builtinMacroRegistry();
+  it("columns → each column's content in order (sequential, nothing dropped)", () => {
+    const h = out(":::::columns\n:::column\nleft body\n:::\n:::column\nright body\n:::\n:::::", reg);
+    expect(h).toContain('<div class="columns">');
+    expect(h.indexOf("left body")).toBeGreaterThanOrEqual(0);
+    expect(h.indexOf("right body")).toBeGreaterThan(h.indexOf("left body"));
+  });
+  it("tabs → each label as a visible heading + body (meaning-preserving degrade)", () => {
+    const h = out("::::::tabs\n:::tab[Setup]\nstep one\n:::\n:::tab[Usage]\nrun it\n:::\n::::::", reg);
+    expect(h).toContain('<div class="tabs">');
+    expect(h).toContain('<h3 class="tab-label">Setup</h3>');
+    expect(h).toContain('<h3 class="tab-label">Usage</h3>');
+  });
+  it("details → standard <details>", () => {
+    const h = out(":::details[More]\nhidden body\n:::", reg);
+    expect(h).toContain("<details><summary>");
+    expect(h).toContain("hidden body");
   });
 });

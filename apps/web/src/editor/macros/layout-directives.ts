@@ -1,41 +1,17 @@
 import type { DirectiveMacro } from "./registry";
 import { renderMarkdownToDom } from "./md-render";
-import { parseDirectiveOpen, isDirectiveClose } from "./directive-parser";
-import { html, joinSafe } from "./safe-html";
+// #85 slice 2: the DOM-free export half (parseLayoutItems + the htmlRenders) is the single source of
+// truth in @wikistead/macro-render, shared with the server export renderer. This file adds only the
+// DOM liveRender + editor metadata on top.
+import { parseLayoutItems, columnsHtmlRender, tabsHtmlRender, detailsHtmlRender } from "@wikistead/macro-render";
+
+export { parseLayoutItems }; // re-export: existing editor imports (tabs/columns liveRender + tests) unchanged
 
 // M2 layout directives (#90, ADR-043 A′): columns / tabs. These need a side-by-side / tab frame
 // that CodeMirror line decorations can't provide, so they render as a BLOCK-WIDGET ATOM (the
 // table/mermaid model) that lays out its inner :::column / :::tab items, rendering each item's
 // Markdown via the sanitized S0 renderer (the widget can't reach CM's renderers). Editing is
 // reveal-on-cursor (revealOnCursor: the whole raw block shows while the caret is inside).
-
-// Split a layout directive's body into its inner :::name items. Depth-tracking (push on any
-// nested open, pop on a close) so a nested directive INSIDE an item (e.g. a callout in a column)
-// doesn't prematurely close the item. Each item keeps its optional [label] + raw content.
-export function parseLayoutItems(body: string, name: string): { label?: string; content: string }[] {
-  const items: { label?: string; lines: string[] }[] = [];
-  let cur: { label?: string; lines: string[] } | null = null;
-  let depth = 0;
-  for (const line of body.split("\n")) {
-    const open = parseDirectiveOpen(line);
-    if (open) {
-      if (depth === 0) {
-        if (open.name === name) { cur = { label: open.label, lines: [] }; items.push(cur); depth = 1; }
-        continue; // an open of a different name at top level is ignored (only `name` items count)
-      }
-      cur!.lines.push(line); depth++; // nested open → part of the current item
-      continue;
-    }
-    if (isDirectiveClose(line, 3)) {
-      if (depth === 0) continue;
-      depth--;
-      if (depth === 0) cur = null; else cur!.lines.push(line); // the item's own close vs a nested close
-      continue;
-    }
-    if (cur) cur.lines.push(line);
-  }
-  return items.map((i) => ({ label: i.label, content: i.lines.join("\n").replace(/^\n+|\n+$/g, "") }));
-}
 
 export const columnsMacro: DirectiveMacro = {
   kind: "directive",
@@ -60,11 +36,7 @@ export const columnsMacro: DirectiveMacro = {
     }
     return row;
   },
-  // M3 export wrapper (inner Markdown rendered server-side; escape as the safe fallback).
-  htmlRender: (body) =>
-    html`<div class="columns">${joinSafe(
-      parseLayoutItems(body, "column").map((c) => html`<div class="column">\n\n${c.content}\n\n</div>`),
-    )}</div>`,
+  htmlRender: columnsHtmlRender, // #85: single source of truth in @wikistead/macro-render
 };
 
 export const detailsMacro: DirectiveMacro = {
@@ -79,8 +51,7 @@ export const detailsMacro: DirectiveMacro = {
     insert: ":::details[Summary]\n\n:::",
     caret: 20, // ":::details[Summary]\n" → the blank body line
   },
-  // M3 export (the [label] summary lives on the fence line, not in body → generic for now).
-  htmlRender: (body) => html`<details><summary>Details</summary>\n\n${body}\n\n</details>`,
+  htmlRender: detailsHtmlRender, // #85: single source of truth in @wikistead/macro-render
 };
 
 export const tabsMacro: DirectiveMacro = {
@@ -125,14 +96,7 @@ export const tabsMacro: DirectiveMacro = {
     wrap.append(bar, panels);
     return wrap;
   },
-  // M3 export / Open-formats degrade (#90, approved: meaning-preserving). A plain reader has no tab
-  // widget, so each tab degrades to a VISIBLE HEADING (its label) + body — the information (which
-  // content belongs to which tab) survives, only the tab affordance is lost. (Was: label hidden in a
-  // data-label attribute → a non-tab reader lost the labels entirely.)
-  htmlRender: (body) =>
-    html`<div class="tabs">${joinSafe(
-      parseLayoutItems(body, "tab").map(
-        (t, i) => html`<section class="tab"><h3 class="tab-label">${t.label || `Tab ${i + 1}`}</h3>\n\n${t.content}\n\n</section>`,
-      ),
-    )}</div>`,
+  // #85/#90 export degrade (meaning-preserving: label → visible heading + body). Single source of
+  // truth in @wikistead/macro-render, shared with the server export renderer.
+  htmlRender: tabsHtmlRender,
 };
