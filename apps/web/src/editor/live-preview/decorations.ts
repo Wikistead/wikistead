@@ -10,7 +10,7 @@ import {
 } from "@codemirror/view";
 import { findFenceMacro, findDirectiveMacro, editModeOf, type FenceMacro, type MacroTheme } from "../macros/registry";
 export type { MacroTheme }; // #200: re-exported so the Editor can type the redrawMacros payload
-import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
+import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, directiveChainAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
 import { parseFenceLine } from "@wikistead/macro-render"; // #198: code-fence attribute parser
@@ -892,6 +892,24 @@ function rangeRevealed(state: EditorState, from: number, to: number): boolean {
     state.selection.ranges.some((r) => r.from <= to && r.to >= from),
   );
 }
+
+// #196 / ADR-092 (innermost-wins reveal): is the caret inside a registered macro that is NESTED
+// STRICTLY within the container [from,to] — a deeper child, not the container at `from` itself? When
+// true, a layout container (columns/tabs) renders a visible frame + descends so ONLY the innermost
+// child reveals raw (its siblings + the container stay rendered); when false, a caret inside reveals
+// the whole block raw (you're editing the container's own :::column/:::tab structure). Uses the main
+// selection head + directiveChainAt (outer→inner chain of registered macros; unregistered structural
+// directives like :::column are skipped, so the chain jumps container→leaf macro).
+//
+// Safety: this ONLY returns true when the syntax tree genuinely nests a registered macro inside the
+// container at the caret. In every other case it is false, so the container's existing reveal/widget
+// behaviour is byte-identical — the change is inert unless real nesting exists.
+export function caretInNestedMacro(state: EditorState, from: number, to: number): boolean {
+  if (!state.selection.ranges.some((r) => r.from <= to && r.to >= from)) return false; // caret not inside
+  const chain = directiveChainAt(state, state.selection.main.head);
+  const innermost = chain[chain.length - 1];
+  return !!innermost && innermost.from > from && innermost.to <= to;
+}
 // Source mode (#164/#165): syntax is ALWAYS raw. Unlike `rangeRevealed` (true for live+caret AND for
 // source), this is TRUE ONLY in source mode — used to force a BLOCK MACRO to show its raw `:::` source
 // (a non-revealOnCursor macro like :::table/:::note would otherwise keep rendering its widget in source
@@ -1055,6 +1073,18 @@ const RENDERERS: BlockRenderer[] = [
     enter: (node, ctx) => {
       const doc = ctx.state.doc;
       const open = parseDirectiveOpen(doc.lineAt(node.from).text);
+      // #196: structural layout children (:::column / :::tab) are NOT standalone macros. They only
+      // reach this renderer when their parent columns/tabs container is in innermost-wins "frame +
+      // descend" mode (caret editing a nested child); in the normal widget/whole-raw modes the
+      // container skips them. Render them as a transparent structural frame box and descend, so the
+      // callouts inside them reveal individually (not the `note` fallback below). Source mode shows raw.
+      if (open && (open.name === "column" || open.name === "tab") && !isSourceMode(ctx.state)) {
+        const first = doc.lineAt(node.from);
+        const lastLine = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1));
+        const box = Decoration.line({ attributes: { class: open.name === "column" ? "cm-lp-column-frame" : "cm-lp-tab-frame" } });
+        for (let n = first.number; n <= lastLine.number; n++) ctx.add(box, doc.line(n).from);
+        return; // descend into the child's inner macros — they reveal per their own caret state
+      }
       // #150: an unknown directive type falls back to a `note` callout (Obsidian-compatible),
       // so e.g. `:::foobar` renders as a note box rather than raw text.
       const macro = open ? (findDirectiveMacro(open.name) ?? noteCalloutMacro) : undefined;
@@ -1082,7 +1112,19 @@ const RENDERERS: BlockRenderer[] = [
           ctx.addAtomic(Decoration.replace({ widget: new EditableTableWidget(from, to, doc.sliceString(from, to)), block: true }), from, to);
           return false; // skip inner nodes — the inline editor owns the block
         }
-        if (macro.revealOnCursor && rangeRevealed(ctx.state, from, to)) return false;
+        if (macro.revealOnCursor && rangeRevealed(ctx.state, from, to)) {
+          // #196 / ADR-092 innermost-wins reveal: a caret inside the container reveals the WHOLE block
+          // raw ONLY when it's editing the container's own structure (chain innermost === container).
+          // When the caret is deeper inside a NESTED registered macro (e.g. a callout in a column),
+          // render a visible frame box over the block and DESCEND, so the container + siblings stay
+          // rendered and only the innermost child reveals raw — the same macro-unit edit as outside a
+          // container. Inert unless real nesting exists (caretInNestedMacro is false otherwise).
+          if (!caretInNestedMacro(ctx.state, from, to)) return false;
+          const frameCls = open!.name === "tabs" ? "cm-lp-tabs-frame" : "cm-lp-columns-frame";
+          const box = Decoration.line({ attributes: { class: frameCls } });
+          for (let n = first.number; n <= lastLine.number; n++) ctx.add(box, doc.line(n).from);
+          return; // descend: the nested :::column/:::tab + their inner macros render individually
+        }
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editMode: macro.editMode }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme), block: true }), from, to);
@@ -1631,6 +1673,13 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-tabpanel": { display: "none" },
   ".cm-lp-tabpanel-active": { display: "block" },
   ".cm-lp-tabpanel > :first-child": { marginTop: "0" },
+  // #196 innermost-wins reveal: while a NESTED child of columns/tabs is being edited, the container
+  // descends to raw lines rather than its flex/tab widget — so the caret can sit inside the child. A
+  // subtle left rail marks the container/child frame so the structure stays visible ("which layer am I
+  // editing"). Display-only line decorations (no widget → no new motion atom); the flex/tab layout
+  // returns as soon as the caret leaves the block.
+  ".cm-lp-columns-frame, .cm-lp-tabs-frame": { borderLeft: "2px solid var(--border, #888)", paddingLeft: "0.6em" },
+  ".cm-lp-column-frame, .cm-lp-tab-frame": { borderLeft: "2px solid color-mix(in srgb, var(--accent, #4ea1ff) 40%, transparent)", paddingLeft: "0.6em" },
   // #90 details: collapsed bar + (revealed) a subtle bordered box.
   ".cm-lp-details-summary": { border: "1px solid var(--border, #888)", borderRadius: "4px", padding: "0.35em 0.7em", cursor: "pointer", color: "var(--fg-dim, #888)", userSelect: "none" },
   ".cm-lp-details": { borderLeft: "3px solid var(--border, #888)", paddingLeft: "0.8em" },
