@@ -24,7 +24,27 @@ interface PageRow {
 
 // A minimal, server-controlled document skeleton. The body is already sanitized; the title is
 // escaped here (it's the only dynamic value in the static shell). Class-only styling hooks are left
-// for the published/static stylesheet (slice 4) — no inline style (ADR-059 decision-4).
+// for the published/static stylesheet (slice 4) — no inline style (ADR-059 decision-4). The document
+// carries a small STATIC stylesheet (server-authored, not user content) so the export is readable
+// standalone AND the per-block fidelity indicator (#85 (c) / ADR-059) is visible: a `degrade` macro is
+// wrapped by withFidelity in `.wks-fidelity-degrade` with a `.wks-fidelity-badge` ◐, which the reader
+// needs to actually SEE to know a block was simplified for export.
+const EXPORT_STYLES = `
+:root { color-scheme: light dark; }
+.wks-export { max-width: 46rem; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; line-height: 1.6; }
+.wks-export-title { margin: 0 0 1rem; }
+.wks-export img { max-width: 100%; height: auto; }
+.wks-export pre { overflow-x: auto; padding: .6em .8em; background: rgba(127,127,127,.12); border-radius: 6px; }
+.wks-export code { background: rgba(127,127,127,.18); border-radius: 3px; padding: 0 3px; }
+.wks-export blockquote { margin: 0; padding-left: .8em; border-left: 3px solid rgba(127,127,127,.5); }
+.wks-export table { border-collapse: collapse; }
+.wks-export th, .wks-export td { border: 1px solid rgba(127,127,127,.4); padding: .3em .5em; }
+.wks-export .callout { border: 1px solid rgba(127,127,127,.4); border-radius: 6px; padding: .5em .8em; margin: .5em 0; }
+/* #85 (c): the fidelity indicator for a block simplified (degraded) on export. */
+.wks-fidelity-degrade { position: relative; border: 1px dashed rgba(127,127,127,.55); border-radius: 6px; padding: .4em .6em; margin: .5em 0; }
+.wks-fidelity-badge { float: right; margin-left: .5em; color: #b8860b; font-size: 1.1em; line-height: 1; cursor: help; }
+`
+
 function htmlDocument(title: string, safeBody: string): string {
   const t = escapeHtml(title || 'Untitled')
   return `<!doctype html>
@@ -33,6 +53,7 @@ function htmlDocument(title: string, safeBody: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${t}</title>
+<style>${EXPORT_STYLES}</style>
 </head>
 <body>
 <main class="wks-export">
