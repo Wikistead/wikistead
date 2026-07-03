@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Text } from "@codemirror/state";
 import { findFenceMacro, findDirectiveMacro, registeredFenceLangs, registeredDirectiveNames } from "./index"; // importing index registers first-party macros
-import { registerMacro } from "./registry";
+import { registerMacro, editModeOf } from "./registry";
 import { mermaidMacro } from "./mermaid";
 import { plantumlMacro } from "./plantuml";
 import { noteCalloutMacro } from "./callout";
@@ -129,5 +129,26 @@ describe("fence parsing", () => {
   it("extracts the body between the fences, excluding fence lines", () => {
     const doc = Text.of(["```mermaid", "graph TD;", "A-->B;", "```"]);
     expect(fenceBody(doc, 0, doc.length)).toBe("graph TD;\nA-->B;");
+  });
+});
+
+describe("editModeOf (#174 / ADR-087 — mouse-edit interaction)", () => {
+  it("derives 'modal' from a modal richEditUI (Excalidraw) with no explicit editMode", () => {
+    const ex = findFenceMacro("excalidraw");
+    expect(ex).toBeDefined();
+    expect(ex!.richEditUI?.present).toBe("modal");
+    expect(ex!.editMode).toBeUndefined();
+    expect(editModeOf(ex!)).toBe("modal");
+  });
+
+  it("derives 'inline' for macros edited in place (mermaid fence, note callout, table)", () => {
+    expect(editModeOf(mermaidMacro)).toBe("inline"); // no richEditUI → edited by entering the source
+    expect(editModeOf(noteCalloutMacro)).toBe("inline"); // inline richEditUI panel
+    expect(editModeOf(findDirectiveMacro("table")!)).toBe("inline"); // in-editor table ops
+  });
+
+  it("lets an explicit editMode override the richEditUI-derived default", () => {
+    expect(editModeOf({ editMode: "modal", richEditUI: undefined })).toBe("modal");
+    expect(editModeOf({ editMode: "inline", richEditUI: { present: "modal" } as never })).toBe("inline");
   });
 });

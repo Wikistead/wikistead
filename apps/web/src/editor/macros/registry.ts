@@ -144,6 +144,11 @@ export interface FenceMacro {
   // Mouse rich-edit surface (modal for embedded React editors — keeps React out of
   // CodeMirror, ADR-013).
   readonly richEditUI?: RichEditUI;
+  // #174 / ADR-087: how the mouse EDITS this macro — "inline" (click the body → edit in place:
+  // table/callout/mermaid) or "modal" (click → select, then ✎ opens a separate editor: Excalidraw —
+  // the cushion prevents a surprise context switch on a stray click). Optional; defaults are derived
+  // (see editModeOf): a modal richEditUI ⇒ "modal", otherwise "inline".
+  readonly editMode?: "inline" | "modal";
   // Tier levels for host auto-demote (ADR-025 step 3). Optional — most fence macros are
   // single-level (mermaid/excalidraw round-trip verbatim in their fence).
   readonly tier?: MacroTier;
@@ -168,6 +173,7 @@ interface DirectiveMacroBase {
   htmlRender(body: string): SafeHtml;
   readonly exportFidelity: "preserve" | "degrade";
   readonly richEditUI?: RichEditUI;
+  readonly editMode?: "inline" | "modal"; // #174 / ADR-087 — see FenceMacro.editMode
   // Tier levels for host auto-demote (ADR-025 step 3). The table declares this (pipe ⟷
   // :::table); container directives without alternate representations omit it.
   readonly tier?: MacroTier;
@@ -200,6 +206,13 @@ export interface BlockDirectiveMacro extends DirectiveMacroBase {
 export type DirectiveMacro = ContainerDirectiveMacro | BlockDirectiveMacro;
 
 export type Macro = FenceMacro | DirectiveMacro;
+
+// #174 / ADR-087: resolve how the mouse edits a macro. An explicit `editMode` wins; otherwise a modal
+// richEditUI (Excalidraw) ⇒ "modal" (click selects, ✎ opens the editor), else "inline" (table/callout/
+// mermaid — clicking the body edits it in place). One source of truth for the interaction matrix.
+export function editModeOf(macro: { editMode?: "inline" | "modal"; richEditUI?: RichEditUI }): "inline" | "modal" {
+  return macro.editMode ?? (macro.richEditUI?.present === "modal" ? "modal" : "inline");
+}
 
 const FENCE_MACROS = new Map<string, FenceMacro>();
 const DIRECTIVE_MACROS = new Map<string, DirectiveMacro>();

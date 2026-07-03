@@ -8,7 +8,7 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from "@codemirror/view";
-import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme } from "../macros/registry";
+import { findFenceMacro, findDirectiveMacro, editModeOf, type FenceMacro, type MacroTheme } from "../macros/registry";
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
@@ -618,7 +618,11 @@ class MacroWidget extends WidgetType {
       const ph = document.createElement("div");
       ph.className = "cm-lp-macro cm-lp-macro-empty";
       ph.setAttribute("data-testid", "macro-empty");
-      ph.textContent = `Empty ${this.name} — click to edit`;
+      // #174 / ADR-087: the empty-macro affordance matches how the macro is actually edited
+      // "inline" macros (table/callout/mermaid) edit in place on click, "modal" ones (Excalidraw)
+      // open a separate editor. editModeOf is the single source of truth for that branch.
+      const opens = editModeOf(this.macro) === "modal";
+      ph.textContent = `Empty ${this.name} — click to ${opens ? "open" : "edit"}`;
       wrap.appendChild(ph);
     } else {
       const rendered = this.macro.liveRender(this.body, { theme: currentMacroTheme() });
