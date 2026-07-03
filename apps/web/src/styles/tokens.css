@@ -235,6 +235,12 @@
   --lh-tight: 1.25;
   --lh-normal: 1.5;
 
+  /* #185: the vertical gap between two blocks. At TOP level (single Y.Text) two blocks are separated
+     by a blank line, whose height is exactly ONE line-height. `1lh` (one line-height, resolved against
+     the using element's own line-height = the editor's --lh-normal) makes the NESTED renderMarkdownToDom
+     rhythm identical BY CONSTRUCTION — change the line-height and both top-level and nested follow. */
+  --lp-block-gap: 1lh;
+
   /* Radius scale (replaces scattered 4/6/7/8 literals). */
   --radius-sm: 4px;
   --radius-md: 6px;
