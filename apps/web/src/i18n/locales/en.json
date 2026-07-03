@@ -298,7 +298,7 @@
     "draft": "Draft",
     "unpublishedChanges": "Unpublished changes",
     "moreActions": "More actions",
-    "export": "Export",
+    "export": "Export as Markdown",
     "exportHtml": "Export as HTML",
     "print": "Print / PDF",
     "history": "History",

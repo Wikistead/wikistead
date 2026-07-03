@@ -22,7 +22,7 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 let db: TenantDb
 // ids
 const SPACE = 'exp-space'
-const ROOT = 'exp-root', CHILD = 'exp-child', HIDDEN = 'exp-hidden', OTHER = 'exp-other', XSS = 'exp-xss'
+const ROOT = 'exp-root', CHILD = 'exp-child', HIDDEN = 'exp-hidden', OTHER = 'exp-other', XSS = 'exp-xss', DEGRADE = 'exp-degrade'
 const ATT = 'exp-att-ok', FORBIDDEN_ATT = 'exp-att-forbidden'
 const USER = 'exp-user'
 
@@ -31,6 +31,7 @@ const grants = [
   { user: `user:${USER}`, relation: 'view_base', object: `page:${ROOT}` },
   { user: `user:${USER}`, relation: 'view_base', object: `page:${CHILD}` },
   { user: `user:${USER}`, relation: 'view_base', object: `page:${XSS}` },
+  { user: `user:${USER}`, relation: 'view_base', object: `page:${DEGRADE}` },
   // NOTE: no grants for HIDDEN or OTHER → not viewable by USER.
 ]
 
@@ -75,6 +76,12 @@ beforeAll(async () => {
     (${OTHER},  ${TENANT}, ${SPACE}, NULL,    'Other Page',  ${ydoc(otherBody)},  ${otherBody}),
     (${XSS},    ${TENANT}, ${SPACE}, NULL,    'XSS Page',    ${ydoc(xssBody)},    ${xssBody})
     ON CONFLICT (id) DO NOTHING`
+  // A page with a DEGRADE macro (plantuml renders to source server-side) → the HTML export must wrap
+  // it with the fidelity indicator (#85 (c)).
+  const degradeBody = '# Diagram\n\n```plantuml\n@startuml\nA -> B\n@enduml\n```\n'
+  await admin`INSERT INTO pages (id, tenant_id, space_id, parent_id, title, ydoc, published_md) VALUES
+    (${DEGRADE}, ${TENANT}, ${SPACE}, NULL, 'Degrade Page', ${ydoc(degradeBody)}, ${degradeBody})
+    ON CONFLICT (id) DO NOTHING`
   // ATT belongs to ROOT (viewable). FORBIDDEN_ATT belongs to OTHER (not viewable).
   // ATT's filename is a zip-slip attempt.
   const k1 = `${TENANT}/exp/${ATT}.png`, k2 = `${TENANT}/exp/${FORBIDDEN_ATT}.png`
@@ -89,7 +96,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await deleteTuples(fgaClient, grants).catch(() => {})
   await admin`DELETE FROM attachments WHERE tenant_id = ${TENANT} AND id LIKE 'exp-att%'`.catch(() => {})
-  await admin`DELETE FROM pages WHERE id IN (${ROOT}, ${CHILD}, ${HIDDEN}, ${OTHER}, ${XSS})`.catch(() => {})
+  await admin`DELETE FROM pages WHERE id IN (${ROOT}, ${CHILD}, ${HIDDEN}, ${OTHER}, ${XSS}, ${DEGRADE})`.catch(() => {})
   await admin`DELETE FROM spaces WHERE id = ${SPACE}`.catch(() => {})
   await db.release()
   await admin.end()
@@ -177,5 +184,14 @@ describe('buildHtmlExport', () => {
     expect(lc).not.toContain('<img src=x onerror')
     // A `javascript:` link href is dropped by the renderer's scheme allowlist.
     expect(lc).not.toContain('javascript:')
+  })
+
+  it('wraps a degrade macro with a VISIBLE fidelity indicator (#85 (c))', async () => {
+    const res = await buildHtmlExport(db, fgaClient, { userId: USER, pageId: DEGRADE })
+    const html = res!.body
+    expect(html).toContain('wks-fidelity-degrade') // the degraded block is wrapped
+    expect(html).toContain('wks-fidelity-badge') // ...with the badge element
+    expect(html).toContain('.wks-fidelity-badge') // ...and the document ships the CSS so it's visible
+    expect(html).toContain('Diagram') // the surrounding prose still renders
   })
 })
