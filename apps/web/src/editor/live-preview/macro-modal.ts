@@ -3,7 +3,7 @@ import type { FenceMacro, DirectiveMacro, MacroTheme, MacroSource } from "../mac
 import { asMacroSource } from "../macros/registry";
 import { macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
 import { autoDemote } from "../macros/tier-cap";
-import { ephemeralCollab } from "./decorations";
+import { ephemeralCollab, macroPresence } from "./decorations";
 import { tableModalEditor, tableTier } from "../macros/table";
 
 // Rich-edit a macro block in a modal (ADR-022 Part 3 / #86 for the table). The overlay is plain
@@ -101,9 +101,13 @@ export function openMacroModal(
   // hand the session to mount. The macro's own API stays {theme}; collab is this separate host channel.
   const collabFactory = macro.richEditUI.collab ? view.state.facet(ephemeralCollab) : null;
   const session = collabFactory ? collabFactory(String(start.from)) : undefined;
+  // #92 presence: while this modal is open, publish "editing the macro at <anchor>" onto the page
+  // awareness so co-editors see a badge at the macro instead of this user vanishing. Cleared on close.
+  const presence = view.state.facet(macroPresence);
+  presence?.set(String(start.from));
   void macro.richEditUI.editor.mount(frame.content, asMacroSource(originalBody), { theme }, session).then((c) => {
     getBody = () => c.getBody();
-    frame.onMounted(() => { c.destroy(); session?.destroy(); });
+    frame.onMounted(() => { presence?.set(null); c.destroy(); session?.destroy(); });
   });
 }
 
