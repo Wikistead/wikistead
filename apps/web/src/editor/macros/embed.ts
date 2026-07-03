@@ -37,6 +37,11 @@ export function isAllowlistedEmbed(url: string, allowlist: readonly string[]): b
     return false;
   }
   if (u.protocol !== "https:") return false;
+  // #108 (comment 643): NEVER iframe the app's own origin. A same-origin iframe with
+  // allow-scripts + allow-same-origin escapes the sandbox and reaches the parent editor DOM/tokens, so
+  // even if an admin adds the app host to the allowlist it must degrade to a link. hostname parsing
+  // (URL) already strips a `user@` userinfo bypass ("youtube.com@evil.com" → hostname "evil.com").
+  if (typeof window !== "undefined" && window.location && u.origin === window.location.origin) return false;
   const host = u.hostname.toLowerCase();
   return allowlist.some((raw) => {
     const h = raw.trim().toLowerCase().replace(/^\.+/, "");
@@ -57,7 +62,12 @@ export function buildEmbedElement(url: string, allowlist: readonly string[]): HT
     // Minimal-but-functional sandbox for a TRUSTED allowlisted host (comment 551: "allow-scripts
     // "). No allow-top-navigation / allow-modals / allow-downloads. Privacy: no-referrer so the
     // embedding page URL isn't leaked to the external host (comment 551 privacy concern).
-    iframe.setAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-presentation");
+    // #108 (comment 643) defence-in-depth: allow-same-origin ONLY for a cross-origin frame — same-origin
+    // is already rejected above, but never combine allow-scripts + allow-same-origin on our own origin
+    // (that pair disables the sandbox), so drop it if the src ever resolves same-origin.
+    let sameOrigin = false;
+    try { sameOrigin = typeof window !== "undefined" && !!window.location && new URL(trimmed).origin === window.location.origin; } catch { /* unparseable → treat as cross-origin (still sandboxed) */ }
+    iframe.setAttribute("sandbox", sameOrigin ? "allow-scripts allow-popups allow-presentation" : "allow-scripts allow-same-origin allow-popups allow-presentation");
     iframe.setAttribute("referrerpolicy", "no-referrer");
     iframe.setAttribute("loading", "lazy");
     iframe.setAttribute("allowfullscreen", "");
