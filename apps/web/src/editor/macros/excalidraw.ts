@@ -32,6 +32,22 @@ function parseScene(body: string): Scene {
   }
 }
 
+// #200: Excalidraw's default stroke colours (light = #1e1e1e, dark = #e3e3e8). A stroke left at the
+// default is meant to follow the theme, but the absolute value is stored, so a theme switch strands it.
+const EXCALIDRAW_DEFAULT_STROKES = new Set(["#1e1e1e", "#e3e3e8"]);
+const themeDefaultStroke = (dark: boolean) => (dark ? "#e3e3e8" : "#1e1e1e");
+
+// Remap any element whose strokeColor is a known Excalidraw DEFAULT to the current display theme's
+// default, so default strokes stay visible after a theme switch. User-picked (non-default) colours are
+// returned untouched. Pure — returns a new array only where a remap is needed.
+export function themeAdaptStrokes(elements: any[], dark: boolean): any[] {
+  const target = themeDefaultStroke(dark);
+  return elements.map((e) => {
+    const s = typeof e?.strokeColor === "string" ? e.strokeColor.toLowerCase() : null;
+    return s && EXCALIDRAW_DEFAULT_STROKES.has(s) && s !== target ? { ...e, strokeColor: target } : e;
+  });
+}
+
 export const excalidrawMacro: FenceMacro = {
   kind: "fence",
   lang: "excalidraw",
@@ -52,11 +68,16 @@ export const excalidrawMacro: FenceMacro = {
     void loadExcalidraw().then(async ({ exportToSvg }) => {
       try {
         const svg = await exportToSvg({
-          elements: scene.elements,
-          // #200: export in the app's theme. Without exportWithDarkMode the SVG kept its light-theme
-          // colours (dark strokes), so the drawing was invisible on the dark background. theme +
-          // exportWithDarkMode make Excalidraw render the strokes for a dark surface.
-          appState: { ...scene.appState, exportBackground: false, theme: ctx.theme, exportWithDarkMode: dark },
+          // #200: make DEFAULT strokes follow the DISPLAY theme. Excalidraw stores absolute stroke
+          // colours and shows the dark theme via a render-time invert filter; exportWithDarkMode applies
+          // that filter to the SVG. But a default stroke drawn in one theme keeps its absolute colour,
+          // so after a theme switch it goes low-contrast (light-drawn #1e1e1e vanishes on dark; a
+          // dark-drawn light stroke vanishes on light). We instead remap any element whose strokeColor
+          // is a known Excalidraw default to the CURRENT theme's default (themeAdaptStrokes) and DISABLE
+          // exportWithDarkMode (so our explicit colours aren't inverted again). User-picked colours are
+          // left untouched — only the theme-default strokes adapt.
+          elements: themeAdaptStrokes(scene.elements, dark),
+          appState: { ...scene.appState, exportBackground: false, theme: ctx.theme, exportWithDarkMode: false },
           files: scene.files,
         } as any);
         el.appendChild(svg);
