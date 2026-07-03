@@ -44,16 +44,20 @@ export function findMath(state: EditorState): MathRange[] {
       }
     }
   }
-  // Inline $…$ (single line, not part of a block already taken). #141 (approved judgment ②): the
-  // Pandoc/CommonMark-math delimiter rule so prose with currency ("$5 and $6") is NOT math-ified — the
-  // OPENING $ must be followed by a non-whitespace char and the CLOSING $ preceded by one. In "$5 and
-  // $6" the closing $ is preceded by a space → no match; "$x^2$" still matches.
+  // Inline $…$ (single line, not part of a block already taken). #141 (approved judgment ②): the FULL
+  // Pandoc/CommonMark-math delimiter rule so prose with currency is NOT math-ified —
+  //   (1) the OPENING $ is followed by a non-whitespace char,
+  //   (2) the CLOSING $ is preceded by a non-whitespace char,
+  //   (3) the CLOSING $ is NOT immediately followed by a digit.
+  // (1)+(2) reject "$5 and $6" (closing preceded by a space); (3) rejects "$5 and$6" / "$100$200" (the
+  // closing $ runs into a number). "$x^2$" still matches.
   const nonWs = (c: string | undefined) => !!c && !/\s/.test(c)
+  const isDigit = (c: string | undefined) => !!c && c >= "0" && c <= "9"
   for (let i = 0; i < text.length; i++) {
     if (text[i] === "$" && !esc(i) && text[i + 1] !== "$" && !overlaps(i, i + 1) && nonWs(text[i + 1])) {
       let j = i + 1
       while (j < text.length && text[j] !== "$" && text[j] !== "\n") { if (text[j] === "\\") j++; j++ }
-      if (j < text.length && text[j] === "$" && !esc(j) && nonWs(text[j - 1])) {
+      if (j < text.length && text[j] === "$" && !esc(j) && nonWs(text[j - 1]) && !isDigit(text[j + 1])) {
         const from = i, to = j + 1, tex = text.slice(i + 1, j).trim()
         if (tex && !overlaps(from, to) && !inCode(state, from)) { out.push({ from, to, tex, display: false }); taken.push([from, to]) }
         i = j

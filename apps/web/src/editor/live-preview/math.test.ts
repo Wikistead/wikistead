@@ -20,6 +20,21 @@ describe("math delimiter rule (#141 judgment ②)", () => {
     expect(math("it costs $5 and $6 total")).toHaveLength(0);
   });
 
+  // #141 bounce (comment 624): the reviewer's EXACT device examples — the real render path (findMath →
+  // mathField, used by both the edit and published surfaces) must reject all of these.
+  it("does NOT math-ify the reported currency examples (real path)", () => {
+    expect(math("$5 and $6")).toHaveLength(0);
+    expect(math("$10 for $20")).toHaveLength(0);
+    expect(math("cost $5 and $6 today")).toHaveLength(0);
+    // full Pandoc rule (3): a closing $ that runs into a digit isn't a delimiter
+    expect(math("$5 and$6")).toHaveLength(0);
+    expect(math("$100$200")).toHaveLength(0);
+    // ...but a REAL formula amid currency still renders
+    const m = math("a $5 and $6 b $x$");
+    expect(m).toHaveLength(1);
+    expect(m[0]!.tex).toBe("x");
+  });
+
   it("does NOT open on '$ x$' (opening $ followed by whitespace)", () => {
     expect(math("a $ x$ b")).toHaveLength(0);
   });
