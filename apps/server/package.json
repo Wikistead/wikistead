@@ -36,6 +36,7 @@
     "@wikistead/entitlements-cloud": "workspace:^",
     "@wikistead/events": "workspace:^",
     "@wikistead/hooks": "workspace:^",
+    "@wikistead/macro-render": "workspace:^",
     "@wikistead/types": "workspace:*",
     "fastify": "^5.0.0",
     "fflate": "^0.8.3",
