@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { usePageAccess, useGrantAccess, useRevokeAccess, usePage, useTenantGroups, type PageRelation } from "../data/queries";
+import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePage, useTenantGroups, type PageRelation } from "../data/queries";
 import { notify } from "./toast";
 import { Select } from "./Select";
 import { Button, IconButton } from "./Button";
@@ -18,10 +18,23 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   const { data: groups } = useTenantGroups(page?.spaceId ?? "", open && !!page?.spaceId);
   const grant = useGrantAccess(pageId);
   const revoke = useRevokeAccess(pageId);
+  const { data: restrictions } = usePageRestrictions(pageId, open); // #109
+  const restrict = useRestrict(pageId);
+  const unrestrict = useUnrestrict(pageId);
   const [mode, setMode] = useState<"user" | "group">("user");
   const [sub, setSub] = useState("");
   const [groupName, setGroupName] = useState("");
   const [relation, setRelation] = useState<PageRelation>("view");
+  const [restrictSub, setRestrictSub] = useState("");
+
+  const addRestrict = () => {
+    const s = restrictSub.trim();
+    if (!s) return;
+    restrict.mutate({ principal: `user:${s}` }, {
+      onSuccess: () => { notify.success(t("toast.saved")); setRestrictSub(""); },
+      onError: () => notify.error(t("toast.actionFailed")),
+    });
+  };
 
   const add = () => {
     if (mode === "group") {
@@ -109,6 +122,28 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             </div>
           ))}
           {(grants?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("permissions.empty")}</p>}
+        </div>
+
+        {/* #109 / ADR-072 monotonic deny: restrict a principal from this page — they can't view it even
+            as a space viewer (the page 404s for them). Deny wins over every grant. */}
+        <div className="mt-4 border-t border-border pt-3">
+          <p className="m-0 mb-2 text-xs font-medium text-fg-dim">{t("permissions.restrictTitle")}</p>
+          <div className="flex items-center gap-2">
+            <Input className="flex-1" value={restrictSub} onChange={(e) => setRestrictSub(e.target.value)}
+              placeholder={t("permissions.restrictPlaceholder")} data-testid="restrict-sub" aria-label={t("permissions.restrictTitle")} />
+            <Button variant="default" size="sm" data-testid="restrict-add" disabled={restrict.isPending} onClick={addRestrict}>{t("permissions.restrictAdd")}</Button>
+          </div>
+          <div className="mt-2 flex flex-col gap-2" data-testid="restrict-list">
+            {(restrictions ?? []).map((r) => (
+              <div key={r.principal} className="flex items-center gap-2" data-testid="restrict-item">
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground">{r.principal.replace(/^user:/, "").replace(/^group:/, "").replace(/#member$/, "")}</span>
+                <IconButton aria-label={t("permissions.unrestrict")} data-testid="restrict-remove" onClick={() => unrestrict.mutate({ principal: r.principal }, {
+                  onSuccess: () => notify.success(t("toast.saved")),
+                  onError: () => notify.error(t("toast.actionFailed")),
+                })}>×</IconButton>
+              </div>
+            ))}
+          </div>
         </div>
 
         <DialogFooter className="mt-4">

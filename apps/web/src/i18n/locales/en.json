@@ -384,7 +384,11 @@
     "typeUser": "Member",
     "typeGroup": "Group",
     "selectGroup": "Select a group",
-    "noGroups": "No groups (imported from your IdP)"
+    "noGroups": "No groups (imported from your IdP)",
+    "restrictTitle": "Restricted (denied even if a space viewer)",
+    "restrictPlaceholder": "member id (user sub)",
+    "restrictAdd": "Restrict",
+    "unrestrict": "Remove restriction"
   },
   "spaceTheme": {
     "title": "Theme",

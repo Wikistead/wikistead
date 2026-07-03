@@ -406,6 +406,36 @@ export function useRevokeAccess(pageId: string) {
   });
 }
 
+// #109 / ADR-072 monotonic deny — the per-page restriction (deny) list, distinct from grants. A
+// restricted principal 404s on the page even as a space viewer.
+export interface PageRestriction { principal: string }
+export function usePageRestrictions(pageId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["page-restrict", pageId],
+    queryFn: () => apiFetch<PageRestriction[]>(`/pages/${encodeURIComponent(pageId)}/restrict`, token).then((r) => r ?? []),
+    enabled: enabled && pageId.length > 0,
+  });
+}
+export function useRestrict(pageId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { principal?: string; groupName?: string }) =>
+      apiFetch<null>(`/pages/${encodeURIComponent(pageId)}/restrict`, token, { method: "POST", body: JSON.stringify(args) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["page-restrict", pageId] }),
+  });
+}
+export function useUnrestrict(pageId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { principal?: string; groupName?: string }) =>
+      apiFetch<null>(`/pages/${encodeURIComponent(pageId)}/restrict`, token, { method: "DELETE", body: JSON.stringify(args) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["page-restrict", pageId] }),
+  });
+}
+
 // The tenant's group-name source for the group-grant picker (#163). manage-gated server-side
 // (group names can be sensitive), so scope the query to a space the caller manages.
 export function useTenantGroups(spaceId: string, enabled = true) {
