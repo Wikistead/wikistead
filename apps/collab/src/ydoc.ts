@@ -90,13 +90,58 @@ export function isUnloadedEmptyFlush(existingState: Uint8Array, incomingState: U
   }
 }
 
+// #114 / ADR-058: bounded, idempotent retry for a 0-row UPDATE. A 0-row write has TWO causes that are
+// INDISTINGUISHABLE under RLS — the page was deleted, or a transient RLS/replication gap — and we must
+// NOT superuser-bypass to tell them apart (that would break tenant isolation; RLS stays a defense-in-
+// depth invariant). So we retry a BOUNDED number of times with exponential backoff + full jitter: a
+// transient cause rides out, a permanently-deleted page simply exhausts the budget (a mid-session
+// delete can never loop forever). Each retry re-applies the SAME captured `state` (the storeYdoc arg) —
+// a newer edit is a separate storeYdoc call with its own state, so an old retry never stomps new state.
+// On exhaustion storeYdoc returns {stored:false} so the caller disconnects the client (edits are not
+// silently dropped) and a stable structured marker (no PII) is logged for alerting. A THROWN DB error
+// (lost connection, etc.) is a DISTINCT path — it propagates, separating explicit errors from the
+// silent 0-row case. The write is idempotent (UPDATE to a fixed state), so a retry after a partial
+// success is harmless.
+const STORE_MAX_RETRIES = 3 // up to 4 attempts total (1 + 3 retries)
+// First-defense delay; grows 500 → 1000 → 2000 (× full jitter). Read at CALL time from the env so tests
+// can shrink it (and ops can tune it) without touching the retry semantics; default is the 500ms design.
+function storeBackoffMs(retry: number): number {
+  const base = Number(process.env.YDOC_STORE_BACKOFF_MS ?? 500)
+  const ceil = base * 2 ** (retry - 1) // retry 1→base, 2→2×, 3→4×
+  return ceil / 2 + Math.random() * (ceil / 2) // full jitter in [ceil/2, ceil] — de-synchronises retriers
+}
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+type WriteOutcome = 'stored' | 'blocked' | 'zero_row'
+
+// One write attempt inside a tenant-scoped transaction. Returns a discriminated outcome so the retry
+// loop can distinguish a terminal empty-overwrite refusal ('blocked') from a retryable 'zero_row'. A
+// DB error THROWS out of here (not caught) — the caller treats that as the separate error path.
+async function attemptWrite(tenantId: string, pageId: string, state: Uint8Array, md: string): Promise<WriteOutcome> {
+  return withTenant(tenantId, async (tx): Promise<WriteOutcome> => {
+    // Empty-overwrite guard (ADR-088 / #186): only an EMPTY incoming state can wipe a page, so the extra
+    // read + causal check run SOLELY on that (rare) branch — a normal non-empty write skips all of it.
+    if (md === '') {
+      const [existing] = await tx<[{ ydoc: Buffer | null }]>`SELECT ydoc FROM pages WHERE id = ${pageId}`
+      if (existing?.ydoc && existing.ydoc.length > 0 && isUnloadedEmptyFlush(new Uint8Array(existing.ydoc), state)) {
+        console.error(
+          `event=ydoc_empty_overwrite_blocked tenant=${tenantId} page=${pageId}` +
+          ` reason=unloaded_empty_flush_over_nonempty — kept existing bytes (no data loss)`,
+        )
+        return 'blocked' // existing ydoc untouched; terminal (never retried)
+      }
+    }
+    const result = await tx`
+      UPDATE pages
+      SET ydoc = ${Buffer.from(state)}, updated_at = now(),
+          has_unpublished_changes = (published_md IS DISTINCT FROM ${md})
+      WHERE id = ${pageId}
+    `
+    return result.count === 0 ? 'zero_row' : 'stored'
+  })
+}
+
 // Save ydoc binary to Postgres and (conditionally) create a revision snapshot.
-//
-// 0-row UPDATE detection: RLS or a deleted/missing page causes the UPDATE
-// to affect 0 rows. When stored=false: error is logged and pages.ydoc is not
-// written. The retry + alert mechanism for persistent 0-row failures is designed
-// in ADR-058 / #114 (bounded retry + a stable structured failure marker; the store
-// callback stops swallowing the result) — pending approval, not yet implemented.
 //
 // Draft-only persistence (draft/publish model): this autosaves the live draft
 // (pages.ydoc) so edits survive a tab close / restart. It deliberately does NOT
@@ -115,41 +160,23 @@ export async function storeYdoc(
   state: Uint8Array,
   _createdBy?: string,
 ): Promise<StoreResult> {
-  let stored = false
-  let blocked = false
   const md = decodeContent(state)
-  await withTenant(tenantId, async (tx) => {
-    // Empty-overwrite guard (ADR-088 / #186): an EMPTY incoming state is the ONLY thing that can wipe a
-    // page, so the extra read + causal check run SOLELY on that (rare) branch — a normal non-empty write
-    // skips all of it (zero hot-path overhead beyond this emptiness check, per the ADR-088 review note).
-    if (md === '') {
-      const [existing] = await tx<[{ ydoc: Buffer | null }]>`SELECT ydoc FROM pages WHERE id = ${pageId}`
-      if (existing?.ydoc && existing.ydoc.length > 0 && isUnloadedEmptyFlush(new Uint8Array(existing.ydoc), state)) {
-        // The writer never observed the existing content — persisting its empty state would silently
-        // wipe the page. REFUSE and keep the existing bytes; emit the LOUD marker (ADR-058 style, no PII).
-        console.error(
-          `event=ydoc_empty_overwrite_blocked tenant=${tenantId} page=${pageId}` +
-          ` reason=unloaded_empty_flush_over_nonempty — kept existing bytes (no data loss)`,
-        )
-        blocked = true
-        return undefined // existing ydoc untouched; stored stays false
-      }
-    }
-    const result = await tx`
-      UPDATE pages
-      SET ydoc = ${Buffer.from(state)}, updated_at = now(),
-          has_unpublished_changes = (published_md IS DISTINCT FROM ${md})
-      WHERE id = ${pageId}
-    `
-    if (result.count === 0) {
-      console.error(
-        `[ydoc:store] 0-row UPDATE page:${pageId} tenant:${tenantId}` +
-        ` — page not found or RLS mismatch; edits will NOT survive restart`,
-      )
-      return undefined
-    }
-    stored = true
-    return undefined
-  })
-  return { stored, blocked }
+  // Attempt + bounded retry ONLY on 'zero_row' (a transient RLS/replication gap rides out; a deleted
+  // page exhausts the budget without an infinite loop). 'blocked' (empty-overwrite) is terminal. A
+  // thrown DB error propagates (the separate error path). See the ADR-058 / #114 note above.
+  for (let attempt = 0; attempt <= STORE_MAX_RETRIES; attempt++) {
+    if (attempt > 0) await delay(storeBackoffMs(attempt))
+    const outcome = await attemptWrite(tenantId, pageId, state, md)
+    if (outcome === 'stored') return { stored: true }
+    if (outcome === 'blocked') return { stored: false, blocked: true }
+    // 'zero_row' → fall through to the next attempt (or exhaust)
+  }
+  // Retries exhausted: the write persistently affected 0 rows. Do NOT advance any persisted checkpoint
+  // (pages.ydoc is unchanged — the UPDATE hit 0 rows). Surface {stored:false} so the caller disconnects
+  // the client instead of silently dropping its edits. Stable structured marker (no PII) for alerting.
+  console.error(
+    `event=ydoc_store_0row_exhausted tenant=${tenantId} page=${pageId} attempts=${STORE_MAX_RETRIES + 1}` +
+    ` reason=page_deleted_or_rls_mismatch — edits NOT persisted (retries exhausted); client will be disconnected`,
+  )
+  return { stored: false }
 }
