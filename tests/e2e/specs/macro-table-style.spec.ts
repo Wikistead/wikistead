@@ -15,6 +15,24 @@ async function pipeTableInEdit(page: any) {
   expect(await page.getByTestId("macro-modal").count()).toBe(0);
 }
 
+// #197: the always-on spreadsheet select handles (A/B/1/2) are removed — selection is by DRAGGING
+// across cells. A full-height drag over one column = column selected (col ops show); full-width over
+// one row = row selected. These helpers reproduce that gesture by data-cellkey.
+async function dragCells(page: any, from: string, to: string) {
+  const s = (await page.locator(`[data-testid=table-edit] [data-cellkey="${from}"]`).boundingBox())!;
+  const e = (await page.locator(`[data-testid=table-edit] [data-cellkey="${to}"]`).boundingBox())!;
+  await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(e.x + e.width / 2, e.y + e.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await sleep(80);
+}
+const selectCol = (page: any, c: number, lastRow: number) => dragCells(page, `0,${c}`, `${lastRow},${c}`);
+const selectRow = (page: any, r: number, lastCol: number) => dragCells(page, `${r},0`, `${r},${lastCol}`);
+// Count columns / rows from the data cells (data-cellkey="r,c") — the select-handle count is gone.
+const colCount = (page: any) => page.locator('[data-testid=table-edit] [data-cellkey^="0,"]').count(); // row-0 cells
+const rowCount = (page: any) => page.locator('[data-testid=table-edit] [data-cellkey$=",0"]').count(); // col-0 cells
+
 test("align: select a cell, Align Center → promotes to :::table with text-align", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "tablealign");
@@ -87,7 +105,7 @@ test("multi-column resize: live preview matches commit (no jump) + all selected 
   const grid = page.locator("[data-testid=table-edit] table.cm-lp-table-grid");
   const before = (await grid.boundingBox())!.width;
 
-  await page.getByTestId("table-select-all").click(); // select every cell → drag resizes all columns
+  await dragCells(page, "0,0", "1,2"); // #197: drag across every cell → drag-resize applies to all columns
   await sleep(100);
   const handle = page.getByTestId("table-col-resize-0");
   const box = (await handle.boundingBox())!;
@@ -152,13 +170,13 @@ test("non-vim click enters edit; edit mode persists across ops; Esc exits", asyn
 });
 
 // #5: row/column header handles select a whole column/row (then an op applies to all).
-test("column handle selects the whole column; color applies to all its cells", async ({ browser }) => {
+test("drag-selecting a whole column applies colour to all its cells (#197)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "tablecolsel");
   await enterEdit(page);
   await pipeTableInEdit(page);
 
-  await page.getByTestId("table-col-select-0").click(); // select column 0 (A + 1)
+  await selectCol(page, 0, 1); // #197: drag over column 0's cells (full height) → column selected
   // #1: the selected column's cells must VISUALLY fill (computed style, not just the
   // class) — incl. the HEADER cell, whose base `th` background would otherwise win the
   // specificity contest. This is what the class-presence assertion missed on device.
@@ -180,17 +198,8 @@ test("column handle selects the whole column; color applies to all its cells", a
   expect(await macroTable.locator('[style*="background"]').count()).toBe(2);
 });
 
-// #2: the select handles read as a spreadsheet header (A/B/C across the top, 1/2/3 down
-// the side) — unmistakably not data cells.
-test("select handles show spreadsheet labels (A/B/C, 1/2/3)", async ({ browser }) => {
-  const page = await (await browser.newContext()).newPage();
-  await openScratch(page, "tablelabels");
-  await enterEdit(page);
-  await pipeTableInEdit(page);
-  expect((await page.getByTestId("table-col-select-0").textContent())?.trim()).toBe("A");
-  expect((await page.getByTestId("table-col-select-1").textContent())?.trim()).toBe("B");
-  expect((await page.getByTestId("table-row-select-0").textContent())?.trim()).toBe("1");
-});
+// #197: the spreadsheet A/B/1/2 labels + select handles are REMOVED (drag-select replaces them), so
+// the old "labels show A/B/C, 1/2/3" test is gone by design.
 
 // #1: append a column / row at the end via the trailing "+" handles; stays a pipe table.
 test("the trailing + adds a column and a row (stays Tier-1 pipe)", async ({ browser }) => {
@@ -201,10 +210,10 @@ test("the trailing + adds a column and a row (stays Tier-1 pipe)", async ({ brow
 
   await page.getByTestId("table-add-col").click();
   await sleep(150);
-  await expect(page.getByTestId("table-col-select-2")).toBeVisible(); // 3rd column now exists
+  expect(await colCount(page)).toBe(3); // #197: 3rd column now exists (counted from data cells)
   await page.getByTestId("table-add-row").click();
   await sleep(150);
-  await expect(page.getByTestId("table-row-select-2")).toBeVisible(); // 3rd row now exists
+  expect(await rowCount(page)).toBe(3); // 3rd row now exists
 
   await page.keyboard.press("Escape"); // #154: per-op commit; Escape exits in-editor edit mode
   await sleep(200);
@@ -222,16 +231,16 @@ test("insert-after and delete a column via the contextual toolbar", async ({ bro
   await enterEdit(page);
   await pipeTableInEdit(page);
 
-  await page.getByTestId("table-col-select-1").click(); // select column B → column ops show
+  await selectCol(page, 1, 1); // #197: drag-select column 1 (full height) → column ops show
   await expect(page.getByTestId("table-col-insert-after")).toBeVisible();
   await page.getByTestId("table-col-insert-after").click();
   await sleep(150);
-  expect(await page.locator('[data-testid=table-edit] [data-testid^="table-col-select-"]').count()).toBe(3);
+  expect(await colCount(page)).toBe(3);
 
-  await page.getByTestId("table-col-select-0").click();
+  await selectCol(page, 0, 1);
   await page.getByTestId("table-col-delete").click();
   await sleep(150);
-  expect(await page.locator('[data-testid=table-edit] [data-testid^="table-col-select-"]').count()).toBe(2);
+  expect(await colCount(page)).toBe(2);
 });
 
 // #3: insert before/after the selected ROW, and delete a row, from the contextual toolbar.
@@ -241,17 +250,17 @@ test("insert-below and delete a row via the contextual toolbar", async ({ browse
   await enterEdit(page);
   await pipeTableInEdit(page); // header row + 1 body row = 2 rows
 
-  await page.getByTestId("table-row-select-1").click(); // select row 2 → row ops show
+  await selectRow(page, 1, 1); // #197: drag-select row 1 (full width) → row ops show
   await expect(page.getByTestId("table-row-insert-below")).toBeVisible();
   await expect(page.getByTestId("table-row-delete")).toBeVisible(); // delete is discoverable (#3)
   await page.getByTestId("table-row-insert-below").click();
   await sleep(150);
-  expect(await page.locator('[data-testid=table-edit] [data-testid^="table-row-select-"]').count()).toBe(3);
+  expect(await rowCount(page)).toBe(3);
 
-  await page.getByTestId("table-row-select-0").click();
+  await selectRow(page, 0, 1);
   await page.getByTestId("table-row-delete").click();
   await sleep(150);
-  expect(await page.locator('[data-testid=table-edit] [data-testid^="table-row-select-"]').count()).toBe(2);
+  expect(await rowCount(page)).toBe(2);
 });
 
 // #3: the add affordances are now ATTACHED to the table (a "+" in the header band / below
