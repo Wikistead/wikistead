@@ -584,7 +584,7 @@ function isFolded(state: EditorState, from: number, to: number): boolean {
 // Display-only / offset-invariant like every other block widget (ADR-008).
 // A renderable macro = anything with a liveRender (fence macros, and block-form
 // directive macros like :::table). foldable is fence-only (large data bodies).
-type RenderableMacro = { liveRender: (body: string, ctx: { theme: MacroTheme }) => HTMLElement; richEditUI?: import("../macros/registry").RichEditUI };
+type RenderableMacro = { liveRender: (body: string, ctx: { theme: MacroTheme }) => HTMLElement; richEditUI?: import("../macros/registry").RichEditUI; editMode?: "inline" | "modal" };
 class MacroWidget extends WidgetType {
   private ro?: ResizeObserver;
   private objectUrl?: string; // #140: revoked on destroy so the rendered image blob isn't leaked
@@ -667,12 +667,14 @@ class MacroWidget extends WidgetType {
       }
     }
     if (!view.state.readOnly) {
-      // ADR-024: a click ENTERS the macro atom (the mouse path, same as Ctrl+Enter)
-      // modal (Excalidraw) / inline cell-edit (table) / source reveal (mermaid). The fold
-      // button stops propagation so its clicks don't enter. Offset-invariant.
+      // ADR-024 / #174 / ADR-087: a body click on an INLINE macro (table/callout/mermaid)
+      // edits it in place — the cheap, in-context edit, no cushion. A MODAL macro (Excalidraw)
+      // must NOT open on a stray body click (it launches a separate editor); a click only
+      // SELECTS it (caret on the atom → ring), and the ✎ button / Ctrl+Enter opens the modal.
+      // The fold/edit buttons stopPropagation so their clicks don't fall through. Offset-invariant.
       wrap.addEventListener("mousedown", (e) => {
         e.preventDefault();
-        if (enterMacroAt(view, view.posAtDOM(wrap))) return;
+        if (editModeOf(this.macro) === "inline" && enterMacroAt(view, view.posAtDOM(wrap))) return;
         view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)) });
         view.focus();
       });
@@ -992,7 +994,7 @@ const RENDERERS: BlockRenderer[] = [
         if (macro.revealOnCursor && rangeRevealed(ctx.state, from, to)) return false;
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), currentMacroTheme()), block: true }), from, to);
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editMode: macro.editMode }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), currentMacroTheme()), block: true }), from, to);
         return macro.revealOnCursor ? false : undefined;
       }
       if (macro.collapsible && !rangeRevealed(ctx.state, first.from, lastLine.to)) {

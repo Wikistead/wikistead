@@ -23,8 +23,13 @@ test("```excalidraw: modal mounts Excalidraw, save writes back, source round-tri
   const macro = page.locator("[data-pane=preview] [data-testid=macro-excalidraw]");
   await expect(macro).toBeVisible();
 
-  // Clicking the macro opens the modal (mode-based, Part 11) — mounts Excalidraw (React 19).
+  // #174 / ADR-087: Excalidraw is a MODAL macro — a body click does NOT open it (a stray
+  // click shouldn't launch a separate editor). The click only SELECTS the atom (ring); the
+  // ✎ edit button then opens the modal that mounts Excalidraw (React 19).
   await macro.click();
+  await expect(macro.locator("xpath=ancestor::*[contains(@class,'cm-lp-atom-sel')]")).toHaveCount(1);
+  await expect(page.getByTestId("macro-modal")).toHaveCount(0);
+  await page.getByTestId("macro-edit").click();
   await expect(page.getByTestId("macro-modal")).toBeVisible();
   await expect(page.locator(".wks-macro-modal .excalidraw")).toBeVisible({ timeout: 20000 });
 
