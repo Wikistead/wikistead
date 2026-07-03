@@ -54,7 +54,8 @@ export function Toc({
             style={{ paddingLeft: `${(h.level - minLevel) * 12}px` }}
             className={cn(
               "block w-full cursor-pointer truncate rounded py-1 pr-2 text-left text-[length:var(--text-xs)] text-fg-dim transition-colors duration-[120ms] hover:text-foreground",
-              activeFrom === h.from && "font-medium text-foreground",
+              activeFrom === h.from && "font-medium text-[var(--accent)]", // #192: active heading in the theme accent
+
             )}
             title={h.text}
           >{h.text || t("common.untitled")}</button>
@@ -70,7 +71,9 @@ export function Toc({
         data-testid="toc"
         data-variant="overlay"
         className={cn(
-          "pointer-events-none fixed right-3 top-16 z-30 max-h-[70vh] w-[240px] overflow-y-auto rounded-lg border border-border/60 bg-panel/70 p-3 shadow-lg backdrop-blur-md transition-opacity duration-200",
+          // #192: sit below the top-right control buttons (TOC / comments toggles) so the overlay
+          // doesn't cover them (was top-16, overlapping them).
+          "pointer-events-none fixed right-3 top-28 z-30 max-h-[70vh] w-[240px] overflow-y-auto rounded-lg border border-border/60 bg-panel/70 p-3 shadow-lg backdrop-blur-md transition-opacity duration-200",
           scrolling ? "pointer-events-auto opacity-100" : "opacity-0",
         )}
       >
