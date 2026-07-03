@@ -152,33 +152,29 @@ export function Sidebar() {
     const d = node.data;
     const selected = d.pageId === pageId;
     const hasChildren = (d.children?.length ?? 0) > 0;
-    // #193: react-arborist's `style` carries the row's absolute position/height AND the depth indent
-    // (paddingLeft). Split them: the OUTER holds only positioning (full row slot); the INNER is the
-    // highlight — full width WITHIN a small edge inset, so the fill is even for every depth and never
-    // overflows the sidebar. The indent moves onto the inner's paddingLeft, so only the CONTENT shifts
-    // right (the highlight stays full-width); h-full makes the whole 32px slot the click/hover target,
-    // removing the un-clickable vertical dead space between rows.
+    // #193 (rebuilt as ONE structure): react-arborist positions each row in a wrapper of exactly
+    // rowHeight(32px) × 100%, and passes us `style` = the depth indent (paddingLeft) only + the
+    // dragHandle ref. So the ONE correct layout is:
+    //   OUTER  = h-full w-full → fills RA's 32px×full-width slot EXACTLY (box-border px-1 = a 4px edge
+    //            inset inside that width, so the highlight never touches the scrollbar).
+    //   INNER  = h-full w-full flex row = the highlight AND the click target. Because OUTER is now
+    //            h-full, INNER's h-full resolves to the full 32px (the earlier bounce failed because
+    //            OUTER had no height, so h-full/stretch collapsed to content height → the vertical gap).
+    //   ROW    = chevron + icon + name(flex-1 min-w-0 truncate → ellipsis when narrow, full when wide)
+    //            + badge/dot/actions(flex-none → never clipped; the name shrinks first).
+    // Click area == highlight == the whole slot; no horizontal overflow; width-resize keeps all of it.
     const indent = typeof (style as { paddingLeft?: number }).paddingLeft === "number" ? (style as { paddingLeft: number }).paddingLeft : 0;
-    const outerStyle = { ...style, paddingLeft: undefined };
     return (
       <div
         ref={dragHandle}
-        style={outerStyle}
-        // #193: `flex items-stretch` makes the inner fill the FULL row-height slot even if h-full can't
-        // resolve (react-arborist's row height), so there is no un-clickable vertical dead space between
-        // rows; `max-w-full` caps the row to the sidebar's visible width (react-arborist can size a row to
-        // its content), which is what lets a long name actually ellipsize instead of overflowing.
-        className="group flex max-w-full items-stretch select-none px-1" // 4px inset so the fill never touches the sidebar edge / scrollbar
+        className="group box-border h-full w-full select-none px-1"
         data-testid="tree-page"
         data-selected={selected ? "" : undefined}
         onClick={() => navigate(`/p/${d.pageId}`)}
       >
        <div
          className={cn(
-           // #193: NO h-full here — the outer's `items-stretch` stretches this highlight to the full
-           // row-height slot. h-full (height:100% of the row slot) could resolve short and leave the
-           // background gap the bounce reported; self-stretch fills it reliably.
-           "flex w-full min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded-lg pr-2 transition-colors duration-[120ms]",
+           "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded-lg pr-2 transition-colors duration-[120ms]",
            selected
              ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium"
              : "hover:bg-panel-2",
