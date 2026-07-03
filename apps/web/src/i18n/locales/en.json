@@ -137,8 +137,20 @@
     "branding": "Branding",
     "auth": "Authentication",
     "api": "API",
+    "embeds": "Embeds",
     "billing": "Billing",
     "orphans": "Orphan drafts"
+  },
+  "adminEmbeds": {
+    "title": "External embeds",
+    "body": "Hosts allowed to be embedded as sandboxed iframes (e.g. video). External embeds are off by default — anything not listed here degrades to a plain link. https is implied.",
+    "addTitle": "Allow a host",
+    "host": "Host",
+    "add": "Add",
+    "remove": "Remove",
+    "empty": "No allowed hosts — all external embeds degrade to a link.",
+    "invalidHost": "Enter a valid host, e.g. youtube.com",
+    "ownOrigin": "This app's own origin can't be embedded."
   },
   "adminOrphans": {
     "title": "Orphan drafts",

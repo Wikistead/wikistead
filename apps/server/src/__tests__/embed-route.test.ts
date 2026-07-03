@@ -10,7 +10,7 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, deleteObjectTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage } from '../routes/pages.js'
+import { createPage, setEmbedProviders, normalizeEmbedProviders } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -76,6 +76,48 @@ describe('GET /embed/providers (#108 / ADR-071 comment 551 — client iframe all
     } finally {
       await setProviders([])
     }
+  })
+
+  // #108 bounce: normalizeEmbedProviders — bare, lowercase, deduped hostnames (the isAllowlistedEmbed form)
+  describe('normalizeEmbedProviders (#108 bounce)', () => {
+    it('strips scheme/path/port, lowercases, dedupes, drops non-hosts', () => {
+      expect(normalizeEmbedProviders([
+        'HTTPS://YouTube.com/watch?v=x', '  player.vimeo.com  ', 'youtube.com', 'example.com:8443/a',
+        'not a host', 'localhost', '', 123, '.evil.',
+      ])).toEqual(['youtube.com', 'player.vimeo.com', 'example.com']) // 'localhost'/'.evil.'(→evil, no dot)/non-strings dropped
+    })
+    it('returns [] for a non-array', () => {
+      expect(normalizeEmbedProviders('youtube.com')).toEqual([])
+      expect(normalizeEmbedProviders(undefined)).toEqual([])
+    })
+  })
+
+  // #108 bounce: PUT /embed/providers — admin-only write, host normalisation, tenant-scoped read
+  describe('PUT /embed/providers (#108 bounce)', () => {
+    const put = (providers: unknown) =>
+      app.inject({ method: 'PUT', url: '/embed/providers', headers: { host: HOST, authorization: 'Bearer dev-token', 'content-type': 'application/json' }, payload: JSON.stringify({ providers }) })
+    const get = () => app.inject({ method: 'GET', url: '/embed/providers', headers: { host: HOST } })
+    const setProviders = (hosts: string[]) =>
+      admin`INSERT INTO tenant_settings (tenant_id, embed_providers) VALUES (${TENANT}, ${admin.array(hosts)})
+            ON CONFLICT (tenant_id) DO UPDATE SET embed_providers = ${admin.array(hosts)}`
+
+    it('a tenant admin writes a normalised allowlist; the scoped read reflects it', async () => {
+      try {
+        const res = await put(['HTTPS://YouTube.com/embed/x', ' player.vimeo.com ', 'youtube.com', 'bad host', ''])
+        expect(res.statusCode).toBe(200)
+        expect(res.json().providers).toEqual(['youtube.com', 'player.vimeo.com']) // normalised + deduped
+        expect((await get()).json().providers).toEqual(['youtube.com', 'player.vimeo.com']) // persisted for THIS tenant
+      } finally {
+        await setProviders([])
+      }
+    })
+
+    it('a NON-admin principal is rejected (403) — the admin gate holds', async () => {
+      // direct fn call with a stranger sub (no tenant#admin) → 403, like the api-key policy gate test
+      await expect(setEmbedProviders(db, fgaClient, { tenantId: TENANT, userId: 'stranger-not-admin-xyz', providers: ['youtube.com'] }))
+        .rejects.toMatchObject({ statusCode: 403 })
+      expect((await get()).json().providers).toEqual([]) // unchanged — the rejected write stored nothing
+    })
   })
 })
 

@@ -18,6 +18,50 @@ import { resolveTranscludeRef } from '../transclude-resolve.js'
 import { renderPlantuml } from '../plantuml-render.js'
 import { assertPageViewable } from '../page-view-gate.js'
 
+// #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames —
+// the exact form isAllowlistedEmbed matches. Strip a scheme, path/query/fragment, port, whitespace and
+// leading dots; require a dotted hostname; drop empties, non-hostnames and duplicates. (https is
+// implied — the client only ever iframes https hosts.) Pure + exported for unit tests.
+export function normalizeEmbedProviders(input: unknown): string[] {
+  const raw = Array.isArray(input) ? input : []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    let h = item.trim().toLowerCase()
+    h = h.replace(/^[a-z][a-z0-9+.-]*:\/\//, '') // strip scheme
+    h = h.replace(/[/?#].*$/, '')                 // strip path/query/fragment
+    h = h.replace(/:\d+$/, '')                     // strip a port
+    h = h.replace(/^\.+/, '').replace(/\.+$/, '')   // strip leading/trailing dots
+    if (!/^[a-z0-9.-]+$/.test(h) || !h.includes('.')) continue // must be a bare dotted hostname
+    if (!seen.has(h)) { seen.add(h); out.push(h) }
+  }
+  return out
+}
+
+// #108 bounce: write the tenant's external-embed host allowlist. tenant#admin ONLY (same authority as
+// branding / API policy — a non-admin gets 403). Entries are normalised to bare hostnames. Scoped to
+// the given tenant (ON CONFLICT tenant_id) so it can't touch another tenant's row. Returns the stored
+// (normalised) list. Extracted as a service fn so the admin gate + isolation are unit-testable.
+export async function setEmbedProviders(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { tenantId: string; userId: string; providers: unknown },
+): Promise<string[]> {
+  // Raw FGA check (like branding's requireTenantAdmin) — `admin` on `tenant:` isn't a capability the
+  // `check` helper maps; the tenant-admin relation is checked directly.
+  const { allowed } = await fga.check({ user: `user:${args.userId}`, relation: 'admin', object: `tenant:${args.tenantId}` })
+  if (!allowed) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  const providers = normalizeEmbedProviders(args.providers)
+  await db.sql`
+    INSERT INTO tenant_settings (tenant_id, embed_providers, updated_at)
+    VALUES (${args.tenantId}, ${db.sql.array(providers)}, now())
+    ON CONFLICT (tenant_id) DO UPDATE SET embed_providers = ${db.sql.array(providers)}, updated_at = now()
+  `
+  emit({ type: 'tenant.embed_providers_updated', tenantId: args.tenantId, actorId: args.userId, count: providers.length })
+  return providers
+}
+
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean }
 export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean; canComment?: boolean }
 function toPage(r: PageRow): Page {
@@ -996,7 +1040,9 @@ export async function pagesPlugin(app: FastifyInstance) {
     const { subject, context } = principalForPage(req, req.params.pageId)
     const url = req.query?.url
     if (!url) return reply.code(400).send({ error: 'url is required' })
-    const [row] = await req.db.sql<{ embed_providers: string[] }[]>`SELECT embed_providers FROM tenant_settings LIMIT 1`
+    // #108 bounce: read the CURRENT tenant's row explicitly (not `LIMIT 1`, which reads an arbitrary
+    // first row → cross-tenant mixing under a shared table). Defence-in-depth alongside any RLS.
+    const [row] = await req.db.sql<{ embed_providers: string[] }[]>`SELECT embed_providers FROM tenant_settings WHERE tenant_id = ${req.tenant.id}`
     try {
       return await resolveEmbed({ fga: app.fga }, { principal: subject, pageId: req.params.pageId, url, allowlist: row?.embed_providers ?? [], context })
     } catch (e) {
@@ -1013,8 +1059,26 @@ export async function pagesPlugin(app: FastifyInstance) {
   // allowlist to decide iframe-vs-degrade. Public + host-resolved (the allowlist is operator config,
   // not sensitive); default empty ⇒ no external embed (operator opt-in).
   app.get('/embed/providers', { config: { public: true } }, async (req) => {
-    const [row] = await req.db.sql<{ embed_providers: string[] }[]>`SELECT embed_providers FROM tenant_settings LIMIT 1`
+    // #108 bounce: scope the read to the CURRENT tenant (not `LIMIT 1`) so a shared tenant_settings
+    // table never leaks/mixes another tenant's allowlist.
+    const [row] = await req.db.sql<{ embed_providers: string[] }[]>`SELECT embed_providers FROM tenant_settings WHERE tenant_id = ${req.tenant.id}`
     return { providers: row?.embed_providers ?? [] }
+  })
+
+  // #108 bounce: write the tenant's external-embed host allowlist. tenant#admin only (same authority
+  // as branding/API policy — a non-admin gets 403). Entries are normalised to bare lowercase hostnames
+  // (scheme/path/whitespace stripped, deduped, empties dropped) so they match isAllowlistedEmbed's
+  // host rule. The app's own origin is NOT a security dependency here — even if an admin adds it, the
+  // render guard (isAllowlistedEmbed/buildEmbedElement) degrades a same-origin URL to a link — but the
+  // UI discourages it. Scoped to the current tenant (ON CONFLICT tenant_id) so it can't touch another.
+  app.put<{ Body: { providers?: unknown } }>('/embed/providers', async (req, reply) => {
+    try {
+      const providers = await setEmbedProviders(req.db, app.fga, { tenantId: req.tenant.id, userId: req.user.sub, providers: req.body?.providers })
+      return { providers }
+    } catch (e) {
+      if ((e as { statusCode?: number })?.statusCode === 403) return reply.code(403).send({ error: 'forbidden' })
+      throw e
+    }
   })
 
   // Internal transclude resolve (#108 / ADR-071): return the REFERENCED page's published content for
