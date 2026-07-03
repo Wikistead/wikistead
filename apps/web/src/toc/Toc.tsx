@@ -84,7 +84,7 @@ export function Toc({
       aria-label={t("toc.title")}
       data-testid="toc"
       data-variant="rail"
-      className="flex min-h-0 w-[240px] flex-none flex-col overflow-y-auto bg-transparent px-3 py-4 text-[length:var(--text-ui)]"
+      className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-transparent px-3 py-4 text-[length:var(--text-ui)]"
     >
       {list}
     </nav>
