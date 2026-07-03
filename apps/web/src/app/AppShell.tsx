@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "./ThemeToggle";
 import { LanguageToggle } from "./LanguageToggle";
 import { UserMenu } from "./UserMenu";
-import { BrandLockup } from "./BrandLockup";
+import { WikisteadMark } from "./BrandLockup";
 import { useBranding } from "../data/queries";
 import { assetUrl } from "../data/apiClient";
 
@@ -59,18 +59,20 @@ export function AppShell({
             Home (→ default page); guests/pre-login get a static brand (no home). Gate
             on onLogout, NOT sidebar: the settings shell has no sidebar but is a member. */}
         {(() => {
-          // #143: logo and name are INDEPENDENT (were exclusive — a logo hid the name). Show whatever
-          // is set: logo + name together (Slack-style, the SaaS default when both exist), logo only,
-          // name only, or the Wikistead lockup when neither. Setting a logo no longer erases the name.
+          // #143: the header brand is ALWAYS two INDEPENDENT slots — a logo slot and a name slot —
+          // each with its own default. Logo slot: the custom uploaded logo when set, else the default
+          // Wikistead mark. Name slot: the tenant display name when set, else "Wikistead". Setting a
+          // logo never hides the name; setting a name never hides the (default) logo. (Was exclusive:
+          // a logo replaced the name and a name replaced the default logo — the #143 bounce.)
           const logoUrl = branding.data?.logoUrl;
           const name = branding.data?.displayName;
-          const brand = logoUrl || name ? (
-            <span className="flex items-center gap-2">
-              {logoUrl && <img className="block h-[22px] max-w-[160px] object-contain" src={assetUrl(logoUrl)} alt={name || "Wikistead"} data-testid="brand-logo" />}
-              {name && <span className="text-[15px] font-semibold" data-testid="brand">{name}</span>}
+          const brand = (
+            <span className="flex items-center gap-2 text-foreground">
+              {logoUrl
+                ? <img className="block h-[22px] max-w-[160px] object-contain" src={assetUrl(logoUrl)} alt={name || "Wikistead"} data-testid="brand-logo" />
+                : <WikisteadMark />}
+              <span className="text-[15px] font-semibold" data-testid="brand">{name || "Wikistead"}</span>
             </span>
-          ) : (
-            <BrandLockup />
           );
           return onLogout ? (
             <Link to="/" className="flex items-center rounded outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("nav.home")} data-testid="brand-home">{brand}</Link>

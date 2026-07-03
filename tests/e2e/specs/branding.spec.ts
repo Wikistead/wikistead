@@ -54,22 +54,33 @@ test("tenant branding: name shows in the header and accent applies app-wide; res
 // logo. Resets at the end so it doesn't leak into other specs.
 const PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
-test("tenant logo: logo and name are INDEPENDENT — a logo shows ALONGSIDE the name, not replacing it (#143)", async ({ page }) => {
+test("tenant logo: logo and name are two INDEPENDENT slots, each with a default; neither hides the other (#143)", async ({ page }) => {
   await openDemo(page);
   await page.goto("/admin/branding");
   await expect(page.getByTestId("tenant-branding")).toBeVisible();
 
-  // Before any logo, the workspace name is shown in the header.
-  await expect(page.getByTestId("brand")).toBeVisible();
+  // #143 regression this captures: the header used to be EXCLUSIVE — uploading a logo hid the name,
+  // and the name hid the default logo — so only one element ever showed. The fix makes the header two
+  // always-present, independent slots: a LOGO slot (custom img ▷ default Wikistead mark) and a NAME
+  // slot (display name ▷ "Wikistead"). Setting one never empties the other.
+
+  // Baseline (no custom logo, no name): the DEFAULT mark fills the logo slot AND the name slot shows.
+  // Both slots are populated by their defaults — the header is never a single lonely element.
+  await expect(page.getByTestId("brand-mark")).toBeVisible(); // default logo present
+  await expect(page.getByTestId("brand")).toBeVisible();      // name slot present ("Wikistead")
+  await expect(page.getByTestId("brand-logo")).toHaveCount(0); // no CUSTOM logo yet
 
   await page.getByTestId("tenant-logo-input").setInputFiles({
     name: "logo.png", mimeType: "image/png", buffer: Buffer.from(PNG_1x1, "base64"),
   });
-  // #143: the logo appears WITH the name (Slack-style), it does NOT erase the name (was: replaced).
-  await expect(page.getByTestId("brand-logo")).toBeVisible();
-  await expect(page.getByTestId("brand")).toBeVisible();
+  // Uploading a custom logo swaps the LOGO slot (default mark → custom img) but leaves the NAME slot.
+  await expect(page.getByTestId("brand-logo")).toBeVisible();  // custom logo now in the logo slot
+  await expect(page.getByTestId("brand-mark")).toHaveCount(0); // default mark gave way to the custom one
+  await expect(page.getByTestId("brand")).toBeVisible();       // name slot UNAFFECTED (was: erased)
 
   await page.getByTestId("tenant-logo-remove").click();
-  await expect(page.getByTestId("brand-logo")).toHaveCount(0); // logo gone
-  await expect(page.getByTestId("brand")).toBeVisible(); // name remains (independent)
+  // Removing the custom logo restores the DEFAULT mark in the logo slot; the name slot is still there.
+  await expect(page.getByTestId("brand-logo")).toHaveCount(0); // custom logo gone
+  await expect(page.getByTestId("brand-mark")).toBeVisible();  // default mark restored (slot never empties)
+  await expect(page.getByTestId("brand")).toBeVisible();       // name remains (independent)
 });
