@@ -1,5 +1,7 @@
 import type { DirectiveMacro } from "./registry";
-import { html } from "./safe-html";
+// #85 slice 2: the callout type list + export htmlRender are the single source of truth in
+// @wikistead/macro-render (shared with the server export). This file adds the editor icon + metadata.
+import { CALLOUT_TYPES, calloutHtmlRender, type CalloutType } from "@wikistead/macro-render";
 
 // Typed callouts (#150 / ADR-049). Obsidian/GitHub-style admonitions, replacing the single
 // `:::callout`. Syntax A: each type is its own directive name (`:::note` / `:::info` / `:::tip`
@@ -11,19 +13,17 @@ import { html } from "./safe-html";
 // renders it as a mask-image SVG (currentColor-tinted, ISC, no new dep) — see decorations.ts.
 
 interface CalloutSpec {
-  type: "note" | "info" | "tip" | "warning" | "danger";
+  type: CalloutType;
   icon: string; // Lucide icon NAME (#158-C4); the header renders it as a mask-image SVG
 }
 
 // #158-C4 mapping (the owner): note=Pencil (distinct from info), info=Info, tip=Lightbulb,
-// warning=TriangleAlert, danger=OctagonAlert. Names key the mask-image CSS in decorations.ts.
-const SPECS: readonly CalloutSpec[] = [
-  { type: "note", icon: "pencil" },
-  { type: "info", icon: "info" },
-  { type: "tip", icon: "lightbulb" },
-  { type: "warning", icon: "triangle-alert" },
-  { type: "danger", icon: "octagon-alert" },
-];
+// warning=TriangleAlert, danger=OctagonAlert. Names key the mask-image CSS in decorations.ts. The type
+// list itself is shared (CALLOUT_TYPES) so the editor and the server export stay in lockstep.
+const ICONS: Record<CalloutType, string> = {
+  note: "pencil", info: "info", tip: "lightbulb", warning: "triangle-alert", danger: "octagon-alert",
+};
+const SPECS: readonly CalloutSpec[] = CALLOUT_TYPES.map((type) => ({ type, icon: ICONS[type] }));
 
 function makeCallout(spec: CalloutSpec): DirectiveMacro {
   return {
@@ -40,8 +40,9 @@ function makeCallout(spec: CalloutSpec): DirectiveMacro {
       insert: `:::${spec.type}\n\n:::`,
       caret: spec.type.length + 4, // ":::" + type + "\n" → the blank body line
     },
-    // M3 wires HTML export server-side; this supplies the wrapper. Escaping keeps it XSS-safe.
-    htmlRender: (body) => html`<div class="callout callout-${spec.type}">\n\n${body}\n\n</div>`,
+    // M3 export wrapper — single source of truth in @wikistead/macro-render (#85), shared with the
+    // server export renderer. Escaping keeps it XSS-safe.
+    htmlRender: calloutHtmlRender(spec.type),
   };
 }
 

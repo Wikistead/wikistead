@@ -9,5 +9,7 @@ export type { MacroHtmlDescriptor, MacroHtmlRegistry } from "./render.js";
 export {
   parseLayoutItems,
   columnsHtmlRender, tabsHtmlRender, detailsHtmlRender,
+  CALLOUT_TYPES, calloutHtmlRender,
   builtinDirectiveDescriptors, builtinMacroRegistry,
 } from "./directives.js";
+export type { CalloutType } from "./directives.js";
