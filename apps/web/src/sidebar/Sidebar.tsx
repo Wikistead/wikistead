@@ -152,23 +152,32 @@ export function Sidebar() {
     const d = node.data;
     const selected = d.pageId === pageId;
     const hasChildren = (d.children?.length ?? 0) > 0;
+    // #193: react-arborist's `style` carries the row's absolute position/height AND the depth indent
+    // (paddingLeft). Split them: the OUTER holds only positioning (full row slot); the INNER is the
+    // highlight — full width WITHIN a small edge inset, so the fill is even for every depth and never
+    // overflows the sidebar. The indent moves onto the inner's paddingLeft, so only the CONTENT shifts
+    // right (the highlight stays full-width); h-full makes the whole 32px slot the click/hover target,
+    // removing the un-clickable vertical dead space between rows.
+    const indent = typeof (style as { paddingLeft?: number }).paddingLeft === "number" ? (style as { paddingLeft: number }).paddingLeft : 0;
+    const outerStyle = { ...style, paddingLeft: undefined };
     return (
       <div
         ref={dragHandle}
-        style={style}
-        className={cn(
-          // #193: the WHOLE row is the click + hover target (Notion-style) — w-full so the empty
-          // space past the label is clickable too (was content-width → only the text reacted), with
-          // an 8px-radius (rounded-lg) hover/selected fill spanning the full row. px gives label room.
-          "group flex w-full cursor-pointer select-none items-center gap-1.5 rounded-lg px-2 transition-colors duration-[120ms]",
-          selected
-            ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium"
-            : "hover:bg-panel-2",
-        )}
+        style={outerStyle}
+        className="group select-none px-1" // 4px inset so the fill never touches the sidebar edge / scrollbar
         data-testid="tree-page"
         data-selected={selected ? "" : undefined}
         onClick={() => navigate(`/p/${d.pageId}`)}
       >
+       <div
+         className={cn(
+           "flex h-full w-full cursor-pointer items-center gap-1.5 overflow-hidden rounded-lg pr-2 transition-colors duration-[120ms]",
+           selected
+             ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium"
+             : "hover:bg-panel-2",
+         )}
+         style={{ paddingLeft: `calc(${indent}px + 0.5rem)` }} // indent shifts only the content; 8px label room
+       >
         <span className="inline-flex flex-none items-center" onClick={(e) => { e.stopPropagation(); node.toggle(); }}>
           {hasChildren ? <ChevronRight size={14} className={cn("transition-transform duration-[120ms]", node.isOpen && "rotate-90")} /> : <span className="inline-block w-[14px]" />}
         </span>
@@ -193,6 +202,7 @@ export function Sidebar() {
             </DropdownMenu>
           </span>
         )}
+       </div>
       </div>
     );
   }, [pageId, canEdit, t, navigate]);
