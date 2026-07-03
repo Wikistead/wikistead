@@ -39,6 +39,23 @@ describe("isAllowlistedEmbed", () => {
   it("does not throw on an unparseable URL", () => {
     expect(isAllowlistedEmbed("not a url", allow)).toBe(false);
   });
+
+  // #108 (comment 643): security — a same-origin iframe with allow-scripts + allow-same-origin escapes
+  // the sandbox and reaches the parent editor, so the app's OWN origin must NEVER be iframed even if an
+  // admin mis-adds it to the allowlist.
+  it("rejects the app's own origin even when it is in the allowlist (sandbox-escape guard)", () => {
+    const w = window as unknown as { happyDOM?: { setURL(u: string): void } };
+    w.happyDOM?.setURL("https://app.example.test/p/x");
+    try {
+      expect(isAllowlistedEmbed("https://app.example.test/embed/y", ["app.example.test"])).toBe(false);
+    } finally {
+      w.happyDOM?.setURL("http://localhost/");
+    }
+  });
+
+  it("strips a userinfo bypass to the real host (youtube.com@evil.com → not allowlisted)", () => {
+    expect(isAllowlistedEmbed("https://youtube.com@evil.com/x", ["youtube.com"])).toBe(false);
+  });
 });
 
 describe("buildEmbedElement", () => {
@@ -67,5 +84,16 @@ describe("buildEmbedElement", () => {
   it("degrades a javascript: URL to a link, never an iframe", () => {
     const el = buildEmbedElement("javascript:alert(1)", allow);
     expect(el.tagName).toBe("A"); // never an iframe
+  });
+
+  it("degrades the app's own origin to a link even if allowlisted (#108 comment 643)", () => {
+    const w = window as unknown as { happyDOM?: { setURL(u: string): void } };
+    w.happyDOM?.setURL("https://app.example.test/p/x");
+    try {
+      const el = buildEmbedElement("https://app.example.test/embed/y", ["app.example.test"]);
+      expect(el.tagName).toBe("A"); // never an iframe on our own origin (sandbox-escape guard)
+    } finally {
+      w.happyDOM?.setURL("http://localhost/");
+    }
   });
 });
