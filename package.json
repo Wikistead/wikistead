@@ -20,6 +20,8 @@
     "preflight:deploy": "tsx apps/server/src/deploy/preflight-cli.ts",
     "compose:up": "docker compose up -d",
     "compose:down": "docker compose down",
+    "dev:setup": "node scripts/dev-setup.mjs",
+    "dev:up": "docker compose up -d && node scripts/dev-setup.mjs",
     "setup:e2e": "node tests/e2e/scripts/up.mjs",
     "test:e2e": "pnpm --filter @wikistead/e2e e2e",
     "teardown:e2e": "node tests/e2e/scripts/down.mjs"
