@@ -175,7 +175,10 @@ export function Sidebar() {
       >
        <div
          className={cn(
-           "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded-lg pr-2 transition-colors duration-[120ms]",
+           // #193: NO h-full here — the outer's `items-stretch` stretches this highlight to the full
+           // row-height slot. h-full (height:100% of the row slot) could resolve short and leave the
+           // background gap the bounce reported; self-stretch fills it reliably.
+           "flex w-full min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded-lg pr-2 transition-colors duration-[120ms]",
            selected
              ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium"
              : "hover:bg-panel-2",
@@ -212,8 +215,32 @@ export function Sidebar() {
   }, [pageId, canEdit, t, navigate]);
 
   const headerBtn = "flex cursor-pointer rounded-sm p-1 text-fg-dim transition-colors duration-[120ms] hover:bg-panel-2 hover:text-foreground";
+
+  // #193: drag the right edge to resize the sidebar. Width is the grid column --sidebar-w (AppShell),
+  // clamped 180–480px and persisted to localStorage so it survives reloads. Restore on mount.
+  useEffect(() => {
+    const saved = localStorage.getItem("wks.sidebarW");
+    if (saved) document.documentElement.style.setProperty("--sidebar-w", saved);
+  }, []);
+  const onResizeStart = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--sidebar-w"), 10) || 260;
+    const onMove = (ev: PointerEvent) => {
+      const w = Math.max(180, Math.min(480, startW + (ev.clientX - startX)));
+      document.documentElement.style.setProperty("--sidebar-w", `${w}px`);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      localStorage.setItem("wks.sidebarW", getComputedStyle(document.documentElement).getPropertyValue("--sidebar-w").trim());
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, []);
+
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden text-[length:var(--text-ui)]" data-testid="sidebar">
+    <div className="relative flex h-full min-w-0 flex-col overflow-hidden text-[length:var(--text-ui)]" data-testid="sidebar">
       {/* Space switcher — the space is a separate layer, not a tree root. */}
       <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
         <DropdownMenu modal={false}>
@@ -319,6 +346,15 @@ export function Sidebar() {
         onSubmit={(name) => { createSpace.mutate(name, { onSuccess: (s) => s && setActiveSpaceId(s.id) }); setCreatingSpace(false); }}
       />
       <ShareDialog pageId={sharing} onClose={() => setSharing(null)} />
+      {/* #193: drag-to-resize handle on the sidebar's right edge. */}
+      <div
+        onPointerDown={onResizeStart}
+        data-testid="sidebar-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        className="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize transition-colors duration-[120ms] hover:bg-[color-mix(in_srgb,var(--accent)_50%,transparent)]"
+      />
     </div>
   );
 }
