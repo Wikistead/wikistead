@@ -27,7 +27,8 @@
 /* #185: the nested renderMarkdownToDom output (inside columns / tabs / transclude / a callout panel
    body) must have the SAME vertical rhythm as top-level blocks. Without this, paragraphs and dispatched
    macros (mermaid / nested callouts / tables) rendered flush against each other — the paragraph/blank-
-   line structure was preserved in the DOM but visually crammed. A uniform top-margin on every block
-   after the first restores the paragraph/macro separation (the container trims its own first/last). */
-.cm-lp-column>*+*,.cm-lp-tabpanel>*+*,.cm-lp-transclude>*+*,.cm-lp-callout-panel-body>*+*{margin-top:0.7em}
+   line structure was preserved in the DOM but visually crammed. The inter-block gap uses --lp-block-gap
+   (= 1lh = one blank line), the SAME measure that separates top-level blocks, so nested and top-level
+   spacing are identical by construction (was a 0.7em magic number that read tighter than top-level). */
+.cm-lp-column>*+*,.cm-lp-tabpanel>*+*,.cm-lp-transclude>*+*,.cm-lp-callout-panel-body>*+*{margin-top:var(--lp-block-gap)}
 .cm-lp-column>*:first-child,.cm-lp-tabpanel>*:first-child,.cm-lp-transclude>*:first-child{margin-top:0}
