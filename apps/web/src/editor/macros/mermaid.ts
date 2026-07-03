@@ -1,5 +1,5 @@
 import type { FenceMacro, MacroContext } from "./registry";
-import { html } from "./safe-html";
+import { mermaidHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
 
 // The first macro: ```mermaid renders a diagram. It proves the registry pipeline
 // (register -> liveRender -> fold -> Markdown round-trip) on the code-fence path,
@@ -61,5 +61,5 @@ export const mermaidMacro: FenceMacro = {
   // M3 wires HTML export server-side. mermaid renders in the browser, so the static
   // form is the source in a <pre class="mermaid"> (a mermaid-enabled HTML viewer
   // renders it; any other shows the code). XSS-safe: the body is escaped.
-  htmlRender: (body) => html`<pre class="mermaid">${body}</pre>`,
+  htmlRender: mermaidHtmlRender,
 };

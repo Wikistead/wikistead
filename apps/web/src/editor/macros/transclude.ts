@@ -1,5 +1,5 @@
 import type { DirectiveMacro } from "./registry";
-import { html } from "./safe-html";
+import { transcludeHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
 
 // :::transclude — embed another page's content by id (the body is the target page id). The MACRO
 // never fetches: its host-API is {theme} only (ADR-024 trust boundary). The host (live-preview
@@ -22,6 +22,6 @@ export const transcludeMacro: DirectiveMacro = {
   },
   // SSR/export placeholder: the server render pipeline resolves the transclusion; this is the
   // wrapper carrying the target id. XSS-safe (id escaped; no innerHTML of untrusted text).
-  htmlRender: (body) => html`<div class="transclude" data-page="${body.trim()}"></div>`,
+  htmlRender: transcludeHtmlRender,
   slash: { labelKey: "palette.transclude", keywords: "transclude embed include page reference link", insert: ":::transclude\n\n:::", caret: 14 },
 };

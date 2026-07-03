@@ -4,6 +4,7 @@ import { parseHtml, styleToCss, parseTableSource, toHtml, toPipe, representableA
 import { setCellText } from "./table-cell-dom";
 import { tableInlineEditor } from "../live-preview/table-edit";
 import { unsafeHtml } from "./safe-html";
+import { tableHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
 
 // ADR-025 step 3: the table's tier. pipe (GFM) is the lowest, most portable level;
 // :::table HTML (a directive) is the richest. canRepresentAt / toLevel both go through the
@@ -101,5 +102,5 @@ export const tableMacro: DirectiveMacro = {
   // The body is already HTML → it round-trips as-is. unsafeHtml marks the ONE place a macro
   // emits verbatim HTML: the server export pipeline (#85) MUST run this through its sanitizer
   // before serving to other users (ADR-045 escape hatch — greppable so that step isn't missed).
-  htmlRender: (body) => unsafeHtml(body),
+  htmlRender: tableHtmlRender,
 };
