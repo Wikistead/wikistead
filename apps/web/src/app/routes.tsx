@@ -285,6 +285,7 @@ function PageRoute() {
   const [displayMode, cycleDisplayMode, setDisplayMode] = useMemberDisplayMode(); // ADR-056 / #164 (startup pref + device-local)
   useDisplayModeShortcut(cycleDisplayMode, editing, resolveKey("editor.cycleDisplayMode", keybindings));
   const isDesktop = useMediaQuery("(min-width: 768px)"); // 3 floating groups vs one ⋯
+  const isWide = useMediaQuery("(min-width: 1200px)"); // #192: enough right whitespace for the TOC rail
   // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
   const publishState = !canEdit ? null : published?.publishedMd == null ? "draft" : published?.hasUnpublishedChanges ? "unpublished" : null;
 
@@ -386,12 +387,20 @@ function PageRoute() {
           <div className="relative" style={{ flex: 1, minHeight: 0 }}>
             <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
-            {/* #192: narrow screens get the TOC as a scroll-triggered blurred overlay over the content. */}
-            {!isDesktop && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="overlay" subscribeScroll={subscribeTocScroll} />}
+            {/* #192: the TOC rail lives in the content's RIGHT WHITESPACE, inside the editor area, so the
+                scrollbar (the editor's, at the far right) is to the RIGHT of the rail — not between them.
+                Positioned absolutely (right-2 clears the scrollbar), only when the viewport is wide enough
+                that the centred reading column leaves room. Narrower screens get the scroll overlay. */}
+            {isWide && tocOn && (
+              <div className="pointer-events-none absolute right-2 top-2 bottom-2 z-[5] w-[210px]">
+                <div className="pointer-events-auto h-full">
+                  <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="rail" />
+                </div>
+              </div>
+            )}
+            {!isWide && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="overlay" subscribeScroll={subscribeTocScroll} />}
           </div>
         </div>
-        {/* #192: wide screens get the always-on rail that blends into the background beside the content. */}
-        {isDesktop && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="rail" />}
         {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={page?.canComment ?? capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} />}
         {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} onCompare={openDiff} onClose={closeHistory} />}
         {pageId && attachmentsOpen && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} onClose={closeAttachments} />}
@@ -548,6 +557,7 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
   const [displayMode, cycleDisplayMode, setDisplayMode] = useDisplayMode(); // ADR-056 / #164 (device-local; guests have no server profile)
   useDisplayModeShortcut(cycleDisplayMode, editing, resolveKey("editor.cycleDisplayMode", undefined));
   const isDesktop = useMediaQuery("(min-width: 768px)");
+  const isWide = useMediaQuery("(min-width: 1200px)"); // #192: right whitespace for the TOC rail
 
   const reloadPublished = useCallback(() => {
     apiFetch<{ publishedMd: string | null; canComment?: boolean }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
@@ -602,9 +612,16 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
             <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} />
             <div className="pointer-events-none absolute right-3 top-3 z-10"><PageStatus {...controls} /></div>
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
-            {!isDesktop && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="overlay" subscribeScroll={subscribeTocScroll} />}
+            {/* #192: TOC rail in the content's right whitespace (scrollbar stays rightmost); overlay narrower. */}
+            {isWide && tocOn && (
+              <div className="pointer-events-none absolute right-2 top-2 bottom-2 z-[5] w-[210px]">
+                <div className="pointer-events-auto h-full">
+                  <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="rail" />
+                </div>
+              </div>
+            )}
+            {!isWide && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="overlay" subscribeScroll={subscribeTocScroll} />}
           </div>
-          {isDesktop && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="rail" />}
           {commentsOpen && <CommentsPanel pageId={pageId} canComment={canComment} anchorGetterRef={anchorGetterRef} onClose={() => setCommentsOpen(false)} />}
         </div>
       </div>
