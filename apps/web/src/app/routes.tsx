@@ -366,16 +366,22 @@ function PageRoute() {
     <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
       <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-          <PageTitle
-            editing={editing}
-            title={page?.title ?? ""}
-            onRename={canEdit && spaceId ? (title) => renamePage.mutate({ pageId: pageId!, spaceId, title }, {
-              onSuccess: () => notify.success(t("toast.saved")),
-              onError: () => notify.error(t("toast.actionFailed")),
-            }) : undefined}
-          />
-          {/* STATUS group floats under the title, right-aligned (same 740 column). */}
-          {isDesktop && <div className="relative z-10 mx-auto flex w-full max-w-[740px] justify-end px-6"><PageStatus {...controls} /></div>}
+          {/* #193 part 3: the header band (title + status) fades DOWN into the content — a semi-
+              transparent vertical gradient (opaque at the top → transparent at the bottom) with a
+              backdrop-blur, so the boundary dissolves into the editor instead of a hard line (the
+              same "blend in + blur" direction as the TOC rail). Token-driven; light/dark via --bg. */}
+          <div className="relative z-10 flex-none bg-gradient-to-b from-[var(--bg)] via-[color-mix(in_srgb,var(--bg)_78%,transparent)] to-transparent pb-3 backdrop-blur-[3px]">
+            <PageTitle
+              editing={editing}
+              title={page?.title ?? ""}
+              onRename={canEdit && spaceId ? (title) => renamePage.mutate({ pageId: pageId!, spaceId, title }, {
+                onSuccess: () => notify.success(t("toast.saved")),
+                onError: () => notify.error(t("toast.actionFailed")),
+              }) : undefined}
+            />
+            {/* STATUS group floats under the title, right-aligned (same 740 column). */}
+            {isDesktop && <div className="mx-auto flex w-full max-w-[740px] justify-end px-6"><PageStatus {...controls} /></div>}
+          </div>
           {/* Editor area is the positioning context for the floating ACTIONS/VIM groups. */}
           <div className="relative" style={{ flex: 1, minHeight: 0 }}>
             <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
