@@ -8,7 +8,10 @@ import { useTranslation } from "react-i18next";
 const wrap = "mx-auto box-border w-full max-w-[740px] px-6 pt-6";
 // break-words so a long unbroken token (or CJK without spaces) wraps inside the column
 // instead of overflowing to the right.
-const title = "m-0 block w-full text-[30px] font-bold leading-tight tracking-[-0.02em] text-foreground break-words [overflow-wrap:anywhere]";
+// #190: the page title follows the PROSE font (--font-body) — the user's font choice / locale default —
+// not the chrome font. Without this it inherits the body's --font-ui (it lives outside .cm-content, so
+// the editor's --font-body doesn't reach it), so the title ignored the font selection while body did.
+const title = "m-0 block w-full text-[30px] font-bold leading-tight tracking-[-0.02em] text-foreground break-words [overflow-wrap:anywhere] [font-family:var(--font-body)]";
 // view mode: wrap to 2 lines then ellipsise (no infinite horizontal overflow / marquee).
 const clamp = "[display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden";
 
