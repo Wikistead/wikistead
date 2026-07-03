@@ -2,6 +2,7 @@ import { useRef, useState, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ui/Button";
 import { RightPanel } from "../ui/RightPanel";
+import { AuthorChip } from "./AuthorChip";
 import { useSession } from "../session/SessionProvider";
 import { useComments, useCommentMutations, fetchMentionable } from "../data/comments";
 import type { Mentionable } from "../data/commentsApi";
@@ -129,8 +130,8 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
             )}
             {t.comments.map((c) => (
               <div key={c.id} className="flex flex-col gap-0.5" data-testid="comment-item">
-                <div className="flex items-baseline gap-1.5">
-                  <span className="text-[0.8em] font-semibold text-fg-dim">{c.authorSub}</span>
+                <div className="flex items-center gap-1.5">
+                  <AuthorChip sub={c.authorSub} />
                   {c.canModify && (
                     <button type="button" className="cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-[var(--danger)] opacity-80 hover:underline hover:opacity-100" data-testid="comment-delete" onClick={() => remove.mutate(c.id)}>{tr("commentsPanel.delete")}</button>
                   )}

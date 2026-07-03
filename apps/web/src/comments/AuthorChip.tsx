@@ -1,0 +1,55 @@
+import { Link2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+
+// #208: the comment author display. The stored identity is the raw `authorSub` (a member OIDC sub or
+// `guest:<uuid>`) — used for authz server-side and NEVER changed here; this only formats how it READS.
+// Guests showed a full UUID ("guest:3ca39b02-…") which is unreadable → shorten to "Guest <4 chars>"
+// (stable per guest). Members show a friendly label (email local-part when the sub is an email).
+
+const GUEST_PREFIX = "guest:";
+export function isGuestSub(sub: string): boolean {
+  return sub.startsWith(GUEST_PREFIX);
+}
+
+// Human-readable author label. Guest → "Guest 3ca3" (short, stable). Member → email local-part, or the
+// sub verbatim when it isn't an email. `guestWord` is the localized "Guest".
+export function authorLabel(sub: string, guestWord: string): string {
+  if (isGuestSub(sub)) return `${guestWord} ${sub.slice(GUEST_PREFIX.length, GUEST_PREFIX.length + 4)}`;
+  const at = sub.indexOf("@");
+  return at > 0 ? sub.slice(0, at) : sub;
+}
+
+// Deterministic hue so the same member always gets the same avatar colour.
+function hue(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return h;
+}
+
+export function AuthorChip({ sub }: { sub: string }) {
+  const { t } = useTranslation();
+  const guest = isGuestSub(sub);
+  const label = authorLabel(sub, t("common.guest"));
+  const initial = (label.trim()[0] ?? "?").toUpperCase();
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      {guest ? (
+        // Guests are anonymous share-link visitors → a generic link icon, not a personal avatar.
+        <span className="inline-flex h-5 w-5 flex-none items-center justify-center rounded-full bg-panel-2 text-fg-dim" data-testid="comment-avatar-guest" title={t("common.guest")}>
+          <Link2 size={12} aria-hidden />
+        </span>
+      ) : (
+        <span
+          className="inline-flex h-5 w-5 flex-none items-center justify-center rounded-full text-[10px] font-semibold text-white"
+          style={{ backgroundColor: `hsl(${hue(sub)} 55% 45%)` }}
+          data-testid="comment-avatar"
+          aria-hidden
+        >
+          {initial}
+        </span>
+      )}
+      {/* full identity stays inspectable on hover; authz is unaffected (display-only). */}
+      <span className="truncate text-[0.8em] font-semibold text-fg-dim" title={sub}>{label}</span>
+    </span>
+  );
+}
