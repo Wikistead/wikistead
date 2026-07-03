@@ -6,19 +6,23 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 // EN=Wikistead Mono). The other choices force a face regardless of locale. Token-driven: only the
 // --font-body CSS variable changes; no view rebuild. (The code face is a single vendored font, so
 // there is no per-user code picker in v1; --font-code stays fixed.)
-export type FontBody = "locale" | "udev" | "mono";
+// "udev"/"mono" are MONOSPACE (vim column-grid); "sans" is a PROPORTIONAL option (#190 comment 614)
+// for non-vim users — nicer titles/prose — reusing the already-vendored UI faces (Inter + Noto Sans
+// JP, #173), so it adds NO new font dependency.
+export type FontBody = "locale" | "udev" | "mono" | "sans";
 const KEY = "wks.fontBody";
 
 // The literal stacks a forced choice writes to --font-body (kept in sync with tokens.css defaults).
 const STACKS: Record<Exclude<FontBody, "locale">, string> = {
   udev: '"UDEV Gothic", ui-monospace, SFMono-Regular, Menlo, monospace',
   mono: '"Wikistead Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+  sans: '"Inter", "Noto Sans JP", system-ui, sans-serif', // proportional; reuses the vendored UI faces
 };
 
 function load(): FontBody {
   try {
     const v = localStorage.getItem(KEY);
-    return v === "udev" || v === "mono" || v === "locale" ? v : "locale";
+    return v === "udev" || v === "mono" || v === "sans" || v === "locale" ? v : "locale";
   } catch {
     return "locale";
   }

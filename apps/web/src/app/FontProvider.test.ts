@@ -18,6 +18,15 @@ describe("applyFontBody (#190 body-font override)", () => {
     expect(udev).not.toBe(mono); // the choice actually changes the face (not a no-op)
   });
 
+  it("'sans' writes a PROPORTIONAL stack (Inter) — distinct from the monospace choices (#190 comment 614)", () => {
+    applyFontBody("sans");
+    const sans = document.documentElement.style.getPropertyValue("--font-body");
+    expect(sans).toContain("Inter");
+    expect(sans).toContain("sans-serif"); // proportional, not monospace
+    applyFontBody("mono");
+    expect(document.documentElement.style.getPropertyValue("--font-body")).not.toBe(sans);
+  });
+
   it("'locale' REMOVES the inline override (falls back to the locale default)", () => {
     applyFontBody("mono");
     expect(document.documentElement.style.getPropertyValue("--font-body")).not.toBe("");
