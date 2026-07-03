@@ -249,7 +249,7 @@ function EditorTab() {
         <label className="mb-1 block text-sm font-medium">{t("account.bodyFont")}</label>
         <p className="mb-2 text-xs text-fg-dim">{t("account.bodyFontHint")}</p>
         <div className="flex flex-col gap-2">
-          {(["locale", "udev", "mono"] as const).map((f) => (
+          {(["locale", "udev", "mono", "sans"] as const).map((f) => (
             <Button
               key={f}
               variant={fontBody === f ? "primary" : "default"}
