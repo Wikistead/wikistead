@@ -393,7 +393,7 @@
     "displayNamePlaceholder": "wikistead",
     "default": "デフォルト",
     "logo": "ロゴ",
-    "logoHint": "ヘッダのワークスペース名を置き換えます。PNG・JPEG・WebP、512 KB まで。",
+    "logoHint": "ヘッダのワークスペース名の隣に表示されます。PNG・JPEG・WebP、512 KB まで。",
     "logoUpload": "ロゴをアップロード",
     "logoRemove": "削除",
     "logoType": "対応していない画像形式です — PNG・JPEG・WebP を使ってください。",
