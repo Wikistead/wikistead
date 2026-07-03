@@ -69,6 +69,36 @@ describe('#100 guest commenting (view link + comment_open)', () => {
     expect(reply.statusCode).toBe(201)
   })
 
+  // #100 (bounce, authz-critical): a view-link GUEST must NOT be able to DELETE a MEMBER's comment.
+  // The device path is exactly this — a guest bearer token hitting DELETE /comments/:id — which the
+  // member-vs-member delete test (comments.test.ts, cookie auth) never exercised. The guest's authorId
+  // is `guest:<shareLink>`, never a member's bare sub, so the isAuthor check fails and the guest is
+  // 403'd; the comment must survive (deleted_at stays NULL).
+  it('a view-link guest CANNOT delete a member\'s comment (403, comment survives)', async () => {
+    const [{ id: threadId }] = await admin<[{ id: string }]>`
+      INSERT INTO comment_threads (tenant_id, page_id, kind, created_by)
+      VALUES (${TENANT}, ${PAGE}, 'page', 'cmt-member') RETURNING id`
+    const [{ id: cid }] = await admin<[{ id: string }]>`
+      INSERT INTO comments (tenant_id, thread_id, body, author_sub)
+      VALUES (${TENANT}, ${threadId}, 'a member wrote this', 'cmt-member') RETURNING id`
+
+    const del = await app.inject({ method: 'DELETE', url: `/comments/${cid}`, headers: H(viewTok) })
+    expect(del.statusCode).toBe(403) // guest authorId `guest:gc-view-link` ≠ author_sub `cmt-member`
+
+    const [row] = await admin<[{ deleted_at: Date | null }]>`SELECT deleted_at FROM comments WHERE id = ${cid}`
+    expect(row!.deleted_at).toBeNull() // the member's comment was NOT deleted
+  })
+
+  it('a view-link guest CAN delete its OWN comment (positive control — authorId matches)', async () => {
+    const create = await app.inject({ method: 'POST', url: `/pages/${PAGE}/comments`, headers: H(viewTok), payload: { body: 'guest owns this' } })
+    const { threadId } = create.json() as { threadId: string }
+    const list = await app.inject({ method: 'GET', url: `/pages/${PAGE}/comments`, headers: H(viewTok) })
+    const body = list.json() as { threads: { id: string; comments: { id: string; body: string }[] }[] }
+    const own = body.threads.find((t) => t.id === threadId)!.comments.find((c) => c.body === 'guest owns this')!
+    const del = await app.inject({ method: 'DELETE', url: `/comments/${own.id}`, headers: H(viewTok) })
+    expect(del.statusCode).toBe(204) // own comment (author_sub === guest:<link>) → allowed
+  })
+
   it('with comments CLOSED, the same view-link guest is admitted then 403 on comment (401→403 shift, ADR §4)', async () => {
     await setCommentsOpen(false)
     try {
