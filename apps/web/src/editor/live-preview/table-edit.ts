@@ -16,14 +16,6 @@ export function uniformResizeSize(pointer: number, blockStart: number, n: number
   return per;
 }
 
-// Spreadsheet-style column label: A, B … Z, AA, AB … (so the handle band reads like a
-// spreadsheet header — unmistakably NOT a data cell, #2).
-function colLabel(n: number): string {
-  let s = "";
-  for (let i = n; i >= 0; i = Math.floor(i / 26) - 1) s = String.fromCharCode(65 + (i % 26)) + s;
-  return s;
-}
-
 // ADR-025 step 2: the table's INLINE rich-editor — VIEW-FREE. It mounts its DOM into
 // `container` and talks ONLY to InnerEditHost (theme/getSource/replaceSource/exit); it never
 // touches the EditorView/Yjs (a host-layer bridge widget wires it in). Cells select on click;
@@ -149,14 +141,19 @@ export const tableInlineEditor: InlineEditor = {
     };
     const setRect = (r1: number, c1: number, r2: number, c2: number) => {
       selected.clear();
-      selMode = "cells"; selCol = -1; selRow = -1;
       const lr = Math.min(r1, r2), hr = Math.max(r1, r2), lc = Math.min(c1, c2), hc = Math.max(c1, c2);
       for (let r = lr; r <= hr; r++) for (let c = lc; c <= hc; c++) if (grid[r]?.[c]) selected.add(`${r},${c}`);
+      // #197: with the spreadsheet select handles removed, DRAG-SELECT now drives the column/row ops. A
+      // rectangle spanning EVERY row of a SINGLE column ⇒ that column is selected (insert/delete-column
+      // toolbar shows, targeting selCol); every column of a SINGLE row ⇒ that row. Anything else (multi
+      // column/row, or a partial block) stays "cells" — colour still applies, single-axis ops hidden.
+      const fullH = lr === 0 && hr === grid.length - 1;
+      const fullW = lc === 0 && hc === ncols - 1;
+      if (fullH && lc === hc) { selMode = "col"; selCol = lc; selRow = -1; }
+      else if (fullW && lr === hr) { selMode = "row"; selRow = lr; selCol = -1; }
+      else { selMode = "cells"; selCol = -1; selRow = -1; }
       applySel();
     };
-    const selectCol = (c: number) => { selected.clear(); selMode = "col"; selCol = c; selRow = -1; grid.forEach((row, r) => { if (row[c]) selected.add(`${r},${c}`); }); applySel(); };
-    const selectRow = (r: number) => { selected.clear(); selMode = "row"; selRow = r; selCol = -1; (grid[r] ?? []).forEach((cell, c) => { if (cell) selected.add(`${r},${c}`); }); applySel(); };
-    const selectAll = () => { selected.clear(); selMode = "cells"; selCol = -1; selRow = -1; grid.forEach((row, r) => row.forEach((cell, c) => { if (cell) selected.add(`${r},${c}`); })); applySel(); };
 
     // A border drag handle: tracks the pointer, previews the size, commits on release.
     // #154 (revised): a UNIFORM multi-select resize whose DRAGGED EDGE follows the pointer, like a
@@ -212,28 +209,15 @@ export const tableInlineEditor: InlineEditor = {
     const colCellsOf = (ci: number) => [...cellEls].filter(([k]) => Number(k.split(",")[1]) === ci).map(([, el]) => el);
     const rowCellsOf = (ri: number) => [...cellEls].filter(([k]) => Number(k.split(",")[0]) === ri).map(([, el]) => el);
 
-    // Spreadsheet handle band: corner (select all) + a select handle per column.
+    // #197 (approved): the always-on A/B/1/2 spreadsheet labels + select handles are REMOVED — multi
+    // column/row selection is done by dragging across cells (unchanged), so the labels/handles were
+    // redundant chrome. A single "+" bar remains to add a column at the end (a table-attached affordance).
     const htr = document.createElement("tr");
-    const corner = document.createElement("th");
-    corner.className = "cm-lp-table-handle cm-lp-table-corner";
-    corner.setAttribute("data-testid", "table-select-all");
-    corner.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); selectAll(); });
-    htr.appendChild(corner);
-    for (let c = 0; c < ncols; c++) {
-      const ch = document.createElement("th");
-      ch.className = "cm-lp-table-handle cm-lp-table-colhandle";
-      ch.textContent = colLabel(c); // spreadsheet column letter (#2 — reads as a header)
-      ch.setAttribute("data-testid", "table-col-select-" + c);
-      ch.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); selectCol(c); });
-      htr.appendChild(ch);
-    }
-    // Trailing "+" attached to the right of the header band: append a column at the end
-    // (#3 — a table-attached affordance, like Notion/Docmost; replaces the disconnected
-    // labeled " Column" bottom button that read as unrelated to the table).
     const addColCell = document.createElement("th");
     addColCell.className = "cm-lp-table-handle cm-lp-table-addcol";
     addColCell.textContent = "+";
     addColCell.title = "Add a column";
+    addColCell.colSpan = ncols; // no row-handle column now → span the data columns
     addColCell.setAttribute("data-testid", "table-add-col");
     addColCell.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertColAt(grid, ncols)); });
     htr.appendChild(addColCell);
@@ -298,12 +282,7 @@ export const tableInlineEditor: InlineEditor = {
 
     grid.forEach((row, r) => {
       const trow = document.createElement("tr");
-      const rh = document.createElement("th");
-      rh.className = "cm-lp-table-handle cm-lp-table-rowhandle";
-      rh.textContent = String(r + 1); // spreadsheet row number (#2 — reads as a header)
-      rh.setAttribute("data-testid", "table-row-select-" + r);
-      rh.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); selectRow(r); });
-      trow.appendChild(rh);
+      // #197: no row-select handle (the 1/2 number column is removed); rows start with data cells.
       row.forEach((cell, c) => {
         if (!cell) return; // covered position
         const el = document.createElement(cell.header ? "th" : "td");
@@ -350,7 +329,7 @@ export const tableInlineEditor: InlineEditor = {
     addRowCell.textContent = "+";
     addRowCell.title = "Add a row";
     addRowCell.setAttribute("data-testid", "table-add-row");
-    addRowCell.colSpan = ncols + 1; // span the rowhandle + every data column
+    addRowCell.colSpan = ncols; // #197: no row-handle column now → span the data columns
     addRowCell.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertRowAt(grid, grid.length)); });
     addRowTr.appendChild(addRowCell);
     table.appendChild(addRowTr);
