@@ -115,8 +115,8 @@ describe("renderMarkdownToHtml — built-in M2 directives (#85 slice 2)", () => 
     expect(p).toContain('<pre class="plantuml">');
     expect(p).toContain('data-fidelity="degrade"'); // plantuml = degrade → badged
   });
-  it(":::transclude → a data-page placeholder (page ref escaped)", () => {
-    expect(out(":::transclude\npage-123\n:::", reg)).toContain('<div class="transclude" data-page="page-123">');
+  it(":::embed-page → a data-page placeholder (page ref escaped)", () => {
+    expect(out(":::embed-page\npage-123\n:::", reg)).toContain('<div class="embed-page" data-page="page-123">');
   });
   it(":::embed → degrades to a link in exported HTML (no iframe; url escaped)", () => {
     const h = out(":::embed\nhttps://youtube.com/embed/x\n:::", reg);

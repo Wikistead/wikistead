@@ -659,14 +659,14 @@ class MacroWidget extends WidgetType {
       // renders it in place, or an existence-hiding placeholder (null = denied/cycle/absent — all
       // indistinguishable). Fires once per widget instance (eq stable on name+body).
       const resolveTransclude = view.state.facet(transcludeResolver);
-      if (this.name === "transclude" && resolveTransclude !== noopTranscludeResolver) {
+      if (this.name === "embed-page" && resolveTransclude !== noopTranscludeResolver) { // #205: `:::embed-page` (was transclude)
         void resolveTransclude(this.body).then((content) => {
           if (this.destroyed) return;
           rendered.replaceChildren();
           if (content == null) {
             const ph = document.createElement("div");
-            ph.className = "cm-lp-transclude-denied";
-            ph.setAttribute("data-testid", "macro-transclude-denied");
+            ph.className = "cm-lp-embed-page-denied";
+            ph.setAttribute("data-testid", "macro-embed-page-denied");
             ph.textContent = "Cannot display this content"; // uniform — hides whether the page exists
             rendered.appendChild(ph);
           } else {
