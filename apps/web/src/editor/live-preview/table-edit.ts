@@ -35,6 +35,21 @@ const BG_PRESETS: { id: string; value: string | undefined; title: string }[] = [
   { id: "blue", value: "#e6f0fb", title: "Blue" },
 ];
 
+// #209: pick a legible text colour for a cell's background — dark text on a light fill, light on a
+// dark one — so a coloured cell reads in BOTH themes. The palette tints are LIGHT, so in dark mode the
+// theme's light text would vanish on them without this. undefined bg (clear) → clear the colour too
+// (inherit the theme). var(--accent) → the accent's paired foreground token (already contrast-safe).
+export function contrastColor(bg: string | undefined): string | undefined {
+  if (!bg) return undefined;
+  if (bg.startsWith("var(")) return "var(--accent-fg)"; // the palette's only var() is --accent
+  const m = /^#([0-9a-f]{6})$/i.exec(bg.trim());
+  if (!m) return undefined;
+  const n = parseInt(m[1]!, 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; // sRGB relative luminance (simple)
+  return lum > 0.6 ? "#1f2328" : "#ffffff";
+}
+
 function btn(label: string, testid: string): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
@@ -108,7 +123,8 @@ export const tableInlineEditor: InlineEditor = {
       sw.setAttribute("data-testid", "table-bg-" + p.id);
       sw.style.background = p.value ?? "transparent";
       if (!p.value) sw.textContent = "⌀"; // "no fill"
-      sw.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ bg: p.value }); });
+      // #209: set the background AND a contrast-matched text colour so the cell is legible in both themes.
+      sw.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ bg: p.value, color: contrastColor(p.value) }); });
       bar.appendChild(sw);
     }
     bar.appendChild(doneBtn);
