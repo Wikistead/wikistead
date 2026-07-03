@@ -38,7 +38,7 @@ export const excalidrawMacro: FenceMacro = {
   exportFidelity: "preserve", // the JSON is a standard code fence → lossless round-trip
   summary: () => "Excalidraw drawing",
   slash: { labelKey: "palette.excalidraw", keywords: "diagram draw whiteboard sketch excalidraw", insert: "```excalidraw\n\n```", caret: 14 },
-  liveRender(body) {
+  liveRender(body, ctx) {
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-excalidraw";
     el.setAttribute("data-testid", "macro-excalidraw");
@@ -48,11 +48,15 @@ export const excalidrawMacro: FenceMacro = {
       el.textContent = "Empty drawing — click to edit";
       return el;
     }
+    const dark = ctx.theme === "dark";
     void loadExcalidraw().then(async ({ exportToSvg }) => {
       try {
         const svg = await exportToSvg({
           elements: scene.elements,
-          appState: { ...scene.appState, exportBackground: false },
+          // #200: export in the app's theme. Without exportWithDarkMode the SVG kept its light-theme
+          // colours (dark strokes), so the drawing was invisible on the dark background. theme +
+          // exportWithDarkMode make Excalidraw render the strokes for a dark surface.
+          appState: { ...scene.appState, exportBackground: false, theme: ctx.theme, exportWithDarkMode: dark },
           files: scene.files,
         } as any);
         el.appendChild(svg);
