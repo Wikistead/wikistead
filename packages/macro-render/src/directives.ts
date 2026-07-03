@@ -71,8 +71,9 @@ export function calloutHtmlRender(type: string): (body: string) => SafeHtml {
 // :::table body is TRUSTED HTML (ADR: the table macro emits HTML verbatim). unsafeHtml keeps parity
 // with the editor; the server export path (#85 slice 3) runs a sanitize allowlist over the result.
 export function tableHtmlRender(body: string): SafeHtml { return unsafeHtml(body); }
-// :::transclude → a placeholder the export can later resolve to the referenced page (data-page).
-export function transcludeHtmlRender(body: string): SafeHtml { return html`<div class="transclude" data-page="${body.trim()}"></div>`; }
+// :::embed-page → a placeholder the export can later resolve to the referenced page (data-page).
+// (#205: syntax renamed from `:::transclude`; the function keeps its name to limit churn.)
+export function transcludeHtmlRender(body: string): SafeHtml { return html`<div class="embed-page" data-page="${body.trim()}"></div>`; }
 // :::embed → in exported/static HTML an external embed DEGRADES to a link (the sanitizer forbids
 // <iframe>; the client renders the sandboxed iframe live). Only http(s) becomes a link; anything else
 // renders as inert text so a javascript:/data: scheme can't smuggle a link (the final sanitizer also
@@ -96,7 +97,7 @@ export const builtinDirectiveDescriptors: Record<string, MacroHtmlDescriptor> = 
   tabs: { exportFidelity: "preserve", htmlRender: tabsHtmlRender },
   details: { exportFidelity: "preserve", htmlRender: detailsHtmlRender },
   table: { exportFidelity: "preserve", htmlRender: tableHtmlRender },
-  transclude: { exportFidelity: "preserve", htmlRender: transcludeHtmlRender },
+  "embed-page": { exportFidelity: "preserve", htmlRender: transcludeHtmlRender }, // #205: renamed from `transclude`
   embed: { exportFidelity: "degrade", htmlRender: embedHtmlRender },
   ...Object.fromEntries(
     CALLOUT_TYPES.map((t) => [t, { exportFidelity: "preserve", htmlRender: calloutHtmlRender(t) } satisfies MacroHtmlDescriptor]),

@@ -1,29 +1,31 @@
 import type { DirectiveMacro } from "./registry";
 import { transcludeHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
 
-// :::transclude — embed another page's content by id (the body is the target page id). The MACRO
+// :::embed-page — embed another page's content by id (the body is the target page id). The MACRO
 // never fetches: its host-API is {theme} only (ADR-024 trust boundary). The host (live-preview
 // MacroWidget, #108) resolves the referenced page's published markdown via the gated server route
-// which re-checks `view` on the REFERENCED page itself (the host page's view is NOT enough), so a
-// transclude can never reveal a page the viewer can't see; an unviewable/absent ref renders an
-// identical placeholder. Source is canonical (`:::transclude\n<pageId>\n:::` round-trips — Open
-// formats). revealOnCursor: the caret inside reveals the raw block so the id is editable in place.
+// which re-checks `view` on the REFERENCED page itself (the host page's view is NOT enough), so an
+// embed can never reveal a page the viewer can't see; an unviewable/absent ref renders an identical
+// placeholder. Source is canonical (`:::embed-page\n<pageId>\n:::` round-trips — Open formats).
+// revealOnCursor: the caret inside reveals the raw block so the id is editable in place.
+// #205: renamed `:::transclude` → `:::embed-page` (pre-launch, no alias) so the `embed-<what>` naming
+// namespaces future embed macros (`:::embed` external content, a later `:::embed-video`, …).
 export const transcludeMacro: DirectiveMacro = {
   kind: "directive",
-  name: "transclude",
+  name: "embed-page",
   exportFidelity: "preserve", // ::: stays plain text → lossless round-trip
   revealOnCursor: true, // edit the target id by placing the caret inside (like layout directives)
   liveRender: (body) => {
     const el = document.createElement("div");
-    el.className = "cm-lp-macro cm-lp-transclude";
-    el.setAttribute("data-testid", "macro-transclude");
+    el.className = "cm-lp-macro cm-lp-embed-page";
+    el.setAttribute("data-testid", "macro-embed-page");
     el.textContent = body.trim() ? "…" : "Empty page embed — add a page id"; // host swaps in resolved content
     return el;
   },
-  // SSR/export placeholder: the server render pipeline resolves the transclusion; this is the
-  // wrapper carrying the target id. XSS-safe (id escaped; no innerHTML of untrusted text).
+  // SSR/export placeholder: the server render pipeline resolves the embed; this is the wrapper
+  // carrying the target id. XSS-safe (id escaped; no innerHTML of untrusted text).
   htmlRender: transcludeHtmlRender,
-  // #205: user-facing name is "embed a page" (transclude is jargon); keywords lead with embed + JP
-  // so the slash palette finds it naturally. The `:::transclude` syntax stays (Open formats round-trip).
-  slash: { labelKey: "palette.transclude", keywords: "embed page 埋め込み 埋込 transclude include reference link", insert: ":::transclude\n\n:::", caret: 14 },
+  // #205: user-facing name is "embed a page"; keywords lead with embed + JP so the slash
+  // palette finds it (transclude kept as a keyword for discoverability, not the syntax).
+  slash: { labelKey: "palette.transclude", keywords: "embed page 埋め込み 埋込 transclude include reference link", insert: ":::embed-page\n\n:::", caret: 14 },
 };
