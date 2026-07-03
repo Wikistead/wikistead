@@ -283,7 +283,14 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       onPublish,
       // #92 / ADR-093: the host ephemeral-collab seam — opens a non-persisted room for a co-editing
       // macro modal (excalidraw). Keyed by docName + the macro's anchor; token/url from the same collab.
-      ephemeralCollab: (anchor: string) => connectEphemeral({ url: collabUrl, docName, anchor, token }),
+      // The local user (name/color) is published on the ephemeral awareness so the macro can render
+      // remote collaborator cursors on the canvas with the SAME identity as the page's yCollab carets
+      // (#92 canvas cursors). The macro host-API stays {theme}; identity rides this host-injected seam.
+      ephemeralCollab: (anchor: string) => {
+        const session = connectEphemeral({ url: collabUrl, docName, anchor, token });
+        try { session.awareness?.setLocalStateField("user", userField(user)); } catch { /* awareness gone */ }
+        return session;
+      },
       // #92 presence: publish "editing this macro" onto the page awareness so co-editors see a badge
       // at the macro's anchor while its modal is open (they'd otherwise see this user vanish).
       macroPresence: c.provider.awareness ? makeMacroPresence(c.provider.awareness) : undefined,

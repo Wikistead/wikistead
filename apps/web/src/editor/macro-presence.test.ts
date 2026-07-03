@@ -32,14 +32,22 @@ describe("makeMacroPresence (#92 presence bridge)", () => {
     expect(peers).toEqual([{ anchor: "250", name: "Ann", color: "#f00" }]);
   });
 
-  it("set() publishes the additive macroEdit field (null clears it) without touching user", () => {
+  it("set()/clear() are ADDITIVE — a pre-existing user (cursor) field is preserved (#92 regression)", () => {
+    // The #92 regression: publishing macroEdit wiped the yCollab user/cursor field, so remote carets
+    // stopped syncing. set() must only touch the macroEdit field, leaving `user` (and yCollab's cursor)
+    // intact — through both set and clear.
     const aw = fakeAwareness(1, {});
+    aw.setLocalStateField("user", { name: "me", color: "#111" }); // yCollab's cursor/user field
+    aw.setLocalStateField("cursor", { anchor: 5, head: 5 });
     const p = makeMacroPresence(aw);
     p.set("42");
     expect(aw.fields["macroEdit"]).toBe("42");
-    expect(aw.fields["user"]).toBeUndefined(); // additive — never overwrites the cursor's user field
+    expect(aw.fields["user"]).toEqual({ name: "me", color: "#111" }); // preserved (not overwritten)
+    expect(aw.fields["cursor"]).toEqual({ anchor: 5, head: 5 }); // cursor position survives
     p.set(null);
     expect(aw.fields["macroEdit"]).toBeNull();
+    expect(aw.fields["user"]).toEqual({ name: "me", color: "#111" }); // still preserved after clear
+    expect(aw.fields["cursor"]).toEqual({ anchor: 5, head: 5 });
   });
 
   it("subscribe() registers a change listener and the returned handle removes it", () => {

@@ -82,9 +82,20 @@ export const excalidrawMacro: FenceMacro = {
         // breaks the updateScene→onChange echo. On close the merged scene is flushed to the fence (getBody)
         // and the room is torn down by the host. No collab session → the M1 single-user modal.
         const doc = hostCollab?.doc;
+        // #92 canvas cursors: the ephemeral room's awareness (host-injected; carries each peer's user
+        // identity + live pointer). Cast to the minimal shape we use — the macro host-API stays {theme};
+        // this is the separate host collab seam. Null in the single-user modal (no cursors).
+        const awareness = (hostCollab?.awareness ?? null) as {
+          clientID: number;
+          setLocalStateField(field: string, value: unknown): void;
+          getStates(): Map<number, Record<string, any>>;
+          on(ev: "change", cb: () => void): void;
+          off(ev: "change", cb: () => void): void;
+        } | null;
         let api: any = null;
         let applyingRemote = false;
         let unobserve: (() => void) | null = null;
+        let unobserveCursors: (() => void) | null = null;
 
         const onChange = (elements: any, appState: any, files: any) => {
           try {
@@ -95,14 +106,49 @@ export const excalidrawMacro: FenceMacro = {
           if (doc && !applyingRemote) writeLocalElements(doc, elements); // includes isDeleted → deletions propagate
         };
 
+        // #92 canvas cursors: publish this user's live pointer (scene coords) onto the ephemeral
+        // awareness so peers can render our cursor. Display-only (never touches the doc/scene).
+        const onPointerUpdate = (p: { payload?: { pointer?: { x: number; y: number }; button?: string } }) => {
+          if (!awareness || !p?.payload?.pointer) return;
+          try { awareness.setLocalStateField("pointer", { x: p.payload.pointer.x, y: p.payload.pointer.y, button: p.payload.button ?? "up" }); } catch { /* gone */ }
+        };
+
         root.render(
           React.createElement(excal.Excalidraw as any, {
             initialData: { elements: scene.elements, appState: { ...scene.appState, theme: ctx.theme }, files: scene.files, scrollToContent: true },
             onChange,
             theme: ctx.theme,
             ...(doc ? { excalidrawAPI: (a: any) => { api = a; } } : {}),
+            ...(awareness ? { onPointerUpdate } : {}),
           }),
         );
+
+        // #92 canvas cursors: mirror remote peers' awareness (pointer + user identity) into Excalidraw's
+        // native `collaborators` map, so their cursors render on the canvas with the SAME colour/label as
+        // the page's yCollab carets (unified multiplayer design). Fires on every awareness change (the
+        // ephemeral room's — NOT the page awareness, so no interference with page cursor sync).
+        if (awareness) {
+          const syncCollaborators = () => {
+            if (!api) return;
+            const collaborators = new Map<string, unknown>();
+            awareness.getStates().forEach((state, clientId) => {
+              if (clientId === awareness.clientID) return; // exclude self
+              const ptr = state?.["pointer"] as { x: number; y: number; button?: string } | undefined;
+              const u = state?.["user"] as { name?: string; color?: string } | undefined;
+              if (!ptr) return;
+              const color = u?.color ?? "#888";
+              collaborators.set(String(clientId), {
+                pointer: { x: ptr.x, y: ptr.y },
+                button: ptr.button === "down" ? "down" : "up",
+                username: u?.name ?? "",
+                color: { background: color, stroke: color }, // unified with the yCollab caret colour
+              });
+            });
+            try { api.updateScene({ collaborators }); } catch { /* excalidraw not ready */ }
+          };
+          awareness.on("change", syncCollaborators);
+          unobserveCursors = () => awareness.off("change", syncCollaborators);
+        }
 
         if (doc) {
           const map = elementsMap(doc);
@@ -129,7 +175,7 @@ export const excalidrawMacro: FenceMacro = {
             }
             return current;
           },
-          destroy: () => { unobserve?.(); root.unmount(); },
+          destroy: () => { unobserve?.(); unobserveCursors?.(); root.unmount(); },
         };
       },
     },
