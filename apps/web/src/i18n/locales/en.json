@@ -107,7 +107,12 @@
     "tocDepthHint": "How many heading levels the outline includes.",
     "tocDepth_1": "H1 only",
     "tocDepth_3": "H1–H3",
-    "tocDepth_6": "All headings"
+    "tocDepth_6": "All headings",
+    "appearance": "Appearance",
+    "appearanceHint": "Light, dark, or follow your system.",
+    "accent": "Accent colour",
+    "accentHint": "Your personal accent colour. Overrides the workspace accent for you only.",
+    "accentInherit": "Default (match workspace)"
   },
   "settings": {
     "back": "Back to app",

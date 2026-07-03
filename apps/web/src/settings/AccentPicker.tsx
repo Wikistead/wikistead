@@ -8,18 +8,23 @@ import { cn } from "../lib/utils";
 // show each preset's colour for the CURRENT personal scheme (light/dark) so the
 // choice previews against the user's base. The first chip clears to inherit/default.
 export function AccentPicker({
-  value, onChange, disabled, inheritLabel,
+  value, onChange, disabled, inheritLabel, allowInherit = true,
 }: {
   value: string | null | undefined;
   onChange: (key: string | null) => void;
   disabled?: boolean;
   inheritLabel: string;
+  // #201: whether to offer the "inherit / default" chip. TENANT branding sets this false — the tenant
+  // is the top of the cascade, so it always picks a concrete colour (no inherit). USER settings keep it
+  // (null = inherit the tenant accent).
+  allowInherit?: boolean;
 }) {
   const { t } = useTranslation();
   const { theme } = useTheme();
   const scheme = resolvedScheme(theme);
   return (
     <div className="flex flex-wrap items-center gap-2.5" role="radiogroup" aria-label={t("accent.label")}>
+      {allowInherit && (
       <button
         type="button"
         className={cn(
@@ -32,6 +37,7 @@ export function AccentPicker({
       >
         {inheritLabel}
       </button>
+      )}
       {ACCENT_PRESETS.map((key) => (
         <button
           key={key}

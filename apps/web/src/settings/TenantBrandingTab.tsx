@@ -85,7 +85,8 @@ export function TenantBrandingTab() {
       </div>
 
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 10 }}>{t("accent.label")}</label>
-      <AccentPicker value={accentKey} onChange={chooseAccent} disabled={locked || update.isPending} inheritLabel={t("tenantBranding.default")} />
+      {/* #201: the tenant is the TOP of the accent cascade — always a concrete colour, no inherit chip. */}
+      <AccentPicker value={accentKey} onChange={chooseAccent} disabled={locked || update.isPending} inheritLabel={t("tenantBranding.default")} allowInherit={false} />
 
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", margin: "28px 0 6px" }}>{t("tenantBranding.logo")}</label>
       <p className="mt-0 text-sm text-fg-dim" style={{ marginTop: 0 }}>{t("tenantBranding.logoHint")}</p>
