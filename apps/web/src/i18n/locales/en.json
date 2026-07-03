@@ -9,6 +9,12 @@
     "on": "ON",
     "off": "OFF"
   },
+  "embedPicker": {
+    "title": "Embed a page",
+    "placeholder": "Search pages by title, or paste a page id…",
+    "empty": "No matching pages you can view.",
+    "useId": "Embed page id \"{{id}}\""
+  },
   "toc": {
     "title": "On this page",
     "empty": "No headings yet",

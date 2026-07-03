@@ -35,6 +35,17 @@ const imageUploader = Facet.define<(() => void) | null, (() => void) | null>({
   combine: (vals) => vals.find((v) => v != null) ?? null,
 });
 
+// #205 part 2: the host seam that opens a title-search PAGE PICKER for `:::embed-page`. The host
+// (Editor) shows a command-palette modal whose candidates come from GET /search — which is
+// FGA-view-filtered (two-stage guard), so a page the user can't view is never offered (no existence
+// leak). onPick receives the chosen page id (or null if cancelled). When the seam is absent
+// (guests / picker-less surfaces) the command falls back to inserting the raw `:::embed-page`
+// template so the id can still be typed by hand.
+export type PageEmbedPicker = (onPick: (pageId: string | null) => void) => void;
+const pageEmbedPicker = Facet.define<PageEmbedPicker | null, PageEmbedPicker | null>({
+  combine: (vals) => vals.find((v) => v != null) ?? null,
+});
+
 // Layer B/C/P commands. Template commands place the caret where you'd type the content
 // next; the image command (P) runs an action (open the file picker) instead. (Inline
 // decorations — layer A — are the decorate palette below.)
@@ -89,8 +100,29 @@ function macroCommands(): PaletteCommand[] {
 // The effective command list for a state: the image command is appended only when an
 // uploader is wired (the facet is set), so it never appears for uploader-less surfaces.
 function commandList(state: EditorState): PaletteCommand[] {
-  const base = [...COMMANDS, ...macroCommands()];
+  const picker = state.facet(pageEmbedPicker);
+  const macros = macroCommands().map((c) =>
+    // #205 part 2: when the host wired a page picker, the embed-page command opens it (title search →
+    // insert the chosen id) instead of dropping a raw template. Without the seam it stays a template.
+    picker && c.id === "macro:embed-page"
+      ? { ...c, action: (view: EditorView) => openEmbedPagePicker(view, picker) }
+      : c,
+  );
+  const base = [...COMMANDS, ...macros];
   return state.facet(imageUploader) ? [...base, IMAGE_COMMAND] : base;
+}
+
+// Open the host page picker and, on selection, insert `:::embed-page\n<id>\n:::` at the caret (where
+// applyAt already removed the "/query" token). Cancel (null) leaves the doc untouched. Offset edit
+// only — no view/Yjs access from here (the picker is host-owned; this just writes the chosen id).
+function openEmbedPagePicker(view: EditorView, open: PageEmbedPicker): void {
+  open((pageId) => {
+    if (!pageId) { view.focus(); return; }
+    const at = view.state.selection.main.head;
+    const insert = `:::embed-page\n${pageId}\n:::`;
+    view.dispatch({ changes: { from: at, insert }, selection: EditorSelection.cursor(at + insert.length), scrollIntoView: true });
+    view.focus();
+  });
 }
 
 function filterCommands(state: EditorState, query: string): PaletteCommand[] {
@@ -510,9 +542,10 @@ function imageInsert(upload: ImageUploader, container?: HTMLElement): Extension 
   return [imageUploader.of(() => input.click()), lifecycle];
 }
 
-export function slashPalette(opts: { uploadImage?: ImageUploader; container?: HTMLElement } = {}): Extension {
+export function slashPalette(opts: { uploadImage?: ImageUploader; container?: HTMLElement; openPageEmbedPicker?: PageEmbedPicker } = {}): Extension {
   // Order matters: vimVisualField before vimHintField (the field reads it); both before
   // the floating toolbar's bubble (added after slashPalette) so the bubble can read it.
   const core = [dismissedField, paletteField, decorateField, vimVisualField, vimHintField, paletteKeymap, decorateKeys, backslashDecorate, vimVisualSync];
-  return opts.uploadImage ? [...core, imageInsert(opts.uploadImage, opts.container)] : core;
+  const ext = opts.uploadImage ? [...core, imageInsert(opts.uploadImage, opts.container)] : core;
+  return opts.openPageEmbedPicker ? [...ext, pageEmbedPicker.of(opts.openPageEmbedPicker)] : ext;
 }
