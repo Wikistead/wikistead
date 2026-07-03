@@ -137,8 +137,20 @@
     "branding": "ブランディング",
     "auth": "認証",
     "api": "API",
+    "embeds": "外部埋め込み",
     "billing": "課金",
     "orphans": "孤立ドラフト"
+  },
+  "adminEmbeds": {
+    "title": "外部埋め込み",
+    "body": "サンドボックス iframe として埋め込みを許可するホスト（動画など）。外部埋め込みは既定でオフ — ここに無いものはリンクに降格します。https 前提。",
+    "addTitle": "ホストを許可",
+    "host": "ホスト",
+    "add": "追加",
+    "remove": "削除",
+    "empty": "許可ホストなし — 外部埋め込みはすべてリンクに降格します。",
+    "invalidHost": "有効なホストを入力してください（例：youtube.com）",
+    "ownOrigin": "このアプリ自身のオリジンは埋め込めません。"
   },
   "adminOrphans": {
     "title": "孤立ドラフト",

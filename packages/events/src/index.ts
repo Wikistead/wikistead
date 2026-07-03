@@ -24,6 +24,9 @@ export type DomainEvent =
   | { type: 'space.access_revoked'; tenantId: string; spaceId: string; grantee: string; relation: string; actorId: string }
   | { type: 'space.branding_updated'; tenantId: string; spaceId: string; actorId: string }
   | { type: 'tenant.branding_updated'; tenantId: string; actorId: string }
+  // A tenant admin changed the external-embed host allowlist (#108 / ADR-071). Config that widens the
+  // client-direct iframe surface, so the change is recorded (count = number of allowlisted hosts).
+  | { type: 'tenant.embed_providers_updated'; tenantId: string; actorId: string; count: number }
   | { type: 'tenant.oidc_updated'; tenantId: string; actorId: string; enabled: boolean }
   // Break-glass recovery (#105 / ADR-060): an OPERATOR (not a tenant principal —
   // hence `operator`, not `actorId`) disabled a locked-out tenant's own OIDC out of

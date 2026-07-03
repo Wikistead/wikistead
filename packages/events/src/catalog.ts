@@ -32,6 +32,7 @@ export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   'space.branding_updated': 'A space\'s branding (accent) was changed.',
   // Tenant
   'tenant.branding_updated': 'The tenant branding (accent + logo) was changed.',
+  'tenant.embed_providers_updated': 'A tenant admin changed the external-embed host allowlist (#108).',
   'tenant.oidc_updated': 'The tenant OIDC login configuration was changed.',
   'tenant.oidc_recovered': 'An operator disabled a locked-out tenant\'s OIDC out of band (break-glass).',
   'tenant.custom_domain_added': 'A custom domain was added (pending verification).',

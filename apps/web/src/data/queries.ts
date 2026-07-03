@@ -533,6 +533,17 @@ export function useEmbedProviders() {
     staleTime: 60_000,
   });
 }
+// #108 bounce: a tenant admin edits the external-embed host allowlist. PUT is admin-gated server-side
+// (non-admin → 403); the server normalises entries to bare hostnames and returns the stored list.
+export function useUpdateEmbedProviders() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (providers: string[]) =>
+      apiFetch<{ providers: string[] }>("/embed/providers", token, { method: "PUT", body: JSON.stringify({ providers }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["embed-providers"] }),
+  });
+}
 export function useUpdateTenantBranding() {
   const { token } = useSession();
   const qc = useQueryClient();

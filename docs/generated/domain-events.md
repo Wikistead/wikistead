@@ -30,6 +30,7 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `space.access_revoked` | A principal lost a relation on a space. |
 | `space.branding_updated` | A space's branding (accent) was changed. |
 | `tenant.branding_updated` | The tenant branding (accent + logo) was changed. |
+| `tenant.embed_providers_updated` | A tenant admin changed the external-embed host allowlist (#108). |
 | `tenant.oidc_updated` | The tenant OIDC login configuration was changed. |
 | `tenant.oidc_recovered` | An operator disabled a locked-out tenant's OIDC out of band (break-glass). |
 | `tenant.custom_domain_added` | A custom domain was added (pending verification). |
