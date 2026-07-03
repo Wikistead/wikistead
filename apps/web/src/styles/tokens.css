@@ -114,8 +114,8 @@
      the tenant --accent. A callout's colour carries meaning (info=blue, note=grey, tip=green,
      warning=yellow, danger=red); riding --accent made info/note change with the tenant theme and lose
      that meaning (#199). Only light/dark tune these (see the dark override); the accent never does. */
-  --callout-info: #0969da;   /* blue — informational */
-  --callout-note: #6e7781;   /* grey — neutral note */
+  --callout-info: #0969da;   /* blue — informational (fixed; never the tenant --accent) */
+  --callout-note: #57606a;   /* grey — neutral note; darker on light so it reads clearly (#199) */
   --callout-tip: #2ea043;    /* green — success/tip */
   --callout-warning: #d29922;/* yellow — caution */
   --callout-danger: var(--danger); /* red — danger (a fixed semantic token, not the accent) */

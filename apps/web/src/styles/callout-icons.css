@@ -4,8 +4,8 @@
 /* #170 panel layout: the icon sits LARGE in the left gutter (the .cm-lp-callout padding-left zone),
    absolutely positioned so it reads as a panel's icon column rather than a tiny inline glyph. Aligned
    to the first (title) line; the colored bar + tint (baseTheme) frame the block. */
-.cm-lp-directive-label::before{content:"";position:absolute;left:0.7em;top:0.28em;width:1.5em;height:1.5em;background-color:var(--cb-color,var(--accent,#4ea1ff));-webkit-mask:var(--cb-icon) center/contain no-repeat;mask:var(--cb-icon) center/contain no-repeat}
-.cm-lp-directive-label::after{content:attr(data-label);font-weight:700;font-size:0.9em;color:var(--cb-color,var(--accent,#4ea1ff))}
+.cm-lp-directive-label::before{content:"";position:absolute;left:0.7em;top:0.28em;width:1.5em;height:1.5em;background-color:var(--cb-color,var(--callout-note,#6e7781));-webkit-mask:var(--cb-icon) center/contain no-repeat;mask:var(--cb-icon) center/contain no-repeat}
+.cm-lp-directive-label::after{content:attr(data-label);font-weight:700;font-size:0.9em;color:var(--cb-color,var(--callout-note,#6e7781))}
 /* #170 / ADR-049 (Y): panel layout — a flex 2-column callout. The icon column is LARGE and
    vertically CENTRED against the whole panel (align-items:center), so it never sticks to the top-left
    even when the body wraps to many lines; the main column stacks a variant-coloured title over the
@@ -14,9 +14,9 @@
    partial): the panel's icon is a flex column, so use normal box padding. Higher specificity
    (.cm-lp-callout.cm-lp-callout-panel) wins over the baseTheme's single-class .cm-lp-callout. */
 .cm-lp-callout.cm-lp-callout-panel{display:flex;align-items:center;gap:0.75em;padding:0.6em 0.8em;position:static}
-.cm-lp-callout-panel-icon{flex:0 0 auto;width:1.75em;height:1.75em;background-color:var(--cb-color,var(--accent,#4ea1ff));-webkit-mask:var(--cb-icon) center/contain no-repeat;mask:var(--cb-icon) center/contain no-repeat}
+.cm-lp-callout-panel-icon{flex:0 0 auto;width:1.75em;height:1.75em;background-color:var(--cb-color,var(--callout-note,#6e7781));-webkit-mask:var(--cb-icon) center/contain no-repeat;mask:var(--cb-icon) center/contain no-repeat}
 .cm-lp-callout-panel-main{flex:1 1 auto;min-width:0}
-.cm-lp-callout-panel-title{font-weight:700;color:var(--cb-color,var(--accent,#4ea1ff));margin-bottom:0.2em}
+.cm-lp-callout-panel-title{font-weight:700;color:var(--cb-color,var(--callout-note,#6e7781));margin-bottom:0.2em}
 .cm-lp-callout-panel-body>*:first-child{margin-top:0}
 .cm-lp-callout-panel-body>*:last-child{margin-bottom:0}
 .cm-lp-callout-note{--cb-color:var(--callout-note);--cb-icon:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%22M21.174%206.812a1%201%200%200%200-3.986-3.987L3.842%2016.174a2%202%200%200%200-.5.83l-1.321%204.352a.5.5%200%200%200%20.623.622l4.353-1.32a2%202%200%200%200%20.83-.497z%22%3E%3C%2Fpath%3E%3Cpath%20d%3D%22m15%205%204%204%22%3E%3C%2Fpath%3E%3C%2Fsvg%3E")}
