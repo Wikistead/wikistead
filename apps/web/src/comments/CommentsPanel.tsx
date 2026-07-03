@@ -1,17 +1,13 @@
 import { useRef, useState, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { X } from "lucide-react";
 import { Button } from "../ui/Button";
-import { useEscClose } from "../ui/useEscClose";
+import { RightPanel } from "../ui/RightPanel";
 import { useSession } from "../session/SessionProvider";
 import { useComments, useCommentMutations, fetchMentionable } from "../data/comments";
 import type { Mentionable } from "../data/commentsApi";
 import type { AnchorGetter } from "../editor/Editor";
 
-// Tailwind class groups (migrated off CSS Modules). wks-slide-right = the global slide-in
-// keyframe; the panel chrome matches History/Attachments.
-const panel = "wks-slide-right flex min-h-0 w-[320px] flex-none flex-col gap-3 overflow-y-auto border-l border-border bg-panel p-3";
-const closeBtn = "inline-flex items-center justify-center rounded-md p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground";
+// #206: the right-panel chrome (width / bg / slide-in / header / close / Esc) is the shared RightPanel.
 const hint = "m-0 text-sm text-fg-dim";
 const textareaCls = "box-border min-h-[56px] w-full resize-y rounded-md border border-border bg-background p-2 text-[0.92em] text-foreground focus-visible:border-[var(--accent)] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-[var(--accent)]";
 const suggestCls = "absolute bottom-full left-0 right-0 z-20 m-0 mb-1 list-none rounded-md border border-border bg-panel p-1 shadow-[0_6px_20px_rgba(0,0,0,0.25)]";
@@ -86,7 +82,6 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
   // guest — not the app SessionProvider's member/dev token (which in dev is the dev-user bypass, the
   // path that let a "guest" delete a member's comment). Members pass no token → the session is used.
   const authToken = token ?? sessionToken;
-  useEscClose(onClose);
   const { data: threads } = useComments(pageId, authToken);
   const { createThread, reply, setStatus, remove } = useCommentMutations(pageId, authToken);
   const [tab, setTab] = useState<"open" | "resolved">("open");
@@ -107,20 +102,17 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
   };
 
   return (
-    <aside className={panel} data-testid="comments-panel">
-      <header className="flex items-center justify-between">
-        <span className="text-[14px] font-semibold">{tr("page.comments")}</span>
-        <div className="inline-flex items-center gap-2">
-          <div className="inline-flex gap-0.5 rounded-[7px] bg-panel-2 p-0.5">
-            <button type="button" className={tabCls} data-testid="tab-open" aria-pressed={tab === "open"} onClick={() => setTab("open")}>{tr("commentsPanel.open")}</button>
-            <button type="button" className={tabCls} data-testid="tab-resolved" aria-pressed={tab === "resolved"} onClick={() => setTab("resolved")}>{tr("commentsPanel.resolved")}</button>
-          </div>
-          <button type="button" className={closeBtn} data-testid="comments-close" aria-label={tr("common.close")} onClick={onClose}>
-            <X size={16} aria-hidden />
-          </button>
+    <RightPanel
+      testId="comments-panel"
+      title={tr("page.comments")}
+      onClose={onClose}
+      headerActions={
+        <div className="inline-flex gap-0.5 rounded-[7px] bg-panel-2 p-0.5">
+          <button type="button" className={tabCls} data-testid="tab-open" aria-pressed={tab === "open"} onClick={() => setTab("open")}>{tr("commentsPanel.open")}</button>
+          <button type="button" className={tabCls} data-testid="tab-resolved" aria-pressed={tab === "resolved"} onClick={() => setTab("resolved")}>{tr("commentsPanel.resolved")}</button>
         </div>
-      </header>
-
+      }
+    >
       {canComment && (
         <div className="flex flex-col gap-2">
           <Button size="sm" data-testid="add-inline" onClick={addInline}>{tr("commentsPanel.addInline")}</Button>
@@ -170,6 +162,6 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
           <Composer pageId={pageId} token={authToken} placeholder={tr("commentsPanel.pagePlaceholder")} onSubmit={(body, mentions) => createThread.mutate({ body, kind: "page", mentions })} />
         </div>
       )}
-    </aside>
+    </RightPanel>
   );
 }

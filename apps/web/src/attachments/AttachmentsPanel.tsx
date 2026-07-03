@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, Paperclip, Trash2, Upload, X } from "lucide-react";
+import { Download, Paperclip, Trash2, Upload } from "lucide-react";
 import { useSession } from "../session/SessionProvider";
-import { useEscClose } from "../ui/useEscClose";
+import { RightPanel } from "../ui/RightPanel";
 import {
   useAttachments,
   useDeleteAttachment,
@@ -11,10 +11,7 @@ import {
   fetchDownloadUrl,
 } from "./useAttachments";
 
-// Right-side panel chrome (shared look with Comments/History; wks-slide-right = the
-// global slide-in keyframe).
-const panel = "wks-slide-right flex min-h-0 w-[300px] flex-none flex-col gap-2 overflow-y-auto border-l border-border p-3";
-const closeBtn = "inline-flex items-center justify-center rounded-md p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground";
+// #206: the right-panel chrome (width / bg / slide-in / header / close / Esc) is the shared RightPanel.
 const iconBtn = "flex flex-none rounded border border-border p-[3px] text-fg-dim hover:bg-panel-2 hover:text-foreground";
 const row = "flex items-center gap-2 py-1 text-[13px]";
 const dim = "flex-none text-xs text-fg-dim";
@@ -40,7 +37,6 @@ export function AttachmentsPanel({ pageId, readOnly, onClose }: { pageId: string
   const list = useAttachments(spaceId, pageId);
   const upload = useUploadAttachment(spaceId, pageId);
   const del = useDeleteAttachment(pageId);
-  useEscClose(onClose);
 
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -71,14 +67,11 @@ export function AttachmentsPanel({ pageId, readOnly, onClose }: { pageId: string
   const count = list.data?.length ?? 0;
 
   return (
-    <aside className={panel} data-testid="attachments-panel">
-      <div className="flex items-center justify-between">
-        <strong className="inline-flex items-center gap-1"><Paperclip size={14} /> {t("attachments.header", { count })}</strong>
-        <button type="button" className={closeBtn} data-testid="attachments-close" aria-label={t("common.close")} onClick={onClose}>
-          <X size={16} aria-hidden />
-        </button>
-      </div>
-
+    <RightPanel
+      testId="attachments-panel"
+      title={<span className="inline-flex items-center gap-1"><Paperclip size={14} /> {t("attachments.header", { count })}</span>}
+      onClose={onClose}
+    >
       <div className="flex flex-col">
           {!readOnly && (
             <div className="py-1">
@@ -119,6 +112,6 @@ export function AttachmentsPanel({ pageId, readOnly, onClose }: { pageId: string
             ))
           )}
       </div>
-    </aside>
+    </RightPanel>
   );
 }
