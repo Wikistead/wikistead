@@ -73,11 +73,17 @@ let failed = false
 const fail = (msg) => { console.error(`FAIL: ${msg}`); failed = true }
 
 // ── Invariant 1: no CE code imports the EE namespace (packages + apps) ──────────────────────────────
-const eeImport = new RegExp(escapeRe(EE_NAMESPACE))
+// A PROPRIETARY (private) package IS Enterprise — it may reference the EE namespace (sibling EE
+// packages, or its own name in docs). So invariant 1 only applies to CE files: skip any file inside a
+// proprietary package's directory. This keeps the ban precise — CE (apps + AGPL libraries) must not
+// pull EE, while EE↔EE is allowed.
+const eeImport = new RegExp(`(?:from|import|require)\\s*\\(?\\s*['"]${escapeRe(EE_NAMESPACE)}`)
+const proprietaryPaths = packages.filter((p) => proprietary.includes(p.name)).map((p) => p.path)
 for (const dir of ['packages', 'apps']) {
   const base = join(root, dir)
   if (!existsSync(base)) continue
   for (const file of walk(base)) {
+    if (proprietaryPaths.some((pp) => file.startsWith(pp + '/') || file.startsWith(pp + '\\'))) continue // EE package → exempt
     if (eeImport.test(readFileSync(file, 'utf8'))) fail(`CE file imports the EE namespace: ${file.replace(root, '')}`)
   }
 }
