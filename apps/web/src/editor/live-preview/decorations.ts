@@ -1316,7 +1316,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-link": { color: "#4ea1ff", textDecoration: "underline" },
   // In the read-only render links are click-to-open, so show the affordance there.
   ".cm-content[contenteditable=false] .cm-lp-link[data-href]": { cursor: "pointer" },
-  ".cm-lp-h": { fontWeight: "700", lineHeight: "1.3" },
+  // #190: headings follow the PROSE font (--font-body) too, so the user's font choice / locale default
+  // applies to titles, not just body. .cm-content already sets --font-body (cm-theme.ts) and headings
+  // inherit it, but set it EXPLICITLY here so no inherited/default family can strand headings on a
+  // different face than the body (the bounce: titles didn't track the font selection).
+  ".cm-lp-h": { fontWeight: "700", lineHeight: "1.3", fontFamily: "var(--font-body)" },
   ".cm-lp-h1": { fontSize: "1.8em" },
   ".cm-lp-h2": { fontSize: "1.5em" },
   ".cm-lp-h3": { fontSize: "1.3em" },
