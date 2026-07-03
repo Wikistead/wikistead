@@ -249,6 +249,10 @@ export const macroPresence = Facet.define<MacroPresence, MacroPresence | null>({
 
 // Force a presence redraw when awareness changes (independent of doc edits).
 const redrawMacroPresence = StateEffect.define<null>();
+// #200: dispatched by the editor when the light/dark theme changes, so buildDecorations re-runs and
+// rebuilds macro widgets with the new theme (their eq keys on theme → CM recreates them → liveRender
+// re-exports for the new theme). The theme is read live from <html data-theme> inside buildDecorations.
+export const redrawMacros = StateEffect.define<null>();
 
 // The peer badge shown at a macro's anchor: one coloured dot per remote editor + a count and an
 // "editing" label. Display-only (contenteditable=false, ignoreEvent) so it never enters the atom.
@@ -557,7 +561,7 @@ class MacroWidget extends WidgetType {
   private ro?: ResizeObserver;
   private objectUrl?: string; // #140: revoked on destroy so the rendered image blob isn't leaked
   private destroyed = false; // guards the async render swap against a widget torn down mid-fetch
-  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string, readonly selected: boolean) {
+  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string, readonly selected: boolean, readonly theme: MacroTheme) {
     super();
   }
   eq(other: MacroWidget) {
@@ -567,7 +571,10 @@ class MacroWidget extends WidgetType {
     // j/k). That DOM churn re-measures the table async while vim computes motion sync from
     // the previous (stale) geometry → persistent 1-line drift below the table. `name` is
     // stable per macro, so the widget is reused and its geometry/ResizeObserver settle.
-    return other.name === this.name && other.body === this.body && other.foldable === this.foldable && other.selected === this.selected;
+    // #200: `theme` is part of the key so a light/dark switch INVALIDATES the widget and CM
+    // rebuilds it → liveRender re-runs and re-exports the SVG for the new theme (a macro like
+    // Excalidraw bakes colours into its output, so it can't follow the theme via CSS alone).
+    return other.name === this.name && other.body === this.body && other.foldable === this.foldable && other.selected === this.selected && other.theme === this.theme;
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
@@ -878,7 +885,7 @@ const RENDERERS: BlockRenderer[] = [
         // reveals — entering opens its modal. Otherwise the atom renders.
         const active = ctx.state.field(macroRenderActiveField, false);
         if (active && !macro.richEditUI && active.from <= from && active.to >= to) return; // entered → source
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), true, lang!, atomSelected(ctx.state, from, to)), block: true }), from, to);
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), true, lang!, atomSelected(ctx.state, from, to), currentMacroTheme()), block: true }), from, to);
         return;
       }
       const first = doc.lineAt(node.from).number;
@@ -933,7 +940,7 @@ const RENDERERS: BlockRenderer[] = [
         if (macro.revealOnCursor && rangeRevealed(ctx.state, from, to)) return false;
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to)), block: true }), from, to);
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), currentMacroTheme()), block: true }), from, to);
         return macro.revealOnCursor ? false : undefined;
       }
       if (macro.collapsible && !rangeRevealed(ctx.state, first.from, lastLine.to)) {
@@ -1150,6 +1157,9 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
     // the range, so the macro widget must drop) but is neither a doc nor selection
     // change — rebuild so isFolded is re-evaluated and the stale widget is removed.
     for (const e of tr.effects) if (e.is(foldEffect) || e.is(unfoldEffect) || e.is(setMacroRenderActive)) return buildDecorations(tr.state);
+    // #200: a theme change → rebuild so macro widgets pick up the new theme (their eq keys on theme,
+    // so CM recreates them and liveRender re-exports for light/dark). Excalidraw etc. bake colours in.
+    for (const e of tr.effects) if (e.is(redrawMacros)) return buildDecorations(tr.state);
     return value;
   },
   provide: (f) => [

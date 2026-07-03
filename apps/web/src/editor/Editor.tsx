@@ -5,6 +5,8 @@ import { headingsExtension, extractHeadings, type Heading } from "./headings";
 import { connect, connectEphemeral } from "./collab";
 import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayModeContent } from "./editor-livepreview";
 import type { DisplayMode } from "./live-preview/decorations";
+import { redrawMacros } from "./live-preview/decorations";
+import { useTheme } from "../app/ThemeProvider";
 import { makeMacroPresence } from "./macro-presence";
 import { makeImageResolver } from "./image-resolver";
 import { makeDiagramRenderer } from "./diagram-renderer";
@@ -181,6 +183,7 @@ function wireToc(
 
 export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, onHeadings, onActiveHeading, onScrollActivity, tocJumpRef, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
+  const { theme } = useTheme(); // #200: re-render macro widgets (Excalidraw etc.) on a light/dark switch
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
   const previewViewRef = useRef<EditorView | null>(null);
   const awarenessRef = useRef<Awareness | null>(null);
@@ -344,6 +347,14 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     if (!v || surfaceKey !== "edit") return;
     v.dispatch({ effects: displayModeCompartment.reconfigure(displayModeContent(displayMode)) });
   }, [displayMode, surfaceKey, displayModeCompartment]);
+
+  // #200: on a light/dark theme change, tell the live-preview to rebuild macro widgets so a macro that
+  // bakes theme colours into its output (Excalidraw's exported SVG) re-renders for the new theme.
+  // ThemeProvider has already updated <html data-theme> by the time this effect runs, so the rebuild's
+  // currentMacroTheme() reads the new value. CSS-driven macros (callouts) are unaffected — free re-theme.
+  useEffect(() => {
+    previewViewRef.current?.dispatch({ effects: redrawMacros.of(null) });
+  }, [theme]);
 
   // Keep the published view in sync when publishedMd changes WITHOUT remounting.
   useEffect(() => {
