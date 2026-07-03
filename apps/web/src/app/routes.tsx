@@ -406,7 +406,7 @@ function PageRoute() {
                 Positioned absolutely (right-2 clears the scrollbar), only when the viewport is wide enough
                 that the centred reading column leaves room. Narrower screens get the scroll overlay. */}
             {isWide && tocOn && (
-              <div className="pointer-events-none absolute right-6 top-2 bottom-2 z-[5] w-[210px]">
+              <div className="pointer-events-none absolute left-[calc(50%+370px+1rem)] top-2 bottom-2 z-[5] w-[210px]">
                 <div className="pointer-events-auto h-full">
                   <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="rail" />
                 </div>
@@ -628,7 +628,7 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #192: TOC rail in the content's right whitespace (scrollbar stays rightmost); overlay narrower. */}
             {isWide && tocOn && (
-              <div className="pointer-events-none absolute right-6 top-2 bottom-2 z-[5] w-[210px]">
+              <div className="pointer-events-none absolute left-[calc(50%+370px+1rem)] top-2 bottom-2 z-[5] w-[210px]">
                 <div className="pointer-events-auto h-full">
                   <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="rail" />
                 </div>
