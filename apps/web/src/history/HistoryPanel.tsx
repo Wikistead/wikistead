@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { RotateCcw, X, GitCompare } from "lucide-react";
+import { RotateCcw, GitCompare } from "lucide-react";
 import { usePageRevisions, useRestoreRevision, type Revision } from "../data/queries";
 import { ConfirmDialog } from "../ui/dialogs";
-import { useEscClose } from "../ui/useEscClose";
+import { RightPanel } from "../ui/RightPanel";
 import { notify } from "../ui/toast";
 
 // Page history: lists the snapshot revisions (newest first) and, for edit-capable
@@ -15,10 +15,7 @@ import { notify } from "../ui/toast";
 // "Compare" (Design-5) opens a near-fullscreen split diff (DiffModal) via onCompare —
 // an OVERLAY, so the editor stays mounted and presence/collab are untouched (ADR-019).
 
-// Right-side panel chrome shared with Comments/Attachments (wks-slide-right = the global
-// slide-in keyframe).
-const panel = "wks-slide-right flex min-h-0 w-[300px] flex-none flex-col gap-2 overflow-y-auto border-l border-border p-3";
-const closeBtn = "inline-flex items-center justify-center rounded-md p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground";
+// #206: the right-panel chrome (width / bg / slide-in / header / close / Esc) is the shared RightPanel.
 const rowBtn = "inline-flex flex-none items-center gap-1 rounded border border-border bg-panel-2 px-2 py-[3px] text-xs text-foreground hover:bg-border disabled:cursor-default disabled:opacity-50";
 
 function fmt(iso: string): string {
@@ -46,17 +43,9 @@ export function HistoryPanel({
   const { data: revisions, isLoading } = usePageRevisions(pageId);
   const restore = useRestoreRevision(pageId);
   const [confirming, setConfirming] = useState<Revision | null>(null);
-  useEscClose(onClose);
 
   return (
-    <aside className={panel} data-testid="history-panel">
-      <div className="flex items-center justify-between">
-        <strong>{t("history.title")}</strong>
-        <button type="button" className={closeBtn} data-testid="history-close" aria-label={t("common.close")} onClick={onClose}>
-          <X size={16} aria-hidden />
-        </button>
-      </div>
-
+    <RightPanel testId="history-panel" title={t("history.title")} onClose={onClose}>
       {isLoading && <p className="m-0 text-sm text-fg-dim">{t("common.loading")}</p>}
       {!isLoading && (revisions?.length ?? 0) === 0 && <p className="m-0 text-sm text-fg-dim">{t("history.empty")}</p>}
 
@@ -97,6 +86,6 @@ export function HistoryPanel({
           setConfirming(null);
         }}
       />
-    </aside>
+    </RightPanel>
   );
 }
