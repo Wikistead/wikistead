@@ -12,6 +12,7 @@ import { findFenceMacro, findDirectiveMacro, type FenceMacro, type MacroTheme } 
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
+import { parseFenceLine } from "@wikistead/macro-render"; // #198: code-fence attribute parser
 import { renderMarkdownToDom, renderCalloutPanel } from "../macros/md-render";
 import { noteCalloutMacro } from "../macros/callout";
 import { openMacroModal } from "./macro-modal";
@@ -89,6 +90,33 @@ const headingLine = (level: number) =>
 const codeBlockLine = Decoration.line({ attributes: { class: "cm-lp-code-line" } });
 const quoteLine = Decoration.line({ attributes: { class: "cm-lp-quote" } });
 const hrLine = Decoration.line({ attributes: { class: "cm-lp-hr" } });
+
+// #198 / ADR-094: a header band shown ABOVE a code fence that carries attributes — a filename/title
+// plus a muted language label. Display-only (contenteditable=false, ignoreEvent), block widget on the
+// side:-1 of the opening fence line. eq keys on lang+title so it's reused while they're stable.
+class FenceHeaderWidget extends WidgetType {
+  constructor(readonly lang: string, readonly title?: string) { super(); }
+  eq(o: FenceHeaderWidget) { return o.lang === this.lang && o.title === this.title; }
+  toDOM() {
+    const bar = document.createElement("div");
+    bar.className = "cm-lp-code-header";
+    bar.contentEditable = "false";
+    if (this.title) {
+      const t = document.createElement("span");
+      t.className = "cm-lp-code-title";
+      t.textContent = this.title; // XSS-safe: textContent, never innerHTML
+      bar.appendChild(t);
+    }
+    if (this.lang) {
+      const l = document.createElement("span");
+      l.className = "cm-lp-code-lang";
+      l.textContent = this.lang;
+      bar.appendChild(l);
+    }
+    return bar;
+  }
+  ignoreEvent() { return true; }
+}
 
 // Shared by every BLOCK widget (image / table / macro / table-edit). A widget's rendered
 // height can change AFTER CM first measures it — an <img>/SVG loading async, child elements
@@ -890,13 +918,33 @@ const RENDERERS: BlockRenderer[] = [
       }
       const first = doc.lineAt(node.from).number;
       const last = doc.lineAt(Math.min(node.to, doc.length)).number;
+      // #198 / ADR-094: parse the fence info string for attributes (title / showLineNumbers / {ranges}).
+      const info = parseFenceLine(doc.lineAt(node.from).text);
+      const hl = new Set<number>();
+      if (info?.highlight) for (const [a, b] of info.highlight) for (let x = a; x <= b; x++) hl.add(x);
       // Tint only the CODE lines, not the ``` / ~~~ fence lines (those would render
       // as empty tinted bars once their CodeMark hides — visually redundant).
+      let codeIdx = 0; // #198: 1-based CODE line index (fence lines excluded) for line numbers + highlight
       for (let n = first; n <= last; n++) {
         const line = doc.line(n);
         const t = line.text.trimStart();
-        if (t.startsWith("```") || t.startsWith("~~~")) continue;
-        ctx.add(codeBlockLine, line.from);
+        if (t.startsWith("```") || t.startsWith("~~~")) {
+          // #198: a header band (title + language) above the OPENING fence when any attribute is set.
+          if (n === first && info && (info.title || info.showLineNumbers || (info.highlight && info.highlight.length))) {
+            ctx.add(Decoration.widget({ widget: new FenceHeaderWidget(info.lang, info.title), side: -1, block: true }), line.from);
+          }
+          continue;
+        }
+        codeIdx++;
+        if (!info?.showLineNumbers && !hl.size) { ctx.add(codeBlockLine, line.from); continue; }
+        // #198: display-only line class carrying the (fence-relative) line number + highlight state; the
+        // gutter number is CSS ::before(attr), the highlight a full-line background UNDER the token colours.
+        let cls = "cm-lp-code-line";
+        const attrs: Record<string, string> = {};
+        if (info?.showLineNumbers) { cls += " cm-lp-code-numbered"; attrs["data-linenum"] = String(codeIdx); }
+        if (hl.has(codeIdx)) cls += " cm-lp-code-hl";
+        attrs.class = cls;
+        ctx.add(Decoration.line({ attributes: attrs }), line.from);
       }
     },
   },
@@ -1341,6 +1389,21 @@ export const livePreviewTheme = EditorView.baseTheme({
     fontFamily: "var(--font-code)", // #190: fenced code uses the code face, not prose --font-body
     background: "rgba(127,127,127,0.12)",
   },
+  // #198 / ADR-094: code-fence attribute chrome. Header band (title + lang), line-number gutter,
+  // highlighted lines. All display-only; token colours (#158-C2) sit ABOVE the highlight background.
+  ".cm-lp-code-header": {
+    fontFamily: "var(--font-ui)", display: "flex", alignItems: "center", justifyContent: "space-between",
+    gap: "0.5em", padding: "0.15em 0.7em", background: "var(--panel-2, #2d2d2e)", color: "var(--fg)",
+    borderTopLeftRadius: "4px", borderTopRightRadius: "4px", fontSize: "0.8em", borderBottom: "1px solid var(--border, #3a3a3a)",
+  },
+  ".cm-lp-code-title": { fontWeight: "600" },
+  ".cm-lp-code-lang": { color: "var(--fg-dim, #888)", textTransform: "uppercase", letterSpacing: "0.03em", fontSize: "0.9em" },
+  ".cm-lp-code-numbered": { paddingLeft: "3.2em", position: "relative" },
+  ".cm-lp-code-numbered::before": {
+    content: "attr(data-linenum)", position: "absolute", left: "0", width: "2.6em", textAlign: "right",
+    color: "var(--fg-dim, #888)", userSelect: "none", opacity: "0.7",
+  },
+  ".cm-lp-code-hl": { background: "color-mix(in srgb, var(--accent) 14%, transparent)", boxShadow: "inset 2px 0 0 var(--accent)" },
   ".cm-lp-quote": {
     borderLeft: "3px solid var(--border, #888)",
     paddingLeft: "0.8em",
