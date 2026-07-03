@@ -136,6 +136,21 @@ describe("renderMarkdownToDom — nested macro dispatch (ADR-085 / #185)", () =>
     expect(d.querySelector(".cm-lp-md-directive")).toBeNull(); // NOT the generic fallback box
   });
 
+  it("keeps paragraphs and a dispatched macro as SEPARATE, ORDERED blocks — not merged (#185)", () => {
+    // The #185 bounce: nested content rendered every element but crammed macros and text together
+    // (the paragraph/blank-line structure was lost visually). Assert the DOM structure is preserved
+    // blank-line-separated text + a macro become distinct sibling blocks in source order (spacing is
+    // then CSS — .cm-lp-*>*+* margin — but the structure must be right first).
+    const d = root("before para\n\n:::adr085test\nmacro body\n:::\n\nafter para");
+    const kids = Array.from(d.children);
+    expect(kids.length).toBe(3); // three separate blocks, not one crammed lump
+    expect(kids[0]!.tagName).toBe("P");
+    expect(kids[0]!.textContent).toBe("before para");
+    expect(kids[1]!.classList.contains("adr085-rendered")).toBe(true); // the macro, between the paragraphs
+    expect(kids[2]!.tagName).toBe("P");
+    expect(kids[2]!.textContent).toBe("after para");
+  });
+
   it("falls back to the generic box for an UNKNOWN directive", () => {
     const d = root(":::totallyunknownxyz\nfoo\n:::");
     expect(d.querySelector(".cm-lp-md-directive")).not.toBeNull();
