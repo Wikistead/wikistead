@@ -30,6 +30,21 @@ export function Toc({
   // unchanged value), so this costs a render only on the show/hide transitions.
   const [scrolling, setScrolling] = useState(false);
   const timer = useRef<number | undefined>(undefined);
+  // #192: the overlay must clear the top-right floating control band (the TOC + comments toggles,
+  // data-testid="page-status") with ZERO overlap. A calc() guess kept under-shooting the real bottom,
+  // so MEASURE the band's actual bottom (getBoundingClientRect) and start the overlay just below it —
+  // self-correcting as the band's height / button count changes.
+  const [overlayTop, setOverlayTop] = useState(112);
+  useEffect(() => {
+    if (variant !== "overlay") return;
+    const measure = () => {
+      const band = document.querySelector('[data-testid="page-status"]');
+      if (band) setOverlayTop(Math.ceil(band.getBoundingClientRect().bottom) + 12);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [variant, scrolling]); // re-measure when it (re)appears — the band may have moved/resized
   useEffect(() => {
     if (variant !== "overlay" || !subscribeScroll) return;
     return subscribeScroll(() => {
@@ -51,11 +66,12 @@ export function Toc({
             onClick={() => onJump(h.from)}
             data-testid="toc-item"
             data-active={activeFrom === h.from ? "" : undefined}
-            style={{ paddingLeft: `${(h.level - minLevel) * 12}px` }}
+            style={{ paddingLeft: `${6 + (h.level - minLevel) * 12}px` }}
             className={cn(
               "block w-full cursor-pointer truncate rounded py-1 pr-2 text-left text-[length:var(--text-xs)] text-fg-dim transition-colors duration-[120ms] hover:text-foreground",
-              activeFrom === h.from && "font-medium text-[var(--accent)]", // #192: active heading in the theme accent
-
+              // #192: the active heading — accent text PLUS a faint accent-tinted background wash on the
+              // whole row (low opacity via color-mix), so the current section reads at a glance.
+              activeFrom === h.from && "font-medium text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]",
             )}
             title={h.text}
           >{h.text || t("common.untitled")}</button>
@@ -70,11 +86,11 @@ export function Toc({
         aria-label={t("toc.title")}
         data-testid="toc"
         data-variant="overlay"
+        style={{ top: `${overlayTop}px` }}
         className={cn(
-          // #192: start BELOW the top control band (header + title + the right-aligned TOC/comments
-          // toggle row) instead of a bare magic offset — derive from --header-h plus the title+controls
-          // band (~5rem) so the overlay clears the buttons even as the header height changes.
-          "pointer-events-none fixed right-3 top-[calc(var(--header-h,40px)+5rem)] z-30 max-h-[70vh] w-[240px] overflow-y-auto rounded-lg border border-border/60 bg-panel/70 p-3 shadow-lg backdrop-blur-md transition-opacity duration-200",
+          // #192: `top` is the MEASURED bottom of the control band (see overlayTop) so the overlay never
+          // overlaps the TOC/comments buttons. Glass look: translucent panel + backdrop-blur.
+          "pointer-events-none fixed right-3 z-30 max-h-[70vh] w-[240px] overflow-y-auto rounded-lg border border-border/60 bg-panel/70 p-3 shadow-lg backdrop-blur-md transition-opacity duration-200",
           scrolling ? "pointer-events-auto opacity-100" : "opacity-0",
         )}
       >
