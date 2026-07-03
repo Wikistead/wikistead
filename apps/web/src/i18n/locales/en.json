@@ -393,7 +393,7 @@
     "displayNamePlaceholder": "wikistead",
     "default": "Default",
     "logo": "Logo",
-    "logoHint": "Replaces the workspace name in the header. PNG, JPEG or WebP, up to 512 KB.",
+    "logoHint": "Shown next to the workspace name in the header. PNG, JPEG or WebP, up to 512 KB.",
     "logoUpload": "Upload logo",
     "logoRemove": "Remove",
     "logoType": "Unsupported image type — use PNG, JPEG or WebP.",

@@ -59,10 +59,16 @@ export function AppShell({
             Home (→ default page); guests/pre-login get a static brand (no home). Gate
             on onLogout, NOT sidebar: the settings shell has no sidebar but is a member. */}
         {(() => {
-          const brand = branding.data?.logoUrl ? (
-            <img className="block h-[22px] max-w-[160px] object-contain" src={assetUrl(branding.data.logoUrl)} alt={branding.data.displayName || "Wikistead"} data-testid="brand-logo" />
-          ) : branding.data?.displayName ? (
-            <span className="text-[15px] font-semibold" data-testid="brand">{branding.data.displayName}</span>
+          // #143: logo and name are INDEPENDENT (were exclusive — a logo hid the name). Show whatever
+          // is set: logo + name together (Slack-style, the SaaS default when both exist), logo only,
+          // name only, or the Wikistead lockup when neither. Setting a logo no longer erases the name.
+          const logoUrl = branding.data?.logoUrl;
+          const name = branding.data?.displayName;
+          const brand = logoUrl || name ? (
+            <span className="flex items-center gap-2">
+              {logoUrl && <img className="block h-[22px] max-w-[160px] object-contain" src={assetUrl(logoUrl)} alt={name || "Wikistead"} data-testid="brand-logo" />}
+              {name && <span className="text-[15px] font-semibold" data-testid="brand">{name}</span>}
+            </span>
           ) : (
             <BrandLockup />
           );

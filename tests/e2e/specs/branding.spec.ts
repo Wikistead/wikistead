@@ -57,18 +57,22 @@ test("tenant branding: name shows in the header and accent applies app-wide; res
 // logo. Resets at the end so it doesn't leak into other specs.
 const PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
-test("tenant logo: upload shows the logo in the header; remove reverts to the wordmark", async ({ page }) => {
+test("tenant logo: logo and name are INDEPENDENT — a logo shows ALONGSIDE the name, not replacing it (#143)", async ({ page }) => {
   await openDemo(page);
   await page.goto("/admin/branding");
   await expect(page.getByTestId("tenant-branding")).toBeVisible();
 
+  // Before any logo, the workspace name is shown in the header.
+  await expect(page.getByTestId("brand")).toBeVisible();
+
   await page.getByTestId("tenant-logo-input").setInputFiles({
     name: "logo.png", mimeType: "image/png", buffer: Buffer.from(PNG_1x1, "base64"),
   });
+  // #143: the logo appears WITH the name (Slack-style), it does NOT erase the name (was: replaced).
   await expect(page.getByTestId("brand-logo")).toBeVisible();
-  await expect(page.getByTestId("brand")).toHaveCount(0); // wordmark replaced
+  await expect(page.getByTestId("brand")).toBeVisible();
 
   await page.getByTestId("tenant-logo-remove").click();
-  await expect(page.getByTestId("brand")).toBeVisible(); // wordmark back
-  await expect(page.getByTestId("brand-logo")).toHaveCount(0);
+  await expect(page.getByTestId("brand-logo")).toHaveCount(0); // logo gone
+  await expect(page.getByTestId("brand")).toBeVisible(); // name remains (independent)
 });
