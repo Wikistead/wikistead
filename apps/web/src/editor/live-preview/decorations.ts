@@ -299,23 +299,49 @@ function buildMacroPresence(view: EditorView): DecorationSet {
   return Decoration.set(ranges, true);
 }
 
-// Renders remote macro-edit presence badges and redraws them when the page awareness changes (via the
-// host's subscribe) or the doc shifts. Additive overlay; never on the doc/offset/collab-sync path.
+// A stable signature of the current macro-edit peers (anchor+name+color). when nobody is editing a
+// macro modal — which is ALWAYS the case during normal page editing, so the plugin then never reacts.
+function macroPresenceSig(view: EditorView): string {
+  const pres = view.state.facet(macroPresence);
+  if (!pres) return "";
+  return pres.peers().map((p) => `${p.anchor}:${p.name}:${p.color}`).sort().join("|");
+}
+
+// Renders remote macro-edit presence badges and redraws them when the macro-edit peer SET changes or
+// the doc shifts. Additive overlay; never on the doc/offset/collab-sync path.
+//
+// #92 regression fix: the previous version dispatched a transaction SYNCHRONOUSLY inside the awareness
+// "change" handler. Awareness fires on every remote CURSOR MOVE / keystroke, and yCollab listens to the
+// same event to render remote carets — a re-entrant view.dispatch during that emission dropped yCollab's
+// cursor updates (remote carets stopped syncing). Now: (a) only act when the macro-edit peer set truly
+// CHANGES (during normal editing the signature is and this is fully inert — zero interference), and
+// (b) defer the dispatch to a frame so it never re-enters CodeMirror mid-awareness-processing.
 export const macroPresencePlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
     unsub: () => void;
+    raf = 0;
+    lastSig: string;
     constructor(view: EditorView) {
       this.decorations = buildMacroPresence(view);
+      this.lastSig = macroPresenceSig(view);
       const pres = view.state.facet(macroPresence);
-      this.unsub = pres ? pres.subscribe(() => view.dispatch({ effects: redrawMacroPresence.of(null) })) : () => {};
+      this.unsub = pres
+        ? pres.subscribe(() => {
+            const sig = macroPresenceSig(view);
+            if (sig === this.lastSig) return; // unchanged (e.g. a plain remote cursor move) → do nothing
+            this.lastSig = sig;
+            if (this.raf) return;
+            this.raf = requestAnimationFrame(() => { this.raf = 0; view.dispatch({ effects: redrawMacroPresence.of(null) }); });
+          })
+        : () => {};
     }
     update(u: ViewUpdate) {
       if (u.docChanged || u.transactions.some((t) => t.effects.some((e) => e.is(redrawMacroPresence)))) {
         this.decorations = buildMacroPresence(u.view);
       }
     }
-    destroy() { this.unsub(); }
+    destroy() { if (this.raf) cancelAnimationFrame(this.raf); this.unsub(); }
   },
   { decorations: (v) => v.decorations },
 );
