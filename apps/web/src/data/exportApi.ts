@@ -26,3 +26,37 @@ export async function downloadPageExport(token: string, pageId: string, format: 
   URL.revokeObjectURL(url);
   return true;
 }
+
+// #207 part 2: print/PDF must render the WHOLE document statically — every macro rendered, no CM
+// viewport virtualisation (only the on-screen slice is in the editor DOM), no reveal-on-cursor raw
+// `:::` leaking. window.print() on the live editor surface can't do that; the #85 server HTML export
+// (renderMarkdownToHtml → sanitise, all macros static, its own print stylesheet) is the faithful
+// source. Fetch it and print it from an offscreen iframe so the app page never navigates away.
+// Returns false if the page has no exportable HTML (unviewable / unpublished → 404) so the caller can
+// fall back to the live-surface print.
+export async function printPageHtml(token: string, pageId: string): Promise<boolean> {
+  const res = await fetch(`${API_URL}/pages/${encodeURIComponent(pageId)}/export.html`, {
+    credentials: "include",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) return false;
+  const html = await res.text();
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;";
+  document.body.appendChild(iframe);
+  const remove = () => { if (iframe.parentNode) iframe.remove(); };
+  await new Promise<void>((resolve) => {
+    iframe.addEventListener("load", () => resolve(), { once: true });
+    iframe.srcdoc = html; // load the standalone export document (its own <style>/@page) into the frame
+  });
+  const win = iframe.contentWindow;
+  if (!win) { remove(); return false; }
+  // Remove the frame once the print dialog closes; keep a timeout fallback for browsers that never
+  // fire afterprint (or where print() is synchronous and the dialog is modal).
+  win.addEventListener("afterprint", () => setTimeout(remove, 0), { once: true });
+  win.focus();
+  win.print();
+  setTimeout(remove, 60_000);
+  return true;
+}

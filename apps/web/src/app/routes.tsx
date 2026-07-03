@@ -133,7 +133,7 @@ import { fetchGuestToken, apiFetch, ApiError, type GuestToken } from "../data/ap
 import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useEntitlements } from "../data/queries";
 import { ConfirmDialog } from "../ui/dialogs";
 import { uploadAttachment } from "../attachments/useAttachments";
-import { downloadPageExport } from "../data/exportApi";
+import { downloadPageExport, printPageHtml } from "../data/exportApi";
 import { useActiveSpace } from "./ActiveSpace";
 
 // Same-origin collab (ADR-016): a relative "/collab" is resolved against the
@@ -374,7 +374,13 @@ function PageRoute() {
     onAttachments: toggleAttachments,
     onExport: () => { if (pageId) void downloadPageExport(token, pageId); },
     onExportHtml: () => { if (pageId) void downloadPageExport(token, pageId, "html"); },
-    onPrint: () => window.print(),
+    // #207 part 2: print the full server-rendered HTML (all macros static, no raw ::: leak) rather
+    // than window.print() on the virtualised CM surface. Fall back to the live-surface print only when
+    // the page has no exportable HTML (unpublished draft → 404), so drafts can still be printed.
+    onPrint: () => {
+      if (pageId) void printPageHtml(token, pageId).then((ok) => { if (!ok) window.print(); });
+      else window.print();
+    },
     onPermissions: page?.canManage ? () => setPermsOpen(true) : undefined,
     dirtySignal: dirtySig,
   };

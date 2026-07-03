@@ -183,6 +183,13 @@ describe('buildHtmlExport', () => {
     expect(css).toContain('--head') // heading colour token (green, like the editor)
     // dark theme is handled
     expect(css).toContain('prefers-color-scheme:dark')
+    // #207 part 2: this document IS what the app prints (offscreen frame, all macros static). It must
+    // carry its OWN print rules so the printed output uses the full sheet (release the narrow reading
+    // column) with a compact even margin — else printing the export reintroduces #207 part 1's
+    // oversized margins. (part 2's macro rendering is the shared #85 renderer, covered above/below.)
+    expect(css).toContain('@page{margin:14mm;}')
+    expect(css).toContain('@media print')
+    expect(css).toContain('.wks-export{max-width:none')
   })
 
   it('neutralises raw XSS from published_md end-to-end (render → sanitize)', async () => {
