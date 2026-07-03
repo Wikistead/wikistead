@@ -98,7 +98,7 @@ export const builtinDirectiveDescriptors: Record<string, MacroHtmlDescriptor> = 
   details: { exportFidelity: "preserve", htmlRender: detailsHtmlRender },
   table: { exportFidelity: "preserve", htmlRender: tableHtmlRender },
   "embed-page": { exportFidelity: "preserve", htmlRender: transcludeHtmlRender }, // #205: renamed from `transclude`
-  embed: { exportFidelity: "degrade", htmlRender: embedHtmlRender },
+  "embed-external": { exportFidelity: "degrade", htmlRender: embedHtmlRender }, // #205: renamed from `embed`
   ...Object.fromEntries(
     CALLOUT_TYPES.map((t) => [t, { exportFidelity: "preserve", htmlRender: calloutHtmlRender(t) } satisfies MacroHtmlDescriptor]),
   ),
