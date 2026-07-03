@@ -1352,7 +1352,9 @@ export const livePreviewTheme = EditorView.baseTheme({
     padding: "3px 8px",
     textAlign: "left",
   },
-  ".cm-lp-table th": { background: "rgba(127,127,127,0.12)", fontWeight: "700" },
+  // #197: a PALE, token-driven header (was a hardcoded grey wash). Neutral surface + --fg text so the
+  // header is always readable in any theme — no accent tint that could clash with the header text.
+  ".cm-lp-table th": { background: "var(--panel-2, #f0f1f3)", color: "var(--fg)", fontWeight: "700" },
   ".cm-lp-image": { maxWidth: "100%", height: "auto", borderRadius: "4px", verticalAlign: "bottom" },
   // Macro block (e.g. ```mermaid). The wrap is relative so the fold button can sit in
   // a corner; the rendered DOM is whatever the macro's liveRender returns.
@@ -1552,7 +1554,7 @@ export const livePreviewTheme = EditorView.baseTheme({
     cursor: "pointer",
     userSelect: "none",
   },
-  ".cm-lp-table-grid th.cm-lp-table-handle:hover": { background: "var(--accent, #4ea1ff)", color: "#fff" },
+  ".cm-lp-table-grid th.cm-lp-table-handle:hover": { background: "var(--panel-3, #d8dce0)", color: "var(--fg)" }, // #197: neutral hover, not the loud accent
   ".cm-lp-table-grid .cm-lp-table-colhandle": { minWidth: "16px", height: "16px" },
   ".cm-lp-table-grid .cm-lp-table-rowhandle": { width: "22px" },
   ".cm-lp-table-grid .cm-lp-table-corner": { width: "22px", height: "16px", borderTopLeftRadius: "5px" },
@@ -1561,10 +1563,10 @@ export const livePreviewTheme = EditorView.baseTheme({
   // border + bold "+" reads as "add here", like Notion/Docmost — replaces the disconnected
   // labeled bottom bar. They share the handle band tint and the accent hover.
   ".cm-lp-table-grid .cm-lp-table-addcol, .cm-lp-table-grid .cm-lp-table-addrow": {
-    color: "var(--accent, #4ea1ff)",
+    color: "var(--fg-dim, #777)", // #197: subtle neutral "+", not the loud accent
     fontSize: "13px",
     fontWeight: "700",
-    border: "1px dashed var(--accent, #4ea1ff)",
+    border: "1px dashed var(--border, #888)",
   },
   ".cm-lp-table-grid .cm-lp-table-addcol": { minWidth: "16px", height: "16px" },
   ".cm-lp-table-grid .cm-lp-table-addrow": { height: "16px" },
@@ -1573,7 +1575,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   // Selection: a translucent THEME-accent fill on each cell (#1 — must read as selected,
   // in the active theme color, not a fixed blue); a thick accent border only on the OUTER
   // edges (per-side classes) — the spreadsheet look. Prefixed to beat the base cell rules.
-  ".cm-lp-table-grid .cm-lp-cell-sel": { background: "color-mix(in srgb, var(--accent, #4ea1ff) 24%, transparent)" },
+  ".cm-lp-table-grid .cm-lp-cell-sel": { background: "color-mix(in srgb, var(--accent, #4ea1ff) 14%, transparent)" }, // #197: subtler selection fill
   ".cm-lp-table-grid .cm-lp-sel-t": { borderTop: "2px solid var(--accent, #4ea1ff)" },
   ".cm-lp-table-grid .cm-lp-sel-b": { borderBottom: "2px solid var(--accent, #4ea1ff)" },
   ".cm-lp-table-grid .cm-lp-sel-l": { borderLeft: "2px solid var(--accent, #4ea1ff)" },
