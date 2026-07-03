@@ -6,3 +6,8 @@ export { SafeHtml, html, joinSafe, unsafeHtml, escapeHtml } from "./safe-html.js
 export { parseDirectiveOpen, isDirectiveClose, directiveExtension } from "./directive-parser.js";
 export { renderMarkdownToHtml } from "./render.js";
 export type { MacroHtmlDescriptor, MacroHtmlRegistry } from "./render.js";
+export {
+  parseLayoutItems,
+  columnsHtmlRender, tabsHtmlRender, detailsHtmlRender,
+  builtinDirectiveDescriptors, builtinMacroRegistry,
+} from "./directives.js";
