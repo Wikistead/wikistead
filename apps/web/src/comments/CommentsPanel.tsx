@@ -81,7 +81,7 @@ function Composer({ pageId, token, onSubmit, placeholder }: { pageId: string; to
 
 export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, token }: { pageId: string; canComment: boolean; anchorGetterRef: MutableRefObject<AnchorGetter | null>; onClose: () => void; token?: string }) {
   const { t: tr } = useTranslation(); // `t` is used as the thread loop var below
-  const { sub: me, token: sessionToken } = useSession();
+  const { token: sessionToken } = useSession();
   // #100 (authz): in a GUEST view `token` is the guest share token, so comment read/write runs as the
   // guest — not the app SessionProvider's member/dev token (which in dev is the dev-user bypass, the
   // path that let a "guest" delete a member's comment). Members pass no token → the session is used.
@@ -139,7 +139,7 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
               <div key={c.id} className="flex flex-col gap-0.5" data-testid="comment-item">
                 <div className="flex items-baseline gap-1.5">
                   <span className="text-[0.8em] font-semibold text-fg-dim">{c.authorSub}</span>
-                  {c.authorSub === me && (
+                  {c.canModify && (
                     <button type="button" className="cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-[var(--danger)] opacity-80 hover:underline hover:opacity-100" data-testid="comment-delete" onClick={() => remove.mutate(c.id)}>{tr("commentsPanel.delete")}</button>
                   )}
                 </div>

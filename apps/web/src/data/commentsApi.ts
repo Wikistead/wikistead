@@ -10,6 +10,7 @@ export interface CommentItem {
   authorSub: string;
   createdAt: string;
   editedAt: string | null;
+  canModify: boolean; // #100: server-computed — this principal (author or admin) may delete/edit it
 }
 export interface CommentThread {
   id: string;

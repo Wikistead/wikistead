@@ -121,7 +121,13 @@ export async function commentsPlugin(app: FastifyInstance) {
   // List threads (+ non-deleted comments) for a page. page#view required → a user
   // who can't view the page gets a uniform 404, never comment bodies.
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/comments', { config: { guest: 'view' } }, async (req, reply) => {
-    if (!(await requirePage(req, reply, req.params.pageId, 'view'))) return
+    const actor = await requirePage(req, reply, req.params.pageId, 'view')
+    if (!actor) return
+    // #100 UX: tell the client which comments THIS principal may modify (author, or a tenant admin) so
+    // it shows delete/edit only there — a guest no longer sees a delete button on a member's comment
+    // (the server already 403s it; this stops the "clickable but forbidden" affordance). Same authz as
+    // the delete/edit routes: isAuthor || isAdmin (guests are never tenant admins).
+    const isAdmin = req.user ? await isTenantAdmin(req) : false
     const threads = await req.db.sql<ThreadRow[]>`
       SELECT id, page_id, kind, anchor_start, anchor_end, quoted_text, status, created_by, created_at, resolved_by, resolved_at
       FROM comment_threads WHERE page_id = ${req.params.pageId} ORDER BY created_at`
@@ -137,7 +143,7 @@ export async function commentsPlugin(app: FastifyInstance) {
         id: t.id, kind: t.kind, status: t.status, quotedText: t.quoted_text,
         anchorStart: b64(t.anchor_start), anchorEnd: b64(t.anchor_end),
         createdBy: t.created_by, createdAt: t.created_at, resolvedBy: t.resolved_by, resolvedAt: t.resolved_at,
-        comments: (byThread.get(t.id) ?? []).map((c) => ({ id: c.id, body: c.body, authorSub: c.author_sub, createdAt: c.created_at, editedAt: c.edited_at })),
+        comments: (byThread.get(t.id) ?? []).map((c) => ({ id: c.id, body: c.body, authorSub: c.author_sub, createdAt: c.created_at, editedAt: c.edited_at, canModify: c.author_sub === actor.authorId || isAdmin })),
       })),
     }
   })
