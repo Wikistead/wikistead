@@ -681,7 +681,7 @@ class MacroWidget extends WidgetType {
       // (narrow host-API); the host checks the URL against the injected tenant allowlist and renders a
       // sandboxed iframe for an allowlisted https host, else a degrade link (Open formats). Synchronous
       // (client-direct iframe — no server proxy/fetch, so no SSRF surface on this path).
-      if (this.name === "embed" && this.body.trim() !== "") {
+      if (this.name === "embed-external" && this.body.trim() !== "") {
         rendered.replaceChildren(buildEmbedElement(this.body, view.state.facet(embedAllowlist)));
       }
     }

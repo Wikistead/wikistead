@@ -42,7 +42,11 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
               <CommandItem key={h.id} value={h.id} onSelect={() => close(h.id)} data-testid="embed-picker-item">
                 <div className="flex min-w-0 flex-col">
                   <span className="truncate">{h.title || t("common.untitled")}</span>
-                  {spaceName(h.spaceId) && <span className="truncate text-xs text-fg-dim">{spaceName(h.spaceId)}</span>}
+                  {/* #205: same-name pages (e.g. many "Untitled") are told apart by their space + a
+                      content preview — both are view-authorized (the whole hit came through the FGA gate). */}
+                  <span className="truncate text-xs text-fg-dim">
+                    {spaceName(h.spaceId)}{spaceName(h.spaceId) && h.snippet ? " · " : ""}{h.snippet ?? ""}
+                  </span>
                 </div>
               </CommandItem>
             ))}

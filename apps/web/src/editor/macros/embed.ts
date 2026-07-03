@@ -1,7 +1,8 @@
 import type { DirectiveMacro } from "./registry";
 import { embedHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender shared (degrades to a link)
 
-// :::embed — embed an external resource by URL (the body is the URL). #108 / ADR-071 (comment 551)
+// :::embed-external — embed an external resource by URL (the body is the URL). #108 / ADR-071 (551)
+// #205 renamed `:::embed` → `:::embed-external` to namespace with `:::embed-page` (embed-<what>).
 // external embeds are CLIENT-DIRECT sandboxed iframes for operator-allowlisted hosts only (never a
 // server proxy → no SSRF surface for this path; never an arbitrary iframe → no tracking/XSS). The
 // MACRO never fetches or reads the allowlist (host-API is {theme} only, ADR-024 trust boundary); the
@@ -10,18 +11,18 @@ import { embedHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRe
 // Server HTML export also degrades to a link (the sanitizer forbids <iframe>).
 export const embedMacro: DirectiveMacro = {
   kind: "directive",
-  name: "embed",
+  name: "embed-external",
   exportFidelity: "degrade", // an external iframe can't round-trip to static HTML → a link is the faithful degrade
   revealOnCursor: true, // edit the URL by placing the caret inside (like :::transclude)
   liveRender: (body) => {
     const el = document.createElement("div");
-    el.className = "cm-lp-macro cm-lp-embed";
-    el.setAttribute("data-testid", "macro-embed");
+    el.className = "cm-lp-macro cm-lp-embed-external";
+    el.setAttribute("data-testid", "macro-embed-external");
     el.textContent = body.trim() ? "…" : "Empty embed — add a URL"; // host swaps in the iframe / link
     return el;
   },
   htmlRender: embedHtmlRender, // server/static: a link (no iframe in exported HTML)
-  slash: { labelKey: "palette.embed", keywords: "embed external iframe youtube video url 埋め込み 外部 リンク", insert: ":::embed\n\n:::", caret: 9 },
+  slash: { labelKey: "palette.embed", keywords: "embed external iframe youtube video url 埋め込み 外部 リンク", insert: ":::embed-external\n\n:::", caret: 18 },
 };
 
 // Is `url` an https URL whose host is on the operator allowlist? Host match is exact OR a subdomain
