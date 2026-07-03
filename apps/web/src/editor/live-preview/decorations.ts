@@ -1440,7 +1440,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   // #90 details: collapsed bar + (revealed) a subtle bordered box.
   ".cm-lp-details-summary": { border: "1px solid var(--border, #888)", borderRadius: "4px", padding: "0.35em 0.7em", cursor: "pointer", color: "var(--fg-dim, #888)", userSelect: "none" },
   ".cm-lp-details": { borderLeft: "3px solid var(--border, #888)", paddingLeft: "0.8em" },
-  // ::: callout directive: a tinted box with an accent left bar. Applied per line
+  // ::: callout directive: a tinted box with a SEMANTIC (never accent) left bar. Applied per line
   // (the fence lines are hidden → empty padding rows inside the box). The content
   // stays live-preview Markdown.
   ".cm-lp-callout": {
