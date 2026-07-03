@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { EditorState, EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { indentList, outdentList, continueMarker } from "./list-edit";
+import { indentList, outdentList } from "./list-edit";
 
 // #202: Tab/Shift-Tab indent/outdent a list ITEM (nesting) but no-op outside a list. Verified on the
 // real doc text (indentation = markdown nesting), with distinct list vs non-list inputs.
@@ -47,17 +47,11 @@ describe("list indent/outdent (#202)", () => {
     expect(outdentList(v)).toBe(false);
   });
 
-  // #202 vim o/O: the marker that continues a list line (same indent; bullet repeats, ordered
-  // increments). This is the core of making o/O consistent with Enter — verified per marker kind.
-  it("continueMarker repeats a bullet and increments an ordered marker (indent preserved)", () => {
-    expect(continueMarker("- item")).toBe("- ");
-    expect(continueMarker("* item")).toBe("* ");
-    expect(continueMarker("  - nested")).toBe("  - "); // indent kept
-    expect(continueMarker("1. item")).toBe("2. "); // ordered → next number
-    expect(continueMarker("  3) item")).toBe("  4) "); // indent + paren style + increment
-    expect(continueMarker("plain text")).toBeNull(); // not a list
-    expect(continueMarker("")).toBeNull();
-  });
+  // #202 vim `o` list continuation is delivered by a vim REMAP (`o` → `A<CR>`) that reuses the
+  // insert-mode marker continuation (markdownKeymap), NOT by a pure function here — a CM keymap cannot
+  // intercept vim normal-mode keys (vim's own keydown handler owns them). That path needs the vim
+  // runtime + real keystrokes, so it is covered by review rather than a unit test (the earlier
+  // pure `continueMarker` helper was removed as it was off the real path — dead confidence).
 
   it("indents EVERY list line in a multi-line selection", () => {
     const v = view("- a\n- b\n- c", 0);

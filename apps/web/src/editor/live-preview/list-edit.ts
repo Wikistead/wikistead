@@ -1,7 +1,7 @@
 import { Prec, type Extension, type Line } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { markdownKeymap } from "@codemirror/lang-markdown";
-import { Vim, getCM } from "@replit/codemirror-vim";
+import { Vim } from "@replit/codemirror-vim";
 
 // #202: standard list-editing ergonomics (Notion / Google Docs style) on the single Y.Text.
 //  - Tab / Shift-Tab INSIDE a list item indent / outdent it (nesting), in vim AND non-vim. Tab was
@@ -59,50 +59,38 @@ export const outdentList = (view: EditorView): boolean => {
   return true;
 };
 
-// The marker that CONTINUES the list from `text`: same indent + a fresh marker (a bullet repeats;
-// an ordered marker increments the number). null when `text` is not a list line. Pure + testable.
-const MARKER_RE = /^(\s*)(?:([-*+])|(\d+)([.)]))(\s+)/;
-export function continueMarker(text: string): string | null {
-  const m = MARKER_RE.exec(text);
-  if (!m) return null;
-  const indent = m[1] ?? "";
-  const sp = m[5] ?? " ";
-  if (m[3]) return `${indent}${Number(m[3]) + 1}${m[4]}${sp}`; // ordered → next number
-  return `${indent}${m[2]}${sp}`; // bullet → repeat
+// #202 vim `o`: in NORMAL mode `o` must CONTINUE the list marker (like Enter in insert mode does),
+// not open a blank line — the previous attempt bound `o` via a CM keymap (Prec.highest), but that
+// CANNOT intercept vim NORMAL-mode keys: @replit/codemirror-vim processes normal-mode commands in its
+// own ViewPlugin `keydown` domEventHandler, so `o` never reaches the CM keymap facet (that is why the
+// bounce reported "o still doesn't complete"). The correct seam is a vim REMAP. We remap `o` to
+// `A<CR>` — append at end of line (enters insert mode, column-independent) then Enter — which reuses
+// the ALREADY-WORKING insert-mode marker continuation (markdownKeymap's insertNewlineContinueMarkdown,
+// Prec.high below). On a list line that continues the marker (bullet repeats, ordered increments); off
+// a list line `A<CR>` is equivalent to plain `o` (end-of-line + newline). One global mapping (vim maps
+// are global), applied once and guarded against HMR re-entry. `O` (open above) is left as vim default
+// for now — the reported issue is `o`; above-continuation has no clean key-remap and is a follow-up.
+let vimListMapped = false;
+function ensureVimListMappings(): void {
+  if (vimListMapped) return;
+  vimListMapped = true;
+  Vim.map("o", "A<CR>", "normal"); // continue the list marker via the working Enter path
 }
 
-// #202 vim: `o` / `O` in NORMAL mode should CONTINUE the list marker (like Enter in insert mode does),
-// not just open a blank line — Enter and o/O were inconsistent. A pre-vim keymap (Prec.highest, the
-// same technique vim-atom uses) handles it ONLY in vim normal mode on a list line; otherwise it returns
-// false so normal typing ("o" in insert mode) and vim's plain o/O off a list are untouched.
-const openListAware = (below: boolean) => (view: EditorView): boolean => {
-  const cm = getCM(view);
-  if (!cm || cm.state.vim?.insertMode) return false; // only vim NORMAL mode (never while typing)
-  const line = view.state.doc.lineAt(view.state.selection.main.head);
-  const marker = continueMarker(line.text);
-  if (marker === null) return false; // not on a list line → let vim's default o/O run
-  const at = below ? line.to : line.from;
-  const insert = below ? `\n${marker}` : `${marker}\n`;
-  const caret = below ? at + 1 + marker.length : at + marker.length;
-  view.dispatch(view.state.update({ changes: { from: at, insert }, selection: { anchor: caret }, userEvent: "input", scrollIntoView: true }));
-  Vim.handleKey(cm, "i", "mapping"); // enter insert mode at the new marker (like o/O does)
-  return true;
-};
-
-export const listEditing: Extension = [
-  // #202 vim o/O list continuation — BEFORE vim (Prec.highest), guarded to fire only in vim normal
-  // mode on a list line (so "o" typed in insert mode, and o/O off a list, are unaffected).
-  Prec.highest(keymap.of([
-    { key: "o", run: openListAware(true) },
-    { key: "O", run: openListAware(false) },
-  ])),
-  // High precedence so Tab reaches the editor for list indent (it was captured by focus), but BELOW
-  // the slash palette's Prec.highest Tab (palette navigation wins while the palette is open).
-  Prec.high(keymap.of([
-    { key: "Tab", run: indentList },
-    { key: "Shift-Tab", run: outdentList },
-  ])),
-  // Enter continues the list marker / Backspace removes it. High prec so Enter continuation beats
-  // minimalSetup's plain newline; falls back to a normal newline outside a list (by design).
-  Prec.high(keymap.of(markdownKeymap)),
-];
+export const listEditing: Extension = (() => {
+  ensureVimListMappings();
+  return [
+    // #202 Tab/Shift-Tab indent/outdent a list item. Prec.highest (was Prec.high, which lost to another
+    // highest-prec Tab handler and fell through to browser focus movement — the "Tab steals focus"
+    // bounce). indentList/outdentList return false when NOT on a list line, so a co-registered
+    // highest-prec Tab handler (e.g. the slash palette while open) still gets its turn.
+    Prec.highest(keymap.of([
+      { key: "Tab", run: indentList },
+      { key: "Shift-Tab", run: outdentList },
+    ])),
+    // Enter continues the list marker / Backspace removes it. High prec so Enter continuation beats
+    // minimalSetup's plain newline; falls back to a normal newline outside a list (by design). The vim
+    // `o` remap above routes through this same handler.
+    Prec.high(keymap.of(markdownKeymap)),
+  ];
+})();
