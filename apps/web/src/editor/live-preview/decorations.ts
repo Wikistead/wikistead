@@ -1460,6 +1460,10 @@ export const livePreviewTheme = EditorView.baseTheme({
     border: "1px solid var(--border, #444)",
     padding: "3px 8px",
     textAlign: "left",
+    // #197 (comment 638): a min row height so an EMPTY cell/row doesn't collapse to a sliver. In table
+    // layout `height` acts as a minimum, so every row is at least ~1 line tall whether it has text or not.
+    height: "1.8em",
+    verticalAlign: "top",
   },
   // #197: a PALE, token-driven header (was a hardcoded grey wash). Neutral surface + --fg text so the
   // header is always readable in any theme — no accent tint that could clash with the header text.

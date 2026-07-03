@@ -23,7 +23,7 @@ export function uniformResizeSize(pointer: number, blockStart: number, n: number
 // rewrites the block by handing the host a LOSSLESS :::table source; the HOST's MacroTier
 // auto-demotes it to the lowest representable level — pipes (Tier 1) or :::table HTML
 // (Tier 2) (ADR-025 step 3). Committed via host.replaceSource (one offset-invariant Y.Text
-// edit, per-op). The grid is parsed from host.getSource at mount.
+// edit, per-op). The grid is parsed from host.getSource() at mount.
 // Controlled background palette: undefined = clear; var(--accent) stays on theme; the
 // tints are safe hex (pass the style allowlist). Not a free color picker (ADR-022 #2).
 const BG_PRESETS: { id: string; value: string | undefined; title: string }[] = [
@@ -159,23 +159,23 @@ export const tableInlineEditor: InlineEditor = {
       selected.clear();
       const lr = Math.min(r1, r2), hr = Math.max(r1, r2), lc = Math.min(c1, c2), hc = Math.max(c1, c2);
       for (let r = lr; r <= hr; r++) for (let c = lc; c <= hc; c++) if (grid[r]?.[c]) selected.add(`${r},${c}`);
-      // #197: with the spreadsheet select handles removed, DRAG-SELECT now drives the column/row ops. A
-      // rectangle spanning EVERY row of a SINGLE column ⇒ that column is selected (insert/delete-column
-      // toolbar shows, targeting selCol); every column of a SINGLE row ⇒ that row. Anything else (multi
-      // column/row, or a partial block) stays "cells" — colour still applies, single-axis ops hidden.
+      // #197 (comment 638): ANY selection targets its top-left cell's column AND row for the structural
+      // ops — no need to select a whole column/row. selCol/selRow = the rectangle's left/top edge (so
+      // "insert before/after/delete" act on that column/row); both op groups show whenever something is
+      // selected. selMode still drives the col/row FILL styling for a full-axis drag.
       const fullH = lr === 0 && hr === grid.length - 1;
       const fullW = lc === 0 && hc === ncols - 1;
-      if (fullH && lc === hc) { selMode = "col"; selCol = lc; selRow = -1; }
-      else if (fullW && lr === hr) { selMode = "row"; selRow = lr; selCol = -1; }
-      else { selMode = "cells"; selCol = -1; selRow = -1; }
+      selMode = fullH && lc === hc ? "col" : fullW && lr === hr ? "row" : "cells";
+      selCol = lc;
+      selRow = lr;
       applySel();
     };
 
     // A border drag handle: tracks the pointer, previews the size, commits on release.
     // #154 (revised): a UNIFORM multi-select resize whose DRAGGED EDGE follows the pointer, like a
     // spreadsheet. The `n` affected columns/rows (previewEls = every cell of each) all take the SAME
-    // size, chosen so the block's dragged (right/bottom) edge sits exactly at the pointer
-    // size = (pointer − blockStart) / n
+    // size, chosen so the block's dragged (right/bottom) edge sits exactly at the pointer:
+    //   size = (pointer − blockStart) / n
     // The block's start edge is frozen at drag-start (columns/rows before the block are unaffected, so
     // it never moves). For a single column/row (n=1) this reduces to "that one edge follows the
     // pointer" — the previous single-resize behaviour, unchanged. previewEls == the exact cells the
@@ -225,27 +225,17 @@ export const tableInlineEditor: InlineEditor = {
     const colCellsOf = (ci: number) => [...cellEls].filter(([k]) => Number(k.split(",")[1]) === ci).map(([, el]) => el);
     const rowCellsOf = (ri: number) => [...cellEls].filter(([k]) => Number(k.split(",")[0]) === ri).map(([, el]) => el);
 
-    // #197 (approved): the always-on A/B/1/2 spreadsheet labels + select handles are REMOVED — multi
-    // column/row selection is done by dragging across cells (unchanged), so the labels/handles were
-    // redundant chrome. A single "+" bar remains to add a column at the end (a table-attached affordance).
-    const htr = document.createElement("tr");
-    const addColCell = document.createElement("th");
-    addColCell.className = "cm-lp-table-handle cm-lp-table-addcol";
-    addColCell.textContent = "+";
-    addColCell.title = "Add a column";
-    addColCell.colSpan = ncols; // no row-handle column now → span the data columns
-    addColCell.setAttribute("data-testid", "table-add-col");
-    addColCell.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertColAt(grid, ncols)); });
-    htr.appendChild(addColCell);
-    table.appendChild(htr);
+    // #197 (comment 638): the always-on A/B/1/2 labels + handles AND the standalone top/bottom "+" bars
+    // are all REMOVED — insert/delete for a column OR row is now on the selected cell's op toolbar
+    // (any selection targets its cell's col+row), so the extra chrome was redundant.
 
     // Cell text editing (#86 / #154): double-click a cell to type into it. The cell becomes
     // contenteditable IN PLACE. Focus is handed over via host.beginTextEdit — a plain focus in the
-    // MODAL path (no CM), but the CM focus-DELEGATION guard in the in-editor path (#153/ADR-054
+    // MODAL path (no CM), but the CM focus-DELEGATION guard in the in-editor path (#153/ADR-054:
     // root contenteditable=false + ignoreEvent means CM won't reclaim the nested island's focus), so
     // the same editor works BOTH in the modal and inline in CodeMirror. Enter commits; Shift+Enter
     // inserts an in-cell <br>; paste is forced to text/plain; blur commits. Every commit rewrites the
-    // block via apply (one Y.Text edit) and remounts from the canonical source.
+    // block via apply() (one Y.Text edit) and remounts from the canonical source.
     let editHandle: { end(): void } | null = null;
     const beginEdit = (el: HTMLElement, r: number, c: number) => {
       const cur = grid[r]?.[c];
@@ -337,18 +327,8 @@ export const tableInlineEditor: InlineEditor = {
       });
       table.appendChild(trow);
     });
-    // Trailing "+" attached below the last row: append a row at the end (#3 — table-attached,
-    // mirrors the column "+"; replaces the disconnected " Row" bottom button).
-    const addRowTr = document.createElement("tr");
-    const addRowCell = document.createElement("th");
-    addRowCell.className = "cm-lp-table-handle cm-lp-table-addrow";
-    addRowCell.textContent = "+";
-    addRowCell.title = "Add a row";
-    addRowCell.setAttribute("data-testid", "table-add-row");
-    addRowCell.colSpan = ncols; // #197: no row-handle column now → span the data columns
-    addRowCell.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); apply(insertRowAt(grid, grid.length)); });
-    addRowTr.appendChild(addRowCell);
-    table.appendChild(addRowTr);
+    // #197 (comment 638): the trailing add-row "+" is removed — add/insert a row via the selected
+    // cell's row-op toolbar (insert above/below) instead.
     table.addEventListener("pointermove", (e) => {
       if (!dragging) return;
       const t = (e.target as HTMLElement)?.closest?.("[data-cellkey]") as HTMLElement | null;
@@ -368,9 +348,10 @@ export const tableInlineEditor: InlineEditor = {
     const updateToolbar = () => {
       if (!selected.size) { bar.style.display = "none"; return; }
       bar.style.display = "flex";
-      // Structural ops only make sense for a whole column / whole row selection.
-      colOps.style.display = selMode === "col" ? "inline-flex" : "none";
-      rowOps.style.display = selMode === "row" ? "inline-flex" : "none";
+      // #197 (comment 638): both structural-op groups are available for ANY selection — they target the
+      // selected cell's column (selCol) and row (selRow), no whole-axis selection required.
+      colOps.style.display = "inline-flex";
+      rowOps.style.display = "inline-flex";
       const cellEl = cellEls.get([...selected][0]!);
       if (!cellEl) return;
       const wrapRect = container.getBoundingClientRect();
