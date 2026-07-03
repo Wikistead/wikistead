@@ -7,10 +7,10 @@ import postgres from 'postgres'
 import * as Y from 'yjs'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
-import { fgaClient, check, deleteObjectTuples } from '@wikistead/authz'
+import { fgaClient, check, deleteObjectTuples, writeTuples } from '@wikistead/authz'
 import { LogicalSearchDriver, buildSearchDoc } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, grantPageAccess, revokePageAccess, listPageAccess } from '../routes/pages.js'
+import { createPage, grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, unrestrictPageAccess, listPageRestrictions } from '../routes/pages.js'
 import { drainAuditOutbox } from '../audit/outbox.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -100,5 +100,43 @@ describe('per-page access (grant/revoke/list)', () => {
     const rows = await db.sql<{ action: string; target: string; actor: string }[]>`SELECT action, target, actor FROM audit_log WHERE tenant_id = ${TENANT} ORDER BY seq`
     expect(rows.some((r) => r.action === 'page.access_granted' && r.target === `page:${pageId}` && r.actor === 'user:dev-user')).toBe(true)
     await deleteObjectTuples(fgaClient, `page:${pageId}`).catch(() => {}) // clean the extra grantee tuple
+  })
+})
+
+// #109 / ADR-072 monotonic deny — the restrict write path over the same manage-gated mechanism.
+describe('per-page restrict (monotonic deny)', () => {
+  const R = 'user:pa-restrictee'
+  // A prior test (the audit one) wipes ALL page tuples incl. the creator's `manage`; re-establish it
+  // so dev-user can manage the page for these tests.
+  beforeAll(async () => { await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'manage', object: `page:${pageId}` }]).catch(() => {}) })
+  afterAll(async () => { await deleteObjectTuples(fgaClient, `page:${pageId}`).catch(() => {}) })
+
+  it('restrict makes a granted viewer 404 (view=false); list shows the deny; unrestrict restores', async () => {
+    // grant view → the principal can see the page
+    await grantPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', grantee: R, relation: 'view' })
+    expect(await check(fgaClient, R, 'view', { type: 'page', id: pageId })).toBe(true)
+    // restrict → deny wins, view=false (the page 404s for them everywhere)
+    await restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', principal: R })
+    expect(await check(fgaClient, R, 'view', { type: 'page', id: pageId })).toBe(false)
+    // the deny appears in the restriction list (distinct from the grant list)
+    expect(await listPageRestrictions(fgaClient, { pageId, userId: 'dev-user' })).toEqual(
+      expect.arrayContaining([{ principal: R }]),
+    )
+    // unrestrict → the grant re-applies, view=true again
+    await unrestrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', principal: R })
+    expect(await check(fgaClient, R, 'view', { type: 'page', id: pageId })).toBe(true)
+  })
+
+  it('a non-manager cannot restrict / list restrictions (403)', async () => {
+    await expect(restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: STRANGER, principal: R }))
+      .rejects.toMatchObject({ statusCode: 403 })
+    await expect(listPageRestrictions(fgaClient, { pageId, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
+  })
+
+  it('rejects a wildcard / share_link restrictee (400)', async () => {
+    await expect(restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', principal: 'user:*' }))
+      .rejects.toMatchObject({ statusCode: 400 })
+    await expect(restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', principal: 'share_link:x' }))
+      .rejects.toMatchObject({ statusCode: 400 })
   })
 })

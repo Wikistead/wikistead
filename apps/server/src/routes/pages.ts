@@ -515,6 +515,71 @@ export async function revokePageAccess(
   emit({ type: 'page.access_revoked', tenantId: args.tenantId, pageId: args.pageId, grantee: args.grantee, relation: args.relation, actorId: args.userId })
 }
 
+// #109 / ADR-072 monotonic deny: RESTRICT a principal from a page. Writes page#restricted so the
+// principal's `view` (= viewable but not restricted) becomes false everywhere — the page 404s for
+// them even if they're a space viewer. Manage-gated + audited + reindexed, like grant/revoke. Only a
+// real member/group (never share_link / wildcard) is restrictable.
+function validateRestrictee(who: string): void {
+  if (!/^user:[^*\s]+$/.test(who) && !/^group:[^\s]+#member$/.test(who)) {
+    throw Object.assign(new Error('restrictee must be user:<sub> or group:<id>#member'), { statusCode: 400 })
+  }
+}
+
+export async function restrictPageAccess(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; tenantId: string; userId: string; principal: string; plan?: string },
+): Promise<void> {
+  validateRestrictee(args.principal)
+  await requireManage(fga, args.userId, args.pageId)
+  const oid = await db.tx(async (tx) => {
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.access_restricted', target: `page:${args.pageId}` })
+    }
+    const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+    await writeTuples(fga, [{ user: args.principal, relation: 'restricted', object: `page:${args.pageId}` }])
+    return o
+  })
+  // Reindex so the restricted principal drops out of FGA-derived surfaces on the next request.
+  processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+  emit({ type: 'page.access_restricted', tenantId: args.tenantId, pageId: args.pageId, grantee: args.principal, relation: 'restricted', actorId: args.userId })
+}
+
+export async function unrestrictPageAccess(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; tenantId: string; userId: string; principal: string; plan?: string },
+): Promise<void> {
+  validateRestrictee(args.principal)
+  await requireManage(fga, args.userId, args.pageId)
+  const oid = await db.tx(async (tx) => {
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.access_unrestricted', target: `page:${args.pageId}` })
+    }
+    const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+    await deleteTuples(fga, [{ user: args.principal, relation: 'restricted', object: `page:${args.pageId}` }])
+    return o
+  })
+  processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+  emit({ type: 'page.access_unrestricted', tenantId: args.tenantId, pageId: args.pageId, grantee: args.principal, relation: 'restricted', actorId: args.userId })
+}
+
+// List the principals RESTRICTED on a page (manage-gated) — the deny list, distinct from grants.
+export async function listPageRestrictions(
+  fga: OpenFgaClient,
+  args: { pageId: string; userId: string },
+): Promise<{ principal: string }[]> {
+  await requireManage(fga, args.userId, args.pageId)
+  const { tuples } = await fga.read({ object: `page:${args.pageId}`, relation: 'restricted' })
+  const out: { principal: string }[] = []
+  for (const { key } of tuples ?? []) {
+    if (key?.relation === 'restricted' && key.user) out.push({ principal: key.user })
+  }
+  return out
+}
+
 export async function listPageAccess(
   fga: OpenFgaClient,
   db: TenantDb,
@@ -1000,6 +1065,27 @@ export async function pagesPlugin(app: FastifyInstance) {
     await revokePageAccess(req.db, app.fga, app.searchDriver, {
       pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub,
       grantee, relation: req.body?.relation ?? '', plan: req.tenant.plan,
+    })
+    return reply.code(204).send()
+  })
+
+  // #109 / ADR-072 monotonic deny — restrict/unrestrict a principal from a page (manage-gated). The
+  // deny list is distinct from the grant list; a restricted principal 404s on the page even as a
+  // space viewer. principal = user:<sub> | group:<id>#member (raw) OR groupName (#163 resolved).
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/restrict', async (req) => {
+    return listPageRestrictions(app.fga, { pageId: req.params.pageId, userId: req.user.sub })
+  })
+  app.post<{ Params: { pageId: string }; Body: { principal?: string; groupName?: string } }>('/pages/:pageId/restrict', async (req, reply) => {
+    const principal = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.principal ?? '')
+    await restrictPageAccess(req.db, app.fga, app.searchDriver, {
+      pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub, principal, plan: req.tenant.plan,
+    })
+    return reply.code(204).send()
+  })
+  app.delete<{ Params: { pageId: string }; Body: { principal?: string; groupName?: string } }>('/pages/:pageId/restrict', async (req, reply) => {
+    const principal = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.principal ?? '')
+    await unrestrictPageAccess(req.db, app.fga, app.searchDriver, {
+      pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub, principal, plan: req.tenant.plan,
     })
     return reply.code(204).send()
   })
