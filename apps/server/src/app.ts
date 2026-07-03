@@ -12,7 +12,7 @@ import { makeMemberVerifier, looksLikeGuestToken, verifyGuestToken } from '@wiki
 import { verifyApiKey } from './api-key-auth.js'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { bumpRateBucket, API_RATE_LIMIT_WINDOW_S } from './rate-limit.js'
-import { getAuthProviders, getSearchDriver, getEmailDriver, type EmailDriver } from '@wikistead/hooks'
+import { getAuthProviders, getSearchDriver, getEmailDriver, getEeFeatures, type EmailDriver } from '@wikistead/hooks'
 import { resolveEmailDriver } from './email/index.js'
 import { emit, onDomainEvent } from '@wikistead/events'
 import { publishRevoke } from './collab-revoke.js'
@@ -349,6 +349,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(publicPlugin)
   await app.register(apiKeysPlugin)
   await app.register(shareLinksPlugin)
+
+  // #178 / ADR-084: EE feature mount seam. A CE / self-host build registers nothing → no-op. The EE
+  // composition root (a separate entrypoint that may import @wikistead-ee/*) calls registerEeFeatures
+  // before buildApp, and its mount receives the app as the host to register EE plugins on. Direct EE
+  // registrations above (SCIM/SAML/…) migrate onto this seam in later #178 slices; the seam is wired
+  // here now (behavior-preserving: getEeFeatures is null until an EE root registers).
+  await getEeFeatures()?.(app)
 
   app.get('/', async (req) => ({ service: 'kb-server', tenant: req.tenant?.slug }))
 
