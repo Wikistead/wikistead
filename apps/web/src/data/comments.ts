@@ -4,18 +4,24 @@ import * as api from "./commentsApi";
 
 // useComments returns null when the page isn't viewable (server 404/403) — the
 // panel then renders nothing, so a page the user can't view never shows comments.
-export function useComments(pageId: string) {
-  const { token } = useSession();
+// #100 (authz): `tokenOverride` lets the GUEST view pass its guest share token so comment ops run as
+// the GUEST — not the app SessionProvider's member/dev token. Without it a guest's delete/edit ran with
+// the session token (in dev the dev-user bypass), letting a "guest" delete a member's comment. Members
+// omit it → the session token (cookie/dev) is used, unchanged.
+export function useComments(pageId: string, tokenOverride?: string) {
+  const { token: sessionToken } = useSession();
+  const token = tokenOverride ?? sessionToken;
   return useQuery({
-    queryKey: ["comments", pageId],
+    queryKey: ["comments", pageId, token],
     queryFn: () => api.listComments(token, pageId),
     enabled: pageId.length > 0,
     staleTime: 5_000,
   });
 }
 
-export function useCommentMutations(pageId: string) {
-  const { token } = useSession();
+export function useCommentMutations(pageId: string, tokenOverride?: string) {
+  const { token: sessionToken } = useSession();
+  const token = tokenOverride ?? sessionToken;
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: ["comments", pageId] });
   return {
