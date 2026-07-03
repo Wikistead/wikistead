@@ -89,6 +89,19 @@ describe('#100 guest commenting (view link + comment_open)', () => {
     expect(row!.deleted_at).toBeNull() // the member's comment was NOT deleted
   })
 
+  it('the comment list marks canModify per principal — a guest may modify its OWN, not a member\'s (#100 UX)', async () => {
+    // A member's comment + the guest's own comment on the same page.
+    const [{ id: mThread }] = await admin<[{ id: string }]>`
+      INSERT INTO comment_threads (tenant_id, page_id, kind, created_by) VALUES (${TENANT}, ${PAGE}, 'page', 'cmt-member2') RETURNING id`
+    await admin`INSERT INTO comments (tenant_id, thread_id, body, author_sub) VALUES (${TENANT}, ${mThread}, 'member owns this', 'cmt-member2')`
+    await app.inject({ method: 'POST', url: `/pages/${PAGE}/comments`, headers: H(viewTok), payload: { body: 'guest owns this too' } })
+
+    const list = await app.inject({ method: 'GET', url: `/pages/${PAGE}/comments`, headers: H(viewTok) })
+    const all = (list.json() as { threads: { comments: { body: string; canModify: boolean }[] }[] }).threads.flatMap((t) => t.comments)
+    expect(all.find((c) => c.body === 'member owns this')!.canModify).toBe(false) // guest can't modify a member's
+    expect(all.find((c) => c.body === 'guest owns this too')!.canModify).toBe(true) // …but can its own
+  })
+
   it('a view-link guest CAN delete its OWN comment (positive control — authorId matches)', async () => {
     const create = await app.inject({ method: 'POST', url: `/pages/${PAGE}/comments`, headers: H(viewTok), payload: { body: 'guest owns this' } })
     const { threadId } = create.json() as { threadId: string }
