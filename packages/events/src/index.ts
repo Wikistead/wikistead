@@ -14,6 +14,8 @@ export type DomainEvent =
   | { type: 'page.published'; tenantId: string; pageId: string; revisionId: string; actorId: string }
   | { type: 'page.access_granted'; tenantId: string; pageId: string; grantee: string; relation: string; actorId: string }
   | { type: 'page.access_revoked'; tenantId: string; pageId: string; grantee: string; relation: string; actorId: string }
+  | { type: 'page.access_restricted'; tenantId: string; pageId: string; grantee: string; relation: string; actorId: string }
+  | { type: 'page.access_unrestricted'; tenantId: string; pageId: string; grantee: string; relation: string; actorId: string }
   // ── Spaces ───────────────────────────────────────────────────────────
   | { type: 'space.created';  tenantId: string; spaceId: string; actorId: string }
   | { type: 'space.updated';  tenantId: string; spaceId: string; actorId: string }
