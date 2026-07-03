@@ -73,6 +73,15 @@ export function calloutHtmlRender(type: string): (body: string) => SafeHtml {
 export function tableHtmlRender(body: string): SafeHtml { return unsafeHtml(body); }
 // :::transclude → a placeholder the export can later resolve to the referenced page (data-page).
 export function transcludeHtmlRender(body: string): SafeHtml { return html`<div class="transclude" data-page="${body.trim()}"></div>`; }
+// :::embed → in exported/static HTML an external embed DEGRADES to a link (the sanitizer forbids
+// <iframe>; the client renders the sandboxed iframe live). Only http(s) becomes a link; anything else
+// renders as inert text so a javascript:/data: scheme can't smuggle a link (the final sanitizer also
+// strips it). html`` escapes the URL in both attribute and text position.
+export function embedHtmlRender(body: string): SafeHtml {
+  const url = body.trim();
+  if (/^https?:\/\//i.test(url)) return html`<a class="embed-link" href="${url}" rel="noopener noreferrer nofollow" target="_blank">${url}</a>`;
+  return html`<span class="embed-link">${url}</span>`;
+}
 
 // Fence (data-block) macros: a declarative text body rendered by client JS in the app view. In a
 // static export the <pre> is the source (mermaid.js / plantuml render it where available).
@@ -88,6 +97,7 @@ export const builtinDirectiveDescriptors: Record<string, MacroHtmlDescriptor> = 
   details: { exportFidelity: "preserve", htmlRender: detailsHtmlRender },
   table: { exportFidelity: "preserve", htmlRender: tableHtmlRender },
   transclude: { exportFidelity: "preserve", htmlRender: transcludeHtmlRender },
+  embed: { exportFidelity: "degrade", htmlRender: embedHtmlRender },
   ...Object.fromEntries(
     CALLOUT_TYPES.map((t) => [t, { exportFidelity: "preserve", htmlRender: calloutHtmlRender(t) } satisfies MacroHtmlDescriptor]),
   ),

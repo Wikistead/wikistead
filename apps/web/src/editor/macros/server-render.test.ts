@@ -118,4 +118,15 @@ describe("renderMarkdownToHtml — built-in M2 directives (#85 slice 2)", () => 
   it(":::transclude → a data-page placeholder (page ref escaped)", () => {
     expect(out(":::transclude\npage-123\n:::", reg)).toContain('<div class="transclude" data-page="page-123">');
   });
+  it(":::embed → degrades to a link in exported HTML (no iframe; url escaped)", () => {
+    const h = out(":::embed\nhttps://youtube.com/embed/x\n:::", reg);
+    expect(h).toContain('<a class="embed-link" href="https://youtube.com/embed/x"');
+    expect(h.toLowerCase()).not.toContain("<iframe"); // server export never emits an iframe
+    expect(h).toContain('data-fidelity="degrade"'); // embed = degrade → badged
+  });
+  it(":::embed with a non-http(s) url renders inert text in a span, never a live link", () => {
+    const h = out(":::embed\njavascript:alert(1)\n:::", reg);
+    expect(h.toLowerCase()).not.toContain('href="javascript:'); // never a link carrying the scheme
+    expect(h).toContain('<span class="embed-link">'); // rendered as inert text instead
+  });
 });

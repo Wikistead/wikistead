@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, checkboxControl, enterMacroCommand, ephemeralCollab, macroPresence, macroPresencePlugin, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, embedAllowlist, checkboxControl, enterMacroCommand, ephemeralCollab, macroPresence, macroPresencePlugin, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { listEditing } from "./live-preview/list-edit";
 import { floatingToolbar } from "./live-preview/toolbar";
@@ -64,7 +64,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence } = {},
+  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -159,6 +159,7 @@ export function mountLivePreview(
       ...(opts.renderDiagram ? [diagramRenderer.of(opts.renderDiagram)] : []),
       // #108: host-mediated transclude (the :::transclude macro never fetches — narrow host-API).
       ...(opts.resolveTransclude ? [transcludeResolver.of(opts.resolveTransclude)] : []),
+      ...(opts.embedProviders ? [embedAllowlist.of(opts.embedProviders)] : []),
       // #92: host ephemeral-collab seam for a collab-capable modal (excalidraw); {theme} stays narrow.
       ...(opts.ephemeralCollab ? [ephemeralCollab.of(opts.ephemeralCollab)] : []),
       // #92 presence: bridge "editing a macro's modal" onto the page awareness (badge at the anchor).
@@ -204,7 +205,7 @@ export function mountPublishedView(
   // A checkbox click calls it; the host flips the live draft over its collab connection
   // and folds the flip into published_md via the no-revision endpoint. Absent → the
   // checkboxes render DISABLED (display only; the server is the bastion regardless).
-  opts: { resolveImageUrl?: ImageResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; onToggleTask?: (index: number, from: number, checked: boolean) => void } = {},
+  opts: { resolveImageUrl?: ImageResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; onToggleTask?: (index: number, from: number, checked: boolean) => void } = {},
 ): EditorView {
   const view = new EditorView({
     doc: markdown,
@@ -222,6 +223,7 @@ export function mountPublishedView(
       ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
       ...(opts.renderDiagram ? [diagramRenderer.of(opts.renderDiagram)] : []),
       ...(opts.resolveTransclude ? [transcludeResolver.of(opts.resolveTransclude)] : []),
+      ...(opts.embedProviders ? [embedAllowlist.of(opts.embedProviders)] : []),
       EditorState.readOnly.of(true),
       EditorView.editable.of(false),
     ],

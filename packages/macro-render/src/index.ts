@@ -10,7 +10,7 @@ export {
   parseLayoutItems,
   columnsHtmlRender, tabsHtmlRender, detailsHtmlRender,
   CALLOUT_TYPES, calloutHtmlRender,
-  tableHtmlRender, transcludeHtmlRender,
+  tableHtmlRender, transcludeHtmlRender, embedHtmlRender,
   mermaidHtmlRender, plantumlHtmlRender, excalidrawHtmlRender,
   builtinDirectiveDescriptors, builtinFenceDescriptors, builtinMacroRegistry,
 } from "./directives.js";

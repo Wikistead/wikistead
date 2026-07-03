@@ -51,6 +51,34 @@ describe('GET /pages/:pageId/embed (#108 / ADR-071)', () => {
   })
 })
 
+describe('GET /embed/providers (#108 / ADR-071 comment 551 — client iframe allowlist)', () => {
+  const providers = () => app.inject({ method: 'GET', url: '/embed/providers', headers: { host: HOST } })
+
+  // Upsert (not UPDATE): the tenant_settings row may not exist yet when this file runs in the full
+  // suite — an UPDATE would affect 0 rows and the read would fall back to the default [].
+  const setProviders = (hosts: string[]) =>
+    admin`INSERT INTO tenant_settings (tenant_id, embed_providers) VALUES (${TENANT}, ${admin.array(hosts)})
+          ON CONFLICT (tenant_id) DO UPDATE SET embed_providers = ${admin.array(hosts)}`
+
+  it('returns the empty allowlist by default (external embed off, opt-in)', async () => {
+    await setProviders([])
+    const res = await providers()
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ providers: [] })
+  })
+
+  it('returns the operator-configured allowlisted hosts', async () => {
+    await setProviders(['youtube.com', 'player.vimeo.com'])
+    try {
+      const res = await providers()
+      expect(res.statusCode).toBe(200)
+      expect(res.json().providers).toEqual(['youtube.com', 'player.vimeo.com'])
+    } finally {
+      await setProviders([])
+    }
+  })
+})
+
 describe('POST /pages/:pageId/plantuml/render (#140 / ADR-074)', () => {
   const render = (source?: string) =>
     app.inject({

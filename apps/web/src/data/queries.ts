@@ -493,6 +493,16 @@ export function useBranding() {
     staleTime: 60_000,
   });
 }
+// #108 / ADR-071: the tenant's external-embed host allowlist for the client-direct sandboxed iframe.
+// PUBLIC + host-resolved (like /branding). Empty ⇒ external embeds all degrade to a link (opt-in off).
+export function useEmbedProviders() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["embed-providers"],
+    queryFn: () => apiFetch<{ providers: string[] }>("/embed/providers", token),
+    staleTime: 60_000,
+  });
+}
 export function useUpdateTenantBranding() {
   const { token } = useSession();
   const qc = useQueryClient();

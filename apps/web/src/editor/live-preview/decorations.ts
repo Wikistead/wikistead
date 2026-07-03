@@ -14,6 +14,7 @@ import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
 import { parseFenceLine } from "@wikistead/macro-render"; // #198: code-fence attribute parser
 import { renderMarkdownToDom, renderCalloutPanel } from "../macros/md-render";
+import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
 import { openMacroModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost } from "./macro-edit";
@@ -390,6 +391,14 @@ export const transcludeResolver = Facet.define<TranscludeResolver, TranscludeRes
   combine: (values) => values[0] ?? noopTranscludeResolver,
 });
 
+// Host-injected external-embed host allowlist (#108 / ADR-071 comment 551). The :::embed macro can't
+// read the allowlist (host-API is {theme} only); the HOST supplies the tenant's allowlisted hosts and
+// the MacroWidget renders a sandboxed iframe for an allowlisted https URL, else degrades to a link.
+// Default empty ⇒ every embed degrades to a link (operator opt-in — external embed off by default).
+export const embedAllowlist = Facet.define<readonly string[], readonly string[]>({
+  combine: (values) => values[0] ?? [],
+});
+
 const ATTACHMENT_REF = /^!\[([^\]]*)\]\(wks-attachment:([^)\s]+)\)$/;
 
 // Renders an image from a wks-attachment reference. src is filled in
@@ -664,6 +673,13 @@ class MacroWidget extends WidgetType {
             rendered.appendChild(renderMarkdownToDom(content)); // sanitized DOM (no innerHTML)
           }
         });
+      }
+      // #108 / ADR-071 (comment 551): host-mediated external embed. The macro can't read the allowlist
+      // (narrow host-API); the host checks the URL against the injected tenant allowlist and renders a
+      // sandboxed iframe for an allowlisted https host, else a degrade link (Open formats). Synchronous
+      // (client-direct iframe — no server proxy/fetch, so no SSRF surface on this path).
+      if (this.name === "embed" && this.body.trim() !== "") {
+        rendered.replaceChildren(buildEmbedElement(this.body, view.state.facet(embedAllowlist)));
       }
     }
     if (!view.state.readOnly) {
@@ -1454,6 +1470,9 @@ export const livePreviewTheme = EditorView.baseTheme({
   // Display-only (never edits/offsets).
   ".cm-lp-macro-wrap:hover:not(.cm-lp-atom-sel)": { outline: "1px solid var(--border, #888)", outlineOffset: "1px", borderRadius: "4px" },
   ".cm-lp-macro": { display: "block", overflowX: "auto" },
+  // #108 external embed: a responsive 16:9 sandboxed iframe; the degrade link is a plain inline link.
+  ".cm-lp-embed-frame": { display: "block", width: "100%", aspectRatio: "16 / 9", border: "1px solid var(--border, #3a3a3a)", borderRadius: "6px", background: "var(--panel, #1e1e1e)" },
+  ".cm-lp-embed-degrade": { display: "inline-block", wordBreak: "break-all" },
   // #92 presence badge: a small "N editing" pill with a coloured dot per remote editor, drawn just
   // before a macro whose modal a peer has open. Display-only; sits inline at the anchor.
   ".cm-lp-macro-presence": { display: "inline-flex", alignItems: "center", gap: "0.25em", margin: "0 0.35em 0 0", padding: "0.05em 0.4em", borderRadius: "999px", background: "var(--panel-2, #2d2d2e)", border: "1px solid var(--border, #3a3a3a)", fontSize: "0.75em", verticalAlign: "middle", userSelect: "none" },
