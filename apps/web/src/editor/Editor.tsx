@@ -4,7 +4,7 @@ import { EditorView } from "@codemirror/view";
 import { headingsExtension, extractHeadings, type Heading } from "./headings";
 import { connect, connectEphemeral } from "./collab";
 import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayModeContent } from "./editor-livepreview";
-import type { DisplayMode } from "./live-preview/decorations";
+import type { DisplayMode, MacroTheme } from "./live-preview/decorations";
 import { redrawMacros } from "./live-preview/decorations";
 import { useTheme } from "../app/ThemeProvider";
 import { makeMacroPresence } from "./macro-presence";
@@ -374,11 +374,15 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
   }, [displayMode, surfaceKey, displayModeCompartment]);
 
   // #200: on a light/dark theme change, tell the live-preview to rebuild macro widgets so a macro that
-  // bakes theme colours into its output (Excalidraw's exported SVG) re-renders for the new theme.
-  // ThemeProvider has already updated <html data-theme> by the time this effect runs, so the rebuild's
-  // currentMacroTheme() reads the new value. CSS-driven macros (callouts) are unaffected — free re-theme.
+  // bakes theme colours into its output (Excalidraw's exported SVG) re-renders for the new theme. We
+  // pass the RESOLVED theme in the effect payload — NOT relying on <html data-theme>, which is still
+  // stale here: this effect (a ThemeProvider child) fires BEFORE ThemeProvider's own effect updates
+  // the DOM (React runs effects child→parent). CSS-driven macros (callouts) re-theme for free.
   useEffect(() => {
-    previewViewRef.current?.dispatch({ effects: redrawMacros.of(null) });
+    const resolved: MacroTheme = theme === "system"
+      ? (window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+      : theme;
+    previewViewRef.current?.dispatch({ effects: redrawMacros.of(resolved) });
   }, [theme]);
 
   // Keep the published view in sync when publishedMd changes WITHOUT remounting.

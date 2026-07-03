@@ -9,6 +9,7 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 import { findFenceMacro, findDirectiveMacro, editModeOf, type FenceMacro, type MacroTheme } from "../macros/registry";
+export type { MacroTheme }; // #200: re-exported so the Editor can type the redrawMacros payload
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen } from "../macros/directive-parser";
@@ -280,8 +281,10 @@ export const macroPresence = Facet.define<MacroPresence, MacroPresence | null>({
 const redrawMacroPresence = StateEffect.define<null>();
 // #200: dispatched by the editor when the light/dark theme changes, so buildDecorations re-runs and
 // rebuilds macro widgets with the new theme (their eq keys on theme → CM recreates them → liveRender
-// re-exports for the new theme). The theme is read live from <html data-theme> inside buildDecorations.
-export const redrawMacros = StateEffect.define<null>();
+// re-exports for the new theme). The effect CARRIES the new theme (React's resolved value): a live
+// <html data-theme> read is STALE at dispatch time — the Editor effect fires child-first, before
+// ThemeProvider updates the DOM — so buildDecorations uses this payload as the theme override.
+export const redrawMacros = StateEffect.define<MacroTheme>();
 
 // The peer badge shown at a macro's anchor: one coloured dot per remote editor + a count and an
 // "editing" label. Display-only (contenteditable=false, ignoreEvent) so it never enters the atom.
@@ -634,7 +637,7 @@ class MacroWidget extends WidgetType {
       ph.textContent = `Empty ${this.name} — click to ${opens ? "open" : "edit"}`;
       wrap.appendChild(ph);
     } else {
-      const rendered = this.macro.liveRender(this.body, { theme: currentMacroTheme() });
+      const rendered = this.macro.liveRender(this.body, { theme: this.theme }); // #200: the widget's built theme (eq() rebuilds on a switch), not a live DOM read
       wrap.appendChild(rendered);
       // #140 / ADR-074: host-mediated render. The macro returned its degrade DOM (the source fence);
       // for a host-renderable lang (plantuml) ask the injected renderer for image bytes and, on
@@ -855,6 +858,11 @@ function atomSelected(state: EditorState, from: number, to: number): boolean {
 // that machinery exists or is implied here.
 export interface RenderCtx {
   readonly state: EditorState;
+  // #200: the theme to build macro widgets with. On a light/dark switch it's the redrawMacros effect
+  // payload (React's new theme) — NOT a live <html data-theme> read, which is STALE at that moment
+  // (the Editor's effect fires child-first, before ThemeProvider updates data-theme). Falls back to
+  // currentMacroTheme for every other (non-theme-switch) rebuild, where the DOM is correct.
+  readonly macroTheme: MacroTheme;
   // Style a range (mark decoration) or a whole line (line decoration at line.from
   // — pass only `from`). Cannot change document length.
   add(deco: Decoration, from: number, to?: number): void;
@@ -935,7 +943,7 @@ const RENDERERS: BlockRenderer[] = [
         // reveals — entering opens its modal. Otherwise the atom renders.
         const active = ctx.state.field(macroRenderActiveField, false);
         if (active && !macro.richEditUI && active.from <= from && active.to >= to) return; // entered → source
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), true, lang!, atomSelected(ctx.state, from, to), currentMacroTheme()), block: true }), from, to);
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), true, lang!, atomSelected(ctx.state, from, to), ctx.macroTheme), block: true }), from, to);
         return;
       }
       const first = doc.lineAt(node.from).number;
@@ -1010,7 +1018,7 @@ const RENDERERS: BlockRenderer[] = [
         if (macro.revealOnCursor && rangeRevealed(ctx.state, from, to)) return false;
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editMode: macro.editMode }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), currentMacroTheme()), block: true }), from, to);
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editMode: macro.editMode }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme), block: true }), from, to);
         return macro.revealOnCursor ? false : undefined;
       }
       if (macro.collapsible && !rangeRevealed(ctx.state, first.from, lastLine.to)) {
@@ -1162,7 +1170,7 @@ const RENDERERS: BlockRenderer[] = [
   },
 ];
 
-function buildDecorations(state: EditorState): {
+function buildDecorations(state: EditorState, themeOverride?: MacroTheme): {
   decorations: DecorationSet;
   atomic: DecorationSet;
   blocks: { from: number; to: number }[];
@@ -1175,6 +1183,8 @@ function buildDecorations(state: EditorState): {
   const blocks: { from: number; to: number }[] = [];
   const ctx: RenderCtx = {
     state,
+    macroTheme: themeOverride ?? currentMacroTheme(), // #200: effect payload on a theme switch, else the DOM
+
     add: (deco, from, to = from) => all.push(deco.range(from, to)),
     hideMarker: (from, to, deco = hide) => {
       if (from >= to) return;
@@ -1229,7 +1239,7 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
     for (const e of tr.effects) if (e.is(foldEffect) || e.is(unfoldEffect) || e.is(setMacroRenderActive)) return buildDecorations(tr.state);
     // #200: a theme change → rebuild so macro widgets pick up the new theme (their eq keys on theme,
     // so CM recreates them and liveRender re-exports for light/dark). Excalidraw etc. bake colours in.
-    for (const e of tr.effects) if (e.is(redrawMacros)) return buildDecorations(tr.state);
+    for (const e of tr.effects) if (e.is(redrawMacros)) return buildDecorations(tr.state, e.value); // #200: rebuild with the effect's theme (not the stale DOM)
     return value;
   },
   provide: (f) => [
