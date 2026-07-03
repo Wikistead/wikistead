@@ -8,6 +8,7 @@ import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, checkboxControl, enterMacroCommand, ephemeralCollab, macroPresence, macroPresencePlugin, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
+import { listEditing } from "./live-preview/list-edit";
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette } from "./live-preview/palette";
 import { contextMenu } from "./live-preview/context-menu";
@@ -102,6 +103,8 @@ export function mountLivePreview(
       // / source reveal). High prec so it beats vim's default Enter handling. event.key
       // "Enter" is JIS-safe. Mouse users enter by clicking (decorations MacroWidget).
       Prec.high(keymap.of([{ key: "Ctrl-Enter", run: enterMacroCommand }])),
+      // #202: list-editing keys (Tab/Shift-Tab indent, Enter continuation) — editable surface only.
+      ...(opts.readOnly ? [] : [listEditing]),
       // Task checkboxes are interactive on the editable surface: a click flips the
       // `[ ]`/`[x]` char directly in the Y.Text (a normal draft edit). (Read-only →
       // disabled; the view surface wires its own no-revision persist below.)
