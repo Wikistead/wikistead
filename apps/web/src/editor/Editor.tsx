@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, type MutableRefObject } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Compartment, StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { headingsExtension, extractHeadings, type Heading } from "./headings";
@@ -11,6 +11,8 @@ import { makeMacroPresence } from "./macro-presence";
 import { makeImageResolver } from "./image-resolver";
 import { makeDiagramRenderer } from "./diagram-renderer";
 import { makeTranscludeResolver } from "./transclude-resolver";
+import { PageEmbedPicker } from "./PageEmbedPicker";
+import type { PageEmbedPicker as PageEmbedPickerFn } from "./live-preview/palette";
 import { useEmbedProviders } from "../data/queries";
 import { createAnchor, resolveAnchor } from "./comment-anchors";
 import { setCommentRanges, type CommentRange } from "./live-preview/comment-highlights";
@@ -223,6 +225,22 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
   // sandboxed iframe. Stable reference (react-query) so it doesn't churn the surface remount.
   const embedQuery = useEmbedProviders();
   const embedProviders = useMemo(() => embedQuery.data?.providers ?? [], [embedQuery.data]);
+  // #205 part 2: the `:::embed-page` title-search picker. The slash command calls openPageEmbedPicker
+  // (stable, so it doesn't churn the surface remount); we stash the CM callback, open the modal, and
+  // resolve it with the chosen page id (or null on cancel). Candidates are FGA-view-filtered by
+  // /search (in PageEmbedPicker) — no existence leak.
+  const [embedPickerOpen, setEmbedPickerOpen] = useState(false);
+  const embedPickResolve = useRef<((id: string | null) => void) | null>(null);
+  const openPageEmbedPicker = useCallback<PageEmbedPickerFn>((onPick) => {
+    embedPickResolve.current = onPick;
+    setEmbedPickerOpen(true);
+  }, []);
+  const handleEmbedPick = useCallback((id: string | null) => {
+    setEmbedPickerOpen(false);
+    const r = embedPickResolve.current;
+    embedPickResolve.current = null;
+    r?.(id);
+  }, []);
 
   // Dev-only probe for the isolation invariant (ADR-013): editor content is not in
   // React state, so typing must NOT re-render this component (read before/after).
@@ -292,6 +310,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       renderDiagram,
       resolveTransclude,
       embedProviders,
+      openPageEmbedPicker,
       uploadImage: onUploadImage,
       vim,
       vimCompartment,
@@ -336,7 +355,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     };
     // vim excluded (Compartment reconfigure, not a remount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, renderDiagram, resolveTransclude, embedProviders, onUploadImage]);
+  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, renderDiagram, resolveTransclude, embedProviders, openPageEmbedPicker, onUploadImage]);
 
   // vim on/off: reconfigure the Compartment IN PLACE (no remount → collab/presence
   // untouched). Only meaningful on the edit surface.
@@ -399,6 +418,8 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
         {/* Edit/Done/vim controls live in the host PageToolbar. */}
         <div ref={previewRef} className="flex min-h-0 flex-1 flex-col" />
       </section>
+      {/* #205 part 2: the :::embed-page title-search picker (opened from the slash command). */}
+      <PageEmbedPicker open={embedPickerOpen} onPick={handleEmbedPick} />
     </div>
   );
 });
