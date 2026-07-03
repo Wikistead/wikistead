@@ -107,7 +107,12 @@
     "tocDepthHint": "目次に含める見出しレベルの数。",
     "tocDepth_1": "H1 のみ",
     "tocDepth_3": "H1〜H3",
-    "tocDepth_6": "すべての見出し"
+    "tocDepth_6": "すべての見出し",
+    "appearance": "外観",
+    "appearanceHint": "ライト・ダーク・システムに合わせる。",
+    "accent": "アクセントカラー",
+    "accentHint": "あなた個人のアクセント色。あなたにだけワークスペースのアクセントを上書きします。",
+    "accentInherit": "デフォルト（ワークスペースに合わせる）"
   },
   "settings": {
     "back": "アプリに戻る",

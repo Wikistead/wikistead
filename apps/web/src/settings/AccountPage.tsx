@@ -8,6 +8,7 @@ import { useSession } from "../session/SessionProvider";
 import { useTheme, type Theme } from "../app/ThemeProvider";
 import { useFontBody, type FontBody } from "../app/FontProvider";
 import { useTocPref } from "../toc/useTocPref";
+import { AccentPicker } from "./AccentPicker";
 import { Avatar } from "../ui/Avatar";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
@@ -314,11 +315,13 @@ function EditorTab() {
 
 function ThemeTab() {
   const { t } = useTranslation();
-  const { theme, setTheme } = useTheme(); // reuse the existing device-local control
+  const { theme, setTheme, accent, setAccent } = useTheme(); // device-local: light/dark AND personal accent (#201)
   return (
     <div data-testid="account-theme">
     <SettingsPage title={t("accountNav.theme")} description={t("account.themeHint")}>
       <SettingsCard>
+      <label className="mb-1 block text-sm font-medium">{t("account.appearance")}</label>
+      <p className="mb-2 text-xs text-fg-dim">{t("account.appearanceHint")}</p>
       <div className="flex gap-2">
         {(["light", "dark", "system"] as const).map((th: Theme) => (
           <Button
@@ -332,6 +335,14 @@ function ThemeTab() {
           </Button>
         ))}
       </div>
+      </SettingsCard>
+
+      {/* #201: personal accent — device-local (like light/dark), overrides the tenant accent for THIS
+          user only. Default = inherit the tenant accent (null). */}
+      <SettingsCard>
+        <label className="mb-1 block text-sm font-medium">{t("account.accent")}</label>
+        <p className="mb-2 text-xs text-fg-dim">{t("account.accentHint")}</p>
+        <AccentPicker value={accent} onChange={setAccent} inheritLabel={t("account.accentInherit")} />
       </SettingsCard>
     </SettingsPage>
     </div>

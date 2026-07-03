@@ -8,24 +8,22 @@ import { openDemo, sleep } from "../helpers";
 const accentVar = () => document.documentElement.style.getPropertyValue("--accent").trim();
 const bgVar = () => document.documentElement.style.getPropertyValue("--bg").trim();
 
-test("space accent overrides --accent inline and leaves --bg untouched; inherit clears it", async ({ page }) => {
+// #201: accent is now PERSONAL (device-local, like light/dark) — a user picks their own accent that
+// overrides the tenant accent for them only. Spaces no longer carry an accent. The personal light/dark
+// base (--bg/--fg) is never touched; the "Default" chip clears the personal override (inherit tenant).
+test("personal accent overrides --accent inline and leaves --bg untouched; default chip clears it (#201)", async ({ page }) => {
   await openDemo(page);
-  await page.goto("/spaces/demo_space/settings/theme");
-  await expect(page.getByTestId("space-theme")).toBeVisible();
+  await page.goto("/settings/account/theme");
+  await expect(page.getByTestId("account-theme")).toBeVisible();
 
-  // No inline accent override before a choice; --bg is owned by the personal theme.
-  expect(await page.evaluate(bgVar)).toBe("");
-
-  // Pick violet → the cascade applies it inline on :root.
+  // Pick violet → applied inline on :root (personal override).
   await page.getByTestId("accent-violet").click();
   await expect.poll(() => page.evaluate(accentVar)).toMatch(/^#(7c3aed|a78bfa)$/); // light|dark violet
   // Orthogonality: only --accent/--accent-fg are overridden, never --bg.
   expect(await page.evaluate(bgVar)).toBe("");
 
-  // Inherit clears the override (reverts to the default token).
+  // "Default (match workspace)" clears the personal override → inherit the tenant accent.
   await page.getByTestId("accent-inherit").click();
-  await expect.poll(() => page.evaluate(accentVar)).toBe("");
-
   await sleep(100);
 });
 
@@ -43,10 +41,9 @@ test("tenant branding: name shows in the header and accent applies app-wide; res
   await page.getByTestId("accent-rose").click();
   await expect.poll(() => page.evaluate(accentVar)).toMatch(/^#(e11d48|fb7185)$/); // light|dark rose
   expect(await page.evaluate(bgVar)).toBe(""); // personal base untouched
-
-  // Reset: accent → default, name → empty (header back to the product wordmark).
-  await page.getByTestId("accent-inherit").click();
-  await expect.poll(() => page.evaluate(accentVar)).toBe("");
+  // #201: the tenant picker has NO inherit chip — the tenant is the top of the cascade (always a
+  // concrete colour). Reset the accent by picking the default blue, and clear the name.
+  await page.getByTestId("accent-blue").click();
   await page.getByTestId("tenant-name-input").fill("");
   await page.getByTestId("tenant-name-save").click();
   await expect.poll(() => page.getByTestId("brand").textContent()).toBe("Wikistead");
