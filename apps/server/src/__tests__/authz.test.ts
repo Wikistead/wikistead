@@ -70,6 +70,60 @@ describe('cross-tenant isolation', () => {
   })
 })
 
+// ── Monotonic deny — restricted (#109 / ADR-072) ──────────────────────────
+//
+// A principal listed in page#restricted cannot view the page even if they'd
+// otherwise qualify (space viewer, direct grant, public, commenter). Deny wins
+// over every grant path: view = viewable but not restricted. These run against
+// the real OpenFGA engine (security boundary). A dedicated page id keeps the
+// heavily-shared page:demo state clean; one test uses dev-user's space-viewer
+// path on page:demo but restores it.
+
+describe('monotonic deny — restricted', () => {
+  const PG = 'restrict-test-pg'
+  const restr = (u: string) => ({ user: `user:${u}`, relation: 'restricted', object: `page:${PG}` })
+  const grant = (u: string) => ({ user: `user:${u}`, relation: 'view_base', object: `page:${PG}` })
+  const pub = { user: 'user:*', relation: 'view_base', object: `page:${PG}` }
+  const ALL = [
+    restr('alice'), restr('bob'), restr('carol'), grant('alice'), grant('bob'), grant('carol'), pub,
+    { user: 'user:dev-user', relation: 'restricted', object: 'page:demo' },
+  ]
+  // writeTuples is ATOMIC and rejects a duplicate, so a prior failed run's leftovers would break the
+  // next write. Delete each tuple individually (ignore "not found") BOTH before and after — no test
+  // pollutes page:demo or the shared graph even if it throws mid-way.
+  const clean = async () => { for (const t of ALL) await deleteTuples(fgaClient, [t]).catch(() => {}) }
+  beforeEach(clean)
+  afterEach(clean)
+
+  it('deny wins over a direct view_base grant (grant → view; +restricted → deny)', async () => {
+    await writeTuples(fgaClient, [grant('alice')])
+    expect(await check(fgaClient, 'user:alice', 'view', page(PG))).toBe(true)
+    await writeTuples(fgaClient, [restr('alice')])
+    expect(await check(fgaClient, 'user:alice', 'view', page(PG))).toBe(false)
+  })
+
+  it('restriction is per-principal — restricting alice does not affect bob', async () => {
+    await writeTuples(fgaClient, [grant('alice'), grant('bob'), restr('alice')])
+    expect(await check(fgaClient, 'user:alice', 'view', page(PG))).toBe(false)
+    expect(await check(fgaClient, 'user:bob', 'view', page(PG))).toBe(true)
+  })
+
+  it('deny hides a PUBLIC page from a restricted member (view=false despite user:*)', async () => {
+    await writeTuples(fgaClient, [pub, restr('carol')])
+    expect(await check(fgaClient, 'user:anyone-else', 'view', page(PG))).toBe(true) // public → anyone views
+    expect(await check(fgaClient, 'user:carol', 'view', page(PG))).toBe(false) // ...except the restricted member
+  })
+
+  it('deny wins over the space-viewer path (space viewer but page restricted → denied)', async () => {
+    // dev-user views page:demo via space manager inheritance (baseline true).
+    expect(await check(fgaClient, 'user:dev-user', 'view', page('demo'))).toBe(true)
+    await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'restricted', object: 'page:demo' }])
+    expect(await check(fgaClient, 'user:dev-user', 'view', page('demo'))).toBe(false)
+    // NOTE: ADR-072 scopes the deny to `view`; `edit` has its own grant path and is NOT subtracted here.
+    // Whether restriction should also block edit is a follow-up decision (see the ticket) — not asserted.
+  })
+})
+
 // ── share_link: non-expiring (no condition) ───────────────────────────────
 
 describe('non-expiring share_link', () => {

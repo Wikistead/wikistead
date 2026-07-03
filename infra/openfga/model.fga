@@ -88,9 +88,21 @@ type page
     # explicit per-principal comment grant (member/group granularity)  ∪  edit  ∪  the audience gate.
     # A specific member may be granted comment even when the audience toggle is off.
     define comment: [user, group#member] or edit or (view_base and comment_open)
-    # view = direct viewers OR anyone who can comment (commenters can view). Acyclic:
-    # comment → {view_base, comment_open, edit}; view → {view_base, comment}; view_base is a leaf.
-    define view: view_base or comment
+    # #109 / ADR-072: per-page MONOTONIC DENY. A principal listed in `restricted` cannot view the page
+    # even if they'd otherwise qualify (space viewer, direct grant, commenter) — deny wins over every
+    # grant path. This is the "space viewer but page restricted → denied" case. Direct view grants stay
+    # on `view_base` (the leaf, so direct writes are unaffected); the search denormaliser reads
+    # view_base/comment (§doc-builder) and is NOT changed by this, while search stage-2 checks `view`
+    # (now excluding restricted), so a restricted user is filtered even from a public / denormalised
+    # page. `viewable` splits the union out because OpenFGA exclusion (`but not`) subtracts from a
+    # single base userset.
+    define restricted: [user, group#member]
+    # viewable = direct viewers OR anyone who can comment (commenters can view). Acyclic:
+    # comment → {view_base, comment_open, edit}; viewable → {view_base, comment}; view_base is a leaf.
+    define viewable: view_base or comment
+    # view = viewable MINUS restricted (monotonic deny). Every `view` check (routes, revisions, search
+    # stage-2, public anon) inherits the deny.
+    define view: viewable but not restricted
 
 # Evaluated at check time using current_time from the check context.
 # expires_at is stored in the tuple condition context at write time.
