@@ -125,10 +125,14 @@ export const tabsMacro: DirectiveMacro = {
     wrap.append(bar, panels);
     return wrap;
   },
+  // M3 export / Open-formats degrade (#90, approved: meaning-preserving). A plain reader has no tab
+  // widget, so each tab degrades to a VISIBLE HEADING (its label) + body — the information (which
+  // content belongs to which tab) survives, only the tab affordance is lost. (Was: label hidden in a
+  // data-label attribute → a non-tab reader lost the labels entirely.)
   htmlRender: (body) =>
     html`<div class="tabs">${joinSafe(
       parseLayoutItems(body, "tab").map(
-        (t, i) => html`<section class="tab" data-label="${t.label || `Tab ${i + 1}`}">\n\n${t.content}\n\n</section>`,
+        (t, i) => html`<section class="tab"><h3 class="tab-label">${t.label || `Tab ${i + 1}`}</h3>\n\n${t.content}\n\n</section>`,
       ),
     )}</div>`,
 };

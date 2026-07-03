@@ -15,6 +15,17 @@ const mdParser = parser.configure(directiveExtension);
 // @lezer/common isn't a direct dependency — derive the SyntaxNode type from the parser instead.
 type SNode = ReturnType<typeof mdParser.parse>["topNode"];
 
+// #90 (approved: nest depth 2–3): cap how deep a directive may nest a LIVE macro widget. Container
+// directives (columns / tabs / callouts) recurse by calling renderMarkdownToDom on their sub-bodies,
+// which would otherwise dispatch nested live widgets to ANY depth — a runaway for recursive rendering
+// and, worse while #183 (vim atom-boundary motion, symptom C) is open, for atom motion + reveal
+// granularity (#196). Beyond the cap a nested directive renders as its plain content (the generic box
+// / real markdown) so the structure never breaks and NO information is lost — only the live layout
+// framing stops. The counter is safe as a module singleton because rendering is fully SYNCHRONOUS
+// (a liveRender call recurses into renderMarkdownToDom inline; no async interleaving between renders).
+const MAX_NESTED_DIRECTIVE_DEPTH = 2; // ≈3 visual levels incl. the top-level widget (from decorations.ts)
+let nestedDirectiveDepth = 0;
+
 // Mark/structural nodes whose own text must NOT be emitted (the `*`/`#`/`[` `]` `(` `)` etc.).
 const MARKS = new Set([
   "EmphasisMark", "CodeMark", "LinkMark", "HeaderMark", "QuoteMark", "ListMark",
@@ -139,22 +150,30 @@ function renderBlock(node: SNode, src: string, into: Node): void {
       const nl = full.indexOf("\n");
       const parsed = parseDirectiveOpen(nl === -1 ? full : full.slice(0, nl));
       const macro = parsed ? findDirectiveMacro(parsed.name) : undefined;
-      if (macro?.liveRender) {
+      // #90: at the nesting cap, do NOT dispatch a nested live widget / callout panel — fall through
+      // to the generic box below (renderBlocks → plain content), so deeply-nested directives still
+      // show their content but stop spawning recursive live layouts.
+      const atDepthCap = nestedDirectiveDepth >= MAX_NESTED_DIRECTIVE_DEPTH;
+      if (!atDepthCap && macro?.liveRender) {
         const lines = full.split("\n").slice(1); // drop the opening ::: line
         if (lines.length && /^\s*:::+\s*$/.test(lines[lines.length - 1]!)) lines.pop(); // drop close :::
-        try {
-          into.appendChild(macro.liveRender(lines.join("\n"), { theme: currentMacroTheme() }));
-          return;
-        } catch { /* a macro that throws must not break the render → fall through to the generic box */ }
+        nestedDirectiveDepth++;
+        let rendered = false;
+        try { into.appendChild(macro.liveRender(lines.join("\n"), { theme: currentMacroTheme() })); rendered = true; }
+        catch { /* a macro that throws must not break the render → fall through to the generic box */ }
+        nestedDirectiveDepth--;
+        if (rendered) return;
       }
       // #170 / ADR-049 (Y): a CONTAINER directive with an icon = a typed callout. It has no
       // liveRender (its body stays Markdown), so render the shared callout PANEL (icon + title +
       // nested body) — the single source of truth reused by the CM widget (decorations.ts) and here
       // (nested callouts inside transclude/columns render as real panels, not a generic box).
-      if (macro?.containerClass && macro.icon) {
+      if (!atDepthCap && macro?.containerClass && macro.icon) {
         const lines = full.split("\n").slice(1);
         if (lines.length && /^\s*:::+\s*$/.test(lines[lines.length - 1]!)) lines.pop();
-        into.appendChild(renderCalloutPanel(macro.containerClass, macro.icon, parsed?.label ?? "", lines.join("\n")));
+        nestedDirectiveDepth++;
+        try { into.appendChild(renderCalloutPanel(macro.containerClass, macro.icon, parsed?.label ?? "", lines.join("\n"))); }
+        finally { nestedDirectiveDepth--; }
         return;
       }
       const el = document.createElement("div"); el.className = "cm-lp-md-directive";
