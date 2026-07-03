@@ -3,6 +3,14 @@
    hide all app chrome — sidebar, search, comments, attachments, toolbars, the
    export/print strip. The visibility trick prints just that subtree regardless of
    layout structure; the rendered preview prints as formatted text. */
+/* #207: the browser default print margin is oversized. Set a compact, even page margin so the
+   content uses the sheet. (Part 2 of #207 — macros printing as raw ::: markers — stems from CM's
+   viewport virtualisation: only the on-screen slice is in the DOM to print, and the reveal-on-cursor
+   raw source of the focused macro leaks; the robust fix is to print the full server-rendered HTML from
+   the shared macro renderer (#85), tracked there.) */
+@page {
+  margin: 14mm;
+}
 @media print {
   body * {
     visibility: hidden;
