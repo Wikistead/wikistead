@@ -234,11 +234,12 @@ function PageRoute() {
   const [commentsOpen, setCommentsOpen] = useState(() => {
     try { return localStorage.getItem("wks.commentsOpen") === "1"; } catch { return false; }
   });
-  const toggleComments = () => setCommentsOpen((v) => {
-    const n = !v;
-    try { localStorage.setItem("wks.commentsOpen", n ? "1" : "0"); } catch { /* no storage */ }
-    return n;
-  });
+  const toggleComments = () => {
+    const willOpen = !commentsOpen;
+    setCommentsOpen(willOpen);
+    try { localStorage.setItem("wks.commentsOpen", willOpen ? "1" : "0"); } catch { /* no storage */ }
+    if (willOpen) closeOtherRightPanels("comments"); // #206: one right panel at a time
+  };
   const closeComments = useCallback(() => {
     setCommentsOpen(false);
     try { localStorage.setItem("wks.commentsOpen", "0"); } catch { /* no storage */ }
@@ -249,11 +250,12 @@ function PageRoute() {
   const [historyOpen, setHistoryOpen] = useState(() => {
     try { return localStorage.getItem("wks.historyOpen") === "1"; } catch { return false; }
   });
-  const toggleHistory = () => setHistoryOpen((v) => {
-    const n = !v;
-    try { localStorage.setItem("wks.historyOpen", n ? "1" : "0"); } catch { /* no storage */ }
-    return n;
-  });
+  const toggleHistory = () => {
+    const willOpen = !historyOpen;
+    setHistoryOpen(willOpen);
+    try { localStorage.setItem("wks.historyOpen", willOpen ? "1" : "0"); } catch { /* no storage */ }
+    if (willOpen) closeOtherRightPanels("history"); // #206: one right panel at a time
+  };
   const closeHistory = useCallback(() => {
     setHistoryOpen(false);
     try { localStorage.setItem("wks.historyOpen", "0"); } catch { /* no storage */ }
@@ -262,8 +264,20 @@ function PageRoute() {
   // Attachments: a right-side panel opened on demand from the ⋯ menu (no longer an
   // always-on bottom bar).
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
-  const toggleAttachments = () => setAttachmentsOpen((v) => !v);
+  const toggleAttachments = () => {
+    const willOpen = !attachmentsOpen;
+    setAttachmentsOpen(willOpen);
+    if (willOpen) closeOtherRightPanels("attachments"); // #206: one right panel at a time
+  };
   const closeAttachments = useCallback(() => setAttachmentsOpen(false), []);
+
+  // #206: mutual exclusion — only one right panel (comments / history / attachments) is open at a time.
+  // Opening one closes the others (and clears their persisted-open flag).
+  const closeOtherRightPanels = (keep: "comments" | "history" | "attachments") => {
+    if (keep !== "comments") { setCommentsOpen(false); try { localStorage.setItem("wks.commentsOpen", "0"); } catch { /* no storage */ } }
+    if (keep !== "history") { setHistoryOpen(false); try { localStorage.setItem("wks.historyOpen", "0"); } catch { /* no storage */ } }
+    if (keep !== "attachments") setAttachmentsOpen(false);
+  };
 
   // Per-page permissions (manage only). Also the invite-to-draft surface.
   const [permsOpen, setPermsOpen] = useState(false);
