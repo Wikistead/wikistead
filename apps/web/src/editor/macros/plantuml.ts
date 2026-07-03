@@ -1,5 +1,5 @@
 import type { FenceMacro } from "./registry";
-import { html } from "./safe-html";
+import { plantumlHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
 
 // ```plantuml — PlantUML is GPL and needs a JRE, so it is NEVER bundled (ADR-011/ADR-074). The
 // DEFAULT render is DEGRADE-TO-SOURCE: the fence shows its source verbatim (a code block), always
@@ -25,5 +25,5 @@ export const plantumlMacro: FenceMacro = {
     return el;
   },
   // Static export degrades to the source (an external-render-enabled viewer can process it later).
-  htmlRender: (body) => html`<pre class="plantuml">${body}</pre>`,
+  htmlRender: plantumlHtmlRender,
 };

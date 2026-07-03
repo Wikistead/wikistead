@@ -10,6 +10,8 @@ export {
   parseLayoutItems,
   columnsHtmlRender, tabsHtmlRender, detailsHtmlRender,
   CALLOUT_TYPES, calloutHtmlRender,
-  builtinDirectiveDescriptors, builtinMacroRegistry,
+  tableHtmlRender, transcludeHtmlRender,
+  mermaidHtmlRender, plantumlHtmlRender, excalidrawHtmlRender,
+  builtinDirectiveDescriptors, builtinFenceDescriptors, builtinMacroRegistry,
 } from "./directives.js";
 export type { CalloutType } from "./directives.js";

@@ -1,7 +1,7 @@
 import type { FenceMacro, MacroContext, MacroModalController, HostEphemeralCollab, MacroSource } from "./registry";
 import { asMacroSource } from "./registry";
 import { writeLocalElements, readSceneElements, allElements, reconcile, elementsMap } from "./excalidraw-collab";
-import { html } from "./safe-html";
+import { excalidrawHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
 
 // ```excalidraw — body is an Excalidraw scene JSON. The PREVIEW (liveRender) uses
 // Excalidraw's NON-React exportToSvg, so no React enters CodeMirror (ADR-013). The
@@ -70,7 +70,7 @@ export const excalidrawMacro: FenceMacro = {
   // M3 wires HTML export. Excalidraw renders in the browser; the static form is a
   // placeholder (a server-side SVG pre-render is an M3 option). The JSON round-trips in
   // .md regardless (it's a code fence).
-  htmlRender: () => html`<div class="excalidraw-drawing">[Excalidraw drawing]</div>`,
+  htmlRender: excalidrawHtmlRender,
   richEditUI: {
     present: "modal",
     collab: true, // #92 / ADR-093: opt into the host's ephemeral collab seam (level-2 co-editing)

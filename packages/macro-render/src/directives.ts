@@ -1,5 +1,5 @@
 import { parseDirectiveOpen, isDirectiveClose } from "./directive-parser.js";
-import { html, joinSafe, type SafeHtml } from "./safe-html.js";
+import { html, joinSafe, unsafeHtml, type SafeHtml } from "./safe-html.js";
 import type { MacroHtmlDescriptor, MacroHtmlRegistry } from "./render.js";
 
 // #85 slice 2 / ADR-085: the DOM-FREE export half of the M2 layout directives (columns / tabs /
@@ -68,22 +68,42 @@ export function calloutHtmlRender(type: string): (body: string) => SafeHtml {
   return (body) => html`<div class="callout callout-${type}">\n\n${body}\n\n</div>`;
 }
 
-// The built-in directive descriptors (name → DOM-free export descriptor). All exportFidelity
-// "preserve": the ::: source round-trips losslessly; the htmlRender is the rendered HTML.
+// :::table body is TRUSTED HTML (ADR: the table macro emits HTML verbatim). unsafeHtml keeps parity
+// with the editor; the server export path (#85 slice 3) runs a sanitize allowlist over the result.
+export function tableHtmlRender(body: string): SafeHtml { return unsafeHtml(body); }
+// :::transclude → a placeholder the export can later resolve to the referenced page (data-page).
+export function transcludeHtmlRender(body: string): SafeHtml { return html`<div class="transclude" data-page="${body.trim()}"></div>`; }
+
+// Fence (data-block) macros: a declarative text body rendered by client JS in the app view. In a
+// static export the <pre> is the source (mermaid.js / plantuml render it where available).
+export function mermaidHtmlRender(body: string): SafeHtml { return html`<pre class="mermaid">${body}</pre>`; }
+export function plantumlHtmlRender(body: string): SafeHtml { return html`<pre class="plantuml">${body}</pre>`; }
+export function excalidrawHtmlRender(): SafeHtml { return html`<div class="excalidraw-drawing">[Excalidraw drawing]</div>`; }
+
+// The built-in directive descriptors (name → DOM-free export descriptor). exportFidelity mirrors each
+// macro's contract in the editor (kept in lockstep — the value is the macro's, not the renderer's).
 export const builtinDirectiveDescriptors: Record<string, MacroHtmlDescriptor> = {
   columns: { exportFidelity: "preserve", htmlRender: columnsHtmlRender },
   tabs: { exportFidelity: "preserve", htmlRender: tabsHtmlRender },
   details: { exportFidelity: "preserve", htmlRender: detailsHtmlRender },
+  table: { exportFidelity: "preserve", htmlRender: tableHtmlRender },
+  transclude: { exportFidelity: "preserve", htmlRender: transcludeHtmlRender },
   ...Object.fromEntries(
     CALLOUT_TYPES.map((t) => [t, { exportFidelity: "preserve", htmlRender: calloutHtmlRender(t) } satisfies MacroHtmlDescriptor]),
   ),
 };
 
-// A MacroHtmlRegistry over the built-in macros, for the server export renderer. Fence macros
-// (mermaid / excalidraw / …) are added in later slices as their htmlRenders are extracted here.
+// The built-in fence descriptors (info-string language → descriptor).
+export const builtinFenceDescriptors: Record<string, MacroHtmlDescriptor> = {
+  mermaid: { exportFidelity: "preserve", htmlRender: mermaidHtmlRender },
+  plantuml: { exportFidelity: "degrade", htmlRender: plantumlHtmlRender },
+  excalidraw: { exportFidelity: "preserve", htmlRender: excalidrawHtmlRender },
+};
+
+// A MacroHtmlRegistry over ALL built-in macros, for the server export renderer.
 export function builtinMacroRegistry(): MacroHtmlRegistry {
   return {
-    fence: () => undefined,
+    fence: (lang) => builtinFenceDescriptors[lang],
     directive: (name) => builtinDirectiveDescriptors[name],
   };
 }
