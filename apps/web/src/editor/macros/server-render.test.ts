@@ -102,4 +102,9 @@ describe("renderMarkdownToHtml — built-in M2 directives (#85 slice 2)", () => 
     expect(h).toContain("<details><summary>");
     expect(h).toContain("hidden body");
   });
+  it("typed callouts → a per-type wrapper (note / warning), body escaped", () => {
+    expect(out(":::note\nheads up\n:::", reg)).toContain('<div class="callout callout-note">');
+    expect(out(":::warning\n<b>careful</b>\n:::", reg)).toContain('<div class="callout callout-warning">');
+    expect(out(":::warning\n<b>careful</b>\n:::", reg)).not.toContain("<b>careful</b>"); // escaped
+  });
 });

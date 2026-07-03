@@ -58,12 +58,25 @@ export function detailsHtmlRender(body: string): SafeHtml {
   return html`<details><summary>Details</summary>\n\n${body}\n\n</details>`;
 }
 
+// Typed callouts (#150 / ADR-049): each admonition type is its own directive (:::note / :::info /
+// :::tip / :::warning / :::danger). The type list is the single source of truth here; the editor
+// (callout.ts) maps its icons onto it. The export HTML is a per-type wrapper (escaped body).
+export const CALLOUT_TYPES = ["note", "info", "tip", "warning", "danger"] as const;
+export type CalloutType = (typeof CALLOUT_TYPES)[number];
+
+export function calloutHtmlRender(type: string): (body: string) => SafeHtml {
+  return (body) => html`<div class="callout callout-${type}">\n\n${body}\n\n</div>`;
+}
+
 // The built-in directive descriptors (name → DOM-free export descriptor). All exportFidelity
 // "preserve": the ::: source round-trips losslessly; the htmlRender is the rendered HTML.
 export const builtinDirectiveDescriptors: Record<string, MacroHtmlDescriptor> = {
   columns: { exportFidelity: "preserve", htmlRender: columnsHtmlRender },
   tabs: { exportFidelity: "preserve", htmlRender: tabsHtmlRender },
   details: { exportFidelity: "preserve", htmlRender: detailsHtmlRender },
+  ...Object.fromEntries(
+    CALLOUT_TYPES.map((t) => [t, { exportFidelity: "preserve", htmlRender: calloutHtmlRender(t) } satisfies MacroHtmlDescriptor]),
+  ),
 };
 
 // A MacroHtmlRegistry over the built-in macros, for the server export renderer. Fence macros
