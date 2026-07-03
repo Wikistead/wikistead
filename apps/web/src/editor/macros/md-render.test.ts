@@ -21,6 +21,19 @@ describe("renderMarkdownToDom (#90 S0)", () => {
     expect(d.querySelector("p")?.textContent).toContain("para");
   });
 
+  // #185: the nested renderer must COMPREHENSIVELY emit every block type (this is what runs inside a
+  // column / tab / callout body). A missing type left a hole (the bounce: headings didn't appear).
+  // Assert each block reaches the DOM (callout-icons.css then styles them like top-level, so a nested
+  // heading reads as a heading, not body text).
+  it("emits EVERY block type: h1-h6, blockquote, hr, ordered list, code (#185)", () => {
+    const d = root("# a\n## b\n### c\n#### d\n##### e\n###### f\n\n> quote\n\n---\n\n1. one\n2. two\n\n```\ncode\n```\n");
+    for (const tag of ["h1", "h2", "h3", "h4", "h5", "h6"]) expect(d.querySelector(tag), tag).not.toBeNull();
+    expect(d.querySelector("blockquote")?.textContent).toContain("quote");
+    expect(d.querySelector("hr")).not.toBeNull();
+    expect(d.querySelectorAll("ol li").length).toBe(2);
+    expect(d.querySelector("pre code")?.textContent).toContain("code");
+  });
+
   it("renders a safe link and DROPS a javascript: href (no anchor, text kept)", () => {
     const ok = root("[x](https://e.com)");
     expect(ok.querySelector("a")?.getAttribute("href")).toBe("https://e.com");
