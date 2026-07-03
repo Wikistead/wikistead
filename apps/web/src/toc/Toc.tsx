@@ -71,9 +71,10 @@ export function Toc({
         data-testid="toc"
         data-variant="overlay"
         className={cn(
-          // #192: sit below the top-right control buttons (TOC / comments toggles) so the overlay
-          // doesn't cover them (was top-16, overlapping them).
-          "pointer-events-none fixed right-3 top-28 z-30 max-h-[70vh] w-[240px] overflow-y-auto rounded-lg border border-border/60 bg-panel/70 p-3 shadow-lg backdrop-blur-md transition-opacity duration-200",
+          // #192: start BELOW the top control band (header + title + the right-aligned TOC/comments
+          // toggle row) instead of a bare magic offset — derive from --header-h plus the title+controls
+          // band (~5rem) so the overlay clears the buttons even as the header height changes.
+          "pointer-events-none fixed right-3 top-[calc(var(--header-h,40px)+5rem)] z-30 max-h-[70vh] w-[240px] overflow-y-auto rounded-lg border border-border/60 bg-panel/70 p-3 shadow-lg backdrop-blur-md transition-opacity duration-200",
           scrolling ? "pointer-events-auto opacity-100" : "opacity-0",
         )}
       >
