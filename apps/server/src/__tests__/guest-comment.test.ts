@@ -112,3 +112,54 @@ describe('#100 guest commenting (view link + comment_open)', () => {
     }
   })
 })
+
+// #100 bounce (authz-critical): the DELETE/PATCH routes had no page authz — a share-link guest could
+// DELETE another user's comment (the route did `req.user.sub` with no ownership/FGA gate). These pin
+// the fix on the REAL routes (not just the create gate): delete/edit are the fortress, hiding the UI
+// button is not enough. Distinct pass/fail — the member's comment must still exist after a denied delete.
+describe('#100 comment delete/edit authz — the delete route is gated (bounce regression)', () => {
+  let memberCommentId = ''
+
+  beforeAll(async () => {
+    // A MEMBER (dev-user) comment, inserted directly so its author is a real member sub, not a guest.
+    const [t] = await admin<{ id: string }[]>`
+      INSERT INTO comment_threads (tenant_id, page_id, kind, created_by) VALUES (${TENANT}, ${PAGE}, 'page', 'dev-user') RETURNING id`
+    const [c] = await admin<{ id: string }[]>`
+      INSERT INTO comments (tenant_id, thread_id, body, author_sub) VALUES (${TENANT}, ${t!.id}, 'a member comment', 'dev-user') RETURNING id`
+    memberCommentId = c!.id
+  })
+
+  it('a view-link guest CANNOT delete a member\'s comment (403) — and it stays undeleted', async () => {
+    const res = await app.inject({ method: 'DELETE', url: `/comments/${memberCommentId}`, headers: H(viewTok) })
+    expect(res.statusCode).toBe(403) // not the author, not an admin
+    const [row] = await admin<{ deleted_at: Date | null }[]>`SELECT deleted_at FROM comments WHERE id = ${memberCommentId}`
+    expect(row!.deleted_at).toBeNull() // the delete did NOT go through (the actual security assertion)
+  })
+
+  it('a view-link guest CANNOT edit a member\'s comment (403)', async () => {
+    const res = await app.inject({ method: 'PATCH', url: `/comments/${memberCommentId}`, headers: H(viewTok), payload: { body: 'hijacked' } })
+    expect(res.statusCode).toBe(403)
+    const [row] = await admin<{ body: string }[]>`SELECT body FROM comments WHERE id = ${memberCommentId}`
+    expect(row!.body).toBe('a member comment') // unchanged
+  })
+
+  it('the delete gate holds even with comments CLOSED (a view-only guest still cannot delete)', async () => {
+    await setCommentsOpen(false)
+    try {
+      const res = await app.inject({ method: 'DELETE', url: `/comments/${memberCommentId}`, headers: H(viewTok) })
+      expect(res.statusCode).toBe(403)
+    } finally {
+      await setCommentsOpen(true)
+    }
+  })
+
+  it('a guest CAN delete their OWN comment (author match via the share-link principal)', async () => {
+    const create = await app.inject({ method: 'POST', url: `/pages/${PAGE}/comments`, headers: H(viewTok), payload: { body: 'my own guest comment' } })
+    expect(create.statusCode).toBe(201)
+    const list = await app.inject({ method: 'GET', url: `/pages/${PAGE}/comments`, headers: H(viewTok) })
+    const body = list.json() as { threads: { comments: { id: string; body: string }[] }[] }
+    const own = body.threads.flatMap((t) => t.comments).find((c) => c.body === 'my own guest comment')!
+    const del = await app.inject({ method: 'DELETE', url: `/comments/${own.id}`, headers: H(viewTok) })
+    expect(del.statusCode).toBe(204) // same share-link principal == author → allowed
+  })
+})

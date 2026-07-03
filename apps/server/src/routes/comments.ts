@@ -193,26 +193,42 @@ export async function commentsPlugin(app: FastifyInstance) {
     return reply.code(201).send({ commentId: c.id })
   })
 
-  // Edit own comment (author only — even an admin doesn't rewrite others' words).
-  app.patch<{ Params: { commentId: string }; Body: { body?: string } }>('/comments/:commentId', async (req, reply) => {
+  // Edit own comment (author only — even an admin doesn't rewrite others' words). #100: gate the
+  // WHOLE op server-side, members AND guests. Resolve the comment's page, require view (no-leak 404),
+  // resolve the principal (member sub OR guest share-link label), and compare against the stored
+  // author via that principal — never `req.user.sub` directly (a guest has no req.user, which both
+  // crashed and bypassed the ownership check).
+  app.patch<{ Params: { commentId: string }; Body: { body?: string } }>('/comments/:commentId', { config: { guest: 'view' } }, async (req, reply) => {
     const [row] = await req.db.sql<[{ author_sub: string; thread_id: string }?]>`
       SELECT author_sub, thread_id FROM comments WHERE id = ${req.params.commentId} AND deleted_at IS NULL`
     if (!row) return reply.code(404).send({ error: 'not found' })
-    if (row.author_sub !== req.user.sub) return reply.code(403).send({ error: 'not the author' })
+    const page = await threadPage(req, row.thread_id)
+    if (!page) return reply.code(404).send({ error: 'not found' })
+    const actor = await requirePage(req, reply, page.pageId, 'view') // view floor + principal; sends on denial
+    if (!actor) return
+    if (row.author_sub !== actor.authorId) return reply.code(403).send({ error: 'not the author' })
     const body = req.body?.body?.trim()
     if (!body) return reply.code(400).send({ error: 'empty comment' })
     await req.db.sql`UPDATE comments SET body = ${body}, edited_at = now() WHERE id = ${req.params.commentId}`
     return { ok: true }
   })
 
-  // Delete a comment (soft). Author deletes own; a tenant admin can delete any.
-  app.delete<{ Params: { commentId: string } }>('/comments/:commentId', async (req, reply) => {
-    const [row] = await req.db.sql<[{ author_sub: string }?]>`
-      SELECT author_sub FROM comments WHERE id = ${req.params.commentId} AND deleted_at IS NULL`
+  // Delete a comment (soft). #100 authz: the AUTHOR (member or guest, matched via the resolved
+  // principal) OR a tenant admin. A viewing-only guest / non-author gets 403; someone who can't even
+  // view the page gets a uniform 404 (no-leak). The delete route is the fortress — hiding the UI
+  // button is not enough (the bounce: a share-link guest could DELETE another user's comment because
+  // this route did `req.user.sub` with no page authz).
+  app.delete<{ Params: { commentId: string } }>('/comments/:commentId', { config: { guest: 'view' } }, async (req, reply) => {
+    const [row] = await req.db.sql<[{ author_sub: string; thread_id: string }?]>`
+      SELECT author_sub, thread_id FROM comments WHERE id = ${req.params.commentId} AND deleted_at IS NULL`
     if (!row) return reply.code(404).send({ error: 'not found' })
-    if (row.author_sub !== req.user.sub && !(await isTenantAdmin(req))) {
-      return reply.code(403).send({ error: 'forbidden' })
-    }
+    const page = await threadPage(req, row.thread_id)
+    if (!page) return reply.code(404).send({ error: 'not found' })
+    const actor = await requirePage(req, reply, page.pageId, 'view') // view floor + principal; sends on denial
+    if (!actor) return
+    const isAuthor = row.author_sub === actor.authorId
+    const isAdmin = req.user ? await isTenantAdmin(req) : false // guests are never tenant admins
+    if (!isAuthor && !isAdmin) return reply.code(403).send({ error: 'forbidden' })
     await req.db.sql`UPDATE comments SET deleted_at = now() WHERE id = ${req.params.commentId}`
     return reply.code(204).send()
   })
