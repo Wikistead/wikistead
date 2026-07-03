@@ -402,6 +402,54 @@ export const embedAllowlist = Facet.define<readonly string[], readonly string[]>
   combine: (values) => values[0] ?? [],
 });
 
+// #205 part 2 / #210: the host seam that opens a title-search PAGE PICKER for `:::embed-page`. The
+// host (Editor) shows a command-palette modal whose candidates come from GET /search — which is
+// FGA-view-filtered (two-stage guard), so a page the user can't view is never offered (no existence
+// leak). onPick receives the chosen page id (or null if cancelled). Homed here (with the other host
+// seams) so BOTH the slash-insert path (palette.ts) and the post-insert "change target" affordance
+// (the MacroWidget edit button, #210) read the same seam and reuse the same authz-gated picker.
+export type PageEmbedPicker = (onPick: (pageId: string | null) => void) => void;
+export const pageEmbedPicker = Facet.define<PageEmbedPicker | null, PageEmbedPicker | null>({
+  combine: (vals) => vals.find((v) => v != null) ?? null,
+});
+
+// #210: compute the single canonical Y.Text edit that re-targets an embed block at `pos` to `value`.
+// The offset is derived from the atom's DIRECTIVE range (directiveMacroAt), so the write lands on the
+// real block, not a display-only mutation. Returns null when `pos` is not the named embed directive
+// the guard that keeps a re-resolved / stale offset (or a cross-macro click) from writing the wrong
+// block. Pure (state → change): the DOM-free core the anti-tests exercise on the real path.
+export function embedRetargetChange(state: EditorState, pos: number, name: string, value: string): { from: number; to: number; insert: string } | null {
+  const d = directiveMacroAt(state, pos);
+  if (!d || d.name !== name) return null;
+  return { from: d.from, to: d.to, insert: `:::${name}\n${value}\n:::` };
+}
+
+// #210: re-target an already-inserted `:::embed-page` / `:::embed-external` block. The edit button
+// re-opens the SAME picker (embed-page) or prompts for a URL (embed-external) and writes the chosen
+// id/URL back via embedRetargetChange — a single canonical dispatch whose offset is re-resolved fresh
+// at WRITE time (posAtDOM → the block's current start), so a concurrent edit can't stale it. No new
+// fetch path: embed-page reuses the FGA-view-gated search picker (the pageEmbedPicker seam).
+function changeEmbedTarget(view: EditorView, wrap: HTMLElement, name: string): void {
+  const write = (value: string) => {
+    let ch: { from: number; to: number; insert: string } | null = null;
+    try { ch = embedRetargetChange(view.state, view.posAtDOM(wrap), name, value); } catch { ch = null; }
+    if (!ch) { view.focus(); return; }
+    view.dispatch({ changes: ch, selection: EditorSelection.cursor(ch.from + ch.insert.length), scrollIntoView: true });
+    view.focus();
+  };
+  if (name === "embed-page") {
+    const picker = view.state.facet(pageEmbedPicker);
+    if (!picker) { view.focus(); return; } // picker-less surface: fall back to raw edit (caret-in reveals)
+    picker((pageId) => { if (pageId) write(pageId); else view.focus(); });
+  } else {
+    let cur = "";
+    try { cur = directiveMacroAt(view.state, view.posAtDOM(wrap))?.body.trim() ?? ""; } catch { /* detached → empty seed */ }
+    const url = window.prompt("Embed URL", cur); // #210: change the external embed target
+    if (url != null && url.trim() !== "") write(url.trim());
+    else view.focus();
+  }
+}
+
 const ATTACHMENT_REF = /^!\[([^\]]*)\]\(wks-attachment:([^)\s]+)\)$/;
 
 // Renders an image from a wks-attachment reference. src is filled in
@@ -714,6 +762,25 @@ class MacroWidget extends WidgetType {
           enterMacroAt(view, view.posAtDOM(wrap));
         });
         wrap.appendChild(edit);
+      }
+      // #210 / ADR-087: embed macros have no rich UI, but their TARGET (page id / URL) must be
+      // changeable after insertion — otherwise a mis-picked embed strands the user in raw editing.
+      // This is the first per-macro action in the ADR-087 block menu: a ⇆ button that re-opens the
+      // same picker (embed-page) / prompts a URL (embed-external) and writes the choice back. Shows on
+      // hover / selection (same as ✎). Offset-invariant here — the write happens in changeEmbedTarget.
+      if (this.name === "embed-page" || this.name === "embed-external") {
+        const retarget = document.createElement("button");
+        retarget.type = "button";
+        retarget.className = "cm-lp-macro-edit";
+        retarget.title = "Change embed target";
+        retarget.textContent = "⇆";
+        retarget.setAttribute("data-testid", "embed-change-target");
+        retarget.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          changeEmbedTarget(view, wrap, this.name);
+        });
+        wrap.appendChild(retarget);
       }
       if (this.foldable) {
       const btn = document.createElement("button");

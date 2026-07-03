@@ -35,16 +35,12 @@ const imageUploader = Facet.define<(() => void) | null, (() => void) | null>({
   combine: (vals) => vals.find((v) => v != null) ?? null,
 });
 
-// #205 part 2: the host seam that opens a title-search PAGE PICKER for `:::embed-page`. The host
-// (Editor) shows a command-palette modal whose candidates come from GET /search — which is
-// FGA-view-filtered (two-stage guard), so a page the user can't view is never offered (no existence
-// leak). onPick receives the chosen page id (or null if cancelled). When the seam is absent
-// (guests / picker-less surfaces) the command falls back to inserting the raw `:::embed-page`
+// #205 part 2 / #210: the host page-picker seam is homed in decorations.ts (with the other host
+// seams) so the post-insert "change target" affordance reuses it too. When absent (guests /
+// picker-less surfaces) the embed-page command falls back to inserting the raw `:::embed-page`
 // template so the id can still be typed by hand.
-export type PageEmbedPicker = (onPick: (pageId: string | null) => void) => void;
-const pageEmbedPicker = Facet.define<PageEmbedPicker | null, PageEmbedPicker | null>({
-  combine: (vals) => vals.find((v) => v != null) ?? null,
-});
+import { pageEmbedPicker, type PageEmbedPicker } from "./decorations";
+export type { PageEmbedPicker };
 
 // Layer B/C/P commands. Template commands place the caret where you'd type the content
 // next; the image command (P) runs an action (open the file picker) instead. (Inline
