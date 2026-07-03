@@ -69,6 +69,17 @@ body{margin:0;background:var(--bg);color:var(--fg);}
 .embed-link{word-break:break-all;}
 .wks-fidelity-degrade{position:relative;border:1px dashed color-mix(in srgb,var(--fg-dim) 55%,transparent);border-radius:6px;padding:.4em .6em;margin:.5em 0;}
 .wks-fidelity-badge{float:right;margin-left:.5em;color:#b8860b;font-size:1.1em;line-height:1;cursor:help;}
+/* #207 part 2: this document IS the print/PDF source (the app prints it from an offscreen frame — the
+   whole doc rendered statically, every macro, no raw ::: leak). Make it print well: a compact even
+   page margin, and release the narrow on-screen reading column so the print uses the full sheet width
+   (#207 part 1's intent, applied on the render path the app actually prints). Force a light surface so
+   "Save as PDF" under a dark OS theme still yields black-on-white, not white-on-dark. */
+@page{margin:14mm;}
+@media print{
+  :root{--bg:#ffffff;--fg:#1f2328;--fg-dim:#656d76;--border:#d0d7de;--head:#35a77c;
+    --callout-info:#0969da;--callout-note:#57606a;--callout-tip:#2ea043;--callout-warning:#d29922;--callout-danger:#f0584d;}
+  .wks-export{max-width:none;margin:0;}
+}
 `
 
 function htmlDocument(title: string, safeBody: string): string {
