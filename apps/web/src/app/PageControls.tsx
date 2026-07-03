@@ -74,12 +74,14 @@ const ROUND = "pointer-events-auto inline-flex h-9 w-9 items-center justify-cent
 const ROUND_BG = "bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] hover:bg-panel-2";
 const ROUND_PRIMARY = "bg-primary text-primary-foreground hover:bg-[color-mix(in_srgb,var(--accent)_88%,black)]";
 
-function RoundBtn({ label, icon, onClick, testId, primary, disabled, badge }: {
-  label: string; icon: ReactNode; onClick?: () => void; testId: string; primary?: boolean; disabled?: boolean; badge?: ReactNode;
+function RoundBtn({ label, icon, onClick, testId, primary, disabled, badge, active }: {
+  label: string; icon: ReactNode; onClick?: () => void; testId: string; primary?: boolean; disabled?: boolean; badge?: ReactNode; active?: boolean;
 }) {
   return (
-    <button type="button" title={label} aria-label={label} data-testid={testId} disabled={disabled} onClick={onClick}
-      className={`relative ${ROUND} ${primary ? ROUND_PRIMARY : ROUND_BG}`}>
+    // #192: `active` (e.g. TOC rail ON) shows the accent fill so the toggle state reads at a glance,
+    // matching the display-mode segment's active style.
+    <button type="button" title={label} aria-label={label} aria-pressed={active} data-testid={testId} data-active={active || undefined} disabled={disabled} onClick={onClick}
+      className={`relative ${ROUND} ${active ? "bg-[var(--accent)] text-white" : primary ? ROUND_PRIMARY : ROUND_BG}`}>
       {icon}
       {badge}
     </button>
@@ -124,6 +126,7 @@ export function PageStatus(p: PageControlsProps) {
           testId="toc-toggle"
           onClick={p.onToggleToc}
           icon={<List size={16} />}
+          active={p.tocOpen} // #192: accent fill when the TOC rail is ON
         />
       )}
       {p.onToggleComments && (

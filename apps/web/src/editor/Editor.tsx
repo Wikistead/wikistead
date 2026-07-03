@@ -149,13 +149,22 @@ function wireToc(
     const compute = () => {
       raf = 0;
       if (!report) return;
-      const top = view.scrollDOM.getBoundingClientRect().top;
+      // #192 (bounce): find the heading whose section contains the TOP of the viewport. Resolve the DOC
+      // POSITION at the top band once (posAtCoords) and compare heading doc offsets — this is robust for
+      // headings scrolled ABOVE the viewport, whose per-position coordsAtPos returns null. The previous
+      // impl called coordsAtPos on EACH heading AND defaulted `active` to the FIRST heading: once you
+      // scrolled a long section past the top, that section's heading (now off-screen) returned null, no
+      // heading updated `active`, and it stayed on the FIRST heading (the reported "highlights the TOC
+      // top heading while I'm deep in a section" bug).
+      const rect = view.scrollDOM.getBoundingClientRect();
       const hs = extractHeadings(view.state);
-      let active: number | null = hs.length ? hs[0]!.from : null;
-      for (const h of hs) {
-        const c = view.coordsAtPos(h.from);
-        if (c && c.top <= top + 48) active = h.from; // last heading at/above the top band
-        else if (c) break;
+      const topPos = view.posAtCoords({ x: rect.left + rect.width / 2, y: rect.top + 48 });
+      let active: number | null = null;
+      if (topPos != null) {
+        for (const h of hs) {
+          if (h.from <= topPos) active = h.from; // last heading at/above the viewport top → current section
+          else break; // headings are in doc order
+        }
       }
       report(active);
     };
