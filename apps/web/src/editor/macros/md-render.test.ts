@@ -128,6 +128,22 @@ describe("renderMarkdownToDom — nested macro dispatch (ADR-085 / #185)", () =>
     });
   });
 
+  it("caps nested LIVE directive rendering depth (#90) — deeper directives degrade to plain content, not more widgets", () => {
+    // A self-nesting macro (like columns/tabs, it re-renders its body via renderMarkdownToDom). Nest it
+    // 3 levels (outer uses more colons than inner so the parser nests: 7 > 5 > 3). With the depth cap
+    // (MAX_NESTED_DIRECTIVE_DEPTH = 2) only the first TWO levels become live widgets; the 3rd degrades to
+    // a generic box — its CONTENT is still present (no information lost), only the live framing stops.
+    registerMacro({
+      kind: "directive", name: "nest90", exportFidelity: "degrade",
+      htmlRender: (b) => html`<div>${b}</div>`,
+      liveRender: (body) => { const d = document.createElement("div"); d.setAttribute("data-testid", "nest90-live"); d.appendChild(renderMarkdownToDom(body)); return d; },
+    });
+    const src = ":::::::nest90\n:::::nest90\n:::nest90\ndeep text\n:::\n:::::\n:::::::";
+    const d = root(src);
+    expect(d.querySelectorAll("[data-testid='nest90-live']").length).toBe(2); // capped at 2 live levels
+    expect(d.textContent).toContain("deep text"); // deepest content still rendered (degraded, not dropped)
+  });
+
   it("dispatches a known directive to its macro's liveRender (not a generic box)", () => {
     const d = root(":::adr085test\nhello body\n:::");
     const rendered = d.querySelector(".adr085-rendered");
