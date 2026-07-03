@@ -1422,11 +1422,23 @@ export function atomMotionTarget(
 // (which already imports decorations) contribute its atom ranges WITHOUT a circular import here.
 export const motionAtomProvider = Facet.define<(state: EditorState) => ReadonlyArray<{ from: number; to: number }>>({});
 
+// #141 bounce (comment 651): a block the caret sits STRICTLY inside is REVEALED (its raw source is
+// shown, editable, non-atomic) — it must move line-by-line like ordinary text, never be crossed as a
+// single motion atom. A COLLAPSED block (macro widget / math) is atomic, so the caret only ever rests
+// at its EDGE (from or to), never strictly inside — those stay motion atoms and keep their overshoot
+// clamp. Pure: the motion-atom set for a given caret. (This is why a `:::info`/`:::xxx` block whose
+// body is being edited must not warp j/k across its fences — it's revealed, so it drops out here.)
+export function motionAtomsForCaret(blocks: ReadonlyArray<{ from: number; to: number }>, head: number): { from: number; to: number }[] {
+  return blocks.filter((b) => !(head > b.from && head < b.to)).map((b) => ({ from: b.from, to: b.to }));
+}
+
 export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   if (tr.docChanged || !tr.selection) return tr;
   const baseBlocks = tr.startState.field(livePreview, false)?.blocks ?? [];
-  // Merge the base block atoms with any provider atoms (display math), so motion is corrected over both.
-  const blocks: { from: number; to: number }[] = baseBlocks.map((b) => ({ from: b.from, to: b.to }));
+  // Merge the base block atoms (excluding any the caret is editing inside — motionAtomsForCaret) with
+  // any provider atoms (display math, always collapsed), so motion is corrected over both without
+  // hijacking line-by-line editing inside a revealed block.
+  const blocks = motionAtomsForCaret(baseBlocks, tr.startState.selection.main.head);
   for (const provide of tr.startState.facet(motionAtomProvider)) for (const r of provide(tr.startState)) blocks.push(r);
   if (!blocks.length) return tr;
   const oldSel = tr.startState.selection.main;
