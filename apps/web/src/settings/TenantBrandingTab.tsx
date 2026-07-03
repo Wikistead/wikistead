@@ -13,9 +13,11 @@ const LOGO_MAX_BYTES = 512 * 1024;
 const LOGO_TYPES = /^image\/(png|jpeg|webp)$/;
 
 // Tenant Branding (Phase 5d). The cascade root below space settings: sets the
-// workspace-wide accent + the header wordmark (display name). admin + entitlement
-// gated server-side; the tab shows an upgrade notice when branding isn't entitled.
-// (Tenant logo upload is Phase 5d-2, pending the multipart dependency.)
+// workspace-wide accent + the header wordmark (display name). #109/ADR-072: basic
+// customization (display name + accent colour) is FREE on all plans — we charge for
+// freedom, not features. Only the ORIGINAL LOGO upload is entitlement-gated, so the
+// upgrade affordance and the disabled state are scoped to the logo control alone
+// (never the whole tab — a wholesale feature ban is the level-cap anti-pattern).
 export function TenantBrandingTab() {
   const { t } = useTranslation();
   const { isAdmin } = useSession();
@@ -25,7 +27,8 @@ export function TenantBrandingTab() {
   const uploadLogo = useUploadTenantLogo();
   const removeLogo = useRemoveTenantLogo();
   const fileRef = useRef<HTMLInputElement>(null);
-  const locked = ent.data ? !ent.data.branding : false;
+  // The branding entitlement gates ONLY the logo (name + colour are basic, all plans).
+  const logoLocked = ent.data ? !ent.data.branding : false;
 
   const accentKey = branding.data?.accentKey ?? null;
   const [name, setName] = useState("");
@@ -69,35 +72,37 @@ export function TenantBrandingTab() {
       <h2 style={{ marginTop: 0 }}>{t("tenantBranding.title")}</h2>
       <p className="mt-0 text-sm text-fg-dim">{t("tenantBranding.body")}</p>
 
+      {/* Display name + accent are BASIC — no upgrade notice, never disabled by plan. */}
+      <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("tenantBranding.displayName")}</label>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 28 }}>
+        <Input className="max-w-xs" value={name} onChange={(e) => setName(e.target.value)}
+          placeholder={t("tenantBranding.displayNamePlaceholder")} aria-label={t("tenantBranding.displayName")} data-testid="tenant-name-input" />
+        <Button variant="primary" size="sm" disabled={update.isPending || name.trim() === (branding.data?.displayName ?? "")} onClick={saveName} data-testid="tenant-name-save">{t("common.save")}</Button>
+      </div>
+
+      <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 10 }}>{t("accent.label")}</label>
+      {/* #201: the tenant is the TOP of the accent cascade — always a concrete colour, no inherit chip. */}
+      <AccentPicker value={accentKey} onChange={chooseAccent} disabled={update.isPending} inheritLabel={t("tenantBranding.default")} allowInherit={false} />
+
+      <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", margin: "28px 0 6px" }}>{t("tenantBranding.logo")}</label>
+      <p className="mt-0 text-sm text-fg-dim" style={{ marginTop: 0 }}>{t("tenantBranding.logoHint")}</p>
+      {/* #109/ADR-072: the upgrade affordance is scoped to the LOGO only (the sole gated control),
+          shown to owner/admin only via UpgradeNotice — not the whole branding tab. */}
       <UpgradeNotice
-        kind={locked ? "entitlement" : null}
+        kind={logoLocked ? "entitlement" : null}
         isAdmin={isAdmin}
         testId="branding-upgrade"
         title={t("branding.upgradeTitle")}
         body={t("branding.upgradeBody")}
       />
-
-      <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("tenantBranding.displayName")}</label>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 28 }}>
-        <Input className="max-w-xs" value={name} onChange={(e) => setName(e.target.value)} disabled={locked}
-          placeholder={t("tenantBranding.displayNamePlaceholder")} aria-label={t("tenantBranding.displayName")} data-testid="tenant-name-input" />
-        <Button variant="primary" size="sm" disabled={locked || update.isPending || name.trim() === (branding.data?.displayName ?? "")} onClick={saveName} data-testid="tenant-name-save">{t("common.save")}</Button>
-      </div>
-
-      <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 10 }}>{t("accent.label")}</label>
-      {/* #201: the tenant is the TOP of the accent cascade — always a concrete colour, no inherit chip. */}
-      <AccentPicker value={accentKey} onChange={chooseAccent} disabled={locked || update.isPending} inheritLabel={t("tenantBranding.default")} allowInherit={false} />
-
-      <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", margin: "28px 0 6px" }}>{t("tenantBranding.logo")}</label>
-      <p className="mt-0 text-sm text-fg-dim" style={{ marginTop: 0 }}>{t("tenantBranding.logoHint")}</p>
       <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
         {branding.data?.logoUrl && (
           <img src={assetUrl(branding.data.logoUrl)} alt="logo" data-testid="tenant-logo-preview" style={{ height: 28, maxWidth: 160, objectFit: "contain", border: "1px solid var(--border)", borderRadius: 4, padding: 2 }} />
         )}
         <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" hidden data-testid="tenant-logo-input" onChange={onPickLogo} />
-        <Button variant="default" size="sm" disabled={locked || uploadLogo.isPending} onClick={() => fileRef.current?.click()} data-testid="tenant-logo-upload">{t("tenantBranding.logoUpload")}</Button>
+        <Button variant="default" size="sm" disabled={logoLocked || uploadLogo.isPending} onClick={() => fileRef.current?.click()} data-testid="tenant-logo-upload">{t("tenantBranding.logoUpload")}</Button>
         {branding.data?.logoUrl && (
-          <Button variant="dangerGhost" size="sm" disabled={locked || removeLogo.isPending} data-testid="tenant-logo-remove"
+          <Button variant="dangerGhost" size="sm" disabled={logoLocked || removeLogo.isPending} data-testid="tenant-logo-remove"
             onClick={() => removeLogo.mutate(undefined, { onSuccess: () => notify.success(t("toast.saved")), onError: () => notify.error(t("toast.actionFailed")) })}>{t("tenantBranding.logoRemove")}</Button>
         )}
       </div>
