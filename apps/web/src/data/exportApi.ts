@@ -3,8 +3,11 @@
 // from the blob, honoring the server's filename.
 const API_URL = (import.meta as any).env?.VITE_API_URL ?? "/api";
 
-export async function downloadPageExport(token: string, pageId: string): Promise<boolean> {
-  const res = await fetch(`${API_URL}/pages/${encodeURIComponent(pageId)}/export`, {
+// #85 / ADR-059: "html" hits the server render→sanitize path (a single page's published HTML);
+// "md" (default) is the Markdown export (subtree + bundled images).
+export async function downloadPageExport(token: string, pageId: string, format: "md" | "html" = "md"): Promise<boolean> {
+  const path = format === "html" ? "export.html" : "export";
+  const res = await fetch(`${API_URL}/pages/${encodeURIComponent(pageId)}/${path}`, {
     credentials: "include",
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });

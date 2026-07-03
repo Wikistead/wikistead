@@ -48,6 +48,7 @@ export interface PageControlsProps {
   onHistory?: () => void;
   onAttachments?: () => void;
   onExport?: () => void;
+  onExportHtml?: () => void; // #85: server-rendered, sanitized HTML export
   onPrint?: () => void;
   onPermissions?: () => void;
   // Delete the page. Set only when the caller may manage the page (FGA `manage`); the
@@ -91,6 +92,7 @@ function RoundBtn({ label, icon, onClick, testId, primary, disabled, badge, acti
 function overflowItems(p: PageControlsProps, t: (k: string) => string): OverflowItem[] {
   const items: OverflowItem[] = [];
   if (p.onExport) items.push({ value: "export", label: t("page.export"), icon: <Download size={14} />, testId: "export-page" });
+  if (p.onExportHtml) items.push({ value: "export-html", label: t("page.exportHtml"), icon: <Download size={14} />, testId: "export-page-html" });
   if (p.onPrint) items.push({ value: "print", label: t("page.print"), icon: <Printer size={14} />, testId: "print-page" });
   if (p.onAttachments) items.push({ value: "attachments", label: t("page.attachments"), icon: <Paperclip size={14} />, testId: "attachments-toggle" });
   if (p.onHistory) items.push({ value: "history", label: t("page.history"), icon: <History size={14} />, testId: "history-toggle" });
@@ -104,6 +106,7 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string): Overflow
 }
 function runOverflow(p: PageControlsProps, v: string) {
   if (v === "export") p.onExport?.();
+  else if (v === "export-html") p.onExportHtml?.();
   else if (v === "print") p.onPrint?.();
   else if (v === "history") p.onHistory?.();
   else if (v === "attachments") p.onAttachments?.();

@@ -292,6 +292,7 @@
     "unpublishedChanges": "未公開の変更",
     "moreActions": "その他の操作",
     "export": "エクスポート",
+    "exportHtml": "HTML でエクスポート",
     "print": "印刷 / PDF",
     "history": "履歴",
     "attachments": "添付ファイル",

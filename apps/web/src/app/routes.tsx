@@ -373,6 +373,7 @@ function PageRoute() {
     onHistory: toggleHistory,
     onAttachments: toggleAttachments,
     onExport: () => { if (pageId) void downloadPageExport(token, pageId); },
+    onExportHtml: () => { if (pageId) void downloadPageExport(token, pageId, "html"); },
     onPrint: () => window.print(),
     onPermissions: page?.canManage ? () => setPermsOpen(true) : undefined,
     dirtySignal: dirtySig,

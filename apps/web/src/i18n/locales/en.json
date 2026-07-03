@@ -292,6 +292,7 @@
     "unpublishedChanges": "Unpublished changes",
     "moreActions": "More actions",
     "export": "Export",
+    "exportHtml": "Export as HTML",
     "print": "Print / PDF",
     "history": "History",
     "attachments": "Attachments",
