@@ -53,3 +53,32 @@ describe("math delimiter rule (#141 judgment ②)", () => {
     expect(math("just $5 here")).toHaveLength(0);
   });
 });
+
+// #141/#183: display-math atoms must be fed to blockEntry's vertical-motion correction via the
+// motionAtomProvider facet (they live in mathField, separate from livePreview.blocks). Verify the
+// wiring: a state with mathField exposes the $$…$$ block through the facet so j/k step over it.
+import { mathField } from "./math";
+import { motionAtomProvider } from "./decorations";
+
+describe("motionAtomProvider wiring (#141/#183 display-math motion)", () => {
+  it("mathField contributes the $$…$$ block range to the motion-atom facet", () => {
+    const doc = "before\n$$\n\\int_0^1 x\\,dx\n$$\nafter";
+    const state = EditorState.create({ doc, extensions: [mathField] });
+    const providers = state.facet(motionAtomProvider);
+    expect(providers.length).toBeGreaterThan(0);
+    const ranges = providers.flatMap((p) => p(state));
+    // exactly one display-math atom, and it spans the whole $$…$$ block (not just one line, and not
+    // extending past the closing $$).
+    expect(ranges).toHaveLength(1);
+    const openAt = doc.indexOf("$$");
+    const closeEnd = doc.lastIndexOf("$$") + 2;
+    expect(ranges[0]!.from).toBe(openAt);
+    expect(ranges[0]!.to).toBe(closeEnd);
+  });
+
+  it("contributes NO atom for inline $…$ (only $$ display blocks are motion atoms)", () => {
+    const state = EditorState.create({ doc: "energy is $x^2$ here", extensions: [mathField] });
+    const ranges = state.facet(motionAtomProvider).flatMap((p) => p(state));
+    expect(ranges).toHaveLength(0); // inline math is single-line; it must not become a block-motion atom
+  });
+});

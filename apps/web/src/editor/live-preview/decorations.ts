@@ -1307,10 +1307,19 @@ export function atomMotionTarget(
   return null;
 }
 
+// #141/#183: display-math ($$…$$) atoms live in a SEPARATE field (mathField), NOT in livePreview.blocks,
+// so blockEntry's vertical-motion correction never saw them → j overshot a math block by its rendered
+// height and k warped up from anywhere below (the reported asymmetry). A provider facet lets math.ts
+// (which already imports decorations) contribute its atom ranges WITHOUT a circular import here.
+export const motionAtomProvider = Facet.define<(state: EditorState) => ReadonlyArray<{ from: number; to: number }>>({});
+
 export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   if (tr.docChanged || !tr.selection) return tr;
-  const blocks = tr.startState.field(livePreview, false)?.blocks;
-  if (!blocks?.length) return tr;
+  const baseBlocks = tr.startState.field(livePreview, false)?.blocks ?? [];
+  // Merge the base block atoms with any provider atoms (display math), so motion is corrected over both.
+  const blocks: { from: number; to: number }[] = baseBlocks.map((b) => ({ from: b.from, to: b.to }));
+  for (const provide of tr.startState.facet(motionAtomProvider)) for (const r of provide(tr.startState)) blocks.push(r);
+  if (!blocks.length) return tr;
   const oldSel = tr.startState.selection.main;
   const newSel = tr.newSelection.main;
   // Only a caret MOTION, not a shift/visual selection expansion (anchor stays put).

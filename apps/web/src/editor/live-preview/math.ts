@@ -8,7 +8,7 @@ import { EditorView, Decoration, WidgetType, type DecorationSet } from "@codemir
 import { StateField, EditorState, RangeSetBuilder, type Range } from "@codemirror/state"
 import { syntaxTree } from "@codemirror/language"
 import katex from "katex"
-import { displayMode, syntaxRevealsAt } from "./decorations"
+import { displayMode, syntaxRevealsAt, motionAtomProvider } from "./decorations"
 
 interface MathRange { from: number; to: number; tex: string; display: boolean }
 
@@ -94,22 +94,24 @@ function rangeRevealed(state: EditorState, from: number, to: number): boolean {
   )
 }
 
-function buildMath(state: EditorState): { deco: DecorationSet; atomic: DecorationSet } {
+function buildMath(state: EditorState): { deco: DecorationSet; atomic: DecorationSet; blocks: { from: number; to: number }[] } {
   const all: Range<Decoration>[] = []
   const hidden: Range<Decoration>[] = []
+  const blocks: { from: number; to: number }[] = [] // #141/#183: DISPLAY ($$) atoms only, for motion
   for (const m of findMath(state)) {
     if (rangeRevealed(state, m.from, m.to)) continue // caret inside → show raw TeX (editable)
     const w = Decoration.replace({ widget: new MathWidget(m.tex, m.display), block: m.display })
     all.push(w.range(m.from, m.to))
     hidden.push(Decoration.replace({}).range(m.from, m.to))
+    if (m.display) blocks.push({ from: m.from, to: m.to }) // block widget → a vertical-motion atom
   }
   const by = (a: Range<Decoration>, b: Range<Decoration>) => a.from - b.from
   const b1 = new RangeSetBuilder<Decoration>(); all.sort(by).forEach((r) => b1.add(r.from, r.to, r.value))
   const b2 = new RangeSetBuilder<Decoration>(); hidden.sort(by).forEach((r) => b2.add(r.from, r.to, r.value))
-  return { deco: b1.finish(), atomic: b2.finish() }
+  return { deco: b1.finish(), atomic: b2.finish(), blocks }
 }
 
-export const mathField = StateField.define<{ deco: DecorationSet; atomic: DecorationSet }>({
+export const mathField = StateField.define<{ deco: DecorationSet; atomic: DecorationSet; blocks: { from: number; to: number }[] }>({
   create: (state) => buildMath(state),
   update(value, tr) {
     if (tr.docChanged || tr.selection) return buildMath(tr.state)
@@ -119,5 +121,9 @@ export const mathField = StateField.define<{ deco: DecorationSet; atomic: Decora
   provide: (f) => [
     EditorView.decorations.from(f, (v) => v.deco),
     EditorView.atomicRanges.of((view) => view.state.field(f).atomic),
+    // #141/#183: feed the display-math atom ranges into blockEntry's vertical-motion correction (its
+    // model reads only livePreview.blocks). Without this, j overshoots a $$…$$ block by its rendered
+    // height and k warps up from far below (the reported asymmetry); with it, motion steps one line.
+    motionAtomProvider.of((state) => state.field(f).blocks),
   ],
 })
