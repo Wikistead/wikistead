@@ -164,14 +164,18 @@ export function Sidebar() {
       <div
         ref={dragHandle}
         style={outerStyle}
-        className="group select-none px-1" // 4px inset so the fill never touches the sidebar edge / scrollbar
+        // #193: `flex items-stretch` makes the inner fill the FULL row-height slot even if h-full can't
+        // resolve (react-arborist's row height), so there is no un-clickable vertical dead space between
+        // rows; `max-w-full` caps the row to the sidebar's visible width (react-arborist can size a row to
+        // its content), which is what lets a long name actually ellipsize instead of overflowing.
+        className="group flex max-w-full items-stretch select-none px-1" // 4px inset so the fill never touches the sidebar edge / scrollbar
         data-testid="tree-page"
         data-selected={selected ? "" : undefined}
         onClick={() => navigate(`/p/${d.pageId}`)}
       >
        <div
          className={cn(
-           "flex h-full w-full cursor-pointer items-center gap-1.5 overflow-hidden rounded-lg pr-2 transition-colors duration-[120ms]",
+           "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded-lg pr-2 transition-colors duration-[120ms]",
            selected
              ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium"
              : "hover:bg-panel-2",
