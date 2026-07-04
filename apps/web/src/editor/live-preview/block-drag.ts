@@ -80,6 +80,15 @@ const blockGutter = gutter({
     const b = blockRangeAt(view.state, line.from)
     return b && b.from === line.from ? new GripMarker(view, line.from) : null
   },
+  // #84 bounce (comment 696): a block ATOM (mermaid/table/callout/excalidraw etc.) is rendered as a
+  // REPLACED block WIDGET, not text lines, so `lineMarker` never fires for it — the grip only appeared on
+  // plain paragraphs. `widgetMarker` places the grip aligned to the widget, so EVERY top-level block
+  // (paragraph OR widget atom) gets a drag grip.
+  widgetMarker: (view, _widget, block) => {
+    if (view.state.readOnly) return null
+    const b = blockRangeAt(view.state, block.from)
+    return b && b.from === block.from ? new GripMarker(view, block.from) : null
+  },
 })
 
 export const blockDrag: Extension = [dropField, blockGutter]
