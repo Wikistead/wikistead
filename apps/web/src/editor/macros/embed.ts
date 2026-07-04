@@ -68,8 +68,16 @@ export function buildEmbedElement(url: string, allowlist: readonly string[]): HT
     let sameOrigin = false;
     try { sameOrigin = typeof window !== "undefined" && !!window.location && new URL(trimmed).origin === window.location.origin; } catch { /* unparseable → treat as cross-origin (still sandboxed) */ }
     iframe.setAttribute("sandbox", sameOrigin ? "allow-scripts allow-popups allow-presentation" : "allow-scripts allow-same-origin allow-popups allow-presentation");
-    iframe.setAttribute("referrerpolicy", "no-referrer");
+    // #108 bounce: `no-referrer` suppresses the Referer entirely, which triggers YouTube error 153
+    // ("video player configuration error") — YouTube's required-minimum-functionality doc says an
+    // embedded player must receive a Referer and forbids a Referrer-Policy that strips it, recommending
+    // `strict-origin-when-cross-origin` (the de-facto fix — Pimcore/react-player/fancyapps all use it).
+    // Privacy is still protected: strict-origin-when-cross-origin sends ONLY the origin (host) cross-
+    // origin — never the path/query/page content — and only to operator-allowlisted hosts, so the
+    // comment-551 "don't leak the embedding page URL" intent holds for path/content.
+    iframe.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
     iframe.setAttribute("loading", "lazy");
+    iframe.setAttribute("allow", "fullscreen"); // YouTube/Vimeo expect the fullscreen permission policy
     iframe.setAttribute("allowfullscreen", "");
     return iframe;
   }

@@ -69,7 +69,10 @@ describe("buildEmbedElement", () => {
     // The minimal sandbox must NOT grant top-navigation / modals / downloads.
     expect(sandbox).not.toContain("allow-top-navigation");
     expect(sandbox).not.toContain("allow-modals");
-    expect(el.getAttribute("referrerpolicy")).toBe("no-referrer");
+    // #108 bounce: strict-origin-when-cross-origin (NOT no-referrer, which triggers YouTube error 153).
+    // Sends only the origin cross-origin — path/content still private.
+    expect(el.getAttribute("referrerpolicy")).toBe("strict-origin-when-cross-origin");
+    expect(el.getAttribute("referrerpolicy")).not.toBe("no-referrer");
     expect(el.getAttribute("src")).toBe("https://www.youtube.com/embed/x");
   });
 
