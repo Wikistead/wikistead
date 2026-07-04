@@ -38,8 +38,8 @@ test("rebind editor.toggleVim via the capture UI; persists; the new chord toggle
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
   const toggle = page.getByTestId("vim-toggle");
-  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await page.keyboard.press("Control+Alt+B");
   await sleep(80);
-  await expect(toggle).toHaveAttribute("aria-checked", "true"); // rebound chord works
+  await expect(toggle).toHaveAttribute("aria-pressed", "true"); // rebound chord works
 });

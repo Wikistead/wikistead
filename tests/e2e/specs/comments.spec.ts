@@ -1,10 +1,21 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { openDemo, openScratch, enterEdit, sleep } from "../helpers";
 
 // P4 UX in a REAL browser: page comments + resolve/tabs, inline comment anchored to
 // a selection (blue underline) that FOLLOWS a live edit, and @mention autocomplete
 // scoped to page-viewers. Uses a unique page (not the shared demo doc).
 const API = "http://dev.localhost:4010";
+
+// #212: the comments toggle moved from the always-visible bar INTO the ⋯ overflow menu.
+// Open the overflow, then click the comments item (which toggles the RightPanel, exclusive).
+async function openComments(page: Page) {
+  await page.click("[data-testid=page-overflow-trigger]");
+  await page.click("[data-testid=comments-toggle]");
+  // Wait for the Radix dropdown to fully close before any following keyboard step — otherwise its
+  // dismissable layer can swallow the next Escape (which the panel's own Esc-to-close relies on).
+  await page.locator("[data-testid=page-overflow]").waitFor({ state: "detached" }).catch(() => {});
+}
+
 
 test("comments: page comment + resolve/tabs, inline highlight that follows edits, @mention", async ({ page }) => {
   await openDemo(page);
@@ -26,7 +37,7 @@ test("comments: page comment + resolve/tabs, inline highlight that follows edits
   await sleep(400);
 
   // Comments panel is toggled now — open it.
-  await page.click("[data-testid=comments-toggle]");
+  await openComments(page);
   const panel = page.locator("[data-testid=comments-panel]");
   await expect(panel).toBeVisible();
 
@@ -71,7 +82,7 @@ test("comments: page comment + resolve/tabs, inline highlight that follows edits
 test("comments panel: × and Esc close it; outside-click and editor-Esc do not", async ({ page }) => {
   await openScratch(page, "comments-close");
   await enterEdit(page);
-  await page.click("[data-testid=comments-toggle]");
+  await openComments(page);
   const panel = page.getByTestId("comments-panel");
   await expect(panel).toBeVisible();
 
@@ -90,7 +101,7 @@ test("comments panel: × and Esc close it; outside-click and editor-Esc do not",
   await expect(panel).toHaveCount(0);
 
   // re-open; Esc with focus in the panel closes it
-  await page.click("[data-testid=comments-toggle]");
+  await openComments(page);
   await expect(panel).toBeVisible();
   await page.getByTestId("comments-close").focus();
   await page.keyboard.press("Escape");
