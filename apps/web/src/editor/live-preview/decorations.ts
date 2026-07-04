@@ -1116,29 +1116,35 @@ const RENDERERS: BlockRenderer[] = [
       if (info?.highlight) for (const [a, b] of info.highlight) for (let x = a; x <= b; x++) hl.add(x);
       // Tint only the CODE lines, not the ``` / ~~~ fence lines (those would render
       // as empty tinted bars once their CodeMark hides — visually redundant).
+      // #198 bounce: in SOURCE mode the code fence must show RAW ONLY — no header band, no hidden info,
+      // no line numbers / highlight (round-trip). hideMarker below is already source-gated, but the
+      // ctx.add decorations are not, so gate them explicitly.
+      const srcMode = isSourceMode(ctx.state);
       let codeIdx = 0; // #198: 1-based CODE line index (fence lines excluded) for line numbers + highlight
       for (let n = first; n <= last; n++) {
         const line = doc.line(n);
         const t = line.text.trimStart();
         if (t.startsWith("```") || t.startsWith("~~~")) {
-          // #198: a header band (title + language) above the OPENING fence when any attribute is set.
+          // #198 bounce: on the OPENING fence of an attributed fence, REPLACE the raw info string with
+          // the header band (title + lang) INLINE, reveal-on-cursor via hideMarker (caret on the line OR
+          // Source mode shows the raw info). Replacing the info in place — rather than a separate side:-1
+          // header widget + a now-empty (blank) opening line — means Live shows the header directly above
+          // the code body with NO blank line between them (the header IS the opening line, matching how
+          // the callout ::: collapses). NON-atomic so the line stays landable to reveal. Attributed only.
           if (n === first && info && (info.title || info.showLineNumbers || (info.highlight && info.highlight.length))) {
-            ctx.add(Decoration.widget({ widget: new FenceHeaderWidget(info.lang, info.title), side: -1, block: true }), line.from);
-            // #198 bounce: the ``` marker is hidden by CodeMark, but the raw info string
-            // (`ts title="app.ts" showLineNumbers {1,3-4}`) stayed visible on the opening line
-            // duplicated with the header band. Hide it in Live (reveal-on-cursor, like the
-            // directive fence), so only the header + code body show; the caret on the opening
-            // line reveals the raw info, and Source mode keeps it raw (round-trip). NON-atomic so
-            // the line stays landable (else the caret can't reach it to reveal). Attributed fences
-            // ONLY — a plain ```lang fence is untouched.
+            // Replace the raw info string INLINE with the header band, reveal-on-cursor via hideMarker
+            // (caret on the line / Source → raw info). NON-atomic so the line stays LANDABLE (a block
+            // replace would be atomic → the caret couldn't reach it to reveal). The header renders
+            // inline-flex (its CSS) so it sits ON the opening line — no residual blank line above the
+            // code body (matching the callout's collapse). Attributed fences only.
             const fence = line.text.match(/^(\s*)([`~]+)/);
             const infoStart = line.from + (fence ? fence[0].length : 0);
-            if (infoStart < line.to) ctx.hideMarker(infoStart, line.to, undefined, false);
+            if (infoStart < line.to) ctx.hideMarker(infoStart, line.to, Decoration.replace({ widget: new FenceHeaderWidget(info.lang, info.title) }), false);
           }
           continue;
         }
         codeIdx++;
-        if (!info?.showLineNumbers && !hl.size) { ctx.add(codeBlockLine, line.from); continue; }
+        if (srcMode || (!info?.showLineNumbers && !hl.size)) { ctx.add(codeBlockLine, line.from); continue; }
         // #198: display-only line class carrying the (fence-relative) line number + highlight state; the
         // gutter number is CSS ::before(attr), the highlight a full-line background UNDER the token colours.
         let cls = "cm-lp-code-line";
@@ -1672,10 +1678,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   },
   // #198 / ADR-094: code-fence attribute chrome. Header band (title + lang), line-number gutter,
   // highlighted lines. All display-only; token colours (#158-C2) sit ABOVE the highlight background.
+  // #198 bounce: inline-flex (not block flex) so the header sits ON the opening fence line it replaces
+  // no residual blank line above the code body. Title + lang read as a compact header chip.
   ".cm-lp-code-header": {
-    fontFamily: "var(--font-ui)", display: "flex", alignItems: "center", justifyContent: "space-between",
-    gap: "0.5em", padding: "0.15em 0.7em", background: "var(--panel-2, #2d2d2e)", color: "var(--fg)",
-    borderTopLeftRadius: "4px", borderTopRightRadius: "4px", fontSize: "0.8em", borderBottom: "1px solid var(--border, #3a3a3a)",
+    fontFamily: "var(--font-ui)", display: "inline-flex", alignItems: "center", verticalAlign: "middle",
+    gap: "0.6em", padding: "0.05em 0.6em", background: "var(--panel-2, #2d2d2e)", color: "var(--fg)",
+    borderRadius: "4px", fontSize: "0.8em", border: "1px solid var(--border, #3a3a3a)",
   },
   ".cm-lp-code-title": { fontWeight: "600" },
   ".cm-lp-code-lang": { color: "var(--fg-dim, #888)", textTransform: "uppercase", letterSpacing: "0.03em", fontSize: "0.9em" },
