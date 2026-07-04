@@ -1857,6 +1857,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-mermaid-edit": { display: "flex", gap: "0.8em", alignItems: "stretch", flexWrap: "wrap" },
   ".cm-lp-mermaid-edit-src": { flex: "1 1 16em", minWidth: "12em", minHeight: "8em", resize: "vertical", fontFamily: "var(--font-code, monospace)", fontSize: "0.85em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.5em", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
   ".cm-lp-mermaid-edit-preview": { flex: "1 1 16em", minWidth: "12em", display: "flex", alignItems: "center", justifyContent: "center", border: "1px dashed var(--border, #888)", borderRadius: "6px", padding: "0.5em", overflow: "auto" },
+  // #174 / ADR-087 addendum: the plantuml editUI — same split as mermaid (source textarea + a degraded
+  // code preview, since plantuml has no bundled renderer). Reuses the mermaid geometry.
+  ".cm-lp-plantuml-edit": { display: "flex", gap: "0.8em", alignItems: "stretch", flexWrap: "wrap" },
+  ".cm-lp-plantuml-edit-src": { flex: "1 1 16em", minWidth: "12em", minHeight: "8em", resize: "vertical", fontFamily: "var(--font-code, monospace)", fontSize: "0.85em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.5em", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
+  ".cm-lp-plantuml-edit-preview": { flex: "1 1 16em", minWidth: "12em", border: "1px dashed var(--border, #888)", borderRadius: "6px", padding: "0.5em", overflow: "auto" },
   // #174 / ADR-087: the callout editUI — a type/label bar above a body textarea.
   ".cm-lp-callout-edit": { display: "flex", flexDirection: "column", gap: "0.5em" },
   ".cm-lp-callout-edit-bar": { display: "flex", gap: "0.5em", alignItems: "center", flexWrap: "wrap" },
