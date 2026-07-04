@@ -112,6 +112,11 @@ export type RichEditUI =
 export interface EditUIController { destroy(): void }
 export interface EditUI {
   readonly present: "inline" | "modal";
+  // #174 / ADR-087: what `source`/`save` operate on. "body" (default) = the macro's inner content only
+  // (the host wraps it back into the fence) — right when the fence is fixed (mermaid). "block" = the
+  // WHOLE block source incl. the `:::name[label]` / ```lang fences — needed when the editor changes the
+  // fence itself (a callout's TYPE = its directive name, a `[label]`), so the macro reconstructs it.
+  readonly sourceScope?: "body" | "block";
   mount(container: HTMLElement, source: MacroSource, ctx: MacroContext, save: (newSource: MacroSource) => void): EditUIController;
 }
 

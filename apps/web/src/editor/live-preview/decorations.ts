@@ -1218,6 +1218,16 @@ const RENDERERS: BlockRenderer[] = [
         return false;
       }
       if (macro.containerClass) {
+        // #174 / ADR-087: a container macro (callout) with the unified inline editUI, render-active →
+        // mount its editor (EditableEditUIWidget). sourceScope "block": the editor owns the WHOLE
+        // `:::type[label]…:::` (so it can change the type/label), so pass the full block source and an
+        // identity wrap (the editUI's save already returns the reconstructed block). Precedes the panel.
+        const cActive = ctx.state.field(macroRenderActiveField, false);
+        if (macro.editUI?.present === "inline" && cActive && cActive.from <= first.from && cActive.to >= lastLine.to && !ctx.state.readOnly) {
+          const blockSrc = doc.sliceString(first.from, lastLine.to);
+          ctx.addAtomic(Decoration.replace({ widget: new EditableEditUIWidget(first.from, lastLine.to, blockSrc, macro.editUI, (b) => b, ctx.macroTheme, macro.tier), block: true }), first.from, lastLine.to);
+          return false; // the inline editor owns the block
+        }
         // #170 / ADR-049 (Y): a typed callout (containerClass + icon) renders as a single-container
         // PANEL widget when the caret is OUTSIDE — icon large + vertically centred, variant title,
         // nested Markdown body (renderCalloutPanel, the shared renderer). Caret-in reveals the raw
@@ -1718,6 +1728,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-mermaid-edit": { display: "flex", gap: "0.8em", alignItems: "stretch", flexWrap: "wrap" },
   ".cm-lp-mermaid-edit-src": { flex: "1 1 16em", minWidth: "12em", minHeight: "8em", resize: "vertical", fontFamily: "var(--font-code, monospace)", fontSize: "0.85em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.5em", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
   ".cm-lp-mermaid-edit-preview": { flex: "1 1 16em", minWidth: "12em", display: "flex", alignItems: "center", justifyContent: "center", border: "1px dashed var(--border, #888)", borderRadius: "6px", padding: "0.5em", overflow: "auto" },
+  // #174 / ADR-087: the callout editUI — a type/label bar above a body textarea.
+  ".cm-lp-callout-edit": { display: "flex", flexDirection: "column", gap: "0.5em" },
+  ".cm-lp-callout-edit-bar": { display: "flex", gap: "0.5em", alignItems: "center", flexWrap: "wrap" },
+  ".cm-lp-callout-edit-type": { fontSize: "0.85em", padding: "0.25em 0.4em", border: "1px solid var(--border, #888)", borderRadius: "6px", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
+  ".cm-lp-callout-edit-label": { flex: "1 1 8em", minWidth: "6em", fontSize: "0.85em", padding: "0.3em 0.5em", border: "1px solid var(--border, #888)", borderRadius: "6px", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
+  ".cm-lp-callout-edit-body": { minHeight: "5em", resize: "vertical", fontFamily: "var(--font-code, monospace)", fontSize: "0.85em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.5em", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
   ".cm-lp-macro-error": {
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
     color: "var(--danger, #c00)",
