@@ -12,7 +12,9 @@ import { makeImageResolver } from "./image-resolver";
 import { makeDiagramRenderer } from "./diagram-renderer";
 import { makeTranscludeResolver } from "./transclude-resolver";
 import { PageEmbedPicker } from "./PageEmbedPicker";
+import { EmbedUrlModal } from "./EmbedUrlModal";
 import type { PageEmbedPicker as PageEmbedPickerFn } from "./live-preview/palette";
+import type { EmbedUrlPrompt as EmbedUrlPromptFn } from "./live-preview/decorations";
 import { useEmbedProviders } from "../data/queries";
 import { createAnchor, resolveAnchor } from "./comment-anchors";
 import { setCommentRanges, type CommentRange } from "./live-preview/comment-highlights";
@@ -241,6 +243,21 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     embedPickResolve.current = null;
     r?.(id);
   }, []);
+  // #210 bounce: the in-app `:::embed-external` URL modal (replaces window.prompt). Same stash/open/
+  // resolve pattern as the page picker; the modal is seeded with the current URL and warns on a
+  // non-allowlisted host (the render still degrades — this is UI only).
+  const [embedUrlState, setEmbedUrlState] = useState<{ open: boolean; current: string }>({ open: false, current: "" });
+  const embedUrlResolve = useRef<((url: string | null) => void) | null>(null);
+  const openEmbedUrlPrompt = useCallback<EmbedUrlPromptFn>((current, onSubmit) => {
+    embedUrlResolve.current = onSubmit;
+    setEmbedUrlState({ open: true, current });
+  }, []);
+  const handleEmbedUrl = useCallback((url: string | null) => {
+    setEmbedUrlState((s) => ({ ...s, open: false }));
+    const r = embedUrlResolve.current;
+    embedUrlResolve.current = null;
+    r?.(url);
+  }, []);
 
   // Dev-only probe for the isolation invariant (ADR-013): editor content is not in
   // React state, so typing must NOT re-render this component (read before/after).
@@ -311,6 +328,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       resolveTransclude,
       embedProviders,
       openPageEmbedPicker,
+      openEmbedUrlPrompt,
       uploadImage: onUploadImage,
       vim,
       vimCompartment,
@@ -355,7 +373,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     };
     // vim excluded (Compartment reconfigure, not a remount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, renderDiagram, resolveTransclude, embedProviders, openPageEmbedPicker, onUploadImage]);
+  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, renderDiagram, resolveTransclude, embedProviders, openPageEmbedPicker, openEmbedUrlPrompt, onUploadImage]);
 
   // vim on/off: reconfigure the Compartment IN PLACE (no remount → collab/presence
   // untouched). Only meaningful on the edit surface.
@@ -424,6 +442,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       </section>
       {/* #205 part 2: the :::embed-page title-search picker (opened from the slash command). */}
       <PageEmbedPicker open={embedPickerOpen} onPick={handleEmbedPick} />
+      <EmbedUrlModal open={embedUrlState.open} current={embedUrlState.current} onSubmit={handleEmbedUrl} />
     </div>
   );
 });

@@ -15,6 +15,10 @@
     "empty": "No matching pages you can view.",
     "useId": "Embed page id \"{{id}}\""
   },
+  "embedUrl": {
+    "title": "Embed URL",
+    "degradeWarning": "This host isn't on the tenant's embed allowlist, so it will show as a link, not an embed. An admin can add it under Admin → Embeds."
+  },
   "toc": {
     "title": "On this page",
     "empty": "No headings yet",

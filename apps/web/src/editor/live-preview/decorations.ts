@@ -414,6 +414,17 @@ export const pageEmbedPicker = Facet.define<PageEmbedPicker | null, PageEmbedPic
   combine: (vals) => vals.find((v) => v != null) ?? null,
 });
 
+// #210 bounce: the host seam that opens an in-app URL modal for `:::embed-external` (replacing the raw
+// window.prompt — review UI bounce). The host (Editor) shows a dialog seeded with the current URL
+// and, using the tenant embed allowlist (useEmbedProviders / GET /embed/providers), warns when the typed
+// host isn't allowlisted (save is still allowed — the render just degrades to a link). onSubmit gets the
+// new URL (or null on cancel). Absent seam (guest / modal-less) ⇒ no-op (the caret stays; raw edit via
+// reveal remains). The write-back core (embedRetargetChange) is unchanged.
+export type EmbedUrlPrompt = (current: string, onSubmit: (url: string | null) => void) => void;
+export const embedUrlPrompt = Facet.define<EmbedUrlPrompt | null, EmbedUrlPrompt | null>({
+  combine: (vals) => vals.find((v) => v != null) ?? null,
+});
+
 // #210: compute the single canonical Y.Text edit that re-targets an embed block at `pos` to `value`.
 // The offset is derived from the atom's DIRECTIVE range (directiveMacroAt), so the write lands on the
 // real block, not a display-only mutation. Returns null when `pos` is not the named embed directive
@@ -443,11 +454,12 @@ function changeEmbedTarget(view: EditorView, wrap: HTMLElement, name: string): v
     if (!picker) { view.focus(); return; } // picker-less surface: fall back to raw edit (caret-in reveals)
     picker((pageId) => { if (pageId) write(pageId); else view.focus(); });
   } else {
+    // #210 bounce: an in-app URL modal (embedUrlPrompt seam), not window.prompt. Seed the current URL.
+    const prompt = view.state.facet(embedUrlPrompt);
+    if (!prompt) { view.focus(); return; } // modal-less surface: raw edit via reveal remains
     let cur = "";
     try { cur = directiveMacroAt(view.state, view.posAtDOM(wrap))?.body.trim() ?? ""; } catch { /* detached → empty seed */ }
-    const url = window.prompt("Embed URL", cur); // #210: change the external embed target
-    if (url != null && url.trim() !== "") write(url.trim());
-    else view.focus();
+    prompt(cur, (url) => { if (url != null && url.trim() !== "") write(url.trim()); else view.focus(); });
   }
 }
 
