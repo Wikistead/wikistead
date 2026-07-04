@@ -1122,6 +1122,16 @@ const RENDERERS: BlockRenderer[] = [
           // #198: a header band (title + language) above the OPENING fence when any attribute is set.
           if (n === first && info && (info.title || info.showLineNumbers || (info.highlight && info.highlight.length))) {
             ctx.add(Decoration.widget({ widget: new FenceHeaderWidget(info.lang, info.title), side: -1, block: true }), line.from);
+            // #198 bounce: the ``` marker is hidden by CodeMark, but the raw info string
+            // (`ts title="app.ts" showLineNumbers {1,3-4}`) stayed visible on the opening line
+            // duplicated with the header band. Hide it in Live (reveal-on-cursor, like the
+            // directive fence), so only the header + code body show; the caret on the opening
+            // line reveals the raw info, and Source mode keeps it raw (round-trip). NON-atomic so
+            // the line stays landable (else the caret can't reach it to reveal). Attributed fences
+            // ONLY — a plain ```lang fence is untouched.
+            const fence = line.text.match(/^(\s*)([`~]+)/);
+            const infoStart = line.from + (fence ? fence[0].length : 0);
+            if (infoStart < line.to) ctx.hideMarker(infoStart, line.to, undefined, false);
           }
           continue;
         }
