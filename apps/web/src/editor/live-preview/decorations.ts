@@ -793,14 +793,16 @@ class MacroWidget extends WidgetType {
       }
     }
     if (!view.state.readOnly) {
-      // ADR-024 / #174 / ADR-087: a body click on an INLINE macro (table/callout/mermaid)
-      // edits it in place — the cheap, in-context edit, no cushion. A MODAL macro (Excalidraw)
-      // must NOT open on a stray body click (it launches a separate editor); a click only
-      // SELECTS it (caret on the atom → ring), and the ✎ button / Ctrl+Enter opens the modal.
-      // The fold/edit buttons stopPropagation so their clicks don't fall through. Offset-invariant.
+      // ADR-087 (unified editUI model) / #84 comment 696: a body click SELECTS the atom (caret → ring);
+      // the rich UI opens only via the ✎ edit button / Ctrl+Enter. A stray click must NOT launch an
+      // editor — otherwise Excalidraw pops a modal on a mis-click AND the click swallows the grip so drag
+      // can't start. This holds for macros with the unified editUI (mermaid/callout) and for modal macros
+      // (Excalidraw). EXCEPTION: a legacy richEditUI macro (table via InnerEditHost, #154) keeps its
+      // in-place click-to-edit — its cell-edit UX depends on the body click and is not an editUI atom yet.
+      const clickEdits = !this.macro.editUI && editModeOf(this.macro) === "inline"; // table (#154) only
       wrap.addEventListener("mousedown", (e) => {
         e.preventDefault();
-        if (editModeOf(this.macro) === "inline" && enterMacroAt(view, view.posAtDOM(wrap))) return;
+        if (clickEdits && enterMacroAt(view, view.posAtDOM(wrap))) return;
         view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)) });
         view.focus();
       });
