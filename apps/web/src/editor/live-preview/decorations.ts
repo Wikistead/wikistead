@@ -1268,9 +1268,17 @@ const RENDERERS: BlockRenderer[] = [
   },
   // The :::name / ::: fence lines: hide (reveal raw on the cursor's line, like every
   // other marker). hideMarker also makes the range atomic for clean cursor motion.
-  // #141 bounce: a `:::` fence occupies a WHOLE line — hide it (reveal-on-cursor) but NOT atomically,
-  // else the fence line is un-landable and j/k warps over a revealed callout's `:::info`/`:::` lines.
-  { match: (n) => n === "DirectiveMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to, undefined, false) },
+  // #141 bounce: a `:::` fence occupies a WHOLE line. Two things
+  // - When the enclosing directive is being EDITED (caret anywhere in its range), show the fence RAW
+  // a hidden (fully-replaced) fence line collapses toward ~0 height, so its y coincides with the next
+  // body line and geometry-based j/k skips a line (the reported 1→3 warp in a revealed callout). Raw
+  // fence lines keep normal line height + stay landable/editable while editing the block.
+  // - Otherwise hide it (reveal-on-cursor) but NOT atomically (a whole-line atomic range is un-landable).
+  { match: (n) => n === "DirectiveMark", enter: (node, ctx) => {
+    const dir = directiveMacroAt(ctx.state, node.from);
+    if (dir && rangeRevealed(ctx.state, dir.from, dir.to)) return; // editing the block → raw fences (normal height)
+    ctx.hideMarker(node.from, node.to, undefined, false);
+  } },
   {
     // Blockquote → a left-bar + muted block. Each line gets the quote line style; the
     // ">" markers hide (revealing on the cursor's line, like every other marker), so
