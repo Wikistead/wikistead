@@ -1091,6 +1091,13 @@ const RENDERERS: BlockRenderer[] = [
         // (Ctrl+Enter / click → macroRenderActiveField). A modal macro (Excalidraw) never
         // reveals — entering opens its modal. Otherwise the atom renders.
         const active = ctx.state.field(macroRenderActiveField, false);
+        // #174 / ADR-087: a fence macro with the unified inline editUI, render-active → mount its own
+        // editor (EditableEditUIWidget). Inert today (no first-party fence macro declares editUI yet)
+        // the migration hook, symmetric with the directive path.
+        if (macro.editUI?.present === "inline" && active && active.from <= from && active.to >= to && !ctx.state.readOnly) {
+          ctx.addAtomic(Decoration.replace({ widget: new EditableEditUIWidget(from, to, fenceBody(doc, node.from, node.to), macro.editUI, (b) => "```" + lang + "\n" + b + "\n```", ctx.macroTheme, macro.tier), block: true }), from, to);
+          return;
+        }
         if (active && !macro.richEditUI && active.from <= from && active.to >= to) return; // entered → source
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), true, lang!, atomSelected(ctx.state, from, to), ctx.macroTheme), block: true }), from, to);
         return;
