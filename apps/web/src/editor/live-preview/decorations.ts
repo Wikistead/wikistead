@@ -13,7 +13,7 @@ import { autoDemote } from "../macros/tier-cap";
 export type { MacroTheme }; // #200: re-exported so the Editor can type the redrawMacros payload
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, directiveChainAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
-import { parseDirectiveOpen } from "../macros/directive-parser";
+import { parseDirectiveOpen, resolveDirectiveRanges } from "../macros/directive-parser";
 import { parseFenceLine } from "@wikistead/macro-render"; // #198: code-fence attribute parser
 import { renderMarkdownToDom, renderCalloutPanel } from "../macros/md-render";
 import { buildEmbedElement } from "../macros/embed";
@@ -1029,6 +1029,11 @@ export interface RenderCtx {
   // the block's boundary — which the reveal-on-cursor check treats as overlapping, so
   // arrowing/`j`/`k` into the block reveals its raw source instead of skipping it.
   addAtomic(deco: Decoration, from: number, to: number): void;
+  // #185 sub-task 2b: line-starts of directive fence lines that lezer's DirectiveMark renderer already
+  // hid. A post-pass hides the RESOLVER's fence lines that are NOT in here (the ones lezer early-closed
+  // and leaked). Only leaked fences (early-closed descend containers — columns/tabs) are absent, and
+  // those are never under a block-replace widget, so the post-pass never overlaps an existing replace.
+  readonly fenceLineStarts: Set<number>;
 }
 
 // Minimal structural view of a syntax-tree node — what renderers need. A real
@@ -1295,6 +1300,7 @@ const RENDERERS: BlockRenderer[] = [
   { match: (n) => n === "DirectiveMark", enter: (node, ctx) => {
     const dir = directiveMacroAt(ctx.state, node.from);
     if (dir && rangeRevealed(ctx.state, dir.from, dir.to)) return; // editing the block → raw fences (normal height)
+    ctx.fenceLineStarts.add(ctx.state.doc.lineAt(node.from).from); // #185 2b: lezer hid this fence line
     ctx.hideMarker(node.from, node.to, undefined, false);
   } },
   {
@@ -1440,6 +1446,7 @@ function buildDecorations(state: EditorState, themeOverride?: MacroTheme): {
       hidden.push(hide.range(from, to));
       blocks.push({ from, to });
     },
+    fenceLineStarts: new Set<number>(),
   };
 
   syntaxTree(state).iterate({
@@ -1451,6 +1458,22 @@ function buildDecorations(state: EditorState, themeOverride?: MacroTheme): {
       for (const r of RENDERERS) if (r.match(node.name)) return r.enter(node, ctx) === false ? false : undefined;
     },
   });
+
+  // #185 sub-task 2b: lezer early-closes a nested `:::tabs` at an inner `::::columns` close, so some
+  // directive fence lines are NOT lezer DirectiveMark nodes and leaked raw. resolveDirectiveRanges (the
+  // stack-based single source of truth) knows EVERY fence; hide the open/close lines it identifies that
+  // lezer did NOT already hide (fenceLineStarts). Reveal-on-cursor (skip while editing the block). Only
+  // early-closed DESCEND containers (columns/tabs) leak, and those are never under a block-replace widget
+  // (callout etc. parse correctly → their fences ARE in fenceLineStarts), so this never overlaps a replace.
+  for (const dir of resolveDirectiveRanges(state.doc.toString())) {
+    if (rangeRevealed(state, dir.from, dir.to)) continue; // editing this block → raw fences
+    const openLine = state.doc.lineAt(dir.from);
+    if (!ctx.fenceLineStarts.has(openLine.from) && openLine.from < openLine.to) ctx.hideMarker(openLine.from, openLine.to, undefined, false);
+    if (dir.closed) {
+      const closeLine = state.doc.lineAt(Math.min(dir.to, state.doc.length));
+      if (!ctx.fenceLineStarts.has(closeLine.from) && closeLine.from < closeLine.to) ctx.hideMarker(closeLine.from, closeLine.to, undefined, false);
+    }
+  }
 
   return {
     decorations: Decoration.set(all, true),
