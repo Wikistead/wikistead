@@ -59,22 +59,58 @@ export const outdentList = (view: EditorView): boolean => {
   return true;
 };
 
-// #202 vim `o`: in NORMAL mode `o` must CONTINUE the list marker (like Enter in insert mode does),
-// not open a blank line — the previous attempt bound `o` via a CM keymap (Prec.highest), but that
-// CANNOT intercept vim NORMAL-mode keys: @replit/codemirror-vim processes normal-mode commands in its
-// own ViewPlugin `keydown` domEventHandler, so `o` never reaches the CM keymap facet (that is why the
-// bounce reported "o still doesn't complete"). The correct seam is a vim REMAP. We remap `o` to
-// `A<CR>` — append at end of line (enters insert mode, column-independent) then Enter — which reuses
-// the ALREADY-WORKING insert-mode marker continuation (markdownKeymap's insertNewlineContinueMarkdown,
-// Prec.high below). On a list line that continues the marker (bullet repeats, ordered increments); off
-// a list line `A<CR>` is equivalent to plain `o` (end-of-line + newline). One global mapping (vim maps
-// are global), applied once and guarded against HMR re-entry. `O` (open above) is left as vim default
-// for now — the reported issue is `o`; above-continuation has no clean key-remap and is a follow-up.
+// #202 vim `o`/`O`: in NORMAL mode these must CONTINUE the list marker (like Enter in insert mode),
+// not open a blank line. Two earlier attempts failed and were measured in a real browser:
+//   - a CM keymap (Prec.highest) can't intercept vim NORMAL keys (vim handles them in its own keydown).
+//   - remapping `o`→`A<CR>` produced an UNMARKED new line: vim's remap `<CR>` doesn't dispatch the CM
+//     Enter that markdownKeymap's continuation listens for (measured: `o` then type → "new", no "- ").
+// The correct seam is a vim ACTION that does the continuation DIRECTLY. `Vim.defineAction` adds the fn
+// to vim's actions object, so a plain `function` (not arrow) binds `this` to that object and can call
+// `this.enterInsertMode` exactly like the built-in `newLineAndEnterInsertMode`. We compute the current
+// line's marker (bullet repeats; ordered increments), insert `\n<marker>` (o) / `<marker>\n` (O), place
+// the caret after the marker, and enter insert mode. Off a list line it falls back to a plain open.
+// One global registration (vim maps/actions are global), guarded against HMR re-entry.
+const MARKER_RE = /^(\s*)([-*+]|\d+)([.)]?)(\s+)/; // indent, bullet-or-number, ordered-delim, trailing ws
+function continuedMarker(lineText: string, forward: boolean): string | null {
+  const m = MARKER_RE.exec(lineText);
+  if (!m) return null;
+  const [, indent, token, delim, ws] = m;
+  if (/^\d+$/.test(token!)) {
+    const n = parseInt(token!, 10);
+    return `${indent}${forward ? n + 1 : Math.max(1, n)}${delim}${ws}`; // ordered: next number (o) / same (O)
+  }
+  return `${indent}${token}${delim}${ws}`; // bullet: repeat
+}
 let vimListMapped = false;
 function ensureVimListMappings(): void {
   if (vimListMapped) return;
   vimListMapped = true;
-  Vim.map("o", "A<CR>", "normal"); // continue the list marker via the working Enter path
+  const openList = function (this: { enterInsertMode: (cm: unknown, a: unknown, v: unknown) => void }, cm: any, actionArgs: { after?: boolean }, vim: unknown): void {
+    const forward = actionArgs?.after !== false; // `o` (after=true) below, `O` (after=false) above
+    const cur = cm.getCursor();
+    const lineText: string = cm.getLine(cur.line) ?? "";
+    const marker = continuedMarker(lineText, forward);
+    if (marker == null) {
+      // not a list line → plain open (mirror the built-in newLineAndEnterInsertMode minimally)
+      const at = forward ? { line: cur.line, ch: lineText.length } : { line: cur.line, ch: 0 };
+      cm.replaceRange(forward ? "\n" : "\n", at);
+      cm.setCursor(forward ? { line: cur.line + 1, ch: 0 } : { line: cur.line, ch: 0 });
+      this.enterInsertMode(cm, { repeat: 1 }, vim);
+      return;
+    }
+    if (forward) {
+      cm.replaceRange("\n" + marker, { line: cur.line, ch: lineText.length });
+      cm.setCursor({ line: cur.line + 1, ch: marker.length });
+    } else {
+      cm.replaceRange(marker + "\n", { line: cur.line, ch: 0 });
+      cm.setCursor({ line: cur.line, ch: marker.length });
+    }
+    this.enterInsertMode(cm, { repeat: 1 }, vim);
+  };
+  Vim.defineAction("continueListBelow", function (this: any, cm: any, a: any, v: any) { openList.call(this, cm, { after: true }, v); });
+  Vim.defineAction("continueListAbove", function (this: any, cm: any, a: any, v: any) { openList.call(this, cm, { after: false }, v); });
+  Vim.mapCommand("o", "action", "continueListBelow", {}, { context: "normal" });
+  Vim.mapCommand("O", "action", "continueListAbove", {}, { context: "normal" });
 }
 
 export const listEditing: Extension = (() => {
