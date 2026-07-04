@@ -12,14 +12,13 @@ import { fenceLang, fenceBody } from "./fence";
 describe("editUI unification (#174 / ADR-087)", () => {
   const noopEditUI = (present: "inline" | "modal"): EditUI => ({ present, mount: () => ({ destroy() {} }) });
 
-  it("editModeOf: editUI.present takes precedence over the legacy richEditUI/editMode", () => {
+  it("editModeOf: editUI.present takes precedence over the legacy richEditUI", () => {
     // editUI wins even when a legacy modal richEditUI would otherwise say "modal"
     expect(editModeOf({ editUI: noopEditUI("inline"), richEditUI: { present: "modal", editor: {} as never } })).toBe("inline");
     expect(editModeOf({ editUI: noopEditUI("modal") })).toBe("modal");
   });
 
-  it("editModeOf: falls back to editMode, then richEditUI, then inline (unchanged legacy behaviour)", () => {
-    expect(editModeOf({ editMode: "modal" })).toBe("modal");
+  it("editModeOf: falls back to richEditUI, then inline (editMode attribute folded into editUI, ADR-087)", () => {
     expect(editModeOf({ richEditUI: { present: "modal", editor: {} as never } })).toBe("modal");
     expect(editModeOf({ richEditUI: { present: "inline", editor: {} as never } })).toBe("inline");
     expect(editModeOf({})).toBe("inline");
@@ -158,22 +157,16 @@ describe("fence parsing", () => {
 });
 
 describe("editModeOf (#174 / ADR-087 — mouse-edit interaction)", () => {
-  it("derives 'modal' from a modal richEditUI (Excalidraw) with no explicit editMode", () => {
+  it("derives 'modal' from a modal richEditUI (Excalidraw)", () => {
     const ex = findFenceMacro("excalidraw");
     expect(ex).toBeDefined();
     expect(ex!.richEditUI?.present).toBe("modal");
-    expect(ex!.editMode).toBeUndefined();
     expect(editModeOf(ex!)).toBe("modal");
   });
 
-  it("derives 'inline' for macros edited in place (mermaid fence, note callout, table)", () => {
-    expect(editModeOf(mermaidMacro)).toBe("inline"); // no richEditUI → edited by entering the source
-    expect(editModeOf(noteCalloutMacro)).toBe("inline"); // inline richEditUI panel
-    expect(editModeOf(findDirectiveMacro("table")!)).toBe("inline"); // in-editor table ops
-  });
-
-  it("lets an explicit editMode override the richEditUI-derived default", () => {
-    expect(editModeOf({ editMode: "modal", richEditUI: undefined })).toBe("modal");
-    expect(editModeOf({ editMode: "inline", richEditUI: { present: "modal" } as never })).toBe("inline");
+  it("derives 'inline' for macros edited in place (mermaid editUI, note callout editUI, table richEditUI)", () => {
+    expect(editModeOf(mermaidMacro)).toBe("inline"); // editUI.present inline (slice 4b)
+    expect(editModeOf(noteCalloutMacro)).toBe("inline"); // editUI.present inline (slice 4b)
+    expect(editModeOf(findDirectiveMacro("table")!)).toBe("inline"); // in-editor table ops (richEditUI inline)
   });
 });
