@@ -133,18 +133,22 @@ export function observeBlockResize(view: EditorView, dom: HTMLElement): ResizeOb
   return ro;
 }
 
+// #202: nested bullet lists get a hierarchy glyph per level (Notion/editors convention) so nesting
+// reads at a glance: level 0 = •, 1 = ◦, 2 = ▪, then cycle. Level = indentation / 2 (the markdown
+// nesting convention used by list-edit.ts indent/outdent).
+const BULLET_GLYPHS = ["•", "◦", "▪"];
 class BulletWidget extends WidgetType {
+  constructor(readonly level: number) { super(); }
   toDOM() {
     const span = document.createElement("span");
     span.className = "cm-lp-bullet";
-    span.textContent = "•";
+    span.textContent = BULLET_GLYPHS[this.level % BULLET_GLYPHS.length]!;
     return span;
   }
-  eq() {
-    return true;
+  eq(o: BulletWidget) {
+    return o.level === this.level;
   }
 }
-const bullet = Decoration.replace({ widget: new BulletWidget() });
 
 // GFM task checkbox (ADR-019). The `[ ]`/`[x]` TaskMarker renders as a real checkbox
 // (reveal-on-cursor still shows the raw markers for editing). How a click is handled
@@ -1336,8 +1340,12 @@ const RENDERERS: BlockRenderer[] = [
     match: (n) => n === "ListMark",
     enter: (node, ctx) => {
       const list = node.node.parent?.parent?.name; // ListItem -> Bullet/OrderedList
-      // Replace "-"/"*" with a bullet glyph (space stays). OrderedList keeps "1.".
-      if (list === "BulletList") ctx.hideMarker(node.from, node.to, bullet);
+      // Replace "-"/"*" with a per-LEVEL bullet glyph (#202: •→◦→▪ by nesting). OrderedList keeps "1.".
+      if (list === "BulletList") {
+        const line = ctx.state.doc.lineAt(node.from);
+        const indent = /^[ \t]*/.exec(line.text)![0].replace(/\t/g, "  ").length;
+        ctx.hideMarker(node.from, node.to, Decoration.replace({ widget: new BulletWidget(Math.floor(indent / 2)) }));
+      }
     },
   },
   {
