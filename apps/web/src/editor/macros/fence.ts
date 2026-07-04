@@ -1,7 +1,7 @@
 import { syntaxTree } from "@codemirror/language";
 import type { EditorState, Text } from "@codemirror/state";
 import { findFenceMacro, findDirectiveMacro, type FenceMacro, type DirectiveMacro } from "./registry";
-import { parseDirectiveOpen } from "./directive-parser";
+import { parseDirectiveOpen, resolveDirectiveRanges, type ResolvedDirective } from "./directive-parser";
 import { parsePipe, parseHtml, type Grid } from "./table-model";
 
 // Shared parsing of fenced-code blocks for the macro path. No DOM, no decorations
@@ -90,15 +90,27 @@ function nodeToDirective(state: EditorState, node: { from: number; to: number })
   return { from, to: lastLine.to, name: open.name, macro, body: parts.join("\n") };
 }
 
+// #185 / ADR-096 sub-task 2: `resolveDirectiveRanges` (stack-based, Pandoc semantics) is the SINGLE
+// source of truth for `:::` directive ranges — lezer's composite early-closed a `:::tabs` parent at an
+// inner `::::columns` close, so directiveMacroAt/directiveChainAt (motion / reveal / edit) resolved the
+// wrong ranges for nested layouts. Route them through the resolver. Memoised per immutable `Text` (one
+// full scan per doc version, then O(1)) so this stays cheap on the hot render path.
+const rdCache = new WeakMap<Text, ResolvedDirective[]>();
+function resolvedFor(doc: Text): ResolvedDirective[] {
+  let r = rdCache.get(doc);
+  if (!r) { r = resolveDirectiveRanges(doc.toString()); rdCache.set(doc, r); }
+  return r;
+}
+// The directives whose range contains `pos`, innermost-LAST (a nesting chain — siblings can't both
+// contain a point). Pure read of the resolver.
+function directivesAt(doc: Text, pos: number): ResolvedDirective[] {
+  return resolvedFor(doc).filter((d) => d.from <= pos && pos <= d.to).sort((a, b) => a.depth - b.depth);
+}
+
 export function directiveMacroAt(state: EditorState, pos: number): MacroDirective | null {
-  let node: ReturnType<ReturnType<typeof syntaxTree>["resolveInner"]> | null = syntaxTree(state).resolveInner(pos, 1);
-  while (node && node.name !== "Directive") node = node.parent;
-  if (!node) {
-    node = syntaxTree(state).resolveInner(pos, -1);
-    while (node && node.name !== "Directive") node = node.parent;
-  }
-  if (!node) return null;
-  return nodeToDirective(state, node);
+  const chain = directivesAt(state.doc, pos);
+  if (chain.length === 0) return null;
+  return nodeToDirective(state, chain[chain.length - 1]!); // innermost containing directive
 }
 
 // #196 / ADR-092: the NESTING CHAIN of directive macros containing `pos`, OUTERMOST first → INNERMOST
@@ -107,25 +119,10 @@ export function directiveMacroAt(state: EditorState, pos: number): MacroDirectiv
 // Pure (syntax tree only). Directives whose open line names no registered macro are skipped (a plain
 // nested block is not a macro layer). Empty when the caret is in no directive.
 export function directiveChainAt(state: EditorState, pos: number): MacroDirective[] {
-  const tree = syntaxTree(state);
-  type Node = ReturnType<typeof tree.resolveInner>;
-  // At a boundary the forward resolve may sit outside the block; fall back to the backward resolve if
-  // no Directive ancestor is found on the forward side.
-  const collect = (start: Node): { from: number; to: number }[] => {
-    const out: { from: number; to: number }[] = [];
-    let n: Node | null = start;
-    while (n) {
-      if (n.name === "Directive") out.push({ from: n.from, to: n.to });
-      n = n.parent;
-    }
-    return out;
-  };
-  let dirs = collect(tree.resolveInner(pos, 1));
-  if (dirs.length === 0) dirs = collect(tree.resolveInner(pos, -1));
-  // `dirs` is innermost-first (walked up from the caret) → reverse to outermost-first, then resolve.
-  return dirs
-    .reverse()
-    .map((n) => nodeToDirective(state, n))
+  // Resolver-backed (sub-task 2): OUTERMOST-first chain of macro directives containing `pos`. Non-macro
+  // directive names resolve to null via nodeToDirective and drop out (a plain nested block is not a layer).
+  return directivesAt(state.doc, pos) // already sorted outermost(depth 0)-first
+    .map((d) => nodeToDirective(state, d))
     .filter((d): d is MacroDirective => d !== null);
 }
 
