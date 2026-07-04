@@ -101,6 +101,20 @@ export type RichEditUI =
   | { readonly present: "modal"; readonly editor: MacroModalEditor; readonly collab?: boolean }
   | { readonly present: "inline"; readonly editor: InlineEditor };
 
+// #174 / ADR-087: the UNIFIED macro edit-UI contract, generalising RichEditUI into ONE public API a
+// third-party macro can implement. The macro renders its editor into the host-provided `container`;
+// the host-API is `ctx = { theme }` ONLY (narrow trust boundary, ADR-024 — no EditorView/Y.Text/DB/FGA)
+// plus `save(newSource)`, which the host applies to the single Y.Text offset-invariantly (the macro
+// never touches the document). `present` picks an inline panel vs a modal. save granularity is the
+// ADR-087 contract: `inline` ⇒ immediate Y.Text (concurrent edits merge via Y.Text); `modal` ⇒
+// close-flush is permitted only for canvas editors (Excalidraw). The mount returns a controller the
+// host destroys on exit. This subsumes RichEditUI (InnerEditHost/MacroModalEditor) as macros migrate.
+export interface EditUIController { destroy(): void }
+export interface EditUI {
+  readonly present: "inline" | "modal";
+  mount(container: HTMLElement, source: MacroSource, ctx: MacroContext, save: (newSource: MacroSource) => void): EditUIController;
+}
+
 // ADR-025 step 3: a macro's source can often be written at more than one "level" — a
 // standard, portable form (CommonMark / GFM) or a richer non-standard one (a ::: directive
 // or HTML). A MacroTier declares those levels (lowest = most standard/portable first) plus
@@ -144,6 +158,9 @@ export interface FenceMacro {
   // Mouse rich-edit surface (modal for embedded React editors — keeps React out of
   // CodeMirror, ADR-013).
   readonly richEditUI?: RichEditUI;
+  // #174 / ADR-087: the unified edit-UI (supersedes richEditUI as macros migrate). When present, the
+  // host opens `editUI.mount` behind the single edit button; `editUI.present` also drives editModeOf.
+  readonly editUI?: EditUI;
   // #174 / ADR-087: how the mouse EDITS this macro — "inline" (click the body → edit in place:
   // table/callout/mermaid) or "modal" (click → select, then ✎ opens a separate editor: Excalidraw —
   // the cushion prevents a surprise context switch on a stray click). Optional; defaults are derived
@@ -173,6 +190,7 @@ interface DirectiveMacroBase {
   htmlRender(body: string): SafeHtml;
   readonly exportFidelity: "preserve" | "degrade";
   readonly richEditUI?: RichEditUI;
+  readonly editUI?: EditUI; // #174 / ADR-087 — unified edit UI (see FenceMacro.editUI)
   readonly editMode?: "inline" | "modal"; // #174 / ADR-087 — see FenceMacro.editMode
   // Tier levels for host auto-demote (ADR-025 step 3). The table declares this (pipe ⟷
   // :::table); container directives without alternate representations omit it.
@@ -207,11 +225,18 @@ export type DirectiveMacro = ContainerDirectiveMacro | BlockDirectiveMacro;
 
 export type Macro = FenceMacro | DirectiveMacro;
 
-// #174 / ADR-087: resolve how the mouse edits a macro. An explicit `editMode` wins; otherwise a modal
-// richEditUI (Excalidraw) ⇒ "modal" (click selects, ✎ opens the editor), else "inline" (table/callout/
-// mermaid — clicking the body edits it in place). One source of truth for the interaction matrix.
-export function editModeOf(macro: { editMode?: "inline" | "modal"; richEditUI?: RichEditUI }): "inline" | "modal" {
-  return macro.editMode ?? (macro.richEditUI?.present === "modal" ? "modal" : "inline");
+// #174 / ADR-087: resolve how the mouse edits a macro. The unified `editUI.present` wins (the migration
+// target); then an explicit `editMode`; otherwise a modal richEditUI (Excalidraw) ⇒ "modal" (click
+// selects, edit button opens the editor), else "inline" (table/callout/mermaid — clicking the body edits
+// it in place). One source of truth for the interaction matrix, valid across the richEditUI→editUI move.
+export function editModeOf(macro: { editUI?: EditUI; editMode?: "inline" | "modal"; richEditUI?: RichEditUI }): "inline" | "modal" {
+  return macro.editUI?.present ?? macro.editMode ?? (macro.richEditUI?.present === "modal" ? "modal" : "inline");
+}
+
+// #174 / ADR-087: does this macro expose ANY rich edit UI (the unified editUI OR the legacy richEditUI)?
+// The host shows the single edit button when true. One predicate so the button logic is migration-safe.
+export function hasEditUI(macro: { editUI?: EditUI; richEditUI?: RichEditUI }): boolean {
+  return !!macro.editUI || !!macro.richEditUI;
 }
 
 const FENCE_MACROS = new Map<string, FenceMacro>();
