@@ -174,6 +174,10 @@ export interface FenceMacro {
   // Tier levels for host auto-demote (ADR-025 step 3). Optional — most fence macros are
   // single-level (mermaid/excalidraw round-trip verbatim in their fence).
   readonly tier?: MacroTier;
+  // #174 / ADR-087: whether the block shows the fold (collapse) button. Default true (a data fence like
+  // a code block benefits from collapsing a large body). Set false for a rendered DIAGRAM where collapse
+  // is meaningless (mermaid) — the reviewer flagged the mermaid collapse button for removal.
+  readonly foldable?: boolean;
   readonly slash?: MacroSlash; // appears in the `/` palette
 }
 
