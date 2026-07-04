@@ -708,6 +708,34 @@ type RenderableMacro = { liveRender: (body: string, ctx: { theme: MacroTheme }) 
 // #174 / ADR-087: the single macro-edit affordance is a Lucide SVG pencil (ADR-052 icon system),
 // replacing the ✎ emoji. A trusted constant (no user input) → safe as innerHTML.
 const MACRO_EDIT_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
+// #213: structural editing for columns/tabs — add / remove a child :::column / :::tab as a real Y.Text
+// edit (single dispatch, offset-invariant), NOT raw hand-editing. The child's colon count is one less
+// than the container's (the outer≥inner convention), so an added item nests correctly under the
+// stack resolver (#185). `directiveMacroAt` (resolver-backed) gives the live container range at the
+// widget's position; `resolveDirectiveRanges` locates the child blocks for removal.
+function containerChildColons(view: EditorView, d: { from: number }): string {
+  const open = parseDirectiveOpen(view.state.doc.lineAt(d.from).text);
+  return ":".repeat(Math.max(3, (open?.colons ?? 4) - 1));
+}
+function addLayoutItem(view: EditorView, pos: number, childName: "column" | "tab"): void {
+  const d = directiveMacroAt(view.state, pos);
+  if (!d || (d.name !== "columns" && d.name !== "tabs")) return;
+  const colons = containerChildColons(view, d);
+  const label = childName === "tab" ? "[Tab]" : "";
+  const closeLine = view.state.doc.lineAt(Math.min(d.to, view.state.doc.length)); // the closing container fence line
+  view.dispatch({ changes: { from: closeLine.from, insert: `${colons}${childName}${label}\n\n${colons}\n` }, userEvent: "input.insert", scrollIntoView: true });
+}
+function removeLastLayoutItem(view: EditorView, pos: number, childName: "column" | "tab"): void {
+  const d = directiveMacroAt(view.state, pos);
+  if (!d) return;
+  const items = resolveDirectiveRanges(view.state.doc.toString()).filter((r) => r.name === childName && r.from >= d.from && r.to <= d.to);
+  if (items.length <= 1) return; // never remove the last remaining item (an empty container is degenerate)
+  const last = items[items.length - 1]!;
+  const fromLine = view.state.doc.lineAt(last.from);
+  const toLine = view.state.doc.lineAt(Math.min(last.to, view.state.doc.length));
+  view.dispatch({ changes: { from: fromLine.from, to: Math.min(toLine.to + 1, view.state.doc.length) }, userEvent: "delete" });
+}
+
 class MacroWidget extends WidgetType {
   private ro?: ResizeObserver;
   private objectUrl?: string; // #140: revoked on destroy so the rendered image blob isn't leaked
@@ -830,6 +858,29 @@ class MacroWidget extends WidgetType {
           enterMacroAt(view, view.posAtDOM(wrap));
         });
         wrap.appendChild(edit);
+      }
+      // #213: columns/tabs get structural add/remove — a `+` appends a child :::column/:::tab and a `−`
+      // removes the last one (real Y.Text edits via addLayoutItem/removeLastLayoutItem). Shown on hover/
+      // selection (a hover row at the bottom-right, off the widget content). This is the structural-edit
+      // affordance the ADR-087 editUI framework generalises; here it's wired directly for the two layout
+      // containers whose child count is otherwise only editable by hand-typing the raw fences.
+      if (this.name === "columns" || this.name === "tabs") {
+        const child = this.name === "columns" ? "column" : "tab";
+        const row = document.createElement("div");
+        row.className = "cm-lp-macro-layoutbar";
+        const mk = (glyph: string, label: string, fn: () => void, testid: string) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "cm-lp-macro-layoutbtn";
+          b.textContent = glyph;
+          b.title = label;
+          b.setAttribute("data-testid", testid);
+          b.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); fn(); });
+          return b;
+        };
+        row.appendChild(mk("＋", `Add ${child}`, () => addLayoutItem(view, view.posAtDOM(wrap), child), `layout-add-${child}`));
+        row.appendChild(mk("－", `Remove ${child}`, () => removeLastLayoutItem(view, view.posAtDOM(wrap), child), `layout-remove-${child}`));
+        wrap.appendChild(row);
       }
       // #210 / ADR-087: embed macros have no rich UI, but their TARGET (page id / URL) must be
       // changeable after insertion — otherwise a mis-picked embed strands the user in raw editing.
@@ -1841,6 +1892,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-macro-edit": { left: "0" },
   ".cm-lp-macro-retarget": { left: "0" },
   ".cm-lp-macro-fold": { left: "2em" },
+  // #213: columns/tabs structural add/remove bar — bottom-right, shown on hover/selection (same gating
+  // as the edit button). Sits below the content so it doesn't overlap the child bodies.
+  ".cm-lp-macro-layoutbar": { position: "absolute", bottom: "-0.6em", right: "0", display: "inline-flex", gap: "0.25em", opacity: "0", transition: "opacity 120ms", zIndex: "3", pointerEvents: "auto" },
+  ".cm-lp-macro-layoutbtn": { display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.5em", height: "1.5em", border: "1px solid var(--border, #888)", borderRadius: "4px", background: "var(--panel, #fff)", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.85em", lineHeight: "1", padding: "0" },
+  ".cm-lp-macro-wrap:hover .cm-lp-macro-layoutbar, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-layoutbar": { opacity: "1" },
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
   ".cm-lp-macro-wrap:hover .cm-lp-macro-fold, .cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-fold, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget": { opacity: "1" },
