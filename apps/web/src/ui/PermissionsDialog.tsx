@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePage, useTenantGroups, type PageRelation } from "../data/queries";
+import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePage, useTenantGroups, type PageRelation } from "../data/queries";
 import { notify } from "./toast";
 import { Select } from "./Select";
 import { Button, IconButton } from "./Button";
@@ -21,6 +21,8 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   const { data: restrictions } = usePageRestrictions(pageId, open); // #109
   const restrict = useRestrict(pageId);
   const unrestrict = useUnrestrict(pageId);
+  const { data: isPrivate } = usePagePrivate(pageId, open); // #109 / ADR-098
+  const setPrivate = useSetPrivate(pageId);
   const [mode, setMode] = useState<"user" | "group">("user");
   const [sub, setSub] = useState("");
   const [groupName, setGroupName] = useState("");
@@ -67,6 +69,23 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
           <DialogDescription>{t("permissions.body")}</DialogDescription>
         </DialogHeader>
 
+        {/* #109 / ADR-098: PRIVATE (allowlist) toggle. Private cuts space inheritance — only the people
+            listed below can view/edit — and strips public. Nested children do NOT inherit a parent's
+            private in v1 (each page is private independently), noted to avoid a manager's false assumption. */}
+        <label className="flex items-start gap-2 rounded-md border border-border p-2" data-testid="private-toggle-row">
+          <input type="checkbox" className="mt-0.5" data-testid="private-toggle" checked={!!isPrivate}
+            disabled={setPrivate.isPending}
+            onChange={(e) => setPrivate.mutate(e.target.checked, {
+              onSuccess: () => notify.success(t("toast.saved")),
+              onError: () => notify.error(t("toast.actionFailed")),
+            })} />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm text-foreground">{t("permissions.privateTitle")}</span>
+            <span className="block text-xs text-fg-dim">{isPrivate ? t("permissions.privateOnHint") : t("permissions.privateHint")}</span>
+          </span>
+        </label>
+
+        <p className="mt-3 text-xs font-medium text-fg-dim">{isPrivate ? t("permissions.allowlistTitle") : t("permissions.grantTitle")}</p>
         <div className="flex items-center gap-2">
           <Select
             value={mode}

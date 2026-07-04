@@ -45,3 +45,42 @@ test("manager grants and revokes page access via the Permissions dialog", async 
   }, { api: API, pageId });
   expect(grants.some((g) => g.grantee === "user:alice-perm")).toBe(false);
 });
+
+// #109 / ADR-098: the PRIVATE (allowlist) toggle in the Permissions dialog. Turning it on makes the
+// page private on the server (only the allow list can access); turning it off clears it. Verified in a
+// real browser against the e2e server.
+test("manager toggles a page private (allowlist) via the Permissions dialog", async ({ page }) => {
+  await openDemo(page);
+  const pageId = await page.evaluate(async (api) => {
+    const r = await fetch(`${api}/spaces/demo_space/pages`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ title: "private page" }),
+    });
+    return (await r.json()).id as string;
+  }, API);
+
+  await page.goto(`/p/${pageId}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await page.click("[data-testid=page-overflow-trigger]");
+  await page.click("[data-testid=permissions-open]");
+  await expect(page.locator("[data-testid=permissions-dialog]")).toBeVisible();
+
+  const toggle = page.locator("[data-testid=private-toggle]");
+  await expect(toggle).not.toBeChecked(); // starts non-private
+
+  const isPrivate = async () => page.evaluate(async ({ api, pageId }) =>
+    (await (await fetch(`${api}/pages/${pageId}/private`, { headers: { Authorization: "Bearer dev-token" } })).json()).private as boolean,
+    { api: API, pageId });
+
+  // turn private ON → the controlled checkbox re-checks once the server round-trip completes.
+  await toggle.click();
+  await expect(toggle).toBeChecked(); // retries until the mutation + refetch land
+  expect(await isPrivate()).toBe(true);
+  await expect(page.locator("[data-testid=permissions-dialog]")).toContainText(/Allow list|許可リスト/);
+
+  // turn private OFF → server clears it
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+  expect(await isPrivate()).toBe(false);
+});
