@@ -47,13 +47,9 @@ test("comments: page comment + resolve/tabs, inline highlight that follows edits
   await panel.locator("[data-testid=comment-submit]").last().click();
   await expect(panel.locator("[data-testid=comment-thread]")).toContainText("a page-level comment");
 
-  // (2) resolve → leaves the Open tab, shows under Resolved
-  await page.locator("[data-testid=thread-toggle]").first().click();
-  await sleep(300);
-  await expect(panel.locator("[data-testid=comment-thread]")).toHaveCount(0);
-  await page.locator("[data-testid=tab-resolved]").click();
-  await expect(panel.locator("[data-testid=comment-thread]")).toContainText("a page-level comment");
-  await page.locator("[data-testid=tab-open]").click();
+  // (2) #214 part 2: resolve/open-resolved tabs were removed — the thread stays in the single list.
+  await expect(panel.locator("[data-testid=thread-toggle]")).toHaveCount(0);
+  await expect(panel.locator("[data-testid=tab-resolved]")).toHaveCount(0);
 
   // (3) inline comment anchored to the selected line → blue-underline highlight
   page.once("dialog", (d) => d.accept("comment on the line"));

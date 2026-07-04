@@ -13,7 +13,6 @@ const hint = "m-0 text-sm text-fg-dim";
 const textareaCls = "box-border min-h-[56px] w-full resize-y rounded-md border border-border bg-background p-2 text-[0.92em] text-foreground focus-visible:border-[var(--accent)] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-[var(--accent)]";
 const suggestCls = "absolute bottom-full left-0 right-0 z-20 m-0 mb-1 list-none rounded-md border border-border bg-panel p-1 shadow-[0_6px_20px_rgba(0,0,0,0.25)]";
 const suggestBtn = "block w-full rounded px-2 py-[5px] text-left text-[0.9em] text-foreground hover:bg-panel-2";
-const tabCls = "rounded-[5px] px-2.5 py-[3px] text-xs text-fg-dim aria-[pressed=true]:bg-background aria-[pressed=true]:text-foreground aria-[pressed=true]:shadow-[0_1px_2px_rgba(0,0,0,0.15)]";
 
 // Composer with @mention autocomplete. Suggestions come from the page-scoped
 // mentionable directory (server limits it to members who can VIEW this page), so a
@@ -84,16 +83,15 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
   // path that let a "guest" delete a member's comment). Members pass no token → the session is used.
   const authToken = token ?? sessionToken;
   const { data: threads } = useComments(pageId, authToken);
-  const { createThread, reply, setStatus, remove } = useCommentMutations(pageId, authToken);
-  const [tab, setTab] = useState<"open" | "resolved">("open");
+  const { createThread, reply, remove } = useCommentMutations(pageId, authToken);
   const [inlineHint, setInlineHint] = useState<string | null>(null);
 
   // Page not viewable (server returned null) → render nothing (no-leak).
   if (threads === null || threads === undefined) return null;
 
-  // #214 part 4: newest thread first (the source is oldest-first creation order). The `[…]` copy keeps
-  // the query cache immutable. (Reverse-infinite-scroll pagination is a follow-on slice.)
-  const shown = [...threads.filter((t) => t.status === tab)].reverse();
+  // #214 part 2: the resolve/open-tabs split is removed — ONE list of all threads. part 4: newest first
+  // (source is oldest-first creation order; the `[…]` copy keeps the query cache immutable).
+  const shown = [...threads].reverse();
 
   const addInline = () => {
     const anchor = anchorGetterRef.current?.();
@@ -109,12 +107,6 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
       testId="comments-panel"
       title={tr("page.comments")}
       onClose={onClose}
-      headerActions={
-        <div className="inline-flex gap-0.5 rounded-[7px] bg-panel-2 p-0.5">
-          <button type="button" className={tabCls} data-testid="tab-open" aria-pressed={tab === "open"} onClick={() => setTab("open")}>{tr("commentsPanel.open")}</button>
-          <button type="button" className={tabCls} data-testid="tab-resolved" aria-pressed={tab === "resolved"} onClick={() => setTab("resolved")}>{tr("commentsPanel.resolved")}</button>
-        </div>
-      }
     >
       {canComment && (
         <div className="flex flex-col gap-2">
@@ -124,7 +116,7 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
       )}
 
       <div className="flex flex-col gap-2">
-        {shown.length === 0 && <p className={hint}>{tab === "open" ? tr("commentsPanel.emptyOpen") : tr("commentsPanel.emptyResolved")}</p>}
+        {shown.length === 0 && <p className={hint}>{tr("commentsPanel.emptyOpen")}</p>}
         {shown.map((t) => (
           <div key={t.id} className="flex flex-col gap-2 rounded-lg border border-border bg-background px-3 py-2" data-testid="comment-thread">
             {t.kind === "inline" && (
@@ -142,25 +134,13 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
               </div>
             ))}
             {canComment && (
-              <>
-                <Composer pageId={pageId} token={authToken} placeholder={tr("commentsPanel.reply")} onSubmit={(body, mentions) => reply.mutate({ threadId: t.id, body, mentions })} />
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    data-testid="thread-toggle"
-                    onClick={() => setStatus.mutate({ threadId: t.id, action: t.status === "open" ? "resolve" : "reopen" })}
-                  >
-                    {t.status === "open" ? tr("commentsPanel.resolve") : tr("commentsPanel.reopen")}
-                  </Button>
-                </div>
-              </>
+              <Composer pageId={pageId} token={authToken} placeholder={tr("commentsPanel.reply")} onSubmit={(body, mentions) => reply.mutate({ threadId: t.id, body, mentions })} />
             )}
           </div>
         ))}
       </div>
 
-      {canComment && tab === "open" && (
+      {canComment && (
         // #214 part 3: the composer stays PINNED to the panel bottom (sticky) while the thread list
         // scrolls above it, so it never gets buried by a long history. The negative margins + panel bg
         // extend the sticky bar to the panel edges and cover the threads scrolling under it (RightPanel is
