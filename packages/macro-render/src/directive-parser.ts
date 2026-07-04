@@ -37,6 +37,62 @@ export function isDirectiveClose(text: string, minColons: number): boolean {
   return !!m && m[1]!.length >= minColons;
 }
 
+// #185 / ADR-096 (Option B, stack-based): the SINGLE SOURCE OF TRUTH for `:::` directive nesting.
+// lezer's `composite` is called OUTER→INNER and only knows its own opening colon count, so a loose
+// close (`>=`) let an inner `::::columns` close its `:::tabs` parent early (measured: `::::tabs`
+// closed at the columns' `::::`, truncating the rest). Pandoc fenced_divs / remark-directive / MyST all
+// solve this with an OPEN-DIV STACK where a close pops the INNERMOST open div — colon count gates only
+// the OPENING nesting convention (outer ≥ inner, for readability / round-trip), NEVER the close. This
+// pure single-pass resolver implements exactly that, decoupled from lezer's composite limitation, so
+// directive ranges are correct at any depth. `directiveMacroAt`/`directiveChainAt`/`parseLayoutItems`
+// consume THIS (sub-task 2) so range resolution is never defined twice.
+export interface ResolvedDirective {
+  from: number;      // offset of the opening fence line start
+  to: number;        // offset of the END of the closing fence line (or text end if unclosed)
+  bodyFrom: number;  // offset of the first body line (after the opening fence's newline)
+  bodyTo: number;    // offset of the closing fence line start (or `to` if unclosed)
+  colons: number;
+  name: string;
+  label?: string;
+  depth: number;     // nesting depth (0 = top-level)
+  closed: boolean;   // false if the directive ran to EOF without a matching close fence
+}
+
+// Only-colons line (a CLOSE candidate). Distinct from an OPENING fence (colons + a name), which
+// `parseDirectiveOpen` matches — the two are mutually exclusive (a close has no name).
+function isBareColonLine(text: string): boolean {
+  return /^:{3,}[ \t]*$/.test(text);
+}
+
+export function resolveDirectiveRanges(text: string): ResolvedDirective[] {
+  const out: ResolvedDirective[] = [];
+  const stack: { from: number; bodyFrom: number; colons: number; name: string; label?: string; depth: number }[] = [];
+  const lines = text.split("\n");
+  let offset = 0;
+  for (const line of lines) {
+    const lineStart = offset;
+    const lineEnd = offset + line.length;
+    const bare = isBareColonLine(line);
+    if (bare && stack.length > 0) {
+      // CLOSE — pop the INNERMOST open directive (Pandoc semantics; colon count does NOT gate).
+      const top = stack.pop()!;
+      out.push({ from: top.from, to: lineEnd, bodyFrom: top.bodyFrom, bodyTo: lineStart, colons: top.colons, name: top.name, label: top.label, depth: top.depth, closed: true });
+    } else {
+      const open = parseDirectiveOpen(line);
+      if (open) stack.push({ from: lineStart, bodyFrom: Math.min(lineEnd + 1, text.length), colons: open.colons, name: open.name, label: open.label, depth: stack.length });
+      // else: a content line (or a bare `:::` with no open directive) — ignored.
+    }
+    offset = lineEnd + 1; // +1 for the consumed "\n"
+  }
+  // Unclosed directives at EOF close at the text end (reveal-on-cursor / editing an in-progress block).
+  while (stack.length > 0) {
+    const top = stack.pop()!;
+    out.push({ from: top.from, to: text.length, bodyFrom: top.bodyFrom, bodyTo: text.length, colons: top.colons, name: top.name, label: top.label, depth: top.depth, closed: false });
+  }
+  // Sort by start offset so callers get document order (the stack pops innermost-first).
+  return out.sort((a, b) => a.from - b.from || b.to - a.to);
+}
+
 export const directiveExtension: MarkdownConfig = {
   defineNodes: [
     {

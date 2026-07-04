@@ -88,3 +88,70 @@ describe("directive parser (composite, nested markdown)", () => {
     }
   });
 });
+
+import { resolveDirectiveRanges } from "./directive-parser";
+
+// #185 / ADR-096 (Option B): the pure stack resolver is the single source of truth for `:::` nesting.
+// A close pops the INNERMOST open directive (Pandoc semantics); colon count never gates the close, so a
+// deep `::::columns` close no longer early-closes its `:::tabs` parent (the bug the CSS/margin fixes
+// couldn't touch). These lock the nesting the reviewer's dense repro exercises.
+describe("resolveDirectiveRanges (stack-based nesting)", () => {
+  const byName = (rs: ReturnType<typeof resolveDirectiveRanges>, n: string) => rs.filter((r) => r.name === n);
+
+  it("resolves a simple directive", () => {
+    const src = ":::note\nhi\n:::";
+    const rs = resolveDirectiveRanges(src);
+    expect(rs).toHaveLength(1);
+    expect(rs[0]).toMatchObject({ name: "note", depth: 0, closed: true, from: 0 });
+    expect(rs[0]!.to).toBe(src.length);
+  });
+
+  it("does NOT let an inner ::::columns close its :::tabs parent (early-close bug)", () => {
+    // outer tabs(4) with an inner columns(4) whose close `::::` previously closed the parent tabs early.
+    const src = [
+      "::::tabs",          // 0
+      ":::tab[Tab 1]",     // 1
+      "::::columns",       // 2
+      ":::column",         // 3
+      "warning",           // 4
+      ":::",               // 5  closes :::column
+      "::::",              // 6  closes ::::columns
+      ":::",               // 7  closes :::tab
+      ":::tab[Tab 2]",     // 8
+      "second",            // 9
+      ":::",               // 10 closes :::tab (Tab 2)
+      "::::",              // 11 closes ::::tabs
+    ].join("\n");
+    const rs = resolveDirectiveRanges(src);
+    const tabs = byName(rs, "tabs");
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]!.depth).toBe(0);
+    expect(tabs[0]!.closed).toBe(true);
+    // the tabs directive spans the WHOLE thing — it is NOT truncated at the inner columns close.
+    expect(tabs[0]!.from).toBe(0);
+    expect(tabs[0]!.to).toBe(src.length);
+    // BOTH tabs are inside (not one orphaned outside) and columns/column nest correctly.
+    expect(byName(rs, "tab")).toHaveLength(2);
+    expect(byName(rs, "columns")).toHaveLength(1);
+    expect(byName(rs, "column")).toHaveLength(1);
+    // no raw marker leaks: every closing `:::` was consumed by a directive on the stack.
+    expect(byName(rs, "tab")[0]!.depth).toBe(1);
+    expect(byName(rs, "columns")[0]!.depth).toBe(2);
+    expect(byName(rs, "column")[0]!.depth).toBe(3);
+  });
+
+  it("closes the innermost even for SAME colon count at two levels (Pandoc)", () => {
+    const src = ":::a\n:::b\ntext\n:::\n:::";
+    const rs = resolveDirectiveRanges(src);
+    expect(byName(rs, "a")[0]).toMatchObject({ depth: 0 });
+    expect(byName(rs, "b")[0]).toMatchObject({ depth: 1 });
+    expect(byName(rs, "a")[0]!.to).toBe(src.length); // a spans both
+    expect(byName(rs, "b")[0]!.to).toBeLessThan(src.length); // b closes first (inner)
+  });
+
+  it("an unclosed directive runs to EOF (reveal-on-cursor while editing)", () => {
+    const rs = resolveDirectiveRanges(":::note\nstill typing");
+    expect(rs[0]).toMatchObject({ name: "note", closed: false });
+    expect(rs[0]!.to).toBe(":::note\nstill typing".length);
+  });
+});
