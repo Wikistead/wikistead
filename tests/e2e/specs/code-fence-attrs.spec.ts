@@ -73,3 +73,34 @@ test("#198: a PLAIN fence (no attributes) is untouched (no header band)", async 
   await sleep(500);
   expect(await page.locator(".cm-lp-code-header").count()).toBe(0); // no header band for a plain fence
 });
+
+// #198 (comment 724): B tab-style header + a copy button on the code area's top-right in view modes.
+test("#198: filename tab + copy button (view mode) copies the code body; hidden in Source", async ({ browser }) => {
+  const ctx = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
+  const page = await ctx.newPage();
+  await openScratch(page, "fence-copy");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText('top\n```ts title="app.ts"\nconst a = 1\nconst b = 2\n```\nbot\n');
+  await sleep(500);
+  await page.getByText("bot").click(); // caret off the fence so the header renders (not raw-revealed)
+  await sleep(200);
+
+  // the tab carries the filename + lang
+  await expect(page.locator(".cm-lp-code-tab .cm-lp-code-title")).toHaveText("app.ts");
+  // a copy button is present in the (Live) view mode
+  const copy = page.locator(".cm-lp-code-copy");
+  await expect(copy).toHaveCount(1);
+
+  // clicking it copies the CODE BODY only (no info line, no header)
+  await copy.click();
+  await sleep(200);
+  const clip = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clip).toBe("const a = 1\nconst b = 2");
+  await expect(copy).toHaveClass(/cm-lp-code-copied/); // transient ✓ feedback
+
+  // Source mode: no copy button (raw text is directly selectable)
+  await page.getByTestId("displaymode-source").click();
+  await sleep(200);
+  expect(await page.locator(".cm-lp-code-copy").count()).toBe(0);
+});

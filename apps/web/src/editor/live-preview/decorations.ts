@@ -97,28 +97,57 @@ const hrLine = Decoration.line({ attributes: { class: "cm-lp-hr" } });
 // #198 / ADR-094: a header band shown ABOVE a code fence that carries attributes — a filename/title
 // plus a muted language label. Display-only (contenteditable=false, ignoreEvent), block widget on the
 // side:-1 of the opening fence line. eq keys on lang+title so it's reused while they're stable.
+// #198 / ADR-094 (comment 724): the attributed code-fence chrome on the opening line — a FILENAME TAB
+// (B) at the top-left that reads like an editor tab connected to the code card, plus a COPY button at
+// the top-right shown only in a VIEW mode (Live/Reading), not Source. The row spans the opening line
+// (justify-between). copy reads the fence's code body (not the info line/header) → clipboard, with a
+// transient ✓ feedback. XSS-safe (textContent only).
 class FenceHeaderWidget extends WidgetType {
-  constructor(readonly lang: string, readonly title?: string) { super(); }
-  eq(o: FenceHeaderWidget) { return o.lang === this.lang && o.title === this.title; }
+  constructor(readonly lang: string, readonly title: string | undefined, readonly code: string, readonly canCopy: boolean) { super(); }
+  eq(o: FenceHeaderWidget) { return o.lang === this.lang && o.title === this.title && o.code === this.code && o.canCopy === this.canCopy; }
   toDOM() {
-    const bar = document.createElement("div");
-    bar.className = "cm-lp-code-header";
-    bar.contentEditable = "false";
+    const row = document.createElement("div");
+    row.className = "cm-lp-code-header";
+    row.contentEditable = "false";
+    // The filename tab (title + lang label) — top-left, editor-tab look.
+    const tab = document.createElement("span");
+    tab.className = "cm-lp-code-tab";
     if (this.title) {
       const t = document.createElement("span");
       t.className = "cm-lp-code-title";
       t.textContent = this.title; // XSS-safe: textContent, never innerHTML
-      bar.appendChild(t);
+      tab.appendChild(t);
     }
     if (this.lang) {
       const l = document.createElement("span");
       l.className = "cm-lp-code-lang";
       l.textContent = this.lang;
-      bar.appendChild(l);
+      tab.appendChild(l);
     }
-    return bar;
+    row.appendChild(tab);
+    // The copy button — view mode only (Source can select the raw text directly).
+    if (this.canCopy) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cm-lp-code-copy";
+      btn.setAttribute("aria-label", "Copy code");
+      btn.title = "Copy code";
+      btn.innerHTML = COPY_ICON; // trusted constant SVG (no user input → XSS-safe)
+      btn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void navigator.clipboard?.writeText(this.code).then(() => {
+          btn.classList.add("cm-lp-code-copied");
+          btn.innerHTML = CHECK_ICON;
+          setTimeout(() => { btn.classList.remove("cm-lp-code-copied"); btn.innerHTML = COPY_ICON; }, 1400);
+        }).catch(() => { /* clipboard denied (insecure ctx / permission) — no-op */ });
+      });
+      row.appendChild(btn);
+    }
+    return row;
   }
-  ignoreEvent() { return true; }
+  ignoreEvent(e: Event) { return e.type !== "mousedown" && e.type !== "click"; }
 }
 
 // Shared by every BLOCK widget (image / table / macro / table-edit). A widget's rendered
@@ -708,6 +737,10 @@ type RenderableMacro = { liveRender: (body: string, ctx: { theme: MacroTheme }) 
 // #174 / ADR-087: the single macro-edit affordance is a Lucide SVG pencil (ADR-052 icon system),
 // replacing the ✎ emoji. A trusted constant (no user input) → safe as innerHTML.
 const MACRO_EDIT_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
+// #198 (comment 724): Lucide copy / check glyphs for the code-fence copy button. Trusted constants
+// (no user input) → safe as innerHTML.
+const COPY_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+const CHECK_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
 // #213: structural editing for columns/tabs — add / remove a child :::column / :::tab as a real Y.Text
 // edit (single dispatch, offset-invariant), NOT raw hand-editing. The child's colon count is one less
 // than the container's (the outer≥inner convention), so an added item nests correctly under the
@@ -1182,6 +1215,19 @@ const RENDERERS: BlockRenderer[] = [
       // no line numbers / highlight (round-trip). hideMarker below is already source-gated, but the
       // ctx.add decorations are not, so gate them explicitly.
       const srcMode = isSourceMode(ctx.state);
+      // #198 (comment 724): the code BODY (fence lines excluded) for the copy button, and the last code
+      // line number for the card's bottom rounding. Collected up front since the header widget (which
+      // holds the copy target) is emitted on the FIRST line, before the loop reaches the body.
+      const codeLines: string[] = [];
+      let lastCodeLine = -1;
+      for (let n = first + 1; n <= last; n++) {
+        const lt = doc.line(n).text;
+        const tt = lt.trimStart();
+        if (tt.startsWith("```") || tt.startsWith("~~~")) break; // closing fence
+        codeLines.push(lt);
+        lastCodeLine = n;
+      }
+      const codeBody = codeLines.join("\n");
       let codeIdx = 0; // #198: 1-based CODE line index (fence lines excluded) for line numbers + highlight
       for (let n = first; n <= last; n++) {
         const line = doc.line(n);
@@ -1201,18 +1247,27 @@ const RENDERERS: BlockRenderer[] = [
             // code body (matching the callout's collapse). Attributed fences only.
             const fence = line.text.match(/^(\s*)([`~]+)/);
             const infoStart = line.from + (fence ? fence[0].length : 0);
-            if (infoStart < line.to) ctx.hideMarker(infoStart, line.to, Decoration.replace({ widget: new FenceHeaderWidget(info.lang, info.title) }), false);
+            // #198 (comment 724): tab (title + lang) + a copy button shown only in a VIEW mode (!srcMode).
+            if (infoStart < line.to) ctx.hideMarker(infoStart, line.to, Decoration.replace({ widget: new FenceHeaderWidget(info.lang, info.title, codeBody, !srcMode) }), false);
           }
           continue;
         }
         codeIdx++;
-        if (srcMode || (!info?.showLineNumbers && !hl.size)) { ctx.add(codeBlockLine, line.from); continue; }
-        // #198: display-only line class carrying the (fence-relative) line number + highlight state; the
-        // gutter number is CSS ::before(attr), the highlight a full-line background UNDER the token colours.
+        // #198 (comment 724): an ATTRIBUTED fence in a view mode reads as a CARD the tab connects to
+        // mark the first / last code line so the card's corners round (top-left stays flat under the tab).
+        const attributed = !srcMode && !!info && (!!info.title || !!info.showLineNumbers || (!!info.highlight && info.highlight.length > 0));
+        const cardFirst = attributed && n === first + 1;
+        const cardLast = attributed && n === lastCodeLine;
+        if (srcMode || (!info?.showLineNumbers && !hl.size && !cardFirst && !cardLast)) { ctx.add(codeBlockLine, line.from); continue; }
+        // #198: display-only line class carrying the (fence-relative) line number + highlight state + card
+        // corners; the gutter number is CSS ::before(attr), the highlight a full-line background UNDER the
+        // token colours (#158-C2).
         let cls = "cm-lp-code-line";
         const attrs: Record<string, string> = {};
         if (info?.showLineNumbers) { cls += " cm-lp-code-numbered"; attrs["data-linenum"] = String(codeIdx); }
         if (hl.has(codeIdx)) cls += " cm-lp-code-hl";
+        if (cardFirst) cls += " cm-lp-code-first";
+        if (cardLast) cls += " cm-lp-code-last";
         attrs.class = cls;
         ctx.add(Decoration.line({ attributes: attrs }), line.from);
       }
@@ -1777,13 +1832,33 @@ export const livePreviewTheme = EditorView.baseTheme({
   // highlighted lines. All display-only; token colours (#158-C2) sit ABOVE the highlight background.
   // #198 bounce: inline-flex (not block flex) so the header sits ON the opening fence line it replaces
   // no residual blank line above the code body. Title + lang read as a compact header chip.
+  // #198 (comment 724, B): the opening-line row spans the code width — a filename TAB at the left, a
+  // copy button at the right. The tab reads like an editor tab: rounded top corners only, flush on top of
+  // the code card below (no bottom edge between them). inline-flex + width so it sits on the (otherwise
+  // hidden) opening fence line without a residual blank line.
   ".cm-lp-code-header": {
-    fontFamily: "var(--font-ui)", display: "inline-flex", alignItems: "center", verticalAlign: "middle",
-    gap: "0.6em", padding: "0.05em 0.6em", background: "var(--panel-2, #2d2d2e)", color: "var(--fg)",
-    borderRadius: "4px", fontSize: "0.8em", border: "1px solid var(--border, #3a3a3a)",
+    fontFamily: "var(--font-ui)", display: "inline-flex", width: "100%", boxSizing: "border-box",
+    alignItems: "flex-end", justifyContent: "space-between", verticalAlign: "middle", fontSize: "0.8em",
+  },
+  ".cm-lp-code-tab": {
+    display: "inline-flex", alignItems: "center", gap: "0.55em", padding: "0.1em 0.7em",
+    background: "var(--panel-2, #2d2d2e)", color: "var(--fg)",
+    border: "1px solid var(--border, #3a3a3a)", borderBottom: "none",
+    borderRadius: "6px 6px 0 0", // tab: top corners only; bottom merges into the code card
   },
   ".cm-lp-code-title": { fontWeight: "600" },
   ".cm-lp-code-lang": { color: "var(--fg-dim, #888)", textTransform: "uppercase", letterSpacing: "0.03em", fontSize: "0.9em" },
+  // The copy button — top-right, subtle until hovered; turns accent on the transient ✓ after a copy.
+  ".cm-lp-code-copy": {
+    display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+    padding: "0.2em", marginBottom: "0.15em", borderRadius: "5px", border: "1px solid transparent",
+    background: "transparent", color: "var(--fg-dim, #888)", opacity: "0.65", transition: "opacity 120ms ease, background 120ms ease, color 120ms ease",
+  },
+  ".cm-lp-code-copy:hover": { opacity: "1", background: "var(--hover, rgba(128,128,128,0.16))", color: "var(--fg)" },
+  ".cm-lp-code-copy.cm-lp-code-copied": { opacity: "1", color: "var(--accent, #4ea1ff)" },
+  // #198 (comment 724): the code card corners — the tab sits on the top-left, so that corner stays flat.
+  ".cm-lp-code-first": { borderRadius: "0 6px 0 0" },
+  ".cm-lp-code-last": { borderRadius: "0 0 6px 6px" },
   ".cm-lp-code-numbered": { paddingLeft: "3.2em", position: "relative" },
   ".cm-lp-code-numbered::before": {
     content: "attr(data-linenum)", position: "absolute", left: "0", width: "2.6em", textAlign: "right",
