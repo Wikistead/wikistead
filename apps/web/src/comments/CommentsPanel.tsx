@@ -91,7 +91,9 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
   // Page not viewable (server returned null) → render nothing (no-leak).
   if (threads === null || threads === undefined) return null;
 
-  const shown = threads.filter((t) => t.status === tab);
+  // #214 part 4: newest thread first (the source is oldest-first creation order). The `[…]` copy keeps
+  // the query cache immutable. (Reverse-infinite-scroll pagination is a follow-on slice.)
+  const shown = [...threads.filter((t) => t.status === tab)].reverse();
 
   const addInline = () => {
     const anchor = anchorGetterRef.current?.();
