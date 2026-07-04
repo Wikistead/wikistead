@@ -35,3 +35,18 @@ test("drag a block's gutter grip to reorder it", async ({ browser }) => {
   expect(iA).toBeLessThan(iC); // A0 before C0
   expect(iA).toBeGreaterThanOrEqual(0); // all three still present (block intact)
 });
+
+// #84 bounce (comment 696): a block ATOM (mermaid/callout/table) renders as a REPLACED block WIDGET,
+// so the gutter `lineMarker` never fired for it — grips only showed on plain paragraphs. `widgetMarker`
+// now places a grip on widget atoms too, so EVERY top-level block is draggable. Verified in a real
+// browser (happy-dom can't lay out the gutter/widgets).
+test("#84: the drag grip shows for widget atoms (mermaid/callout/table), not only paragraphs", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "blockdrag-widgets");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("a paragraph\n\n```mermaid\ngraph TD\nA-->B\n```\n\n:::info\nhello\n:::\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\nlast para\n");
+  await sleep(700);
+  // 5 top-level blocks (paragraph, mermaid widget, callout, table widget, paragraph) → 5 grips.
+  await expect.poll(() => page.locator("[data-pane=preview] [data-testid=block-grip]").count(), { timeout: 4000 }).toBeGreaterThanOrEqual(5);
+});
