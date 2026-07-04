@@ -1,7 +1,56 @@
-import type { DirectiveMacro } from "./registry";
+import { asMacroSource, type DirectiveMacro, type EditUI } from "./registry";
+import { parseDirectiveOpen } from "./directive-parser";
 // #85 slice 2: the callout type list + export htmlRender are the single source of truth in
 // @wikistead/macro-render (shared with the server export). This file adds the editor icon + metadata.
 import { CALLOUT_TYPES, calloutHtmlRender, type CalloutType } from "@wikistead/macro-render";
+
+// #174 / ADR-087: the shared callout editUI (type / label / body), reached via the single edit button.
+// sourceScope "block" — the editor owns the WHOLE `:::type[label]…:::` so it can change the TYPE (the
+// directive NAME) and the `[label]`, which a body-only scope can't reach. save reconstructs the block.
+const calloutEditUI: EditUI = {
+  present: "inline",
+  sourceScope: "block",
+  mount(container, source, _ctx, save) {
+    const lines = source.split("\n");
+    const open = parseDirectiveOpen(lines[0] ?? "");
+    let type = open?.name ?? "note";
+    let label = open?.label ?? "";
+    let body = lines.slice(1, Math.max(1, lines.length - 1)).join("\n");
+    const commit = () => save(asMacroSource(`:::${type}${label ? `[${label}]` : ""}\n${body}\n:::`));
+
+    const wrap = document.createElement("div");
+    wrap.className = "cm-lp-callout-edit";
+    const bar = document.createElement("div");
+    bar.className = "cm-lp-callout-edit-bar";
+    const typeSel = document.createElement("select");
+    typeSel.className = "cm-lp-callout-edit-type";
+    typeSel.setAttribute("data-testid", "callout-edit-type");
+    for (const ty of CALLOUT_TYPES) {
+      const o = document.createElement("option"); o.value = ty; o.textContent = ty;
+      if (ty === type) o.selected = true;
+      typeSel.appendChild(o);
+    }
+    typeSel.addEventListener("change", () => { type = typeSel.value; commit(); });
+    const labelIn = document.createElement("input");
+    labelIn.className = "cm-lp-callout-edit-label";
+    labelIn.value = label;
+    labelIn.setAttribute("aria-label", "Callout label");
+    labelIn.setAttribute("data-testid", "callout-edit-label");
+    labelIn.addEventListener("change", () => { label = labelIn.value.trim(); commit(); });
+    bar.append(typeSel, labelIn);
+    const bodyTa = document.createElement("textarea");
+    bodyTa.className = "cm-lp-callout-edit-body";
+    bodyTa.value = body;
+    bodyTa.spellcheck = false;
+    bodyTa.setAttribute("aria-label", "Callout body");
+    bodyTa.setAttribute("data-testid", "callout-edit-body");
+    bodyTa.addEventListener("change", () => { body = bodyTa.value; commit(); });
+    wrap.append(bar, bodyTa);
+    container.appendChild(wrap);
+    const f = setTimeout(() => bodyTa.focus(), 0);
+    return { destroy() { clearTimeout(f); wrap.remove(); } };
+  },
+};
 
 // Typed callouts (#150 / ADR-049). Obsidian/GitHub-style admonitions, replacing the single
 // `:::callout`. Syntax A: each type is its own directive name (`:::note` / `:::info` / `:::tip`
@@ -33,6 +82,7 @@ function makeCallout(spec: CalloutSpec): DirectiveMacro {
     // header via the open line's data-icon (display-only).
     containerClass: `cm-lp-callout cm-lp-callout-${spec.type}`,
     icon: spec.icon,
+    editUI: calloutEditUI, // #174 / ADR-087: type/label/body panel via the single edit button
     exportFidelity: "preserve", // ::: stays plain text → lossless round-trip
     slash: {
       labelKey: `palette.callout.${spec.type}`,
