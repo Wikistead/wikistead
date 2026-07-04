@@ -17,6 +17,7 @@ import { macroFold } from "./macros";
 import { registerVimFold } from "./live-preview/vim-fold";
 import { atomDelete, atomYank } from "./live-preview/vim-atom";
 import { blockDrag } from "./live-preview/block-drag";
+import { moveBlockUp, moveBlockDown } from "./live-preview/block-move";
 import { m1Spike } from "./live-preview/m1-spike";
 import { everforestHighlight } from "./everforest-highlight";
 import { mathField } from "./live-preview/math";
@@ -157,6 +158,13 @@ export function mountLivePreview(
       // #84: a left-gutter grip per top-level block; drag it to reorder (one Yjs op).
       // Display-only gutter + drop indicator; editable surface only.
       ...(opts.readOnly ? [] : [blockDrag]),
+      // #84 / #174 (ADR-087): keyboard alternative to the drag grip — Alt-Shift-Up/Down move the block
+      // at the caret one block up/down (same computeBlockMove math, one Y.Text op). Works in vim + non-
+      // vim (a plain keymap). Prec.high so it beats vim's default Alt handling.
+      ...(opts.readOnly ? [] : [Prec.high(keymap.of([
+        { key: "Alt-Shift-ArrowUp", run: moveBlockUp, preventDefault: true },
+        { key: "Alt-Shift-ArrowDown", run: moveBlockDown, preventDefault: true },
+      ]))]),
       // Inline-comment anchor highlights (display-only; fed via setCommentRanges).
       commentHighlightTheme,
       commentHighlights,
