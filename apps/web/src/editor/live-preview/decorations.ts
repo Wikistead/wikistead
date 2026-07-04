@@ -1160,7 +1160,9 @@ const RENDERERS: BlockRenderer[] = [
         // #174 / ADR-087: a fence macro with the unified inline editUI, render-active → mount its own
         // editor (EditableEditUIWidget). Inert today (no first-party fence macro declares editUI yet)
         // the migration hook, symmetric with the directive path.
-        if (macro.editUI?.present === "inline" && active && active.from <= from && active.to >= to && !ctx.state.readOnly) {
+        // #174 addendum: `active.raw` (Ctrl+Enter) opts OUT of the editUI — it reveals the raw source
+        // (falls through to the reveal-on-cursor branch below). The ✎ button enters with raw=false → editUI.
+        if (macro.editUI?.present === "inline" && active && !active.raw && active.from <= from && active.to >= to && !ctx.state.readOnly) {
           ctx.addAtomic(Decoration.replace({ widget: new EditableEditUIWidget(from, to, fenceBody(doc, node.from, node.to), macro.editUI, (b) => "```" + lang + "\n" + b + "\n```", ctx.macroTheme, macro.tier), block: true }), from, to);
           return;
         }
@@ -1694,7 +1696,7 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
 // an inline/source macro becomes render-active (table → the cell-edit widget; mermaid /
 // callout → revealed source via macroRenderActiveField). Returns true if a macro was
 // entered. Display-only: the document is untouched; presence/collab unaffected.
-export function enterMacroAt(view: EditorView, pos: number): boolean {
+export function enterMacroAt(view: EditorView, pos: number, raw = false): boolean {
   if (view.state.readOnly) return false;
   if (tableBlockAt(view.state, pos)) return openTableEditing(view, pos); // pipe OR :::table (#86)
   const fence = macroFenceAt(view.state, pos);
@@ -1702,7 +1704,10 @@ export function enterMacroAt(view: EditorView, pos: number): boolean {
     if (fence.macro.richEditUI?.present === "modal") {
       openMacroModal(view, fence.macro, () => fence.from, currentMacroTheme());
     } else {
-      view.dispatch({ selection: EditorSelection.cursor(fence.from), effects: setMacroRenderActive.of({ from: fence.from, to: fence.to }) });
+      // #174 addendum: a ``` -notation macro's Ctrl+Enter (raw=true) reveals the RAW source (vim-editable);
+      // the ✎ button (raw=false) opens the editUI. `raw` only matters for an editUI macro (mermaid); a
+      // legacy source macro reveals raw either way.
+      view.dispatch({ selection: EditorSelection.cursor(fence.from), effects: setMacroRenderActive.of({ from: fence.from, to: fence.to, raw }) });
       view.focus();
     }
     return true;
@@ -1719,7 +1724,9 @@ export function enterMacroAt(view: EditorView, pos: number): boolean {
 // Ctrl+Enter (ADR-024 Q1): enter the macro atom at the caret. event.key "Enter" is
 // layout/JIS-safe. Bound via the editor keymap; remappable later (#4).
 export function enterMacroCommand(view: EditorView): boolean {
-  return enterMacroAt(view, view.state.selection.main.head);
+  // #174 addendum: Ctrl+Enter reveals RAW source (raw=true) — for a ``` editUI macro (mermaid) that means
+  // the vim-editable source, NOT the editUI (which the ✎ button opens). Harmless for other macros.
+  return enterMacroAt(view, view.state.selection.main.head, true);
 }
 
 // Follows a clickable link's data-href. In a READ-ONLY (view) surface a plain click

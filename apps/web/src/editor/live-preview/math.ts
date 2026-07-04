@@ -9,7 +9,6 @@ import { StateField, EditorState, RangeSetBuilder, type Range } from "@codemirro
 import { syntaxTree } from "@codemirror/language"
 import katex from "katex"
 import { displayMode, syntaxRevealsAt, motionAtomProvider, observeBlockResize } from "./decorations"
-import type { EditorView } from "@codemirror/view"
 
 interface MathRange { from: number; to: number; tex: string; display: boolean }
 
