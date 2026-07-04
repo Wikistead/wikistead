@@ -1,9 +1,13 @@
-// Block drag-to-reorder UI (ADR-036 / #84). A left-gutter grip per top-level block; dragging
-// it moves the whole block to the drop position as ONE transaction (computeBlockMove → one Yjs
-// op). The grip + drop indicator are DISPLAY-ONLY (gutter marker + a line decoration), never in
-// the doc / never synced — presence and the single Y.Text are untouched. vim/non-vim identical
-// (it's pointer-driven, not a keymap). The move math lives in block-move.ts (unit-tested).
-import { gutter, GutterMarker, EditorView, Decoration, type DecorationSet } from "@codemirror/view"
+// Block drag-to-reorder UI (ADR-036 / #84). A HOVER-FOLLOWING drag handle (Notion-style): hovering a
+// top-level block shows a grip just outside the block's left edge; dragging it moves the whole block to
+// the drop position as ONE transaction (computeBlockMove → one Yjs op). The grip + drop indicator are
+// DISPLAY-ONLY (a floating DOM handle + a line decoration), never in the doc / never synced — presence
+// and the single Y.Text are untouched. vim/non-vim identical (pointer-driven). Move math: block-move.ts.
+//
+// #84 comment 741: this REPLACED a fixed left-gutter grip. The gutter marker sat at the editor's far left
+// (near the sidebar), always on — the reviewer couldn't associate it with a block. A handle that appears
+// on hover, adjacent to the hovered block's left edge, is the expected affordance.
+import { EditorView, Decoration, ViewPlugin, type DecorationSet, type PluginValue } from "@codemirror/view"
 import { StateField, StateEffect, RangeSet, type Extension } from "@codemirror/state"
 import { blockRangeAt, computeBlockMove } from "./block-move"
 
@@ -58,37 +62,93 @@ function startDrag(view: EditorView, srcFrom: number, e: PointerEvent, grip: HTM
   grip.addEventListener("pointerup", up)
 }
 
-class GripMarker extends GutterMarker {
-  constructor(readonly view: EditorView, readonly from: number) { super() }
-  eq(o: GripMarker) { return o.from === this.from }
-  toDOM() {
-    const el = document.createElement("span")
-    el.className = "cm-lp-block-grip"
-    el.textContent = "⠿"
-    el.title = "Drag to move this block"
-    el.setAttribute("data-testid", "block-grip")
-    el.addEventListener("pointerdown", (e) => startDrag(this.view, this.from, e, el))
+// #84 comment 741: a single hover-following handle. On mousemove it resolves the top-level block under
+// the pointer (works for BOTH text paragraphs and replaced widget atoms — blockRangeAt is tree-based, not
+// line-based) and parks the grip just outside that block's left edge; leaving the editor (or hovering off
+// any block) hides it. pointerdown starts the drag (startDrag owns capture + the move/drop). The handle
+// is a plain DOM element under `view.dom` (the .cm-editor positioning context) — display-only, never in
+// the doc. Hidden in Reading mode (readOnly).
+const GRIP_GAP = 10 // px between the grip's right edge and the block's left edge (clearly outside the frame)
+class HoverGrip implements PluginValue {
+  private grip: HTMLElement
+  private from = -1
+  private dragging = false
+  private onMove: (e: MouseEvent) => void
+  private onLeave: () => void
+  constructor(private view: EditorView) {
+    const grip = document.createElement("div")
+    grip.className = "cm-lp-block-grip"
+    grip.textContent = "⠿"
+    grip.title = "Drag to move this block"
+    grip.setAttribute("data-testid", "block-grip")
+    grip.style.display = "none"
+    grip.addEventListener("mousedown", (e) => e.preventDefault()) // don't move the caret / start a selection
+    grip.addEventListener("pointerdown", (e) => {
+      if (this.from < 0) return
+      this.dragging = true
+      startDrag(this.view, this.from, e, grip)
+      const done = () => { this.dragging = false; grip.removeEventListener("pointerup", done) }
+      grip.addEventListener("pointerup", done)
+    })
+    this.grip = grip
+    view.dom.appendChild(grip)
+    this.onMove = (e) => this.position(e)
+    this.onLeave = () => { if (!this.dragging) this.hide() }
+    // CAPTURE phase on the whole editor: a block WIDGET (mermaid/table/excalidraw) can stopPropagation on
+    // its own DOM, so a bubbling listener never fires over it and the grip never appeared on widget atoms.
+    // Capturing fires on the way down, before any child can swallow it.
+    view.dom.addEventListener("mousemove", this.onMove, true)
+    view.dom.addEventListener("mouseleave", this.onLeave)
+  }
+  private hide() { this.grip.style.display = "none"; this.from = -1 }
+  // The block's TOP-LEVEL DOM element (direct child of cm-content) — a `.cm-line` for a paragraph or the
+  // block wrapper for a replaced widget atom (mermaid/table/callout). Its rect gives the block's visual
+  // left edge (the reading-column left, OUTSIDE which the handle must sit) and top, for both kinds.
+  private blockEl(from: number): HTMLElement | null {
+    const content = this.view.contentDOM
+    let el: HTMLElement | null = (() => { const d = this.view.domAtPos(from); return (d.node.nodeType === 3 ? d.node.parentElement : d.node) as HTMLElement | null })()
+    while (el && el.parentElement !== content) el = el.parentElement
     return el
   }
+  // The top-level cm-content child (a `.cm-line` or a widget block) under a viewport point, if any.
+  private blockElUnder(x: number, y: number): HTMLElement | null {
+    const content = this.view.contentDOM
+    let el = document.elementFromPoint(x, y) as HTMLElement | null
+    while (el && el !== content && el.parentElement !== content) el = el.parentElement
+    return el && el.parentElement === content ? el : null
+  }
+  private position(e: MouseEvent) {
+    if (this.dragging || this.view.state.readOnly) return
+    if (e.target === this.grip) return // hovering the grip itself → keep it parked (don't recompute/hide)
+    // `false` = nearest position even when the pointer is over a block WIDGET (a precise hit returns null
+    // there, which is why the grip never showed on mermaid/table atoms).
+    // Resolve the block from the DOM element under the pointer FIRST (deterministic for both a `.cm-line`
+    // and a replaced widget atom); posAtCoords over a widget's SVG can return null even with the inexact
+    // flag, which is why widget atoms used to miss the grip. Fall back to posAtCoords for edge cases.
+    let el = this.blockElUnder(e.clientX, e.clientY)
+    let pos: number | null = null
+    if (el) { try { pos = this.view.posAtDOM(el) } catch { pos = null } }
+    if (pos == null) { pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY }, false); el = null }
+    if (pos == null) return this.hide()
+    const block = blockRangeAt(this.view.state, pos)
+    if (!block) return this.hide()
+    if (block.from === this.from && this.grip.style.display === "block") return // same block, already shown
+    const anchor = this.blockEl(block.from) ?? el
+    if (!anchor) return this.hide()
+    const b = anchor.getBoundingClientRect()
+    const dom = this.view.dom.getBoundingClientRect()
+    // Position relative to .cm-editor (the grip's offset parent), just OUTSIDE the block's left edge.
+    this.grip.style.top = `${Math.round(b.top - dom.top)}px`
+    this.grip.style.left = `${Math.round(Math.max(0, b.left - dom.left - this.grip.offsetWidth - GRIP_GAP))}px`
+    this.grip.style.display = "block"
+    this.from = block.from
+  }
+  destroy() {
+    this.view.dom.removeEventListener("mousemove", this.onMove, true)
+    this.view.dom.removeEventListener("mouseleave", this.onLeave)
+    this.grip.remove()
+  }
 }
+const hoverGrip = ViewPlugin.fromClass(HoverGrip)
 
-// A grip on the FIRST line of every top-level block (blockRangeAt.from === line.from).
-const blockGutter = gutter({
-  class: "cm-lp-block-gutter",
-  lineMarker: (view, line) => {
-    if (view.state.readOnly) return null // Reading mode (#164): no drag affordance on a clean view
-    const b = blockRangeAt(view.state, line.from)
-    return b && b.from === line.from ? new GripMarker(view, line.from) : null
-  },
-  // #84 bounce (comment 696): a block ATOM (mermaid/table/callout/excalidraw etc.) is rendered as a
-  // REPLACED block WIDGET, not text lines, so `lineMarker` never fires for it — the grip only appeared on
-  // plain paragraphs. `widgetMarker` places the grip aligned to the widget, so EVERY top-level block
-  // (paragraph OR widget atom) gets a drag grip.
-  widgetMarker: (view, _widget, block) => {
-    if (view.state.readOnly) return null
-    const b = blockRangeAt(view.state, block.from)
-    return b && b.from === block.from ? new GripMarker(view, block.from) : null
-  },
-})
-
-export const blockDrag: Extension = [dropField, blockGutter]
+export const blockDrag: Extension = [dropField, hoverGrip]
