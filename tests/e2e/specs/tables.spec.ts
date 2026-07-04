@@ -33,7 +33,7 @@ test("GFM table renders as an HTML table; cursor reveals raw markdown", async ({
   // mouse edit mode in both modes — ADR-022 review #5, covered in the table-edit specs;
   // pipe tables stay hand-editable via reveal-on-cursor).
   await page.getByTestId("vim-toggle").click();
-  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-pressed", "true");
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.press("Escape"); // vim normal
   await page.keyboard.press("g");

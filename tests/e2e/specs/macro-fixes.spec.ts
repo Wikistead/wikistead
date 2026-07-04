@@ -36,7 +36,7 @@ test("vim G jumps past a macro to the last line", async ({ browser }) => {
   }
   await sleep(300);
   await page.getByTestId("vim-toggle").click();
-  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-pressed", "true");
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.press("Escape");
   // Go to line 2 (just above the macro), then G.
@@ -67,7 +67,7 @@ test("ArrowUp / vim k from below a macro step one line (no warp)", async ({ brow
   expect(await head(page)).toBe(6);
   // VIM k from the bottom → also one line.
   await page.getByTestId("vim-toggle").click();
-  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-pressed", "true");
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.press("Escape");
   await page.keyboard.press("Shift+G"); await sleep(100); // to last line

@@ -1,4 +1,4 @@
-import { MoreHorizontal } from "lucide-react";
+import { Check, MoreHorizontal } from "lucide-react";
 import type { ReactNode } from "react";
 import { IconButton } from "./Button";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
@@ -13,6 +13,7 @@ export interface OverflowItem {
   danger?: boolean;
   disabled?: boolean; // grayed out + not selectable (e.g. a temporarily-sealed action)
   hint?: string; // tooltip (title) — e.g. why a disabled item is unavailable
+  checked?: boolean; // #212: a TOGGLE item (e.g. comments panel open/closed) — trailing ✓ when on
 }
 
 export function OverflowMenu({
@@ -44,10 +45,15 @@ export function OverflowMenu({
             title={it.hint}
             data-testid={it.testId}
             data-danger={it.danger ? "" : undefined}
+            data-checked={it.checked ? "" : undefined}
+            aria-checked={it.checked === undefined ? undefined : it.checked}
+            role={it.checked === undefined ? undefined : "menuitemcheckbox"}
             variant={it.danger ? "destructive" : "default"}
           >
             {it.icon}
             {it.label}
+            {/* #212: a toggle item shows its ON state with a trailing check (state via icon, not colour). */}
+            {it.checked && <Check size={14} className="ml-auto text-[var(--accent)]" />}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

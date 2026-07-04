@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Eye, Code, BookOpen, Sparkles, List } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui/Button";
+import { ToggleButton } from "../ui/ToggleButton";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel } from "../components/ui/dropdown-menu";
 import { useDirty, type DirtySignal } from "../editor/dirtySignal";
@@ -91,6 +92,9 @@ function RoundBtn({ label, icon, onClick, testId, primary, disabled, badge, acti
 
 function overflowItems(p: PageControlsProps, t: (k: string) => string): OverflowItem[] {
   const items: OverflowItem[] = [];
+  // #212: comments toggle lives here now (was an always-visible bar button). It's a right-panel
+  // toggle like history/attachments; `checked` shows the panel-open state (✓, not colour alone).
+  if (p.onToggleComments) items.push({ value: "comments", label: p.openComments ? `${t("page.comments")} (${p.openComments})` : t("page.comments"), icon: <MessageSquare size={14} />, testId: "comments-toggle", checked: !!p.commentsOpen });
   if (p.onExport) items.push({ value: "export", label: t("page.export"), icon: <Download size={14} />, testId: "export-page" });
   // #85 bounce: the HTML export is sealed until the post-launch Option-A redesign — show the item but
   // GRAYED OUT (disabled) with a hint, rather than hiding it (per the user), so its return is discoverable.
@@ -109,7 +113,8 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string): Overflow
   return items;
 }
 function runOverflow(p: PageControlsProps, v: string) {
-  if (v === "export") p.onExport?.();
+  if (v === "comments") p.onToggleComments?.();
+  else if (v === "export") p.onExport?.();
   else if (v === "export-html") p.onExportHtml?.();
   else if (v === "print") p.onPrint?.();
   else if (v === "history") p.onHistory?.();
@@ -122,27 +127,20 @@ function runOverflow(p: PageControlsProps, v: string) {
 // ── STATUS: under the title, right-aligned (draft / unpublished text + comments btn) ──
 export function PageStatus(p: PageControlsProps) {
   const { t } = useTranslation();
-  if (!p.publishState && !p.onToggleComments && !p.onToggleToc) return null;
+  if (!p.publishState && !p.onToggleToc) return null;
   return (
     <div className="pointer-events-auto flex items-center gap-2" data-testid="page-status">
       {p.publishState === "draft" && <span className="text-xs text-fg-dim" data-testid="draft-badge">{t("page.draft")}</span>}
       {p.publishState === "unpublished" && <span className="text-xs text-[var(--accent)]" data-testid="unpublished-badge">{t("page.unpublishedChanges")}</span>}
+      {/* #212: TOC is a common ToggleButton (filled=ON + aria-pressed). Comments moved OUT of the
+          always-visible bar into the ⋯ overflow (it's an occasional toggle, not a frequent one). */}
       {p.onToggleToc && (
-        <RoundBtn
+        <ToggleButton
+          pressed={!!p.tocOpen}
+          onToggle={p.onToggleToc}
+          icon={<List size={16} />}
           label={t("toc.toggle")}
           testId="toc-toggle"
-          onClick={p.onToggleToc}
-          icon={<List size={16} />}
-          active={p.tocOpen} // #192: accent fill when the TOC rail is ON
-        />
-      )}
-      {p.onToggleComments && (
-        <RoundBtn
-          label={t("page.comments")}
-          testId="comments-toggle"
-          onClick={p.onToggleComments}
-          icon={<MessageSquare size={16} />}
-          badge={p.openComments ? <span className="absolute -top-0.5 -right-0.5 min-w-[15px] rounded-full bg-[var(--accent)] px-1 text-[10px] leading-[15px] text-primary-foreground">{p.openComments}</span> : null}
         />
       )}
     </div>
@@ -158,16 +156,17 @@ export function PageVim(p: PageControlsProps) {
   const dm = p.displayMode ?? "live";
   return (
     <div className="pointer-events-none absolute bottom-4 left-4 z-10 flex items-center gap-2">
+      {/* #212: vim is the same common ToggleButton as TOC (filled=ON + aria-pressed), not a bespoke
+          switch — state reads from the fill (a11y: not colour-only). Keeps the "Vim" text label. */}
       {p.onToggleVim && (
-        <button type="button" role="switch" aria-checked={p.vim} data-testid="vim-toggle"
-          title={t("page.vimMode")} aria-label={t("page.vimMode")} onClick={p.onToggleVim}
-          className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] px-3 py-1.5 text-xs font-medium shadow-md backdrop-blur transition-colors hover:bg-panel-2">
-          <SquareTerminal size={14} className={p.vim ? "text-[var(--accent)]" : "text-fg-dim"} />
-          <span>Vim</span>
-          <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${p.vim ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}>
-            <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${p.vim ? "left-[14px]" : "left-0.5"}`} />
-          </span>
-        </button>
+        <ToggleButton
+          pressed={!!p.vim}
+          onToggle={p.onToggleVim}
+          icon={<SquareTerminal size={14} />}
+          label={t("page.vimMode")}
+          text="Vim"
+          testId="vim-toggle"
+        />
       )}
       {/* ADR-056 / #164 · #165: display-mode SEGMENT — icon-only buttons, current highlighted, one
           click switches DIRECTLY. The current mode is always visible (highlight) so there is NO
@@ -256,7 +255,7 @@ export function PageControlsMobile(p: PageControlsProps) {
               {p.onShare && <DropdownMenuItem onSelect={p.onShare} data-testid="m-share-open"><Share2 size={14} /> {t("page.share")}</DropdownMenuItem>}
             </>
           )}
-          {p.onToggleComments && <DropdownMenuItem onSelect={p.onToggleComments} data-testid="m-comments-toggle"><MessageSquare size={14} /> {t("page.comments")}{p.openComments ? ` (${p.openComments})` : ""}</DropdownMenuItem>}
+          {/* #212: comments is part of overflowItems now (rendered below), so no separate entry here. */}
           {overflow.length > 0 && <DropdownMenuSeparator />}
           {overflow.map((it) => (
             <DropdownMenuItem key={it.value} onSelect={() => runOverflow(p, it.value)} data-testid={`m-${it.testId}`}>{it.icon} {it.label}</DropdownMenuItem>

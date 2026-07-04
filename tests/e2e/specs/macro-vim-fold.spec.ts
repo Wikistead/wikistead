@@ -19,7 +19,7 @@ test("vim za/zo fold and unfold a macro block", async ({ browser }) => {
 
   // vim on.
   await page.getByTestId("vim-toggle").click();
-  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-pressed", "true");
 
   // Put the caret on a line inside the macro fence (clicking the rendered block places
   // the caret at the block start → its source is revealed), then NORMAL mode.

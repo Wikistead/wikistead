@@ -19,12 +19,12 @@ test("vim toggle keeps collab/presence and activates the keymap", async ({ brows
   // proves the connection is alive: content sync.)
   await expect.poll(async () => B.evaluate(() => document.querySelector("[data-pane=preview] .cm-content")?.textContent ?? ""), { timeout: 5000 }).toContain("hello");
 
-  // The toggle reads its state at a glance (role=switch, aria-checked).
-  await expect(A.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "false");
+  // The toggle reads its state at a glance (aria-pressed toggle button).
+  await expect(A.getByTestId("vim-toggle")).toHaveAttribute("aria-pressed", "false");
   // Toggle vim ON — a Compartment reconfigure, not a remount.
   await A.getByTestId("vim-toggle").click();
   await sleep(600);
-  await expect(A.getByTestId("vim-toggle")).toHaveAttribute("aria-checked", "true");
+  await expect(A.getByTestId("vim-toggle")).toHaveAttribute("aria-pressed", "true");
   // The editor was not remounted: still a single surface.
   expect(await A.locator("[data-pane=preview] .cm-content").count()).toBe(1);
 
