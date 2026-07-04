@@ -2058,26 +2058,22 @@ export const livePreviewTheme = EditorView.baseTheme({
   // global CSS so the data URIs stay out of this baseTheme. Display-only; reveal-on-cursor edits
   // the hidden `:::name[label]` source. paddingTop keeps the header off the box's top edge.
   ".cm-lp-directive-label::before, .cm-lp-directive-label::after": { paddingTop: "0.1em" },
-  // Block drag-to-reorder (#84): a grip in the left gutter on each top-level block's first
-  // line, and a drop-target line indicator. Display-only.
-  ".cm-lp-block-gutter": { width: "1.25em" },
-  // #84 (comment 719): the grip must be VISIBLE to a human, not just present in the DOM. opacity 0.25 on
-  // muted gray was imperceptible — the e2e counted the element while the eye saw nothing (the exact
-  // "green report vs broken reality" gap). Baseline is now clearly visible; a hover on the editor lifts
-  // it toward full, and a hover on the grip itself gives it a handle background. Pointer events fire at
-  // any opacity, so raising it only affects perception, never behaviour.
+  // Block drag-to-reorder (#84 comment 741): a HOVER-FOLLOWING drag handle (not a fixed gutter marker).
+  // The plugin absolutely-positions it just outside the hovered block's left edge and toggles display; it
+  // is only ever on-screen when hovering a block, so it reads as "this block's handle". Display-only.
   ".cm-lp-block-grip": {
+    position: "absolute",
+    zIndex: "6",
     cursor: "grab",
-    opacity: "0.5", // clearly visible at rest (was 0.25 = imperceptible)
-    color: "var(--fg, #444)",
+    opacity: "0.7",
+    color: "var(--fg-dim, #888)",
     userSelect: "none",
-    lineHeight: "1",
+    lineHeight: "1.2",
     padding: "0 2px",
     borderRadius: "4px",
-    transition: "opacity 120ms ease, background 120ms ease",
+    transition: "opacity 120ms ease, background 120ms ease, color 120ms ease",
   },
-  ".cm-editor:hover .cm-lp-block-grip": { opacity: "0.85" },
-  ".cm-lp-block-grip:hover": { opacity: "1", background: "var(--hover, rgba(128,128,128,0.18))" },
+  ".cm-lp-block-grip:hover": { opacity: "1", color: "var(--fg, #444)", background: "var(--hover, rgba(128,128,128,0.18))" },
   ".cm-lp-block-droptarget": { boxShadow: "inset 0 2px 0 0 var(--accent, #4ea1ff)" },
   // Table cell-merge edit mode (render-active): a toolbar + selectable cells.
   // margin 0 (see cm-lp-macro-wrap): the edit widget's root margin would be uncounted in
