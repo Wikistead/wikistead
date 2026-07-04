@@ -1099,7 +1099,7 @@ const RENDERERS: BlockRenderer[] = [
           return;
         }
         if (active && !macro.richEditUI && active.from <= from && active.to >= to) return; // entered → source
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), true, lang!, atomSelected(ctx.state, from, to), ctx.macroTheme), block: true }), from, to);
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), macro.foldable ?? true, lang!, atomSelected(ctx.state, from, to), ctx.macroTheme), block: true }), from, to);
         return;
       }
       const first = doc.lineAt(node.from).number;

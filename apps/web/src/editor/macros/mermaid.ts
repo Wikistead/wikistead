@@ -31,6 +31,7 @@ export const mermaidMacro: FenceMacro = {
   kind: "fence",
   lang: "mermaid",
   exportFidelity: "preserve", // declarative text body → round-trips verbatim
+  foldable: false, // #174 / ADR-087: no collapse button on a rendered diagram (the reviewer flagged it)
   summary: () => "Mermaid diagram",
   slash: { labelKey: "palette.mermaid", keywords: "diagram flowchart graph chart mermaid", insert: "```mermaid\n\n```", caret: 11 },
   liveRender(body, ctx) {
