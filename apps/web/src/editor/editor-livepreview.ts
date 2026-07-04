@@ -85,7 +85,16 @@ export function mountLivePreview(
       // the caret above that ~52px band: CM scrolls BEFORE the caret reaches it. The room to
       // lift the LAST line comes from `.lp-editor-host .cm-content { padding-bottom: 4.5rem }`
       // (tokens.css) — the two MUST stay in sync (72px ≈ 4.5rem).
-      EditorView.scrollMargins.of(() => ({ bottom: 72 })),
+      // #212 bounce 3: the header band is an absolute frosted overlay over the editor's TOP. CM's
+      // scrollIntoView doesn't know about it, so Ctrl+Home / caret-on-line-1 would scroll line 1 flush to
+      // the viewport top — UNDER the band. A top scroll-margin equal to the band height (--wks-band-h,
+      // published by routes.tsx bandRef; inherited onto the CM DOM) keeps the caret below the band. 0 when
+      // there is no band (var unset). Pairs with `.cm-content { padding-top: var(--wks-band-h) }`.
+      EditorView.scrollMargins.of((view) => {
+        const raw = getComputedStyle(view.dom).getPropertyValue("--wks-band-h").trim();
+        const top = raw.endsWith("px") ? parseFloat(raw) : 0;
+        return { top: Number.isFinite(top) ? top : 0, bottom: 72 };
+      }),
       // GFM base (tables) + fenced-code highlighting. The doc stays plain markdown.
       markdownExtension(),
       // #158-C2: Everforest code highlighting (after minimalSetup's default → takes precedence).

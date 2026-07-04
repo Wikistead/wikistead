@@ -478,6 +478,11 @@ body {
    this padding gives the scroll room to do so on the last line (scrollMargin alone can't,
    as there's nothing below the last line to scroll into view). #6. */
 .lp-editor-host .cm-content { padding-bottom: 4.5rem; }
+/* #212 bounce 3: the header band is an absolute frosted overlay at the editor's top, so the first line
+   must clear it — pad the content top by the band's measured height (--wks-band-h, published by bandRef).
+   Falls back to 0 before the var is set (e.g. a header-less route). This gives the backdrop-blur real
+   content to blur as the document scrolls up behind the band. */
+.lp-editor-host .cm-content { padding-top: var(--wks-band-h, 0px); }
 
 /* #204: custom thin, subtle scrollbars app-wide (light/dark via --fg + color-mix). A track-less slim
    pill: a semi-transparent thumb inset by a transparent border (background-clip: padding-box) so it

@@ -92,9 +92,10 @@ function RoundBtn({ label, icon, onClick, testId, primary, disabled, badge, acti
 
 function overflowItems(p: PageControlsProps, t: (k: string) => string): OverflowItem[] {
   const items: OverflowItem[] = [];
-  // #212: comments toggle lives here now (was an always-visible bar button). It's a right-panel
-  // toggle like history/attachments; `checked` shows the panel-open state (✓, not colour alone).
-  if (p.onToggleComments) items.push({ value: "comments", label: p.openComments ? `${t("page.comments")} (${p.openComments})` : t("page.comments"), icon: <MessageSquare size={14} />, testId: "comments-toggle", checked: !!p.commentsOpen });
+  // #212: comments toggle lives here now (was an always-visible bar button). It's a right-panel toggle
+  // exactly like history/attachments, so it shows NO ✓ open-state marker (comment 720): the three
+  // right-panel items are visually identical and open/closed is read from the panel itself, not a tick.
+  if (p.onToggleComments) items.push({ value: "comments", label: p.openComments ? `${t("page.comments")} (${p.openComments})` : t("page.comments"), icon: <MessageSquare size={14} />, testId: "comments-toggle" });
   if (p.onExport) items.push({ value: "export", label: t("page.export"), icon: <Download size={14} />, testId: "export-page" });
   // #85 bounce: the HTML export is sealed until the post-launch Option-A redesign — show the item but
   // GRAYED OUT (disabled) with a hint, rather than hiding it (per the user), so its return is discoverable.

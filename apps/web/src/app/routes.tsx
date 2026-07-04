@@ -389,30 +389,52 @@ function PageRoute() {
     onPermissions: page?.canManage ? () => setPermsOpen(true) : undefined,
     dirtySignal: dirtySig,
   };
+  // #212 bounce 3 (comment 720): the header band must OVERLAP the scrolling editor for its
+  // backdrop-blur to have anything to blur (measured: the band sat ABOVE the scroller with a zero-overlap
+  // seam, so the frosted effect could never show). It now renders as an absolute overlay at the top of
+  // the editor area; the editor content clears it via a padding-top equal to the band's height, published
+  // as the --wks-band-h CSS var (a ResizeObserver tracks title-wrap/status changes). React 19 callback
+  // ref with cleanup.
+  const bandRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const parent = el.parentElement;
+    if (!parent) return;
+    const set = () => parent.style.setProperty("--wks-band-h", `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => { ro.disconnect(); parent.style.removeProperty("--wks-band-h"); };
+  }, []);
   return (
     <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
       <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-          {/* #193 part 3 / #212 bounce 2: the header band (title + status) fades DOWN into the content —
-              a SEMI-TRANSPARENT vertical gradient (translucent at the top → transparent at the bottom) so
-              the backdrop-blur actually shows content scrolling UNDER the band (iOS-navbar style). A fully
-              opaque top hid the backdrop (no blur visible), which is why the effect read as "not there";
-              now the whole band is translucent and the boundary dissolves into the editor. Token-driven
-              (--bg), light/dark. */}
-          <div className="relative z-10 flex-none bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_88%,transparent)] via-[color-mix(in_srgb,var(--bg)_58%,transparent)] to-transparent pb-3 backdrop-blur-md">
-            <PageTitle
-              editing={editing}
-              title={page?.title ?? ""}
-              onRename={canEdit && spaceId ? (title) => renamePage.mutate({ pageId: pageId!, spaceId, title }, {
-                onSuccess: () => notify.success(t("toast.saved")),
-                onError: () => notify.error(t("toast.actionFailed")),
-              }) : undefined}
-            />
-            {/* STATUS group floats under the title, right-aligned (same 740 column). */}
-            {isDesktop && <div className="mx-auto flex w-full max-w-[740px] justify-end px-6"><PageStatus {...controls} /></div>}
-          </div>
-          {/* Editor area is the positioning context for the floating ACTIONS/VIM groups. */}
+          {/* Editor area is the positioning context for the floating ACTIONS/VIM groups AND the header
+              band overlay (#212 bounce 3). */}
           <div className="relative" style={{ flex: 1, minHeight: 0 }}>
+            {/* #193 part 3 / #212 bounce 2+3: the header band (title + status) fades DOWN into the content
+                — a SEMI-TRANSPARENT vertical gradient (translucent top → transparent bottom) with a
+                backdrop-blur. It is ABSOLUTELY positioned over the TOP of the scrolling editor so content
+                scrolls UNDER it and the frosted effect actually shows (iOS-navbar style); a flow sibling
+                sat above the scroller with zero overlap, so nothing was ever behind the blur (comment 720).
+                pointer-events-none on the band + auto on its content lets clicks through the transparent
+                gradient to the editor's first lines while keeping the title interactive. The editor pads
+                its top by --wks-band-h (set by bandRef) so line 1 clears the band. Token-driven (--bg),
+                light/dark. */}
+            <div ref={bandRef} className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_88%,transparent)] via-[color-mix(in_srgb,var(--bg)_58%,transparent)] to-transparent pb-3 backdrop-blur-md">
+              <div className="pointer-events-auto">
+                <PageTitle
+                  editing={editing}
+                  title={page?.title ?? ""}
+                  onRename={canEdit && spaceId ? (title) => renamePage.mutate({ pageId: pageId!, spaceId, title }, {
+                    onSuccess: () => notify.success(t("toast.saved")),
+                    onError: () => notify.error(t("toast.actionFailed")),
+                  }) : undefined}
+                />
+                {/* STATUS group floats under the title, right-aligned (same 740 column). */}
+                {isDesktop && <div className="mx-auto flex w-full max-w-[740px] justify-end px-6"><PageStatus {...controls} /></div>}
+              </div>
+            </div>
             <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #192: the TOC rail lives in the content's RIGHT WHITESPACE, inside the editor area, so the
@@ -423,7 +445,9 @@ function PageRoute() {
                 yields (hidden) when one is open — else its pointer-events overlap and swallow clicks on
                 the panel (a right panel and the rail must not both occupy the zone). */}
             {isWide && tocOn && !commentsOpen && !historyOpen && !attachmentsOpen && (
-              <div className="pointer-events-none absolute left-[calc(50%+370px+1rem)] top-2 bottom-2 z-[5] w-[210px]">
+              /* #212 bounce 3: clear the absolute header band (offset top by --wks-band-h) so the TOC rail
+                 isn't hidden under it. */
+              <div className="pointer-events-none absolute left-[calc(50%+370px+1rem)] top-[calc(var(--wks-band-h,0px)+0.5rem)] bottom-2 z-[5] w-[210px]">
                 <div className="pointer-events-auto h-full">
                   <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="rail" />
                 </div>
