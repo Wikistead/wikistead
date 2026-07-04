@@ -35,12 +35,33 @@ test("#198: attributed fence hides its raw info in Live, reveals on caret + Sour
   const revealed = await content(page).innerText();
   expect(revealed).toContain('title="app.ts"');
 
-  // Source mode: always raw (round-trip)
+  // Source mode: RAW ONLY — raw info round-trips AND the header band / highlight are gone (#198 bounce 3).
   await page.getByTestId("displaymode-source").click();
   await sleep(200);
   const src = await content(page).innerText();
   expect(src).toContain('title="app.ts"');
   expect(src).toContain("showLineNumbers");
+  expect(await page.locator(".cm-lp-code-header").count()).toBe(0); // no header band in Source
+  expect(await page.locator("[data-pane=preview] .cm-lp-code-hl").count()).toBe(0); // no highlight in Source
+});
+
+test("#198 bounce: no blank line between the header band and the code body (Live)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "fence-noblank");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText('top\n```ts title="app.ts"\nconst a = 1\n```\nbot\n');
+  await sleep(500);
+  // The header band sits DIRECTLY above the first code line — their vertical gap is ~0 (no residual
+  // blank opening-fence line). Measure the gap between the header's bottom and the code line's top.
+  const gap = await page.evaluate(() => {
+    const header = document.querySelector(".cm-lp-code-header") as HTMLElement;
+    const codeLine = [...document.querySelectorAll("[data-pane=preview] .cm-line")].find((l) => l.textContent?.includes("const a = 1")) as HTMLElement;
+    if (!header || !codeLine) return -1;
+    return Math.round(codeLine.getBoundingClientRect().top - header.getBoundingClientRect().bottom);
+  });
+  expect(gap).toBeGreaterThanOrEqual(0);
+  expect(gap).toBeLessThan(12); // less than a full blank text line (~line-height); no residual blank line
 });
 
 test("#198: a PLAIN fence (no attributes) is untouched (no header band)", async ({ browser }) => {
