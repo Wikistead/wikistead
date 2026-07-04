@@ -150,6 +150,18 @@ export function tableBlockAt(state: EditorState, pos: number): TableBlock | null
   if (!node) return null;
   const doc = state.doc;
   const from = doc.lineAt(node.from).from;
-  const to = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1)).to;
+  // #141: the lezer GFM `Table` node can ABSORB following paragraph lines when no blank line separates
+  // them, so the rendered table widget covered those paragraphs and collapsed them to one y — vim j/k
+  // then skipped the swallowed lines (measured: a table block reported {11,15} eating two trailing
+  // paragraphs). Clip the range to the ACTUAL table rows — the contiguous run of pipe-bearing lines from
+  // the node start — so the widget (and the motion atom) covers only the table.
+  const startLine = doc.lineAt(node.from).number;
+  const nodeEndLine = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1)).number;
+  let endLine = startLine;
+  for (let n = startLine; n <= nodeEndLine; n++) {
+    if (doc.line(n).text.includes("|")) endLine = n;
+    else break; // first non-table (no-pipe) line ends the table — trailing paragraphs are not the table
+  }
+  const to = doc.line(endLine).to;
   return { from, to, tier: "pipe", grid: parsePipe(doc.sliceString(from, to)) };
 }
