@@ -146,6 +146,18 @@ export function mountLivePreview(
         const atomicRanges: { fromLine: number; toLine: number }[] = [];
         atomic?.between(0, u.state.doc.length, (from, to) => { atomicRanges.push({ fromLine: u.state.doc.lineAt(from).number, toLine: u.state.doc.lineAt(to).number }); });
         w.__lpAtomic = atomicRanges;
+        // #141 bounce: the geometric top (px) of each line's start — so a device trace can see whether a
+        // Live decoration COLLAPSES adjacent lines (equal/near-equal tops ⇒ moveVertically treats two
+        // lines as one and j/k skips a line). Bounded to a small window around the caret to stay cheap.
+        try {
+          const cl = u.state.doc.lineAt(u.state.selection.main.head).number;
+          const tops: { line: number; top: number | null }[] = [];
+          for (let n = Math.max(1, cl - 4); n <= Math.min(u.state.doc.lines, cl + 4); n++) {
+            const c = u.view.coordsAtPos(u.state.doc.line(n).from);
+            tops.push({ line: n, top: c ? Math.round(c.top) : null });
+          }
+          (w as unknown as { __lpLineTops?: unknown }).__lpLineTops = tops;
+        } catch { /* coords unavailable (not laid out) */ }
       })] : []),
       // M1 focus-delegation SPIKE (#153 / ADR-054) — DEV/e2e only, never in prod. Activated by the
       // literal token `@SPIKE@` in the doc. Strip from prod builds.
