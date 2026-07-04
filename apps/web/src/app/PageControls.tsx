@@ -92,7 +92,9 @@ function RoundBtn({ label, icon, onClick, testId, primary, disabled, badge, acti
 function overflowItems(p: PageControlsProps, t: (k: string) => string): OverflowItem[] {
   const items: OverflowItem[] = [];
   if (p.onExport) items.push({ value: "export", label: t("page.export"), icon: <Download size={14} />, testId: "export-page" });
-  if (p.onExportHtml) items.push({ value: "export-html", label: t("page.exportHtml"), icon: <Download size={14} />, testId: "export-page-html" });
+  // #85 bounce: the HTML export is sealed until the post-launch Option-A redesign — show the item but
+  // GRAYED OUT (disabled) with a hint, rather than hiding it (per the user), so its return is discoverable.
+  if (p.onExportHtml) items.push({ value: "export-html", label: t("page.exportHtml"), icon: <Download size={14} />, testId: "export-page-html", disabled: true, hint: t("page.exportHtmlDisabled") });
   if (p.onPrint) items.push({ value: "print", label: t("page.print"), icon: <Printer size={14} />, testId: "print-page" });
   if (p.onAttachments) items.push({ value: "attachments", label: t("page.attachments"), icon: <Paperclip size={14} />, testId: "attachments-toggle" });
   if (p.onHistory) items.push({ value: "history", label: t("page.history"), icon: <History size={14} />, testId: "history-toggle" });

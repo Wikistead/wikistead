@@ -316,6 +316,7 @@
     "moreActions": "その他の操作",
     "export": "Markdown でエクスポート",
     "exportHtml": "HTML でエクスポート",
+    "exportHtmlDisabled": "HTML エクスポートは再構築中のため一時的に利用できません。",
     "print": "印刷 / PDF",
     "history": "履歴",
     "attachments": "添付ファイル",

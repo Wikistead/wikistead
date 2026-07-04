@@ -316,6 +316,7 @@
     "moreActions": "More actions",
     "export": "Export as Markdown",
     "exportHtml": "Export as HTML",
+    "exportHtmlDisabled": "HTML export is temporarily unavailable while it's being rebuilt.",
     "print": "Print / PDF",
     "history": "History",
     "attachments": "Attachments",

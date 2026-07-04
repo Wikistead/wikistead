@@ -11,6 +11,8 @@ export interface OverflowItem {
   icon?: ReactNode;
   testId?: string;
   danger?: boolean;
+  disabled?: boolean; // grayed out + not selectable (e.g. a temporarily-sealed action)
+  hint?: string; // tooltip (title) — e.g. why a disabled item is unavailable
 }
 
 export function OverflowMenu({
@@ -37,7 +39,9 @@ export function OverflowMenu({
         {items.map((it) => (
           <DropdownMenuItem
             key={it.value}
-            onSelect={() => onSelect(it.value)}
+            onSelect={() => { if (!it.disabled) onSelect(it.value); }}
+            disabled={it.disabled}
+            title={it.hint}
             data-testid={it.testId}
             data-danger={it.danger ? "" : undefined}
             variant={it.danger ? "destructive" : "default"}
