@@ -1713,6 +1713,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   // diagram wouldn't reveal it. Scoped to the svg so the container stays hoverable
   // (the fold button shows on hover).
   ".cm-lp-mermaid svg": { maxWidth: "100%", height: "auto", pointerEvents: "none" },
+  // #174 / ADR-087: the mermaid inline editUI — source textarea beside a live preview (stacks on a
+  // narrow block). The preview reuses the .cm-lp-mermaid svg sizing above.
+  ".cm-lp-mermaid-edit": { display: "flex", gap: "0.8em", alignItems: "stretch", flexWrap: "wrap" },
+  ".cm-lp-mermaid-edit-src": { flex: "1 1 16em", minWidth: "12em", minHeight: "8em", resize: "vertical", fontFamily: "var(--font-code, monospace)", fontSize: "0.85em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.5em", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
+  ".cm-lp-mermaid-edit-preview": { flex: "1 1 16em", minWidth: "12em", display: "flex", alignItems: "center", justifyContent: "center", border: "1px dashed var(--border, #888)", borderRadius: "6px", padding: "0.5em", overflow: "auto" },
   ".cm-lp-macro-error": {
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
     color: "var(--danger, #c00)",

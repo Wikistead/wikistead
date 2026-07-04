@@ -1,4 +1,4 @@
-import type { FenceMacro, MacroContext } from "./registry";
+import { asMacroSource, type FenceMacro, type MacroContext } from "./registry";
 import { mermaidHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
 
 // The first macro: ```mermaid renders a diagram. It proves the registry pipeline
@@ -57,6 +57,52 @@ export const mermaidMacro: FenceMacro = {
       }
     });
     return el;
+  },
+  // #174 / ADR-087: the unified inline editUI — the first first-party consumer of the editUI framework.
+  // Reached via the single edit button (or Ctrl+Enter). A split panel: a source textarea + a LIVE
+  // preview that re-renders the diagram as you type (the value reveal-on-cursor never gave). Host-API is
+  // { theme } + save only (ADR-024) — the macro uses its OWN mermaid dep for the preview, never the host.
+  // Save granularity: on `change` (commit/blur), NOT per keystroke — an immediate per-keystroke save
+  // re-runs the doc → the host re-mounts this widget → the textarea would reset mid-typing. Input drives
+  // the local preview; the Y.Text write lands on blur (still merges via Y.Text). ADR-087 inline contract.
+  editUI: {
+    present: "inline",
+    mount(container, source, ctx, save) {
+      const wrap = document.createElement("div");
+      wrap.className = "cm-lp-mermaid-edit";
+      const ta = document.createElement("textarea");
+      ta.className = "cm-lp-mermaid-edit-src";
+      ta.value = source;
+      ta.spellcheck = false;
+      ta.setAttribute("data-testid", "mermaid-edit-src");
+      const preview = document.createElement("div");
+      preview.className = "cm-lp-mermaid cm-lp-mermaid-edit-preview";
+      preview.setAttribute("data-testid", "mermaid-edit-preview");
+      let gen = 0; // guards against a stale async render landing after a newer edit
+      const renderPreview = (code: string) => {
+        const trimmed = code.trim();
+        if (!trimmed) { preview.textContent = ""; return; }
+        const myId = nextId();
+        const mine = ++gen;
+        void loadMermaid(ctx.theme).then(async (mermaid) => {
+          try {
+            const { svg } = await mermaid.render(myId, trimmed);
+            if (mine === gen) preview.innerHTML = svg; // mermaid-sanitized (securityLevel: strict)
+          } catch {
+            if (mine === gen) preview.textContent = "Invalid mermaid diagram";
+          } finally {
+            document.getElementById("d" + myId)?.remove(); // mermaid's temp/error node (see liveRender)
+          }
+        }).catch(() => { /* mermaid failed to load (offline/test env) — the preview just stays empty */ });
+      };
+      ta.addEventListener("input", () => renderPreview(ta.value)); // local live preview, no doc write
+      ta.addEventListener("change", () => save(asMacroSource(ta.value))); // commit to Y.Text on blur
+      renderPreview(source);
+      wrap.append(ta, preview);
+      container.appendChild(wrap);
+      const focus = setTimeout(() => ta.focus(), 0);
+      return { destroy() { clearTimeout(focus); gen++; wrap.remove(); } };
+    },
   },
   // M3 wires HTML export server-side. mermaid renders in the browser, so the static
   // form is the source in a <pre class="mermaid"> (a mermaid-enabled HTML viewer
