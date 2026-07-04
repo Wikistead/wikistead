@@ -69,12 +69,25 @@ type page
     # permission relation yet — space is the sole inheritance level for now.
     define parent: [page]
 
-    define manage: [user, group#member] or manager from space
+    # #109 / ADR-098: per-page PRIVATE (allowlist) marker. Populating `private@user:*` makes the page
+    # private: the space-inherited grant paths (manager/editor/viewer from space) are cut, so ONLY the
+    # explicit direct grants (the allow list) remain — for view AND edit AND manage (no back door). An
+    # empty marker is a 1:1 no-op (the space paths pass through), so existing pages are unchanged. This is
+    # the whitelist counterpart to `restricted` (blocklist); the two compose (deny still wins — see view).
+    # public⊥private is a WRITE-BOUNDARY invariant (setting private strips view_base@user:* → is_public
+    # false), enforced in the write path, not here — the model can't subtract the DIRECT user:* grant.
+    define private: [user:*]
+
+    # Each `... from space` inheritance is gated by `but not private` via a helper (OpenFGA forbids mixing
+    # `or` and `but not` at one level). Private → the helper is empty → only direct grants survive.
+    define manage_from_space: manager from space but not private
+    define manage: [user, group#member] or manage_from_space
     # share_link entries appear twice per relation:
     #   share_link             — permanent link (tuple written without condition)
     #   share_link with non_expired — time-bounded link (tuple written with condition)
     # OpenFGA requires both to be declared to allow either form.
-    define edit: [user, group#member, share_link, share_link with non_expired] or manage or editor from space
+    define edit_from_space: editor from space but not private
+    define edit: [user, group#member, share_link, share_link with non_expired] or manage or edit_from_space
 
     # Commenting authorization (#100 / ADR-029 Option B) — a RESOURCE SETTING, not a link capability.
     # Split view into `view_base` (the direct view grants — the leaf) so `comment` can intersect on it
@@ -82,7 +95,10 @@ type page
     # link + comments being open (view_base and comment_open), never via a comment link.
     #
     # view_base: direct view grants ONLY (user:* here = public page — keep in sync with search is_public).
-    define view_base: [user, group#member, user:*, share_link, share_link with non_expired] or viewer from space
+    # The `viewer from space` inheritance is cut when the page is private (ADR-098) — only the direct
+    # grants above (the allow list) remain. Backward compatible when private is empty.
+    define view_base_from_space: viewer from space but not private
+    define view_base: [user, group#member, user:*, share_link, share_link with non_expired] or view_base_from_space
     # comment audience gate, space-inherited (the write/delete switch lives on space#comment_open).
     define comment_open: [user:*, share_link:*] or comment_open from space
     # explicit per-principal comment grant (member/group granularity)  ∪  edit  ∪  the audience gate.
