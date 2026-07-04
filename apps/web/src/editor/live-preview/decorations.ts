@@ -645,6 +645,9 @@ function isFolded(state: EditorState, from: number, to: number): boolean {
 // A renderable macro = anything with a liveRender (fence macros, and block-form
 // directive macros like :::table). foldable is fence-only (large data bodies).
 type RenderableMacro = { liveRender: (body: string, ctx: { theme: MacroTheme }) => HTMLElement; richEditUI?: import("../macros/registry").RichEditUI; editUI?: import("../macros/registry").EditUI; editMode?: "inline" | "modal" };
+// #174 / ADR-087: the single macro-edit affordance is a Lucide SVG pencil (ADR-052 icon system),
+// replacing the ✎ emoji. A trusted constant (no user input) → safe as innerHTML.
+const MACRO_EDIT_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
 class MacroWidget extends WidgetType {
   private ro?: ResizeObserver;
   private objectUrl?: string; // #140: revoked on destroy so the rendered image blob isn't leaked
@@ -755,7 +758,9 @@ class MacroWidget extends WidgetType {
         edit.type = "button";
         edit.className = "cm-lp-macro-edit";
         edit.title = "Edit";
-        edit.textContent = "✎";
+        // #174 / ADR-087: a Lucide SVG pencil (not the ✎ emoji — ADR-052 icon system), top-left, shown
+        // on hover/selection. innerHTML of a trusted constant SVG (no user input → XSS-safe).
+        edit.innerHTML = MACRO_EDIT_ICON;
         edit.setAttribute("data-testid", "macro-edit");
         edit.addEventListener("mousedown", (e) => {
           e.preventDefault();
@@ -1639,6 +1644,9 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-macro-fold, .cm-lp-macro-edit": {
     position: "absolute",
     top: "4px",
+    display: "inline-flex", // centres the Lucide SVG (#174) / the fold glyph
+    alignItems: "center",
+    justifyContent: "center",
     border: "1px solid var(--border, #888)",
     borderRadius: "4px",
     background: "var(--panel, #fff)",
@@ -1651,7 +1659,10 @@ export const livePreviewTheme = EditorView.baseTheme({
     transition: "opacity 120ms",
   },
   ".cm-lp-macro-fold": { right: "4px" },
-  ".cm-lp-macro-edit": { right: "30px" }, // sits left of the fold button
+  // #174 / ADR-087: the edit button sits at the block's TOP-LEFT (inside the content box), a different
+  // zone from the #84 block-drag grip (left GUTTER, outside the block) — no co-located affordances. The
+  // fold button stays top-right, so an editable+foldable macro (Excalidraw) shows them in opposite corners.
+  ".cm-lp-macro-edit": { left: "4px" },
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
   ".cm-lp-macro-wrap:hover .cm-lp-macro-fold, .cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-fold, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit": { opacity: "1" },
