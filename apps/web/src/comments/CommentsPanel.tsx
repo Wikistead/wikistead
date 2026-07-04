@@ -1,4 +1,4 @@
-import { useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ui/Button";
 import { RightPanel } from "../ui/RightPanel";
@@ -13,6 +13,21 @@ const hint = "m-0 text-sm text-fg-dim";
 const textareaCls = "box-border min-h-[56px] w-full resize-y rounded-md border border-border bg-background p-2 text-[0.92em] text-foreground focus-visible:border-[var(--accent)] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-[var(--accent)]";
 const suggestCls = "absolute bottom-full left-0 right-0 z-20 m-0 mb-1 list-none rounded-md border border-border bg-panel p-1 shadow-[0_6px_20px_rgba(0,0,0,0.25)]";
 const suggestBtn = "block w-full rounded px-2 py-[5px] text-left text-[0.9em] text-foreground hover:bg-panel-2";
+
+// #214 part 3 (comment 738): a relative timestamp ("3 minutes ago") with the absolute time on hover.
+// Locale-aware via Intl.RelativeTimeFormat (i18n language); the title is the full toLocaleString.
+function relTime(iso: string, lang: string): { rel: string; abs: string } {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return { rel: iso, abs: iso };
+  const abs = d.toLocaleString();
+  const secs = Math.round((d.getTime() - Date.now()) / 1000); // negative = past
+  const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
+  const table: [Intl.RelativeTimeFormatUnit, number][] = [["year", 31536000], ["month", 2592000], ["day", 86400], ["hour", 3600], ["minute", 60]];
+  for (const [unit, s] of table) {
+    if (Math.abs(secs) >= s) return { rel: rtf.format(Math.round(secs / s), unit), abs };
+  }
+  return { rel: rtf.format(secs, "second"), abs };
+}
 
 // Composer with @mention autocomplete. Suggestions come from the page-scoped
 // mentionable directory (server limits it to members who can VIEW this page), so a
@@ -76,8 +91,9 @@ function Composer({ pageId, token, onSubmit, placeholder }: { pageId: string; to
 }
 
 export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, token }: { pageId: string; canComment: boolean; anchorGetterRef: MutableRefObject<AnchorGetter | null>; onClose: () => void; token?: string }) {
-  const { t: tr } = useTranslation(); // `t` is used as the thread loop var below
+  const { t: tr, i18n } = useTranslation();
   const { token: sessionToken } = useSession();
+  void anchorGetterRef; // #214 part 1: inline/selection comments removed — the anchor ref is now unused here
   // #100 (authz): in a GUEST view `token` is the guest share token, so comment read/write runs as the
   // guest — not the app SessionProvider's member/dev token (which in dev is the dev-user bypass, the
   // path that let a "guest" delete a member's comment). Members pass no token → the session is used.
@@ -85,51 +101,78 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
   const { data: threads } = useComments(pageId, authToken);
   const { createThread, reply, remove } = useCommentMutations(pageId, authToken);
 
+  // #214 part 2 (comment 738): a comment's "reply" button retargets the SINGLE bottom composer to that
+  // thread (no always-expanded per-comment reply box). Null = the composer posts a new page comment.
+  const [replyTo, setReplyTo] = useState<{ threadId: string; sub: string } | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const count = threads?.reduce((n, t) => n + t.comments.length, 0) ?? 0;
+  // #214 part 5: chat order (oldest → newest, newest just above the composer). Keep the newest in view.
+  useLayoutEffect(() => { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight; }, [count]);
+  // A retargeted reply whose thread vanished (deleted) falls back to a new page comment.
+  useEffect(() => { if (replyTo && !threads?.some((t) => t.id === replyTo.threadId)) setReplyTo(null); }, [threads, replyTo]);
+
   // Page not viewable (server returned null) → render nothing (no-leak).
   if (threads === null || threads === undefined) return null;
 
-  // #214 part 2: the resolve/open-tabs split is removed — ONE list of all threads. part 4: newest first
-  // (source is oldest-first creation order; the `[…]` copy keeps the query cache immutable).
-  const shown = [...threads].reverse();
+  const Stamp = ({ iso }: { iso: string }) => {
+    const { rel, abs } = relTime(iso, i18n.language);
+    return <time className="text-[0.75em] text-fg-dim" dateTime={iso} title={abs} data-testid="comment-time">{rel}</time>;
+  };
 
   return (
-    <RightPanel
-      testId="comments-panel"
-      title={tr("page.comments")}
-      onClose={onClose}
-    >
-      {/* #214 part 1: the selection/inline comment affordance was removed — page comments only. */}
-      <div className="flex flex-col gap-2">
-        {shown.length === 0 && <p className={hint}>{tr("commentsPanel.emptyOpen")}</p>}
-        {shown.map((t) => (
-          <div key={t.id} className="flex flex-col gap-2 rounded-lg border border-border bg-background px-3 py-2" data-testid="comment-thread">
-            {t.comments.map((c) => (
-              <div key={c.id} className="flex flex-col gap-0.5" data-testid="comment-item">
-                <div className="flex items-center gap-1.5">
-                  <AuthorChip sub={c.authorSub} />
-                  {c.canModify && (
-                    <button type="button" className="cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-[var(--danger)] opacity-80 hover:underline hover:opacity-100" data-testid="comment-delete" onClick={() => remove.mutate(c.id)}>{tr("commentsPanel.delete")}</button>
-                  )}
+    <RightPanel testId="comments-panel" title={tr("page.comments")} onClose={onClose}>
+      {/* #214 part 1: NO selection/inline comment affordance — page comments only. part 4/5: a scrolling
+          thread list above a composer pinned FLUSH to the panel bottom (no gap / see-through). */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2">
+        <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto" data-testid="comment-list">
+          {threads.length === 0 && <p className={hint}>{tr("commentsPanel.emptyOpen")}</p>}
+          {threads.map((t) => (
+            <div key={t.id} className="flex flex-col gap-2 rounded-lg border border-border bg-background px-3 py-2" data-testid="comment-thread">
+              {t.comments.map((c) => (
+                <div key={c.id} className="flex flex-col gap-0.5" data-testid="comment-item">
+                  <div className="flex items-center gap-1.5">
+                    <AuthorChip sub={c.authorSub} />
+                    <Stamp iso={c.createdAt} />
+                    {c.canModify && (
+                      <button type="button" className="ml-auto cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-[var(--danger)] opacity-80 hover:underline hover:opacity-100" data-testid="comment-delete" onClick={() => remove.mutate(c.id)}>{tr("commentsPanel.delete")}</button>
+                    )}
+                  </div>
+                  <span className="whitespace-pre-wrap text-[0.92em] [overflow-wrap:anywhere]">{c.body}</span>
                 </div>
-                <span className="whitespace-pre-wrap text-[0.92em] [overflow-wrap:anywhere]">{c.body}</span>
-              </div>
-            ))}
-            {canComment && (
-              <Composer pageId={pageId} token={authToken} placeholder={tr("commentsPanel.reply")} onSubmit={(body, mentions) => reply.mutate({ threadId: t.id, body, mentions })} />
-            )}
-          </div>
-        ))}
-      </div>
-
-      {canComment && (
-        // #214 part 3: the composer stays PINNED to the panel bottom (sticky) while the thread list
-        // scrolls above it, so it never gets buried by a long history. The negative margins + panel bg
-        // extend the sticky bar to the panel edges and cover the threads scrolling under it (RightPanel is
-        // the `overflow-y-auto` scroll container; RightPanel itself is unchanged — comments-panel only).
-        <div className="sticky bottom-0 z-10 -mx-3 -mb-3 mt-auto flex flex-col gap-2 border-t border-border bg-panel px-3 pb-3 pt-2">
-          <Composer pageId={pageId} token={authToken} placeholder={tr("commentsPanel.pagePlaceholder")} onSubmit={(body, mentions) => createThread.mutate({ body, kind: "page", mentions })} />
+              ))}
+              {canComment && (
+                <button type="button" className="self-start cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-[var(--accent)] opacity-90 hover:underline hover:opacity-100" data-testid="comment-reply" onClick={() => setReplyTo({ threadId: t.id, sub: t.comments[0]?.authorSub ?? "" })}>
+                  {tr("commentsPanel.reply")}
+                </button>
+              )}
+            </div>
+          ))}
         </div>
-      )}
+
+        {canComment && (
+          // Composer pinned flush to the panel bottom: the negative margins cancel the RightPanel p-3 so the
+          // opaque bar reaches the panel's true bottom edge (no gap / see-through — comment 738 part 4).
+          <div className="flex-none -mx-3 -mb-3 flex flex-col gap-2 border-t border-border bg-panel px-3 pb-3 pt-2" data-testid="comment-composer">
+            {replyTo && (
+              <div className="flex items-center gap-1.5 text-[0.8em] text-fg-dim" data-testid="reply-banner">
+                <span>{tr("commentsPanel.replyingTo")}</span>
+                <AuthorChip sub={replyTo.sub} />
+                <button type="button" className="ml-auto cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-fg-dim hover:text-foreground hover:underline" data-testid="reply-cancel" onClick={() => setReplyTo(null)}>{tr("common.cancel")}</button>
+              </div>
+            )}
+            <Composer
+              key={replyTo?.threadId ?? "new"}
+              pageId={pageId}
+              token={authToken}
+              placeholder={replyTo ? tr("commentsPanel.reply") : tr("commentsPanel.pagePlaceholder")}
+              onSubmit={(body, mentions) => {
+                if (replyTo) { reply.mutate({ threadId: replyTo.threadId, body, mentions }); setReplyTo(null); }
+                else createThread.mutate({ body, kind: "page", mentions });
+              }}
+            />
+          </div>
+        )}
+      </div>
     </RightPanel>
   );
 }

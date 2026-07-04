@@ -41,21 +41,39 @@ test("comments: page comment + @mention; resolve/tabs and inline affordance remo
   const panel = page.locator("[data-testid=comments-panel]");
   await expect(panel).toBeVisible();
 
-  // (1) page-level comment (the page composer is the last comment-input in the panel)
+  // (1) page-level comment via the bottom composer.
   const pageInput = panel.locator("[data-testid=comment-input]").last();
   await pageInput.fill("a page-level comment");
   await panel.locator("[data-testid=comment-submit]").last().click();
   await expect(panel.locator("[data-testid=comment-thread]")).toContainText("a page-level comment");
 
-  // (2) #214 parts 1-2: the resolve/open-resolved tabs AND the selection/inline-comment affordance were
-  // removed — one list of page comments; no resolve toggle, no inline "add-inline" button.
+  // (2) #214 part 1 (comment 738): NO selection/inline comment affordance — asserted by the RENDERED
+  // TEXT, not just a testid (the prior testid-only check passed while the button was actually present).
+  await expect(page.getByText("選択範囲にコメント")).toHaveCount(0);
+  await expect(page.getByText("Comment on selection")).toHaveCount(0);
   await expect(panel.locator("[data-testid=thread-toggle]")).toHaveCount(0);
   await expect(panel.locator("[data-testid=tab-resolved]")).toHaveCount(0);
-  await expect(panel.locator("[data-testid=add-inline]")).toHaveCount(0);
 
-  // (3) @mention autocomplete from the page-view-scoped directory. dev-user is the
-  // only page-viewer member; its display name is "dev-user" (the IdP claim name set
-  // at login). Typing "@dev" surfaces it from the view-scoped directory.
+  // (3) part 3: each comment shows a timestamp.
+  await expect(panel.locator("[data-testid=comment-time]").first()).toBeVisible();
+
+  // (4) part 2: a comment has a REPLY button (not an always-expanded reply box); clicking it retargets
+  // the single bottom composer to that thread (reply banner appears).
+  await expect(panel.locator("[data-testid=comment-input]")).toHaveCount(1); // ONE composer, not one-per-comment
+  await panel.locator("[data-testid=comment-reply]").first().click();
+  await expect(panel.locator("[data-testid=reply-banner]")).toBeVisible();
+  await panel.locator("[data-testid=reply-cancel]").click();
+  await expect(panel.locator("[data-testid=reply-banner]")).toHaveCount(0);
+
+  // (5) part 4: the composer is pinned FLUSH to the panel's bottom — no gap / see-through below it.
+  const gap = await page.evaluate(() => {
+    const p = document.querySelector("[data-testid=comments-panel]")!.getBoundingClientRect();
+    const c = document.querySelector("[data-testid=comment-composer]")!.getBoundingClientRect();
+    return Math.round(p.bottom - c.bottom);
+  });
+  expect(gap, "the composer's bottom must meet the panel's bottom (no gap/see-through)").toBeLessThanOrEqual(1);
+
+  // (6) @mention autocomplete from the page-view-scoped directory. dev-user is the only page-viewer.
   await pageInput.fill("@dev");
   await expect(panel.locator("[data-testid=mention-suggest]")).toBeVisible({ timeout: 6000 });
   await expect(panel.locator("[data-testid=mention-option]").first()).toContainText("dev-user");

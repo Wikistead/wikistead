@@ -570,6 +570,7 @@
     "anchoredDeleted": "(anchored text deleted)",
     "delete": "delete",
     "reply": "Reply…",
+    "replyingTo": "Replying to",
     "pagePlaceholder": "Comment on the page…",
     "resolve": "Resolve",
     "reopen": "Reopen",
