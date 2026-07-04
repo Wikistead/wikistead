@@ -167,7 +167,10 @@ export function Sidebar() {
     return (
       <div
         ref={dragHandle}
-        className="group box-border h-full w-full select-none px-1"
+        // #193 bounce: min-w-0 + overflow-hidden so this level of the chain also shrinks/clips (the RA
+        // wrapper's forced min-width is overridden via rowClassName above; this keeps the chain complete
+        // RA-wrapper → OUTER → INNER → ROW → name so the name truncates on width resize).
+        className="group box-border h-full w-full min-w-0 overflow-hidden select-none px-1"
         data-testid="tree-page"
         data-selected={selected ? "" : undefined}
         onClick={() => navigate(`/p/${d.pageId}`)}
@@ -277,6 +280,14 @@ export function Sidebar() {
         <div ref={treeBox} className="min-h-0 min-w-0 flex-1">
           <Tree<Node>
             className="!overflow-x-hidden"
+            // #193 bounce: react-arborist forces each row wrapper to `min-width: <scrollable width>`
+            // (row-container.js — its #10 highlight-to-edge for horizontally-scrolled nested rows). That
+            // INLINE min-width is the broken link in the shrink chain: it pins every row to content width,
+            // so a long name never shrinks and `truncate` can't fire (it's clipped without an ellipsis).
+            // We hide horizontal scroll (above), so that min-width is unneeded — override it to 0 with
+            // `!min-w-0` (min-width:0 !important beats the inline style). Now the row = viewport width and
+            // the name's flex-1 min-w-0 truncate engages on width resize.
+            rowClassName="!min-w-0"
             data={data}
             idAccessor="id"
             childrenAccessor="children"
