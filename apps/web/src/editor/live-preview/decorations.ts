@@ -1172,6 +1172,15 @@ const RENDERERS: BlockRenderer[] = [
         // pipe table, :::table HTML is not hand-typeable, so BOTH vim and non-vim use the editor
         // here (the M1 spike/ADR-054 proved focus delegation holds in vim too).
         const active = ctx.state.field(macroRenderActiveField, false);
+        // #174 / ADR-087: a directive macro with the unified inline editUI, render-active → mount its own
+        // editor via EditableEditUIWidget (editUI.mount + save→Y.Text). Precedes the legacy richEditUI
+        // branch. Inert today (no first-party directive declares editUI yet) — the migration hook.
+        if (macro.editUI?.present === "inline" && active && active.from <= from && active.to >= to && !ctx.state.readOnly) {
+          const editBody: string[] = [];
+          for (let n = first.number + 1; n < lastLine.number; n++) editBody.push(doc.line(n).text);
+          ctx.addAtomic(Decoration.replace({ widget: new EditableEditUIWidget(from, to, editBody.join("\n"), macro.editUI, (b) => `:::${open!.name}\n${b}\n:::`, ctx.macroTheme, macro.tier), block: true }), from, to);
+          return false; // the inline editor owns the block
+        }
         if (macro.richEditUI?.present === "inline" && active && active.from <= from && active.to >= to && !ctx.state.readOnly) {
           ctx.addAtomic(Decoration.replace({ widget: new EditableTableWidget(from, to, doc.sliceString(from, to)), block: true }), from, to);
           return false; // skip inner nodes — the inline editor owns the block
