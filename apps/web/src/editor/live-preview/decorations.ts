@@ -8,7 +8,8 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from "@codemirror/view";
-import { findFenceMacro, findDirectiveMacro, editModeOf, hasEditUI, type FenceMacro, type MacroTheme } from "../macros/registry";
+import { findFenceMacro, findDirectiveMacro, editModeOf, hasEditUI, asMacroSource, type FenceMacro, type MacroTheme, type MacroSource, type MacroTier, type EditUI, type EditUIController } from "../macros/registry";
+import { autoDemote } from "../macros/tier-cap";
 export type { MacroTheme }; // #200: re-exported so the Editor can type the redrawMacros payload
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, directiveChainAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
@@ -626,6 +627,49 @@ class EditableTableWidget extends WidgetType {
   ignoreEvent() {
     return true; // the inline editor owns interaction inside the island; CM must not process its events
   }
+}
+
+// #174 / ADR-087: compute the offset-invariant Y.Text change for an editUI `save(newBody)` — wrap the
+// new body back into the block's fence, auto-demote to the lowest representable level (Open formats),
+// and replace the block range. Pure (no view) → the inline save path is unit-testable. Immediate apply
+// (inline ⇒ live Y.Text per ADR-087); the widget wires it into view.dispatch.
+export function editUISaveChange(from: number, to: number, wrapSource: (body: string) => string, tier: MacroTier | undefined, newBody: string): { from: number; to: number; insert: string } {
+  let src = asMacroSource(wrapSource(newBody));
+  if (tier) src = autoDemote(tier, src);
+  return { from, to, insert: src };
+}
+
+interface EditUIDom extends HTMLDivElement { __editUICtrl?: EditUIController; __editUIRo?: ResizeObserver }
+// #174 / ADR-087: the generic inline editUI host. When a macro with `editUI.present === "inline"` is
+// render-active, this mounts the macro's OWN editor (editUI.mount) into an atom-root island and wires
+// `save(newBody)` → an immediate, offset-invariant Y.Text replace of the block (Open-formats tier
+// demote). Mirrors EditableTableWidget but generic over any editUI macro; the host-API stays {theme} +
+// save (ADR-024 narrow boundary — the macro never sees EditorView/Y.Text). Inert until a macro adopts
+// editUI (no first-party macro does yet), so it adds no behaviour to shipped macros. Exported as the
+// framework primitive the render-path wiring + first macro migration (next slice) will instantiate.
+export class EditableEditUIWidget extends WidgetType {
+  constructor(readonly from: number, readonly to: number, readonly source: string, readonly editUI: EditUI, readonly wrapSource: (body: string) => string, readonly theme: MacroTheme, readonly tier?: MacroTier) { super(); }
+  eq(o: EditableEditUIWidget) { return o.from === this.from && o.to === this.to && o.source === this.source && o.editUI === this.editUI && o.theme === this.theme; }
+  private mountInto(dom: EditUIDom, view: EditorView) {
+    dom.__editUICtrl?.destroy();
+    dom.replaceChildren();
+    const save = (newBody: MacroSource) => {
+      const ch = editUISaveChange(this.from, this.to, this.wrapSource, this.tier, newBody);
+      view.dispatch({ changes: ch, effects: setMacroRenderActive.of({ from: ch.from, to: ch.from + ch.insert.length }) });
+      view.focus();
+    };
+    dom.__editUICtrl = this.editUI.mount(dom, asMacroSource(this.source), { theme: this.theme }, save);
+  }
+  toDOM(view: EditorView) {
+    const wrap = document.createElement("div") as EditUIDom;
+    wrap.contentEditable = "false"; // atom root (ADR-054): CM keeps the block atomic, no focus reclaim
+    this.mountInto(wrap, view);
+    wrap.__editUIRo = observeBlockResize(view, wrap);
+    return wrap;
+  }
+  updateDOM(dom: HTMLElement, view: EditorView) { this.mountInto(dom as EditUIDom, view); return true; }
+  destroy(dom: HTMLElement) { const d = dom as EditUIDom; d.__editUICtrl?.destroy(); d.__editUICtrl = undefined; d.__editUIRo?.disconnect(); d.__editUIRo = undefined; }
+  ignoreEvent() { return true; }
 }
 
 // True if a folded range (CodeMirror's native folding) covers [from, to). When folded
