@@ -161,7 +161,11 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
       </div>
 
       {canComment && tab === "open" && (
-        <div className="flex flex-col gap-2">
+        // #214 part 3: the composer stays PINNED to the panel bottom (sticky) while the thread list
+        // scrolls above it, so it never gets buried by a long history. The negative margins + panel bg
+        // extend the sticky bar to the panel edges and cover the threads scrolling under it (RightPanel is
+        // the `overflow-y-auto` scroll container; RightPanel itself is unchanged — comments-panel only).
+        <div className="sticky bottom-0 z-10 -mx-3 -mb-3 mt-auto flex flex-col gap-2 border-t border-border bg-panel px-3 pb-3 pt-2">
           <Composer pageId={pageId} token={authToken} placeholder={tr("commentsPanel.pagePlaceholder")} onSubmit={(body, mentions) => createThread.mutate({ body, kind: "page", mentions })} />
         </div>
       )}
