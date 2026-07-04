@@ -17,7 +17,7 @@ async function openComments(page: Page) {
 }
 
 
-test("comments: page comment + resolve/tabs, inline highlight that follows edits, @mention", async ({ page }) => {
+test("comments: page comment + @mention; resolve/tabs and inline affordance removed (#214)", async ({ page }) => {
   await openDemo(page);
   const pageId = await page.evaluate(async (api) => {
     const r = await fetch(`${api}/spaces/demo_space/pages`, {
@@ -47,24 +47,13 @@ test("comments: page comment + resolve/tabs, inline highlight that follows edits
   await panel.locator("[data-testid=comment-submit]").last().click();
   await expect(panel.locator("[data-testid=comment-thread]")).toContainText("a page-level comment");
 
-  // (2) #214 part 2: resolve/open-resolved tabs were removed — the thread stays in the single list.
+  // (2) #214 parts 1-2: the resolve/open-resolved tabs AND the selection/inline-comment affordance were
+  // removed — one list of page comments; no resolve toggle, no inline "add-inline" button.
   await expect(panel.locator("[data-testid=thread-toggle]")).toHaveCount(0);
   await expect(panel.locator("[data-testid=tab-resolved]")).toHaveCount(0);
+  await expect(panel.locator("[data-testid=add-inline]")).toHaveCount(0);
 
-  // (3) inline comment anchored to the selected line → blue-underline highlight
-  page.once("dialog", (d) => d.accept("comment on the line"));
-  await page.locator("[data-pane=preview] .cm-line").first().click({ clickCount: 3 }); // select the line
-  await page.locator("[data-testid=add-inline]").click();
-  await expect(page.locator("[data-pane=preview] .cm-comment-anchor")).toBeVisible({ timeout: 8000 });
-
-  // (4) the highlight FOLLOWS a live edit (real CodeMirror, complementing the unit test)
-  await page.locator("[data-pane=preview] .cm-content").click();
-  await page.keyboard.press("Control+Home");
-  await page.keyboard.type("XX ");
-  await sleep(300);
-  await expect(page.locator("[data-pane=preview] .cm-comment-anchor")).toContainText("quick");
-
-  // (5) @mention autocomplete from the page-view-scoped directory. dev-user is the
+  // (3) @mention autocomplete from the page-view-scoped directory. dev-user is the
   // only page-viewer member; its display name is "dev-user" (the IdP claim name set
   // at login). Typing "@dev" surfaces it from the view-scoped directory.
   await pageInput.fill("@dev");

@@ -84,7 +84,6 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
   const authToken = token ?? sessionToken;
   const { data: threads } = useComments(pageId, authToken);
   const { createThread, reply, remove } = useCommentMutations(pageId, authToken);
-  const [inlineHint, setInlineHint] = useState<string | null>(null);
 
   // Page not viewable (server returned null) → render nothing (no-leak).
   if (threads === null || threads === undefined) return null;
@@ -93,35 +92,17 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
   // (source is oldest-first creation order; the `[…]` copy keeps the query cache immutable).
   const shown = [...threads].reverse();
 
-  const addInline = () => {
-    const anchor = anchorGetterRef.current?.();
-    if (!anchor) { setInlineHint(tr("commentsPanel.selectFirst")); return; }
-    setInlineHint(null);
-    const body = window.prompt(tr("commentsPanel.promptInline", { quote: anchor.quotedText.slice(0, 40) }));
-    if (!body?.trim()) return;
-    createThread.mutate({ body: body.trim(), kind: "inline", anchorStart: anchor.anchorStart, anchorEnd: anchor.anchorEnd, quotedText: anchor.quotedText });
-  };
-
   return (
     <RightPanel
       testId="comments-panel"
       title={tr("page.comments")}
       onClose={onClose}
     >
-      {canComment && (
-        <div className="flex flex-col gap-2">
-          <Button size="sm" data-testid="add-inline" onClick={addInline}>{tr("commentsPanel.addInline")}</Button>
-          {inlineHint && <p className={hint}>{inlineHint}</p>}
-        </div>
-      )}
-
+      {/* #214 part 1: the selection/inline comment affordance was removed — page comments only. */}
       <div className="flex flex-col gap-2">
         {shown.length === 0 && <p className={hint}>{tr("commentsPanel.emptyOpen")}</p>}
         {shown.map((t) => (
           <div key={t.id} className="flex flex-col gap-2 rounded-lg border border-border bg-background px-3 py-2" data-testid="comment-thread">
-            {t.kind === "inline" && (
-              <blockquote className="m-0 border-l-[3px] border-[var(--accent)] py-0.5 pl-2 text-[0.85em] text-fg-dim">{t.quotedText || tr("commentsPanel.anchoredDeleted")}</blockquote>
-            )}
             {t.comments.map((c) => (
               <div key={c.id} className="flex flex-col gap-0.5" data-testid="comment-item">
                 <div className="flex items-center gap-1.5">
