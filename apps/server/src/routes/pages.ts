@@ -624,6 +624,70 @@ export async function listPageRestrictions(
   return out
 }
 
+// #109 / ADR-098: per-page PRIVATE (allowlist). Writing `private@user:*` cuts the space-inherited
+// grant paths (view/edit/manage) — only explicit direct grants (the allow list, managed via grant/
+// revoke) remain. Setting private ALSO strips the public grant (view_base@user:*) so a page can't be
+// both public and private (the write-boundary invariant → is_public becomes false on reindex). The allow
+// list itself is the existing grant/revoke path; this pair only flips the marker. Manage-gated + audited
+// (#177) + reindexed, like restrict.
+const PRIVATE_MARKER = (pageId: string) => ({ user: 'user:*', relation: 'private', object: `page:${pageId}` })
+const PUBLIC_GRANT = (pageId: string) => ({ user: 'user:*', relation: 'view_base', object: `page:${pageId}` })
+
+export async function setPagePrivate(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; tenantId: string; userId: string; plan?: string },
+): Promise<void> {
+  await requireManage(fga, args.userId, args.pageId)
+  const oid = await db.tx(async (tx) => {
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.made_private', target: `page:${args.pageId}` })
+    }
+    const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+    await writeTuples(fga, [PRIVATE_MARKER(args.pageId)])
+    // public⊥private invariant: strip the public grant so is_public can't survive privatisation. Idempotent
+    // (ignore "not found" — the page may not be public). This is the write-boundary that closes the leak
+    // where a private page still indexes as public.
+    await deleteTuples(fga, [PUBLIC_GRANT(args.pageId)]).catch(() => {})
+    return o
+  })
+  // Reindex so is_public flips to false (view_base@user:* gone) + space members drop from stage-1.
+  processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+  emit({ type: 'page.made_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
+}
+
+export async function unsetPagePrivate(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; tenantId: string; userId: string; plan?: string },
+): Promise<void> {
+  await requireManage(fga, args.userId, args.pageId)
+  const oid = await db.tx(async (tx) => {
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.made_non_private', target: `page:${args.pageId}` })
+    }
+    const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+    // Clearing private resumes space inheritance; it does NOT restore public (one-way — a re-publish or
+    // an explicit public toggle re-adds view_base@user:* if desired).
+    await deleteTuples(fga, [PRIVATE_MARKER(args.pageId)]).catch(() => {})
+    return o
+  })
+  processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+  emit({ type: 'page.made_non_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
+}
+
+// Is the page private (allowlist mode)? Manage-gated read for the permissions UI.
+export async function isPagePrivate(
+  fga: OpenFgaClient,
+  args: { pageId: string; userId: string },
+): Promise<boolean> {
+  await requireManage(fga, args.userId, args.pageId)
+  const { tuples } = await fga.read({ object: `page:${args.pageId}`, relation: 'private' })
+  return (tuples ?? []).some(({ key }) => key?.relation === 'private' && key.user === 'user:*')
+}
+
 export async function listPageAccess(
   fga: OpenFgaClient,
   db: TenantDb,
@@ -1150,6 +1214,25 @@ export async function pagesPlugin(app: FastifyInstance) {
     const principal = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.principal ?? '')
     await unrestrictPageAccess(req.db, app.fga, app.searchDriver, {
       pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub, principal, plan: req.tenant.plan,
+    })
+    return reply.code(204).send()
+  })
+
+  // #109 / ADR-098 — per-page PRIVATE (allowlist) toggle (manage-gated). POST makes the page private
+  // (space inheritance cut + public stripped); DELETE clears it (space inheritance resumes). The allow
+  // list is the existing grant/revoke path (POST/DELETE /pages/:id/access). GET reports the flag.
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/private', async (req) => {
+    return { private: await isPagePrivate(app.fga, { pageId: req.params.pageId, userId: req.user.sub }) }
+  })
+  app.post<{ Params: { pageId: string } }>('/pages/:pageId/private', async (req, reply) => {
+    await setPagePrivate(req.db, app.fga, app.searchDriver, {
+      pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub, plan: req.tenant.plan,
+    })
+    return reply.code(204).send()
+  })
+  app.delete<{ Params: { pageId: string } }>('/pages/:pageId/private', async (req, reply) => {
+    await unsetPagePrivate(req.db, app.fga, app.searchDriver, {
+      pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub, plan: req.tenant.plan,
     })
     return reply.code(204).send()
   })

@@ -2,15 +2,15 @@
 // Phase 4b per-page grant/revoke/list. Only a `manage` holder may grant/revoke/list;
 // a grant makes the grantee a real FGA viewer (and a search viewer after reindex); a
 // revoke drops them; granting on a DRAFT is how you invite someone to it.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import postgres from 'postgres'
 import * as Y from 'yjs'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
-import { fgaClient, check, deleteObjectTuples, writeTuples } from '@wikistead/authz'
+import { fgaClient, check, deleteObjectTuples, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver, buildSearchDoc } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, unrestrictPageAccess, listPageRestrictions } from '../routes/pages.js'
+import { createPage, grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, unrestrictPageAccess, listPageRestrictions, setPagePrivate, unsetPagePrivate, isPagePrivate } from '../routes/pages.js'
 import { drainAuditOutbox } from '../audit/outbox.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -138,5 +138,78 @@ describe('per-page restrict (monotonic deny)', () => {
       .rejects.toMatchObject({ statusCode: 400 })
     await expect(restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', principal: 'share_link:x' }))
       .rejects.toMatchObject({ statusCode: 400 })
+  })
+})
+
+// #109 / ADR-098 — the PRIVATE (allowlist) write path over the same manage-gated mechanism. The core
+// invariant is public⊥private: setting private strips the public grant so is_public flips to false.
+describe('per-page private (ADR-098 allowlist)', () => {
+  const publicTuple = () => ({ user: 'user:*', relation: 'view_base', object: `page:${pageId}` })
+  const ALLOWED = 'user:pa-allowed'
+  // The restrict describe's afterAll wiped the page tuples incl. the creator's `manage`; re-establish it.
+  beforeAll(async () => { await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'manage', object: `page:${pageId}` }]).catch(() => {}) })
+  afterAll(async () => { await deleteObjectTuples(fgaClient, `page:${pageId}`).catch(() => {}) })
+  afterEach(async () => {
+    await unsetPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' }).catch(() => {})
+    await deleteObjectTuples(fgaClient, `page:${pageId}`).catch(() => {}) // clear public + direct grants
+    // restore the creator's manage grant that deleteObjectTuples wiped, so later tests still pass
+    await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'manage', object: `page:${pageId}` }]).catch(() => {})
+  })
+
+  it('setPagePrivate marks private, STRIPS public (is_public → false), keeps a direct allow grant', async () => {
+    // make the page public + add a direct allow-listed viewer
+    await writeTuples(fgaClient, [publicTuple()])
+    await grantPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', grantee: ALLOWED, relation: 'view' })
+    const before = await buildSearchDoc(pool, fgaClient, pageId, TENANT)
+    expect(before!.isPublic).toBe(true) // public before
+
+    await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
+    expect(await isPagePrivate(fgaClient, { pageId, userId: 'dev-user' })).toBe(true)
+
+    // public⊥private write boundary: is_public flips false + the public grant is gone.
+    const after = await buildSearchDoc(pool, fgaClient, pageId, TENANT)
+    expect(after!.isPublic).toBe(false)
+    expect(await check(fgaClient, 'user:pa-anon', 'view', { type: 'page', id: pageId })).toBe(false) // no longer public
+    // the direct allow-listed grantee still views (the allow list survives private).
+    expect(await check(fgaClient, ALLOWED, 'view', { type: 'page', id: pageId })).toBe(true)
+  })
+
+  it('a private page drops space-inherited members from the search doc (slice 3 — stage-1 accurate)', async () => {
+    const SPACE_MEMBER = 'user:pa-spacemember'
+    // simulate a PUBLISHED page (page#space link) + a space viewer with NO direct page grant.
+    await writeTuples(fgaClient, [
+      { user: `space:${spaceId}`, relation: 'space', object: `page:${pageId}` },
+      { user: SPACE_MEMBER, relation: 'viewer', object: `space:${spaceId}` },
+    ])
+    const shared = await buildSearchDoc(pool, fgaClient, pageId, TENANT)
+    expect(shared!.viewerUsers).toContain(SPACE_MEMBER) // inherits via space while non-private
+
+    await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
+    const priv = await buildSearchDoc(pool, fgaClient, pageId, TENANT)
+    expect(priv!.viewerUsers).not.toContain(SPACE_MEMBER) // space inheritance cut → dropped from stage-1
+
+    await deleteTuples(fgaClient, [{ user: SPACE_MEMBER, relation: 'viewer', object: `space:${spaceId}` }]).catch(() => {})
+  })
+
+  it('unsetPagePrivate clears the marker', async () => {
+    await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
+    expect(await isPagePrivate(fgaClient, { pageId, userId: 'dev-user' })).toBe(true)
+    await unsetPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
+    expect(await isPagePrivate(fgaClient, { pageId, userId: 'dev-user' })).toBe(false)
+  })
+
+  it('a non-manager cannot toggle or read private (403)', async () => {
+    await expect(setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: STRANGER }))
+      .rejects.toMatchObject({ statusCode: 403 })
+    await expect(unsetPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: STRANGER }))
+      .rejects.toMatchObject({ statusCode: 403 })
+    await expect(isPagePrivate(fgaClient, { pageId, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
+  })
+
+  it('records a durable page.made_private audit entry when entitled + plan passed (#177)', async () => {
+    await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', plan: 'team' })
+    expect(await drainAuditOutbox()).toBeGreaterThanOrEqual(1)
+    const rows = await db.sql<{ action: string; target: string; actor: string }[]>`SELECT action, target, actor FROM audit_log WHERE tenant_id = ${TENANT} ORDER BY seq`
+    expect(rows.some((r) => r.action === 'page.made_private' && r.target === `page:${pageId}` && r.actor === 'user:dev-user')).toBe(true)
   })
 })
