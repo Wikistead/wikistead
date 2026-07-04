@@ -40,3 +40,41 @@ test("#174: mermaid Ctrl+Enter reveals raw source; the ✎ button opens the edit
   await expect(page.getByTestId("mermaid-edit-src")).toHaveCount(1); // the editUI source textarea
   expect(await page.getByTestId("mermaid-edit-src").inputValue()).toContain("graph TD");
 });
+
+// #174 addendum (comment 716): plantuml — a degrade-to-source ``` macro — gets the SAME split: Ctrl+Enter
+// reveals the raw fence; the ✎ button opens the editUI (source textarea + degraded preview) so a non-vim /
+// WYSIWYG user can edit it. Before this plantuml had no edit button at all.
+test("#174: plantuml Ctrl+Enter reveals raw source; the ✎ button opens the editUI", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "plantuml-raw-vs-editui");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("top\n```plantuml\n@startuml\nA -> B\n@enduml\n```\nbot\n");
+  await sleep(500);
+
+  // Caret off → rendered as the atom (degraded code block); no raw fence, no editUI textarea.
+  await page.getByText("bot").click();
+  await sleep(200);
+  await expect(page.getByTestId("macro-plantuml").first()).toBeVisible();
+  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("```plantuml");
+  await expect(page.getByTestId("plantuml-edit-src")).toHaveCount(0);
+
+  // Ctrl+Enter → raw fence revealed, NOT the editUI.
+  await page.getByTestId("macro-plantuml").first().click();
+  await sleep(120);
+  await page.keyboard.press("Control+Enter");
+  await sleep(250);
+  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("```plantuml");
+  await expect(page.getByTestId("plantuml-edit-src")).toHaveCount(0);
+
+  // ✎ button → the editUI source textarea.
+  await page.keyboard.press("Escape");
+  await page.getByText("bot").click();
+  await sleep(200);
+  await page.getByTestId("macro-plantuml").first().hover();
+  await sleep(120);
+  await page.getByTestId("macro-edit").first().click({ force: true });
+  await sleep(250);
+  await expect(page.getByTestId("plantuml-edit-src")).toHaveCount(1);
+  expect(await page.getByTestId("plantuml-edit-src").inputValue()).toContain("@startuml");
+});
