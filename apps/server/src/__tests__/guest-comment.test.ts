@@ -140,6 +140,18 @@ describe('#100 guest commenting (view link + comment_open)', () => {
     expect(res.statusCode).toBe(403) // token resource is bound to PAGE
   })
 
+  // #211: a guest whose VIEW grant is gone (link revoked) must be 404'd — view is the floor, so the
+  // comment op hides the page's existence (no-leak) rather than 403-leaking "exists but you can't comment".
+  it('a guest whose view grant was revoked is 404 on comment — never 403 (no-leak floor)', async () => {
+    await deleteTuples(fgaClient, [tuples[2]!]).catch(() => {}) // remove the VIEW-link view_base tuple
+    try {
+      const res = await app.inject({ method: 'POST', url: `/pages/${PAGE}/comments`, headers: H(viewTok), payload: { body: 'x' } })
+      expect(res.statusCode).toBe(404) // view floor → 404 (existence hidden), not a 403 leak
+    } finally {
+      await writeTuples(fgaClient, [tuples[2]!]).catch(() => {})
+    }
+  })
+
   // #100 UI: the guest page reads canComment from /published to decide whether to show the composer.
   // It must track comment_open (distinct true/false) so the composer appears only when guests may post.
   it('the /published endpoint reports canComment for the guest, tracking comment_open', async () => {
