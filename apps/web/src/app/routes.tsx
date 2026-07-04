@@ -416,8 +416,11 @@ function PageRoute() {
             {/* #192: the TOC rail lives in the content's RIGHT WHITESPACE, inside the editor area, so the
                 scrollbar (the editor's, at the far right) is to the RIGHT of the rail — not between them.
                 Positioned absolutely (right-2 clears the scrollbar), only when the viewport is wide enough
-                that the centred reading column leaves room. Narrower screens get the scroll overlay. */}
-            {isWide && tocOn && (
+                that the centred reading column leaves room. Narrower screens get the scroll overlay.
+                #212: the rail shares the RIGHT zone with the comments/history/attachments panels, so it
+                yields (hidden) when one is open — else its pointer-events overlap and swallow clicks on
+                the panel (a right panel and the rail must not both occupy the zone). */}
+            {isWide && tocOn && !commentsOpen && !historyOpen && !attachmentsOpen && (
               <div className="pointer-events-none absolute left-[calc(50%+370px+1rem)] top-2 bottom-2 z-[5] w-[210px]">
                 <div className="pointer-events-auto h-full">
                   <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="rail" />
@@ -638,8 +641,9 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
             <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} />
             <div className="pointer-events-none absolute right-3 top-3 z-10"><PageStatus {...controls} /></div>
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
-            {/* #192: TOC rail in the content's right whitespace (scrollbar stays rightmost); overlay narrower. */}
-            {isWide && tocOn && (
+            {/* #192: TOC rail in the content's right whitespace (scrollbar stays rightmost); overlay narrower.
+                #212: yields to the comments panel when open (shared right zone — no pointer overlap). */}
+            {isWide && tocOn && !commentsOpen && (
               <div className="pointer-events-none absolute left-[calc(50%+370px+1rem)] top-2 bottom-2 z-[5] w-[210px]">
                 <div className="pointer-events-auto h-full">
                   <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="rail" />
