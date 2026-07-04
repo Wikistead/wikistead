@@ -23,6 +23,8 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `page.access_revoked` | A principal lost a relation on a page. |
 | `page.access_restricted` | A principal was restricted (monotonic deny) from a page. |
 | `page.access_unrestricted` | A principal was un-restricted from a page. |
+| `page.made_private` | A page was made private (allowlist — space inheritance cut, public stripped). |
+| `page.made_non_private` | A page was made non-private (space inheritance resumed). |
 | `space.created` | A space was created. |
 | `space.updated` | A space was updated. |
 | `space.deleted` | A space was deleted. |

@@ -55,9 +55,15 @@ export async function buildSearchDoc(
   //    gate, but excluding them from stage-1 keeps drafts out of space search.
   const { tuples: pageTuples } = await fga.read({ object: `page:${pageId}` })
   let linkedToSpace = false
+  let isPrivate = false // #109 / ADR-098: a private page cuts space inheritance — see below
   for (const { key } of pageTuples ?? []) {
     if (!key) continue
     if (key.relation === 'space' && key.user === `space:${page.space_id}`) { linkedToSpace = true; continue }
+    // #109 / ADR-098: the private marker (private@user:*) cuts space inheritance for this page, so space
+    // members must NOT be denormalised as viewers (only the direct grants below are the allow list). This
+    // keeps stage-1 accurate — a member who lost access on privatisation drops from search immediately,
+    // not only at the stage-2 FGA gate. Not a viewer/public tuple itself, so it never enters the sets.
+    if (key.relation === 'private' && key.user === 'user:*') { isPrivate = true; continue }
     // #100 / ADR-029: `view` is now a computed relation (view_base or comment); direct page view
     // grants live on `view_base`, so read THAT for the viewer set + is_public (view_base@user:*). A
     // direct `comment` grant also confers view (comment ⊃ view), so a comment-granted member is a
@@ -67,8 +73,9 @@ export async function buildSearchDoc(
   }
 
   // 2. Space inheritance + tenant admins — ONLY for a PUBLISHED page (page#space
-  //    present). For a draft these are withheld (the gate), matching FGA exactly.
-  if (linkedToSpace) {
+  //    present) that is NOT private (ADR-098 cuts space inheritance). For a draft
+  //    (or a private page) these are withheld, matching the FGA `view` graph exactly.
+  if (linkedToSpace && !isPrivate) {
     const { tuples: spaceTuples } = await fga.read({ object: `space:${page.space_id}` })
     for (const { key } of spaceTuples ?? []) {
       if (!key || !['manager', 'editor', 'viewer'].includes(key.relation)) continue
