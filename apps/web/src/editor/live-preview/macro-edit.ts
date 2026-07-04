@@ -12,14 +12,17 @@ import { asMacroSource } from "../macros/registry";
 
 // The block in inline render-edit mode (null = none). Transient: mapped through edits,
 // cleared when the caret leaves it. Read by the table renderer (tryTableEdit).
-export const setMacroRenderActive = StateEffect.define<{ from: number; to: number } | null>();
-export const macroRenderActiveField = StateField.define<{ from: number; to: number } | null>({
+// #174 / ADR-087 addendum: `raw` distinguishes HOW a ``` -notation macro (mermaid/plantuml/code) is
+// entered — Ctrl+Enter reveals the RAW source (vim-editable), the ✎ edit button opens the rich editUI.
+// Absent/false → the existing behaviour (editUI for an editUI macro, raw for a legacy source macro).
+export const setMacroRenderActive = StateEffect.define<{ from: number; to: number; raw?: boolean } | null>();
+export const macroRenderActiveField = StateField.define<{ from: number; to: number; raw?: boolean } | null>({
   create: () => null,
   update(value, tr) {
     for (const e of tr.effects) if (e.is(setMacroRenderActive)) return e.value;
     if (!value) return null;
     let v = value;
-    if (tr.docChanged) v = { from: tr.changes.mapPos(v.from, 1), to: tr.changes.mapPos(v.to, -1) };
+    if (tr.docChanged) v = { from: tr.changes.mapPos(v.from, 1), to: tr.changes.mapPos(v.to, -1), raw: value.raw };
     if (tr.selection) {
       const h = tr.newSelection.main.head;
       if (h < v.from || h > v.to) return null; // caret left → back to normal render
