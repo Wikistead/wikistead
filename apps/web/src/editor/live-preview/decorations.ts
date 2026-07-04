@@ -1368,7 +1368,15 @@ const RENDERERS: BlockRenderer[] = [
     enter: (node, ctx) => {
       const doc = ctx.state.doc;
       const from = doc.lineAt(node.from).from;
-      const to = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1)).to;
+      // #141: the lezer GFM `Table` node ABSORBS immediately-following paragraph lines (no blank line
+      // between), so the widget covered + collapsed those paragraphs and vim j/k skipped them (measured
+      // {11,15} eating two trailing paragraphs). Clip to the contiguous run of pipe-bearing lines = the
+      // actual table rows, so the widget covers only the table (matches tableBlockAt's clip).
+      const startLine = doc.lineAt(node.from).number;
+      const nodeEndLine = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1)).number;
+      let endLine = startLine;
+      for (let n = startLine; n <= nodeEndLine; n++) { if (doc.line(n).text.includes("|")) endLine = n; else break; }
+      const to = doc.line(endLine).to;
       // Reveal raw source while the cursor is anywhere in the block's range. The block
       // can't be ENTERED by vertical motion (it's a collapsed widget) — the blockEntry
       // transaction filter redirects motion that would skip it INTO it, then these lines
