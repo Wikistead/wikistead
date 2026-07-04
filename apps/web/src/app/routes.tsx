@@ -375,10 +375,10 @@ function PageRoute() {
     onExport: () => { if (pageId) void downloadPageExport(token, pageId); },
     // #85 bounce: the HTML-export UI entry is SEALED until the post-launch Option-A redesign (a
     // DOM-free render core shared by client + SSR). The current renderMarkdownToHtml output is
-    // low-fidelity (math `$$` leaks as raw text, table/callout/embed diverge, dark theme), so it must
-    // not be reachable from the UI. The backend route (/pages/:id/export.html, buildHtmlExport) stays —
-    // undefined here just hides the ⋯ menu item (PageControls guards on onExportHtml). Reversible.
-    onExportHtml: undefined,
+    // low-fidelity (math `$$` leaks as raw text, table/callout/embed diverge, dark theme). Per the
+    // user, the menu item stays VISIBLE but GRAYED OUT (disabled) rather than hidden — see
+    // PageControls (export-html item is disabled). The handler is kept for when the redesign re-enables it.
+    onExportHtml: () => { if (pageId) void downloadPageExport(token, pageId, "html"); },
     // #207 part 2: print the full server-rendered HTML (all macros static, no raw ::: leak) rather
     // than window.print() on the virtualised CM surface. Fall back to the live-surface print only when
     // the page has no exportable HTML (unpublished draft → 404), so drafts can still be printed.
