@@ -5,10 +5,13 @@
 // Comments create NO FGA tuples (authz is page-derived), so there is no dual-write
 // to roll back — the route is a plain DB mutation behind an FGA gate.
 //
-// TODO(phase: comments): guest (share-link) commenting — the core product is
-// anonymous guest co-EDITING, so guests editing-but-not-commenting is slightly
-// uneven. Deferred: it needs `comment` added to share_link in the FGA model; v1 is
-// member-only.
+// Guest (share-link) commenting is IMPLEMENTED (#100 / ADR-029 Option B): it is a RESOURCE SETTING,
+// not a link capability. A VIEW-link guest may comment ONLY when the space has comments open
+// (`space#comment_open@share_link:*`); the FGA model resolves it via `page#comment = … or (view_base
+// and comment_open)`, so no `comment` link type is needed. `view` stays the floor (comment_open off ⇒
+// the guest keeps view but is 403'd on comment; a non-view guest is 404'd — no leak). Space-link guests
+// (token resource = a space) never reach the comment write path (principalForPage 403). See
+// guest-comment.test.ts for the authz matrix.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { check } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
