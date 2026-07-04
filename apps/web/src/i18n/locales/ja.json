@@ -570,6 +570,7 @@
     "anchoredDeleted": "（アンカーされたテキストは削除されました）",
     "delete": "削除",
     "reply": "返信…",
+    "replyingTo": "返信先:",
     "pagePlaceholder": "ページにコメント…",
     "resolve": "解決",
     "reopen": "再オープン",
