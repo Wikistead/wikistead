@@ -1773,9 +1773,14 @@ export const livePreviewTheme = EditorView.baseTheme({
     borderRadius: "4px",
     padding: "0.4em 0.6em",
   },
+  // #210 bounce (comment 699): the action buttons sit in a hover row ABOVE the macro — OUTSIDE its content
+  // box — not on top of it. An <iframe> (embed-external, e.g. a playing YouTube) is a stacking context AND
+  // a pointer sink that captures clicks regardless of z-index, so a button OVER the iframe was unclickable.
+  // A row above the widget (in the block's top margin) is never over the iframe, so every macro's buttons
+  // (edit / retarget / fold) are reliably clickable — the Notion block-hover pattern, uniform across macros.
   ".cm-lp-macro-fold, .cm-lp-macro-edit, .cm-lp-macro-retarget": {
     position: "absolute",
-    top: "4px",
+    top: "-1.55em", // above the content box (outside the iframe/widget), in the block's top margin
     display: "inline-flex", // centres the Lucide SVG (#174) / the fold glyph
     alignItems: "center",
     justifyContent: "center",
@@ -1788,16 +1793,15 @@ export const livePreviewTheme = EditorView.baseTheme({
     lineHeight: "1",
     padding: "2px 5px",
     opacity: "0",
+    zIndex: "3", // above the rendered content (belt-and-braces; the real fix is being OUTSIDE the box)
+    pointerEvents: "auto",
     transition: "opacity 120ms",
   },
-  ".cm-lp-macro-fold": { right: "4px" },
-  // #210 bounce: the embed retarget (⇆) gets its OWN top-right slot + a z-index ABOVE the rendered embed
-  // (an <iframe> is a stacking context / pointer sink), so the click reaches it instead of the content.
-  ".cm-lp-macro-retarget": { right: "4px", zIndex: "2", pointerEvents: "auto" },
-  // #174 / ADR-087: the edit button sits at the block's TOP-LEFT (inside the content box), a different
-  // zone from the #84 block-drag grip (left GUTTER, outside the block) — no co-located affordances. The
-  // fold button stays top-right, so an editable+foldable macro (Excalidraw) shows them in opposite corners.
-  ".cm-lp-macro-edit": { left: "4px" },
+  // Left-aligned row (top-left of the block). edit and retarget never co-occur (editUI macros vs embeds),
+  // so both take the first slot; fold sits in the second slot next to an edit button (Excalidraw).
+  ".cm-lp-macro-edit": { left: "0" },
+  ".cm-lp-macro-retarget": { left: "0" },
+  ".cm-lp-macro-fold": { left: "2em" },
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
   ".cm-lp-macro-wrap:hover .cm-lp-macro-fold, .cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-fold, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget": { opacity: "1" },

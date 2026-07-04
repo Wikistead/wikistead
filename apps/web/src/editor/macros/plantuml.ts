@@ -9,6 +9,7 @@ import { plantumlHtmlRender } from "@wikistead/macro-render"; // #85: export htm
 export const plantumlMacro: FenceMacro = {
   kind: "fence",
   lang: "plantuml",
+  foldable: false, // #210 / #174 / ADR-087: no meaningless collapse button on a rendered diagram (like mermaid)
   // No bundled renderer: until an external service is configured the block degrades to its source.
   exportFidelity: "degrade",
   summary: () => "PlantUML diagram",
