@@ -5,7 +5,6 @@
 // separator, so on remove we reclaim its LEADING separator and on insert we synthesize one.
 // Only the two move boundaries are re-normalized — never other whitespace.
 import type { EditorState, ChangeSpec, Text } from "@codemirror/state"
-import type { EditorView, Command } from "@codemirror/view"
 import { syntaxTree } from "@codemirror/language"
 
 export interface BlockRange { from: number; to: number } // line-aligned source offsets (no trailing \n)
@@ -92,35 +91,7 @@ export function computeBlockMove(
   return { changes }
 }
 
-// #84 / #174 (ADR-087): the KEYBOARD alternative to dragging the gutter grip — move the block at the
-// caret up/down one block. The matrix (ADR-087) requires a keyboard move so a vim / keyboard-only /
-// touch user can reorder without the pointer grip. Reuses computeBlockMove (one Y.Text transaction,
-// offset-invariant), so drag and keyboard share the exact move math. Wired to Alt-Shift-Arrow.
-export const moveBlockDown: Command = (view: EditorView): boolean => {
-  const { state } = view
-  const src = blockRangeAt(state, state.selection.main.head)
-  if (!src) return false // caret on a blank line — nothing to move
-  const nextStart = nextContentLineFrom(state.doc, state.doc.lineAt(src.to).number)
-  if (nextStart == null) return false // already the last block
-  const next = blockRangeAt(state, nextStart)
-  if (!next) return false
-  const afterNext = nextContentLineFrom(state.doc, state.doc.lineAt(next.to).number)
-  const res = computeBlockMove(state.doc, src, afterNext ?? state.doc.length)
-  if (!res) return false
-  view.dispatch({ ...res, scrollIntoView: true })
-  return true
-}
-
-export const moveBlockUp: Command = (view: EditorView): boolean => {
-  const { state } = view
-  const src = blockRangeAt(state, state.selection.main.head)
-  if (!src) return false
-  const prevEnd = prevContentLineTo(state.doc, state.doc.lineAt(src.from).number)
-  if (prevEnd == null) return false // already the first block
-  const prev = blockRangeAt(state, prevEnd)
-  if (!prev) return false
-  const res = computeBlockMove(state.doc, src, prev.from) // insert before the previous block
-  if (!res) return false
-  view.dispatch({ ...res, scrollIntoView: true })
-  return true
-}
+// #84: the keyboard-move commands (Alt-Shift-Up/Down) were removed per review (comment 696):
+// vim users reorder with dd→move→p (atom dd/yy exist) and mouse users drag the gutter grip, so the
+// middle-tier keyboard move had no demand and only added keybinding/maintenance surface. computeBlockMove
+// stays — the drag path (block-drag.ts) is its only caller now.
