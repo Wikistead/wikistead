@@ -42,16 +42,30 @@ function buildPageNodes(pages: Page[], parentId: string | null): Node[] {
     .map((p) => ({ id: `page:${p.id}`, name: p.title, pageId: p.id, spaceId: p.spaceId, published: p.published ?? false, unpublished: p.hasUnpublishedChanges ?? false, children: buildPageNodes(pages, p.id) }));
 }
 
-function useSize(ref: React.RefObject<HTMLElement | null>) {
+// #193: measure the tree container via a CALLBACK ref, not an effect keyed on a stable
+// ref object. The container is mounted CONDITIONALLY (only once pages load — before that
+// the loading/empty state renders instead), so an effect that runs on first commit finds
+// ref.current === null, returns early, and never re-runs (its dep is the stable ref) — the
+// ResizeObserver is never attached and `size` stays {0,0}. react-arborist needs an explicit
+// pixel width, so a 0 width falls back to a hardcoded 260px that NEVER tracks the real
+// sidebar width: rows stay 260px wide even when the sidebar is dragged to 180px, so the row
+// overflows the aside and the name can't shrink / the badge is clipped (the whole #193 bug).
+// A callback ref (re)attaches the observer whenever the node actually mounts/unmounts, and
+// seeds the size synchronously so the first paint is already correct.
+function useSize() {
   const [size, setSize] = useState({ width: 0, height: 0 });
-  useEffect(() => {
-    const el = ref.current;
+  const roRef = useRef<ResizeObserver | null>(null);
+  const ref = useCallback((el: HTMLElement | null) => {
+    roRef.current?.disconnect();
+    roRef.current = null;
     if (!el) return;
     const ro = new ResizeObserver(([e]) => setSize({ width: e.contentRect.width, height: e.contentRect.height }));
     ro.observe(el);
-    return () => ro.disconnect();
-  }, [ref]);
-  return size;
+    roRef.current = ro;
+    const r = el.getBoundingClientRect(); // seed immediately (RO may not fire synchronously)
+    setSize({ width: r.width, height: r.height });
+  }, []);
+  return { ref, size };
 }
 
 export function Sidebar() {
@@ -108,8 +122,7 @@ export function Sidebar() {
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const [sharing, setSharing] = useState<string | null>(null);
 
-  const treeBox = useRef<HTMLDivElement>(null);
-  const size = useSize(treeBox);
+  const { ref: treeBox, size } = useSize();
 
   const newPage = (parentId: string | null) => {
     if (!current) return;
@@ -188,7 +201,7 @@ export function Sidebar() {
           {hasChildren ? <ChevronRight size={14} className={cn("transition-transform duration-[120ms]", node.isOpen && "rotate-90")} /> : <span className="inline-block w-[14px]" />}
         </span>
         <FileText size={14} className="flex-none text-fg-dim" />
-        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{d.name || t("common.untitled")}</span>
+        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" data-testid="tree-page-name">{d.name || t("common.untitled")}</span>
         {/* 3-state: Draft (never published) / Unpublished changes / clean (nothing). */}
         {!d.published ? (
           <span className="mx-1 flex-none rounded border border-border px-[5px] py-0.5 text-[length:var(--text-xs)] leading-none text-fg-dim" data-testid="tree-draft-badge" title={t("sidebar.draftTitle")}>{t("sidebar.draft")}</span>
