@@ -1411,7 +1411,13 @@ const RENDERERS: BlockRenderer[] = [
   // - Otherwise hide it (reveal-on-cursor) but NOT atomically (a whole-line atomic range is un-landable).
   { match: (n) => n === "DirectiveMark", enter: (node, ctx) => {
     const dir = directiveMacroAt(ctx.state, node.from);
-    if (dir && rangeRevealed(ctx.state, dir.from, dir.to)) return; // editing the block → raw fences (normal height)
+    // #196 / ADR-092 (comment 740): reveal a directive's raw fences ONLY when the caret is editing THIS
+    // directive itself — NOT when it's deeper inside a nested child. Without the `!caretInNestedMacro`
+    // guard, a container (columns/tabs) whose nested callout is being edited kept its own `::::columns` /
+    // `::::` markers raw (the leak the reviewer saw), because the caret is within the container's range.
+    // Innermost-wins: an ancestor container hides its markers while a descendant reveals; the frame +
+    // descend renderer (above) keeps the container drawn, so only the innermost child shows raw.
+    if (dir && rangeRevealed(ctx.state, dir.from, dir.to) && !caretInNestedMacro(ctx.state, dir.from, dir.to)) return;
     ctx.fenceLineStarts.add(ctx.state.doc.lineAt(node.from).from); // #185 2b: lezer hid this fence line
     ctx.hideMarker(node.from, node.to, undefined, false);
   } },
@@ -1582,7 +1588,13 @@ function buildDecorations(state: EditorState, themeOverride?: MacroTheme): {
   // early-closed DESCEND containers (columns/tabs) leak, and those are never under a block-replace widget
   // (callout etc. parse correctly → their fences ARE in fenceLineStarts), so this never overlaps a replace.
   for (const dir of resolveDirectiveRanges(state.doc.toString())) {
-    if (rangeRevealed(state, dir.from, dir.to)) continue; // editing this block → raw fences
+    if (typeof window !== "undefined") { const w = window as unknown as { __pp?: unknown[] }; (w.__pp ??= []).push({ name: dir.name, from: dir.from, to: dir.to, closed: dir.closed, revealed: rangeRevealed(state, dir.from, dir.to), nested: caretInNestedMacro(state, dir.from, dir.to) }); }
+    // #196 / ADR-092 (comment 740): innermost-wins — reveal a directive's raw fences ONLY when the caret
+    // edits THIS directive itself, not when it's deeper inside a nested child. Without `!caretInNestedMacro`
+    // a layout container (columns/tabs) whose nested callout is being edited kept its own `::::columns` /
+    // `::::` fences raw (the leak): the caret is within the container's range, so plain `rangeRevealed` was
+    // true. The frame + descend renderer keeps the container drawn, so hiding its fences here is correct.
+    if (rangeRevealed(state, dir.from, dir.to) && !caretInNestedMacro(state, dir.from, dir.to)) continue; // editing this block → raw fences
     const openLine = state.doc.lineAt(dir.from);
     if (!ctx.fenceLineStarts.has(openLine.from) && openLine.from < openLine.to) ctx.hideMarker(openLine.from, openLine.to, undefined, false);
     if (dir.closed) {

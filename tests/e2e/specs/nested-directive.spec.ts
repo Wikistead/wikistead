@@ -32,3 +32,38 @@ test("#185: nested tabs>columns renders clean — no raw ::: marker leak, no CM 
   // No CM overlapping-decoration / render errors from the fence-hide post-pass.
   expect(errors, errors.join(" | ")).toHaveLength(0);
 });
+
+// #196 / ADR-092 (comment 740): innermost-wins reveal. With the caret inside a NESTED callout, only that
+// callout reveals raw — the OUTER container's own fences (::::columns / :::column / ::::) must NOT leak,
+// and the sibling column stays rendered. Measured in a real browser (the reveal + resolver fence-hide are
+// geometry/decoration concerns happy-dom can't exercise). Guards the leak the reviewer reproduced.
+test("#196: a nested callout reveals raw without leaking the container's fences", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "nested-reveal");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("top\n\n::::columns\n:::column\n:::note\nAAA note body\n:::\n:::\n:::column\nBBB\n:::\n::::\n\nbot\n");
+  await sleep(900);
+  const markers = () => page.evaluate(() => (((document.querySelector("[data-pane=preview] .cm-content") as HTMLElement).innerText).match(/::::?/g) || []).length);
+
+  // caret OUTSIDE the block → everything renders, ZERO raw fence markers, both columns' content shown.
+  await page.getByText("bot").click();
+  await sleep(250);
+  expect(await markers()).toBe(0);
+  const cleanText = await page.locator("[data-pane=preview] .cm-content").innerText();
+  expect(cleanText).toContain("BBB"); // sibling column rendered
+  expect(cleanText).toContain("AAA note body");
+
+  // navigate the caret INTO the nested note → ONLY the note's own two fences (:::note / :::) reveal; the
+  // container's ::::columns / :::column / :::: are hidden (so the count is 2, not the whole structure).
+  await page.keyboard.press("Control+Home");
+  for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("End");
+  await sleep(250);
+  expect(await markers(), "only the innermost note's own fences reveal; the container's must stay hidden").toBe(2);
+  const editingText = await page.locator("[data-pane=preview] .cm-content").innerText();
+  expect(editingText).not.toContain("::::columns"); // the container's opening fence must NOT leak
+  expect(editingText).not.toContain("::::");        // nor its closing fence
+  expect(editingText).toContain(":::note");          // the innermost note IS raw (being edited)
+  expect(editingText).toContain("BBB");              // the sibling column stays rendered
+});
