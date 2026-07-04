@@ -833,15 +833,19 @@ class MacroWidget extends WidgetType {
       if (this.name === "embed-page" || this.name === "embed-external") {
         const retarget = document.createElement("button");
         retarget.type = "button";
-        retarget.className = "cm-lp-macro-edit";
+        // #210 bounce: was `cm-lp-macro-edit` (left:4px) — it overlapped the edit button's slot AND sat
+        // under the embed's own content (an embed-external <iframe> is a stacking context + a pointer-
+        // event sink, so a same-plane button never received the click). Give it its OWN class: top-RIGHT
+        // corner (embeds have no fold button there) + a z-index above the rendered embed content, and use
+        // `click` (fires reliably even when a child iframe swallows earlier pointer phases).
+        retarget.className = "cm-lp-macro-retarget";
         retarget.title = "Change embed target";
         retarget.textContent = "⇆";
         retarget.setAttribute("data-testid", "embed-change-target");
-        retarget.addEventListener("mousedown", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          changeEmbedTarget(view, wrap, this.name);
-        });
+        // mousedown only PREVENTS the caret/fall-through (don't open here); `click` does the action, so
+        // it can't double-fire, and click lands even when an intervening pointer phase is swallowed.
+        retarget.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
+        retarget.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); changeEmbedTarget(view, wrap, this.name); });
         wrap.appendChild(retarget);
       }
       if (this.foldable) {
@@ -1741,7 +1745,7 @@ export const livePreviewTheme = EditorView.baseTheme({
     borderRadius: "4px",
     padding: "0.4em 0.6em",
   },
-  ".cm-lp-macro-fold, .cm-lp-macro-edit": {
+  ".cm-lp-macro-fold, .cm-lp-macro-edit, .cm-lp-macro-retarget": {
     position: "absolute",
     top: "4px",
     display: "inline-flex", // centres the Lucide SVG (#174) / the fold glyph
@@ -1759,13 +1763,16 @@ export const livePreviewTheme = EditorView.baseTheme({
     transition: "opacity 120ms",
   },
   ".cm-lp-macro-fold": { right: "4px" },
+  // #210 bounce: the embed retarget (⇆) gets its OWN top-right slot + a z-index ABOVE the rendered embed
+  // (an <iframe> is a stacking context / pointer sink), so the click reaches it instead of the content.
+  ".cm-lp-macro-retarget": { right: "4px", zIndex: "2", pointerEvents: "auto" },
   // #174 / ADR-087: the edit button sits at the block's TOP-LEFT (inside the content box), a different
   // zone from the #84 block-drag grip (left GUTTER, outside the block) — no co-located affordances. The
   // fold button stays top-right, so an editable+foldable macro (Excalidraw) shows them in opposite corners.
   ".cm-lp-macro-edit": { left: "4px" },
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
-  ".cm-lp-macro-wrap:hover .cm-lp-macro-fold, .cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-fold, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit": { opacity: "1" },
+  ".cm-lp-macro-wrap:hover .cm-lp-macro-fold, .cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-fold, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget": { opacity: "1" },
   ".cm-lp-excalidraw svg": { maxWidth: "100%", height: "auto", pointerEvents: "none" },
   // Empty-macro placeholder (#3): a clearly-bounded dashed block so the user SEES that a
   // macro widget occupies the line (matches the caret's block-motion behavior).

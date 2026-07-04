@@ -39,7 +39,7 @@ const imageUploader = Facet.define<(() => void) | null, (() => void) | null>({
 // seams) so the post-insert "change target" affordance reuses it too. When absent (guests /
 // picker-less surfaces) the embed-page command falls back to inserting the raw `:::embed-page`
 // template so the id can still be typed by hand.
-import { pageEmbedPicker, type PageEmbedPicker } from "./decorations";
+import { pageEmbedPicker, embedUrlPrompt, type PageEmbedPicker, type EmbedUrlPrompt } from "./decorations";
 export type { PageEmbedPicker };
 
 // Layer B/C/P commands. Template commands place the caret where you'd type the content
@@ -97,13 +97,16 @@ function macroCommands(): PaletteCommand[] {
 // uploader is wired (the facet is set), so it never appears for uploader-less surfaces.
 function commandList(state: EditorState): PaletteCommand[] {
   const picker = state.facet(pageEmbedPicker);
-  const macros = macroCommands().map((c) =>
+  const urlPrompt = state.facet(embedUrlPrompt);
+  const macros = macroCommands().map((c) => {
     // #205 part 2: when the host wired a page picker, the embed-page command opens it (title search →
     // insert the chosen id) instead of dropping a raw template. Without the seam it stays a template.
-    picker && c.id === "macro:embed-page"
-      ? { ...c, action: (view: EditorView) => openEmbedPagePicker(view, picker) }
-      : c,
-  );
+    if (picker && c.id === "macro:embed-page") return { ...c, action: (view: EditorView) => openEmbedPagePicker(view, picker) };
+    // #210 bounce: embed-external insert opens the SAME in-app URL modal (embedUrlPrompt) as the ⇆
+    // retarget, so the URL + allowlist warning are entered up front instead of dropping a raw template.
+    if (urlPrompt && c.id === "macro:embed-external") return { ...c, action: (view: EditorView) => openEmbedExternalPrompt(view, urlPrompt) };
+    return c;
+  });
   const base = [...COMMANDS, ...macros];
   return state.facet(imageUploader) ? [...base, IMAGE_COMMAND] : base;
 }
@@ -116,6 +119,18 @@ function openEmbedPagePicker(view: EditorView, open: PageEmbedPicker): void {
     if (!pageId) { view.focus(); return; }
     const at = view.state.selection.main.head;
     const insert = `:::embed-page\n${pageId}\n:::`;
+    view.dispatch({ changes: { from: at, insert }, selection: EditorSelection.cursor(at + insert.length), scrollIntoView: true });
+    view.focus();
+  });
+}
+
+// #210 bounce: open the host URL modal (seeded empty) and, on submit, insert `:::embed-external\n<url>\n:::`.
+// Cancel/empty leaves the doc untouched. Same seam the ⇆ retarget uses, so insert + retarget share the modal.
+function openEmbedExternalPrompt(view: EditorView, prompt: EmbedUrlPrompt): void {
+  prompt("", (url) => {
+    if (url == null || url.trim() === "") { view.focus(); return; }
+    const at = view.state.selection.main.head;
+    const insert = `:::embed-external\n${url.trim()}\n:::`;
     view.dispatch({ changes: { from: at, insert }, selection: EditorSelection.cursor(at + insert.length), scrollIntoView: true });
     view.focus();
   });
