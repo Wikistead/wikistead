@@ -112,7 +112,7 @@ export function mountLivePreview(
       // DEV-only probe: expose the caret's doc line + selection offsets so e2e can
       // assert motion / selection extent. Stripped from prod builds.
       ...(import.meta.env.DEV ? [EditorView.updateListener.of((u) => {
-        const w = window as Window & { __lpHeadLine?: number; __lpHeadLineLog?: number[]; __lpSel?: { from: number; to: number; head: number; anchor: number }; __lpBlocks?: { fromLine: number; toLine: number }[]; __lpMathAtoms?: { fromLine: number; toLine: number }[]; __lpVimInsert?: boolean };
+        const w = window as Window & { __lpHeadLine?: number; __lpHeadLineLog?: number[]; __lpSel?: { from: number; to: number; head: number; anchor: number }; __lpBlocks?: { fromLine: number; toLine: number }[]; __lpMathAtoms?: { fromLine: number; toLine: number }[]; __lpAtomic?: { fromLine: number; toLine: number }[]; __lpVimInsert?: boolean };
         if (u.selectionSet) {
           const s = u.state.selection.main;
           w.__lpHeadLine = u.state.doc.lineAt(s.head).number;
@@ -138,6 +138,13 @@ export function mountLivePreview(
         const mathRanges: { fromLine: number; toLine: number }[] = [];
         mathAtomic?.between(0, u.state.doc.length, (from, to) => { mathRanges.push({ fromLine: u.state.doc.lineAt(from).number, toLine: u.state.doc.lineAt(to).number }); });
         w.__lpMathAtoms = mathRanges;
+        // #141 bounce: dump the ATOMIC ranges (EditorView.atomicRanges = livePreview.atomic) by line, so a
+        // device trace shows whether a warped line sits on an atomic range (e.g. a `:::` fence marker) —
+        // the path blockEntry's motionAtomsForCaret does NOT touch (it filters livePreview.blocks only).
+        const atomic = u.state.field(livePreview, false)?.atomic;
+        const atomicRanges: { fromLine: number; toLine: number }[] = [];
+        atomic?.between(0, u.state.doc.length, (from, to) => { atomicRanges.push({ fromLine: u.state.doc.lineAt(from).number, toLine: u.state.doc.lineAt(to).number }); });
+        w.__lpAtomic = atomicRanges;
       })] : []),
       // M1 focus-delegation SPIKE (#153 / ADR-054) — DEV/e2e only, never in prod. Activated by the
       // literal token `@SPIKE@` in the doc. Strip from prod builds.

@@ -1013,9 +1013,11 @@ export interface RenderCtx {
   // Style a range (mark decoration) or a whole line (line decoration at line.from
   // — pass only `from`). Cannot change document length.
   add(deco: Decoration, from: number, to?: number): void;
-  // Hide a syntax marker unless the cursor is on its line; also feeds atomicRanges
-  // so local cursor motion skips it cleanly. Display-only (never mutates the doc).
-  hideMarker(from: number, to: number, deco?: Decoration): void;
+  // Hide a syntax marker unless the cursor is on its line. `atomic` (default true) also feeds
+  // atomicRanges so local cursor motion skips an INLINE marker cleanly. Pass `atomic: false` for a
+  // WHOLE-LINE marker (a `:::` directive fence) — an atomic whole-line range is un-landable, so j/k
+  // vertical motion skips the line entirely (#141 bounce: callout fence lines warped). Display-only.
+  hideMarker(from: number, to: number, deco?: Decoration, atomic?: boolean): void;
   // Add a decoration AND mark its range atomic (fed to EditorView.atomicRanges). Used
   // for collapsed BLOCK widgets (table, image, future macros) so cursor motion snaps to
   // the block's boundary — which the reveal-on-cursor check treats as overlapping, so
@@ -1236,7 +1238,9 @@ const RENDERERS: BlockRenderer[] = [
   },
   // The :::name / ::: fence lines: hide (reveal raw on the cursor's line, like every
   // other marker). hideMarker also makes the range atomic for clean cursor motion.
-  { match: (n) => n === "DirectiveMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
+  // #141 bounce: a `:::` fence occupies a WHOLE line — hide it (reveal-on-cursor) but NOT atomically,
+  // else the fence line is un-landable and j/k warps over a revealed callout's `:::info`/`:::` lines.
+  { match: (n) => n === "DirectiveMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to, undefined, false) },
   {
     // Blockquote → a left-bar + muted block. Each line gets the quote line style; the
     // ">" markers hide (revealing on the cursor's line, like every other marker), so
@@ -1357,11 +1361,14 @@ function buildDecorations(state: EditorState, themeOverride?: MacroTheme): {
     macroTheme: themeOverride ?? currentMacroTheme(), // #200: effect payload on a theme switch, else the DOM
 
     add: (deco, from, to = from) => all.push(deco.range(from, to)),
-    hideMarker: (from, to, deco = hide) => {
+    hideMarker: (from, to, deco = hide, atomic = true) => {
       if (from >= to) return;
       if (lineRevealed(state, from)) return;
       all.push(deco.range(from, to));
-      hidden.push(hide.range(from, to));
+      // #141 bounce: an INLINE marker is atomic (horizontal motion skips the hidden glyph); a WHOLE-LINE
+      // marker (a `:::` directive fence) must NOT be atomic — an atomic whole-line range is un-landable,
+      // so vertical j/k skips the line and the caret can't step onto the fence to edit/reveal it.
+      if (atomic) hidden.push(hide.range(from, to));
     },
     addAtomic: (deco, from, to) => {
       if (from >= to) return;
