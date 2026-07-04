@@ -393,11 +393,13 @@ function PageRoute() {
     <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
       <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-          {/* #193 part 3: the header band (title + status) fades DOWN into the content — a semi-
-              transparent vertical gradient (opaque at the top → transparent at the bottom) with a
-              backdrop-blur, so the boundary dissolves into the editor instead of a hard line (the
-              same "blend in + blur" direction as the TOC rail). Token-driven; light/dark via --bg. */}
-          <div className="relative z-10 flex-none bg-gradient-to-b from-[var(--bg)] via-[color-mix(in_srgb,var(--bg)_78%,transparent)] to-transparent pb-3 backdrop-blur-[3px]">
+          {/* #193 part 3 / #212 bounce 2: the header band (title + status) fades DOWN into the content —
+              a SEMI-TRANSPARENT vertical gradient (translucent at the top → transparent at the bottom) so
+              the backdrop-blur actually shows content scrolling UNDER the band (iOS-navbar style). A fully
+              opaque top hid the backdrop (no blur visible), which is why the effect read as "not there";
+              now the whole band is translucent and the boundary dissolves into the editor. Token-driven
+              (--bg), light/dark. */}
+          <div className="relative z-10 flex-none bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_88%,transparent)] via-[color-mix(in_srgb,var(--bg)_58%,transparent)] to-transparent pb-3 backdrop-blur-md">
             <PageTitle
               editing={editing}
               title={page?.title ?? ""}
