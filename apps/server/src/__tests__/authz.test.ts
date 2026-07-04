@@ -124,6 +124,69 @@ describe('monotonic deny — restricted', () => {
   })
 })
 
+// ── Private (allowlist) — ADR-098 (#109) ──────────────────────────────────
+//
+// Populating `private@user:*` cuts the space-inherited grant paths (manager/editor/viewer from space)
+// for view AND edit AND manage — so ONLY the explicit direct grants (the allow list) remain. An empty
+// marker is a 1:1 no-op. Deny (`restricted`) still wins over the allow list. These run against the real
+// OpenFGA engine (security boundary). A dedicated page keeps the shared graph clean.
+
+describe('private allowlist — ADR-098', () => {
+  const PG = 'private-test-pg'
+  const obj = `page:${PG}`
+  const priv = { user: 'user:*', relation: 'private', object: obj }
+  const spaceLink = { user: 'space:demo_space', relation: 'space', object: obj } // inherit demo_space grants
+  const allow = (u: string, rel = 'view_base') => ({ user: `user:${u}`, relation: rel, object: obj })
+  const groupAllow = { user: 'group:execs#member', relation: 'view_base', object: obj }
+  const restr = (u: string) => ({ user: `user:${u}`, relation: 'restricted', object: obj })
+  const ALL = [
+    priv, spaceLink, allow('dev-user'), allow('dev-user', 'edit'), allow('dev-user', 'manage'),
+    allow('alice'), groupAllow, restr('alice'),
+    { user: 'user:erin', relation: 'member', object: 'group:execs' },
+  ]
+  const clean = async () => { for (const t of ALL) await deleteTuples(fgaClient, [t]).catch(() => {}) }
+  beforeEach(clean)
+  afterEach(clean)
+
+  it('empty private marker is a no-op — space inheritance still grants view (backward compatible)', async () => {
+    await writeTuples(fgaClient, [spaceLink])
+    // dev-user is manager of demo_space → inherits view on a page linked to demo_space, no private set.
+    expect(await check(fgaClient, 'user:dev-user', 'view', page(PG))).toBe(true)
+  })
+
+  it('private cuts space inheritance for view AND edit AND manage (no back door — the "hole 2" fix)', async () => {
+    await writeTuples(fgaClient, [spaceLink])
+    expect(await check(fgaClient, 'user:dev-user', 'view', page(PG))).toBe(true) // baseline via space
+    await writeTuples(fgaClient, [priv])
+    // all three inherited paths are cut — dev-user (space manager) loses view/edit/manage.
+    expect(await check(fgaClient, 'user:dev-user', 'view', page(PG))).toBe(false)
+    expect(await check(fgaClient, 'user:dev-user', 'edit', page(PG))).toBe(false)
+    expect(await check(fgaClient, 'user:dev-user', 'manage', page(PG))).toBe(false)
+  })
+
+  it('an explicit direct grant (the allow list) survives private — only allowed principals get in', async () => {
+    await writeTuples(fgaClient, [spaceLink, priv])
+    expect(await check(fgaClient, 'user:alice', 'view', page(PG))).toBe(false) // not on the allow list
+    await writeTuples(fgaClient, [allow('alice')]) // add alice to the allow list
+    expect(await check(fgaClient, 'user:alice', 'view', page(PG))).toBe(true)
+    // a non-allowed principal (bob) still cannot view — existence is not leaked at the authz layer.
+    expect(await check(fgaClient, 'user:bob', 'view', page(PG))).toBe(false)
+  })
+
+  it('a group#member allow works on a private page (exec-group use case)', async () => {
+    await writeTuples(fgaClient, [spaceLink, priv, groupAllow, { user: 'user:erin', relation: 'member', object: 'group:execs' }])
+    expect(await check(fgaClient, 'user:erin', 'view', page(PG))).toBe(true) // via group:execs#member on the allow list
+    expect(await check(fgaClient, 'user:frank', 'view', page(PG))).toBe(false) // not in the group
+  })
+
+  it('deny (restricted) wins over the private allow list (private ∘ restrict)', async () => {
+    await writeTuples(fgaClient, [priv, allow('alice')])
+    expect(await check(fgaClient, 'user:alice', 'view', page(PG))).toBe(true) // allowed
+    await writeTuples(fgaClient, [restr('alice')])
+    expect(await check(fgaClient, 'user:alice', 'view', page(PG))).toBe(false) // deny still wins
+  })
+})
+
 // ── share_link: non-expiring (no condition) ───────────────────────────────
 
 describe('non-expiring share_link', () => {
