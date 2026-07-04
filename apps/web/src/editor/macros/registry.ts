@@ -166,11 +166,6 @@ export interface FenceMacro {
   // #174 / ADR-087: the unified edit-UI (supersedes richEditUI as macros migrate). When present, the
   // host opens `editUI.mount` behind the single edit button; `editUI.present` also drives editModeOf.
   readonly editUI?: EditUI;
-  // #174 / ADR-087: how the mouse EDITS this macro — "inline" (click the body → edit in place:
-  // table/callout/mermaid) or "modal" (click → select, then ✎ opens a separate editor: Excalidraw —
-  // the cushion prevents a surprise context switch on a stray click). Optional; defaults are derived
-  // (see editModeOf): a modal richEditUI ⇒ "modal", otherwise "inline".
-  readonly editMode?: "inline" | "modal";
   // Tier levels for host auto-demote (ADR-025 step 3). Optional — most fence macros are
   // single-level (mermaid/excalidraw round-trip verbatim in their fence).
   readonly tier?: MacroTier;
@@ -200,7 +195,6 @@ interface DirectiveMacroBase {
   readonly exportFidelity: "preserve" | "degrade";
   readonly richEditUI?: RichEditUI;
   readonly editUI?: EditUI; // #174 / ADR-087 — unified edit UI (see FenceMacro.editUI)
-  readonly editMode?: "inline" | "modal"; // #174 / ADR-087 — see FenceMacro.editMode
   // Tier levels for host auto-demote (ADR-025 step 3). The table declares this (pipe ⟷
   // :::table); container directives without alternate representations omit it.
   readonly tier?: MacroTier;
@@ -234,12 +228,12 @@ export type DirectiveMacro = ContainerDirectiveMacro | BlockDirectiveMacro;
 
 export type Macro = FenceMacro | DirectiveMacro;
 
-// #174 / ADR-087: resolve how the mouse edits a macro. The unified `editUI.present` wins (the migration
-// target); then an explicit `editMode`; otherwise a modal richEditUI (Excalidraw) ⇒ "modal" (click
-// selects, edit button opens the editor), else "inline" (table/callout/mermaid — clicking the body edits
-// it in place). One source of truth for the interaction matrix, valid across the richEditUI→editUI move.
-export function editModeOf(macro: { editUI?: EditUI; editMode?: "inline" | "modal"; richEditUI?: RichEditUI }): "inline" | "modal" {
-  return macro.editUI?.present ?? macro.editMode ?? (macro.richEditUI?.present === "modal" ? "modal" : "inline");
+// #174 / ADR-087: resolve how the mouse edits a macro. The unified `editUI.present` wins; otherwise a
+// modal richEditUI (Excalidraw) ⇒ "modal" (click selects, the edit button opens the editor), else
+// "inline" (table/callout/mermaid — the edit button opens the in-place editor). One source of truth for
+// the interaction matrix. (The legacy `editMode` attribute was folded into editUI.present — ADR-087 (4).)
+export function editModeOf(macro: { editUI?: EditUI; richEditUI?: RichEditUI }): "inline" | "modal" {
+  return macro.editUI?.present ?? (macro.richEditUI?.present === "modal" ? "modal" : "inline");
 }
 
 // #174 / ADR-087: does this macro expose ANY rich edit UI (the unified editUI OR the legacy richEditUI)?
