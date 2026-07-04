@@ -41,6 +41,61 @@ describe("renderMarkdownToHtml — XSS boundary (#88)", () => {
   });
 });
 
+// #89 / ADR-097 (the sanitize ): `:::table` cells that carry BLOCK content render through this
+// SAME shared renderer, so its tag allowlist IS the cell sanitize boundary. The reviewer (comment 710)
+// required the allowlist be pinned as an executable contract — a positive list AND a negative assert
+// so an external-resource / executable tag can never slip in via a table cell and bypass the embed
+// (#108) allowlist/sandbox/same-origin gates. This renderer is allowlist-BY-CONSTRUCTION (it only ever
+// emits a fixed set of tags via html``/unsafeHtml; any raw HTML block, incl. HTMLBlock, degrades to
+// escaped text), so these lock that guarantee for the cell-content path.
+describe("renderMarkdownToHtml — #89/ADR-097 cell block-content sanitize allowlist", () => {
+  // POSITIVE: the block/inline constructs a cell is allowed to contain all render as live, allowlisted tags.
+  it("renders the allowlisted block + inline tags (lists, paragraphs, headings, quote, emphasis, code, safe link)", () => {
+    const h = out("# H\n\npara\n\n> quote\n\n- a\n- b\n\n1. x\n\n**s** _e_ `c` [l](https://ok.example)");
+    for (const tag of ["<h1>", "<p>", "<blockquote>", "<ul>", "<li>", "<ol>", "<strong>", "<em>", "<code>"]) {
+      expect(h, `allowlisted ${tag} must render`).toContain(tag);
+    }
+    expect(h).toContain('<a href="https://ok.example" rel="noopener noreferrer nofollow">');
+  });
+
+  // NEGATIVE : NO external-resource / executable / form tag is ever emitted live — each degrades
+  // to escaped text. A raw <iframe src> in a cell must NOT become a live frame (else it bypasses #108).
+  const FORBIDDEN = ["iframe", "object", "embed", "script", "form", "input", "button", "style", "link", "base", "meta", "svg", "math", "template", "img"];
+  for (const tag of FORBIDDEN) {
+    it(`does NOT emit a live <${tag}> — raw HTML degrades to escaped text`, () => {
+      const h = out(`before\n\n<${tag} src="https://evil.example" onerror="alert(1)">x</${tag}>\n\nafter`);
+      expect(h, `<${tag}> must not appear as a live tag`).not.toMatch(new RegExp(`<${tag}[\\s>]`, "i"));
+      expect(h).toContain(`&lt;${tag}`); // present only as inert escaped text
+      expect(h).toContain("<p>before</p>");
+      expect(h).toContain("<p>after</p>"); // surrounding content intact
+    });
+  }
+
+  it("strips event-handler attributes and dangerous URL schemes (never live on* / javascript:/data:/vbscript:)", () => {
+    const h = out('text <span onclick="alert(1)">y</span>\n\n[a](javascript:alert(1)) [b](data:text/html,x) [c](vbscript:x)');
+    // on* only survives as escaped text (the raw span), never as a live attribute on an emitted tag.
+    expect(h).not.toMatch(/<[a-z]+[^>]*\son(?:click|error|load|mouseover)=/i);
+    expect(h).not.toContain('href="javascript:');
+    expect(h).not.toContain('href="data:');
+    expect(h).not.toContain('href="vbscript:');
+  });
+
+  it("an in-cell embed is a DIRECTIVE routed through the macro gate, not a raw iframe", () => {
+    // With no registry, an unknown directive degrades to an escaped generic box — NEVER a live iframe.
+    const h = out(":::embed-external\nhttps://evil.example\n:::");
+    expect(h).not.toMatch(/<iframe[\s>]/i);
+    // With a registry, dispatch hits the macro's htmlRender (its own gate) — proving the directive path,
+    // not a raw-HTML passthrough, is what renders an embed in a cell.
+    const gated: MacroHtmlRegistry = {
+      fence: () => undefined,
+      directive: (name) => (name === "embed-external" ? { exportFidelity: "degrade", htmlRender: (b) => html`<a class="wks-embed-degrade" href="${b.trim()}">${b.trim()}</a>` } : undefined),
+    };
+    const h2 = out(":::embed-external\nhttps://ok.example\n:::", gated);
+    expect(h2).toContain('class="wks-embed-degrade"'); // went through the gate (degraded link), not a raw frame
+    expect(h2).not.toMatch(/<iframe[\s>]/i);
+  });
+});
+
 // A registry with a preserve macro, a degrade macro, and a throwing macro.
 const macros: MacroHtmlRegistry = {
   fence: (lang) =>
@@ -82,7 +137,7 @@ describe("renderMarkdownToHtml — macro dispatch + fidelity (#85)", () => {
 });
 
 // #85 slice 2: the SERVER export dispatches the real built-in M2 directive htmlRenders (single source
-// of truth in @wikistead/macro-render — the same code the editor uses), via builtinMacroRegistry().
+// of truth in @wikistead/macro-render — the same code the editor uses), via builtinMacroRegistry.
 describe("renderMarkdownToHtml — built-in M2 directives (#85 slice 2)", () => {
   const reg = builtinMacroRegistry();
   it("columns → each column's content in order (sequential, nothing dropped)", () => {
