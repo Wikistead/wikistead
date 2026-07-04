@@ -8,7 +8,7 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from "@codemirror/view";
-import { findFenceMacro, findDirectiveMacro, editModeOf, type FenceMacro, type MacroTheme } from "../macros/registry";
+import { findFenceMacro, findDirectiveMacro, editModeOf, hasEditUI, type FenceMacro, type MacroTheme } from "../macros/registry";
 export type { MacroTheme }; // #200: re-exported so the Editor can type the redrawMacros payload
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, directiveChainAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
@@ -644,7 +644,7 @@ function isFolded(state: EditorState, from: number, to: number): boolean {
 // Display-only / offset-invariant like every other block widget (ADR-008).
 // A renderable macro = anything with a liveRender (fence macros, and block-form
 // directive macros like :::table). foldable is fence-only (large data bodies).
-type RenderableMacro = { liveRender: (body: string, ctx: { theme: MacroTheme }) => HTMLElement; richEditUI?: import("../macros/registry").RichEditUI; editMode?: "inline" | "modal" };
+type RenderableMacro = { liveRender: (body: string, ctx: { theme: MacroTheme }) => HTMLElement; richEditUI?: import("../macros/registry").RichEditUI; editUI?: import("../macros/registry").EditUI; editMode?: "inline" | "modal" };
 class MacroWidget extends WidgetType {
   private ro?: ResizeObserver;
   private objectUrl?: string; // #140: revoked on destroy so the rendered image blob isn't leaked
@@ -748,8 +748,9 @@ class MacroWidget extends WidgetType {
       // #174 / ADR-087: an explicit EDIT button — the visible affordance for the block's rich UI. It
       // appears on mouse hover AND when the atom is SELECTED (caret-entry, cm-lp-atom-sel), so a vim/
       // keyboard user can SEE how to reach the table/columns/tabs rich UI (same target as a click or
-      // Ctrl+Enter → enterMacroAt). Only for macros that HAVE a rich UI. Offset-invariant (never edits).
-      if (this.macro.richEditUI) {
+      // Ctrl+Enter → enterMacroAt). Only for macros that HAVE a rich UI — the unified editUI OR the
+      // legacy richEditUI (hasEditUI, migration-safe per #174). Offset-invariant (never edits).
+      if (hasEditUI(this.macro)) {
         const edit = document.createElement("button");
         edit.type = "button";
         edit.className = "cm-lp-macro-edit";
@@ -1127,7 +1128,7 @@ const RENDERERS: BlockRenderer[] = [
         }
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editMode: macro.editMode }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme), block: true }), from, to);
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editUI: macro.editUI, editMode: macro.editMode }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme), block: true }), from, to);
         return macro.revealOnCursor ? false : undefined;
       }
       if (macro.collapsible && !rangeRevealed(ctx.state, first.from, lastLine.to)) {

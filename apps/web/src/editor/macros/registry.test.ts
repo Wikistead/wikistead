@@ -1,11 +1,36 @@
 import { describe, it, expect } from "vitest";
 import { Text } from "@codemirror/state";
 import { findFenceMacro, findDirectiveMacro, registeredFenceLangs, registeredDirectiveNames } from "./index"; // importing index registers first-party macros
-import { registerMacro, editModeOf } from "./registry";
+import { registerMacro, editModeOf, hasEditUI, type EditUI } from "./registry";
 import { mermaidMacro } from "./mermaid";
 import { plantumlMacro } from "./plantuml";
 import { noteCalloutMacro } from "./callout";
 import { fenceLang, fenceBody } from "./fence";
+
+// #174 / ADR-087: the unified editUI contract must drive the interaction matrix (editModeOf) and the
+// edit-button predicate (hasEditUI), migration-safe alongside the legacy richEditUI.
+describe("editUI unification (#174 / ADR-087)", () => {
+  const noopEditUI = (present: "inline" | "modal"): EditUI => ({ present, mount: () => ({ destroy() {} }) });
+
+  it("editModeOf: editUI.present takes precedence over the legacy richEditUI/editMode", () => {
+    // editUI wins even when a legacy modal richEditUI would otherwise say "modal"
+    expect(editModeOf({ editUI: noopEditUI("inline"), richEditUI: { present: "modal", editor: {} as never } })).toBe("inline");
+    expect(editModeOf({ editUI: noopEditUI("modal") })).toBe("modal");
+  });
+
+  it("editModeOf: falls back to editMode, then richEditUI, then inline (unchanged legacy behaviour)", () => {
+    expect(editModeOf({ editMode: "modal" })).toBe("modal");
+    expect(editModeOf({ richEditUI: { present: "modal", editor: {} as never } })).toBe("modal");
+    expect(editModeOf({ richEditUI: { present: "inline", editor: {} as never } })).toBe("inline");
+    expect(editModeOf({})).toBe("inline");
+  });
+
+  it("hasEditUI: true for either the unified editUI or the legacy richEditUI, false otherwise", () => {
+    expect(hasEditUI({ editUI: noopEditUI("inline") })).toBe(true);
+    expect(hasEditUI({ richEditUI: { present: "inline", editor: {} as never } })).toBe(true);
+    expect(hasEditUI({})).toBe(false); // a plain macro (no rich edit) gets no edit button
+  });
+});
 
 describe("macro registry", () => {
   it("registers the first-party mermaid fence macro", () => {
