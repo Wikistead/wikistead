@@ -1,4 +1,4 @@
-// #158-C3 / ADR-052: math rendering. Inline $…$ and block $$…$$ render via KaTeX (MIT) as ATOMS:
+// #158-C3 / ADR-052: math rendering. Inline $…$ and block $$…$$ render via KaTeX (MIT) as ATOMS
 // the source hides and a rendered formula shows, EXCEPT when the caret is inside (reveal-on-cursor,
 // like every other marker) — so you edit the raw TeX in place. Display-only (no doc/offset/presence
 // change); collaborators each reveal independently. KaTeX runs trust:false + strict (no \href / no
@@ -8,7 +8,8 @@ import { EditorView, Decoration, WidgetType, type DecorationSet } from "@codemir
 import { StateField, EditorState, RangeSetBuilder, type Range } from "@codemirror/state"
 import { syntaxTree } from "@codemirror/language"
 import katex from "katex"
-import { displayMode, syntaxRevealsAt, motionAtomProvider } from "./decorations"
+import { displayMode, syntaxRevealsAt, motionAtomProvider, observeBlockResize } from "./decorations"
+import type { EditorView } from "@codemirror/view"
 
 interface MathRange { from: number; to: number; tex: string; display: boolean }
 
@@ -45,10 +46,10 @@ export function findMath(state: EditorState): MathRange[] {
     }
   }
   // Inline $…$ (single line, not part of a block already taken). #141 (approved judgment ②): the FULL
-  // Pandoc/CommonMark-math delimiter rule so prose with currency is NOT math-ified —
-  //   (1) the OPENING $ is followed by a non-whitespace char,
-  //   (2) the CLOSING $ is preceded by a non-whitespace char,
-  //   (3) the CLOSING $ is NOT immediately followed by a digit.
+  // Pandoc/CommonMark-math delimiter rule so prose with currency is NOT math-ified
+  // (1) the OPENING $ is followed by a non-whitespace char,
+  // (2) the CLOSING $ is preceded by a non-whitespace char,
+  // (3) the CLOSING $ is NOT immediately followed by a digit.
   // (1)+(2) reject "$5 and $6" (closing preceded by a space); (3) rejects "$5 and$6" / "$100$200" (the
   // closing $ runs into a number). "$x^2$" still matches.
   const nonWs = (c: string | undefined) => !!c && !/\s/.test(c)
@@ -68,9 +69,10 @@ export function findMath(state: EditorState): MathRange[] {
 }
 
 class MathWidget extends WidgetType {
+  private ro?: ResizeObserver
   constructor(readonly tex: string, readonly display: boolean) { super() }
   eq(o: MathWidget) { return o.tex === this.tex && o.display === this.display }
-  toDOM() {
+  toDOM(view: EditorView) {
     const el = document.createElement(this.display ? "div" : "span")
     el.className = this.display ? "cm-lp-math cm-lp-math-block" : "cm-lp-math cm-lp-math-inline"
     el.setAttribute("data-testid", this.display ? "math-block" : "math-inline")
@@ -81,8 +83,15 @@ class MathWidget extends WidgetType {
     } catch {
       el.textContent = this.display ? `$$${this.tex}$$` : `$${this.tex}$`
     }
+    // #141: a DISPLAY math block is a multi-line block widget — like table/mermaid it MUST feed its
+    // rendered height back to CM (ResizeObserver → requestMeasure), else CM's heightMap is short for the
+    // math block and every line BELOW it gets a stale coordsAtPos → vim j/k drifts (measured: a `$$…$$`
+    // before a callout made the callout region skip every other line). the project design notes: " block
+    // widget ResizeObserver + requestMeasure CM " — math was the one block widget missing it.
+    if (this.display) this.ro = observeBlockResize(view, el)
     return el
   }
+  destroy() { this.ro?.disconnect(); this.ro = undefined }
   ignoreEvent() { return false }
 }
 
