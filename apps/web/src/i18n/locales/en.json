@@ -406,7 +406,12 @@
     "restrictTitle": "Restricted (denied even if a space viewer)",
     "restrictPlaceholder": "member id (user sub)",
     "restrictAdd": "Restrict",
-    "unrestrict": "Remove restriction"
+    "unrestrict": "Remove restriction",
+    "privateTitle": "Make this page private",
+    "privateHint": "Only the people you list below can view or edit it; space members no longer inherit access, and it won't be public. Child pages are not made private automatically.",
+    "privateOnHint": "This page is private — only the people in the allow list below can access it. Space members do not inherit access.",
+    "grantTitle": "Access",
+    "allowlistTitle": "Allow list (only these people can access this private page)"
   },
   "spaceTheme": {
     "title": "Theme",

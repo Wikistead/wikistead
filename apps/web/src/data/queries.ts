@@ -436,6 +436,27 @@ export function useUnrestrict(pageId: string) {
   });
 }
 
+// #109 / ADR-098 — per-page PRIVATE (allowlist) toggle. Private cuts space inheritance so only the
+// explicit direct grants (the access list above) can view/edit; setting it also strips public.
+export function usePagePrivate(pageId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["page-private", pageId],
+    queryFn: () => apiFetch<{ private: boolean }>(`/pages/${encodeURIComponent(pageId)}/private`, token).then((r) => r?.private ?? false),
+    enabled: enabled && pageId.length > 0,
+  });
+}
+export function useSetPrivate(pageId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (makePrivate: boolean) =>
+      apiFetch<null>(`/pages/${encodeURIComponent(pageId)}/private`, token, { method: makePrivate ? "POST" : "DELETE" }),
+    // Access-set and public/is_public change with privacy → refresh the access list too.
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["page-private", pageId] }); qc.invalidateQueries({ queryKey: ["page-access", pageId] }); },
+  });
+}
+
 // The tenant's group-name source for the group-grant picker (#163). manage-gated server-side
 // (group names can be sensitive), so scope the query to a space the caller manages.
 export function useTenantGroups(spaceId: string, enabled = true) {
