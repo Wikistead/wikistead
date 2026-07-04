@@ -318,6 +318,7 @@
     "exportHtml": "Export as HTML",
     "exportHtmlDisabled": "HTML export is temporarily unavailable while it's being rebuilt.",
     "print": "Print / PDF",
+    "printDisabled": "Print / PDF is temporarily unavailable while the render pipeline is being rebuilt.",
     "history": "History",
     "attachments": "Attachments",
     "permissions": "Permissions",
