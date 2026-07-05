@@ -1753,7 +1753,11 @@ export function atomMotionTarget(
   if (adj >= 1 && adj <= totalLines && newLine !== adj) {
     const lo = Math.min(oldLine, newLine), hi = Math.max(oldLine, newLine);
     const crossed = atoms.some(({ first, last }) => first >= lo && last <= hi && !(oldLine >= first && oldLine <= last));
-    if (crossed) return adj;
+    // A single j/k must move EXACTLY one line. #183 symptom C: a hidden-marker line (a ```lang code
+    // fence, reveal-on-cursor) can make CM's DOWN motion overshoot the adjacent landable line while UP
+    // lands on it (the reported asymmetric skip). Clamp any >1-line single-step — whether it crossed a
+    // motion atom OR overshot a plain landable line — to the adjacent line, so no landable line is skipped.
+    if (crossed || Math.abs(newLine - oldLine) > 1) return adj;
   }
   return null;
 }
