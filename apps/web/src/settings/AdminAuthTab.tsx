@@ -5,6 +5,7 @@ import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
 import { cn } from "../lib/utils";
+import { AdminEnrollmentSection } from "./AdminEnrollmentSection";
 
 const label = "mb-1 mt-3.5 block text-sm text-fg-dim";
 
@@ -93,6 +94,9 @@ export function AdminAuthTab() {
         </Button>
         <Button variant="primary" size="sm" disabled={update.isPending} onClick={onSave} data-testid="oidc-save">{t("common.save")}</Button>
       </div>
+
+      {/* #101 / ADR-034: auto-enrolment policy for successful OIDC logins (below the IdP config). */}
+      <AdminEnrollmentSection />
     </div>
   );
 }
