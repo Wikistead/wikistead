@@ -109,3 +109,34 @@ test("#202 comment 773: Tab-nesting an ordered list restarts and switches 1.→a
   expect(ords).not.toContain("4.");
   expect(ords).not.toContain("5.");
 });
+
+// #202 comment 779: the ordinal must re-render the INSTANT you Tab-nest — WITHOUT moving the caret off
+// the item. The earlier code revealed the whole caret line, so the raw un-renumbered source marker ("2."/
+// "5.") showed under the caret and read as a stale ordinal until the next edit. hideMarkerTight reveals
+// only when the caret is IN the marker, so the widget renders as soon as the caret is in the content.
+test("#202 comment 779: Tab-nesting re-renders the ordinal immediately (caret stays on the item)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "list-immediate");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("1. a");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("b");        // "2. b", caret after b (in content)
+  await page.keyboard.press("Enter");   // "3. "
+  await page.keyboard.press("Tab");     // nest THIS item
+  await page.keyboard.type("c");        // "   a. c" — caret in content, NO Control+End
+  await sleep(250);
+  // The nested item renders lower-alpha "a." immediately (not decimal), while the caret is still on it.
+  const afterTab = await page.locator("[data-pane=preview] .cm-lp-ordinal").allTextContents();
+  expect(afterTab, "Tab shows a. at once (not 2./3. decimal) with the caret still on the nested item").toContain("a.");
+  expect(afterTab).not.toContain("3."); // the nested source marker "3." is NOT shown as an ordinal
+  // Back to the top level: the continuation renders "3." (the 3rd top item), NOT the bled "5.".
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("d");
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.type("e");        // top-level "e", caret in content
+  await sleep(250);
+  const afterUp = await page.locator("[data-pane=preview] .cm-lp-ordinal").allTextContents();
+  expect(afterUp, "the top continuation is 3. (independent count), not the raw source 5.").toContain("3.");
+  expect(afterUp).not.toContain("5.");
+});
