@@ -476,14 +476,10 @@
   },
   "comments": {
     "title": "コメント",
-    "open": "未解決",
-    "resolved": "解決済み",
     "addOnSelection": "選択範囲にコメント",
     "placeholder": "コメントを追加…",
     "pagePlaceholder": "ページにコメント…",
     "submit": "コメント",
-    "resolve": "解決",
-    "reopen": "再オープン",
     "empty": "コメントはまだありません。"
   },
   "history": {
@@ -585,20 +581,11 @@
     "revoke": "取り消し"
   },
   "commentsPanel": {
-    "open": "未解決",
-    "resolved": "解決済み",
     "submit": "コメント",
-    "addInline": "選択範囲にコメント",
-    "selectFirst": "先にページ内のテキストを選択してから「コメント」を押してください。",
-    "promptInline": "「{{quote}}」へのコメント:",
-    "anchoredDeleted": "（アンカーされたテキストは削除されました）",
     "delete": "削除",
     "reply": "返信…",
     "replyingTo": "返信先:",
     "pagePlaceholder": "ページにコメント…",
-    "resolve": "解決",
-    "reopen": "再オープン",
-    "emptyOpen": "未解決のコメントはありません。",
-    "emptyResolved": "解決済みのコメントはありません。"
+    "empty": "コメントはありません。"
   }
 }

@@ -103,7 +103,8 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
 
   // #214 part 2 (comment 738): a comment's "reply" button retargets the SINGLE bottom composer to that
   // thread (no always-expanded per-comment reply box). Null = the composer posts a new page comment.
-  const [replyTo, setReplyTo] = useState<{ threadId: string; sub: string } | null>(null);
+  // #214 comment 751 (1): carry the target comment's body so the reply banner previews WHICH comment.
+  const [replyTo, setReplyTo] = useState<{ threadId: string; sub: string; body: string } | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const count = threads?.reduce((n, t) => n + t.comments.length, 0) ?? 0;
   // #214 part 5: chat order (oldest → newest, newest just above the composer). Keep the newest in view.
@@ -113,6 +114,9 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
 
   // Page not viewable (server returned null) → render nothing (no-leak).
   if (threads === null || threads === undefined) return null;
+  // #214 comment 751 (2): never render an EMPTY thread frame — deleting the last comment of a thread must
+  // not leave a dangling box. A thread with remaining replies still shows (its remaining comments render).
+  const visibleThreads = threads.filter((t) => t.comments.length > 0);
 
   const Stamp = ({ iso }: { iso: string }) => {
     const { rel, abs } = relTime(iso, i18n.language);
@@ -125,8 +129,8 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
           thread list above a composer pinned FLUSH to the panel bottom (no gap / see-through). */}
       <div className="flex min-h-0 flex-1 flex-col gap-2">
         <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto" data-testid="comment-list">
-          {threads.length === 0 && <p className={hint}>{tr("commentsPanel.emptyOpen")}</p>}
-          {threads.map((t) => (
+          {visibleThreads.length === 0 && <p className={hint}>{tr("commentsPanel.empty")}</p>}
+          {visibleThreads.map((t) => (
             <div key={t.id} className="flex flex-col gap-2 rounded-lg border border-border bg-background px-3 py-2" data-testid="comment-thread">
               {t.comments.map((c) => (
                 <div key={c.id} className="flex flex-col gap-0.5" data-testid="comment-item">
@@ -141,7 +145,7 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
                 </div>
               ))}
               {canComment && (
-                <button type="button" className="self-start cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-[var(--accent)] opacity-90 hover:underline hover:opacity-100" data-testid="comment-reply" onClick={() => setReplyTo({ threadId: t.id, sub: t.comments[0]?.authorSub ?? "" })}>
+                <button type="button" className="self-start cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-[var(--accent)] opacity-90 hover:underline hover:opacity-100" data-testid="comment-reply" onClick={() => setReplyTo({ threadId: t.id, sub: t.comments[0]?.authorSub ?? "", body: t.comments[0]?.body ?? "" })}>
                   {tr("commentsPanel.reply")}
                 </button>
               )}
@@ -157,6 +161,9 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
               <div className="flex items-center gap-1.5 text-[0.8em] text-fg-dim" data-testid="reply-banner">
                 <span>{tr("commentsPanel.replyingTo")}</span>
                 <AuthorChip sub={replyTo.sub} />
+                {/* #214 comment 751 (1): preview the target comment's content so it's clear WHICH comment.
+                    Locale-neutral (italic, no language-specific quote glyphs); truncated to one line. */}
+                {replyTo.body && <span className="min-w-0 flex-1 truncate italic opacity-80" data-testid="reply-preview">{replyTo.body}</span>}
                 <button type="button" className="ml-auto cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-fg-dim hover:text-foreground hover:underline" data-testid="reply-cancel" onClick={() => setReplyTo(null)}>{tr("common.cancel")}</button>
               </div>
             )}
