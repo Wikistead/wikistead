@@ -1397,7 +1397,10 @@ const RENDERERS: BlockRenderer[] = [
         if (macro.editUI?.present === "inline" && active && active.from <= from && active.to >= to && !ctx.state.readOnly) {
           const editBody: string[] = [];
           for (let n = first.number + 1; n < lastLine.number; n++) editBody.push(doc.line(n).text);
-          ctx.addAtomic(Decoration.replace({ widget: new EditableEditUIWidget(from, to, editBody.join("\n"), macro.editUI, (b) => `:::${open!.name}\n${b}\n:::`, ctx.macroTheme, macro.tier), block: true }), from, to);
+          // #196: preserve the OPENING fence VERBATIM (colon count + any `[label]`) so a 4-colon `::::columns`
+          // round-trips as `::::columns`, not `:::columns` — the nesting colon convention (#185) stays intact.
+          const openLine = first.text; const closeMark = openLine.match(/^\s*([`~:]+)/)?.[1] ?? ':::';
+          ctx.addAtomic(Decoration.replace({ widget: new EditableEditUIWidget(from, to, editBody.join("\n"), macro.editUI, (b) => `${openLine}\n${b}\n${closeMark}`, ctx.macroTheme, macro.tier), block: true }), from, to);
           return false; // the inline editor owns the block
         }
         if (macro.richEditUI?.present === "inline" && active && active.from <= from && active.to >= to && !ctx.state.readOnly) {

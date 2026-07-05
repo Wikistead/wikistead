@@ -3,7 +3,7 @@ import { enterEdit, openScratch, sleep } from "../helpers";
 
 // #90 (ADR-043 A′): ::::tabs renders as a block-widget ATOM with a tab bar + only the active
 // panel shown. Switching tabs is DISPLAY-ONLY (no doc write); editing is reveal-on-cursor.
-test("::::tabs: tab bar + active panel, switch is display-only, caret-in reveals raw", async ({ browser }) => {
+test("::::tabs: tab bar + active panel, switch is display-only, edited via the editUI panel (not caret-in raw)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "tabs");
   await enterEdit(page);
@@ -25,10 +25,15 @@ test("::::tabs: tab bar + active panel, switch is display-only, caret-in reveals
   await expect(widget).toBeVisible();
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("::::tabs");
 
-  // Clicking the panel body (not a tab) enters the atom → reveal raw source.
+  // #196 comment 786 (Option B, variant i): clicking the panel body does NOT reveal raw — the tab widget is
+  // preserved ALWAYS. Editing is via the editUI PANEL (single edit button → source textarea + live preview),
+  // so the layout never collapses.
   await widget.locator(".cm-lp-tabpanel-active").click();
   await sleep(250);
-  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("::::tabs");
+  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("::::tabs"); // still a widget
+  await page.locator("[data-pane=preview] [data-testid=macro-edit]").first().click({ force: true });
+  await sleep(300);
+  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit-src]")).toBeVisible(); // editUI source panel
 });
 
 // XSS boundary (parity with ::::columns): a tab panel's inner Markdown is rendered via the S0
