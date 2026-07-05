@@ -219,7 +219,7 @@ test("yy on a normal line still yanks just that line (passes through to vim)", a
 
 // ADR-024 1b: a TALL RENDERED widget (mermaid SVG ~380px) mounts its SVG asynchronously;
 // without re-measuring, every line BELOW it kept a stale visual-y and vim j/k drifted
-// across the whole region under the widget. A ResizeObserver → view.requestMeasure() keeps
+// across the whole region under the widget. A ResizeObserver → view.requestMeasure keeps
 // CM's line geometry in sync. This guards that motion below a tall rendered macro is
 // exactly one doc line per key (uses flowchart syntax, which renders here, not the
 // env-flaky `graph TD;`).
@@ -360,7 +360,7 @@ test("a large macro present at load renders as an atom, not a fold placeholder",
   );
   await sleep(2500); // SVG mounts + collab persists the doc
 
-  // Reload from scratch: the large macro now arrives over the provider at sync time —
+  // Reload from scratch: the large macro now arrives over the provider at sync time
   // exactly when the old auto-fold fired.
   await page.goto(`/p/${id}`);
   await page.waitForSelector("[data-pane=preview] .cm-content");
@@ -370,4 +370,38 @@ test("a large macro present at load renders as an atom, not a fold placeholder",
   // The figure is rendered and there is no fold placeholder.
   expect(await page.getByTestId("macro-folded").count()).toBe(0);
   expect(await page.locator("[data-pane=preview] [data-testid=macro-mermaid] svg").count()).toBeGreaterThanOrEqual(1);
+});
+
+// #183 symptom C (the reviewer's exact repro): 1:$x^2$ · 2:empty · 3:$$…$$ · 4:empty · 5:```js · 6:```.
+// Display math ($$…$$) atoms live in mathField, SEPARATE from livePreview.blocks. Before the
+// motionAtomProvider fix, blockEntry never saw them, so its motion correction miscounted around the OTHER
+// atoms too — j skipped line 5 (1→2→3→4→6) and k warped asymmetrically (6→3→2→1). With math atoms fed to
+// the motion facet, j/k step ONE line at a time, symmetric down vs up (the reviewer's "1↔6 1").
+// This is the real-machine caret-transition measurement the reviewer required to confirm the fix.
+test("#183 symptom C: vim j/k move one line at a time, symmetric, over a math atom + code fence", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "vim-math-motion");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("$x^2$\n\n$$a^2+b^2$$\n\n```js\n```\n");
+  await sleep(400);
+  await vimOn(page);
+  // the display-math atom is exposed to blockEntry's motion facet (the pre-fix blind spot).
+  const mathAtoms = await page.evaluate(() => (window as any).__lpMathAtoms ?? []);
+  expect(mathAtoms.length, "display math is a motion atom").toBeGreaterThan(0);
+
+  // down: from the top, press j and record each landing line until it stops advancing.
+  await page.keyboard.press("g"); await page.keyboard.press("g"); await sleep(120);
+  const down: number[] = [await headLine(page)];
+  for (let i = 0; i < 8; i++) { await page.keyboard.press("j"); await sleep(110); const h = await headLine(page); if (h === down[down.length - 1]) break; down.push(h); }
+  // up: from the bottom, press k symmetrically.
+  await page.keyboard.press("G"); await sleep(120);
+  const up: number[] = [await headLine(page)];
+  for (let i = 0; i < 8; i++) { await page.keyboard.press("k"); await sleep(110); const h = await headLine(page); if (h === up[up.length - 1]) break; up.push(h); }
+
+  // #183: each step advances by EXACTLY one line (no skip / no warp), both directions.
+  for (let i = 1; i < down.length; i++) expect(down[i]! - down[i - 1]!, `down step ${i}: ${down.join(",")}`).toBe(1);
+  for (let i = 1; i < up.length; i++) expect(up[i - 1]! - up[i]!, `up step ${i}: ${up.join(",")}`).toBe(1);
+  // symmetric: k retraces j's lines in reverse (1↔last, one by one).
+  expect(up.slice().reverse(), `down ${down.join(",")} vs up ${up.join(",")}`).toEqual(down);
 });
