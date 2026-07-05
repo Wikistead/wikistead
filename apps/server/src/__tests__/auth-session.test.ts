@@ -47,13 +47,13 @@ describe('establishMemberSession: membership gate', () => {
   it('rejects a subject that is not a tenant member (un-invited)', async () => {
     // STRANGER has no tenant#member tuple — IdP could verify them, but they cannot enter.
     await expect(
-      establishMemberSession({ db, fga: fgaClient, valkey }, { id: tenant.id }, { sub: STRANGER, email: 's@x.test' }),
+      establishMemberSession({ db, fga: fgaClient, valkey }, { id: tenant.id, plan: 'free' }, { sub: STRANGER, email: 's@x.test' }),
     ).rejects.toMatchObject({ statusCode: 403 })
   })
 
   it('accepts a provisioned member and creates a session + upserts the profile', async () => {
     await writeTuples(fgaClient, [{ user: `user:${MEMBER}`, relation: 'member', object: `tenant:${tenant.id}` }])
-    const sid = await establishMemberSession({ db, fga: fgaClient, valkey }, { id: tenant.id }, { sub: MEMBER, email: 'm@x.test', name: 'M' })
+    const sid = await establishMemberSession({ db, fga: fgaClient, valkey }, { id: tenant.id, plan: 'free' }, { sub: MEMBER, email: 'm@x.test', name: 'M' })
     const sess = await readSession(valkey, sid)
     expect(sess).toMatchObject({ tenantId: tenant.id, sub: MEMBER })
     const [row] = await db.sql<{ email: string }[]>`SELECT email FROM members WHERE sub = ${MEMBER}`
@@ -102,7 +102,7 @@ describe('cross-tenant session cookie', () => {
 describe('session endpoints', () => {
   it('/auth/me returns the member; logout deletes the Valkey session and clears the cookie', async () => {
     await writeTuples(fgaClient, [{ user: `user:${MEMBER}`, relation: 'member', object: `tenant:${tenant.id}` }]).catch(() => {})
-    const sid = await establishMemberSession({ db, fga: fgaClient, valkey }, { id: tenant.id }, { sub: MEMBER, email: 'm@x.test' })
+    const sid = await establishMemberSession({ db, fga: fgaClient, valkey }, { id: tenant.id, plan: 'free' }, { sub: MEMBER, email: 'm@x.test' })
 
     const me = await app.inject({ method: 'GET', url: '/auth/me', headers: { host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${sid}` } })
     expect(me.statusCode).toBe(200)
@@ -120,7 +120,7 @@ describe('session endpoints', () => {
       { user: `user:${ADMIN_SUB}`, relation: 'member', object: `tenant:${tenant.id}` },
       { user: `user:${ADMIN_SUB}`, relation: 'admin', object: `tenant:${tenant.id}` },
     ]).catch(() => {})
-    const sid = await establishMemberSession({ db, fga: fgaClient, valkey }, { id: tenant.id }, { sub: ADMIN_SUB, email: 'a@x.test' })
+    const sid = await establishMemberSession({ db, fga: fgaClient, valkey }, { id: tenant.id, plan: 'free' }, { sub: ADMIN_SUB, email: 'a@x.test' })
     const me = await app.inject({ method: 'GET', url: '/auth/me', headers: { host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${sid}` } })
     expect(me.statusCode).toBe(200)
     expect(me.json()).toMatchObject({ sub: ADMIN_SUB, isAdmin: true })
@@ -133,7 +133,7 @@ describe('session endpoints', () => {
 
   it('/auth/collab-token mints a member collab token from the session', async () => {
     await writeTuples(fgaClient, [{ user: `user:${MEMBER}`, relation: 'member', object: `tenant:${tenant.id}` }]).catch(() => {})
-    const sid = await establishMemberSession({ db, fga: fgaClient, valkey }, { id: tenant.id }, { sub: MEMBER, email: 'm@x.test' })
+    const sid = await establishMemberSession({ db, fga: fgaClient, valkey }, { id: tenant.id, plan: 'free' }, { sub: MEMBER, email: 'm@x.test' })
     const res = await app.inject({ method: 'POST', url: '/auth/collab-token', headers: { host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${sid}` } })
     expect(res.statusCode).toBe(200)
     const body = res.json() as { token: string; expiresInSeconds: number }

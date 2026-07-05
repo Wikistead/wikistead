@@ -8,6 +8,10 @@ import type IORedis from 'ioredis'
 import type { OpenFgaClient } from '@openfga/sdk'
 import type { TenantDb } from '../db/index.js'
 import { syncMemberGroups } from './group-sync.js'
+import { coerceGroups } from './oidc.js'
+import { enrollEligible } from './enroll-policy.js'
+import { getEnrollConfig } from './enroll-domains.js'
+import { enrolUnderSeatCap } from './invites.js'
 
 export const SESSION_COOKIE = 'wks_sess'
 
@@ -130,13 +134,32 @@ export async function destroyMemberSessions(valkey: IORedis, tenantId: string, s
 // Membership is granted elsewhere (Cloud signup P1.2 / invite P1.4).
 export async function establishMemberSession(
   deps: { db: TenantDb; fga: OpenFgaClient; valkey: IORedis },
-  tenant: { id: string },
+  tenant: { id: string; plan: string },
   claims: { sub: string; email?: string | null; name?: string | null; picture?: string | null; groups?: string[] },
 ): Promise<string> {
   // tenant#member is the authority (raw relation on a tenant object — not a page/
   // space Capability — so call FGA directly). Membership = the right to enter.
   const { allowed } = await deps.fga.check({ user: `user:${claims.sub}`, relation: 'member', object: `tenant:${tenant.id}` })
-  if (!allowed) throw Object.assign(new Error('not a member of this tenant'), { statusCode: 403 })
+  if (!allowed) {
+    // #101 / ADR-034: not a member yet — AUTO-ENROL if the tenant's enrol policy admits this login. The
+    // trust boundary lives in enrollEligible (domain = DNS-verified only, groups = normalised claim). The
+    // seat cap is enforced by the SAME fortress as invite accept (enrolUnderSeatCap), so every new-member
+    // path shares one atomic gate. invite_only (the default) → not eligible → 403, and the caller (auth /
+    // saml) falls through to the invite/bootstrap paths — behaviour unchanged for existing tenants. An
+    // existing member never reaches here (allowed=true above), so this adds no cost to the common path.
+    const cfg = await getEnrollConfig(deps.db)
+    const eligible = enrollEligible({
+      policy: cfg.policy,
+      email: claims.email,
+      groups: coerceGroups(claims.groups, claims.sub), // re-normalise defensively (idempotent)
+      verifiedDomains: cfg.verifiedDomains,
+      allowedGroups: cfg.allowedGroups,
+    })
+    if (!eligible) throw Object.assign(new Error('not a member of this tenant'), { statusCode: 403 })
+    // A NEW member goes through the shared seat fortress (advisory lock + cap + member INSERT + FGA). A
+    // 402 (cap) or FGA failure rolls the tx back → no member → the caller answers as for a non-member.
+    await deps.db.tx((tx) => enrolUnderSeatCap(tx, deps.fga, tenant, claims, 'member', 'auto'))
+  }
 
   // #131 / ADR-064: a member frozen by a plan-downgrade seat overage cannot establish a session
   // (data kept; reactivated on re-upgrade). The membership tuple stays — this is a reversible

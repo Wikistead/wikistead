@@ -61,13 +61,13 @@ describe('seat freeze on downgrade commit (#131)', () => {
   it('a deactivated member cannot establish a session (403); clearing it restores login', async () => {
     await admin`UPDATE members SET deactivated_at = now() WHERE tenant_id = ${TENANT} AND sub = 'dev-user'`
     try {
-      await expect(establishMemberSession({ db, fga: fgaClient, valkey }, { id: TENANT }, { sub: 'dev-user' }))
+      await expect(establishMemberSession({ db, fga: fgaClient, valkey }, { id: TENANT, plan: 'free' }, { sub: 'dev-user' }))
         .rejects.toMatchObject({ statusCode: 403, code: 'member_deactivated' })
     } finally {
       await admin`UPDATE members SET deactivated_at = NULL WHERE tenant_id = ${TENANT} AND sub = 'dev-user'`
     }
     // Reactivated → a session is created again.
-    const sid = await establishMemberSession({ db, fga: fgaClient, valkey }, { id: TENANT }, { sub: 'dev-user' })
+    const sid = await establishMemberSession({ db, fga: fgaClient, valkey }, { id: TENANT, plan: 'free' }, { sub: 'dev-user' })
     expect(typeof sid).toBe('string')
   })
 })
