@@ -48,3 +48,30 @@ test("#212: header band overlaps the scrolling editor so its backdrop-blur has c
   });
   expect(behind, "content must scroll behind the band").toBeGreaterThan(0);
 });
+
+// #212 comment 755: (1) the band's frosted layer fades out (mask-image) so its bottom edge dissolves
+// rather than showing a hard line; (2) title + status (unpublished badge / TOC toggle) share ONE row —
+// the status no longer sits on a second row below the title. (3) the TOC overlay offset follows the
+// (now shorter) band height via --wks-band-h. Structure is measured; the frosted LOOK stays review.
+test("#212 comment 755: one-row header (title + status same row), band fades at its bottom edge", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1400, height: 900 } })).newPage();
+  await openScratch(page, "Demo Page");
+  await enterEdit(page);
+  const m = await page.evaluate(() => {
+    const band = document.querySelector(".backdrop-blur-md") as HTMLElement;
+    const rect = (s: string) => { const el = document.querySelector(s); return el ? el.getBoundingClientRect() : null; };
+    const title = rect("[data-testid=page-title]") || rect("[data-testid=page-title-input]");
+    const status = rect("[data-testid=page-status]");
+    return {
+      mask: getComputedStyle(band).maskImage || getComputedStyle(band).webkitMaskImage,
+      bandVar: getComputedStyle(document.querySelector(".lp-editor-host") as HTMLElement).getPropertyValue("--wks-band-h").trim(),
+      sameRow: title && status ? Math.abs(title.top - status.top) < title.height : false,
+    };
+  });
+  // (1) the frosted band fades out toward its bottom (a mask gradient) → no hard blur cutoff line.
+  expect(m.mask, "band has a fade mask so its bottom edge dissolves").toContain("gradient");
+  // (2) title + status are on the same row (status is not a second line below the title).
+  expect(m.sameRow, "title and status share one row").toBe(true);
+  // (3) the band height is published so the CM padding + TOC overlay can follow it.
+  expect(m.bandVar).toMatch(/^\d+px$/);
+});

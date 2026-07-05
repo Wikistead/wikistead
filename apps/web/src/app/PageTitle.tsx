@@ -5,7 +5,9 @@ import { useTranslation } from "react-i18next";
 // aligned to the same ~740px column as the body. Click-to-rename for edit-capable
 // users; a read-only heading otherwise. The server re-checks page#edit on the PATCH.
 // Testids (page-title / page-title-input) are unchanged so the rename e2e still applies.
-const wrap = "mx-auto box-border w-full max-w-[740px] px-6 pt-6";
+// #212 comment 755 (2): the 740px reading column + top padding now live on the BAND's flex row (title +
+// status share one row), so PageTitle just fills its flex cell — the column/padding moved to the parent.
+const wrap = "box-border w-full min-w-0";
 // break-words so a long unbroken token (or CJK without spaces) wraps inside the column
 // instead of overflowing to the right.
 // #190: the page title follows the PROSE font (--font-body) — the user's font choice / locale default —
