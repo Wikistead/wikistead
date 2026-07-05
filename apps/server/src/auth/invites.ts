@@ -142,35 +142,41 @@ export async function acceptInvite(
       RETURNING role
     `
     if (flipped.length === 0) return false // unknown / expired / consumed / revoked / cross-tenant
-    const role = flipped[0]!.role
-
-    // Idempotent by identity: an existing member who re-accepts (a re-invite, or a second
-    // link) consumes NO new seat, makes no DB/FGA change, and does not error — they already
-    // hold their one seat and grant. The invite above is still consumed (one-time use).
-    if (await isMember(tx, claims.sub)) return true
-
-    // NEW member → enforce the cap, now atomic thanks to the per-tenant advisory lock above.
-    const ent = resolveEntitlements(tenant.plan)
-    if (isFinite(ent.maxSeats) && (await billableMemberCount(tx)) >= ent.maxSeats) {
-      // 402 = billing cap (vs 403 authz / bad token). Throw → whole tx rolls back, including
-      // the invite flip, so the invite stays pending and re-tryable once a seat frees.
-      throw Object.assign(new Error('seat limit reached'), { statusCode: 402, code: 'seat_limit' })
-    }
-
-    // ON CONFLICT is belt-and-suspenders against a same-sub race (the advisory lock already
-    // serializes, and isMember ran inside it) — never errors on UNIQUE(tenant_id, sub).
-    await tx`
-      INSERT INTO members (tenant_id, sub, email, display_name, role)
-      VALUES (${tenant.id}, ${claims.sub}, ${claims.email ?? null}, ${claims.name ?? null}, ${role})
-      ON CONFLICT (tenant_id, sub) DO NOTHING
-    `
-    // FGA LAST (ADR-003): failure throws → tx rollback → no member row, invite flip undone.
-    // Only a NEW member reaches here, so the grant does not yet exist (writeTuples is not
-    // idempotent — it rejects an existing tuple).
-    await writeTuples(deps.fga, memberTuples(tenant.id, claims.sub, role))
-    emit({ type: 'member.added', tenantId: tenant.id, targetSub: claims.sub, role, via: 'invite' })
+    // The seat fortress (lock already held above): idempotent for an existing member, cap-checked,
+    // atomic member INSERT + FGA. Shared with #101 auto-enrolment so EVERY new-member path goes through
+    // the ONE gate. Returns whether it created; acceptInvite answers true either way (membership held).
+    await enrolUnderSeatCap(tx, deps.fga, tenant, claims, flipped[0]!.role, 'invite')
     return true
   })
+}
+
+// THE SEAT FORTRESS (ADR-034), shared by invite accept AND #101 auto-enrolment. The caller MUST already
+// hold lockSeats(tx, tenant.id) so the count→compare→insert is one indivisible decision (this re-acquires
+// it harmlessly — advisory locks are re-entrant within a tx). Idempotent by identity (an existing member
+// consumes no seat, no DB/FGA change, no error). Throws 402 seat_limit for a NEW member over the cap →
+// the whole tx rolls back. FGA is written LAST (ADR-003). Returns 'created' | 'exists'.
+export async function enrolUnderSeatCap(
+  tx: Sql,
+  fga: OpenFgaClient,
+  tenant: { id: string; plan: string },
+  claims: { sub: string; email?: string | null; name?: string | null },
+  role: InviteRole,
+  via: 'invite' | 'auto',
+): Promise<'created' | 'exists'> {
+  await lockSeats(tx, tenant.id)
+  if (await isMember(tx, claims.sub)) return 'exists'
+  const ent = resolveEntitlements(tenant.plan)
+  if (isFinite(ent.maxSeats) && (await billableMemberCount(tx)) >= ent.maxSeats) {
+    throw Object.assign(new Error('seat limit reached'), { statusCode: 402, code: 'seat_limit' })
+  }
+  await tx`
+    INSERT INTO members (tenant_id, sub, email, display_name, role)
+    VALUES (${tenant.id}, ${claims.sub}, ${claims.email ?? null}, ${claims.name ?? null}, ${role})
+    ON CONFLICT (tenant_id, sub) DO NOTHING
+  `
+  await writeTuples(fga, memberTuples(tenant.id, claims.sub, role))
+  emit({ type: 'member.added', tenantId: tenant.id, targetSub: claims.sub, role, via })
+  return 'created'
 }
 
 // Revoke a pending invite (admin action). Returns true if a pending invite was
