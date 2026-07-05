@@ -1167,6 +1167,9 @@ export interface RenderCtx {
   // WHOLE-LINE marker (a `:::` directive fence) — an atomic whole-line range is un-landable, so j/k
   // vertical motion skips the line entirely (#141 bounce: callout fence lines warped). Display-only.
   hideMarker(from: number, to: number, deco?: Decoration, atomic?: boolean): void;
+  // #202: hideMarker variant that reveals only when the caret is ON the marker range (not the whole
+  // line), so a list marker's ordinal/glyph re-renders immediately on nest/continue. Source mode raw.
+  hideMarkerTight(from: number, to: number, deco?: Decoration, atomic?: boolean): void;
   // Add a decoration AND mark its range atomic (fed to EditorView.atomicRanges). Used
   // for collapsed BLOCK widgets (table, image, future macros) so cursor motion snaps to
   // the block's boundary — which the reveal-on-cursor check treats as overlapping, so
@@ -1513,10 +1516,13 @@ const RENDERERS: BlockRenderer[] = [
       // its nested list (not merged into the parent's run), so nested numbering reads as a real hierarchy.
       // Both key off the SAME nesting DEPTH (listDepth) so bullets and ordered lists stay consistent.
       const level = listDepth(node);
+      // #202 comment 779: hideMarkerTight — the marker renders its widget even while the caret is elsewhere
+      // ON THE SAME ITEM (only revealing raw when the caret is IN the marker), so nesting/continuing shows
+      // the right ordinal/glyph immediately instead of the stale raw source marker under the caret.
       if (list === "BulletList") {
-        ctx.hideMarker(node.from, node.to, Decoration.replace({ widget: new BulletWidget(level) }));
+        ctx.hideMarkerTight(node.from, node.to, Decoration.replace({ widget: new BulletWidget(level) }));
       } else if (list === "OrderedList") {
-        ctx.hideMarker(node.from, node.to, Decoration.replace({ widget: new OrderedWidget(level, orderedOrdinal(node)) }));
+        ctx.hideMarkerTight(node.from, node.to, Decoration.replace({ widget: new OrderedWidget(level, orderedOrdinal(node)) }));
       }
     },
   },
@@ -1618,6 +1624,18 @@ function buildDecorations(state: EditorState, themeOverride?: MacroTheme): {
       // #141 bounce: an INLINE marker is atomic (horizontal motion skips the hidden glyph); a WHOLE-LINE
       // marker (a `:::` directive fence) must NOT be atomic — an atomic whole-line range is un-landable,
       // so vertical j/k skips the line and the caret can't step onto the fence to edit/reveal it.
+      if (atomic) hidden.push(hide.range(from, to));
+    },
+    // #202 comment 779: like hideMarker but reveals ONLY when the caret sits ON THE MARKER ITSELF
+    // (rangeRevealed on [from,to]) rather than anywhere on the line. A list marker's rendered ordinal/
+    // glyph must update the instant you nest (Tab) or continue (Enter) — with line-wide reveal the caret
+    // is still on the item, so the raw, un-renumbered source marker ("5.") shows and reads as a stale
+    // ordinal. Tightening to the marker range keeps it editable WHILE you type "1. " (caret in the marker)
+    // yet renders the widget the moment the caret is in the content. Source mode still shows raw.
+    hideMarkerTight: (from, to, deco = hide, atomic = true) => {
+      if (from >= to) return;
+      if (rangeRevealed(state, from, to)) return;
+      all.push(deco.range(from, to));
       if (atomic) hidden.push(hide.range(from, to));
     },
     addAtomic: (deco, from, to) => {
