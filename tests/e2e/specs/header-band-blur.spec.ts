@@ -75,3 +75,32 @@ test("#212 comment 755: one-row header (title + status same row), band fades at 
   // (3) the band height is published so the CM padding + TOC overlay can follow it.
   expect(m.bandVar).toMatch(/^\d+px$/);
 });
+
+// #212 comment 769: (1) the mask that dissolves the band's bottom edge must fade only the FROSTED
+// BACKGROUND — the title/badge/toggle must stay 100% opaque (a mask on the whole band dimmed them). The
+// frosted layer is now a separate aria-hidden sibling behind a crisp content layer. (2) a long title
+// clamps to ONE line with an ellipsis in view mode, so the band height (--wks-band-h) is independent of
+// title length. Edit mode shows the full title (the rename textarea wraps).
+test("#212 comment 769: header foreground is crisp; long title clamps to one line (view)", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1400, height: 900 } })).newPage();
+  await openScratch(page, "A very long page title that would otherwise wrap onto several rows inside the header band region here");
+  await sleep(400); // stay in VIEW mode (no enterEdit) — the title should truncate to one line
+  const m = await page.evaluate(() => {
+    const title = document.querySelector("[data-testid=page-title]") as HTMLElement;
+    const status = document.querySelector("[data-testid=page-status]") as HTMLElement | null;
+    const frosted = document.querySelector(".backdrop-blur-md") as HTMLElement;
+    const lh = parseFloat(getComputedStyle(title).lineHeight);
+    return {
+      titleOpacity: getComputedStyle(title).opacity,
+      statusOpacity: status ? getComputedStyle(status).opacity : "1",
+      titleLines: Math.round(title.getBoundingClientRect().height / lh),
+      frostedMasked: /gradient/.test(getComputedStyle(frosted).maskImage) || /gradient/.test((getComputedStyle(frosted) as any).webkitMaskImage || ""),
+      frostedBlur: /blur/.test(getComputedStyle(frosted).backdropFilter || (getComputedStyle(frosted) as any).webkitBackdropFilter || ""),
+    };
+  });
+  expect(m.titleOpacity, "title is fully opaque (not dimmed by the band mask)").toBe("1");
+  expect(m.statusOpacity, "status (badge + TOC) is fully opaque").toBe("1");
+  expect(m.titleLines, "a long title clamps to one line in view mode").toBe(1);
+  expect(m.frostedMasked, "the frosted background layer still carries the dissolve mask").toBe(true);
+  expect(m.frostedBlur, "the frosted background layer still has backdrop-blur").toBe(true);
+});
