@@ -90,7 +90,6 @@ const hide = Decoration.replace({});
 
 const headingLine = (level: number) =>
   Decoration.line({ attributes: { class: `cm-lp-h cm-lp-h${level}` } });
-const codeBlockLine = Decoration.line({ attributes: { class: "cm-lp-code-line" } });
 const quoteLine = Decoration.line({ attributes: { class: "cm-lp-quote" } });
 const hrLine = Decoration.line({ attributes: { class: "cm-lp-hr" } });
 
@@ -1253,21 +1252,20 @@ const RENDERERS: BlockRenderer[] = [
           continue;
         }
         codeIdx++;
-        // #198 (comment 724): an ATTRIBUTED fence in a view mode reads as a CARD the tab connects to
-        // mark the first / last code line so the card's corners round (top-left stays flat under the tab).
-        const attributed = !srcMode && !!info && (!!info.title || !!info.showLineNumbers || (!!info.highlight && info.highlight.length > 0));
-        const cardFirst = attributed && n === first + 1;
-        const cardLast = attributed && n === lastCodeLine;
-        if (srcMode || (!info?.showLineNumbers && !hl.size && !cardFirst && !cardLast)) { ctx.add(codeBlockLine, line.from); continue; }
-        // #198: display-only line class carrying the (fence-relative) line number + highlight state + card
-        // corners; the gutter number is CSS ::before(attr), the highlight a full-line background UNDER the
-        // token colours (#158-C2).
+        // #198 comment 752 (2): Source mode is FULLY raw — no code-block decoration at all, parity with
+        // every other macro (`:::warning` shows raw text in Source). No card background / number / highlight.
+        if (srcMode) continue;
+        // #198 comment 752 (1): EVERY code fence is the SAME base card (cm-lp-code-line + rounded corners) in
+        // a view mode — the base look does NOT change with the presence of attributes. A title/number/
+        // highlight fence just LAYERS the tab / gutter / tint ON TOP of that identical card. When a tab is
+        // present it flattens the card's top-left corner so the tab connects; a plain fence keeps it rounded.
+        const hasTab = !!info && (!!info.title || !!info.showLineNumbers || (!!info.highlight && info.highlight.length > 0));
         let cls = "cm-lp-code-line";
         const attrs: Record<string, string> = {};
         if (info?.showLineNumbers) { cls += " cm-lp-code-numbered"; attrs["data-linenum"] = String(codeIdx); }
         if (hl.has(codeIdx)) cls += " cm-lp-code-hl";
-        if (cardFirst) cls += " cm-lp-code-first";
-        if (cardLast) cls += " cm-lp-code-last";
+        if (n === first + 1) cls += hasTab ? " cm-lp-code-first cm-lp-code-tabbed" : " cm-lp-code-first";
+        if (n === lastCodeLine) cls += " cm-lp-code-last";
         attrs.class = cls;
         ctx.add(Decoration.line({ attributes: attrs }), line.from);
       }
@@ -1868,9 +1866,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   },
   ".cm-lp-code-copy:hover": { opacity: "1", background: "var(--hover, rgba(128,128,128,0.16))", color: "var(--fg)" },
   ".cm-lp-code-copy.cm-lp-code-copied": { opacity: "1", color: "var(--accent, #4ea1ff)" },
-  // #198 (comment 724): the code card corners — the tab sits on the top-left, so that corner stays flat.
-  ".cm-lp-code-first": { borderRadius: "0 6px 0 0" },
-  ".cm-lp-code-last": { borderRadius: "0 0 6px 6px" },
+  // #198 (comment 752): the code card corners — SAME base card for plain and attributed fences. Individual
+  // corner radii (not the shorthand) so a single-line fence (first AND last) rounds all four corners. When a
+  // tab is present (cm-lp-code-tabbed, declared AFTER so it wins) the top-left flattens to connect the tab.
+  ".cm-lp-code-first": { borderTopLeftRadius: "6px", borderTopRightRadius: "6px" },
+  ".cm-lp-code-last": { borderBottomLeftRadius: "6px", borderBottomRightRadius: "6px" },
+  ".cm-lp-code-tabbed": { borderTopLeftRadius: "0" },
   ".cm-lp-code-numbered": { paddingLeft: "3.2em", position: "relative" },
   ".cm-lp-code-numbered::before": {
     content: "attr(data-linenum)", position: "absolute", left: "0", width: "2.6em", textAlign: "right",
