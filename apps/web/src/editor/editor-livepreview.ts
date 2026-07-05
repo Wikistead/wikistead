@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, ephemeralCollab, macroPresence, macroPresencePlugin, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, macroPresencePlugin, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { listEditing } from "./live-preview/list-edit";
 import { floatingToolbar } from "./live-preview/toolbar";
@@ -20,7 +20,7 @@ import { blockDrag } from "./live-preview/block-drag";
 import { m1Spike } from "./live-preview/m1-spike";
 import { everforestHighlight } from "./everforest-highlight";
 import { mathField } from "./live-preview/math";
-import { macroEdit } from "./live-preview/macro-edit";
+import { macroEdit, nestedSelectionField, setNestedSelection } from "./live-preview/macro-edit";
 
 // vim Compartment content: the keymap AND a vimEnabled flag (so the decoration builder
 // can be mode-aware — ADR-022 Part 11). Reused by mount + the Editor's vim toggle.
@@ -112,6 +112,18 @@ export function mountLivePreview(
       // / source reveal). High prec so it beats vim's default Enter handling. event.key
       // "Enter" is JIS-safe. Mouse users enter by clicking (decorations MacroWidget).
       Prec.high(keymap.of([{ key: "Ctrl-Enter", run: enterMacroCommand }])),
+      // #215 / ADR-100 (Consumer 4): with a nested macro selected, Backspace/Delete remove ONLY its range
+      // (one Y.Text change via nestedDeleteChange — the same range vim `dd` uses). Falls through (returns
+      // false) when nothing nested is selected, so normal Backspace/Delete is untouched everywhere else.
+      ...(opts.readOnly ? [] : [Prec.high(keymap.of((["Backspace", "Delete"]).map((key) => ({ key, run: (view) => {
+        const sel = view.state.field(nestedSelectionField, false);
+        if (!sel) return false;
+        const ch = nestedDeleteChange(view.state, sel.anchor);
+        if (!ch) return false;
+        view.dispatch({ changes: ch, effects: setNestedSelection.of(null), userEvent: "delete" });
+        view.focus();
+        return true;
+      } })))) ]),
       // #202: list-editing keys (Tab/Shift-Tab indent, Enter continuation) — editable surface only.
       ...(opts.readOnly ? [] : [listEditing]),
       // Task checkboxes are interactive on the editable surface: a click flips the

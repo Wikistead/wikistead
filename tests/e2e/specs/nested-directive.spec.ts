@@ -90,3 +90,53 @@ test("#196: a caret in a nested callout keeps the columns layout side-by-side an
   expect(await layout(), "columns stay side-by-side with the caret in the nested note").toEqual({ n: 2, sideBySide: true });
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("BBB"); // sibling column rendered
 });
+
+// #215 / ADR-100: a nested macro behaves like a top-level macro at depth — clicking it SELECTS it (ring)
+// and its edit button opens its OWN editUI island (structured, not the parent's flat source), all while
+// the flex layout stays intact; Backspace removes ONLY that macro. Measured in a real browser (the layout
+// + island geometry happy-dom can't exercise). This is the "untouchable box" fix (comment 803).
+test("#215: a nested callout selects, edits via its own editUI island, and deletes alone — layout intact", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1000, height: 700 } })).newPage();
+  const errs: string[] = [];
+  page.on("pageerror", (e) => errs.push(String(e)));
+  await openScratch(page, "nested-parity");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("top\n\n::::columns\n:::column\n:::note\nAAA note\n:::\n:::\n:::column\nBBB text\n:::\n::::\n\nbot\n");
+  await sleep(800);
+  const layout = () => page.evaluate(() => {
+    const cols = Array.from(document.querySelectorAll("[data-pane=preview] .cm-lp-column")) as HTMLElement[];
+    const r = cols.map((c) => c.getBoundingClientRect());
+    return { n: cols.length, sideBySide: r.length >= 2 && Math.abs(r[0].top - r[1].top) < 20 };
+  });
+  await page.getByText("bot").click();
+  await sleep(250);
+
+  // (1) Selection: clicking the nested note draws the nested ring + its own edit button (NOT the container).
+  await page.getByText("AAA note").click();
+  await sleep(300);
+  await expect(page.locator("[data-pane=preview] .cm-lp-nested-sel")).toHaveCount(1);
+  await expect(page.locator("[data-pane=preview] [data-testid=nested-macro-edit]")).toHaveCount(1);
+  expect(await layout(), "layout stays side-by-side while a nested macro is selected").toEqual({ n: 2, sideBySide: true });
+
+  // (2) RichUI: the edit button opens the callout's OWN editUI island (type select + label + body),
+  // in place — the structured macro-unit editor, not the parent columns' flat source dump.
+  await page.locator("[data-pane=preview] [data-testid=nested-macro-edit]").first().click({ force: true });
+  await sleep(350);
+  await expect(page.locator("[data-pane=preview] [data-testid=nested-edit-island]")).toHaveCount(1);
+  await expect(page.locator("[data-pane=preview] [data-testid=nested-edit-island] select")).toHaveCount(1); // callout type dropdown
+  expect(await layout(), "layout stays side-by-side while the nested editUI island is open").toEqual({ n: 2, sideBySide: true });
+  await page.keyboard.press("Escape");
+  await sleep(250);
+
+  // (4) Deletion: Backspace on the selected nested note removes ONLY it — container + sibling intact.
+  await page.getByText("AAA note").click();
+  await sleep(250);
+  await page.keyboard.press("Backspace");
+  await sleep(350);
+  const txt = await page.locator("[data-pane=preview] .cm-content").innerText();
+  expect(txt, "the note is gone").not.toContain("AAA note");
+  expect(txt, "the sibling column survives").toContain("BBB text");
+  expect(await layout(), "both columns still render side-by-side after the nested delete").toEqual({ n: 2, sideBySide: true });
+  expect(errs, errs.join(" | ")).toHaveLength(0);
+});
