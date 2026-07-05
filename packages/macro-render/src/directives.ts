@@ -1,6 +1,6 @@
 import { parseDirectiveOpen, isDirectiveClose } from "./directive-parser.js";
 import { html, joinSafe, unsafeHtml, type SafeHtml } from "./safe-html.js";
-import type { MacroHtmlDescriptor, MacroHtmlRegistry } from "./render.js";
+import { renderMarkdownToHtml, type MacroHtmlDescriptor, type MacroHtmlRegistry } from "./render.js";
 
 // #85 slice 2 / ADR-085: the DOM-FREE export half of the M2 layout directives (columns / tabs /
 // details) lives here — the SINGLE source of truth for their HTML. The editor (apps/web
@@ -68,9 +68,30 @@ export function calloutHtmlRender(type: string): (body: string) => SafeHtml {
   return (body) => html`<div class="callout callout-${type}">\n\n${body}\n\n</div>`;
 }
 
+// #89 / ADR-097: decode a block cell's inner HTML (toHtml emits `cellTextToHtml` = entity-escaped text
+// with `\n`→`<br>`) back to its Markdown source. `<br>`→`\n` first, then strip any stray tags and decode
+// the four entities cellTextToHtml emits. DOM-free (server export runs in node).
+function blockCellSource(inner: string): string {
+  return inner
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&")
+    .trim();
+}
+
 // :::table body is TRUSTED HTML (ADR: the table macro emits HTML verbatim). unsafeHtml keeps parity
 // with the editor; the server export path (#85 slice 3) runs a sanitize allowlist over the result.
-export function tableHtmlRender(body: string): SafeHtml { return unsafeHtml(body); }
+// #89 / ADR-097: a `data-block="1"` cell carries Markdown block content — render it through the SHARED
+// sanitized renderer (renderMarkdownToHtml, allowlist-by-construction) so a raw <iframe>/<script> in a
+// cell degrades to escaped text and can't smuggle past the embed gates (the core ADR-097 threat). Plain
+// text cells and table structure pass through unchanged (the downstream #85 sanitizer still applies).
+const BLOCK_CELL_RE = /<(t[hd])\b([^>]*\bdata-block\s*=\s*"?1"?[^>]*)>([\s\S]*?)<\/\1>/gi;
+export function tableHtmlRender(body: string): SafeHtml {
+  const rendered = body.replace(BLOCK_CELL_RE, (_full, tag: string, attrs: string, inner: string) =>
+    `<${tag}${attrs}>${renderMarkdownToHtml(blockCellSource(inner)).value}</${tag}>`,
+  );
+  return unsafeHtml(rendered);
+}
 // :::embed-page → a placeholder the export can later resolve to the referenced page (data-page).
 // (#205: syntax renamed from `:::transclude`; the function keeps its name to limit churn.)
 export function transcludeHtmlRender(body: string): SafeHtml { return html`<div class="embed-page" data-page="${body.trim()}"></div>`; }

@@ -3,6 +3,21 @@
 // other (no cycle). The XSS boundary holds: cell content is only ever text nodes + <br>
 // elements; innerHTML is NEVER read or written for cell text.
 
+import { renderMarkdownToDom } from "./md-render";
+
+// #89 / ADR-097: render a BLOCK cell's Markdown through the shared sanitized renderer and mount the
+// resulting subtree. The renderer is allowlist-by-construction (h1-6/p/ul/ol/li/blockquote/code/… only;
+// a raw <iframe>/<script> in the source degrades to escaped text, never a live tag) and builds nodes via
+// createElement + textContent — so ADR-037's "never innerHTML of untrusted text" holds: we mount a
+// TRUSTED sanitized subtree, we never write raw user HTML. An in-cell embed/image is a DIRECTIVE and
+// hits the renderer's macro dispatch (its own #108/image gate), so a table cell can't smuggle a raw
+// iframe past the embed protections.
+export function setCellBlock(el: HTMLElement, markdown: string): void {
+  el.textContent = "";
+  el.classList.add("cm-lp-cell-block");
+  el.appendChild(renderMarkdownToDom(markdown));
+}
+
 // Render cell text into an element, preserving in-cell newlines as <br> ELEMENTS (never innerHTML).
 export function setCellText(el: HTMLElement, text: string): void {
   el.textContent = "";
