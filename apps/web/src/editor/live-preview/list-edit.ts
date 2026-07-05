@@ -12,7 +12,12 @@ import { Vim } from "@replit/codemirror-vim";
 // stays offset-invariant. OUTSIDE a list, Tab/Shift-Tab return false → the previous behaviour is kept.
 
 const LIST_RE = /^(\s*)(?:[-*+]|\d+[.)])\s/; // a bullet (-, *, +) or ordered (1. / 1)) marker
-const INDENT = "  "; // two spaces per nesting level (the common markdown convention)
+// #202 (comment 773): a nested list must be indented PAST its parent's marker to parse as a child list —
+// CommonMark requires the child indent to clear the parent's content column. A bullet `- ` clears at 2,
+// but an ordered `1. ` clears at 3, so a fixed 2-space indent left ordered items in the PARENT list
+// (flat 1,2,3,4,5 — the reported bug). Indent by the item's own marker width so ordered nests correctly.
+const MARKER_W = /^\s*((?:[-*+]|\d+[.)]))(\s+)/;
+const markerIndentWidth = (text: string): number => { const m = MARKER_W.exec(text); return m ? m[1].length + m[2].length : 2; };
 
 // The distinct lines touched by the selection (each once, in order).
 function selectedLines(view: EditorView): Line[] {
@@ -37,7 +42,9 @@ export const indentList = (view: EditorView): boolean => {
   const lines = selectedLines(view).filter((l) => isListLine(l.text));
   if (!lines.length) return false;
   view.dispatch(view.state.update({
-    changes: lines.map((l) => ({ from: l.from, insert: INDENT })),
+    // #202: one nesting level = the item's marker width (ordered `1. ` → 3 spaces so it parses as a child
+    // ordered list; bullet `- ` → 2), so a nested ordered list restarts + gets its own ordinal style.
+    changes: lines.map((l) => ({ from: l.from, insert: " ".repeat(markerIndentWidth(l.text)) })),
     userEvent: "input.indent",
   }));
   return true;
@@ -50,7 +57,8 @@ export const outdentList = (view: EditorView): boolean => {
   for (const l of selectedLines(view)) {
     if (!isListLine(l.text)) continue;
     sawList = true;
-    const lead = /^ {1,2}/.exec(l.text); // remove up to one indent level of leading spaces
+    // #202: remove up to one nesting level (the item's marker width) of leading spaces — symmetric with indent.
+    const lead = new RegExp(`^ {1,${markerIndentWidth(l.text)}}`).exec(l.text);
     if (lead) changes.push({ from: l.from, to: l.from + lead[0].length });
   }
   if (!sawList) return false; // not in a list → let the default Shift-Tab run

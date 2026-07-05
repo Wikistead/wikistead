@@ -70,3 +70,42 @@ test("#202: nested ordered lists are independent per level with 1.→a.→i. sty
   expect(ords).not.toContain("4.");
   expect(ords).not.toContain("5.");
 });
+
+// #202 comment 773: pressing Tab to nest an ordered item must indent it by the marker width (3 for `1. `)
+// so it PARSES as a child list — restarting the count and switching the ordinal style to lower-alpha. A
+// fixed 2-space indent left the item in the parent list (flat 1,2,3,4,5). This is the real Tab workflow.
+test("#202 comment 773: Tab-nesting an ordered list restarts and switches 1.→a. (not flat decimal)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "list-ordered-tab");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("1. a");
+  await page.keyboard.press("Enter"); // → "2. "
+  await page.keyboard.type("b");
+  await page.keyboard.press("Enter"); // → "3. "
+  await page.keyboard.press("Tab");   // nest: indent by marker width (3) so it parses as a child list
+  await page.keyboard.type("c");
+  await page.keyboard.press("Enter"); // continues the NESTED list
+  await page.keyboard.type("d");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Shift+Tab"); // back to top level
+  await page.keyboard.type("e");
+  await page.keyboard.press("Enter"); // → continuation marker
+  await page.keyboard.press("Enter"); // empty item → exits the list (blank line)
+  await page.keyboard.type("end");
+  await sleep(400);
+  await page.keyboard.press("Control+End"); // caret on the trailing paragraph — every list marker renders
+  await sleep(300);
+
+  const ords = await page.locator("[data-pane=preview] .cm-lp-ordinal").allTextContents();
+  // top level stays decimal and consecutive (nested items do NOT bleed into it)
+  expect(ords).toContain("1.");
+  expect(ords).toContain("2.");
+  expect(ords).toContain("3."); // the third TOP item (e), not "5."
+  // the nested items restart under lower-alpha
+  expect(ords).toContain("a.");
+  expect(ords).toContain("b.");
+  // the flat-decimal bug is gone: no 4./5. from counting nested items into the parent run
+  expect(ords).not.toContain("4.");
+  expect(ords).not.toContain("5.");
+});
