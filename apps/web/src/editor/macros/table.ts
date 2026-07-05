@@ -1,7 +1,7 @@
 import type { DirectiveMacro, MacroTier, MacroLevel, MacroModalEditor, InnerEditHost, InlineController } from "./registry";
 import { asMacroSource } from "./registry";
 import { parseHtml, styleToCss, parseTableSource, toHtml, toPipe, representableAsPipe, type Grid } from "./table-model";
-import { setCellText, setCellBlock } from "./table-cell-dom";
+import { setCellText } from "./table-cell-dom";
 import { tableInlineEditor } from "../live-preview/table-edit";
 import { unsafeHtml } from "./safe-html";
 import { tableHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
@@ -40,8 +40,7 @@ export function gridToTable(grid: Grid): HTMLTableElement {
     for (const cell of row) {
       if (!cell) continue; // covered position
       const el = document.createElement(cell.header ? "th" : "td");
-      if (cell.block) setCellBlock(el, cell.text); // #89: block cell → shared sanitized renderer
-      else setCellText(el, cell.text);
+      setCellText(el, cell.text); // #89 (rescoped): cells are inline text only — no block content, no macros
       if (cell.colspan > 1) el.colSpan = cell.colspan;
       if (cell.rowspan > 1) el.rowSpan = cell.rowspan;
       if (cell.style) el.setAttribute("style", styleToCss(cell.style)); // already allowlisted
