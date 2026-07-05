@@ -191,18 +191,36 @@ export async function revokeShareLink(
   emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: row.id, pageId: row.resource_id, actorId: args.userId })
 }
 
-// #109 Fix A (comment 768): revoke EVERY active share link on a resource. Used when a page is made private
-// — a page share link is a DIRECT grant (share_link:<id> → view/edit on page:<id>), NOT routed through
-// `viewer from space`, so `but not private` does NOT cut it: a link issued before privatisation would keep
-// working. Revoke (not just strip the tuple) so DB row + FGA + revoked emit stay consistent — no zombie
-// link that looks active in listPageGrants but 404s. One-way, like the public strip (private OFF does not
-// restore revoked links). Idempotent per link. Returns the count revoked (surfaced in the UX warning).
+export interface RevokeShareLinksResult {
+  revoked: { id: string; pageId: string }[]; // FGA-cleared + DB-revoked (emit these AFTER the caller commits)
+  failed: string[]; // link ids whose FGA delete errored — left revoked_at IS NULL, recoverable on a re-run
+}
+
+// #109 Fix A (comment 768) + comment 785 (partial-failure detectability): revoke EVERY active share link on
+// a resource. Used when a page is made private — a page share link is a DIRECT grant (share_link:<id> →
+// view/edit on page:<id>), NOT routed through `viewer from space`, so `but not private` does NOT cut it: a
+// link issued before privatisation would keep working. Revoke (not just strip the tuple) so DB row + FGA +
+// emit stay consistent — no zombie link that looks active in listPageGrants but 404s.
+//
+// comment 785 hardening (why NOT one PG tx with the private marker): the private marker is an FGA write
+// (writeTuples PRIVATE_MARKER) — NOT transactional — so it cannot roll back with a PG tx, and it MUST stay
+// (fail-safe: private = space-cut is the security priority; a missed link-revoke is not danger EXPANSION).
+// Folding this into setPagePrivate's tx would also roll back the outbox reindex on a revoke failure, leaving
+// the private page indexed as public — a worse leak. So the private-ization commits FIRST (marker + public
+// strip + outbox), then this runs. Here we make the DB side ATOMIC and the FGA side DETECTABLE/RECOVERABLE:
+//   1. delete each link's FGA tuple first (idempotent — "did not exist" counts as cleared);
+//   2. mark revoked_at for the FGA-cleared links in ONE tx (no partial DB state — comment 785 #1 intent);
+//   3. an FGA delete that ERRORS is logged and its link left revoked_at IS NULL (comment 785 #3) — the next
+//      privatise/sweep re-selects it (revoked_at IS NULL filter) and retries idempotently, no double-process.
+// The caller emits `share_link.revoked` AFTER it commits (comment 785 #2 — never emit on a rolled-back tx).
 export async function revokeResourceShareLinks(
-  db: TenantDb, fga: OpenFgaClient, resource: ResourceRef, tenantId: string, actorId: string,
-): Promise<number> {
+  db: TenantDb, fga: OpenFgaClient, resource: ResourceRef, _tenantId: string, _actorId: string,
+): Promise<RevokeShareLinksResult> {
   const rows = await db.sql<ShareLinkRow[]>`
     SELECT id, resource_type, resource_id, capability FROM share_links
     WHERE resource_type = ${resource.type} AND resource_id = ${resource.id} AND revoked_at IS NULL`
+  const cleared: ShareLinkRow[] = [];
+  const failed: string[] = [];
   for (const row of rows) {
     try {
       await deleteTuples(fga, [{
@@ -210,11 +228,23 @@ export async function revokeResourceShareLinks(
         relation: relationForResource(resource.type, row.capability as Capability),
         object: `${resource.type}:${row.resource_id}`,
       }])
-    } catch (err) { if (!String((err as Error)?.message ?? '').includes('did not exist')) throw err }
-    await db.sql`UPDATE share_links SET revoked_at = now() WHERE id = ${row.id}`
-    emit({ type: 'share_link.revoked', tenantId, shareLinkId: row.id, pageId: row.resource_id, actorId })
+      cleared.push(row)
+    } catch (err) {
+      // "did not exist" = already cleared (idempotent) → treat as cleared; any other FGA error → leave the
+      // link active (revoked_at stays NULL), record it so the "private but link alive on FGA" window is
+      // detectable and a re-run picks it up. Do NOT abort the other links or the private-ization.
+      if (String((err as Error)?.message ?? '').includes('did not exist')) cleared.push(row)
+      else { failed.push(row.id); console.error('[share-link:revoke-fga-failed]', { linkId: row.id, resource, err: String(err) }) }
+    }
   }
-  return rows.length
+  // Atomic DB: mark revoked_at for exactly the FGA-cleared links, in one tx (all-or-nothing — no partial
+  // DB revocation). `AND revoked_at IS NULL` keeps a re-run idempotent (a concurrent revoke can't double-set).
+  if (cleared.length) {
+    await db.tx(async (tx) => {
+      for (const row of cleared) await tx`UPDATE share_links SET revoked_at = now() WHERE id = ${row.id} AND revoked_at IS NULL`
+    })
+  }
+  return { revoked: cleared.map((r) => ({ id: r.id, pageId: r.resource_id })), failed }
 }
 
 export interface MintedGuestToken {

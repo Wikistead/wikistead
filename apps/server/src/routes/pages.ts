@@ -670,14 +670,20 @@ export async function setPagePrivate(
     await deleteTuples(fga, [PUBLIC_GRANT(args.pageId)]).catch(() => {})
     return o
   })
-  // #109 Fix A (comment 768): revoke this page's share links. `but not private` cuts space-inherited access,
-  // but a PAGE share link is a direct grant (share_link:<id> → view/edit on page:<id>) that survives it — a
-  // link issued before privatisation would keep working. Revoke (DB + FGA + emit) so no zombie link remains.
-  // One-way: private OFF restores space inheritance but NOT revoked links (like the public strip).
-  await revokeResourceShareLinks(db, fga, { type: 'page', id: args.pageId }, args.tenantId, args.userId)
+  // #109 Fix A (comment 768) + comment 785: revoke this page's share links AFTER the private-ization commit
+  // above — the marker + public strip + outbox reindex are the security-critical, fail-safe part and must
+  // land first (a revoke failure must NOT roll back the private marker or the reindex, else the page stays
+  // publicly indexed — a worse leak). revokeResourceShareLinks makes the DB revoke atomic and returns which
+  // links were cleared (emit AFTER commit) + which FGA deletes failed (logged, left recoverable).
+  const { revoked, failed } = await revokeResourceShareLinks(db, fga, { type: 'page', id: args.pageId }, args.tenantId, args.userId)
   // Reindex so is_public flips to false (view_base@user:* gone) + space members drop from stage-1.
   processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
   emit({ type: 'page.made_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
+  // comment 785 #2: emit share_link.revoked ONLY after the DB revoke committed (never on a rolled-back tx).
+  for (const link of revoked) emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: link.id, pageId: link.pageId, actorId: args.userId })
+  // comment 785 #3: a partial FGA-delete failure is not silent — the page IS private (fail-safe), but these
+  // links are still live on FGA until a re-privatise/sweep retries them (they stay revoked_at IS NULL).
+  if (failed.length) console.error('[setPagePrivate] share-link revoke incomplete (private applied; links pending FGA delete)', { pageId: args.pageId, failed })
 }
 
 export async function unsetPagePrivate(
