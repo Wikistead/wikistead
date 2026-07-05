@@ -112,9 +112,14 @@ export const tableInlineEditor: InlineEditor = {
     const rowInsB = btn("⊞↓", "table-row-insert-below"); rowInsB.title = "Insert row below";
     const rowDel = btn("✕", "table-row-delete"); rowDel.title = "Delete row";
     rowOps.append(rowInsT, rowInsB, rowDel);
-    bar.append(mergeBtn, unmergeBtn, alignL, alignC, alignR, headerBtn, colOps, rowOps);
-    // Background-color presets (ADR-022 review #2): a controlled palette (theme accent +
-    // soft tints), NOT a free picker — keeps tables on-theme, accessible, round-trip-safe.
+    // #217 (comment 772): the bar WRAPS at a narrow width (flex-wrap on the bar) but each LOGICAL GROUP is
+    // an indivisible unit (a `cm-lp-table-ops` span with flex-shrink:0 and no internal wrap), so groups
+    // wrap whole — merge / align / header / column-ops / row-ops / colour / done never scatter mid-group.
+    const mkGroup = (...els: HTMLElement[]) => { const g = document.createElement("span"); g.className = "cm-lp-table-ops"; g.append(...els); return g; };
+    // Background-color presets (ADR-022 review #2): a controlled palette (theme accent + soft tints),
+    // NOT a free picker — keeps tables on-theme, accessible, round-trip-safe. Grouped so they wrap together.
+    const colorGroup = document.createElement("span");
+    colorGroup.className = "cm-lp-table-ops";
     for (const p of BG_PRESETS) {
       const sw = document.createElement("button");
       sw.type = "button";
@@ -125,9 +130,9 @@ export const tableInlineEditor: InlineEditor = {
       if (!p.value) sw.textContent = "⌀"; // "no fill"
       // #209: set the background AND a contrast-matched text colour so the cell is legible in both themes.
       sw.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ bg: p.value, color: contrastColor(p.value) }); });
-      bar.appendChild(sw);
+      colorGroup.appendChild(sw);
     }
-    bar.appendChild(doneBtn);
+    bar.append(mkGroup(mergeBtn, unmergeBtn), mkGroup(alignL, alignC, alignR), mkGroup(headerBtn), colOps, rowOps, colorGroup, mkGroup(doneBtn));
 
     const selected = new Set<string>(); // "r,c" of selected origin cells
     const cellEls = new Map<string, HTMLElement>();
