@@ -747,6 +747,47 @@ export function useTestTenantOidc() {
   });
 }
 
+// #101 / ADR-034: OIDC enrolment config — which successful logins auto-enrol (policy), the allow-listed
+// groups, and the DNS-verified enrol domains (add → publish TXT → verify). tenant#admin gated server-side.
+export interface EnrollDomainDTO { domain: string; verified: boolean; challengeRecord: string; challengeValue: string }
+export interface EnrollmentDTO { policy: string; policies: string[]; allowedGroups: string[]; verifiedDomains: string[]; domains: EnrollDomainDTO[] }
+export function useEnrollment() {
+  const { token } = useSession();
+  return useQuery({ queryKey: ["enrollment"], queryFn: () => apiFetch<EnrollmentDTO>("/admin/enrollment", token), staleTime: 30_000 });
+}
+export function useSetEnrollPolicy() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { policy: string; allowedGroups: string[] }) => apiFetch<null>("/admin/enrollment", token, { method: "PUT", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["enrollment"] }),
+  });
+}
+export function useAddEnrollDomain() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (domain: string) => apiFetch<EnrollDomainDTO>("/admin/enrollment/domains", token, { method: "POST", body: JSON.stringify({ domain }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["enrollment"] }),
+  });
+}
+export function useVerifyEnrollDomain() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (domain: string) => apiFetch<null>(`/admin/enrollment/domains/${encodeURIComponent(domain)}/verify`, token, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["enrollment"] }),
+  });
+}
+export function useRemoveEnrollDomain() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (domain: string) => apiFetch<null>(`/admin/enrollment/domains/${encodeURIComponent(domain)}`, token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["enrollment"] }),
+  });
+}
+
 // Pages overview for a space (Phase 5 #5) — space#manage only.
 export interface PageOverview { id: string; title: string; published: boolean; hasUnpublishedChanges: boolean; grantCount: number; linkCount: number }
 export function useSpacePagesOverview(spaceId: string, enabled = true) {
