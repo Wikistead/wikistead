@@ -371,6 +371,7 @@
     "draft": "Draft",
     "draftTitle": "Draft (not published)",
     "unpublished": "Unpublished changes",
+    "private": "Private (allowlist only)",
     "pageActions": "Page actions",
     "noSpace": "No space",
     "untitledSpace": "Untitled space",
@@ -435,7 +436,10 @@
     "privateHint": "Only the people you list below can view or edit it; space members no longer inherit access, and it won't be public. Child pages are not made private automatically.",
     "privateOnHint": "This page is private — only the people in the allow list below can access it. Space members do not inherit access.",
     "grantTitle": "Access",
-    "allowlistTitle": "Allow list (only these people can access this private page)"
+    "allowlistTitle": "Allow list (only these people can access this private page)",
+    "privateConfirmTitle": "Make this page private?",
+    "privateConfirmBody": "{{count}} active share link(s) for this page will be revoked and can't be restored. Space members will lose inherited access.",
+    "privateConfirmAction": "Make private"
   },
   "spaceTheme": {
     "title": "Theme",

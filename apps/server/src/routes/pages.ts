@@ -17,6 +17,7 @@ import { resolveEmbed, EmbedDeniedError } from '../embed-resolve.js'
 import { resolveTranscludeRef } from '../transclude-resolve.js'
 import { renderPlantuml } from '../plantuml-render.js'
 import { assertPageViewable } from '../page-view-gate.js'
+import { revokeResourceShareLinks } from './share-links.js'
 
 // #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames —
 // the exact form isAllowlistedEmbed matches. Strip a scheme, path/query/fragment, port, whitespace and
@@ -63,7 +64,7 @@ export async function setEmbedProviders(
 }
 
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean }
-export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean; canComment?: boolean }
+export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean; canComment?: boolean; private?: boolean }
 function toPage(r: PageRow): Page {
   // hasUnpublishedChanges + published are only present when the SELECT included the
   // columns (listPages); together they drive the sidebar's 3-state badge
@@ -237,7 +238,13 @@ export async function listPages(
     FROM pages WHERE space_id = ${args.spaceId} ORDER BY position, created_at
   `
   const allowed = await filterAuthorized(fga, args.subject, 'view', rows.map((r) => r.id), args.context)
-  return rows.filter((r) => allowed.has(r.id)).map(toPage)
+  const visible = rows.filter((r) => allowed.has(r.id))
+  // #109 Fix B: annotate each visible page with its private flag so the sidebar can render a lock.
+  // Bounded to the space's visible pages; a read fault falls back to "not private" (no false lock).
+  const privateFlags = await Promise.all(
+    visible.map((r) => readPagePrivate(fga, r.id).catch(() => false)),
+  )
+  return visible.map((r, i) => ({ ...toPage(r), private: privateFlags[i] }))
 }
 
 export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: string; userId: string }): Promise<Page> {
@@ -259,7 +266,9 @@ export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: 
   // comment is a distinct capability the UI needs to show the composer to comment-capable viewers.
   // Convenience only — the comment routes re-check FGA (the fortress), so a forged composer can't post.
   const canComment = await check(fga, `user:${args.userId}`, 'comment', { type: 'page', id: args.pageId })
-  return { ...toPage(row), capability: access.readOnly ? 'view' : 'edit', canManage, canComment }
+  // #109 Fix B: private flag drives the lock badge next to the title (visible to any viewer of the page).
+  const isPrivate = await readPagePrivate(fga, args.pageId)
+  return { ...toPage(row), capability: access.readOnly ? 'view' : 'edit', canManage, canComment, private: isPrivate }
 }
 
 // Update title. Outbox entry written in the same tx as the UPDATE.
@@ -633,6 +642,15 @@ export async function listPageRestrictions(
 const PRIVATE_MARKER = (pageId: string) => ({ user: 'user:*', relation: 'private', object: `page:${pageId}` })
 const PUBLIC_GRANT = (pageId: string) => ({ user: 'user:*', relation: 'view_base', object: `page:${pageId}` })
 
+// Read the private marker WITHOUT a manage gate (#109 Fix B): the lock badge is shown to
+// anyone who can already see the page (sidebar + title). Callers who can view a page ARE its
+// allowlist when it is private, so exposing the flag to them leaks nothing (non-viewers 404).
+// isPagePrivate stays manage-gated for the permission UI's authoritative read.
+async function readPagePrivate(fga: OpenFgaClient, pageId: string): Promise<boolean> {
+  const { tuples } = await fga.read({ object: `page:${pageId}`, relation: 'private' })
+  return (tuples ?? []).some(({ key }) => key?.relation === 'private' && key.user === 'user:*')
+}
+
 export async function setPagePrivate(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -652,6 +670,11 @@ export async function setPagePrivate(
     await deleteTuples(fga, [PUBLIC_GRANT(args.pageId)]).catch(() => {})
     return o
   })
+  // #109 Fix A (comment 768): revoke this page's share links. `but not private` cuts space-inherited access,
+  // but a PAGE share link is a direct grant (share_link:<id> → view/edit on page:<id>) that survives it — a
+  // link issued before privatisation would keep working. Revoke (DB + FGA + emit) so no zombie link remains.
+  // One-way: private OFF restores space inheritance but NOT revoked links (like the public strip).
+  await revokeResourceShareLinks(db, fga, { type: 'page', id: args.pageId }, args.tenantId, args.userId)
   // Reindex so is_public flips to false (view_base@user:* gone) + space members drop from stage-1.
   processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
   emit({ type: 'page.made_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })

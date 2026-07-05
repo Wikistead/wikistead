@@ -191,6 +191,32 @@ export async function revokeShareLink(
   emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: row.id, pageId: row.resource_id, actorId: args.userId })
 }
 
+// #109 Fix A (comment 768): revoke EVERY active share link on a resource. Used when a page is made private
+// — a page share link is a DIRECT grant (share_link:<id> → view/edit on page:<id>), NOT routed through
+// `viewer from space`, so `but not private` does NOT cut it: a link issued before privatisation would keep
+// working. Revoke (not just strip the tuple) so DB row + FGA + revoked emit stay consistent — no zombie
+// link that looks active in listPageGrants but 404s. One-way, like the public strip (private OFF does not
+// restore revoked links). Idempotent per link. Returns the count revoked (surfaced in the UX warning).
+export async function revokeResourceShareLinks(
+  db: TenantDb, fga: OpenFgaClient, resource: ResourceRef, tenantId: string, actorId: string,
+): Promise<number> {
+  const rows = await db.sql<ShareLinkRow[]>`
+    SELECT id, resource_type, resource_id, capability FROM share_links
+    WHERE resource_type = ${resource.type} AND resource_id = ${resource.id} AND revoked_at IS NULL`
+  for (const row of rows) {
+    try {
+      await deleteTuples(fga, [{
+        user: `share_link:${row.id}`,
+        relation: relationForResource(resource.type, row.capability as Capability),
+        object: `${resource.type}:${row.resource_id}`,
+      }])
+    } catch (err) { if (!String((err as Error)?.message ?? '').includes('did not exist')) throw err }
+    await db.sql`UPDATE share_links SET revoked_at = now() WHERE id = ${row.id}`
+    emit({ type: 'share_link.revoked', tenantId, shareLinkId: row.id, pageId: row.resource_id, actorId })
+  }
+  return rows.length
+}
+
 export interface MintedGuestToken {
   token: string
   docName: string
