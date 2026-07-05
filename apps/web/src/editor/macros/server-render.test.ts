@@ -97,6 +97,55 @@ describe("renderMarkdownToHtml — #89/ADR-097 cell block-content sanitize allow
   });
 });
 
+// #89 comment 782: the ACTUAL cell path is `tableHtmlRender` → blockCellSource (decode the wire-escaped
+// inner back to Markdown source) → renderMarkdownToHtml. The reviewer's core threat is a raw <iframe> that
+// survives that decode-then-reparse and goes live. These tests drive the END-TO-END cell path (not just
+// renderMarkdownToHtml directly) and assert nothing dangerous becomes live — including the escaped-then-
+// decoded round-trip that blockCellSource performs (a `&lt;iframe&gt;` in the wire → decoded to source →
+// re-escaped by renderMarkdownToHtml's HTMLBlock default). cellTextToHtml (toHtml) entity-escapes cell
+// source, so the wire inner of a block cell is ALWAYS entity-escaped — that is what these inputs mirror.
+describe("tableHtmlRender — #89/ADR-097 block-cell path never goes live (comment 782)", () => {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const cell = (source: string) => tableHtmlRender(`<table><tbody><tr><td data-block="1">${esc(source)}</td></tr></tbody></table>`).value;
+
+  it("renders allowlisted block content in a cell (a list becomes a real <ul><li>)", () => {
+    const h = cell("- one\n- two");
+    expect(h).toMatch(/<ul><li>(<p>)?one(<\/p>)?<\/li>\s*<li>(<p>)?two(<\/p>)?<\/li><\/ul>/);
+  });
+
+  const DANGEROUS = [
+    '<iframe src="https://evil.example"></iframe>',
+    '<script>alert(1)</script>',
+    '<object data="x"></object>',
+    '<embed src="x">',
+    '<img src=x onerror="alert(1)">',
+    '<svg onload="alert(1)"></svg>',
+  ];
+  for (const raw of DANGEROUS) {
+    const kind = raw.match(/^<([a-z]+)/)![1];
+    it(`a raw <${kind}> written into a block cell degrades to escaped text (no live element)`, () => {
+      const h = cell(`before\n\n${raw}\n\nafter`);
+      // the decode-then-reparse (blockCellSource → renderMarkdownToHtml HTMLBlock default) re-escapes it
+      // the dangerous tag only ever appears inside an escaped `&lt;…&gt;` run, never as a live element (so
+      // any on* handler it carries is inert text, not an attribute on a real node).
+      expect(h).not.toMatch(new RegExp(`<${kind}[\\s>]`, "i")); // NOT a live tag
+      expect(h).toContain(`&lt;${kind}`); // the tag survives ONLY as escaped text
+      expect(h).toContain("<td data-block=\"1\">"); // the cell wrapper itself is intact
+    });
+  }
+
+  it("a javascript: / data: URL in a block cell never becomes a live href", () => {
+    const h = cell("[x](javascript:alert(1)) [y](data:text/html,x)");
+    expect(h).not.toContain('href="javascript:');
+    expect(h).not.toContain('href="data:');
+  });
+
+  it("a plain (non-block) cell passes through unchanged — no markdown reparse", () => {
+    const plain = tableHtmlRender('<table><tbody><tr><td>a &amp; b</td></tr></tbody></table>').value;
+    expect(plain).toContain("<td>a &amp; b</td>"); // untouched; only data-block cells are reparsed
+  });
+});
+
 // A registry with a preserve macro, a degrade macro, and a throwing macro.
 const macros: MacroHtmlRegistry = {
   fence: (lang) =>
