@@ -166,3 +166,26 @@ test("the brand lockup links home (member chrome)", async ({ page }) => {
   await page.getByTestId("brand-home").click();
   await page.waitForURL(/\/p\/demo$/);
 });
+
+// #219: a native tooltip on a sidebar page item ONLY when its title is truncated (VSCode/Finder tree
+// behaviour) — checked at hover via scrollWidth > clientWidth so it follows a sidebar resize.
+test("#219: truncated sidebar page titles get a hover tooltip; fully-visible ones do not", async ({ page }) => {
+  await openDemo(page);
+  const long = "A very very long page title that will certainly be truncated in the narrow sidebar column here indeed";
+  await page.evaluate(async ({ api, long }) => {
+    for (const title of ["short", long]) {
+      await fetch(`${api}/spaces/demo_space/pages`, { method: "POST", headers: { Authorization: "Bearer dev-token", "content-type": "application/json" }, body: JSON.stringify({ title }) });
+    }
+  }, { api: API, long });
+  await page.reload();
+  await page.waitForSelector("[data-testid=tree-page-name]");
+
+  const longSpan = page.locator("[data-testid=tree-page-name]", { hasText: "A very very long" });
+  const shortSpan = page.locator("[data-testid=tree-page-name]", { hasText: /^short$/ });
+  await longSpan.hover();
+  await sleep(120);
+  await expect(longSpan, "a truncated title shows its full text as a tooltip").toHaveAttribute("title", long);
+  await shortSpan.hover();
+  await sleep(120);
+  expect(await shortSpan.getAttribute("title"), "a fully-visible title gets no tooltip").toBe("");
+});
