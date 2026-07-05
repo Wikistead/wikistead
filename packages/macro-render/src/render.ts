@@ -161,7 +161,13 @@ function renderBlock(node: SNode, src: string, macros: MacroHtmlRegistry): SafeH
       }
       return html`<div class="wks-directive">${renderBlocks(node, src, macros)}</div>`;
     }
-    // Unknown block (incl. HTMLBlock) → literal escaped text, safe.
+    // #89 comment 782 (XSS lifeline): raw HTML (a lezer HTMLBlock — e.g. a hand-written <iframe>/<script>
+    // in a `:::table` block cell) is emitted as the node's LITERAL SOURCE via `txt`, which the `html`
+    // tag escapes — NOT recursed into (no child passthrough) and NEVER as a live element. Explicit here
+    // (not only in `default`) so this allowlist-by-construction guarantee is unmissable at the boundary.
+    case "HTMLBlock": return html`<p>${txt(src, node)}</p>`;
+    // Any other un-enumerated block also degrades to literal escaped text (positive allowlist: only the
+    // cases above emit real tags; everything else is escaped).
     default: return html`<p>${txt(src, node)}</p>`;
   }
 }
