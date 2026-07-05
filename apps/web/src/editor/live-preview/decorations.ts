@@ -1300,12 +1300,11 @@ const RENDERERS: BlockRenderer[] = [
           // header widget + a now-empty (blank) opening line — means Live shows the header directly above
           // the code body with NO blank line between them (the header IS the opening line, matching how
           // the callout ::: collapses). NON-atomic so the line stays landable to reveal. Attributed only.
-          if (n === first && info && (info.title || info.showLineNumbers || (info.highlight && info.highlight.length))) {
-            // Replace the raw info string INLINE with the header band, reveal-on-cursor via hideMarker
-            // (caret on the line / Source → raw info). NON-atomic so the line stays LANDABLE (a block
-            // replace would be atomic → the caret couldn't reach it to reveal). The header renders
-            // inline-flex (its CSS) so it sits ON the opening line — no residual blank line above the
-            // code body (matching the callout's collapse). Attributed fences only.
+          // #198 comment 770 (1/2): render the header for EVERY fence with a language, not only attributed
+          // ones — the copy button and the lang tab are universal (a plain ```c must have a copy button too,
+          // and the tab must look identical whether it's "lang only" or "filename + lang"). Reveal-on-cursor
+          // via hideMarker (caret on the line / Source → raw info). NON-atomic so the line stays LANDABLE.
+          if (n === first && info && info.lang) {
             const fence = line.text.match(/^(\s*)([`~]+)/);
             const infoStart = line.from + (fence ? fence[0].length : 0);
             // #198 (comment 724): tab (title + lang) + a copy button shown only in a VIEW mode (!srcMode).
@@ -1321,12 +1320,14 @@ const RENDERERS: BlockRenderer[] = [
         // a view mode — the base look does NOT change with the presence of attributes. A title/number/
         // highlight fence just LAYERS the tab / gutter / tint ON TOP of that identical card. When a tab is
         // present it flattens the card's top-left corner so the tab connects; a plain fence keeps it rounded.
-        const hasTab = !!info && (!!info.title || !!info.showLineNumbers || (!!info.highlight && info.highlight.length > 0));
         let cls = "cm-lp-code-line";
         const attrs: Record<string, string> = {};
         if (info?.showLineNumbers) { cls += " cm-lp-code-numbered"; attrs["data-linenum"] = String(codeIdx); }
         if (hl.has(codeIdx)) cls += " cm-lp-code-hl";
-        if (n === first + 1) cls += hasTab ? " cm-lp-code-first cm-lp-code-tabbed" : " cm-lp-code-first";
+        // #198 comment 770 (3): the card ALWAYS keeps all top corners rounded — the tab OVERLAPS the card's
+        // top-left to connect (it's a chip on top of the card), so the top edge to the RIGHT of the (narrow)
+        // tab keeps its rounding rather than the whole first line flattening.
+        if (n === first + 1) cls += " cm-lp-code-first";
         if (n === lastCodeLine) cls += " cm-lp-code-last";
         attrs.class = cls;
         ctx.add(Decoration.line({ attributes: attrs }), line.from);
@@ -1956,7 +1957,11 @@ export const livePreviewTheme = EditorView.baseTheme({
     display: "inline-flex", alignItems: "center", gap: "0.55em", padding: "0.1em 0.7em",
     background: "var(--panel-2, #2d2d2e)", color: "var(--fg)",
     border: "1px solid var(--border, #3a3a3a)", borderBottom: "none",
-    borderRadius: "6px 6px 0 0", // tab: top corners only; bottom merges into the code card
+    borderRadius: "6px 6px 0 0", // tab: top corners only; bottom overlaps onto the code card
+    // #198 comment 770 (3): sit the tab ON TOP of the card (overlap its top border) so the tab's flat
+    // bottom covers the card's rounded top-left corner and reads as connected — the card stays a clean
+    // rounded rectangle, only the tab-width slice at the left is flattened by the overlap.
+    position: "relative", zIndex: "1", marginBottom: "-1px",
   },
   ".cm-lp-code-title": { fontWeight: "600" },
   ".cm-lp-code-lang": { color: "var(--fg-dim, #888)", textTransform: "uppercase", letterSpacing: "0.03em", fontSize: "0.9em" },
@@ -1973,7 +1978,6 @@ export const livePreviewTheme = EditorView.baseTheme({
   // tab is present (cm-lp-code-tabbed, declared AFTER so it wins) the top-left flattens to connect the tab.
   ".cm-lp-code-first": { borderTopLeftRadius: "6px", borderTopRightRadius: "6px" },
   ".cm-lp-code-last": { borderBottomLeftRadius: "6px", borderBottomRightRadius: "6px" },
-  ".cm-lp-code-tabbed": { borderTopLeftRadius: "0" },
   ".cm-lp-code-numbered": { paddingLeft: "3.2em", position: "relative" },
   ".cm-lp-code-numbered::before": {
     content: "attr(data-linenum)", position: "absolute", left: "0", width: "2.6em", textAlign: "right",

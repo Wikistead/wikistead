@@ -64,14 +64,20 @@ test("#198 bounce: no blank line between the header band and the code body (Live
   expect(gap).toBeLessThan(12); // less than a full blank text line (~line-height); no residual blank line
 });
 
-test("#198: a PLAIN fence (no attributes) is untouched (no header band)", async ({ browser }) => {
+// #198 comment 770 (1/2): the header (lang tab + copy button) is UNIVERSAL — a plain ```lang fence gets
+// it too, not only an attributed one. The copy button must not depend on a filename being present.
+test("#198 comment 770: a plain lang fence still gets the tab + copy button", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "fence-plain");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.insertText("top\n```ts\nconst a = 1\n```\nbot\n");
   await sleep(500);
-  expect(await page.locator(".cm-lp-code-header").count()).toBe(0); // no header band for a plain fence
+  await page.getByText("bot").click(); // caret off the fence so the header renders (not raw-revealed)
+  await sleep(200);
+  expect(await page.locator(".cm-lp-code-header").count()).toBe(1); // header renders for a plain lang fence
+  await expect(page.locator(".cm-lp-code-tab .cm-lp-code-lang")).toHaveText("ts"); // lang badge in the tab
+  expect(await page.locator(".cm-lp-code-copy").count()).toBe(1); // copy button present even without a title
 });
 
 // #198 (comment 724): B tab-style header + a copy button on the code area's top-right in view modes.
@@ -105,11 +111,12 @@ test("#198: filename tab + copy button (view mode) copies the code body; hidden 
   expect(await page.locator(".cm-lp-code-copy").count()).toBe(0);
 });
 
-// #198 comment 752: (1) a PLAIN fence and an ATTRIBUTED fence share the SAME base card (background +
-// rounded corners); attributes only LAYER a tab / line numbers / highlight on top. A tab flattens the
-// card's top-left corner; a plain fence keeps it rounded. (2) Source mode is fully raw — no code-block
-// decoration at all (no card background, tab, number or highlight). Verified in a real browser.
-test("#198 comment 752: plain & attributed fences share one card base; Source is fully raw", async ({ browser }) => {
+// #198 comment 752/770: (1) a plain fence and an attributed fence share the SAME base card (background +
+// rounded corners); attributes only LAYER a tab / line numbers / highlight on top. comment 770 (3): the
+// card ALWAYS keeps its rounded top-left — the tab OVERLAPS to connect (a chip on top) rather than the
+// first line flattening — so the code area to the right of the (narrow) tab keeps its rounding. (2) Source
+// mode is fully raw — no code-block decoration at all. Verified in a real browser.
+test("#198 comment 770: plain & attributed fences share one rounded card base; Source is fully raw", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "codefence-unify");
   await enterEdit(page);
@@ -122,27 +129,28 @@ test("#198 comment 752: plain & attributed fences share one card base; Source is
   const m = () => page.evaluate(() => {
     const q = (s: string) => Array.from(document.querySelectorAll(s));
     const firsts = q(".cm-lp-code-first") as HTMLElement[];
-    const plain = firsts.find((e) => !e.classList.contains("cm-lp-code-tabbed"))!;
-    const tabbed = firsts.find((e) => e.classList.contains("cm-lp-code-tabbed"))!;
+    const tabOverlap = q(".cm-lp-code-tab").map((t) => getComputedStyle(t as HTMLElement).marginBottom);
     return {
       codeLines: q(".cm-lp-code-line").length,
       firsts: firsts.length,
       lasts: q(".cm-lp-code-last").length,
-      tabbed: q(".cm-lp-code-tabbed").length,
-      plainTopLeft: plain ? getComputedStyle(plain).borderTopLeftRadius : null,
-      tabbedTopLeft: tabbed ? getComputedStyle(tabbed).borderTopLeftRadius : null,
+      tabbed: q(".cm-lp-code-tabbed").length, // the old flatten class is gone
+      tabs: q(".cm-lp-code-tab").length,
+      topLefts: firsts.map((e) => getComputedStyle(e).borderTopLeftRadius),
+      tabOverlap,
     };
   });
 
-  // Live: BOTH fences are carded (2 firsts / 2 lasts / all base cm-lp-code-line); only the attributed
-  // fence's first line is tabbed. Plain keeps a rounded top-left; the tabbed one is flattened for the tab.
+  // Live: BOTH fences are carded (2 firsts / 2 lasts / all base cm-lp-code-line) and BOTH keep a rounded
+  // top-left (no flattening) — the tab overlaps the card to connect. Both fences carry a tab (unified).
   const live = await m();
   expect(live.firsts).toBe(2);
   expect(live.lasts).toBe(2);
   expect(live.codeLines).toBe(4);
-  expect(live.tabbed).toBe(1);
-  expect(live.plainTopLeft).not.toBe("0px"); // plain fence: rounded card corner
-  expect(live.tabbedTopLeft).toBe("0px"); // attributed fence: flattened under the tab
+  expect(live.tabbed).toBe(0); // the flatten class was removed (card stays rounded)
+  expect(live.tabs).toBe(2); // every lang fence has a tab
+  expect(live.topLefts.every((r) => r !== "0px")).toBe(true); // BOTH cards keep a rounded top-left
+  expect(live.tabOverlap.every((mb) => mb !== "0px")).toBe(true); // tabs overlap the card to connect
 
   // Source: fully raw — no code-block decoration whatsoever.
   await page.getByTestId("displaymode-source").click();
