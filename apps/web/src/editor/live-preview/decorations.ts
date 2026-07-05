@@ -2087,6 +2087,9 @@ export const livePreviewTheme = EditorView.baseTheme({
   },
   ".cm-lp-block-grip:hover": { opacity: "1", color: "var(--fg, #444)", background: "var(--hover, rgba(128,128,128,0.18))" },
   ".cm-lp-block-droptarget": { boxShadow: "inset 0 2px 0 0 var(--accent, #4ea1ff)" },
+  // #84 comment 750: dropping at the very END of the doc (after the last block, no trailing blank line).
+  // The indicator sits on the LAST line's BOTTOM edge so "drop after the last block" is visible.
+  ".cm-lp-block-droptarget-end": { boxShadow: "inset 0 -2px 0 0 var(--accent, #4ea1ff)" },
   // Table cell-merge edit mode (render-active): a toolbar + selectable cells.
   // margin 0 (see cm-lp-macro-wrap): the edit widget's root margin would be uncounted in
   // CM's heightMap. The accent border + inner padding give it presence without an outer

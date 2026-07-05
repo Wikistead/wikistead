@@ -87,3 +87,37 @@ test("#84: dragging the grip reorders the block (one Y.Text transaction)", async
   expect(iA).toBeGreaterThanOrEqual(0); // AAA still present (block intact)
   expect(iC).toBeGreaterThanOrEqual(0);
 });
+
+// #84 comment 750: dropping onto the LOWER HALF of the last block appends the dragged block at the very
+// END of the doc — even with NO trailing blank line to hover below the last block. The end drop shows a
+// bottom-edge indicator on the last line (cm-lp-block-droptarget-end), not a top-border ("before").
+test("#84 comment 750: drop on the last block's lower half moves a block to the very end", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "blockdrag-end");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("AAA first\n\nBBB second\n\nCCC third"); // NO trailing blank line
+  await sleep(400);
+  await page.getByText("AAA first").click();
+  await sleep(150);
+
+  // grab BBB's grip and drop on the LOWER HALF of CCC (the last block) → BBB appends after CCC.
+  const bb = (await page.getByText("BBB second").boundingBox())!;
+  await page.mouse.move(bb.x + 30, bb.y + bb.height / 2);
+  await sleep(200);
+  const g = (await grip(page).boundingBox())!;
+  const cb = (await page.getByText("CCC third").boundingBox())!;
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(cb.x + 20, cb.y + cb.height * 0.85, { steps: 14 }); // lower half of the last block
+  await sleep(150);
+  const endIndicator = await page.locator(".cm-lp-block-droptarget-end").count();
+  await page.mouse.up();
+  await sleep(300);
+
+  const text = await page.locator("[data-pane=preview] .cm-content").innerText();
+  const iA = text.indexOf("AAA"), iB = text.indexOf("BBB"), iC = text.indexOf("CCC");
+  expect(endIndicator, "the end-of-doc drop indicator shows on the last block's bottom edge").toBeGreaterThan(0);
+  expect(iA).toBeLessThan(iC); // AAA still first
+  expect(iC).toBeLessThan(iB); // CCC now before BBB — BBB moved to the very end
+});

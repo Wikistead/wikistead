@@ -14,12 +14,20 @@ import { blockRangeAt, computeBlockMove } from "./block-move"
 // ── drop indicator (display-only) ───────────────────────────────────────────
 const setDropTarget = StateEffect.define<number | null>() // a line-start offset, or null
 const dropLine = Decoration.line({ class: "cm-lp-block-droptarget" })
+// #84 comment 750: the very-end drop. A target of doc.length means "append after the last block", which
+// a top-border on the last line can't show (it reads as "before"). Render a BOTTOM-border on the last
+// line instead so the user sees a drop slot after the last block even with no trailing blank line.
+const dropLineEnd = Decoration.line({ class: "cm-lp-block-droptarget-end" })
 const dropField = StateField.define<DecorationSet>({
   create: () => RangeSet.empty,
   update(deco, tr) {
     for (const e of tr.effects) {
       if (e.is(setDropTarget)) {
-        return e.value == null ? RangeSet.empty : RangeSet.of([dropLine.range(tr.state.doc.lineAt(e.value).from)])
+        if (e.value == null) return RangeSet.empty
+        const doc = tr.state.doc
+        return e.value >= doc.length
+          ? RangeSet.of([dropLineEnd.range(doc.lineAt(doc.length).from)]) // end-of-doc ⇒ last line's bottom
+          : RangeSet.of([dropLine.range(doc.lineAt(e.value).from)])
       }
     }
     return deco.map(tr.changes)
@@ -27,11 +35,27 @@ const dropField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 })
 
-// The block-start offset under viewport y (for the drop position); doc.length when below all.
+// Is `block` the last content block (no non-blank line after it)? An end-drop appends after it.
+function isLastContentBlock(view: EditorView, blockTo: number): boolean {
+  const doc = view.state.doc
+  for (let n = doc.lineAt(blockTo).number + 1; n <= doc.lines; n++) {
+    if (doc.line(n).text.trim() !== "") return false
+  }
+  return true
+}
+
+// The block-start offset under viewport y (for the drop position); doc.length ⇒ append at the very end.
+// #84 comment 750: also append at the end when the pointer is over the LOWER HALF of the LAST block, so a
+// block can be dropped after the last one even when there is no trailing blank line to hover below it.
 function targetUnder(view: EditorView, clientX: number, clientY: number): number {
   const pos = view.posAtCoords({ x: clientX, y: clientY })
   if (pos == null) return view.state.doc.length // below the last line ⇒ append
   const block = blockRangeAt(view.state, pos)
+  if (block && isLastContentBlock(view, block.to)) {
+    const top = view.coordsAtPos(block.from)?.top
+    const bottom = view.coordsAtPos(block.to)?.bottom
+    if (top != null && bottom != null && clientY > (top + bottom) / 2) return view.state.doc.length // lower half ⇒ append at end
+  }
   return block ? block.from : view.state.doc.line(view.state.doc.lineAt(pos).number).from
 }
 
