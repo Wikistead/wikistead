@@ -2,7 +2,7 @@
 // Phase 4b per-page grant/revoke/list. Only a `manage` holder may grant/revoke/list;
 // a grant makes the grantee a real FGA viewer (and a search viewer after reindex); a
 // revoke drops them; granting on a DRAFT is how you invite someone to it.
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import postgres from 'postgres'
 import * as Y from 'yjs'
 import { pool } from '../db/pool.js'
@@ -11,7 +11,7 @@ import { fgaClient, check, deleteObjectTuples, writeTuples, deleteTuples } from 
 import { LogicalSearchDriver, buildSearchDoc } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, unrestrictPageAccess, listPageRestrictions, setPagePrivate, unsetPagePrivate, isPagePrivate, listPages, getPage } from '../routes/pages.js'
-import { createShareLink, listShareLinks, revokeShareLink } from '../routes/share-links.js'
+import { createShareLink, listShareLinks, revokeShareLink, revokeResourceShareLinks } from '../routes/share-links.js'
 import { drainAuditOutbox } from '../audit/outbox.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -237,6 +237,38 @@ describe('per-page private (ADR-098 allowlist)', () => {
     expect(await isPagePrivate(fgaClient, { pageId, userId: 'dev-user' })).toBe(true)
     await unsetPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
     expect(await isPagePrivate(fgaClient, { pageId, userId: 'dev-user' })).toBe(false)
+  })
+
+  it('#109 comment 785: a partial FGA-delete failure keeps the page private, revokes the other links, and leaves the failed one recoverable', async () => {
+    // Two page links; make the FGA delete of linkB fail (but not linkA / anything else).
+    const linkA = await createShareLink(db, fgaClient, { tenantId: TENANT, plan: 'free', userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null })
+    const linkB = await createShareLink(db, fgaClient, { tenantId: TENANT, plan: 'free', userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'edit', expiresInSeconds: null })
+    const realWrite = fgaClient.write.bind(fgaClient)
+    const spy = vi.spyOn(fgaClient, 'write').mockImplementation(async (body: Parameters<typeof realWrite>[0]) => {
+      if ((body?.deletes ?? []).some((d) => d.user === `share_link:${linkB.id}`)) throw new Error('fga transient down')
+      return realWrite(body)
+    })
+    try {
+      await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
+    } finally { spy.mockRestore() }
+
+    // The page IS private (fail-safe: the marker + public strip committed regardless of the revoke miss).
+    expect(await isPagePrivate(fgaClient, { pageId, userId: 'dev-user' })).toBe(true)
+    // linkA revoked (FGA cleared → view=false) AND its DB row revoked (not in the active list).
+    expect(await check(fgaClient, `share_link:${linkA.id}`, 'view', { type: 'page', id: pageId })).toBe(false)
+    // linkB's FGA delete FAILED → it is still live on FGA (edit) AND left revoked_at IS NULL (recoverable),
+    // NOT a half-state: the DB revoke is atomic per link (only the FGA-cleared ones are marked revoked).
+    expect(await check(fgaClient, `share_link:${linkB.id}`, 'edit', { type: 'page', id: pageId })).toBe(true)
+    const active = await listShareLinks(db, fgaClient, { userId: 'dev-user', resource: { type: 'page', id: pageId } })
+    expect(active.find((l) => l.id === linkB.id)).toBeDefined() // still active (recoverable)
+    expect(active.find((l) => l.id === linkA.id)).toBeUndefined()
+
+    // Recovery: re-run (spy gone) picks up the still-active linkB idempotently (revoked_at IS NULL filter).
+    const res = await revokeResourceShareLinks(db, fgaClient, { type: 'page', id: pageId }, TENANT, 'dev-user')
+    expect(res.failed).toHaveLength(0)
+    expect(res.revoked.map((r) => r.id)).toContain(linkB.id)
+    expect(await check(fgaClient, `share_link:${linkB.id}`, 'edit', { type: 'page', id: pageId })).toBe(false)
+    await unsetPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
   })
 
   it('#109 Fix B: listPages / getPage expose the private flag to a viewer on the allowlist (lock badge)', async () => {
