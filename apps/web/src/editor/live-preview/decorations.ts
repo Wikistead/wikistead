@@ -178,6 +178,62 @@ class BulletWidget extends WidgetType {
   }
 }
 
+// #202 (comment 761): nested ORDERED lists mirror the bullet hierarchy — each nesting level counts
+// independently (a nested list restarts, not merged into the parent's run) and gets its own ordinal
+// STYLE: level 0 = decimal (1.), 1 = lower-alpha (a.), 2 = lower-roman (i.), then cycle. The DISPLAYED
+// ordinal is the item's POSITION in its list (from the syntax tree), NOT the raw source number, so
+// `1. / 2. / 3.` typed at any indent renders as the correct per-level sequence. Display-only (the source
+// markers round-trip unchanged — Open formats).
+function toAlpha(n: number): string {
+  let s = "";
+  while (n > 0) { n--; s = String.fromCharCode(97 + (n % 26)) + s; n = Math.floor(n / 26); }
+  return s || "a";
+}
+function toRoman(n: number): string {
+  const map: [number, string][] = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]];
+  let s = "";
+  for (const [v, r] of map) while (n >= v) { s += r; n -= v; }
+  return s || "i";
+}
+function orderedLabel(level: number, ordinal: number): string {
+  const style = level % 3; // 0 decimal, 1 lower-alpha, 2 lower-roman
+  const body = style === 1 ? toAlpha(ordinal) : style === 2 ? toRoman(ordinal) : String(ordinal);
+  return body + ".";
+}
+class OrderedWidget extends WidgetType {
+  constructor(readonly level: number, readonly ordinal: number) { super(); }
+  toDOM() {
+    const span = document.createElement("span");
+    span.className = "cm-lp-ordinal";
+    span.textContent = orderedLabel(this.level, this.ordinal);
+    return span;
+  }
+  eq(o: OrderedWidget) { return o.level === this.level && o.ordinal === this.ordinal; }
+}
+// The runtime node is a real @lezer SyntaxNodeRef (fuller than RenderNode's minimal typing), so we reach
+// .parent/.prevSibling here for the tree walks.
+type TreeNode = { readonly name: string; readonly prevSibling: TreeNode | null; readonly parent: TreeNode | null };
+const asTree = (node: RenderNode): TreeNode => node.node as unknown as TreeNode;
+// The item's 1-based position within its immediate list (independent per nesting level — a nested list
+// starts at 1). Counts preceding ListItem siblings in the syntax tree, so "wrong" source numbers still
+// render the correct per-level sequence.
+function orderedOrdinal(node: RenderNode): number {
+  const item = asTree(node).parent; // ListMark -> ListItem
+  let n = 1;
+  let sib = item?.prevSibling ?? null;
+  while (sib) { if (sib.name === "ListItem") n++; sib = sib.prevSibling; }
+  return n;
+}
+// #202 (comment 761): the NESTING DEPTH (0 = top-level) from the syntax tree — counts ancestor list
+// nodes. Bullets AND ordered lists both key their per-level style off this SAME metric, so their hierarchy
+// reads consistently (a single nest is level 1 for both), independent of the raw indent width.
+function listDepth(node: RenderNode): number {
+  let count = 0;
+  let p = asTree(node).parent; // start at ListItem
+  while (p) { if (p.name === "OrderedList" || p.name === "BulletList") count++; p = p.parent; }
+  return Math.max(0, count - 1);
+}
+
 // GFM task checkbox (ADR-019). The `[ ]`/`[x]` TaskMarker renders as a real checkbox
 // (reveal-on-cursor still shows the raw markers for editing). How a click is handled
 // depends on the surface, supplied via this facet
@@ -1452,11 +1508,15 @@ const RENDERERS: BlockRenderer[] = [
     match: (n) => n === "ListMark",
     enter: (node, ctx) => {
       const list = node.node.parent?.parent?.name; // ListItem -> Bullet/OrderedList
-      // Replace "-"/"*" with a per-LEVEL bullet glyph (#202: •→◦→▪ by nesting). OrderedList keeps "1.".
+      // Replace "-"/"*" with a per-LEVEL bullet glyph (#202: •→◦→▪ by nesting). #202 (comment 761)
+      // an ORDERED marker is replaced with a per-LEVEL ordinal (1.→a.→i.) counted INDEPENDENTLY within
+      // its nested list (not merged into the parent's run), so nested numbering reads as a real hierarchy.
+      // Both key off the SAME nesting DEPTH (listDepth) so bullets and ordered lists stay consistent.
+      const level = listDepth(node);
       if (list === "BulletList") {
-        const line = ctx.state.doc.lineAt(node.from);
-        const indent = /^[ \t]*/.exec(line.text)![0].replace(/\t/g, "  ").length;
-        ctx.hideMarker(node.from, node.to, Decoration.replace({ widget: new BulletWidget(Math.floor(indent / 2)) }));
+        ctx.hideMarker(node.from, node.to, Decoration.replace({ widget: new BulletWidget(level) }));
+      } else if (list === "OrderedList") {
+        ctx.hideMarker(node.from, node.to, Decoration.replace({ widget: new OrderedWidget(level, orderedOrdinal(node)) }));
       }
     },
   },
@@ -1890,6 +1950,9 @@ export const livePreviewTheme = EditorView.baseTheme({
     borderTop: "2px solid var(--border, #888)",
   },
   ".cm-lp-bullet": { paddingRight: "0.25em" },
+  // #202: the ordered-list ordinal (per-level style: decimal / lower-alpha / lower-roman). Tabular so
+  // widths align down a list; the raw source number is hidden (this widget replaces it).
+  ".cm-lp-ordinal": { paddingRight: "0.35em", fontVariantNumeric: "tabular-nums" },
   // Task checkbox: replaces the raw `[ ]`/`[x]`. Sits inline with the list text; the
   // accent cursor signals it is clickable (disabled = read-only, no edit permission).
   ".cm-lp-checkbox": { verticalAlign: "middle", margin: "0 0.35em 0 0", cursor: "pointer", accentColor: "var(--accent)" },
