@@ -1,5 +1,4 @@
 import { randomBytes } from 'node:crypto'
-import { promises as dns } from 'node:dns'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { resolveEntitlements } from '@wikistead/entitlements'
@@ -7,6 +6,7 @@ import { emit } from '@wikistead/events'
 import { entitlementDenied } from '../entitlement-ux.js'
 import { pool } from '../db/pool.js'
 import type { TenantDb } from '../db/index.js'
+import { CHALLENGE_PREFIX, txtChallengePresent, type ResolveTxt } from '../auth/dns-challenge.js'
 
 // Custom-domain verification registry (#123 / ADR-065). A Pro tenant brings its own domain;
 // we issue a TLS cert ONLY after DNS ownership is verified (issuing for arbitrary caller hosts
@@ -14,8 +14,6 @@ import type { TenantDb } from '../db/index.js'
 // challenge → verify → activate (mirror to tenants.custom_domain, which host→tenant resolution
 // already reads, ADR-016) → revoke. The cert-manager `Certificate` lifecycle is infra (#148);
 // a Certificate is only ever created for a `verified` row.
-
-const CHALLENGE_PREFIX = '_wikistead-challenge'
 
 async function requireTenantAdmin(fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> {
   const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'admin', object: `tenant:${tenantId}` })
@@ -84,18 +82,16 @@ export async function addCustomDomain(
 export async function verifyCustomDomain(
   db: TenantDb,
   args: { tenantId: string; domain: string },
-  opts: { resolveTxt?: (name: string) => Promise<string[][]> } = {},
+  opts: { resolveTxt?: ResolveTxt } = {},
 ): Promise<{ verified: boolean }> {
-  const resolveTxt = opts.resolveTxt ?? dns.resolveTxt
   const domain = normalizeDomain(args.domain)
   const [row] = await db.sql<{ verification_token: string; status: string }[]>`
     SELECT verification_token, status FROM custom_domains WHERE domain = ${domain}
   `
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
 
-  const records = await resolveTxt(`${CHALLENGE_PREFIX}.${domain}`).catch(() => [] as string[][])
-  const present = records.some((chunks) => chunks.join('').trim() === row.verification_token)
-  if (!present) {
+  // Same DNS-TXT ownership check as enrol domains (#101) — one primitive, no looser second path.
+  if (!(await txtChallengePresent(domain, row.verification_token, opts.resolveTxt))) {
     throw Object.assign(new Error('DNS challenge not found yet'), { statusCode: 400, code: 'not_verified' })
   }
 

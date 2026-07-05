@@ -42,6 +42,7 @@ import { brandingPlugin } from './routes/branding.js'
 import { tenantOidcPlugin } from './routes/tenant-oidc.js'
 import { orphanDraftsPlugin } from './routes/orphan-drafts.js'
 import { customDomainsPlugin } from './routes/custom-domains.js'
+import { enrollmentPlugin } from './auth/enroll-domains.js'
 import { tenantSamlPlugin } from './routes/tenant-saml.js'
 import { samlAuthPlugin } from './routes/saml-auth.js'
 import { aiPlugin } from './routes/ai.js'
@@ -335,6 +336,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(tenantOidcPlugin)
   await app.register(orphanDraftsPlugin)
   await app.register(customDomainsPlugin)
+  await app.register(enrollmentPlugin)
   await app.register(tenantSamlPlugin)
   await app.register(samlAuthPlugin)
   await app.register(aiPlugin)
