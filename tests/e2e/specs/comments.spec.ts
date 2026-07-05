@@ -110,3 +110,41 @@ test("comments panel: × and Esc close it; outside-click and editor-Esc do not",
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
 });
+
+// #214 comment 751: (1) the reply banner previews the TARGET comment's content; (2) deleting the last
+// comment of a thread leaves NO empty thread frame; (3) no resolve wording //"resolved")
+// appears anywhere — the empty state is resolve-agnostic. Verified by real rendered DOM (not just testids).
+test("#214 comment 751: reply preview, no empty thread on delete, no resolve wording", async ({ page }) => {
+  await openDemo(page);
+  const pageId = await page.evaluate(async (api) => {
+    const r = await fetch(`${api}/spaces/demo_space/pages`, { method: "POST", headers: { Authorization: "Bearer dev-token", "content-type": "application/json" }, body: JSON.stringify({ title: "P4 comments 751" }) });
+    return (await r.json()).id as string;
+  }, API);
+  await page.goto(`/p/${pageId}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(400);
+  await openComments(page);
+  const panel = page.locator("[data-testid=comments-panel]");
+  await expect(panel).toBeVisible();
+
+  // (3) empty state carries no resolve wording (real rendered text)
+  const list = panel.locator("[data-testid=comment-list]");
+  for (const w of ["未解決", "解決", "resolved", "Resolved", "unresolved"]) {
+    await expect(page.getByText(w, { exact: false })).toHaveCount(0);
+  }
+
+  // post a page comment
+  await panel.locator("[data-testid=comment-input]").last().fill("parent comment body");
+  await panel.locator("[data-testid=comment-submit]").last().click();
+  await expect(panel.locator("[data-testid=comment-thread]")).toHaveCount(1);
+
+  // (1) reply → banner previews the target comment's content
+  await panel.locator("[data-testid=comment-reply]").first().click();
+  await expect(panel.locator("[data-testid=reply-preview]")).toContainText("parent comment body");
+  await panel.locator("[data-testid=reply-cancel]").click();
+
+  // (2) delete the only comment → the empty thread frame does NOT remain
+  await panel.locator("[data-testid=comment-delete]").first().click();
+  await expect(panel.locator("[data-testid=comment-thread]")).toHaveCount(0);
+  await expect(list).not.toContainText("未解決");
+});

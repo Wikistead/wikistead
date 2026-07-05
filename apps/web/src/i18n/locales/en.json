@@ -476,14 +476,10 @@
   },
   "comments": {
     "title": "Comments",
-    "open": "Open",
-    "resolved": "Resolved",
     "addOnSelection": "Comment on selection",
     "placeholder": "Add a comment…",
     "pagePlaceholder": "Comment on the page…",
     "submit": "Comment",
-    "resolve": "Resolve",
-    "reopen": "Reopen",
     "empty": "No comments yet."
   },
   "history": {
@@ -585,20 +581,11 @@
     "revoke": "Revoke"
   },
   "commentsPanel": {
-    "open": "Open",
-    "resolved": "Resolved",
     "submit": "Comment",
-    "addInline": "Add comment on selection",
-    "selectFirst": "Select text in the page first, then click Add comment.",
-    "promptInline": "Comment on \"{{quote}}\":",
-    "anchoredDeleted": "(anchored text deleted)",
     "delete": "delete",
     "reply": "Reply…",
     "replyingTo": "Replying to",
     "pagePlaceholder": "Comment on the page…",
-    "resolve": "Resolve",
-    "reopen": "Reopen",
-    "emptyOpen": "No open comments.",
-    "emptyResolved": "No resolved comments."
+    "empty": "No comments yet."
   }
 }
