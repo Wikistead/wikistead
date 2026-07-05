@@ -17,19 +17,11 @@ export interface CellStyle {
   align?: "left" | "center" | "right";
 }
 export interface TCell {
-  text: string;
+  text: string; // #89 (rescoped): INLINE cell text only (never block content / macros) — ADR-037 text+<br>
   header: boolean;
   colspan: number;
   rowspan: number;
   style?: CellStyle;
-  // #89 / ADR-097: a BLOCK cell. When true, `text` is Markdown block content (a list, several
-  // paragraphs, a heading/quote) rendered through the shared sanitized renderer (renderMarkdownToDom /
-  // renderMarkdownToHtml) — NOT inline text. A block cell is pipe-inexpressible → forces the HTML tier;
-  // in the `:::table` HTML it is marked `<td data-block="1">` so the round-trip is unambiguous. The XSS
-  // boundary is unchanged: block content is a sanitized subtree from the trusted renderer (allowlist
-  // drops <iframe>/<script>/…), never a raw-innerHTML write of user HTML (ADR-037). Macro-in-cell
-  // (:::embed etc.) is gated on the directive-nesting fix (#185); non-macro blocks ship independently.
-  block?: boolean;
 }
 export type Grid = (TCell | null)[][]; // null = covered by a spanning origin
 
@@ -146,10 +138,7 @@ export function parseHtml(html: string): Grid {
       const colspan = clampSpan(/colspan\s*=\s*"?(\d+)"?/i.exec(attrs)?.[1] ?? null);
       const rowspan = clampSpan(/rowspan\s*=\s*"?(\d+)"?/i.exec(attrs)?.[1] ?? null);
       const style = sanitizeStyle(/style\s*=\s*"([^"]*)"/i.exec(attrs)?.[1] ?? ""); // allowlist
-      // #89: a `data-block="1"` cell carries Markdown block content (rendered via the shared sanitizer).
-      // Its text still decodes via htmlToCellText (<br>→\n, tags stripped) so the source round-trips.
-      const block = /\bdata-block\s*=\s*"?1"?/i.test(attrs);
-      grid[r]![c] = { text: htmlToCellText(m[3]!).trim(), header: m[1]!.toLowerCase() === "th", colspan, rowspan, ...(style ? { style } : {}), ...(block ? { block: true } : {}) };
+      grid[r]![c] = { text: htmlToCellText(m[3]!).trim(), header: m[1]!.toLowerCase() === "th", colspan, rowspan, ...(style ? { style } : {}) };
       for (let dr = 0; dr < rowspan; dr++) {
         for (let dc = 0; dc < colspan; dc++) {
           if (dr === 0 && dc === 0) continue;
@@ -179,10 +168,6 @@ const complexHeader = (grid: Grid): boolean => grid.some((row, r) => r > 0 && ro
 // it must serialize at the :::table HTML tier (where the newline becomes <br>). Without this
 // guard toPipe would silently flatten the newline (lossy).
 const hasMultilineCell = (grid: Grid): boolean => grid.some((row) => row.some((c) => c && c.text.includes("\n")));
-// #89 / ADR-097: a block-content cell (Markdown list/paragraphs) is pipe-inexpressible — a pipe cell is
-// single-line inline text. It forces the :::table HTML tier (where <td data-block> carries the block).
-const hasBlockCell = (grid: Grid): boolean => grid.some((row) => row.some((c) => c && c.block));
-
 export function toHtml(grid: Grid): string {
   let s = "<table>";
   for (const row of grid) {
@@ -193,8 +178,7 @@ export function toHtml(grid: Grid): string {
       const cs = cell.colspan > 1 ? ` colspan="${cell.colspan}"` : "";
       const rs = cell.rowspan > 1 ? ` rowspan="${cell.rowspan}"` : "";
       const st = cell.style ? ` style="${styleToCss(cell.style)}"` : "";
-      const db = cell.block ? ` data-block="1"` : ""; // #89: mark a block cell so parseHtml round-trips it
-      s += `<${tag}${cs}${rs}${st}${db}>${cellTextToHtml(cell.text)}</${tag}>`;
+      s += `<${tag}${cs}${rs}${st}>${cellTextToHtml(cell.text)}</${tag}>`;
     }
     s += "</tr>";
   }
@@ -329,7 +313,7 @@ export function deleteRowAt(grid: Grid, at: number): Grid {
 // share ONE rule: a grid is a GFM pipe table iff it has no spans, no per-cell style, and no
 // body-row header (all pipe-inexpressible → the :::table HTML tier).
 export function representableAsPipe(grid: Grid): boolean {
-  return !hasSpans(grid) && !hasStyle(grid) && !complexHeader(grid) && !hasMultilineCell(grid) && !hasBlockCell(grid);
+  return !hasSpans(grid) && !hasStyle(grid) && !complexHeader(grid) && !hasMultilineCell(grid);
 }
 
 // Serialize to the lowest tier that can represent the grid: pipes if span-free

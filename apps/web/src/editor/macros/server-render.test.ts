@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { renderMarkdownToHtml, html, builtinMacroRegistry, tableHtmlRender, type MacroHtmlRegistry } from "@wikistead/macro-render";
-import { toHtml, type TCell } from "./table-model";
 
 // #85 / ADR-059+085: the DOM-free server-side markdown → HTML renderer (published/static export). It
 // mirrors the editor's DOM renderer from the SAME grammar + macro contract, emits SafeHtml (the #88 XSS
@@ -97,52 +96,16 @@ describe("renderMarkdownToHtml — #89/ADR-097 cell block-content sanitize allow
   });
 });
 
-// #89 comment 782: the ACTUAL cell path is `tableHtmlRender` → blockCellSource (decode the wire-escaped
-// inner back to Markdown source) → renderMarkdownToHtml. The reviewer's core threat is a raw <iframe> that
-// survives that decode-then-reparse and goes live. These tests drive the END-TO-END cell path (not just
-// renderMarkdownToHtml directly) and assert nothing dangerous becomes live — including the escaped-then-
-// decoded round-trip that blockCellSource performs (a `&lt;iframe&gt;` in the wire → decoded to source →
-// re-escaped by renderMarkdownToHtml's HTMLBlock default). cellTextToHtml (toHtml) entity-escapes cell
-// source, so the wire inner of a block cell is ALWAYS entity-escaped — that is what these inputs mirror.
-describe("tableHtmlRender — #89/ADR-097 block-cell path never goes live (comment 782)", () => {
-  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  const cell = (source: string) => tableHtmlRender(`<table><tbody><tr><td data-block="1">${esc(source)}</td></tr></tbody></table>`).value;
-
-  it("renders allowlisted block content in a cell (a list becomes a real <ul><li>)", () => {
-    const h = cell("- one\n- two");
-    expect(h).toMatch(/<ul><li>(<p>)?one(<\/p>)?<\/li>\s*<li>(<p>)?two(<\/p>)?<\/li><\/ul>/);
-  });
-
-  const DANGEROUS = [
-    '<iframe src="https://evil.example"></iframe>',
-    '<script>alert(1)</script>',
-    '<object data="x"></object>',
-    '<embed src="x">',
-    '<img src=x onerror="alert(1)">',
-    '<svg onload="alert(1)"></svg>',
-  ];
-  for (const raw of DANGEROUS) {
-    const kind = raw.match(/^<([a-z]+)/)![1];
-    it(`a raw <${kind}> written into a block cell degrades to escaped text (no live element)`, () => {
-      const h = cell(`before\n\n${raw}\n\nafter`);
-      // the decode-then-reparse (blockCellSource → renderMarkdownToHtml HTMLBlock default) re-escapes it
-      // the dangerous tag only ever appears inside an escaped `&lt;…&gt;` run, never as a live element (so
-      // any on* handler it carries is inert text, not an attribute on a real node).
-      expect(h).not.toMatch(new RegExp(`<${kind}[\\s>]`, "i")); // NOT a live tag
-      expect(h).toContain(`&lt;${kind}`); // the tag survives ONLY as escaped text
-      expect(h).toContain("<td data-block=\"1\">"); // the cell wrapper itself is intact
-    });
-  }
-
-  it("a javascript: / data: URL in a block cell never becomes a live href", () => {
-    const h = cell("[x](javascript:alert(1)) [y](data:text/html,x)");
-    expect(h).not.toContain('href="javascript:');
-    expect(h).not.toContain('href="data:');
-  });
-
-  it("a plain (non-block) cell passes through unchanged — no markdown reparse", () => {
-    const plain = tableHtmlRender('<table><tbody><tr><td>a &amp; b</td></tr></tbody></table>').value;
-    expect(plain).toContain("<td>a &amp; b</td>"); // untouched; only data-block cells are reparsed
+// #89 (rescoped, 2026-07-05): cells are inline text only. tableHtmlRender no longer reparses cell content
+// (the block-content feature was removed) — it emits the table body verbatim; cell text is already entity-
+// escaped by cellTextToHtml (toHtml), and the downstream #85 export sanitizer is the authoritative XSS
+// boundary (covered end-to-end in the html-export integration tests). No markdown/macro dispatch per cell.
+describe("tableHtmlRender — #89 (rescoped): cell body is emitted verbatim, no per-cell reparse", () => {
+  it("passes the table body through unchanged (entity-escaped cell text stays escaped)", () => {
+    const body = '<table><tbody><tr><td>a &amp; b</td><td>&lt;iframe&gt;</td></tr></tbody></table>';
+    const out = tableHtmlRender(body).value;
+    expect(out).toBe(body); // verbatim — no reparse, no macro dispatch; final sanitizer handles raw HTML
+    expect(out).not.toMatch(/<iframe[\s>]/i); // cell text stays escaped (never a live tag here)
   });
 });
 
@@ -233,36 +196,5 @@ describe("renderMarkdownToHtml — built-in M2 directives (#85 slice 2)", () => 
     const h = out(":::embed-external\njavascript:alert(1)\n:::", reg);
     expect(h.toLowerCase()).not.toContain('href="javascript:'); // never a link carrying the scheme
     expect(h).toContain('<span class="embed-link">'); // rendered as inert text instead
-  });
-});
-
-// #89 / ADR-097 anti-test ③④ (server): the :::table export renders a `data-block="1"` cell's Markdown
-// through the shared sanitizer, so block content renders AND a raw <iframe>/<script> in a cell can't
-// smuggle past the embed gates. Wire form is built via toHtml (the real serializer).
-describe("tableHtmlRender — block-content cells (#89 / ADR-097)", () => {
-  const block = (text: string): TCell => ({ text, header: false, colspan: 1, rowspan: 1, block: true });
-  const plain = (text: string): TCell => ({ text, header: false, colspan: 1, rowspan: 1 });
-
-  it("renders a block cell's Markdown list as real <ul>/<li> (not inline text)", () => {
-    const h = tableHtmlRender(toHtml([[block("- one\n- two")]])).value;
-    expect(h).toContain("<ul>");
-    expect(h).toContain("one");
-    expect(h).toContain("two");
-    expect(h).toContain('data-block="1"'); // cell marker preserved in the export
-  });
-
-  it("a raw <iframe>/<script> inside a block cell is NOT live — the embed gate can't be bypassed", () => {
-    const h = tableHtmlRender(toHtml([[block("- <iframe src=https://evil.example></iframe>\n- <script>alert(1)</script>")]])).value;
-    expect(h).not.toMatch(/<iframe[\s>]/i); // no live frame
-    expect(h).not.toMatch(/<script[\s>]/i); // no live script
-    expect(h).toContain("&lt;iframe"); // degraded to escaped text
-    expect(h).toContain("&lt;script");
-  });
-
-  it("a plain text cell passes through unchanged (no block rendering, no regression)", () => {
-    const h = tableHtmlRender(toHtml([[plain("hello"), plain("a\nb")]])).value;
-    expect(h).not.toContain("data-block");
-    expect(h).toContain("hello");
-    expect(h).toContain("a<br>b"); // plain multi-line stays <br>-joined inline text
   });
 });

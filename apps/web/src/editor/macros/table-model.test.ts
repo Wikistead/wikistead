@@ -56,57 +56,6 @@ describe("table-model: in-cell newline <-> <br> round-trip (#86 / ADR-037)", () 
   });
 });
 
-// #89 / ADR-097: block content (Markdown list/paragraphs) in a cell. A block cell forces the :::table
-// HTML tier (pipe-inexpressible) and round-trips through toHtml/parseHtml via a `data-block="1"` marker;
-// its text is the Markdown source (rendered elsewhere through the shared sanitizer). Anti-test ④.
-describe("table-model: block-content cell round-trip (#89 / ADR-097)", () => {
-  const blockCell = (text: string) => ({ text, header: false, colspan: 1, rowspan: 1, block: true });
-
-  it("a block cell forces the HTML tier; a plain table stays pipe (no regression)", () => {
-    expect(representableAsPipe([[blockCell("- a\n- b")]])).toBe(false);
-    expect(serialize([[blockCell("- a\n- b")]]).tier).toBe("html");
-    // one block cell among plain cells still demotes the whole table to HTML
-    const mixed = [[{ text: "x", header: true, colspan: 1, rowspan: 1 }], [blockCell("- a\n- b")]];
-    expect(serialize(mixed).tier).toBe("html");
-    // a plain table with no block/style/span/multiline cell is still a clean pipe table
-    expect(representableAsPipe(parsePipe("| A | B |\n| --- | --- |\n| 1 | 2 |"))).toBe(true);
-  });
-
-  it("toHtml marks a block cell `data-block=1` and round-trips text + block flag through parseHtml", () => {
-    const grid = [[blockCell("- one\n- two\n- three")]];
-    const out = toHtml(grid);
-    expect(out).toContain('data-block="1"');
-    const back = parseHtml(out);
-    expect(back[0]![0]).toMatchObject({ text: "- one\n- two\n- three", block: true });
-  });
-
-  it("round-trips multi-paragraph and blockquote/heading Markdown losslessly", () => {
-    for (const md of ["para1\n\npara2", "> quote\n> line2", "# Heading\n\nbody", "1. a\n2. b\n\ntail"]) {
-      const back = parseHtml(toHtml([[blockCell(md)]]));
-      expect(back[0]![0]!.text).toBe(md); // exact source preserved
-      expect(back[0]![0]!.block).toBe(true);
-    }
-  });
-
-  it("a plain (non-block) cell never gains data-block, and its multi-line text stays inline text", () => {
-    const plainMultiline = [[{ text: "a\nb", header: false, colspan: 1, rowspan: 1 }]];
-    const out = toHtml(plainMultiline);
-    expect(out).not.toContain("data-block");
-    expect(parseHtml(out)[0]![0]!.block).toBeUndefined(); // stays a text cell (<br>-joined inline)
-  });
-
-  it("block-cell Markdown with < > & round-trips (the source is entity-safe on the wire)", () => {
-    const md = "- a < b & c > d"; // angle brackets / ampersand in the Markdown source
-    const out = toHtml([[blockCell(md)]]);
-    // the cell inner escapes the angle brackets/ampersand — no raw tag is emitted from cell content
-    const inner = /data-block="1">([\s\S]*?)<\/td>/.exec(out)![1]!;
-    expect(inner).toContain("&lt;");
-    expect(inner).toContain("&gt;");
-    expect(inner).not.toMatch(/<[a-z]/i); // cell inner carries no live tag, only escaped entities
-    expect(parseHtml(out)[0]![0]!.text).toBe(md); // source recovered exactly
-  });
-});
-
 describe("table-model: parse/serialize", () => {
   it("parses a GFM pipe table (row 0 = header, no spans)", () => {
     const g = parsePipe("| A | B |\n| --- | --- |\n| 1 | 2 |");
