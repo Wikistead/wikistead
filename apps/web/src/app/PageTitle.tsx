@@ -13,11 +13,13 @@ const wrap = "box-border w-full min-w-0";
 // #190: the page title follows the PROSE font (--font-body) — the user's font choice / locale default —
 // not the chrome font. Without this it inherits the body's --font-ui (it lives outside .cm-content, so
 // the editor's --font-body doesn't reach it), so the title ignored the font selection while body did.
-const title = "m-0 block w-full text-[30px] font-bold leading-tight tracking-[-0.02em] text-foreground break-words [overflow-wrap:anywhere] [font-family:var(--font-body)]";
-// #212 comment 769 (2): view mode clamps the title to ONE line with an ellipsis so the header band stays a
-// constant one-row height (--wks-band-h independent of title length). The full title shows on hover (the
-// `title` attr tooltip) and in edit mode (the textarea wraps in full).
-const clamp = "truncate";
+// No `display` here: view mode adds line-clamp-2 (which needs display:-webkit-box), edit/full mode adds
+// `block`. A `block` in this base would override line-clamp's display and defeat the clamp (#212/780).
+const title = "m-0 w-full text-[30px] font-bold leading-tight tracking-[-0.02em] text-foreground break-words [overflow-wrap:anywhere] [font-family:var(--font-body)]";
+// #212 comment 780 (2): view mode clamps the title to at most TWO lines with an ellipsis — 1–2 lines show
+// as-is, 3+ collapse to 2 with an ellipsis. The band height stays bounded (max two rows). The full title
+// shows on hover (the `title` attr tooltip) and in edit mode (the textarea wraps in full).
+const clamp = "line-clamp-2";
 
 // `pageEditing` = the PAGE edit mode (not the rename input): view mode clamps a long
 // title to 2 lines; edit mode shows it in full, WRAPPING within the column (you must see
@@ -45,7 +47,7 @@ export function PageTitle({ title: value, onRename, editing: pageEditing = false
       {editing ? (
         <textarea
           ref={taRef}
-          className={`${title} resize-none overflow-hidden rounded-sm border border-border bg-background px-1.5 outline-none focus:border-[var(--accent)]`}
+          className={`${title} block resize-none overflow-hidden rounded-sm border border-border bg-background px-1.5 outline-none focus:border-[var(--accent)]`}
           data-testid="page-title-input"
           rows={1}
           autoFocus
@@ -59,12 +61,12 @@ export function PageTitle({ title: value, onRename, editing: pageEditing = false
           onBlur={commit}
         />
       ) : onRename ? (
-        <button type="button" className={`${title} cursor-text text-left ${pageEditing ? "" : clamp}`} data-testid="page-title" title={value || t("dialogs.renamePageTitle")}
+        <button type="button" className={`${title} cursor-text text-left ${pageEditing ? "block" : clamp}`} data-testid="page-title" title={value || t("dialogs.renamePageTitle")}
           onClick={() => { setDraft(value); setEditing(true); }}>
           {value || t("common.untitled")}
         </button>
       ) : (
-        <h1 className={`${title} ${pageEditing ? "" : clamp}`} data-testid="page-title" title={value}>{value || t("common.untitled")}</h1>
+        <h1 className={`${title} ${pageEditing ? "block" : clamp}`} data-testid="page-title" title={value}>{value || t("common.untitled")}</h1>
       )}
     </div>
   );
