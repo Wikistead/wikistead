@@ -18,10 +18,10 @@ describe("list indent/outdent (#202)", () => {
     expect(v.state.doc.toString()).toBe("  - item");
   });
 
-  it("Tab indents an ORDERED list item too", () => {
+  it("Tab indents an ORDERED list item by its marker width (3) so it parses as a nested list (#202)", () => {
     const v = view("1. item", 4);
     expect(indentList(v)).toBe(true);
-    expect(v.state.doc.toString()).toBe("  1. item");
+    expect(v.state.doc.toString()).toBe("   1. item"); // 3 spaces (marker `1. ` width) — clears the parent's content column
   });
 
   it("Tab does NOTHING (returns false) outside a list — default behaviour preserved", () => {
