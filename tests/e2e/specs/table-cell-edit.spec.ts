@@ -40,6 +40,43 @@ test("double-click a cell → type → Enter commits the new text to the doc (st
   await expect(tbl.locator("td").first()).toHaveText("hello");
 });
 
+// #216 / ADR-101 (comment 787): Excel "select a cell then just type" — a SINGLE click selects a cell, and a
+// printable keystroke REPLACES the cell's content and starts editing (no double-click / edit-button hunt).
+// Enter/F2 on a selected cell edits the EXISTING text (double-click parity). Verified in a real browser.
+test("#216: select a cell + type overwrites it (Excel select-then-type); Enter edits existing text", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "cell-overwrite");
+  await enterEdit(page);
+  await openTableInline(page);
+
+  // single click = select (NOT immediate edit), then typing REPLACES "1" with "Z" and starts editing.
+  const cell = page.getByTestId("table-edit").locator("td").first(); // body cell "1"
+  await cell.click();
+  await sleep(120);
+  await page.keyboard.type("Z");
+  await sleep(120);
+  await expect(page.getByTestId("table-edit").locator("td.cm-lp-cell-editing")).toHaveText("Z"); // overwritten + editing
+  await page.keyboard.press("Enter"); // commit
+  await sleep(200);
+  await page.keyboard.press("Escape"); // exit editor → static render
+  await sleep(200);
+  await expect(page.locator("[data-pane=preview] table.cm-lp-table").locator("td").first()).toHaveText("Z");
+
+  // Re-enter; Enter on a SELECTED cell edits the EXISTING text (does not overwrite) — append "9" → "Z9".
+  await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await expect(page.getByTestId("table-edit")).toBeVisible();
+  await page.getByTestId("table-edit").locator("td").first().click(); // select
+  await sleep(120);
+  await page.keyboard.press("Enter"); // F2/Enter → edit existing (caret at end), NOT overwrite
+  await sleep(120);
+  await page.keyboard.type("9");
+  await page.keyboard.press("Enter");
+  await sleep(200);
+  await page.keyboard.press("Escape");
+  await sleep(200);
+  await expect(page.locator("[data-pane=preview] table.cm-lp-table").locator("td").first()).toHaveText("Z9");
+});
+
 test("Shift+Enter inserts an in-cell newline → promotes to :::table with a <br>", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "cellnewline");

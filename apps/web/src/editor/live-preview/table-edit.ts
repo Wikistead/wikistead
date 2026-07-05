@@ -221,6 +221,10 @@ export const tableInlineEditor: InlineEditor = {
 
     const table = document.createElement("table");
     table.className = "cm-lp-table cm-lp-table-merged cm-lp-table-grid";
+    // #216 / ADR-101: the table is focusable so a SELECTED cell can receive keystrokes (Excel "type to
+    // overwrite"). tabIndex -1 keeps it out of the tab order; contentEditable=false on the root means CM's
+    // focus-delegation guard (ADR-054) won't reclaim focus while a cell edits.
+    table.tabIndex = -1;
 
     // Columns/rows affected by a border drag: if the dragged cell is part of a multi-cell
     // selection, resize ALL selected columns/rows uniformly; otherwise just this one.
@@ -242,7 +246,10 @@ export const tableInlineEditor: InlineEditor = {
     // inserts an in-cell <br>; paste is forced to text/plain; blur commits. Every commit rewrites the
     // block via apply() (one Y.Text edit) and remounts from the canonical source.
     let editHandle: { end(): void } | null = null;
-    const beginEdit = (el: HTMLElement, r: number, c: number) => {
+    // #216 / ADR-101 (comment 787): `overwrite` = the Excel "select a cell then just type" path — the
+    // cell's content is REPLACED with the typed text and edit starts (vs double-click / F2 which edits the
+    // EXISTING text in place). undefined = edit the current text (double-click path).
+    const beginEdit = (el: HTMLElement, r: number, c: number, overwrite?: string) => {
       const cur = grid[r]?.[c];
       if (!cur || editing) return;
       editing = true;
@@ -250,7 +257,7 @@ export const tableInlineEditor: InlineEditor = {
       applySel();
       // Drop the resize handles + the " " placeholder; render the cell's real text.
       el.querySelectorAll(".cm-lp-col-resize, .cm-lp-row-resize").forEach((h) => h.remove());
-      setCellText(el, cur.text);
+      setCellText(el, overwrite !== undefined ? overwrite : cur.text);
       el.contentEditable = "true";
       el.classList.add("cm-lp-cell-editing");
       editHandle = host.beginTextEdit(el); // #154: focus via the host (CM-safe in the inline path)
@@ -323,6 +330,7 @@ export const tableInlineEditor: InlineEditor = {
           dragging = true;
           anchor = [r, c];
           setRect(r, c, r, c);
+          table.focus({ preventScroll: true }); // #216: so a following keystroke lands on the selected cell
           const end = () => { dragging = false; window.removeEventListener("pointerup", end); };
           window.addEventListener("pointerup", end);
         });
@@ -338,6 +346,24 @@ export const tableInlineEditor: InlineEditor = {
       if (!dragging) return;
       const t = (e.target as HTMLElement)?.closest?.("[data-cellkey]") as HTMLElement | null;
       if (t?.dataset.cellkey) { const [r, c] = t.dataset.cellkey.split(",").map(Number) as [number, number]; setRect(anchor[0], anchor[1], r, c); }
+    });
+    // #216 / ADR-101 (comment 787): Excel "select then type" — with a cell selected (not yet editing), a
+    // single printable keystroke starts editing the ACTIVE cell (anchor) with the typed char, REPLACING its
+    // content. Enter/F2 fall through to normal edit-of-existing (below). Modifier combos (Ctrl/Cmd/Alt) are
+    // left for shortcuts (Ctrl+Enter = exit to RichUI/host). Nav/whitespace-only keys don't start an edit.
+    table.addEventListener("keydown", (e) => {
+      if (editing || !selected.size) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return; // shortcuts (e.g. Ctrl+Enter) — not a character
+      if (e.key === "Enter" || e.key === "F2") { // Excel F2 / Enter → edit the EXISTING text of the active cell
+        e.preventDefault();
+        const el = cellEls.get(`${anchor[0]},${anchor[1]}`);
+        if (el) beginEdit(el, anchor[0], anchor[1]);
+        return;
+      }
+      if (e.key.length !== 1 || e.key === " ") return; // only a single printable char overwrites (skip nav/space)
+      e.preventDefault();
+      const el = cellEls.get(`${anchor[0]},${anchor[1]}`);
+      if (el) beginEdit(el, anchor[0], anchor[1], e.key); // overwrite the cell with the typed char
     });
 
     const apply = (next: Grid) => {
