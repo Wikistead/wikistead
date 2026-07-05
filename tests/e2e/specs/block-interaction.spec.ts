@@ -37,3 +37,33 @@ test("block macro affordances are display-only and the edit button is keyboard-r
   // The table modal mounts (its edit surface). The doc is still unchanged by merely opening it.
   expect(await content()).toContain("plain tail"); // page intact; opening the editor didn't rewrite it
 });
+
+// #174 / ADR-087 sub-task 4: the block-drag GRIP (the drag affordance in the interaction matrix) appears
+// on hover over ANY top-level block — paragraphs AND widget-atom macros alike — in a zone SEPARATE from the
+// edit button (grip in the left margin outside the block; edit button top-left inside). This was #174's
+// held-back item ("grip not showing"), resolved by #84's hover-following grip; locked in here.
+test("#174: the block-drag grip appears on hover over paragraphs and macro atoms (separate from the edit button)", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1000, height: 700 } })).newPage();
+  await openScratch(page, "blockgrip");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("a paragraph here\n\n```mermaid\ngraph TD\nA-->B\n```\n\nlast para\n");
+  await sleep(600);
+  await page.getByText("last para").click(); // caret off the macro so it renders as an atom
+  await sleep(300);
+
+  const grip = page.locator("[data-testid=block-grip]");
+  // Hover a PARAGRAPH → grip shows.
+  const para = await page.getByText("a paragraph here").boundingBox();
+  if (para) await page.mouse.move(para.x + para.width / 2, para.y + para.height / 2);
+  await sleep(250);
+  await expect(grip, "grip shows on hover over a paragraph").toBeVisible();
+
+  // Hover the MERMAID widget atom → grip still shows (a widget can stopPropagation; the capture-phase
+  // listener still fires) AND the macro edit button is present — the two affordances co-exist, not collide.
+  const svg = await page.locator("[data-pane=preview] svg").first().boundingBox().catch(() => null);
+  if (svg) await page.mouse.move(svg.x + svg.width / 2, svg.y + svg.height / 2);
+  await sleep(250);
+  await expect(grip, "grip shows on hover over a widget-atom macro").toBeVisible();
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-edit]"), "the edit button co-exists with the grip").toHaveCount(1);
+});
