@@ -202,7 +202,11 @@ export function Sidebar() {
           {hasChildren ? <ChevronRight size={14} className={cn("transition-transform duration-[120ms]", node.isOpen && "rotate-90")} /> : <span className="inline-block w-[14px]" />}
         </span>
         <FileText size={14} className="flex-none text-fg-dim" />
-        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" data-testid="tree-page-name">{d.name || t("common.untitled")}</span>
+        {/* #219: a native tooltip ONLY when the title is truncated (VSCode/Finder tree behaviour). Checked
+            at hover time via scrollWidth > clientWidth, so it follows a sidebar resize; a fully-visible title
+            gets no title attr (empty string = no tooltip). */}
+        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" data-testid="tree-page-name"
+          onMouseEnter={(e) => { const el = e.currentTarget; el.title = el.scrollWidth > el.clientWidth ? (d.name || t("common.untitled")) : ""; }}>{d.name || t("common.untitled")}</span>
         {/* #109 Fix B: private (allowlist-only) lock. Shown only to viewers of the page — non-viewers 404. */}
         {d.private && <Lock size={12} className="mx-0.5 flex-none text-fg-dim" data-testid="tree-private-lock" aria-label={t("sidebar.private")} />}
         {/* 3-state: Draft (never published) / Unpublished changes / clean (nothing). */}
