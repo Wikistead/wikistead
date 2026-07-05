@@ -1175,6 +1175,9 @@ export interface RenderCtx {
   // the block's boundary — which the reveal-on-cursor check treats as overlapping, so
   // arrowing/`j`/`k` into the block reveals its raw source instead of skipping it.
   addAtomic(deco: Decoration, from: number, to: number): void;
+  // #185 comment 781: is `pos` inside a block-replace widget already emitted this pass? Skips the orphaned
+  // inner directive nodes a lezer early-close leaves behind (they'd double-render over the container widget).
+  coveredByBlock(pos: number): boolean;
   // #185 sub-task 2b: line-starts of directive fence lines that lezer's DirectiveMark renderer already
   // hid. A post-pass hides the RESOLVER's fence lines that are NOT in here (the ones lezer early-closed
   // and leaked). Only leaked fences (early-closed descend containers — columns/tabs) are absent, and
@@ -1339,6 +1342,11 @@ const RENDERERS: BlockRenderer[] = [
     match: (n) => n === "Directive",
     enter: (node, ctx) => {
       const doc = ctx.state.doc;
+      // #185 comment 781: lezer early-closes a `::::tabs` parent at an inner `::::columns` close, leaving
+      // the later tabs (e.g. the second tab) as ORPHANED sibling Directive nodes. Once the container
+      // widget is emitted over its FULL resolver range, skip any node the walk reaches inside it — else
+      // the orphan double-renders (frame box / note fallback) below the container and leaks outside it.
+      if (ctx.coveredByBlock(node.from)) return false;
       const open = parseDirectiveOpen(doc.lineAt(node.from).text);
       // #196: structural layout children (:::column / :::tab) are NOT standalone macros. They only
       // reach this renderer when their parent columns/tabs container is in innermost-wins "frame +
@@ -1356,8 +1364,15 @@ const RENDERERS: BlockRenderer[] = [
       // so e.g. `:::foobar` renders as a note box rather than raw text.
       const macro = open ? (findDirectiveMacro(open.name) ?? noteCalloutMacro) : undefined;
       if (!macro) return;
-      const first = doc.lineAt(node.from);
-      const lastLine = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1));
+      // #185 comment 781: derive the block range from the RESOLVER (Pandoc stack semantics), not lezer's
+      // `node.to` — lezer early-closes a nested container so its `node.to` truncates the body (the widget
+      // then splits only the first tab/column and the rest leaks out). directiveMacroAt is resolver-backed
+      // and gives the true end; fall back to the lezer node for an unregistered/unresolved directive.
+      const resolved = directiveMacroAt(ctx.state, node.from);
+      const blockFrom = resolved ? resolved.from : node.from;
+      const blockTo = resolved ? resolved.to : node.to;
+      const first = doc.lineAt(blockFrom);
+      const lastLine = doc.lineAt(Math.max(blockFrom, Math.min(blockTo, doc.length) - 1));
       // Source mode (#165): show the RAW `:::` block — no widget, no callout box. Descend so the
       // DirectiveMark + body render as raw editable markdown (hideMarker/lineRevealed already show raw
       // in source). Without this a non-revealOnCursor macro kept rendering its widget in source mode.
@@ -1644,6 +1659,11 @@ function buildDecorations(state: EditorState, themeOverride?: MacroTheme): {
       hidden.push(hide.range(from, to));
       blocks.push({ from, to });
     },
+    // #185 comment 781: has a block-replace widget already been emitted covering `pos`? A container
+    // widget (tabs/columns) is emitted over its FULL resolver range; lezer's early-close leaves the
+    // orphaned inner directive (e.g. the second tab) as a SIBLING node the walk still visits — skip it
+    // so it isn't double-rendered (frame box / note fallback) on top of the container's own widget.
+    coveredByBlock: (pos) => blocks.some((b) => pos >= b.from && pos < b.to),
     fenceLineStarts: new Set<number>(),
   };
 
