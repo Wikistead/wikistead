@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "../components/ui/dropdown-menu";
-import { ChevronRight, ChevronsUpDown, FilePlus, FileText, MoreHorizontal, Pencil, Plus, Settings, Share2, Trash2 } from "lucide-react";
+import { ChevronRight, ChevronsUpDown, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Plus, Settings, Share2, Trash2 } from "lucide-react";
 import {
   useSpaces,
   useCreateSpace,
@@ -32,6 +32,7 @@ interface Node {
   spaceId: string;
   published: boolean;
   unpublished: boolean;
+  private: boolean;
   children?: Node[];
 }
 
@@ -39,7 +40,7 @@ function buildPageNodes(pages: Page[], parentId: string | null): Node[] {
   return pages
     .filter((p) => p.parentId === parentId)
     .sort((a, b) => a.position - b.position)
-    .map((p) => ({ id: `page:${p.id}`, name: p.title, pageId: p.id, spaceId: p.spaceId, published: p.published ?? false, unpublished: p.hasUnpublishedChanges ?? false, children: buildPageNodes(pages, p.id) }));
+    .map((p) => ({ id: `page:${p.id}`, name: p.title, pageId: p.id, spaceId: p.spaceId, published: p.published ?? false, unpublished: p.hasUnpublishedChanges ?? false, private: p.private ?? false, children: buildPageNodes(pages, p.id) }));
 }
 
 // #193: measure the tree container via a CALLBACK ref, not an effect keyed on a stable
@@ -202,6 +203,8 @@ export function Sidebar() {
         </span>
         <FileText size={14} className="flex-none text-fg-dim" />
         <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" data-testid="tree-page-name">{d.name || t("common.untitled")}</span>
+        {/* #109 Fix B: private (allowlist-only) lock. Shown only to viewers of the page — non-viewers 404. */}
+        {d.private && <Lock size={12} className="mx-0.5 flex-none text-fg-dim" data-testid="tree-private-lock" aria-label={t("sidebar.private")} />}
         {/* 3-state: Draft (never published) / Unpublished changes / clean (nothing). */}
         {!d.published ? (
           <span className="mx-1 flex-none rounded border border-border px-[5px] py-0.5 text-[length:var(--text-xs)] leading-none text-fg-dim" data-testid="tree-draft-badge" title={t("sidebar.draftTitle")}>{t("sidebar.draft")}</span>

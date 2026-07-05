@@ -33,6 +33,10 @@ export interface Page {
   // Whether the page has ever been published (cheap: published_at IS NOT NULL).
   // With hasUnpublishedChanges this gives the sidebar's 3-state badge.
   published?: boolean;
+  // #109 Fix B: page is private (allowlist-only). Drives the lock badge in the sidebar
+  // and next to the title. Exposed only to viewers of the page (non-viewers 404), so it
+  // leaks nothing. `restrict`-only (deny) pages are NOT private and show no lock.
+  private?: boolean;
 }
 
 export function useSpaces(enabled = true) {
@@ -369,6 +373,7 @@ export interface PageMeta {
   hasUnpublishedChanges?: boolean;
   canManage?: boolean; // gates the per-page permission UI (server re-checks)
   canComment?: boolean; // #100: comment capability (comment_open/grant/edit) — gates the comment composer
+  private?: boolean; // #109 Fix B: allowlist-only — drives the lock badge beside the title
 }
 
 // ── per-page access (Phase 4) ──────────────────────────────────────────────
@@ -453,7 +458,14 @@ export function useSetPrivate(pageId: string) {
     mutationFn: (makePrivate: boolean) =>
       apiFetch<null>(`/pages/${encodeURIComponent(pageId)}/private`, token, { method: makePrivate ? "POST" : "DELETE" }),
     // Access-set and public/is_public change with privacy → refresh the access list too.
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["page-private", pageId] }); qc.invalidateQueries({ queryKey: ["page-access", pageId] }); },
+    // #109 Fix B: the private flag drives the lock badge in the tree (usePages) and beside the
+    // title (usePage), so invalidate both so the lock appears/disappears immediately.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["page-private", pageId] });
+      qc.invalidateQueries({ queryKey: ["page-access", pageId] });
+      qc.invalidateQueries({ queryKey: ["page", pageId] });
+      qc.invalidateQueries({ queryKey: ["pages"] });
+    },
   });
 }
 

@@ -112,6 +112,7 @@ function useDisplayModeShortcut(cycle: () => void, enabled: boolean, chord: stri
     return () => window.removeEventListener("keydown", onKey);
   }, [cycle, enabled, chord]);
 }
+import { Lock } from "lucide-react";
 import { PageTitle } from "./PageTitle";
 import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
@@ -432,6 +433,8 @@ function PageRoute() {
                   (unpublished badge + TOC toggle) sits at the row's right. --wks-band-h shrinks accordingly,
                   and the CM top padding + TOC overlay offset follow it automatically (bandRef ResizeObserver). */}
               <div className="pointer-events-auto relative mx-auto flex w-full max-w-[740px] items-center gap-3 px-6 pt-6">
+                {/* #109 Fix B: private (allowlist-only) lock beside the title. Only viewers of the page see it. */}
+                {page?.private && <Lock size={16} className="mt-1 flex-none self-start text-fg-dim" data-testid="title-private-lock" aria-label={t("sidebar.private")} />}
                 <div className="min-w-0 flex-1">
                   <PageTitle
                     editing={editing}

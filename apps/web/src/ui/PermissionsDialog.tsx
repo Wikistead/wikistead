@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePage, useTenantGroups, type PageRelation } from "../data/queries";
+import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePage, useTenantGroups, useShareLinks, type PageRelation } from "../data/queries";
+import { ConfirmDialog } from "./dialogs";
 import { notify } from "./toast";
 import { Select } from "./Select";
 import { Button, IconButton } from "./Button";
@@ -23,6 +24,14 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   const unrestrict = useUnrestrict(pageId);
   const { data: isPrivate } = usePagePrivate(pageId, open); // #109 / ADR-098
   const setPrivate = useSetPrivate(pageId);
+  // #109 Fix A (comment 768): making a page private REVOKES its share links — warn (with the count) first.
+  const { data: shareLinks } = useShareLinks({ type: "page", id: pageId }, open);
+  const activeLinks = shareLinks?.length ?? 0;
+  const [confirmPrivate, setConfirmPrivate] = useState(false);
+  const applyPrivate = (v: boolean) => setPrivate.mutate(v, {
+    onSuccess: () => notify.success(t("toast.saved")),
+    onError: () => notify.error(t("toast.actionFailed")),
+  });
   const [mode, setMode] = useState<"user" | "group">("user");
   const [sub, setSub] = useState("");
   const [groupName, setGroupName] = useState("");
@@ -62,6 +71,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
     : g.grantee.replace(/^user:/, "");
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent data-testid="permissions-dialog" className="sm:max-w-[480px]">
         <DialogHeader>
@@ -75,10 +85,11 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
         <label className="flex items-start gap-2 rounded-md border border-border p-2" data-testid="private-toggle-row">
           <input type="checkbox" className="mt-0.5" data-testid="private-toggle" checked={!!isPrivate}
             disabled={setPrivate.isPending}
-            onChange={(e) => setPrivate.mutate(e.target.checked, {
-              onSuccess: () => notify.success(t("toast.saved")),
-              onError: () => notify.error(t("toast.actionFailed")),
-            })} />
+            onChange={(e) => {
+              // Turning ON revokes the page's share links (#109 Fix A) — confirm first. Turning OFF is a plain toggle.
+              if (e.target.checked) setConfirmPrivate(true);
+              else applyPrivate(false);
+            }} />
           <span className="min-w-0 flex-1">
             <span className="block text-sm text-foreground">{t("permissions.privateTitle")}</span>
             <span className="block text-xs text-fg-dim">{isPrivate ? t("permissions.privateOnHint") : t("permissions.privateHint")}</span>
@@ -170,5 +181,19 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {/* #109 Fix A (comment 768): confirm before privatising — it revokes the page's share links (one-way).
+        Rendered as a SIBLING of the permissions Dialog (not nested) — nesting two Radix Dialog roots makes
+        the inner content inherit the outer's context and the confirm click never applies the mutation. */}
+    <ConfirmDialog
+      stacked
+      open={confirmPrivate}
+      title={t("permissions.privateConfirmTitle")}
+      message={t("permissions.privateConfirmBody", { count: activeLinks })}
+      confirmLabel={t("permissions.privateConfirmAction")}
+      confirmTestId="private-confirm"
+      onClose={() => setConfirmPrivate(false)}
+      onConfirm={() => { setConfirmPrivate(false); applyPrivate(true); }}
+    />
+    </>
   );
 }

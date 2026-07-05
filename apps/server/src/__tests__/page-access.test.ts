@@ -10,7 +10,8 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check, deleteObjectTuples, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver, buildSearchDoc } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, unrestrictPageAccess, listPageRestrictions, setPagePrivate, unsetPagePrivate, isPagePrivate } from '../routes/pages.js'
+import { createPage, grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, unrestrictPageAccess, listPageRestrictions, setPagePrivate, unsetPagePrivate, isPagePrivate, listPages, getPage } from '../routes/pages.js'
+import { createShareLink, listShareLinks, revokeShareLink } from '../routes/share-links.js'
 import { drainAuditOutbox } from '../audit/outbox.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -191,11 +192,65 @@ describe('per-page private (ADR-098 allowlist)', () => {
     await deleteTuples(fgaClient, [{ user: SPACE_MEMBER, relation: 'viewer', object: `space:${spaceId}` }]).catch(() => {})
   })
 
+  it('#109 Fix A: making a page private REVOKES its page share links (no zombie survives the private cut)', async () => {
+    // a page share link is a DIRECT grant (share_link:<id> → view page) NOT routed through `viewer from space`.
+    const link = await createShareLink(db, fgaClient, { tenantId: TENANT, plan: 'free', userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null })
+    expect(await check(fgaClient, `share_link:${link.id}`, 'view', { type: 'page', id: pageId })).toBe(true) // active before
+
+    await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
+
+    // revoked: FGA tuple gone (view=false) AND DB row revoked (not in the active list → no zombie in linkCount).
+    expect(await check(fgaClient, `share_link:${link.id}`, 'view', { type: 'page', id: pageId })).toBe(false)
+    const active = await listShareLinks(db, fgaClient, { userId: 'dev-user', resource: { type: 'page', id: pageId } })
+    expect(active.find((l) => l.id === link.id)).toBeUndefined()
+
+    // one-way: private OFF restores space inheritance but does NOT resurrect the revoked link.
+    await unsetPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
+    expect(await check(fgaClient, `share_link:${link.id}`, 'view', { type: 'page', id: pageId })).toBe(false)
+  })
+
+  it('#109 Fix A (②): privatising a page does NOT revoke the SPACE share link (page view is cut by the model, not the DB)', async () => {
+    // A space link grants viewer ON THE SPACE; page view flows via `viewer from space but not private`,
+    // so privatising already blocks it at the model — Fix A must leave the space link ROW untouched
+    // (Fix A queries only resource_type='page'). Over-revoking a space link would break every other page.
+    const spaceLink = await createShareLink(db, fgaClient, { tenantId: TENANT, plan: 'free', userId: 'dev-user', resource: { type: 'space', id: spaceId }, capability: 'view', expiresInSeconds: null })
+
+    await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
+
+    // The space link stays ACTIVE (its space viewer tuple, and thus every non-private page, is unaffected).
+    const spaceLinks = await listShareLinks(db, fgaClient, { userId: 'dev-user', resource: { type: 'space', id: spaceId } })
+    expect(spaceLinks.find((l) => l.id === spaceLink.id)).toBeDefined()
+    await revokeShareLink(db, fgaClient, { id: spaceLink.id, userId: 'dev-user', tenantId: TENANT }).catch(() => {})
+  })
+
+  it('#109 Fix A: privatising a page does NOT revoke another page\'s share links (scoped to the page)', async () => {
+    const other = await createPage(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user', title: 'other' })
+    const otherLink = await createShareLink(db, fgaClient, { tenantId: TENANT, plan: 'free', userId: 'dev-user', resource: { type: 'page', id: other.id }, capability: 'view', expiresInSeconds: null })
+    await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
+    // the OTHER page's link is untouched.
+    expect(await check(fgaClient, `share_link:${otherLink.id}`, 'view', { type: 'page', id: other.id })).toBe(true)
+    await deleteObjectTuples(fgaClient, `page:${other.id}`).catch(() => {})
+  })
+
   it('unsetPagePrivate clears the marker', async () => {
     await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
     expect(await isPagePrivate(fgaClient, { pageId, userId: 'dev-user' })).toBe(true)
     await unsetPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
     expect(await isPagePrivate(fgaClient, { pageId, userId: 'dev-user' })).toBe(false)
+  })
+
+  it('#109 Fix B: listPages / getPage expose the private flag to a viewer on the allowlist (lock badge)', async () => {
+    // Grant STRANGER view, then privatise: STRANGER is on the allowlist so still sees the page,
+    // and both the tree (listPages) and the open page (getPage) carry private=true to render the lock.
+    await grantPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', grantee: `user:${STRANGER}`, relation: 'view' })
+    await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
+    const tree = await listPages(db, fgaClient, { spaceId, subject: `user:${STRANGER}` })
+    expect(tree.find((p) => p.id === pageId)?.private).toBe(true)
+    expect((await getPage(db, fgaClient, { pageId, userId: STRANGER })).private).toBe(true)
+    // A restrict-only (deny) page is NOT private → no lock: unset private, page stays non-private.
+    await unsetPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
+    expect((await getPage(db, fgaClient, { pageId, userId: STRANGER })).private).toBe(false)
+    await revokePageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', grantee: `user:${STRANGER}`, relation: 'view' })
   })
 
   it('a non-manager cannot toggle or read private (403)', async () => {

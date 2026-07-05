@@ -73,6 +73,7 @@ export function ConfirmDialog({
   confirmLabel,
   tone = "danger",
   confirmTestId = "confirm-delete",
+  stacked = false,
 }: {
   open: boolean;
   message: string;
@@ -84,11 +85,16 @@ export function ConfirmDialog({
   confirmLabel?: string;
   tone?: "danger" | "primary";
   confirmTestId?: string;
+  // When shown OVER another open dialog (e.g. the permissions dialog), raise the
+  // overlay + content above it (default z-50) so it isn't drawn behind the base dialog.
+  stacked?: boolean;
 }) {
   const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent data-testid="confirm-dialog" className="sm:max-w-[400px]">
+      <DialogContent data-testid="confirm-dialog"
+        className={`sm:max-w-[400px]${stacked ? " z-[60]" : ""}`}
+        overlayClassName={stacked ? "z-[60]" : undefined}>
         <DialogHeader>
           <DialogTitle>{title ?? t("dialogs.confirmTitle")}</DialogTitle>
           <DialogDescription>{message}</DialogDescription>

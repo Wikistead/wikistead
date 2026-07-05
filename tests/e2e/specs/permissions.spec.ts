@@ -73,14 +73,64 @@ test("manager toggles a page private (allowlist) via the Permissions dialog", as
     (await (await fetch(`${api}/pages/${pageId}/private`, { headers: { Authorization: "Bearer dev-token" } })).json()).private as boolean,
     { api: API, pageId });
 
-  // turn private ON → the controlled checkbox re-checks once the server round-trip completes.
+  // turn private ON → #109 Fix A: a confirm dialog warns first (privatising revokes share links, one-way).
   await toggle.click();
-  await expect(toggle).toBeChecked(); // retries until the mutation + refetch land
-  expect(await isPrivate()).toBe(true);
-  await expect(page.locator("[data-testid=permissions-dialog]")).toContainText(/Allow list|許可リスト/);
+  await expect(page.locator("[data-testid=private-confirm]")).toBeVisible();
+  await page.locator("[data-testid=private-confirm]").click();
+  // Confirming applies the mutation (the dialog closes on the destructive confirm) — private is now set.
+  await expect.poll(isPrivate).toBe(true);
 
-  // turn private OFF → server clears it
+  // #109 Fix B: a lock badge appears next to the title and in the sidebar tree once private.
+  await expect(page.locator("[data-testid=title-private-lock]")).toBeVisible();
+  await expect(page.locator("[data-testid=tree-private-lock]")).toHaveCount(1);
+
+  // Reopen and turn private OFF → a plain toggle (no confirm); server clears it, lock disappears.
+  await page.click("[data-testid=page-overflow-trigger]");
+  await page.click("[data-testid=permissions-open]");
+  await expect(toggle).toBeChecked();
   await toggle.click();
   await expect(toggle).not.toBeChecked();
   expect(await isPrivate()).toBe(false);
+  await expect(page.locator("[data-testid=title-private-lock]")).toHaveCount(0);
+});
+
+// #109 Fix A: privatising a page with an active share link warns with the count and revokes it.
+test("privatising a page revokes its share links (confirm shows count)", async ({ page }) => {
+  await openDemo(page);
+  const pageId = await page.evaluate(async (api) => {
+    const r = await fetch(`${api}/spaces/demo_space/pages`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ title: "shared then private" }),
+    });
+    return (await r.json()).id as string;
+  }, API);
+
+  // Create a page share link up front (guestAccess is a paid entitlement; the demo tenant has it).
+  const linkCount = async () => page.evaluate(async ({ api, pageId }) =>
+    ((await (await fetch(`${api}/pages/${pageId}/share-links`, { headers: { Authorization: "Bearer dev-token" } })).json()) ?? []).length as number,
+    { api: API, pageId });
+  await page.evaluate(async ({ api, pageId }) => {
+    await fetch(`${api}/share-links`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ resource: { type: "page", id: pageId }, capability: "view" }),
+    });
+  }, { api: API, pageId });
+  expect(await linkCount()).toBe(1);
+
+  await page.goto(`/p/${pageId}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await page.click("[data-testid=page-overflow-trigger]");
+  await page.click("[data-testid=permissions-open]");
+  await page.locator("[data-testid=private-toggle]").click();
+  // The confirm body names the active link count (1) — the manager sees what will be lost.
+  await expect(page.locator("[data-testid=confirm-dialog]")).toContainText("1");
+  await page.locator("[data-testid=private-confirm]").click();
+
+  // The share link is gone (one-way) — count drops to 0, and the page is now private.
+  await expect.poll(linkCount).toBe(0);
+  expect(await page.evaluate(async ({ api, pageId }) =>
+    (await (await fetch(`${api}/pages/${pageId}/private`, { headers: { Authorization: "Bearer dev-token" } })).json()).private as boolean,
+    { api: API, pageId })).toBe(true);
 });
