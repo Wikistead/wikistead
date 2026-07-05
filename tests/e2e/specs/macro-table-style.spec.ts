@@ -307,10 +307,10 @@ test("toolbar stays inside the container for a rightmost cell (no clip)", async 
   expect(barBox.x).toBeGreaterThanOrEqual(contBox.x - 2);
 });
 
-// #217: the contextual toolbar must STAY ONE ROW at any width — a narrow editor used to wrap its ~16 ops
-// onto several rows, growing the floating bar tall enough to cover the table. It now nowraps with a width
-// clamp + horizontal scroll, so it never grows vertically and every op stays reachable (scroll).
-test("#217: the table edit toolbar stays one row (no vertical wrap) and scrolls when narrow", async ({ browser }) => {
+// #217 (comment 772): at a narrow width the contextual toolbar WRAPS (not horizontal scroll — scroll hid
+// ops). Every op stays visible without scrolling, groups (cm-lp-table-ops) wrap as indivisible units, and
+// the bar is clamped to the editor width so it can't run off. At a normal width it stays one row.
+test("#217: the table edit toolbar wraps (no scroll) at narrow width, groups stay intact, one row when wide", async ({ browser }) => {
   const page = await (await browser.newContext({ viewport: { width: 900, height: 800 } })).newPage();
   await openScratch(page, "tablebarwrap");
   await enterEdit(page);
@@ -326,10 +326,21 @@ test("#217: the table edit toolbar stays one row (no vertical wrap) and scrolls 
 
   const m = await bar.evaluate((el) => {
     const cs = getComputedStyle(el);
-    return { height: Math.round(el.getBoundingClientRect().height), flexWrap: cs.flexWrap, overflowX: cs.overflowX, opsReachable: el.scrollWidth >= el.clientWidth };
+    const barRect = el.getBoundingClientRect();
+    // every op button is WITHIN the bar bounds (no horizontal clipping / no scroll needed to reach it).
+    const btns = Array.from(el.querySelectorAll("button")) as HTMLElement[];
+    const allWithin = btns.every((b) => { const r = b.getBoundingClientRect(); return r.left >= barRect.left - 1 && r.right <= barRect.right + 1; });
+    // each logical group sits on ONE row (its buttons share a top) — groups never split mid-group.
+    const groupsIntact = (Array.from(el.querySelectorAll(".cm-lp-table-ops")) as HTMLElement[]).every((g) => {
+      const bs = Array.from(g.querySelectorAll("button")) as HTMLElement[];
+      if (bs.length < 2) return true;
+      const t0 = Math.round(bs[0]!.getBoundingClientRect().top);
+      return bs.every((b) => Math.abs(Math.round(b.getBoundingClientRect().top) - t0) < 4);
+    });
+    return { flexWrap: cs.flexWrap, noScroll: el.scrollWidth <= el.clientWidth + 1, allWithin, groupsIntact, height: Math.round(barRect.height) };
   });
-  expect(m.height, "toolbar is a single row (not wrapped to several)").toBeLessThan(44);
-  expect(m.flexWrap).toBe("nowrap");
-  expect(m.overflowX).toBe("auto"); // scrollable when it exceeds the available width
-  expect(m.opsReachable).toBe(true);
+  expect(m.flexWrap).toBe("wrap"); // wraps, not nowrap
+  expect(m.noScroll, "no horizontal scroll — all ops visible by wrapping").toBe(true);
+  expect(m.allWithin, "every op button is within the bar bounds (nothing clipped off)").toBe(true);
+  expect(m.groupsIntact, "each logical group stays on one row (wraps as a unit)").toBe(true);
 });

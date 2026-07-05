@@ -2168,14 +2168,14 @@ export const livePreviewTheme = EditorView.baseTheme({
     position: "absolute",
     zIndex: "5",
     display: "flex",
-    // #217: STAY ONE ROW. A narrow editor (side panel open) or viewport used to wrap the ~16 ops onto
-    // several rows, so the floating bar grew tall and covered the table. nowrap + a width clamped to the
-    // available space + horizontal scroll keeps it a single row and every op stays reachable (scroll).
-    flexWrap: "nowrap",
+    // #217 (comment 772): WRAP the ~16 ops at a narrow width (a side panel narrows the editor) so every op
+    // stays visible WITHOUT horizontal scroll (scroll hides table ops = bad). Groups (cm-lp-table-ops) are
+    // the wrap units — they never break mid-group. maxWidth clamps to the editor width so the bar can't run
+    // off; rowGap spaces the wrapped rows. At a normal width it stays one row (no regression).
+    flexWrap: "wrap",
     maxWidth: "min(calc(100% - 6px), calc(100vw - 1.5rem))",
-    overflowX: "auto",
-    overflowY: "hidden",
     alignItems: "center", // #4: swatches line up with the icon buttons
+    rowGap: "3px",
     gap: "4px",
     padding: "3px 4px",
     background: "var(--panel, #fff)",
@@ -2183,9 +2183,6 @@ export const livePreviewTheme = EditorView.baseTheme({
     borderRadius: "6px",
     boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
   },
-  // #217: keep a thin, unobtrusive horizontal scrollbar for the overflow.
-  ".cm-lp-table-edit-bar::-webkit-scrollbar": { height: "5px" },
-  ".cm-lp-table-edit-bar::-webkit-scrollbar-thumb": { background: "var(--border, #888)", borderRadius: "3px" },
   ".cm-lp-table-edit-btn": {
     display: "inline-flex",
     alignItems: "center",
