@@ -2101,6 +2101,13 @@ export const livePreviewTheme = EditorView.baseTheme({
     position: "absolute",
     zIndex: "5",
     display: "flex",
+    // #217: STAY ONE ROW. A narrow editor (side panel open) or viewport used to wrap the ~16 ops onto
+    // several rows, so the floating bar grew tall and covered the table. nowrap + a width clamped to the
+    // available space + horizontal scroll keeps it a single row and every op stays reachable (scroll).
+    flexWrap: "nowrap",
+    maxWidth: "min(calc(100% - 6px), calc(100vw - 1.5rem))",
+    overflowX: "auto",
+    overflowY: "hidden",
     alignItems: "center", // #4: swatches line up with the icon buttons
     gap: "4px",
     padding: "3px 4px",
@@ -2109,9 +2116,13 @@ export const livePreviewTheme = EditorView.baseTheme({
     borderRadius: "6px",
     boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
   },
+  // #217: keep a thin, unobtrusive horizontal scrollbar for the overflow.
+  ".cm-lp-table-edit-bar::-webkit-scrollbar": { height: "5px" },
+  ".cm-lp-table-edit-bar::-webkit-scrollbar-thumb": { background: "var(--border, #888)", borderRadius: "3px" },
   ".cm-lp-table-edit-btn": {
     display: "inline-flex",
     alignItems: "center",
+    flexShrink: "0", // #217: never compress the ops — scroll to reach them instead of shrinking/wrapping
     border: "1px solid transparent",
     borderRadius: "4px",
     background: "transparent",
@@ -2176,7 +2187,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-table-grid .cm-lp-table-addcol": { minWidth: "16px", height: "16px" },
   ".cm-lp-table-grid .cm-lp-table-addrow": { height: "16px" },
   // Structural-op group in the toolbar (insert/delete col/row) — visually separated.
-  ".cm-lp-table-ops": { display: "inline-flex", gap: "2px", alignItems: "center", borderLeft: "1px solid var(--border, #888)", paddingLeft: "4px", marginLeft: "2px" },
+  ".cm-lp-table-ops": { display: "inline-flex", flexShrink: "0", gap: "2px", alignItems: "center", borderLeft: "1px solid var(--border, #888)", paddingLeft: "4px", marginLeft: "2px" },
   // Selection: a translucent THEME-accent fill on each cell (#1 — must read as selected,
   // in the active theme color, not a fixed blue); a thick accent border only on the OUTER
   // edges (per-side classes) — the spreadsheet look. Prefixed to beat the base cell rules.
