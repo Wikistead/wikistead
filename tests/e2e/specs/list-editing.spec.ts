@@ -41,3 +41,32 @@ test("#202: vim normal o/O continue the list marker", async ({ browser }) => {
   await page.keyboard.press("O"); await page.keyboard.type("Y"); await page.keyboard.press("Escape"); await sleep(150);
   expect(await page.locator("[data-pane=preview] .cm-content").innerText(), "O did not continue the marker").toMatch(/- Y|• Y/);
 });
+
+// #202 (comment 761): nested ORDERED lists count INDEPENDENTLY per level (a nested list restarts, not
+// merged into the parent's run) and get a per-level ordinal STYLE (1.→a.→i.), keyed off the same nesting
+// depth as the bullet glyphs so the two hierarchies read consistently. The rendered ordinal comes from
+// the tree position, so deliberately "wrong" source numbers still render the correct sequence.
+test("#202: nested ordered lists are independent per level with 1.→a.→i. style", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "list-ordered");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  // source numbers are wrong on purpose (9., 9.) — the render must use the per-level tree position.
+  await page.keyboard.insertText("1. a\n2. b\n   9. n1\n   9. n2\n      9. deep\n3. c\nafter\n");
+  await sleep(500);
+  await page.keyboard.press("Control+End"); // caret off the list so markers render
+  await sleep(200);
+  const ords = await page.locator("[data-pane=preview] .cm-lp-ordinal").allTextContents();
+  // top level: decimal, independent of the nested items (3. is the 3rd TOP item, not 6.)
+  expect(ords).toContain("1.");
+  expect(ords).toContain("2.");
+  expect(ords).toContain("3.");
+  // first nest: lower-alpha, restarted at a. (from source 9., 9.)
+  expect(ords).toContain("a.");
+  expect(ords).toContain("b.");
+  // second nest: lower-roman
+  expect(ords).toContain("i.");
+  // NOT merged into the parent run — no stray 4./5./6. from counting the nested items
+  expect(ords).not.toContain("4.");
+  expect(ords).not.toContain("5.");
+});
