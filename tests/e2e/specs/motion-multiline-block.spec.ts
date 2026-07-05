@@ -28,6 +28,10 @@ const CASES: Record<string, string> = {
   pipe: "top\n| A | B |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\nmid\nbot\n",
   code: "top\n```js\nconst a = 1\nconst b = 2\nconst c = 3\n```\nmid\nbot\n",
   callout: "top\n:::info\naa\naa\n:::\nmid\nbot\n",
+  // #141 comment 735 / #183: DENSE stack (display math + callout + code fence). Multiple block widgets in a
+  // row made j skip every other line downstream (5→7→9→…) — the " motion" gated on #183. The #183 clamp
+  // (a single j/k moves exactly one line) must make even the dense document step one line at a time.
+  dense: "top\n$$x^2$$\n:::info\naa\naa\n:::\n```js\nconst a = 1\n```\nmid\nbot\n",
 };
 
 for (const [name, text] of Object.entries(CASES)) {
