@@ -14,8 +14,10 @@ const wrap = "box-border w-full min-w-0";
 // not the chrome font. Without this it inherits the body's --font-ui (it lives outside .cm-content, so
 // the editor's --font-body doesn't reach it), so the title ignored the font selection while body did.
 const title = "m-0 block w-full text-[30px] font-bold leading-tight tracking-[-0.02em] text-foreground break-words [overflow-wrap:anywhere] [font-family:var(--font-body)]";
-// view mode: wrap to 2 lines then ellipsise (no infinite horizontal overflow / marquee).
-const clamp = "[display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden";
+// #212 comment 769 (2): view mode clamps the title to ONE line with an ellipsis so the header band stays a
+// constant one-row height (--wks-band-h independent of title length). The full title shows on hover (the
+// `title` attr tooltip) and in edit mode (the textarea wraps in full).
+const clamp = "truncate";
 
 // `pageEditing` = the PAGE edit mode (not the rename input): view mode clamps a long
 // title to 2 lines; edit mode shows it in full, WRAPPING within the column (you must see

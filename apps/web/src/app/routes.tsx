@@ -420,15 +420,18 @@ function PageRoute() {
                 gradient to the editor's first lines while keeping the title interactive. The editor pads
                 its top by --wks-band-h (set by bandRef) so line 1 clears the band. Token-driven (--bg),
                 light/dark. */}
-            {/* #212 comment 755 (1): the boundary must DISSOLVE — a more gradual bg gradient PLUS a
-                mask-image that fades the whole band (incl. its backdrop-blur) toward the bottom, so the
-                frosted layer has no hard rect edge (a straight blur cutoff was the visible "line"). */}
-            <div ref={bandRef} className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_90%,transparent)] via-[color-mix(in_srgb,var(--bg)_42%,transparent)] to-transparent pb-6 backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_50%,transparent)]">
+            {/* #212 comment 769 (1): the frosted FADE and the CONTENT are SEPARATE layers. The mask-image
+                that dissolves the boundary (comment 755) must only fade the BACKGROUND (gradient +
+                backdrop-blur) — putting it on the whole band also dimmed the title/badge/toggle. So the
+                frosted layer is an absolute, masked, aria-hidden sibling BEHIND the content; the content
+                layer sits above it (relative), crisp and 100% opaque. pb-6 = the fade zone below the row. */}
+            <div ref={bandRef} className="pointer-events-none absolute inset-x-0 top-0 z-20 pb-6">
+              <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_90%,transparent)] via-[color-mix(in_srgb,var(--bg)_42%,transparent)] to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_50%,transparent)]" />
               {/* #212 comment 755 (2): title + status share ONE row (was title, then status BELOW = 2 lines
                   tall). The 740px reading column + top padding live here now; the title flexes and the status
                   (unpublished badge + TOC toggle) sits at the row's right. --wks-band-h shrinks accordingly,
                   and the CM top padding + TOC overlay offset follow it automatically (bandRef ResizeObserver). */}
-              <div className="pointer-events-auto mx-auto flex w-full max-w-[740px] items-start gap-3 px-6 pt-6">
+              <div className="pointer-events-auto relative mx-auto flex w-full max-w-[740px] items-center gap-3 px-6 pt-6">
                 <div className="min-w-0 flex-1">
                   <PageTitle
                     editing={editing}
@@ -439,7 +442,7 @@ function PageRoute() {
                     }) : undefined}
                   />
                 </div>
-                {isDesktop && <div className="shrink-0 pt-1.5"><PageStatus {...controls} /></div>}
+                {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}
               </div>
             </div>
             <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
