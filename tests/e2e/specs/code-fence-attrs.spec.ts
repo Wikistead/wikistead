@@ -104,3 +104,52 @@ test("#198: filename tab + copy button (view mode) copies the code body; hidden 
   await sleep(200);
   expect(await page.locator(".cm-lp-code-copy").count()).toBe(0);
 });
+
+// #198 comment 752: (1) a PLAIN fence and an ATTRIBUTED fence share the SAME base card (background +
+// rounded corners); attributes only LAYER a tab / line numbers / highlight on top. A tab flattens the
+// card's top-left corner; a plain fence keeps it rounded. (2) Source mode is fully raw — no code-block
+// decoration at all (no card background, tab, number or highlight). Verified in a real browser.
+test("#198 comment 752: plain & attributed fences share one card base; Source is fully raw", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "codefence-unify");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText('```c\nint x = 1;\nint y = 2;\n```\n\n```ts title="app.ts" showLineNumbers {1}\nconst a = 1\nconst b = 2\n```\n\ntail\n');
+  await sleep(400);
+  await page.getByText("tail").click(); // caret off the fences
+  await sleep(300);
+
+  const m = () => page.evaluate(() => {
+    const q = (s: string) => Array.from(document.querySelectorAll(s));
+    const firsts = q(".cm-lp-code-first") as HTMLElement[];
+    const plain = firsts.find((e) => !e.classList.contains("cm-lp-code-tabbed"))!;
+    const tabbed = firsts.find((e) => e.classList.contains("cm-lp-code-tabbed"))!;
+    return {
+      codeLines: q(".cm-lp-code-line").length,
+      firsts: firsts.length,
+      lasts: q(".cm-lp-code-last").length,
+      tabbed: q(".cm-lp-code-tabbed").length,
+      plainTopLeft: plain ? getComputedStyle(plain).borderTopLeftRadius : null,
+      tabbedTopLeft: tabbed ? getComputedStyle(tabbed).borderTopLeftRadius : null,
+    };
+  });
+
+  // Live: BOTH fences are carded (2 firsts / 2 lasts / all base cm-lp-code-line); only the attributed
+  // fence's first line is tabbed. Plain keeps a rounded top-left; the tabbed one is flattened for the tab.
+  const live = await m();
+  expect(live.firsts).toBe(2);
+  expect(live.lasts).toBe(2);
+  expect(live.codeLines).toBe(4);
+  expect(live.tabbed).toBe(1);
+  expect(live.plainTopLeft).not.toBe("0px"); // plain fence: rounded card corner
+  expect(live.tabbedTopLeft).toBe("0px"); // attributed fence: flattened under the tab
+
+  // Source: fully raw — no code-block decoration whatsoever.
+  await page.getByTestId("displaymode-source").click();
+  await sleep(300);
+  const src = await m();
+  expect(src.codeLines).toBe(0);
+  expect(src.firsts).toBe(0);
+  expect(await page.locator(".cm-lp-code-tab").count()).toBe(0);
+  expect(await page.locator(".cm-lp-code-hl").count()).toBe(0);
+});
