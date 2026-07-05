@@ -306,3 +306,30 @@ test("toolbar stays inside the container for a rightmost cell (no clip)", async 
   expect(barBox.x + barBox.width).toBeLessThanOrEqual(contBox.x + contBox.width + 2);
   expect(barBox.x).toBeGreaterThanOrEqual(contBox.x - 2);
 });
+
+// #217: the contextual toolbar must STAY ONE ROW at any width — a narrow editor used to wrap its ~16 ops
+// onto several rows, growing the floating bar tall enough to cover the table. It now nowraps with a width
+// clamp + horizontal scroll, so it never grows vertically and every op stays reachable (scroll).
+test("#217: the table edit toolbar stays one row (no vertical wrap) and scrolls when narrow", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 900, height: 800 } })).newPage();
+  await openScratch(page, "tablebarwrap");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  // a many-column table → a wide toolbar (all ops present) relative to the editor
+  for (const l of ["| A | B | C | D | E | F |", "| - | - | - | - | - | - |", "| 1 | 2 | 3 | 4 | 5 | 6 |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
+  await sleep(250);
+  await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await expect(page.getByTestId("table-edit")).toBeVisible();
+  await page.getByTestId("table-edit").locator("td").first().click();
+  const bar = page.locator("[data-testid=table-edit] .cm-lp-table-edit-bar");
+  await expect(bar).toBeVisible();
+
+  const m = await bar.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { height: Math.round(el.getBoundingClientRect().height), flexWrap: cs.flexWrap, overflowX: cs.overflowX, opsReachable: el.scrollWidth >= el.clientWidth };
+  });
+  expect(m.height, "toolbar is a single row (not wrapped to several)").toBeLessThan(44);
+  expect(m.flexWrap).toBe("nowrap");
+  expect(m.overflowX).toBe("auto"); // scrollable when it exceeds the available width
+  expect(m.opsReachable).toBe(true);
+});
