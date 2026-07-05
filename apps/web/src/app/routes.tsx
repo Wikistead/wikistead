@@ -427,7 +427,9 @@ function PageRoute() {
                 frosted layer is an absolute, masked, aria-hidden sibling BEHIND the content; the content
                 layer sits above it (relative), crisp and 100% opaque. pb-6 = the fade zone below the row. */}
             <div ref={bandRef} className="pointer-events-none absolute inset-x-0 top-0 z-20 pb-6">
-              <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_90%,transparent)] via-[color-mix(in_srgb,var(--bg)_42%,transparent)] to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_50%,transparent)]" />
+              {/* #212 comment 780 (1): the frosted layer stops 10px short of the right edge (the scrollbar
+                  gutter, --wks-sbw=10px in tokens.css) so backdrop-blur never blurs the scrollbar thumb. */}
+              <div aria-hidden="true" className="absolute inset-y-0 left-0 right-2.5 bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_90%,transparent)] via-[color-mix(in_srgb,var(--bg)_42%,transparent)] to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_50%,transparent)]" />
               {/* #212 comment 755 (2): title + status share ONE row (was title, then status BELOW = 2 lines
                   tall). The 740px reading column + top padding live here now; the title flexes and the status
                   (unpublished badge + TOC toggle) sits at the row's right. --wks-band-h shrinks accordingly,

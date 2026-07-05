@@ -76,19 +76,21 @@ test("#212 comment 755: one-row header (title + status same row), band fades at 
   expect(m.bandVar).toMatch(/^\d+px$/);
 });
 
-// #212 comment 769: (1) the mask that dissolves the band's bottom edge must fade only the FROSTED
-// BACKGROUND — the title/badge/toggle must stay 100% opaque (a mask on the whole band dimmed them). The
-// frosted layer is now a separate aria-hidden sibling behind a crisp content layer. (2) a long title
-// clamps to ONE line with an ellipsis in view mode, so the band height (--wks-band-h) is independent of
-// title length. Edit mode shows the full title (the rename textarea wraps).
-test("#212 comment 769: header foreground is crisp; long title clamps to one line (view)", async ({ browser }) => {
+// #212 comment 769/780: (1) the mask that dissolves the band's bottom edge fades only the FROSTED
+// BACKGROUND — the title/badge/toggle stay 100% opaque (a mask on the whole band dimmed them). The
+// frosted layer is a separate aria-hidden sibling behind a crisp content layer. (2) comment 780: a long
+// title clamps to at most TWO lines with an ellipsis in view mode (was one), so the band height stays
+// bounded. (3) comment 780: the frosted layer stops short of the right edge so the scrollbar gutter is
+// NOT under backdrop-blur (its right edge is left of the editor area's right edge).
+test("#212 comment 780: header foreground crisp; title clamps to two lines; frosted clears the scrollbar", async ({ browser }) => {
   const page = await (await browser.newContext({ viewport: { width: 1400, height: 900 } })).newPage();
-  await openScratch(page, "A very long page title that would otherwise wrap onto several rows inside the header band region here");
-  await sleep(400); // stay in VIEW mode (no enterEdit) — the title should truncate to one line
+  await openScratch(page, "A very long page title that would otherwise wrap onto several rows inside the header band region here and keep going well past three lines of text");
+  await sleep(400); // stay in VIEW mode (no enterEdit) — the title should clamp to two lines
   const m = await page.evaluate(() => {
     const title = document.querySelector("[data-testid=page-title]") as HTMLElement;
     const status = document.querySelector("[data-testid=page-status]") as HTMLElement | null;
     const frosted = document.querySelector(".backdrop-blur-md") as HTMLElement;
+    const area = frosted.parentElement!.parentElement as HTMLElement; // band → editor area (positioning ctx)
     const lh = parseFloat(getComputedStyle(title).lineHeight);
     return {
       titleOpacity: getComputedStyle(title).opacity,
@@ -96,11 +98,14 @@ test("#212 comment 769: header foreground is crisp; long title clamps to one lin
       titleLines: Math.round(title.getBoundingClientRect().height / lh),
       frostedMasked: /gradient/.test(getComputedStyle(frosted).maskImage) || /gradient/.test((getComputedStyle(frosted) as any).webkitMaskImage || ""),
       frostedBlur: /blur/.test(getComputedStyle(frosted).backdropFilter || (getComputedStyle(frosted) as any).webkitBackdropFilter || ""),
+      // the frosted layer's right edge sits left of the editor area's right edge (the scrollbar gutter).
+      scrollbarGap: Math.round(area.getBoundingClientRect().right - frosted.getBoundingClientRect().right),
     };
   });
   expect(m.titleOpacity, "title is fully opaque (not dimmed by the band mask)").toBe("1");
   expect(m.statusOpacity, "status (badge + TOC) is fully opaque").toBe("1");
-  expect(m.titleLines, "a long title clamps to one line in view mode").toBe(1);
+  expect(m.titleLines, "a long title clamps to at most two lines in view mode").toBe(2);
   expect(m.frostedMasked, "the frosted background layer still carries the dissolve mask").toBe(true);
   expect(m.frostedBlur, "the frosted background layer still has backdrop-blur").toBe(true);
+  expect(m.scrollbarGap, "frosted layer clears the ~10px scrollbar gutter so blur can't catch it").toBeGreaterThanOrEqual(8);
 });
