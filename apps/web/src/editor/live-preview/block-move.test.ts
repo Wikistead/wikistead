@@ -45,6 +45,17 @@ describe("computeBlockMove — block owns trailing separator (#84)", () => {
     expect(move("A\n\nB\n\nC", 0, null)).toBe("B\n\nC\n\nA")
   })
 
+  it("moves a MIDDLE block to the very end (B to end) with no trailing blank line (#84 comment 750)", () => {
+    // The end-drop appends after C even though the doc has no trailing blank line.
+    const s = mk("A\n\nB\n\nC")
+    expect(move("A\n\nB\n\nC", s.doc.line(3).from, null)).toBe("A\n\nC\n\nB")
+  })
+
+  it("moving the LAST block to the very end is a no-op (already last)", () => {
+    const s = mk("A\n\nB\n\nC")
+    expect(computeBlockMove(s.doc, blockRangeAt(s, s.doc.line(5).from)!, s.doc.length)).toBeNull()
+  })
+
   it("moves the LAST block up to the top (C before A) — leading separator reclaimed", () => {
     const s = mk("A\n\nB\n\nC")
     expect(move("A\n\nB\n\nC", s.doc.line(5).from, 1)).toBe("C\n\nA\n\nB")
