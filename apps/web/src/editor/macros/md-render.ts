@@ -26,6 +26,25 @@ type SNode = ReturnType<typeof mdParser.parse>["topNode"];
 const MAX_NESTED_DIRECTIVE_DEPTH = 2; // ≈3 visual levels incl. the top-level widget (from decorations.ts)
 let nestedDirectiveDepth = 0;
 
+// #215 / ADR-100: source-anchor tagging so a nested macro rendered inside a columns/tabs widget can be
+// hit-tested back to its absolute doc range. `renderBase` is the absolute doc offset of the CURRENT
+// `src` slice (null = untagged / non-nested render — the branch is inert). When set, each nested-macro
+// root element is tagged `data-mac-pos = renderBase + node.from` (an offset guaranteed inside the macro;
+// consumers RE-RESOLVE the live range from it). Safe as module singletons because rendering is fully
+// SYNCHRONOUS (same justification as nestedDirectiveDepth). `pendingBaseOffset` bridges the ONE gap the
+// narrow liveRender(body,{theme}) API can't cross: md-render stashes a nested container's body base here
+// right before dispatching to columns/tabs, which consume it via takePendingBaseOffset; it is reset
+// after each dispatch so it never leaks. MUST move together with MAX_NESTED_DIRECTIVE_DEPTH if depth changes.
+let renderBase: number | null = null;
+let pendingBaseOffset: number | null = null;
+export function setPendingBaseOffset(v: number | null): void { pendingBaseOffset = v; }
+export function takePendingBaseOffset(): number | null { const v = pendingBaseOffset; pendingBaseOffset = null; return v; }
+function tagMacro(el: HTMLElement, relFrom: number, name: string): void {
+  if (renderBase == null) return; // non-nested / untagged render → inert (byte-identical to before #215)
+  el.dataset.macPos = String(renderBase + relFrom);
+  el.dataset.macName = name;
+}
+
 // Mark/structural nodes whose own text must NOT be emitted (the `*`/`#`/`[` `]` `(` `)` etc.).
 const MARKS = new Set([
   "EmphasisMark", "CodeMark", "LinkMark", "HeaderMark", "QuoteMark", "ListMark",
@@ -130,7 +149,7 @@ function renderBlock(node: SNode, src: string, into: Node): void {
         const lang = info ? txt(src, info).trim().split(/\s+/)[0] : null;
         const macro = lang ? findFenceMacro(lang) : undefined;
         if (macro?.liveRender) {
-          try { into.appendChild(macro.liveRender(body, { theme: currentMacroTheme() })); return; }
+          try { const el = macro.liveRender(body, { theme: currentMacroTheme() }); tagMacro(el, node.from, lang!); into.appendChild(el); return; } // #215: tag for nested hit-test
           catch { /* a macro that throws must not break the render → fall through to plain code */ }
         }
       }
@@ -154,15 +173,20 @@ function renderBlock(node: SNode, src: string, into: Node): void {
       // to the generic box below (renderBlocks → plain content), so deeply-nested directives still
       // show their content but stop spawning recursive live layouts.
       const atDepthCap = nestedDirectiveDepth >= MAX_NESTED_DIRECTIVE_DEPTH;
+      // #215 / ADR-100: absolute base of THIS directive's inner body (drop the ::: open line) — handed to
+      // a nested columns/tabs liveRender (pendingBaseOffset) and to renderCalloutPanel so their nested
+      // macros tag themselves. null when the surrounding render is untagged (non-nested).
+      const nestedBodyBase = renderBase != null ? renderBase + node.from + (nl === -1 ? full.length : nl) + 1 : null;
       if (!atDepthCap && macro?.liveRender) {
         const lines = full.split("\n").slice(1); // drop the opening ::: line
         if (lines.length && /^\s*:::+\s*$/.test(lines[lines.length - 1]!)) lines.pop(); // drop close :::
         nestedDirectiveDepth++;
-        let rendered = false;
-        try { into.appendChild(macro.liveRender(lines.join("\n"), { theme: currentMacroTheme() })); rendered = true; }
+        setPendingBaseOffset(nestedBodyBase); // hand the body base to columns/tabs (narrow API can't pass it)
+        let el: HTMLElement | null = null;
+        try { el = macro.liveRender(lines.join("\n"), { theme: currentMacroTheme() }); }
         catch { /* a macro that throws must not break the render → fall through to the generic box */ }
-        nestedDirectiveDepth--;
-        if (rendered) return;
+        finally { setPendingBaseOffset(null); nestedDirectiveDepth--; }
+        if (el) { tagMacro(el, node.from, parsed!.name); into.appendChild(el); return; } // #215: tag for nested hit-test
       }
       // #170 / ADR-049 (Y): a CONTAINER directive with an icon = a typed callout. It has no
       // liveRender (its body stays Markdown), so render the shared callout PANEL (icon + title +
@@ -172,8 +196,11 @@ function renderBlock(node: SNode, src: string, into: Node): void {
         const lines = full.split("\n").slice(1);
         if (lines.length && /^\s*:::+\s*$/.test(lines[lines.length - 1]!)) lines.pop();
         nestedDirectiveDepth++;
-        try { into.appendChild(renderCalloutPanel(macro.containerClass, macro.icon, parsed?.label ?? "", lines.join("\n"))); }
-        finally { nestedDirectiveDepth--; }
+        try {
+          const panel = renderCalloutPanel(macro.containerClass, macro.icon, parsed?.label ?? "", lines.join("\n"), nestedBodyBase ?? undefined);
+          tagMacro(panel, node.from, parsed!.name); // #215: tag for nested hit-test (anchor in the OUTER src coords)
+          into.appendChild(panel);
+        } finally { nestedDirectiveDepth--; }
         return;
       }
       const el = document.createElement("div"); el.className = "cm-lp-md-directive";
@@ -194,11 +221,18 @@ function renderBlocks(parent: SNode, src: string, into: Node): void {
 }
 
 // Parse `src` as Markdown and return a sanitized DOM fragment. Safe by construction (no innerHTML).
-export function renderMarkdownToDom(src: string): DocumentFragment {
-  const tree = mdParser.parse(src);
-  const frag = document.createDocumentFragment();
-  renderBlocks(tree.topNode, src, frag);
-  return frag;
+// #215 / ADR-100: `baseOffset` (optional) is the absolute doc offset of `src`; when set, nested macros
+// are tagged `data-mac-pos` for the columns/tabs hit-test. Omitted (all existing callers) → byte-identical
+// output. renderBase is saved/restored so nested renderMarkdownToDom calls don't corrupt a parent's base.
+export function renderMarkdownToDom(src: string, baseOffset?: number): DocumentFragment {
+  const prevBase = renderBase;
+  renderBase = baseOffset ?? null;
+  try {
+    const tree = mdParser.parse(src);
+    const frag = document.createDocumentFragment();
+    renderBlocks(tree.topNode, src, frag);
+    return frag;
+  } finally { renderBase = prevBase; }
 }
 
 // #170 / ADR-049 (Y): the shared callout PANEL renderer (single source of truth). A flex 2-column
@@ -207,7 +241,7 @@ export function renderMarkdownToDom(src: string): DocumentFragment {
 // the CM live widget (decorations.ts, top-level callouts) AND the nested dispatch above (callouts
 // inside transclude/columns), so both render identically. Display-only; XSS-safe (title via
 // textContent, body via the sanitized renderMarkdownToDom, icon via data-icon + CSS mask, no innerHTML).
-export function renderCalloutPanel(containerClass: string, icon: string, label: string, body: string): HTMLElement {
+export function renderCalloutPanel(containerClass: string, icon: string, label: string, body: string, baseOffset?: number): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = `${containerClass} cm-lp-callout-panel`;
   wrap.setAttribute("data-testid", "callout-panel");
@@ -226,7 +260,7 @@ export function renderCalloutPanel(containerClass: string, icon: string, label: 
   }
   const bodyEl = document.createElement("div");
   bodyEl.className = "cm-lp-callout-panel-body";
-  bodyEl.appendChild(renderMarkdownToDom(body)); // sanitized DOM (no innerHTML)
+  bodyEl.appendChild(renderMarkdownToDom(body, baseOffset)); // sanitized DOM (no innerHTML); #215: thread base for nested tags
   main.appendChild(bodyEl);
   wrap.appendChild(main);
   return wrap;

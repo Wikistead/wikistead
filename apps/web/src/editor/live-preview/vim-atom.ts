@@ -1,7 +1,8 @@
 import { Vim, getCM } from "@replit/codemirror-vim";
 import { EditorState, EditorSelection, type Extension } from "@codemirror/state";
 import { ViewPlugin, type EditorView } from "@codemirror/view";
-import { livePreview } from "./decorations";
+import { livePreview, nestedDeleteChange } from "./decorations";
+import { nestedSelectionField, setNestedSelection } from "./macro-edit";
 
 // ADR-024 1b (Mode A): dd treats a macro ATOM as one unit — the WHOLE macro source is the
 // delete payload, and the unnamed register gets the whole macro so `p` pastes it back. The
@@ -134,6 +135,25 @@ export const atomYank: Extension = ViewPlugin.define((view) => {
       e.preventDefault();
       e.stopImmediatePropagation(); // vim must NOT also see this 2nd y (it would yank 1 line)
     } else if (e.key === "d") {
+      // #215 / ADR-100 (Consumer 4): with a nested macro selected, `dd` removes ONLY that macro's range
+      // (the caret sits on the CONTAINER atom, so the normal atomChordTarget would take the whole
+      // container). Same range as Backspace/Delete (nestedDeleteChange). Guarded to a bare 2nd `d`.
+      const vimD = cm?.state.vim;
+      const isD = vimD?.inputState;
+      const nsel = view.state.field(nestedSelectionField, false);
+      if (nsel && vimD && !vimD.insertMode && !vimD.visualMode && isD?.operator === "delete" && !isD.registerName) {
+        const ch = nestedDeleteChange(view.state, nsel.anchor);
+        if (ch) {
+          const src = view.state.doc.sliceString(ch.from, ch.to);
+          const newLen = view.state.doc.length - (ch.to - ch.from);
+          view.dispatch({ changes: ch, effects: setNestedSelection.of(null), selection: EditorSelection.cursor(Math.min(ch.from, newLen)) });
+          try { Vim.getRegisterController().getRegister().setText(src, true); } catch { /* register unavailable */ }
+          Vim.handleKey(cm!, "<Esc>", "mapping");
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          return;
+        }
+      }
       const t = atomChordTarget(view, "delete");
       if (!t) return; // first d, or not an atom → let vim do a normal dd
       const src = view.state.doc.sliceString(t.from, t.to);

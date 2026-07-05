@@ -15,11 +15,11 @@ import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, directiveChainAt,
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen, resolveDirectiveRanges } from "../macros/directive-parser";
 import { parseFenceLine } from "@wikistead/macro-render"; // #198: code-fence attribute parser
-import { renderMarkdownToDom, renderCalloutPanel } from "../macros/md-render";
+import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset } from "../macros/md-render";
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
 import { openMacroModal } from "./macro-modal";
-import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost } from "./macro-edit";
+import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost, nestedSelectionField, setNestedSelection, nestedEditActiveField, setNestedEditActive, type NestedSelection } from "./macro-edit";
 import { tableInlineEditor } from "./table-edit";
 import { tableTier } from "../macros/table";
 import type { InlineController } from "../macros/registry";
@@ -824,13 +824,135 @@ function removeLastLayoutItem(view: EditorView, pos: number, childName: "column"
   view.dispatch({ changes: { from: fromLine.from, to: Math.min(toLine.to + 1, view.state.doc.length) }, userEvent: "delete" });
 }
 
+// #215 / ADR-100: nested-macro parity. Four consumers (select / edit / render / delete) key off ONE
+// question — "what is the innermost macro at this interaction point?" — so a click selects exactly what
+// the edit button opens and Backspace/dd/Delete removes. `resolveNestedAnchor` is input-device-independent
+// (takes a DOM element, so a future touch handler feeds elementFromPoint); `closest('[data-mac-pos]')`
+// returns the INNERMOST tagged ancestor (DOM nesting mirrors macro nesting), so innermost-wins is by
+// construction. `innermostMacroAt` re-resolves the LIVE range from the anchor (drift-tolerant — never
+// trusts the tag arithmetic for the edit), mirroring changeEmbedTarget's re-resolve discipline.
+export function resolveNestedAnchor(target: EventTarget | null): number | null {
+  const el = (target as HTMLElement | null)?.closest?.("[data-mac-pos]") as HTMLElement | null;
+  if (!el) return null;
+  const v = Number(el.dataset.macPos);
+  return Number.isFinite(v) ? v : null;
+}
+export type InnerMacro = { from: number; to: number; kind: "fence" | "directive"; name: string };
+export function innermostMacroAt(state: EditorState, anchor: number): InnerMacro | null {
+  const t = tableBlockAt(state, anchor); if (t && directiveMacroAt(state, anchor)?.name === "table") return { from: t.from, to: t.to, kind: "directive", name: "table" };
+  const f = macroFenceAt(state, anchor); if (f) return { from: f.from, to: f.to, kind: "fence", name: f.lang };
+  const d = directiveMacroAt(state, anchor); if (d) return { from: d.from, to: d.to, kind: "directive", name: d.name };
+  return null;
+}
+// #215 (Consumer 4): one offset-invariant range covering the innermost macro's whole lines (open/close
+// fence incl.) plus one trailing separator line — the SAME range for Backspace, Delete, and vim dd, so
+// they can't drift (decision 788). Container + siblings untouched (a plain Y.Text delete).
+export function nestedDeleteChange(state: EditorState, anchor: number): { from: number; to: number } | null {
+  const m = innermostMacroAt(state, anchor);
+  if (!m) return null;
+  const doc = state.doc;
+  const fromLine = doc.lineAt(m.from);
+  const toLine = doc.lineAt(Math.min(m.to, doc.length));
+  return { from: fromLine.from, to: Math.min(toLine.to + 1, doc.length) };
+}
+// #215 (Consumer 2): open the selected nested macro's own editUI in place (sets the nested-edit field;
+// the container widget re-renders and swaps just that subtree for its editUI island). A nested
+// richEditUI:modal macro (Excalidraw) opens its modal instead. Returns false if the anchor resolves to
+// no macro (e.g. structural click).
+export function enterNestedMacroAt(view: EditorView, sel: NestedSelection): boolean {
+  if (view.state.readOnly) return false;
+  const m = innermostMacroAt(view.state, sel.anchor);
+  if (!m) return false;
+  if (m.kind === "fence") {
+    const fence = macroFenceAt(view.state, sel.anchor);
+    if (fence?.macro.richEditUI?.present === "modal") { openMacroModal(view, fence.macro, () => fence.from, currentMacroTheme()); return true; }
+  }
+  view.dispatch({ effects: setNestedEditActive.of({ nested: { from: m.from, to: m.to }, anchor: sel.anchor, container: sel.container }) });
+  view.focus();
+  return true;
+}
+
+// #215 (Consumer 2): mount the innermost nested macro's editUI into `slot` (the tagged subtree), replacing
+// its rendered form in place — keeping the flex layout (Option B(i)). Save = one offset-invariant Y.Text
+// replace of the macro's range (the same editUISaveChange / makeInnerEditHost the top-level path uses), so
+// single Y.Text is preserved and the macro never sees the EditorView. Source-scope mirrors the top-level
+// Directive renderer: a callout owns its whole `:::type[label]…:::` block (identity wrap); columns/tabs/
+// fence macros own their inner body (fence-reconstruction wrap). Returns true if an island mounted.
+function mountNestedEditIsland(view: EditorView, slot: HTMLElement, sel: NestedSelection): boolean {
+  const state = view.state;
+  const m = innermostMacroAt(state, sel.anchor);
+  if (!m) return false;
+  const doc = state.doc;
+  const to = Math.min(m.to, doc.length);
+  const host = document.createElement("div");
+  host.className = "cm-lp-nested-edit-island";
+  host.setAttribute("data-testid", "nested-edit-island");
+  const clearAndRender = () => { view.dispatch({ effects: setNestedEditActive.of(null) }); view.focus(); };
+  if (m.kind === "directive") {
+    const macro = findDirectiveMacro(m.name) ?? noteCalloutMacro;
+    if (macro.richEditUI?.present === "inline") { // :::table → in-editor WYSIWYG grid
+      const hostApi = makeInnerEditHost(view, m.from, to, tableTier);
+      const ctrl = tableInlineEditor.mount(host, hostApi);
+      host.querySelector('[data-testid="table-done"]')?.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); ctrl.destroy(); clearAndRender(); });
+      slot.replaceWith(host);
+      return true;
+    }
+    if (macro.editUI?.present === "inline") {
+      // A callout owns its WHOLE block (so its editUI can change type/label) → full source + identity wrap.
+      // columns/tabs own their inner body → the lines between the fences, re-wrapped with the verbatim open
+      // fence (colon count + [label] preserved) so a 4-colon `::::columns` round-trips (the #185 convention).
+      const isCallout = !!macro.containerClass;
+      const first = doc.lineAt(m.from);
+      const last = doc.lineAt(Math.min(m.to, doc.length) - 1);
+      const openLine = first.text;
+      const closeMark = openLine.match(/^\s*([`~:]+)/)?.[1] ?? ":::";
+      const bodyLines: string[] = [];
+      for (let n = first.number + 1; n < last.number; n++) bodyLines.push(doc.line(n).text);
+      const source = isCallout ? doc.sliceString(m.from, to) : bodyLines.join("\n");
+      const wrap = isCallout ? (b: string) => b : (b: string) => `${openLine}\n${b}\n${closeMark}`;
+      const save = (newBody: MacroSource) => {
+        view.dispatch({ changes: editUISaveChange(m.from, to, wrap, macro.tier, newBody) });
+        view.focus();
+      };
+      macro.editUI.mount(host, asMacroSource(source), { theme: currentMacroTheme() }, save);
+      slot.replaceWith(host);
+      return true;
+    }
+  }
+  // Fence macro (mermaid/plantuml) OR any macro without an in-place editUI: a generic raw-source panel
+  // over its range (ADR-100 open question — a nested ``` macro has no bespoke in-place surface in v1).
+  const src = doc.sliceString(m.from, to);
+  const ta = document.createElement("textarea");
+  ta.className = "cm-lp-nested-edit-src";
+  ta.setAttribute("data-testid", "nested-edit-src");
+  ta.value = src;
+  ta.spellcheck = false;
+  ta.addEventListener("mousedown", (e) => e.stopPropagation());
+  ta.addEventListener("change", () => { view.dispatch({ changes: { from: m.from, to, insert: ta.value } }); view.focus(); });
+  host.appendChild(ta);
+  slot.replaceWith(host);
+  return true;
+}
+
+// #215: locate the tagged subtree for a given anchor inside a rendered widget (exact match; the widget
+// re-renders from the live doc so tags and the mapped anchor stay in lock-step).
+function findNestedSlot(root: HTMLElement, anchor: number): HTMLElement | null {
+  return root.querySelector(`[data-mac-pos="${anchor}"]`);
+}
+
 class MacroWidget extends WidgetType {
   private ro?: ResizeObserver;
   private objectUrl?: string; // #140: revoked on destroy so the rendered image blob isn't leaked
   private destroyed = false; // guards the async render swap against a widget torn down mid-fetch
-  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string, readonly selected: boolean, readonly theme: MacroTheme) {
+  // #215 / ADR-100: `from`/`bodyFrom` are the container's absolute range start + inner-body start (so the
+  // top-level columns/tabs render tags its nested macros via pendingBaseOffset). `nestedSel`/`nestedEdit`
+  // are the display-only selection / edit-active state intersecting THIS widget (null otherwise), driving
+  // the nested ring + edit button + editUI island. Stable string keys in eq so an unrelated selection
+  // move never churns this widget (the project design notes "widget eq ").
+  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string, readonly selected: boolean, readonly theme: MacroTheme, readonly from = 0, readonly to = 0, readonly bodyFrom = 0, readonly nestedSel: NestedSelection | null = null, readonly nestedEdit: NestedSelection | null = null) {
     super();
   }
+  private nestedKey(v: NestedSelection | null) { return v ? `${v.nested.from}:${v.nested.to}:${v.anchor}` : ""; }
   eq(other: MacroWidget) {
     // Compare by `name` (the registry key), NOT the `macro` object: the directive renderer
     // passes a FRESH { liveRender, richEditUI } literal every render, so a `macro` identity
@@ -841,7 +963,8 @@ class MacroWidget extends WidgetType {
     // #200: `theme` is part of the key so a light/dark switch INVALIDATES the widget and CM
     // rebuilds it → liveRender re-runs and re-exports the SVG for the new theme (a macro like
     // Excalidraw bakes colours into its output, so it can't follow the theme via CSS alone).
-    return other.name === this.name && other.body === this.body && other.foldable === this.foldable && other.selected === this.selected && other.theme === this.theme;
+    return other.name === this.name && other.body === this.body && other.foldable === this.foldable && other.selected === this.selected && other.theme === this.theme
+      && this.nestedKey(other.nestedSel) === this.nestedKey(this.nestedSel) && this.nestedKey(other.nestedEdit) === this.nestedKey(this.nestedEdit);
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
@@ -864,8 +987,36 @@ class MacroWidget extends WidgetType {
       ph.textContent = `Empty ${this.name} — click to ${opens ? "open" : "edit"}`;
       wrap.appendChild(ph);
     } else {
+      // #215 / ADR-100: for the layout containers, hand the inner-body base offset to the liveRender so its
+      // nested macros tag themselves (data-mac-pos) for the hit-test. Consumed by columns/tabs liveRender;
+      // reset immediately after so it never leaks to another macro's render.
+      const isLayout = this.name === "columns" || this.name === "tabs";
+      if (isLayout) setPendingBaseOffset(this.bodyFrom);
       const rendered = this.macro.liveRender(this.body, { theme: this.theme }); // #200: the widget's built theme (eq() rebuilds on a switch), not a live DOM read
+      if (isLayout) setPendingBaseOffset(null);
       wrap.appendChild(rendered);
+      // #215 / ADR-100 (Consumers 1 & 2): draw the nested-macro ring + edit button on the selected nested
+      // subtree, or swap it for its editUI island when nested-edit is active. Only for layout containers,
+      // only when this widget's range actually holds the selection (nestedSel/nestedEdit already intersect).
+      if (isLayout && !view.state.readOnly) {
+        if (this.nestedEdit) {
+          const slot = findNestedSlot(rendered, this.nestedEdit.anchor);
+          if (slot) mountNestedEditIsland(view, slot, this.nestedEdit);
+        } else if (this.nestedSel) {
+          const slot = findNestedSlot(rendered, this.nestedSel.anchor);
+          if (slot) {
+            slot.classList.add("cm-lp-nested-sel");
+            const edit = document.createElement("button");
+            edit.type = "button";
+            edit.className = "cm-lp-macro-edit cm-lp-nested-macro-edit";
+            edit.title = "Edit";
+            edit.innerHTML = MACRO_EDIT_ICON;
+            edit.setAttribute("data-testid", "nested-macro-edit");
+            edit.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterNestedMacroAt(view, this.nestedSel!); });
+            slot.appendChild(edit);
+          }
+        }
+      }
       // #140 / ADR-074: host-mediated render. The macro returned its degrade DOM (the source fence);
       // for a host-renderable lang (plantuml) ask the injected renderer for image bytes and, on
       // success, swap the source for the image. null (unconfigured / failure / non-viewer 403) keeps
@@ -920,8 +1071,26 @@ class MacroWidget extends WidgetType {
       // (Excalidraw). EXCEPTION: a legacy richEditUI macro (table via InnerEditHost, #154) keeps its
       // in-place click-to-edit — its cell-edit UX depends on the body click and is not an editUI atom yet.
       const clickEdits = !this.macro.editUI && editModeOf(this.macro) === "inline"; // table (#154) only
+      const isLayout = this.name === "columns" || this.name === "tabs";
       wrap.addEventListener("mousedown", (e) => {
         e.preventDefault();
+        // #215 / ADR-100 (Consumer 1): a click on a NESTED macro selects THAT macro (ring), not the
+        // container. resolveNestedAnchor(e.target) → innermost tagged subtree; the caret stays on the
+        // container atom (posAtDOM(wrap)) since the interior isn't caret-addressable, and the display-only
+        // field carries the selection. A click on the container's own structure (no data-mac-pos) clears
+        // any nested selection and selects the whole container (ADR-100 §1).
+        if (isLayout) {
+          const anchor = resolveNestedAnchor(e.target);
+          if (anchor != null) {
+            const m = innermostMacroAt(view.state, anchor);
+            if (m) {
+              view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)), effects: setNestedSelection.of({ nested: { from: m.from, to: m.to }, anchor, container: { from: this.from, to: this.to } }) });
+              view.focus();
+              return;
+            }
+          }
+          if (view.state.field(nestedSelectionField, false)) { view.dispatch({ effects: setNestedSelection.of(null) }); }
+        }
         if (clickEdits && enterMacroAt(view, view.posAtDOM(wrap))) return;
         view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)) });
         view.focus();
@@ -1422,7 +1591,14 @@ const RENDERERS: BlockRenderer[] = [
         }
         const parts: string[] = [];
         for (let n = first.number + 1; n < lastLine.number; n++) parts.push(doc.line(n).text);
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editUI: macro.editUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme), block: true }), from, to);
+        // #215 / ADR-100: the container's inner-body base (for nested tagging) + the display-only
+        // nested-selection / nested-edit state that intersects THIS container (null otherwise).
+        const bodyFrom = first.number + 1 <= doc.lines ? doc.line(first.number + 1).from : from;
+        const nsf = ctx.state.field(nestedSelectionField, false);
+        const nestedSel = nsf && nsf.nested.from >= from && nsf.nested.to <= to ? nsf : null;
+        const nef = ctx.state.field(nestedEditActiveField, false);
+        const nestedEdit = nef && nef.nested.from >= from && nef.nested.to <= to ? nef : null;
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editUI: macro.editUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme, from, to, bodyFrom, nestedSel, nestedEdit), block: true }), from, to);
         return macro.revealOnCursor ? false : undefined;
       }
       if (macro.collapsible && !rangeRevealed(ctx.state, first.from, lastLine.to)) {
@@ -1729,7 +1905,9 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
     // A fold toggle changes WHICH macro blocks render (folded → CM's placeholder owns
     // the range, so the macro widget must drop) but is neither a doc nor selection
     // change — rebuild so isFolded is re-evaluated and the stale widget is removed.
-    for (const e of tr.effects) if (e.is(foldEffect) || e.is(unfoldEffect) || e.is(setMacroRenderActive)) return buildDecorations(tr.state);
+    // #215 / ADR-100: nested-selection / nested-edit are not doc/selection changes but change which nested
+    // subtree draws the ring / editUI island — rebuild so the container widget re-renders.
+    for (const e of tr.effects) if (e.is(foldEffect) || e.is(unfoldEffect) || e.is(setMacroRenderActive) || e.is(setNestedSelection) || e.is(setNestedEditActive)) return buildDecorations(tr.state);
     // #200: a theme change → rebuild so macro widgets pick up the new theme (their eq keys on theme,
     // so CM recreates them and liveRender re-exports for light/dark). Excalidraw etc. bake colours in.
     for (const e of tr.effects) if (e.is(redrawMacros)) return buildDecorations(tr.state, e.value); // #200: rebuild with the effect's theme (not the stale DOM)
@@ -2112,6 +2290,14 @@ export const livePreviewTheme = EditorView.baseTheme({
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
   ".cm-lp-macro-wrap:hover .cm-lp-macro-fold, .cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-fold, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget": { opacity: "1" },
+  // #215 / ADR-100: the selected NESTED macro (inside a columns/tabs widget) draws its own ring + edit
+  // button — the same affordance as a top-level macro, at depth. The ring is on the nested subtree (not
+  // the container), and the button is anchored to that subtree's top-left (the container's top margin is
+  // out of reach). Shown always while selected (no hover needed — the click already selected it).
+  ".cm-lp-nested-sel": { position: "relative", outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "2px", borderRadius: "4px" },
+  ".cm-lp-nested-macro-edit": { position: "absolute", top: "2px", left: "2px", opacity: "1", zIndex: "4" },
+  ".cm-lp-nested-edit-island": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "2px", borderRadius: "4px" },
+  ".cm-lp-nested-edit-src": { width: "100%", minHeight: "4em", boxSizing: "border-box", fontFamily: "var(--font-mono, monospace)", fontSize: "0.85em" },
   ".cm-lp-excalidraw svg": { maxWidth: "100%", height: "auto", pointerEvents: "none" },
   // Empty-macro placeholder (#3): a clearly-bounded dashed block so the user SEES that a
   // macro widget occupies the line (matches the caret's block-motion behavior).

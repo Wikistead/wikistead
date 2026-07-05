@@ -10,15 +10,23 @@ import { type MacroHtmlDescriptor, type MacroHtmlRegistry } from "./render.js";
 // Split a layout directive's body into its inner :::name items. Depth-tracking (push on any nested
 // open, pop on a close) so a nested directive INSIDE an item (e.g. a callout in a column) doesn't
 // prematurely close the item. Each item keeps its optional [label] + raw content. Pure + DOM-free.
-export function parseLayoutItems(body: string, name: string): { label?: string; content: string }[] {
-  const items: { label?: string; lines: string[] }[] = [];
-  let cur: { label?: string; lines: string[] } | null = null;
+// #215 / ADR-100: `contentOffset` is the byte offset WITHIN `body` where the item's (post-trim)
+// content begins — the source anchor the editor uses to tag nested-macro DOM (`data-mac-pos`). It is
+// derived, not guessed: each item's first content line starts right after its open fence (tracked in
+// `firstLineStart`), and the leading blank lines the trim strips map 1:1 to leading "\n" bytes, so
+// `firstLineStart + leadingNewlines` is exactly the trimmed content's first byte in `body`. Existing
+// callers destructure `{label, content}` and ignore the new field (additive, no behaviour change).
+export function parseLayoutItems(body: string, name: string): { label?: string; content: string; contentOffset: number }[] {
+  const items: { label?: string; lines: string[]; firstLineStart: number }[] = [];
+  let cur: { label?: string; lines: string[]; firstLineStart: number } | null = null;
   let depth = 0;
+  let pos = 0; // byte offset of the current line's start in `body`
   for (const line of body.split("\n")) {
+    pos += line.length + 1; // advance to the NEXT line's start (past this line + its "\n")
     const open = parseDirectiveOpen(line);
     if (open) {
       if (depth === 0) {
-        if (open.name === name) { cur = { label: open.label, lines: [] }; items.push(cur); depth = 1; }
+        if (open.name === name) { cur = { label: open.label, lines: [], firstLineStart: pos }; items.push(cur); depth = 1; }
         continue; // an open of a different name at top level is ignored (only `name` items count)
       }
       cur!.lines.push(line); depth++; // nested open → part of the current item
@@ -32,7 +40,11 @@ export function parseLayoutItems(body: string, name: string): { label?: string; 
     }
     if (cur) cur.lines.push(line);
   }
-  return items.map((i) => ({ label: i.label, content: i.lines.join("\n").replace(/^\n+|\n+$/g, "") }));
+  return items.map((i) => {
+    const joined = i.lines.join("\n");
+    const leading = joined.length - joined.replace(/^\n+/, "").length; // leading blank lines the trim removes
+    return { label: i.label, content: joined.replace(/^\n+|\n+$/g, ""), contentOffset: i.firstLineStart + leading };
+  });
 }
 
 // columns → each column's content in order (a plain reader stacks them; nothing dropped).

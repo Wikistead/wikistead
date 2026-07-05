@@ -31,21 +31,77 @@ export const macroRenderActiveField = StateField.define<{ from: number; to: numb
   },
 });
 
+// #215 / ADR-100: nested-macro parity inside an ATOMIC container widget (columns/tabs). The
+// container's interior is NOT caret-addressable (Option B(i), #196), so a nested macro can't be
+// selected via the caret → ring path. Instead a display-only field tracks the selected nested
+// macro: `nested` = the innermost macro's [from,to] (drives which subtree draws the ring), `anchor`
+// = one absolute doc offset guaranteed INSIDE that macro (consumers re-resolve the live range from
+// it — drift-tolerant, mirrors changeEmbedTarget), `container` = the atomic widget's [from,to]
+// (clears the selection when the caret leaves the container). Single Y.Text untouched: this is pure
+// display state; edit/delete are plain offset-invariant range edits located by the #185 resolver.
+export type NestedSelection = { nested: { from: number; to: number }; anchor: number; container: { from: number; to: number } };
+const mapNested = (v: NestedSelection, tr: { changes: import("@codemirror/state").ChangeDesc }): NestedSelection => ({
+  nested: { from: tr.changes.mapPos(v.nested.from, 1), to: tr.changes.mapPos(v.nested.to, -1) },
+  anchor: tr.changes.mapPos(v.anchor, 1),
+  container: { from: tr.changes.mapPos(v.container.from, 1), to: tr.changes.mapPos(v.container.to, -1) },
+});
+export const setNestedSelection = StateEffect.define<NestedSelection | null>();
+export const nestedSelectionField = StateField.define<NestedSelection | null>({
+  create: () => null,
+  update(value, tr) {
+    for (const e of tr.effects) if (e.is(setNestedSelection)) return e.value;
+    if (!value) return null;
+    let v = value;
+    if (tr.docChanged) v = mapNested(v, tr);
+    if (tr.selection) {
+      const h = tr.newSelection.main.head;
+      if (h < v.container.from || h > v.container.to) return null; // caret left the container → clear
+    }
+    return v;
+  },
+});
+
+// #215 / ADR-100 (Consumer 2): which nested subtree is swapped for its editUI island (null = none).
+// Same shape as nestedSelectionField; separate from macroRenderActiveField so nested edit does not
+// cross-talk with the top-level render-active branch. Cleared on Esc (below) and when the caret
+// leaves the container.
+export const setNestedEditActive = StateEffect.define<NestedSelection | null>();
+export const nestedEditActiveField = StateField.define<NestedSelection | null>({
+  create: () => null,
+  update(value, tr) {
+    for (const e of tr.effects) if (e.is(setNestedEditActive)) return e.value;
+    if (!value) return null;
+    let v = value;
+    if (tr.docChanged) v = mapNested(v, tr);
+    if (tr.selection) {
+      const h = tr.newSelection.main.head;
+      if (h < v.container.from || h > v.container.to) return null;
+    }
+    return v;
+  },
+});
+
 // Esc exits an inline edit session (the explicit way out besides the Done button; edit
 // mode otherwise persists across operations — ADR-022 review #2).
 const escExit = Prec.high(
   EditorView.domEventHandlers({
     keydown(e, view) {
-      if (e.key === "Escape" && !view.state.readOnly && view.state.field(macroRenderActiveField)) {
-        view.dispatch({ effects: setMacroRenderActive.of(null) });
-        return true;
+      if (e.key === "Escape" && !view.state.readOnly) {
+        if (view.state.field(nestedEditActiveField)) { // #215: back out of a nested editUI island first
+          view.dispatch({ effects: setNestedEditActive.of(null) });
+          return true;
+        }
+        if (view.state.field(macroRenderActiveField)) {
+          view.dispatch({ effects: setMacroRenderActive.of(null) });
+          return true;
+        }
       }
       return false;
     },
   }),
 );
 
-export const macroEdit: Extension = [macroRenderActiveField, escExit];
+export const macroEdit: Extension = [macroRenderActiveField, nestedSelectionField, nestedEditActiveField, escExit];
 
 // ADR-025 step 3: auto-demote `source` to the LOWEST tier level that can represent it (open
 // formats — persist the most portable form). `cap` is a pass-through SEAM: the highest level
