@@ -327,6 +327,21 @@ function PageRoute() {
       }),
     [toggleTask, t],
   );
+  // #212 bounce 3 (comment 720): the header band OVERLAPS the scrolling editor (absolute overlay) so its
+  // backdrop-blur has content behind it; the editor clears it via a padding-top equal to the band height,
+  // published as the --wks-band-h CSS var by this ResizeObserver. React 19 callback ref with cleanup.
+  // MUST be declared BEFORE the early returns below — a hook after a conditional return breaks the
+  // rules-of-hooks (the "rendered fewer hooks" crash).
+  const bandRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const parent = el.parentElement;
+    if (!parent) return;
+    const set = () => parent.style.setProperty("--wks-band-h", `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => { ro.disconnect(); parent.style.removeProperty("--wks-band-h"); };
+  }, []);
 
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
@@ -389,22 +404,6 @@ function PageRoute() {
     onPermissions: page?.canManage ? () => setPermsOpen(true) : undefined,
     dirtySignal: dirtySig,
   };
-  // #212 bounce 3 (comment 720): the header band must OVERLAP the scrolling editor for its
-  // backdrop-blur to have anything to blur (measured: the band sat ABOVE the scroller with a zero-overlap
-  // seam, so the frosted effect could never show). It now renders as an absolute overlay at the top of
-  // the editor area; the editor content clears it via a padding-top equal to the band's height, published
-  // as the --wks-band-h CSS var (a ResizeObserver tracks title-wrap/status changes). React 19 callback
-  // ref with cleanup.
-  const bandRef = useCallback((el: HTMLDivElement | null) => {
-    if (!el) return;
-    const parent = el.parentElement;
-    if (!parent) return;
-    const set = () => parent.style.setProperty("--wks-band-h", `${Math.ceil(el.getBoundingClientRect().height)}px`);
-    set();
-    const ro = new ResizeObserver(set);
-    ro.observe(el);
-    return () => { ro.disconnect(); parent.style.removeProperty("--wks-band-h"); };
-  }, []);
   return (
     <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
       <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
