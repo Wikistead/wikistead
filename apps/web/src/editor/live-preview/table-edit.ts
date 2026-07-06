@@ -2,6 +2,7 @@ import { mergeRect, unmergeAt, toHtml, styleToCss, insertColAt, insertRowAt, del
 import type { InnerEditHost, InlineEditor, InlineController } from "../macros/registry";
 import { asMacroSource } from "../macros/registry";
 import { setCellText, cellElToText, insertBrAtCaret, insertTextAtCaret, stripZeroWidth } from "../macros/table-cell-dom";
+import { mountCellFormatToolbar } from "./cell-inline-format";
 
 // #154: the uniform multi-select resize size — PURE so it is unit-testable (the previous impl set
 // every selected column to draggedWidth+delta, ballooning the block so the dragged edge didn't track
@@ -261,6 +262,9 @@ export const tableInlineEditor: InlineEditor = {
       el.contentEditable = "true";
       el.classList.add("cm-lp-cell-editing");
       editHandle = host.beginTextEdit(el); // #154: focus via the host (CM-safe in the inline path)
+      // #89 (rescoped): a selection inside the cell shows the inline-decoration toolbar (bold/italic/etc.),
+      // the cell-island counterpart of the CM floatingToolbar (which can't reach the contenteditable).
+      const fmtBar = mountCellFormatToolbar(el);
       const range = document.createRange();
       range.selectNodeContents(el);
       range.collapse(false); // caret at end
@@ -270,6 +274,7 @@ export const tableInlineEditor: InlineEditor = {
       const finish = (commit: boolean) => {
         if (!editing) return;
         editing = false;
+        fmtBar.destroy(); // #89: tear down the cell inline-format toolbar
         el.removeEventListener("blur", onBlur);
         el.removeEventListener("keydown", onKey);
         el.removeEventListener("paste", onPaste);

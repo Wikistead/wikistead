@@ -376,6 +376,35 @@ body {
   background: var(--panel-3);
 }
 
+/* #89 (rescoped): the inline-decoration toolbar for a table cell being edited. Fixed-positioned in
+   document.body (the cell is a contenteditable island inside a CM widget, so a CM tooltip can't host it);
+   mirrors the .lp-toolbar look. Theme-aware via the same tokens (light/dark). */
+.cm-lp-cell-format-bar {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3, 8px);
+  background: var(--panel);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+.cm-lp-cell-format-btn {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--fg);
+  cursor: pointer;
+}
+.cm-lp-cell-format-btn:hover {
+  background: var(--panel-3);
+}
+
 /* Slash command palette: a CM tooltip-layer menu opened by `/` at line start. */
 .cm-tooltip.lp-palette {
   display: flex;
