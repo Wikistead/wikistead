@@ -24,3 +24,4 @@ playwright-report/
 
 # TypeScript incremental build state (build artifact — never track; caused perpetual diff churn).
 *.tsbuildinfo
+
