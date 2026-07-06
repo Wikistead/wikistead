@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "../session/SessionProvider";
 import * as api from "./commentsApi";
 
@@ -8,12 +8,17 @@ import * as api from "./commentsApi";
 // the GUEST — not the app SessionProvider's member/dev token. Without it a guest's delete/edit ran with
 // the session token (in dev the dev-user bypass), letting a "guest" delete a member's comment. Members
 // omit it → the session token (cookie/dev) is used, unchanged.
+// ADR-102: an INFINITE query — page 0 is the newest activity, each `fetchNextPage()` pulls the next-OLDER
+// page (triggered by scrolling to the top). `getNextPageParam` returns the server cursor until `hasMore`
+// is false (the beginning). A non-viewable page returns null (the panel then renders nothing).
 export function useComments(pageId: string, tokenOverride?: string) {
   const { token: sessionToken } = useSession();
   const token = tokenOverride ?? sessionToken;
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: ["comments", pageId, token],
-    queryFn: () => api.listComments(token, pageId),
+    queryFn: ({ pageParam }) => api.listCommentsPage(token, pageId, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => (lastPage?.hasMore ? lastPage.nextCursor ?? undefined : undefined),
     enabled: pageId.length > 0,
     staleTime: 5_000,
   });

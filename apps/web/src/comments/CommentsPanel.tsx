@@ -90,6 +90,11 @@ function Composer({ pageId, token, onSubmit, placeholder }: { pageId: string; to
   );
 }
 
+// ADR-102 (comment 805): the tuning values live HERE, named, so they adjust in one place.
+const THREAD_COLLAPSE_THRESHOLD = 5; // collapse a thread with MORE than this many comments
+const THREAD_COLLAPSE_KEEP = 3; // ...keeping the parent + this many latest replies
+const LOAD_OLDER_SCROLL_PX = 48; // fetch the next-older page when the list is scrolled within this of the top
+
 export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, token }: { pageId: string; canComment: boolean; anchorGetterRef: MutableRefObject<AnchorGetter | null>; onClose: () => void; token?: string }) {
   const { t: tr, i18n } = useTranslation();
   const { token: sessionToken } = useSession();
@@ -98,59 +103,105 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
   // guest — not the app SessionProvider's member/dev token (which in dev is the dev-user bypass, the
   // path that let a "guest" delete a member's comment). Members pass no token → the session is used.
   const authToken = token ?? sessionToken;
-  const { data: threads } = useComments(pageId, authToken);
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useComments(pageId, authToken);
   const { createThread, reply, remove } = useCommentMutations(pageId, authToken);
 
   // #214 part 2 (comment 738): a comment's "reply" button retargets the SINGLE bottom composer to that
   // thread (no always-expanded per-comment reply box). Null = the composer posts a new page comment.
   // #214 comment 751 (1): carry the target comment's body so the reply banner previews WHICH comment.
   const [replyTo, setReplyTo] = useState<{ threadId: string; sub: string; body: string } | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set()); // ADR-102 §2: threads the user expanded
   const listRef = useRef<HTMLDivElement | null>(null);
-  const count = threads?.reduce((n, t) => n + t.comments.length, 0) ?? 0;
-  // #214 part 5: chat order (oldest → newest, newest just above the composer). Keep the newest in view.
-  useLayoutEffect(() => { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight; }, [count]);
-  // A retargeted reply whose thread vanished (deleted) falls back to a new page comment.
-  useEffect(() => { if (replyTo && !threads?.some((t) => t.id === replyTo.threadId)) setReplyTo(null); }, [threads, replyTo]);
+  const anchorHeight = useRef<number | null>(null); // ADR-102 §3: scrollHeight snapshot for prepend anchoring
 
-  // Page not viewable (server returned null) → render nothing (no-leak).
-  if (threads === null || threads === undefined) return null;
-  // #214 comment 751 (2): never render an EMPTY thread frame — deleting the last comment of a thread must
-  // not leave a dangling box. A thread with remaining replies still shows (its remaining comments render).
+  // ADR-102 §3: pages are newest-first (page 0 = newest activity); a thread within a page is also
+  // newest-first. Flatten to chat order (oldest at top, newest just above the composer) by reversing both.
+  const pages = data?.pages;
+  const notViewable = !!pages && pages[0] === null; // first page 404/403 → not viewable (no-leak)
+  const threads = pages ? [...pages].reverse().flatMap((p) => (p ? [...p.threads].reverse() : [])) : [];
+  // #214 comment 751 (2): never render an EMPTY thread frame (deleting a thread's last comment).
   const visibleThreads = threads.filter((t) => t.comments.length > 0);
+  const count = visibleThreads.reduce((n, t) => n + t.comments.length, 0);
+
+  // ADR-102 §3 (the crux): after an OLDER page prepends, keep the viewport on the same comment —
+  // scrollTop += (newHeight − snapshot). Otherwise (initial load / a new comment at the bottom) pin to
+  // the newest. `anchorHeight` is set ONLY when we fetch older (onScroll below), so the two never conflict.
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    if (anchorHeight.current != null) { el.scrollTop += el.scrollHeight - anchorHeight.current; anchorHeight.current = null; }
+    else el.scrollTop = el.scrollHeight;
+  }, [count, visibleThreads.length]);
+  // A retargeted reply whose thread vanished (deleted) falls back to a new page comment.
+  useEffect(() => { if (replyTo && !threads.some((t) => t.id === replyTo.threadId)) setReplyTo(null); }, [threads, replyTo]);
+
+  const loadOlder = () => {
+    const el = listRef.current;
+    if (!el || !hasNextPage || isFetchingNextPage) return;
+    anchorHeight.current = el.scrollHeight; // snapshot BEFORE the prepend, for the layout-effect compensation
+    void fetchNextPage();
+  };
+  const onScroll = () => { const el = listRef.current; if (el && el.scrollTop <= LOAD_OLDER_SCROLL_PX) loadOlder(); };
+
+  // Page not viewable (server returned null) → render nothing (no-leak). While the first page loads
+  // (pages undefined) the panel shell still renders with an empty list.
+  if (notViewable) return null;
 
   const Stamp = ({ iso }: { iso: string }) => {
     const { rel, abs } = relTime(iso, i18n.language);
     return <time className="text-[0.75em] text-fg-dim" dateTime={iso} title={abs} data-testid="comment-time">{rel}</time>;
   };
+  const CommentRow = ({ c }: { c: (typeof visibleThreads)[number]["comments"][number] }) => (
+    <div className="flex flex-col gap-0.5" data-testid="comment-item">
+      <div className="flex items-center gap-1.5">
+        <AuthorChip sub={c.authorSub} />
+        <Stamp iso={c.createdAt} />
+        {c.canModify && (
+          <button type="button" className="ml-auto cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-[var(--danger)] opacity-80 hover:underline hover:opacity-100" data-testid="comment-delete" onClick={() => remove.mutate(c.id)}>{tr("commentsPanel.delete")}</button>
+        )}
+      </div>
+      <span className="whitespace-pre-wrap text-[0.92em] [overflow-wrap:anywhere]">{c.body}</span>
+    </div>
+  );
 
   return (
     <RightPanel testId="comments-panel" title={tr("page.comments")} onClose={onClose}>
       {/* #214 part 1: NO selection/inline comment affordance — page comments only. part 4/5: a scrolling
           thread list above a composer pinned FLUSH to the panel bottom (no gap / see-through). */}
       <div className="flex min-h-0 flex-1 flex-col gap-2">
-        <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto" data-testid="comment-list">
-          {visibleThreads.length === 0 && <p className={hint}>{tr("commentsPanel.empty")}</p>}
-          {visibleThreads.map((t) => (
-            <div key={t.id} className="flex flex-col gap-2 rounded-lg border border-border bg-background px-3 py-2" data-testid="comment-thread">
-              {t.comments.map((c) => (
-                <div key={c.id} className="flex flex-col gap-0.5" data-testid="comment-item">
-                  <div className="flex items-center gap-1.5">
-                    <AuthorChip sub={c.authorSub} />
-                    <Stamp iso={c.createdAt} />
-                    {c.canModify && (
-                      <button type="button" className="ml-auto cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-[var(--danger)] opacity-80 hover:underline hover:opacity-100" data-testid="comment-delete" onClick={() => remove.mutate(c.id)}>{tr("commentsPanel.delete")}</button>
-                    )}
-                  </div>
-                  <span className="whitespace-pre-wrap text-[0.92em] [overflow-wrap:anywhere]">{c.body}</span>
-                </div>
-              ))}
-              {canComment && (
-                <button type="button" className="self-start cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-[var(--accent)] opacity-90 hover:underline hover:opacity-100" data-testid="comment-reply" onClick={() => setReplyTo({ threadId: t.id, sub: t.comments[0]?.authorSub ?? "", body: t.comments[0]?.body ?? "" })}>
-                  {tr("commentsPanel.reply")}
-                </button>
-              )}
-            </div>
-          ))}
+        <div ref={listRef} onScroll={onScroll} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto" data-testid="comment-list">
+          {/* ADR-102 §4: load-older affordance at the TOP — visible while an older page exists, gone at the
+              beginning. It is both the indicator and a click target (the scroll handler also triggers it). */}
+          {hasNextPage && (
+            <button type="button" className="shrink-0 cursor-pointer rounded border-0 bg-transparent py-1 text-center text-[0.8em] text-fg-dim hover:text-foreground hover:underline disabled:opacity-60" data-testid="comment-load-older" disabled={isFetchingNextPage} onClick={loadOlder}>
+              {tr("commentsPanel.loadOlder")}
+            </button>
+          )}
+          {!hasNextPage && visibleThreads.length === 0 && <p className={hint}>{tr("commentsPanel.empty")}</p>}
+          {visibleThreads.map((t) => {
+            // ADR-102 §2: a long thread (> threshold) shows the parent + the latest KEEP replies, folding
+            // the middle behind a "n replies" button until the user expands it.
+            const cs = t.comments;
+            const collapsed = cs.length > THREAD_COLLAPSE_THRESHOLD && !expanded.has(t.id);
+            const tail = collapsed ? cs.slice(cs.length - THREAD_COLLAPSE_KEEP) : cs.slice(1);
+            const hidden = collapsed ? cs.length - 1 - THREAD_COLLAPSE_KEEP : 0;
+            return (
+              <div key={t.id} className="flex flex-col gap-2 rounded-lg border border-border bg-background px-3 py-2" data-testid="comment-thread">
+                <CommentRow c={cs[0]!} />
+                {collapsed && (
+                  <button type="button" className="self-start cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-fg-dim hover:text-foreground hover:underline" data-testid="show-replies" onClick={() => setExpanded((s) => new Set(s).add(t.id))}>
+                    {tr("commentsPanel.showReplies", { count: hidden })}
+                  </button>
+                )}
+                {tail.map((c) => <CommentRow key={c.id} c={c} />)}
+                {canComment && (
+                  <button type="button" className="self-start cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-[var(--accent)] opacity-90 hover:underline hover:opacity-100" data-testid="comment-reply" onClick={() => setReplyTo({ threadId: t.id, sub: cs[0]?.authorSub ?? "", body: cs[0]?.body ?? "" })}>
+                    {tr("commentsPanel.reply")}
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {canComment && (
