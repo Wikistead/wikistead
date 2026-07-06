@@ -689,11 +689,15 @@ class TableWidget extends WidgetType {
     // until the #174 common hover-frame lands (then it folds into that), per comment 836 (don't leave non-vim
     // users without a visible entry while #174 is in review).
     if (!view.state.readOnly && view.state.facet(displayMode) === "live") {
+      // #216 comment 860: ONE always-visible (not hover-gated) pill that is BOTH the Ctrl+Enter key hint AND
+      // a clickable RichUI-entry button. The hover-only opacity approach did not appear on the reviewer's
+      // device (3×); dropping the hover dependency (always shown, subtly, brighter on hover) makes it reliably
+      // recognizable. Pencil + "Ctrl+↵" text so a keyboard/vim user sees the shortcut; click opens RichUI too.
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "cm-lp-macro-edit cm-lp-table-richui";
       btn.title = "Rich edit (Ctrl+Enter)";
-      btn.innerHTML = MACRO_EDIT_ICON;
+      btn.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-table-richui-key">Ctrl+↵</span>';
       btn.setAttribute("data-testid", "table-richui-enter");
       btn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); openTableEditing(view, view.posAtDOM(wrap)); });
       wrap.appendChild(btn);
@@ -2407,8 +2411,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   // clip/occlude it and the hover area doesn't cover it). Inside the corner it's within the table's own hover
   // region — reliably revealed on table hover and reachable without a hover gap. Panel bg + zIndex keep it
   // readable over the header cell.
-  ".cm-lp-table-richui": { top: "0.15em", left: "0.15em", zIndex: "4" },
+  // #216 comment 860: ALWAYS visible (subtle), not hover-gated — the hover-only version never showed on the
+  // reviewer's device. A small pill at the top-left corner: pencil + the Ctrl+↵ key hint. Brightens on hover.
+  ".cm-lp-table-richui": { top: "0.15em", left: "0.15em", zIndex: "4", opacity: "0.55", display: "inline-flex", alignItems: "center", gap: "3px", padding: "1px 5px" },
+  ".cm-lp-table-richui-key": { fontSize: "0.72em", fontWeight: "600", letterSpacing: "0.02em" },
   ".cm-lp-table-wrap:hover .cm-lp-table-richui": { opacity: "1" },
+  ".cm-lp-table-richui:hover": { opacity: "1" },
   // #213: columns/tabs structural add/remove bar — bottom-right, shown on hover/selection (same gating
   // as the edit button). Sits below the content so it doesn't overlap the child bodies.
   ".cm-lp-macro-layoutbar": { position: "absolute", bottom: "-0.6em", right: "0", display: "inline-flex", gap: "0.25em", opacity: "0", transition: "opacity 120ms", zIndex: "3", pointerEvents: "auto" },
