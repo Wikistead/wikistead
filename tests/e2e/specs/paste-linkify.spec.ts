@@ -92,3 +92,39 @@ test("#223: vim ON, Ctrl+V URL linkifies in normal AND insert mode", async ({ br
   await realPaste(page, "https://example.com/v");
   expect(await rawText(page)).toContain("[https://example.com/v](https://example.com/v)");
 });
+
+// #223 comment 885: pasting a URL onto a SELECTED (non-editing) RichUI cell must drop it IN the cell (the
+// Excel select-then-paste), NOT at the table's atom boundary. The CM-body handler bypasses when the table
+// island has focus; the table's own paste handler starts editing the active cell with the linkified content.
+test("#223 comment 885: URL paste onto a selected cell lands in the cell, not the atom boundary", async ({ browser }) => {
+  const page = await ctx(browser);
+  await openScratch(page, "paste-cell");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("| A | B |\n| --- | --- |\n| 1 | 2 |\n\nbelow\n");
+  await sleep(300);
+  await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await sleep(150);
+  await page.keyboard.press("Control+Enter"); // pipe x Live RichUI opt-in
+  await expect(page.getByTestId("table-edit")).toBeVisible();
+
+  const cell = page.getByTestId("table-edit").locator("td").first(); // body cell "1"
+  await cell.click(); // single click = SELECT (non-edit)
+  await sleep(150);
+  await page.evaluate(() => navigator.clipboard.writeText("https://example.com/cell"));
+  await page.keyboard.press("Control+v");
+  await sleep(250);
+
+  // the URL is linkified INTO the cell (rendered as a link), not inserted at the table edge.
+  await expect(cell.locator("a")).toHaveAttribute("href", "https://example.com/cell");
+  await page.keyboard.press("Enter"); // commit the cell
+  await sleep(150);
+  await page.keyboard.press("Escape"); // exit edit mode -> static render
+  await sleep(300);
+  // the committed cell renders the link INSIDE the table (WYSIWYG); it did NOT leak to a stray line below.
+  const tbl = page.locator("[data-pane=preview] table.cm-lp-table");
+  await expect(tbl.locator("td").first().locator("a")).toHaveAttribute("href", "https://example.com/cell");
+  // the paragraph below the table is still just "below" (no stray top-level linkified URL was inserted).
+  const below = await page.locator("[data-pane=preview] .cm-content").innerText();
+  expect(below).not.toContain("example.com/cell\nbelow"); // not dropped right before "below"
+});

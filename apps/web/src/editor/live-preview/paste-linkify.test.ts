@@ -34,6 +34,13 @@ describe("#223 linkifyPaste", () => {
     expect(call("", '<a href="https://example.com/p">Docs</a>')).toBe("[Docs](https://example.com/p)");
   });
 
+  it("#223 comment 885: normalizes our own rendered link (cm-lp-link [data-href] span), not just <a href>", () => {
+    // copying a link shown INSIDE the editor yields the span, not an <a> — must still normalize.
+    expect(call("", '<span class="cm-lp-link" data-href="https://example.com/p">Docs</span>')).toBe("[Docs](https://example.com/p)");
+    // dangerous scheme in a data-href span → plain paste (safeHref is still the only judge).
+    expect(call("x", '<span class="cm-lp-link" data-href="javascript:alert(1)">x</span>')).toBeNull();
+  });
+
   it("does NOT linkify a rich link with a dangerous href (plain paste)", () => {
     expect(call("click", '<a href="javascript:alert(1)">click</a>')).toBeNull();
     expect(call("x", '<a href="data:text/html,x">x</a>')).toBeNull();

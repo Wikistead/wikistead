@@ -15,23 +15,26 @@ const BARE_URL = /^https?:\/\/\S+$/i; // v1: explicit http/https scheme only (ww
 const escLinkText = (s: string): string => s.replace(/[[\]\\]/g, "\\$&");
 const emitHref = (url: string): string => (/[()\s]/.test(url) ? `<${url}>` : url); // angle-wrap if it has ()/space
 
-// The pasted HTML is a SINGLE anchor whose visible text is the whole paste → its href + text (else null).
+// The pasted HTML is a SINGLE link whose visible text is the whole paste → its href + text (else null).
 // DOMParser.parseFromString does not execute scripts and builds an inert tree; we read attributes/textContent
 // only (no innerHTML, no live DOM). Returns null when the paste is more than just one link (don't mangle it).
-function singleAnchor(html: string): { href: string; text: string } | null {
+// #223 comment 885: match BOTH a real `<a href>` (external sites) AND our own rendered link, which is a
+// `<span class="cm-lp-link" data-href>` (decorations.ts) — copying a link shown inside the editor yields the
+// span, not an `<a>`, so without data-href it fell through to a plain-text paste.
+function singleLink(html: string): { href: string; text: string } | null {
   let doc: Document;
   try {
     doc = new DOMParser().parseFromString(html, "text/html");
   } catch {
     return null;
   }
-  const anchors = doc.querySelectorAll("a[href]");
-  if (anchors.length !== 1) return null;
-  const a = anchors[0]!;
+  const links = doc.querySelectorAll("a[href], [data-href]");
+  if (links.length !== 1) return null;
+  const el = links[0]!;
   const bodyText = (doc.body.textContent ?? "").trim();
-  const aText = (a.textContent ?? "").trim();
-  if (!bodyText || bodyText !== aText) return null; // extra content around the link → leave it to default paste
-  return { href: a.getAttribute("href") ?? "", text: aText };
+  const elText = (el.textContent ?? "").trim();
+  if (!bodyText || bodyText !== elText) return null; // extra content around the link → leave it to default paste
+  return { href: el.getAttribute("href") ?? el.getAttribute("data-href") ?? "", text: elText };
 }
 
 // Pure decision: the Markdown to INSERT (replacing the current selection), or null to fall back to the
@@ -40,9 +43,10 @@ function singleAnchor(html: string): { href: string; text: string } | null {
 export function linkifyPaste(input: { text: string; html: string; selectedText: string }): string | null {
   const text = (input.text ?? "").trim();
   const html = input.html ?? "";
-  // 1. Rich link paste (text/html holds a single <a href>): normalize to [text](href).
-  if (html.includes("<a")) {
-    const link = singleAnchor(html);
+  // 1. Rich link paste (text/html holds a single <a href> or a cm-lp-link [data-href] span): normalize to
+  // [text](href). #223 comment 885: also trigger on data-href so an in-editor link copy is caught.
+  if (html.includes("<a") || html.includes("data-href")) {
+    const link = singleLink(html);
     if (link) {
       const href = safeHref(link.href);
       if (!href) return null; // dangerous scheme → not a link; default paste (plain text)
@@ -91,6 +95,11 @@ export function pasteLinkify(): Extension {
       if (view.state.readOnly) { dbg.result = "skip:readOnly"; return; }
       if (plainNext) { plainNext = false; dbg.result = "skip:plainNext(Ctrl+Shift+V)"; return; }
       if (!cd) { dbg.result = "skip:noClipboardData"; return; }
+      // #223 comment 885: only handle pastes aimed at the CM BODY. When a nested island (a table widget or an
+      // editing cell's contenteditable) holds focus, activeElement is NOT contentDOM — leave the paste to that
+      // island's own handler. Otherwise this body handler would insert at view.state.selection.main (the atom
+      // boundary), dropping the paste at the table's edge and breaking the ADR-024 atom invariant.
+      if (document.activeElement !== view.contentDOM) { dbg.result = "skip:nested-focus"; return; }
       const sel = view.state.selection.main;
       const md = linkifyPaste({
         text: cd.getData("text/plain"),
