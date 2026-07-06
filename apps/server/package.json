@@ -2,9 +2,20 @@
   "name": "@wikistead/server",
   "version": "0.0.0",
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./ee-host": {
+      "types": "./dist/ee-host.d.ts",
+      "source": "./src/ee-host.ts",
+      "default": "./dist/ee-host.js"
+    }
+  },
   "scripts": {
     "build": "tsc -b",
-    "dev": "tsx watch --env-file=../../.env src/index.ts",
+    "dev": "tsc -b -w",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'noop'",

@@ -46,8 +46,8 @@ import { enrollmentPlugin } from './auth/enroll-domains.js'
 import { tenantSamlPlugin } from './routes/tenant-saml.js'
 import { samlAuthPlugin } from './routes/saml-auth.js'
 import { aiPlugin } from './routes/ai.js'
-import { scimTokensPlugin } from './routes/scim-tokens.js'
-import { scimPlugin } from './routes/scim.js'
+// #178 / ADR-084: SCIM (scim-tokens + scim router) is EE and now lives in @wikistead-ee/server; it is
+// mounted via the getEeFeatures seam by the EE composition root, NOT imported here (CE stays EE-free).
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -340,8 +340,6 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(tenantSamlPlugin)
   await app.register(samlAuthPlugin)
   await app.register(aiPlugin)
-  await app.register(scimTokensPlugin)
-  await app.register(scimPlugin)
   await app.register(spacesPlugin)
   await app.register(pagesPlugin)
   await app.register(billingPlugin)
@@ -353,10 +351,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(shareLinksPlugin)
 
   // #178 / ADR-084: EE feature mount seam. A CE / self-host build registers nothing → no-op. The EE
-  // composition root (a separate entrypoint that may import @wikistead-ee/*) calls registerEeFeatures
-  // before buildApp, and its mount receives the app as the host to register EE plugins on. Direct EE
-  // registrations above (SCIM/SAML/…) migrate onto this seam in later #178 slices; the seam is wired
-  // here now (behavior-preserving: getEeFeatures is null until an EE root registers).
+  // composition root (packages/ee-server/src/main.ts — the entrypoint that may import @wikistead-ee/*)
+  // calls registerEeFeatures before buildApp, and its mount receives the app as the host to register EE
+  // plugins on. SCIM now mounts HERE (moved into @wikistead-ee/server this slice); SAML / EE-audit /
+  // operator-ledger migrate onto this seam in later #178 slices. getEeFeatures is null on a CE build.
   await getEeFeatures()?.(app)
 
   app.get('/', async (req) => ({ service: 'kb-server', tenant: req.tenant?.slug }))

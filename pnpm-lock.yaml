@@ -393,7 +393,41 @@ importers:
         version: 5.9.3
 
   packages/ee-server:
+    dependencies:
+      '@openfga/sdk':
+        specifier: ^0.7.0
+        version: 0.7.0
+      '@wikistead/authz':
+        specifier: workspace:*
+        version: link:../authz
+      '@wikistead/entitlements':
+        specifier: workspace:^
+        version: link:../entitlements
+      '@wikistead/entitlements-cloud':
+        specifier: workspace:^
+        version: link:../entitlements-cloud
+      '@wikistead/events':
+        specifier: workspace:^
+        version: link:../events
+      '@wikistead/hooks':
+        specifier: workspace:^
+        version: link:../hooks
+      '@wikistead/server':
+        specifier: workspace:*
+        version: link:../../apps/server
+      '@wikistead/types':
+        specifier: workspace:*
+        version: link:../types
+      fastify:
+        specifier: ^5.0.0
+        version: 5.8.5
     devDependencies:
+      postgres:
+        specifier: ^3.4.0
+        version: 3.4.9
+      tsx:
+        specifier: ^4.19.0
+        version: 4.22.4
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
