@@ -1,95 +1,81 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from "vitest";
 import { applyCellMark, CELL_MARKS } from "./cell-inline-format";
-import { setCellText, cellElToText } from "../macros/table-cell-dom";
+import { renderCellInline, cellElToText } from "../macros/table-cell-dom";
 
-// #89 (rescoped): the inline-decoration toolbar for a table cell. The risky core is the OFFSET mapping —
-// a DOM selection inside a contenteditable cell (text nodes + <br>) is wrapped with the Markdown mark and
-// the cell re-rendered, keeping the ADR-037 text-node/<br> invariant (never innerHTML). These test that
-// core against the SAME cellElToText accounting the commit path uses, so a wrap round-trips to source.
+// #89 comment 830: a table cell is a WYSIWYG surface — pressing Bold WRAPS the selection in <strong> so it
+// LOOKS bold in place (not literal `**a**`), while the canonical text round-trips to Markdown via
+// cellElToText and re-renders WYSIWYG via renderCellInline. These test that display↔source round-trip and
+// the XSS boundary (no innerHTML; raw HTML in the source degrades to text).
 const mark = (id: string) => CELL_MARKS.find((m) => m.id === id)!;
 
-// Select [from,to) characters of a single-text-node cell (the common case) and return the element.
-function cell(text: string): HTMLElement {
+function cell(md: string): HTMLElement {
   const el = document.createElement("td");
   el.contentEditable = "true";
-  setCellText(el, text);
+  renderCellInline(el, md); // WYSIWYG render of the Markdown source
   document.body.appendChild(el);
   return el;
 }
-function selectChars(el: HTMLElement, from: number, to: number) {
-  // walk text nodes to find the DOM points for the char offsets (single/multi text node)
-  const point = (target: number): { node: Node; offset: number } => {
-    let acc = 0;
-    for (let c = el.firstChild; c; c = c.nextSibling) {
-      if (c.nodeType === Node.TEXT_NODE) {
-        const len = (c.nodeValue ?? "").length;
-        if (target <= acc + len) return { node: c, offset: target - acc };
-        acc += len;
-      } else if (c instanceof HTMLBRElement) {
-        if (target <= acc) return { node: el, offset: Array.from(el.childNodes).indexOf(c) };
-        acc += 1;
-      }
-    }
-    return { node: el, offset: el.childNodes.length };
-  };
-  const a = point(from), b = point(to);
+// select the visible characters [from,to) of a single-text-node run inside `el`
+function selectText(el: HTMLElement, needle: string) {
+  const tn = Array.from(el.childNodes).find((n) => n.nodeType === Node.TEXT_NODE && (n.nodeValue ?? "").includes(needle)) as Text;
+  const start = (tn.nodeValue ?? "").indexOf(needle);
   const r = document.createRange();
-  r.setStart(a.node, a.offset); r.setEnd(b.node, b.offset);
-  const s = window.getSelection()!;
-  s.removeAllRanges(); s.addRange(r);
+  r.setStart(tn, start); r.setEnd(tn, start + needle.length);
+  const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
 }
 
-describe("#89 applyCellMark — wrap a cell selection in Markdown, offset-correct", () => {
+describe("#89 WYSIWYG cell marks — decorate in place, round-trip to Markdown", () => {
   beforeEach(() => { document.body.innerHTML = ""; });
 
-  it("wraps the selected word with the bold mark (source round-trips)", () => {
+  it("bold wraps the selection in <strong> (visible) and serialises to `**…**`", () => {
     const el = cell("hello world");
-    selectChars(el, 0, 5); // "hello"
+    selectText(el, "hello");
     expect(applyCellMark(el, mark("bold"))).toBe(true);
-    expect(cellElToText(el)).toBe("**hello** world");
+    expect(el.querySelector("strong")?.textContent).toBe("hello"); // shown bold, not literal **
+    expect(cellElToText(el)).toBe("**hello** world"); // source round-trips
   });
 
-  for (const [id, open, close] of [["italic", "*", "*"], ["strike", "~~", "~~"], ["code", "`", "`"]] as const) {
-    it(`wraps with the ${id} mark`, () => {
+  for (const [id, tag, open, close] of [["italic", "em", "*", "*"], ["strike", "s", "~~", "~~"], ["code", "code", "`", "`"]] as const) {
+    it(`${id} → <${tag}> + ${open}…${close}`, () => {
       const el = cell("ab cd");
-      selectChars(el, 3, 5); // "cd"
+      selectText(el, "cd");
       applyCellMark(el, mark(id));
+      expect(el.querySelector(tag)?.textContent).toBe("cd");
       expect(cellElToText(el)).toBe(`ab ${open}cd${close}`);
     });
   }
 
-  it("link wraps the selection as a label and inserts a url placeholder", () => {
+  it("link wraps in <a> and serialises to [text](url)", () => {
     const el = cell("see docs");
-    selectChars(el, 4, 8); // "docs"
+    selectText(el, "docs");
     applyCellMark(el, mark("link"));
+    const a = el.querySelector("a");
+    expect(a?.textContent).toBe("docs");
     expect(cellElToText(el)).toBe("see [docs](url)");
-    // the restored selection covers the "url" placeholder so it can be typed over
-    expect(window.getSelection()?.toString()).toBe("url");
   });
 
-  it("is offset-correct ACROSS a <br> (multi-line cell text nodes + <br> = \\n)", () => {
-    const el = cell("one\ntwo"); // text "one", <br>, text "two" → offsets 0..7 with \n at 3
-    selectChars(el, 4, 7); // "two" (after the \n)
-    applyCellMark(el, mark("bold"));
-    expect(cellElToText(el)).toBe("one\n**two**"); // the <br> line break is preserved
+  it("renderCellInline SHOWS existing marks WYSIWYG (round-trips both ways)", () => {
+    const el = cell("a **b** c *d*");
+    expect(el.querySelector("strong")?.textContent).toBe("b"); // ** hidden, shown bold
+    expect(el.querySelector("em")?.textContent).toBe("d");
+    expect(el.textContent).toBe("a b c d"); // no literal ** / * visible
+    expect(cellElToText(el)).toBe("a **b** c *d*"); // back to source
   });
 
-  it("restores the selection over the wrapped inner text (not the markers)", () => {
-    const el = cell("pick me");
-    selectChars(el, 5, 7); // "me"
-    applyCellMark(el, mark("bold"));
-    expect(window.getSelection()?.toString()).toBe("me"); // caret sits on the content, markers excluded
+  it("preserves <br> line breaks across the round-trip", () => {
+    const el = cell("one\ntwo");
+    expect(el.querySelector("br")).toBeTruthy();
+    expect(cellElToText(el)).toBe("one\ntwo");
   });
 
-  it("a collapsed caret inserts the empty pair (no crash)", () => {
-    const el = cell("x");
-    selectChars(el, 1, 1); // caret at end
-    applyCellMark(el, mark("bold"));
-    expect(cellElToText(el)).toBe("x****");
+  it("XSS boundary: raw HTML in the source renders as TEXT, never a live element (no innerHTML)", () => {
+    const el = cell("x <img src=q onerror=alert(1)> y");
+    expect(el.querySelector("img")).toBeNull(); // no live <img>
+    expect(el.textContent).toContain("<img"); // shown as literal text
   });
 
-  it("does nothing when the selection is outside the cell", () => {
+  it("a collapsed / out-of-cell selection is a no-op", () => {
     const el = cell("abc");
     const other = document.createElement("div"); other.textContent = "zzz"; document.body.appendChild(other);
     const r = document.createRange(); r.selectNodeContents(other);

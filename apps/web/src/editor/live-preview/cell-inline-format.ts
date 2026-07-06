@@ -1,106 +1,41 @@
-// #89 (rescoped, 2026-07-06): the inline-decoration toolbar for a table cell being edited. A table cell is
-// a contenteditable ISLAND with its OWN DOM selection (NOT CodeMirror's EditorSelection), so the CM
-// floatingToolbar / `wrap(view, "**", "**")` can't reach it. This mounts a small floating toolbar that
-// appears when text is selected inside the editing cell and applies the SAME inline marks (bold / italic /
-// strikethrough / code / link) by wrapping the selected text in the cell's raw Markdown source.
-//
-// Offset-based, not DOM-splice-based: the cell renders raw text as text nodes + <br> (ADR-037: never
-// innerHTML). We map the DOM selection to CHARACTER offsets in the cell text (cellElToText semantics —
-// <br> = "\n"), wrap in offset space, re-render with setCellText, and restore the selection at the shifted
-// offsets. This is robust across <br> boundaries and keeps the text-node + <br> XSS invariant (no innerHTML).
+// #89 (rescoped, then comment 830): the inline-decoration toolbar for a table cell being edited. A cell is
+// a contenteditable ISLAND with its OWN DOM selection (not CodeMirror's), and it is a WYSIWYG surface —
+// pressing Bold must make the selection LOOK bold immediately (not insert literal `**`). So a mark WRAPS
+// the DOM selection in the corresponding safe element (strong/em/s/code/a), built with createElement (never
+// innerHTML — the ADR-037 / #89 XSS boundary). The cell's canonical Markdown round-trips via cellElToText
+// (<strong> → `**…**`), and re-opening a cell shows the marks WYSIWYG via renderCellInline.
 
-import { setCellText, cellElToText, stripZeroWidth } from "../macros/table-cell-dom";
-
-// The inline marks, mirroring INLINE_FORMATS (commands.ts) — same set the CM toolbar / `\` palette apply,
-// so a cell decorates identically to body text. `link` selects the inserted "url" placeholder afterwards.
-export type Mark = { id: string; label: string; before: string; after: string; selectPlaceholder?: string };
+// Each mark is a factory for its wrapper element. `a` gets a placeholder href="url" that round-trips to
+// `[text](url)`; the user edits the URL in Source view (Open formats).
+type Mark = { id: string; label: string; el: () => HTMLElement };
 export const CELL_MARKS: Mark[] = [
-  { id: "bold", label: "B", before: "**", after: "**" },
-  { id: "italic", label: "I", before: "*", after: "*" },
-  { id: "strike", label: "S", before: "~~", after: "~~" },
-  { id: "code", label: "</>", before: "`", after: "`" },
-  { id: "link", label: "Link", before: "[", after: "](url)", selectPlaceholder: "url" },
+  { id: "bold", label: "B", el: () => document.createElement("strong") },
+  { id: "italic", label: "I", el: () => document.createElement("em") },
+  { id: "strike", label: "S", el: () => document.createElement("s") },
+  { id: "code", label: "</>", el: () => document.createElement("code") },
+  { id: "link", label: "Link", el: () => { const a = document.createElement("a"); a.setAttribute("href", "url"); return a; } },
 ];
 
-// Character offset in the cell text of a DOM point (node, offset), counting text-node chars and each <br>
-// as one "\n" — the same accounting as cellElToText, so offsets line up with the committed source.
-function offsetOfPoint(root: HTMLElement, node: Node, nodeOffset: number): number {
-  let acc = 0;
-  let found = -1;
-  const walk = (n: Node): boolean => {
-    if (n === node && n.nodeType !== Node.ELEMENT_NODE) { found = acc + nodeOffset; return true; }
-    if (n.nodeType === Node.TEXT_NODE) {
-      acc += (n.nodeValue ?? "").length;
-    } else if (n instanceof HTMLBRElement) {
-      acc += 1; // "\n"
-    } else if (n instanceof HTMLElement) {
-      if (n.classList.contains("cm-lp-col-resize") || n.classList.contains("cm-lp-row-resize")) return false;
-      for (let c = n.firstChild; c; c = c.nextSibling) { if (walk(c)) return true; }
-      if (n === node) { found = acc; return true; } // element-node point = at the accumulated end
-    }
-    return false;
-  };
-  if (node === root && node.nodeType === Node.ELEMENT_NODE) {
-    // a point expressed as (root, childIndex): sum the lengths of the first `nodeOffset` children
-    let i = 0;
-    for (let c = root.firstChild; c && i < nodeOffset; c = c.nextSibling, i++) {
-      if (c.nodeType === Node.TEXT_NODE) acc += (c.nodeValue ?? "").length;
-      else if (c instanceof HTMLBRElement) acc += 1;
-    }
-    return acc;
-  }
-  for (let c = root.firstChild; c; c = c.nextSibling) { if (walk(c)) break; }
-  return found >= 0 ? found : acc;
-}
-
-// The reverse: a {node, offset} DOM point for a character offset, over a cell rebuilt by setCellText
-// (a flat run of text nodes and <br>s).
-function pointOfOffset(root: HTMLElement, target: number): { node: Node; offset: number } {
-  let acc = 0;
-  for (let c = root.firstChild; c; c = c.nextSibling) {
-    if (c.nodeType === Node.TEXT_NODE) {
-      const len = (c.nodeValue ?? "").length;
-      if (target <= acc + len) return { node: c, offset: target - acc };
-      acc += len;
-    } else if (c instanceof HTMLBRElement) {
-      if (target <= acc) return { node: root, offset: indexOfChild(root, c) };
-      acc += 1;
-    }
-  }
-  return { node: root, offset: root.childNodes.length };
-}
-function indexOfChild(parent: HTMLElement, child: Node): number {
-  let i = 0;
-  for (let c = parent.firstChild; c; c = c.nextSibling, i++) if (c === child) return i;
-  return i;
-}
-
-// Apply a mark to the current selection inside `el`, then reselect the wrapped inner text (or the mark's
-// placeholder, e.g. "url"). Returns true if it acted (a real selection was present).
+// Wrap the current selection inside `el` with the mark's element — the decoration appears in place
+// (WYSIWYG). Returns false for a collapsed / out-of-cell selection. DOM-space (no source-offset math), so
+// it composes with existing marks (selecting bold text and pressing italic nests em>strong).
 export function applyCellMark(el: HTMLElement, mark: Mark): boolean {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return false;
   const range = sel.getRangeAt(0);
-  if (!el.contains(range.commonAncestorContainer)) return false;
-  const full = stripZeroWidth(cellElToText(el));
-  let from = offsetOfPoint(el, range.startContainer, range.startOffset);
-  let to = offsetOfPoint(el, range.endContainer, range.endOffset);
-  if (from > to) [from, to] = [to, from];
-  const inner = full.slice(from, to);
-  const next = full.slice(0, from) + mark.before + inner + mark.after + full.slice(to);
-  setCellText(el, next);
-  // Restore a selection: for `link` on a wrap, select the "url" placeholder; otherwise select the inner text.
-  let selFrom: number, selTo: number;
-  if (mark.selectPlaceholder && mark.after.includes(mark.selectPlaceholder)) {
-    const phAt = from + mark.before.length + inner.length + mark.after.indexOf(mark.selectPlaceholder);
-    selFrom = phAt; selTo = phAt + mark.selectPlaceholder.length;
-  } else {
-    selFrom = from + mark.before.length; selTo = selFrom + inner.length;
+  if (range.collapsed || !el.contains(range.commonAncestorContainer)) return false;
+  const wrapper = mark.el();
+  try {
+    wrapper.appendChild(range.extractContents());
+    range.insertNode(wrapper);
+  } catch {
+    return false; // a range crossing element boundaries that can't be extracted cleanly — no-op
   }
-  const a = pointOfOffset(el, selFrom); const b = pointOfOffset(el, selTo);
+  el.normalize(); // merge any split text nodes so cellElToText reads clean runs
   const r = document.createRange();
-  r.setStart(a.node, a.offset); r.setEnd(b.node, b.offset);
-  sel.removeAllRanges(); sel.addRange(r);
+  r.selectNodeContents(wrapper);
+  sel.removeAllRanges();
+  sel.addRange(r);
   return true;
 }
 
@@ -129,7 +64,6 @@ export function mountCellFormatToolbar(cellEl: HTMLElement): { destroy(): void }
     const rect = sel.getRangeAt(0).getBoundingClientRect();
     if (rect.width === 0 && rect.height === 0) { bar.style.display = "none"; return; }
     bar.style.display = "flex";
-    // measure after display so offsetWidth/Height are real
     const bw = bar.offsetWidth, bh = bar.offsetHeight;
     let left = rect.left + rect.width / 2 - bw / 2;
     left = Math.max(4, Math.min(left, window.innerWidth - bw - 4));
@@ -140,7 +74,6 @@ export function mountCellFormatToolbar(cellEl: HTMLElement): { destroy(): void }
   };
   const onSel = () => position();
   document.addEventListener("selectionchange", onSel);
-  // reposition on scroll/resize while open
   window.addEventListener("scroll", onSel, true);
   window.addEventListener("resize", onSel);
   return {

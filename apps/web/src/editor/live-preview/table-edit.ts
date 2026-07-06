@@ -1,7 +1,7 @@
 import { mergeRect, unmergeAt, toHtml, styleToCss, insertColAt, insertRowAt, deleteColAt, deleteRowAt, parseTableSource, type Grid, type CellStyle } from "../macros/table-model";
 import type { InnerEditHost, InlineEditor, InlineController } from "../macros/registry";
 import { asMacroSource } from "../macros/registry";
-import { setCellText, cellElToText, insertBrAtCaret, insertTextAtCaret, stripZeroWidth } from "../macros/table-cell-dom";
+import { renderCellInline, cellElToText, insertBrAtCaret, insertTextAtCaret, stripZeroWidth } from "../macros/table-cell-dom";
 import { mountCellFormatToolbar } from "./cell-inline-format";
 
 // #154: the uniform multi-select resize size — PURE so it is unit-testable (the previous impl set
@@ -258,7 +258,7 @@ export const tableInlineEditor: InlineEditor = {
       applySel();
       // Drop the resize handles + the " " placeholder; render the cell's real text.
       el.querySelectorAll(".cm-lp-col-resize, .cm-lp-row-resize").forEach((h) => h.remove());
-      setCellText(el, overwrite !== undefined ? overwrite : cur.text);
+      renderCellInline(el, overwrite !== undefined ? overwrite : cur.text); // #89 (830): WYSIWYG inline marks
       el.contentEditable = "true";
       el.classList.add("cm-lp-cell-editing");
       editHandle = host.beginTextEdit(el); // #154: focus via the host (CM-safe in the inline path)
