@@ -405,3 +405,35 @@ test("#183 symptom C: vim j/k move one line at a time, symmetric, over a math at
   // symmetric: k retraces j's lines in reverse (1↔last, one by one).
   expect(up.slice().reverse(), `down ${down.join(",")} vs up ${up.join(",")}`).toEqual(down);
 });
+
+// #221: an EMPTY ```mermaid / ```plantuml (a "caret fully lands on it" atom whose 2 source lines render
+// as one placeholder) was reported to be vertically ASYMMETRIC on device — j crosses in one, k needs an
+// extra press. Measured in a REAL browser (not the happy-dom unit traces that miss layout): it is
+// SYMMETRIC — the caret makes exactly ONE stop on the atom in each direction and steps past the far edge,
+// and k retraces j's stops in reverse. (A persisting device asymmetry with this green is the known
+// stale-Vite-HMR gotcha — hard-reload first.)
+for (const lang of ["mermaid", "plantuml"] as const) {
+  test(`#221: empty \`\`\`${lang} atom — vim j/k are vertically symmetric (one stop each way)`, async ({ browser }) => {
+    const page = await (await browser.newContext()).newPage();
+    await openScratch(page, `empty-${lang}`);
+    await enterEdit(page);
+    await page.click("[data-pane=preview] .cm-content");
+    // 1 top · 2 blank · 3-4 ```lang``` (atom) · 5 blank · 6 bot
+    await page.keyboard.insertText("top\n\n```" + lang + "\n```\n\nbot\n");
+    await sleep(500);
+    expect(await blocks(page)).toEqual([{ fromLine: 3, toLine: 4 }]); // the empty fence is ONE atom (lines 3-4)
+    await vimOn(page);
+
+    await page.keyboard.press("g"); await page.keyboard.press("g"); await sleep(120);
+    const down: (number | undefined)[] = [await headLine(page)];
+    for (let i = 0; i < 5; i++) { await page.keyboard.press("j"); await sleep(100); const h = await headLine(page); if (h === down[down.length - 1]) break; down.push(h); }
+    const up: (number | undefined)[] = [await headLine(page)];
+    for (let i = 0; i < 5; i++) { await page.keyboard.press("k"); await sleep(100); const h = await headLine(page); if (h === up[up.length - 1]) break; up.push(h); }
+
+    // exactly ONE stop inside the atom [3,4] each direction (no double-stop / extra press)
+    expect(down.filter((l) => l === 3 || l === 4), `down ${down.join(",")}`).toHaveLength(1);
+    expect(up.filter((l) => l === 3 || l === 4), `up ${up.join(",")}`).toHaveLength(1);
+    // and the same number of presses to traverse top↔bottom both ways (no upward-only extra k)
+    expect(up.length, `down ${down.join(",")} vs up ${up.join(",")}`).toBe(down.length);
+  });
+}
