@@ -18,6 +18,7 @@ import { parseFenceLine } from "@wikistead/macro-render"; // #198: code-fence at
 import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset } from "../macros/md-render";
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
+import { renderCellInline } from "../macros/table-cell-dom";
 import { openMacroModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost, nestedSelectionField, setNestedSelection, nestedEditActiveField, setNestedEditActive, type NestedSelection } from "./macro-edit";
 import { tableInlineEditor } from "./table-edit";
@@ -666,7 +667,13 @@ class TableWidget extends WidgetType {
       const tr = document.createElement("tr");
       for (const c of cells) {
         const cell = document.createElement(inBody ? "td" : "th");
-        cell.textContent = c; // XSS-safe: text, not HTML
+        // #89 comment 848: render the cell's INLINE markdown (**bold**, *em*, ~~s~~, `code`, [](url)) so the
+        // NON-editing pipe table is WYSIWYG-consistent with the editing island and :::table — a pipe cell is
+        // GFM and renders inline formatting. Shared allowlist-by-construction renderer (em/strong/s/code/a
+        // only; raw <iframe>/<script> degrade to escaped text) — text+<br> nodes, never innerHTML (ADR-037).
+        // A pipe table with inline decoration STAYS Tier1 pipe (Open formats): representableAsPipe is
+        // unaffected by inline marks (only spans/style/complex-header/multiline promote to :::table).
+        renderCellInline(cell, c);
         tr.appendChild(cell);
       }
       (inBody ? tbody : thead).appendChild(tr);

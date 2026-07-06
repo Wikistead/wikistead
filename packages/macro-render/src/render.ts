@@ -1,4 +1,4 @@
-import { parser } from "@lezer/markdown";
+import { parser, Strikethrough } from "@lezer/markdown";
 import { directiveExtension, parseDirectiveOpen } from "./directive-parser.js";
 import { SafeHtml, html, joinSafe, unsafeHtml } from "./safe-html.js";
 
@@ -29,13 +29,17 @@ export interface MacroHtmlRegistry {
 
 const EMPTY_REGISTRY: MacroHtmlRegistry = { fence: () => undefined, directive: () => undefined };
 
-const mdParser = parser.configure(directiveExtension);
+// #89 comment 848: GFM Strikethrough so the SERVER renderer emits <s> for `~~x~~` too — client (apps/web
+// md-render) and server must stay a single source of truth (ADR-085), so a strikethrough table cell renders
+// identically in the editor and on the published page. The Strikethrough case already exists below.
+const mdParser = parser.configure([directiveExtension, Strikethrough]);
 type SNode = ReturnType<typeof mdParser.parse>["topNode"];
 
 // Mark/structural nodes whose own text must NOT be emitted.
 const MARKS = new Set([
   "EmphasisMark", "CodeMark", "LinkMark", "HeaderMark", "QuoteMark", "ListMark",
   "DirectiveMark", "URL", "CodeInfo", "LinkTitle",
+  "StrikethroughMark", // #89 comment 848: skip the `~~` delimiters so <s> holds only the text
 ]);
 
 const HEADINGS: Record<string, string> = {

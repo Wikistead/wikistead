@@ -1,4 +1,4 @@
-import { parser } from "@lezer/markdown";
+import { parser, Strikethrough } from "@lezer/markdown";
 import { directiveExtension, parseDirectiveOpen } from "./directive-parser";
 import { findDirectiveMacro, findFenceMacro } from "./registry";
 import { currentMacroTheme } from "./theme";
@@ -11,7 +11,10 @@ import { currentMacroTheme } from "./theme";
 // TEXT (the HTML* nodes fall through to the text default), so `<script>` can never execute; link
 // hrefs are scheme-checked. Anything unhandled degrades to its source text (safe).
 
-const mdParser = parser.configure(directiveExtension);
+// #89 comment 848: GFM Strikethrough (`~~x~~`) so the shared renderer emits <s> (renderInline already has the
+// case; the base CommonMark parser didn't produce the node). GFM is the target format (Open formats), and the
+// table-cell inline-format toolbar's strike must round-trip to a rendered <s> in the non-editing cell too.
+const mdParser = parser.configure([directiveExtension, Strikethrough]);
 // @lezer/common isn't a direct dependency — derive the SyntaxNode type from the parser instead.
 type SNode = ReturnType<typeof mdParser.parse>["topNode"];
 
@@ -49,6 +52,7 @@ function tagMacro(el: HTMLElement, relFrom: number, name: string): void {
 const MARKS = new Set([
   "EmphasisMark", "CodeMark", "LinkMark", "HeaderMark", "QuoteMark", "ListMark",
   "DirectiveMark", "URL", "CodeInfo", "LinkTitle",
+  "StrikethroughMark", // #89 comment 848: skip the `~~` delimiters so <s> holds only the text
 ]);
 
 // Block-level nodes get their own recursion; everything else is inline/text.
