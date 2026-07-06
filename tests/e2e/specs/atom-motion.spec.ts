@@ -437,3 +437,56 @@ for (const lang of ["mermaid", "plantuml"] as const) {
     expect(up.length, `down ${down.join(",")} vs up ${up.join(",")}`).toBe(down.length);
   });
 }
+
+// #221 (the RENDERED gap): the empty-fence tests above and the tall-SOURCE j/k test (top of file) both cover
+// atoms whose geometry is STATIC. The device report is about k (UP) specifically, and the case that stayed
+// untested is crossing UP over a tall ASYNC-RENDERED widget — the mermaid SVG mounts AFTER load and changes
+// the line geometry, so upward motion computed from transiently-stale geometry is exactly where an
+// "extra k" could hide (a short/empty macro can't expose it; the project design notes: motion tests need tall/rendered/
+// multiple). Measure k UP vs j DOWN across a tall rendered mermaid and a stacked pair: exactly ONE stop in
+// the atom each way, and the SAME press count top↔bottom both directions (no upward-only extra k).
+async function measureUpDownSymmetry(page: any, inAtom: (l: number | undefined) => boolean) {
+  await page.keyboard.press("g"); await page.keyboard.press("g"); await sleep(130);
+  const down: (number | undefined)[] = [await headLine(page)];
+  for (let i = 0; i < 12; i++) { await page.keyboard.press("j"); await sleep(100); const h = await headLine(page); if (h === down[down.length - 1]) break; down.push(h); }
+  const up: (number | undefined)[] = [await headLine(page)];
+  for (let i = 0; i < 12; i++) { await page.keyboard.press("k"); await sleep(100); const h = await headLine(page); if (h === up[up.length - 1]) break; up.push(h); }
+  return { down, up };
+}
+const inRange = (a: { fromLine: number; toLine: number }) => (l: number | undefined) => l !== undefined && l >= a.fromLine && l <= a.toLine;
+
+test("#221 (rendered): vim k UP over a tall RENDERED mermaid is symmetric with j DOWN (one stop, no extra k)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "vim221-render");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("top\n```mermaid\nflowchart TD\n  A --> B\n  B --> C\n  C --> D\n```\nB0\nB1\nB2\n");
+  await sleep(2500); // SVG mounts → the widget becomes tall (~380px)
+  const svgH = await page.evaluate(() => { const m = document.querySelector("[data-pane=preview] [data-testid=macro-mermaid]") as HTMLElement; return m ? Math.round(m.getBoundingClientRect().height) : 0; });
+  expect(svgH).toBeGreaterThan(120); // genuinely tall & rendered (not a fold placeholder)
+  const [atom] = await blocks(page);
+  await vimOn(page);
+  const { down, up } = await measureUpDownSymmetry(page, inRange(atom));
+  expect(down.filter(inRange(atom)), `down ${down.join(",")}`).toHaveLength(1); // one stop on the atom descending
+  expect(up.filter(inRange(atom)), `up ${up.join(",")}`).toHaveLength(1);       // one stop ascending (no double / extra press)
+  expect(up.length, `down ${down.join(",")} vs up ${up.join(",")}`).toBe(down.length); // #221: no upward-only extra k
+});
+
+test("#221 (rendered): vim k UP over TWO stacked tall RENDERED mermaids is symmetric with j DOWN", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "vim221-stacked");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("top\n```mermaid\nflowchart TD\n  A --> B\n  B --> C\n```\n```mermaid\nflowchart TD\n  D --> E\n  E --> F\n```\nB0\nB1\nB2\n");
+  await sleep(3000); // both SVGs mount
+  expect(await page.locator("[data-pane=preview] [data-testid=macro-mermaid] svg").count()).toBe(2);
+  const bl = await blocks(page); // two atoms
+  expect(bl.length).toBe(2);
+  const inAnyAtom = (l: number | undefined) => bl.some((a: { fromLine: number; toLine: number }) => inRange(a)(l));
+  await vimOn(page);
+  const { down, up } = await measureUpDownSymmetry(page, inAnyAtom);
+  // exactly one stop on EACH atom in each direction (2 total), no double-stop or extra upward press.
+  expect(down.filter(inAnyAtom), `down ${down.join(",")}`).toHaveLength(2);
+  expect(up.filter(inAnyAtom), `up ${up.join(",")}`).toHaveLength(2);
+  expect(up.length, `down ${down.join(",")} vs up ${up.join(",")}`).toBe(down.length); // #221: symmetric press count
+});
