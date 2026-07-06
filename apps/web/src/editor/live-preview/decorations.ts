@@ -2107,6 +2107,14 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
   create: (state) => buildDecorations(state),
   update: (value, tr) => {
     if (tr.docChanged || tr.selection) return buildDecorations(tr.state);
+    // #237: the lezer parse advances ASYNCHRONOUSLY after load — a huge single-line block (e.g. a
+    // heavy ```excalidraw fence) exhausts the initial parse budget mid-document, and the language
+    // worker's progress dispatches carry no doc/selection change. This field then kept STALE
+    // decorations built from the PARTIAL tree, so every block past the parse frontier stayed plain
+    // text until some later selection change forced a rebuild — the "macros below a heavy macro
+    // don't render until I click" bug (#203 is the excalidraw-specific observation). The parser
+    // yields a NEW Tree object on every progress step, so an identity compare detects growth.
+    if (syntaxTree(tr.startState) !== syntaxTree(tr.state)) return buildDecorations(tr.state);
     // Toggling vim is a Compartment reconfigure — no doc/selection/effect change — but it
     // flips reveal-on-cursor gating (revealAllowed): vim→non-vim must re-render every
     // rich-editable macro that was revealed under the caret. Rebuild on the facet change.
