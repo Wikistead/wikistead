@@ -681,27 +681,10 @@ class TableWidget extends WidgetType {
     if (thead.childNodes.length) table.appendChild(thead);
     if (tbody.childNodes.length) table.appendChild(tbody);
     wrap.appendChild(table);
-    // #216 comment 836: a VISIBLE RichUI-entry button for a pipe (Tier1) table in LIVE — so a non-vim
-    // mouse user discovers how to reach the rich editor without knowing Ctrl+Enter. Hover-revealed, subtle,
-    // top-left (reuses the shared .cm-lp-macro-edit chrome), tooltip names the Ctrl+Enter shortcut. Its
-    // mousedown stops the table's caret-in handler and opens the RichUI (promote pipe → :::table). Shown
-    // only in LIVE (WYSIWYG already enters RichUI on click) and when editable. This is the interim affordance
-    // until the #174 common hover-frame lands (then it folds into that), per comment 836 (don't leave non-vim
-    // users without a visible entry while #174 is in review).
-    if (!view.state.readOnly && view.state.facet(displayMode) === "live") {
-      // #216 comment 860: ONE always-visible (not hover-gated) pill that is BOTH the Ctrl+Enter key hint AND
-      // a clickable RichUI-entry button. The hover-only opacity approach did not appear on the reviewer's
-      // device (3×); dropping the hover dependency (always shown, subtly, brighter on hover) makes it reliably
-      // recognizable. Pencil + "Ctrl+↵" text so a keyboard/vim user sees the shortcut; click opens RichUI too.
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "cm-lp-macro-edit cm-lp-table-richui";
-      btn.title = "Rich edit (Ctrl+Enter)";
-      btn.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-table-richui-key">Ctrl+↵</span>';
-      btn.setAttribute("data-testid", "table-richui-enter");
-      btn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); openTableEditing(view, view.posAtDOM(wrap)); });
-      wrap.appendChild(btn);
-    }
+    // #216 comment 874: the RichUI-entry pill does NOT belong on the RENDERED table (a finished, non-edited
+    // grid needs no entry affordance). It belongs on the RAW-EDITING state — when the caret is in the table
+    // and the `| a | b |` source is visible. That pill is emitted by the reveal branch (TableRawRichuiPill),
+    // not here. The rendered widget stays clean.
     // Height can shift after first measure (fonts, reflow, edit-mode chrome) → re-measure
     // so lines below a tall table don't drift (ADR-024 motion correctness — common path).
     this.ro = observeBlockResize(view, wrap);
@@ -715,6 +698,43 @@ class TableWidget extends WidgetType {
     return false; // let clicks through so the cursor can enter (→ reveal raw)
   }
 }
+
+// #216 comment 874: the RichUI-entry pill for a pipe (Tier1) table in LIVE, shown ON THE RAW-EDITING STATE.
+// When the caret is inside the pipe table its `| a | b |` source is revealed (rangeRevealed) — that is when a
+// writer wants "you can promote this to the rich editor". The pill is BOTH the Ctrl+Enter key HINT (visible
+// "Ctrl+↵" text, not a tooltip) AND a click target; click and Ctrl+Enter both reach openTableEditing (promote
+// pipe → :::table = RichUI). ALWAYS visible (no hover gate — the hover-only version never showed on the
+// reviewer's device, 3×). Anchored to the first revealed line (cm-lp-table-raw = position:relative) and
+// floated just above the first row so it never covers the raw source it advertises.
+class TableRawRichuiPill extends WidgetType {
+  constructor(readonly pos: number) {
+    super();
+  }
+  eq(o: TableRawRichuiPill) {
+    return o.pos === this.pos;
+  }
+  toDOM(view: EditorView) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cm-lp-macro-edit cm-lp-table-richui cm-lp-table-richui-raw";
+    btn.title = "Rich edit (Ctrl+Enter)";
+    btn.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-table-richui-key">Ctrl+↵</span>';
+    btn.setAttribute("data-testid", "table-richui-enter");
+    // Own mousedown → open the RichUI; preventDefault so the caret isn't also re-placed, stopPropagation so it
+    // does not bubble to the line. ignoreEvent keeps CM from routing the click as an editor gesture.
+    btn.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openTableEditing(view, this.pos);
+    });
+    return btn;
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
+// The first revealed pipe-table line becomes the pill's positioning context (position: relative).
+const tableRawLead = Decoration.line({ attributes: { class: "cm-lp-table-raw" } });
 
 // #154 / ADR-025: in-editor WYSIWYG table editing. When a table block is render-active
 // (macroRenderActiveField, set by a non-vim click/entry — openTableEditing), the table renders
@@ -1936,7 +1956,17 @@ const RENDERERS: BlockRenderer[] = [
         ctx.addAtomic(Decoration.replace({ widget: new EditableTableWidget(from, to, doc.sliceString(from, to)), block: true }), from, to);
         return;
       }
-      if (rangeRevealed(ctx.state, from, to)) return;
+      if (rangeRevealed(ctx.state, from, to)) {
+        // #216 comment 874: RAW-editing state (caret in the pipe table, `| a | b |` source visible) → this is
+        // when to surface the RichUI-entry pill, NOT the rendered widget (the reversed condition the reviewer
+        // rejected). LIVE + editable only: source mode already reveals everything raw, so a pill on every table
+        // there would be noise. Mark the first line as the positioning context and float the pill above it.
+        if (ctx.state.facet(displayMode) === "live") {
+          ctx.add(tableRawLead, from);
+          ctx.add(Decoration.widget({ widget: new TableRawRichuiPill(from), side: -1 }), from);
+        }
+        return;
+      }
       ctx.addAtomic(Decoration.replace({ widget: new TableWidget(doc.sliceString(from, to)), block: true }), from, to);
     },
   },
@@ -2472,6 +2502,15 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-table-richui-key": { fontSize: "0.72em", fontWeight: "600", letterSpacing: "0.02em" },
   ".cm-lp-table-wrap:hover .cm-lp-table-richui": { opacity: "1" },
   ".cm-lp-table-richui:hover": { opacity: "1" },
+  // #216 comment 874: the RAW-editing variant. Anchored to the first revealed pipe-table line (position
+  // relative) and floated JUST ABOVE the first row so it never covers the `| a | b |` source it advertises.
+  // Always visible (opacity 0.8, full on hover) — reliably recognizable without a hover (the show/no-show
+  // regression was hover-dependency). Solid panel bg + border (inherited from .cm-lp-macro-edit) keeps it
+  // readable if a content line sits directly above. Must follow .cm-lp-table-richui / .cm-lp-macro-edit in
+  // source order so its top/left/opacity win at equal specificity.
+  ".cm-lp-table-raw": { position: "relative" },
+  ".cm-lp-table-richui-raw": { top: "-1.5em", left: "0", opacity: "0.8" },
+  ".cm-lp-table-richui-raw:hover": { opacity: "1" },
   // #174 / ADR-087 (Class 1): the callout icon-badge type picker.
   ".cm-lp-callout-type-menu": { position: "absolute", top: "100%", left: "0", zIndex: "10", display: "flex", flexDirection: "column", background: "var(--panel, #fff)", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "3px", boxShadow: "0 2px 8px rgba(0,0,0,0.18)", minWidth: "7em", marginTop: "2px" },
   ".cm-lp-callout-type-opt": { textAlign: "left", padding: "3px 8px", border: "none", background: "transparent", color: "var(--fg, #222)", cursor: "pointer", borderRadius: "4px", fontSize: "0.85em", textTransform: "capitalize" },
