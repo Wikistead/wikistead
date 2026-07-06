@@ -554,6 +554,21 @@
     "image": "Image",
     "link": "Link"
   },
+  "calloutEdit": {
+    "title": "Edit callout",
+    "type": "Type",
+    "header": "Header",
+    "content": "Content",
+    "headerPlaceholder": "Optional heading",
+    "contentPlaceholder": "Callout content (Markdown)…",
+    "types": {
+      "note": "Note",
+      "info": "Info",
+      "tip": "Tip",
+      "warning": "Warning",
+      "danger": "Danger"
+    }
+  },
   "contextMenu": {
     "copy": "Copy",
     "cut": "Cut",

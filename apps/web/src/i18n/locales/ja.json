@@ -554,6 +554,21 @@
     "image": "画像",
     "link": "リンク"
   },
+  "calloutEdit": {
+    "title": "コールアウトを編集",
+    "type": "種別",
+    "header": "ヘッダー",
+    "content": "本文",
+    "headerPlaceholder": "見出し（省略可）",
+    "contentPlaceholder": "本文（Markdown）…",
+    "types": {
+      "note": "ノート",
+      "info": "インフォ",
+      "tip": "ヒント",
+      "warning": "警告",
+      "danger": "危険"
+    }
+  },
   "contextMenu": {
     "copy": "コピー",
     "cut": "切り取り",

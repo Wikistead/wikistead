@@ -63,3 +63,44 @@ test("#174 comment 878: Live click reveals raw + a RichUI-entry pill (not the ed
   await sleep(250);
   await expect(page.getByTestId("callout-edit-type")).toBeVisible();
 });
+
+// #174 comment 883: the Type choices are VISUAL chips — each type's mask-image icon + variant colour +
+// localized name — in BOTH the editUI panel and the icon-badge picker (one shared builder). Real-browser
+// pinned: the icon span has actual size (mask renders), the current type carries the pressed ring, and
+// picking a chip still rewrites the source.
+test("#174 comment 883: type choices render as icon+colour chips (editUI panel + badge menu)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "callout-type-chips");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("top\n\n:::info\nhello body\n:::\n\nbottom\n");
+  await sleep(500);
+
+  // Badge menu: chips with icons + localized names.
+  await page.getByTestId("callout-type-badge").click();
+  await expect(page.getByTestId("callout-type-menu")).toBeVisible();
+  const menuWarn = page.getByTestId("callout-type-warning");
+  await expect(menuWarn).toContainText("Warning"); // localized (en) name, not the bare key
+  const menuIcon = (await menuWarn.locator(".cm-lp-callout-type-opt-icon").boundingBox())!;
+  expect(menuIcon.width).toBeGreaterThan(5); // the mask-image icon actually renders with size
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("callout-type-menu")).toHaveCount(0);
+
+  // editUI panel (via the caret-in pill): chip row, current type pressed, picking rewrites the source.
+  await page.locator("[data-pane=preview] .cm-lp-callout-panel .cm-lp-callout-panel-main").click();
+  await sleep(250);
+  await page.getByTestId("callout-richui-enter").click();
+  await sleep(250);
+  const infoChip = page.getByTestId("callout-edit-type-info");
+  await expect(infoChip).toHaveAttribute("aria-pressed", "true"); // seeded from :::info
+  const chipIcon = (await infoChip.locator(".cm-lp-callout-type-opt-icon").boundingBox())!;
+  expect(chipIcon.width).toBeGreaterThan(5);
+  await page.getByTestId("callout-edit-type-danger").click();
+  await sleep(300);
+  await expect(page.getByTestId("callout-edit-type-danger")).toHaveAttribute("aria-pressed", "true");
+  // the save hit the Y.Text: leave the editor and the callout re-renders as danger
+  await page.keyboard.press("Escape");
+  await page.locator("[data-pane=preview] .cm-line").first().click();
+  await sleep(400);
+  await expect(page.locator("[data-pane=preview] .cm-lp-callout-panel")).toHaveClass(/cm-lp-callout-danger/);
+});
