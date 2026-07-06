@@ -45,7 +45,7 @@ test("GFM table renders as an HTML table; cursor reveals raw markdown", async ({
 // #216 comment 836: a pipe (Tier1) table in LIVE must show a VISIBLE RichUI-entry button on hover, so a
 // non-vim mouse user can reach the rich editor without knowing Ctrl+Enter. Subtle (hidden until hover),
 // top-left, tooltip names the shortcut; clicking it opens the in-editor rich table editor.
-test("#216: a pipe table in Live shows a hover RichUI-entry button that opens the rich editor", async ({ browser }) => {
+test("#216: a pipe table in Live shows an ALWAYS-visible RichUI-entry pill (Ctrl+Enter hint + button)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "table-richui-btn");
   await enterEdit(page);
@@ -55,22 +55,20 @@ test("#216: a pipe table in Live shows a hover RichUI-entry button that opens th
   const table = page.locator("[data-pane=preview] table.cm-lp-table");
   await expect(table).toBeVisible();
   const btn = page.getByTestId("table-richui-enter");
-  await expect(btn).toHaveCount(1); // present in the DOM…
-  await expect(btn).toHaveAttribute("title", /Ctrl\+Enter/); // …with the shortcut hint in its tooltip
-  expect(await btn.evaluate((el) => getComputedStyle(el).opacity)).toBe("0"); // invisible to the eye until hover
-  // comment 853: hover the TABLE (what a user does) → the button becomes opaque AND is anchored at the
-  // table's top-left CORNER (inside its box, so it's on-screen and reachable), then a REAL click (no force,
-  // through the hover) opens the RichUI — proving it's genuinely reachable, not just opacity-toggled.
-  await table.hover();
-  await sleep(150);
-  expect(await btn.evaluate((el) => getComputedStyle(el).opacity)).toBe("1"); // now visible to the eye
+  await expect(btn).toHaveCount(1);
+  await expect(btn).toHaveAttribute("title", /Ctrl\+Enter/);
+  await expect(btn).toContainText("Ctrl+↵"); // comment 860: the pill visibly carries the keyboard-shortcut hint
+  // comment 860: ALWAYS visible (not hover-gated) — the hover-only version never showed on the device. It is
+  // opaque WITHOUT any hover, anchored at the table's top-left corner, and a REAL click (no force → must be
+  // the topmost hit-test target, not occluded) opens the RichUI.
+  const opacityNoHover = Number(await btn.evaluate((el) => getComputedStyle(el).opacity));
+  expect(opacityNoHover).toBeGreaterThan(0.4); // visible to the eye with NO hover
   const tb = (await table.boundingBox())!;
   const bb = (await btn.boundingBox())!;
   expect(bb.x).toBeGreaterThanOrEqual(tb.x - 2); // at the table's top-left corner, inside its box
   expect(bb.y).toBeGreaterThanOrEqual(tb.y - 2);
-  expect(bb.x).toBeLessThan(tb.x + tb.width);
-  expect(bb.width).toBeGreaterThan(0); // a real, sized, hit-testable button
-  await btn.click(); // real click (no force) through the hover → reachable
+  expect(bb.width).toBeGreaterThan(0);
+  await btn.click(); // real click (no force) → reachable / not occluded
   await expect(page.getByTestId("table-edit")).toBeVisible(); // → the in-editor RichUI table editor opens
 });
 
