@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Navigate, Route, Routes, useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { Navigate, Route, Routes, useParams, useSearchParams, useNavigate, Link as RouterLink } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { LoginScreen } from "./LoginScreen";
 import { AdminRoutes } from "../settings/AdminPage";
@@ -131,7 +131,8 @@ import { Sidebar } from "../sidebar/Sidebar";
 import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
-import { fetchGuestToken, apiFetch, ApiError, type GuestToken } from "../data/apiClient";
+import { fetchGuestToken, apiFetch, ApiError, assetUrl, type GuestToken } from "../data/apiClient";
+import { renderMarkdownToDom } from "../editor/macros/md-render"; // #227: public render via the shared sanitized renderer
 import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useEntitlements } from "../data/queries";
 import { ConfirmDialog } from "../ui/dialogs";
 import { uploadAttachment } from "../attachments/useAttachments";
@@ -781,10 +782,89 @@ function InviteRoute() {
   );
 }
 
+// #227 / ADR-030: the PUBLIC page view — the missing consumer of GET /public/pages/:id. Renders a
+// published-public page for ANONYMOUS visitors (no session; this route never touches useSession, so
+// unauthenticated visits don't bounce to the login screen) plus its PUBLIC child tree as nested nav
+// links (the server authorizes each child individually with the anonymous principal — a non-public
+// child and its whole subtree are absent from the payload, so nothing here can leak).
+// XSS: the body is rendered through the SAME shared allowlist-by-construction renderer the editor
+// uses (renderMarkdownToDom — raw HTML degrades to escaped text, hrefs are scheme-checked); the API
+// 404s for anything non-public (existence hidden), which renders as the not-found screen.
+interface PublicChildNode { id: string; title: string; children: PublicChildNode[] }
+function PublicTree({ nodes }: { nodes: PublicChildNode[] }) {
+  if (!nodes.length) return null;
+  return (
+    <ul style={{ listStyle: "none", paddingLeft: 16, margin: "4px 0" }}>
+      {nodes.map((n) => (
+        <li key={n.id}>
+          <RouterLink className="wks-public-child" data-testid={`public-child-${n.id}`} to={`/pub/${encodeURIComponent(n.id)}`}>{n.title}</RouterLink>
+          <PublicTree nodes={n.children} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function PublicPageRoute() {
+  const { t } = useTranslation();
+  const { pageId } = useParams<{ pageId: string }>();
+  const [state, setState] = useState<{ status: "loading" | "notfound" | "ok"; page?: { id: string; title: string; content: string; noindex: boolean; children: PublicChildNode[] } }>({ status: "loading" });
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setState({ status: "loading" });
+    if (!pageId) { setState({ status: "notfound" }); return; }
+    // Plain unauthenticated fetch — the endpoint is anonymous by design (404 = not public / absent).
+    fetch(assetUrl(`/public/pages/${encodeURIComponent(pageId)}`))
+      .then(async (res) => {
+        if (cancelled) return;
+        if (!res.ok) { setState({ status: "notfound" }); return; }
+        setState({ status: "ok", page: await res.json() });
+      })
+      .catch(() => { if (!cancelled) setState({ status: "notfound" }); });
+    return () => { cancelled = true; };
+  }, [pageId]);
+
+  // Sanitized body render (display-only DOM; never innerHTML with user content).
+  useEffect(() => {
+    if (state.status !== "ok" || !bodyRef.current) return;
+    bodyRef.current.replaceChildren(renderMarkdownToDom(state.page!.content));
+  }, [state]);
+
+  // #124: mirror the server's X-Robots-Tag as <meta name="robots"> for the SPA-rendered page.
+  useEffect(() => {
+    if (state.status !== "ok" || !state.page!.noindex) return;
+    const meta = document.createElement("meta");
+    meta.name = "robots";
+    meta.content = "noindex";
+    document.head.appendChild(meta);
+    return () => meta.remove();
+  }, [state]);
+
+  if (state.status === "loading") return <div style={{ padding: 24 }} />;
+  if (state.status === "notfound") {
+    return <div data-testid="public-not-found" style={{ padding: 24, fontFamily: "var(--font-body, sans-serif)" }}>{t("publicPage.notFound")}</div>;
+  }
+  const page = state.page!;
+  return (
+    <div className="wks-public" style={{ maxWidth: "46rem", margin: "0 auto", padding: "32px 20px", fontFamily: "var(--font-body, sans-serif)" }}>
+      <h1 data-testid="public-title" style={{ marginTop: 0 }}>{page.title}</h1>
+      <div ref={bodyRef} data-testid="public-body" />
+      {page.children.length > 0 && (
+        <nav data-testid="public-children" style={{ marginTop: 32, borderTop: "1px solid var(--border, #ddd)", paddingTop: 12 }}>
+          <PublicTree nodes={page.children} />
+        </nav>
+      )}
+    </div>
+  );
+}
+
 export function AppRoutes() {
   return (
     <Routes>
       <Route path="/p/:pageId" element={<PageRoute />} />
+      <Route path="/pub/:pageId" element={<PublicPageRoute />} />
       <Route path="/share/:linkId" element={<ShareRoute />} />
       <Route path="/invite" element={<InviteRoute />} />
       {AdminRoutes()}

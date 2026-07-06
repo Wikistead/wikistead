@@ -612,5 +612,8 @@
   "pageMeta": {
     "created": "Created",
     "updated": "Updated"
+  },
+  "publicPage": {
+    "notFound": "Page not found"
   }
 }

@@ -612,5 +612,8 @@
   "pageMeta": {
     "created": "作成",
     "updated": "更新"
+  },
+  "publicPage": {
+    "notFound": "ページが見つかりません"
   }
 }
