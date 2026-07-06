@@ -949,6 +949,11 @@ function findNestedSlot(root: HTMLElement, anchor: number): HTMLElement | null {
   return root.querySelector(`[data-mac-pos="${anchor}"]`);
 }
 
+// #221: fields stashed on the widget's DOM so updateDOM can reuse it on a selection-only change (see
+// MacroWidget.updateDOM). __mwKey is the rendered-content identity; __mwRo/__mwObjUrl are the async
+// resources whose ownership must travel with the DOM so the current instance's destroy releases them.
+type MwDom = HTMLElement & { __mwKey?: { body: string; theme: MacroTheme; name: string; foldable: boolean }; __mwRo?: ResizeObserver; __mwObjUrl?: string };
+
 class MacroWidget extends WidgetType {
   private ro?: ResizeObserver;
   private objectUrl?: string; // #140: revoked on destroy so the rendered image blob isn't leaked
@@ -1045,6 +1050,8 @@ class MacroWidget extends WidgetType {
         void renderDiagram(this.name, this.body).then((blob) => {
           if (this.destroyed || !blob) return; // torn down mid-fetch, or degrade → leave the source
           this.objectUrl = URL.createObjectURL(blob);
+          (wrap as MwDom).__mwObjUrl = this.objectUrl; // #221: travel with the DOM for updateDOM reuse
+
           const img = document.createElement("img");
           img.className = "cm-lp-macro-rendered";
           img.alt = `${this.name} diagram`;
@@ -1208,7 +1215,29 @@ class MacroWidget extends WidgetType {
     // measured it short → lines below drift. Re-measure on resize (common path, shared with
     // every other block widget).
     this.ro = observeBlockResize(view, wrap);
+    // #221 comment 845: keep enough on the DOM for updateDOM to reuse it on a SELECTION-only change
+    // (identity of the rendered content + the live ResizeObserver, so destroy still disconnects it).
+    (wrap as MwDom).__mwKey = { body: this.body, theme: this.theme, name: this.name, foldable: this.foldable };
+    (wrap as MwDom).__mwRo = this.ro;
     return wrap;
+  }
+  // #221 comment 845: a SELECTION-only change (the caret LANDING ON / passing over the atom toggles
+  // `selected`) must NOT rebuild the widget — recreating it re-runs liveRender and re-mounts the rendered
+  // content (a mermaid SVG / a plantuml image), which flickers and wobbles the height. eq excludes truly
+  // equal widgets; this handles the not-equal-but-cheap case: when only `selected` differs (content, theme,
+  // name, foldable identical AND no nested container affordance), reuse the DOM and just toggle the ring
+  // class. Any content/theme change, or a nested ring/island, returns false so CM rebuilds via toDOM.
+  updateDOM(dom: HTMLElement): boolean {
+    const prev = (dom as MwDom).__mwKey;
+    const nestedNow = !!(this.nestedSel || this.nestedEdit);
+    const nestedBefore = dom.classList.contains("cm-lp-nested-host");
+    if (!prev || prev.body !== this.body || prev.theme !== this.theme || prev.name !== this.name || prev.foldable !== this.foldable || nestedNow || nestedBefore) {
+      return false; // content / theme / nested affordance changed → let CM rebuild via toDOM
+    }
+    this.ro = (dom as MwDom).__mwRo; // adopt the live ResizeObserver so this instance's destroy() disconnects it
+    this.objectUrl = (dom as MwDom).__mwObjUrl; // adopt any host-rendered blob url so destroy() revokes it
+    dom.classList.toggle("cm-lp-atom-sel", this.selected); // selection ring only — the rendered content stays
+    return true;
   }
   destroy() {
     this.destroyed = true;
