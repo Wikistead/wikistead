@@ -42,32 +42,45 @@ test("GFM table renders as an HTML table; cursor reveals raw markdown", async ({
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("| Name | Age |");
 });
 
-// #216 comment 836: a pipe (Tier1) table in LIVE must show a VISIBLE RichUI-entry button on hover, so a
-// non-vim mouse user can reach the rich editor without knowing Ctrl+Enter. Subtle (hidden until hover),
-// top-left, tooltip names the shortcut; clicking it opens the in-editor rich table editor.
-test("#216: a pipe table in Live shows an ALWAYS-visible RichUI-entry pill (Ctrl+Enter hint + button)", async ({ browser }) => {
+// #216 comment 874: the RichUI-entry pill belongs on the RAW-EDITING state — when the caret is IN the pipe
+// table and its `| a | b |` source is visible — NOT on the rendered/finished table (that was the reversed
+// condition the reviewer rejected). The pill is BOTH the visible Ctrl+Enter key hint AND a click target; a
+// real click opens the in-editor rich table editor. It floats above the first raw row (does not cover the
+// source) and is always visible (no hover gate — the hover-only version never showed on the reviewer's device).
+test("#216 comment 874: the RichUI-entry pill shows on the RAW-editing state (caret in the table), not the rendered table", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
-  await openScratch(page, "table-richui-btn");
+  await openScratch(page, "table-richui-raw");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.insertText("| Name | Age |\n| --- | --- |\n| Alice | 30 |\n\nbelow\n");
   await sleep(400);
+  // The caret is BELOW the table (after "below") → the table renders as a widget. Per comment 874 the pill
+  // must NOT be on the rendered, non-edited table.
   const table = page.locator("[data-pane=preview] table.cm-lp-table");
   await expect(table).toBeVisible();
+  await expect(page.getByTestId("table-richui-enter")).toHaveCount(0); // no pill on the rendered widget
+
+  // Click INTO the table → the caret enters it and the raw `| Name | Age |` source is revealed = the
+  // raw-editing state. That is when the pill appears.
+  await table.click();
+  await sleep(250);
+  const content = page.locator("[data-pane=preview] .cm-content");
+  expect(await content.innerText()).toContain("| Name | Age |"); // raw source visible (caret-in)
   const btn = page.getByTestId("table-richui-enter");
   await expect(btn).toHaveCount(1);
   await expect(btn).toHaveAttribute("title", /Ctrl\+Enter/);
-  await expect(btn).toContainText("Ctrl+↵"); // comment 860: the pill visibly carries the keyboard-shortcut hint
-  // comment 860: ALWAYS visible (not hover-gated) — the hover-only version never showed on the device. It is
-  // opaque WITHOUT any hover, anchored at the table's top-left corner, and a REAL click (no force → must be
-  // the topmost hit-test target, not occluded) opens the RichUI.
+  await expect(btn).toContainText("Ctrl+↵"); // comment 860/874: visible key hint (not a tooltip)
+  // Always visible without any hover (the show/no-show regression was hover-dependency).
   const opacityNoHover = Number(await btn.evaluate((el) => getComputedStyle(el).opacity));
-  expect(opacityNoHover).toBeGreaterThan(0.4); // visible to the eye with NO hover
-  const tb = (await table.boundingBox())!;
+  expect(opacityNoHover).toBeGreaterThan(0.4);
+  // Floated ABOVE the first raw row (does not cover the `| Name` source): the pill's bottom is at/above the
+  // first revealed line's top. The first .cm-line carrying the raw table source is the anchor row.
+  const firstRaw = content.locator(".cm-line", { hasText: "| Name | Age |" }).first();
+  const rowBox = (await firstRaw.boundingBox())!;
   const bb = (await btn.boundingBox())!;
-  expect(bb.x).toBeGreaterThanOrEqual(tb.x - 2); // at the table's top-left corner, inside its box
-  expect(bb.y).toBeGreaterThanOrEqual(tb.y - 2);
   expect(bb.width).toBeGreaterThan(0);
+  expect(bb.y).toBeLessThanOrEqual(rowBox.y + 2); // sits above the raw row, not over it
+  expect(bb.x).toBeLessThanOrEqual(rowBox.x + rowBox.width); // left side of the row
   await btn.click(); // real click (no force) → reachable / not occluded
   await expect(page.getByTestId("table-edit")).toBeVisible(); // → the in-editor RichUI table editor opens
 });
