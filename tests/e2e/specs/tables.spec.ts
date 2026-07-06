@@ -122,3 +122,31 @@ test("#89: Ctrl+Enter opens the RichUI and its grid cells render inline markdown
   await expect(grid.locator("td a")).toHaveText("lnk");
   expect(await grid.innerText()).not.toContain("**"); // …not the raw marks
 });
+
+// #89 comment 876: the NON-editing pipe TableWidget must render `code` and [link] just like bold/strike
+// (all four are valid GFM in a pipe cell). Prior e2e only checked bold/strike on the non-editing widget;
+// this pins code + link on the RENDERED table (caret moved away), in a real browser.
+test("#89 comment 876 REPRO: non-editing pipe table renders code and link (not plain text)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "cell-code-link");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("| H | Note |\n| - | - |\n| a | `code` and [lnk](https://x.test) |\n\nbelow\n");
+  await sleep(400);
+  // caret is below the table → it renders as the static TableWidget
+  const table = page.locator("[data-pane=preview] table.cm-lp-table");
+  await expect(table).toBeVisible();
+  const bodyCell = table.locator("td").nth(1); // second body cell
+  await expect(bodyCell.locator("code")).toHaveText("code"); // `code` -> <code> (not literal backticks)
+  await expect(bodyCell.locator("a")).toHaveText("lnk");     // [lnk](url) -> <a> (not literal brackets)
+  await expect(bodyCell.locator("a")).toHaveAttribute("href", "https://x.test");
+
+  // Same content in the RichUI grid (Ctrl+Enter) must also render code/link (third path — 863 baseline).
+  await table.click(); // caret in -> raw
+  await sleep(150);
+  await page.keyboard.press("Control+Enter");
+  const grid = page.getByTestId("table-edit");
+  await expect(grid).toBeVisible();
+  await expect(grid.locator("td code").first()).toHaveText("code");
+  await expect(grid.locator("td a").first()).toHaveText("lnk");
+});
