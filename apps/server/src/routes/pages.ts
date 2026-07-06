@@ -63,14 +63,16 @@ export async function setEmbedProviders(
   return providers
 }
 
-interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean }
-export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean; canComment?: boolean; private?: boolean }
+interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean; created_by?: string | null; updated_by?: string | null }
+export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean; canComment?: boolean; private?: boolean; createdBy?: string | null; updatedBy?: string | null }
 function toPage(r: PageRow): Page {
   // hasUnpublishedChanges + published are only present when the SELECT included the
   // columns (listPages); together they drive the sidebar's 3-state badge
   // (Draft / Published / Unpublished changes). `published` is a cheap check
   // (published_at IS NOT NULL) — the heavy published_md is not read for the tree.
-  return { id: r.id, tenantId: r.tenant_id, spaceId: r.space_id, parentId: r.parent_id, title: r.title, position: r.position, createdAt: r.created_at, updatedAt: r.updated_at, hasUnpublishedChanges: r.has_unpublished_changes ?? false, published: r.published ?? false }
+  // #222: createdBy/updatedBy (author subs) are present only when the SELECT included them (getPage) —
+  // they feed the title-bar metadata row; undefined for the tree list (not needed there).
+  return { id: r.id, tenantId: r.tenant_id, spaceId: r.space_id, parentId: r.parent_id, title: r.title, position: r.position, createdAt: r.created_at, updatedAt: r.updated_at, hasUnpublishedChanges: r.has_unpublished_changes ?? false, published: r.published ?? false, createdBy: r.created_by ?? null, updatedBy: r.updated_by ?? null }
 }
 
 // Fractional sibling ordering: a new value between two neighbours, no renumber.
@@ -196,8 +198,8 @@ export async function createPage(
   let outboxId!: string
   const row = await db.tx(async (tx) => {
     const [r] = await tx<PageRow[]>`
-      INSERT INTO pages (tenant_id, space_id, parent_id, title, position)
-      VALUES (${args.tenantId}, ${args.spaceId}, ${parentId}, ${args.title ?? ''}, ${position})
+      INSERT INTO pages (tenant_id, space_id, parent_id, title, position, created_by)
+      VALUES (${args.tenantId}, ${args.spaceId}, ${parentId}, ${args.title ?? ''}, ${position}, ${args.userId})
       RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
     `
     // Visibility gate (Phase 4): a new page is a DRAFT — do NOT link it to its
@@ -255,7 +257,8 @@ export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: 
   const access = await checkMemberAccess(fga, args.userId, { type: 'page', id: args.pageId })
   if (!access) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
   const [row] = await db.sql<PageRow[]>`
-    SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at, has_unpublished_changes
+    SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at, has_unpublished_changes,
+           created_by, updated_by
     FROM pages WHERE id = ${args.pageId}
   `
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
@@ -360,7 +363,7 @@ export async function publishPage(
     revisionId = rev.id
     const [p] = await tx<[{ published_at: Date }]>`
       UPDATE pages SET published_md = ${md}, published_revision_id = ${rev.id}, published_at = now(),
-        has_unpublished_changes = false
+        has_unpublished_changes = false, updated_by = ${args.subject.replace(/^user:/, '')}
       WHERE id = ${args.pageId}
       RETURNING published_at
     `

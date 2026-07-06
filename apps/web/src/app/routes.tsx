@@ -114,6 +114,7 @@ function useDisplayModeShortcut(cycle: () => void, enabled: boolean, chord: stri
 }
 import { Lock } from "lucide-react";
 import { PageTitle } from "./PageTitle";
+import { PageMeta } from "./PageMeta";
 import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
 import { CommentsPanel } from "../comments/CommentsPanel";
@@ -450,6 +451,8 @@ function PageRoute() {
                       onError: () => notify.error(t("toast.actionFailed")),
                     }) : undefined}
                   />
+                  {/* #222: creator / last-publisher / updated-time, directly under the title. */}
+                  <PageMeta createdBy={page?.createdBy} updatedBy={page?.updatedBy} updatedAt={page?.updatedAt} />
                 </div>
                 {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}
               </div>
