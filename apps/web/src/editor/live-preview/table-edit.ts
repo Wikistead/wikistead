@@ -382,6 +382,26 @@ export const tableInlineEditor: InlineEditor = {
       const el = cellEls.get(`${anchor[0]},${anchor[1]}`);
       if (el) beginEdit(el, anchor[0], anchor[1], e.key); // overwrite the cell with the typed char
     });
+    // #223 comment 885: PASTE onto a SELECTED (non-editing) cell. The CM-body pasteLinkify bypasses when a
+    // nested island has focus (activeElement = this table, not contentDOM), so without this the paste was
+    // dropped at the atom boundary. Capture the paste HERE and start editing the active cell with the
+    // (linkified) content — the Excel-style select-then-paste, the paste analogue of select-then-type above.
+    // safeHref stays the only scheme judge; the result is inserted as TEXT (text+<br>, ADR-037). Ctrl+Shift+V
+    // requests a plain paste (skip linkify).
+    let tablePlainPaste = false;
+    table.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "v" || e.key === "V")) tablePlainPaste = true;
+    }, true);
+    table.addEventListener("paste", (e) => {
+      if (editing || !selected.size) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const plain = e.clipboardData?.getData("text/plain") ?? "";
+      const md = tablePlainPaste ? null : linkifyPaste({ text: plain, html: e.clipboardData?.getData("text/html") ?? "", selectedText: "" });
+      tablePlainPaste = false;
+      const el = cellEls.get(`${anchor[0]},${anchor[1]}`);
+      if (el) beginEdit(el, anchor[0], anchor[1], md ?? plain); // overwrite the active cell with the pasted content
+    }, true);
 
     const apply = (next: Grid) => {
       // Hand the host a LOSSLESS source (the richest :::table form) and let IT pick the level
