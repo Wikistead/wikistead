@@ -41,3 +41,27 @@ test("GFM table renders as an HTML table; cursor reveals raw markdown", async ({
   await sleep(300);
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("| Name | Age |");
 });
+
+// #216 comment 836: a pipe (Tier1) table in LIVE must show a VISIBLE RichUI-entry button on hover, so a
+// non-vim mouse user can reach the rich editor without knowing Ctrl+Enter. Subtle (hidden until hover),
+// top-left, tooltip names the shortcut; clicking it opens the in-editor rich table editor.
+test("#216: a pipe table in Live shows a hover RichUI-entry button that opens the rich editor", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "table-richui-btn");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("| Name | Age |\n| --- | --- |\n| Alice | 30 |\n\nbelow\n");
+  await sleep(400);
+  const wrap = page.locator("[data-pane=preview] .cm-lp-table-wrap");
+  await expect(wrap).toBeVisible();
+  const btn = page.getByTestId("table-richui-enter");
+  await expect(btn).toHaveCount(1); // present in the DOM…
+  await expect(btn).toHaveAttribute("title", /Ctrl\+Enter/); // …with the shortcut hint in its tooltip
+  expect(await btn.evaluate((el) => getComputedStyle(el).opacity)).toBe("0"); // hidden until hover (subtle)
+  await wrap.hover();
+  await sleep(150);
+  expect(await btn.evaluate((el) => getComputedStyle(el).opacity)).toBe("1"); // revealed on hover
+  await btn.click({ force: true });
+  await sleep(300);
+  await expect(page.getByTestId("table-edit")).toBeVisible(); // → the in-editor RichUI table editor opens
+});
