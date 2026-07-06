@@ -490,3 +490,29 @@ test("#221 (rendered): vim k UP over TWO stacked tall RENDERED mermaids is symme
   expect(up.filter(inAnyAtom), `up ${up.join(",")}`).toHaveLength(2);
   expect(up.length, `down ${down.join(",")} vs up ${up.join(",")}`).toBe(down.length); // #221: symmetric press count
 });
+
+// #221 comment 845: landing / passing the caret ON a rendered mermaid must NOT re-render it. Recreating the
+// widget on the selection toggle re-runs liveRender → the SVG re-mounts → the "source flickers / height
+// wobbles" the reviewer saw while k crossed the atom. updateDOM reuses the DOM on a selection-only change.
+// Tag the SVG, land the caret ON the atom, and assert the SAME node survives (and the atom is selected, and
+// the raw source never revealed) — a recreated widget would lose the JS marker.
+test("#221: landing the caret ON a rendered mermaid reuses it (no re-render / flicker)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "vim221-noflicker");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("top\n```mermaid\nflowchart TD\n  A --> B\n  B --> C\n```\nbot\n");
+  await sleep(2500); // SVG mounts
+  await page.evaluate(() => { const s = document.querySelector("[data-pane=preview] [data-testid=macro-mermaid] svg") as HTMLElement & { __mark?: string } | null; if (s) s.__mark = "KEEP"; });
+  await page.getByTestId("vim-toggle").click();
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("g"); await page.keyboard.press("g"); await sleep(120); // line 1 (top)
+  await page.keyboard.press("j"); await sleep(200); // lands ON the atom → selected (was the flicker trigger)
+  expect(await page.locator("[data-pane=preview] .cm-lp-atom-sel").count()).toBe(1); // the atom IS selected
+  // the SAME svg node survived → the widget was REUSED (updateDOM), not rebuilt → no SVG re-mount / flicker.
+  const reused = await page.evaluate(() => (document.querySelector("[data-pane=preview] [data-testid=macro-mermaid] svg") as (HTMLElement & { __mark?: string }) | null)?.__mark === "KEEP");
+  expect(reused).toBe(true);
+  // and the raw ```mermaid source did NOT reveal on the caret landing (atom stays rendered).
+  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("```mermaid");
+});
