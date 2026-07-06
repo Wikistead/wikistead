@@ -7,15 +7,99 @@ import { safeHref } from "../macros/md-render"; // #89 comment 886 (②): the ON
 // innerHTML — the ADR-037 / #89 XSS boundary). The cell's canonical Markdown round-trips via cellElToText
 // (<strong> → `**…**`), and re-opening a cell shows the marks WYSIWYG via renderCellInline.
 
-// Each mark is a factory for its wrapper element. `link` needs a URL, so it is NOT a plain wrapper — the
-// toolbar routes it through the URL popover (applyCellLink) instead of applyCellMark.
-type Mark = { id: string; label: string; el: () => HTMLElement };
+// Each mark is a factory for its wrapper element plus the DOM tag set that COUNTS as this mark
+// (#236 toggle detection — the same aliases cellElToText serialises). `link` needs a URL, so it is
+// NOT a plain wrapper — the toolbar routes it through the URL popover (applyCellLink).
+type Mark = { id: string; label: string; el: () => HTMLElement; tags: readonly string[] };
 export const CELL_MARKS: Mark[] = [
-  { id: "bold", label: "B", el: () => document.createElement("strong") },
-  { id: "italic", label: "I", el: () => document.createElement("em") },
-  { id: "strike", label: "S", el: () => document.createElement("s") },
-  { id: "code", label: "</>", el: () => document.createElement("code") },
+  { id: "bold", label: "B", el: () => document.createElement("strong"), tags: ["STRONG", "B"] },
+  { id: "italic", label: "I", el: () => document.createElement("em"), tags: ["EM", "I"] },
+  { id: "strike", label: "S", el: () => document.createElement("s"), tags: ["S", "DEL", "STRIKE"] },
+  { id: "code", label: "</>", el: () => document.createElement("code"), tags: ["CODE"] },
 ];
+
+// #236: is EVERY text character of `range` inside an element whose tag is in `tags` (within `root`)?
+// BRs don't count against coverage (a line break carries no formatting). False when the range holds
+// no text at all.
+function rangeFullyMarked(root: HTMLElement, range: Range, tags: readonly string[]): boolean {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let sawText = false;
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    if (!range.intersectsNode(t)) continue;
+    // Ignore zero-length boundary touches (intersectsNode is inclusive at edges).
+    const r = document.createRange();
+    r.selectNodeContents(t);
+    if (r.compareBoundaryPoints(Range.END_TO_START, range) >= 0 || r.compareBoundaryPoints(Range.START_TO_END, range) <= 0) continue;
+    if (!(t.nodeValue ?? "").length) continue;
+    sawText = true;
+    let marked = false;
+    for (let p = t.parentElement; p && p !== root; p = p.parentElement) {
+      if (tags.includes(p.tagName)) { marked = true; break; }
+    }
+    if (!marked) return false;
+  }
+  return sawText;
+}
+
+// Unwrap every `tags` element inside `root` (replace it with its children). Recursion-safe: the
+// NodeList is materialised before mutating.
+function unwrapTags(root: ParentNode, tags: readonly string[]): void {
+  for (const el of Array.from(root.querySelectorAll(tags.map((t) => t.toLowerCase()).join(",")))) {
+    el.replaceWith(...Array.from(el.childNodes));
+  }
+}
+
+// #236: make the range's boundaries sit OUTSIDE any `tags` element by SPLITTING boundary elements.
+// Without this, extractContents on a selection that starts/ends exactly at an element's content
+// boundary leaves the original element as a shell around the re-insertion point, so the "removed"
+// content lands back INSIDE the mark. Marker technique: insert empty text markers at the range
+// edges (insertNode splits a Text container as needed), then, while a marker's parent is a tags
+// element, move the siblings on the far side into a shallow clone beside it and hoist the marker
+// out. Empty split shells are dropped later by mergeAdjacent. Returns the two markers; the caller
+// re-ranges between them and removes them afterwards.
+function isolateRangeFromTags(root: HTMLElement, range: Range, tags: readonly string[]): { startMarker: Text; endMarker: Text } {
+  const startMarker = document.createTextNode("");
+  const endMarker = document.createTextNode("");
+  const rEnd = range.cloneRange();
+  rEnd.collapse(false);
+  rEnd.insertNode(endMarker);
+  const rStart = range.cloneRange();
+  rStart.collapse(true);
+  rStart.insertNode(startMarker);
+  // Hoist the START marker out of every tags ancestor: children BEFORE it move to a pre-clone.
+  while (startMarker.parentElement && startMarker.parentElement !== root && tags.includes(startMarker.parentElement.tagName)) {
+    const parent = startMarker.parentElement;
+    const pre = parent.cloneNode(false) as HTMLElement;
+    while (parent.firstChild && parent.firstChild !== startMarker) pre.appendChild(parent.firstChild);
+    parent.parentNode!.insertBefore(pre, parent);
+    parent.parentNode!.insertBefore(startMarker, parent);
+  }
+  // Hoist the END marker out: children AFTER it move to a post-clone.
+  while (endMarker.parentElement && endMarker.parentElement !== root && tags.includes(endMarker.parentElement.tagName)) {
+    const parent = endMarker.parentElement;
+    const post = parent.cloneNode(false) as HTMLElement;
+    while (endMarker.nextSibling) post.appendChild(endMarker.nextSibling);
+    parent.parentNode!.insertBefore(post, parent.nextSibling);
+    parent.parentNode!.insertBefore(endMarker, parent.nextSibling);
+  }
+  return { startMarker, endMarker };
+}
+
+// Merge ADJACENT same-tag siblings and drop empty ones, so an apply next to an existing mark can't
+// serialise to the ambiguous `**ab****cd**` form.
+function mergeAdjacent(root: HTMLElement, tags: readonly string[]): void {
+  for (const el of Array.from(root.querySelectorAll(tags.map((t) => t.toLowerCase()).join(",")))) {
+    if (!el.isConnected) continue;
+    if (!(el.textContent ?? "").length) { el.remove(); continue; }
+    let next = el.nextSibling;
+    while (next instanceof HTMLElement && next.tagName === el.tagName) {
+      el.append(...Array.from(next.childNodes));
+      const gone = next;
+      next = gone.nextSibling;
+      gone.remove();
+    }
+  }
+}
 
 // #89 comment 886 (③): wrap a range's contents PER LINE, so a mark that spans a <br> becomes
 // `<strong>a</strong><br><strong>b</strong>` — NOT `<strong>a<br>b</strong>`. The latter serialises to
@@ -33,27 +117,41 @@ function wrapPerLine(fragment: DocumentFragment, makeEl: () => HTMLElement): Doc
   return out;
 }
 
-// Wrap the current selection inside `mark`'s element(s) — the decoration appears in place (WYSIWYG). Returns
-// false for a collapsed / out-of-cell selection. DOM-space (no source-offset math), so it composes with
-// existing marks (selecting bold text and pressing italic nests em>strong). A selection crossing <br>s is
-// wrapped per line (see wrapPerLine).
+// TOGGLE the current selection's `mark` (#236) — the decoration appears/disappears in place (WYSIWYG).
+// Fully marked selection → remove (extractContents splits partially-covered elements at the range
+// boundaries, so the outside parts KEEP their mark — sub-range removal, word-processor style). Mixed or
+// unmarked → apply-unify: same-tag wrappers inside the extracted fragment are unwrapped first, then the
+// whole fragment is wrapped per line — never nested same-tag / ambiguous `**ab****cd**` output (adjacent
+// same-tag siblings are merged after insert). Returns false for a collapsed / out-of-cell selection.
+// DOM-space (no source-offset math), so it composes with OTHER marks (bold selection + italic nests
+// em>strong; removing bold keeps the em). A selection crossing <br>s is handled per line (wrapPerLine).
 export function applyCellMark(el: HTMLElement, mark: Mark): boolean {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return false;
   const range = sel.getRangeAt(0);
   if (range.collapsed || !el.contains(range.commonAncestorContainer)) return false;
-  let inserted: DocumentFragment;
   try {
-    inserted = wrapPerLine(range.extractContents(), mark.el);
-    range.insertNode(inserted);
+    // Split boundary same-tag elements so the working range's edges sit OUTSIDE them (otherwise the
+    // re-insert lands back inside the mark and a "remove" is a no-op — the boundary-shell bug).
+    const { startMarker, endMarker } = isolateRangeFromTags(el, range, mark.tags);
+    const r = document.createRange();
+    r.setStartAfter(startMarker);
+    r.setEndBefore(endMarker);
+    const fully = rangeFullyMarked(el, r, mark.tags);
+    const frag = r.extractContents();
+    unwrapTags(frag, mark.tags); // both paths: strip this mark inside the selection first
+    r.insertNode(fully ? frag : wrapPerLine(frag, mark.el));
+    startMarker.remove();
+    endMarker.remove();
   } catch {
     return false; // a range crossing element boundaries that can't be extracted cleanly — no-op
   }
   el.normalize(); // merge any split text nodes so cellElToText reads clean runs
-  const r = document.createRange();
-  r.selectNodeContents(el); // re-select the whole cell (multiple wrappers may exist after a per-line wrap)
+  mergeAdjacent(el, mark.tags); // also drops empty split shells
+  const r2 = document.createRange();
+  r2.selectNodeContents(el); // re-select the whole cell (multiple wrappers may exist after a per-line wrap)
   sel.removeAllRanges();
-  sel.addRange(r);
+  sel.addRange(r2);
   return true;
 }
 

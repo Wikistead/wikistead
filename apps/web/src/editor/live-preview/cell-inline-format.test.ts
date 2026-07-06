@@ -105,6 +105,66 @@ describe("#89 WYSIWYG cell marks — decorate in place, round-trip to Markdown",
     expect(el.textContent).toContain("<img"); // shown as literal text
   });
 
+  it("#236: fully marked selection → TOGGLES OFF (whole element)", () => {
+    const el = cell("a **b** c");
+    // select exactly the bold text "b" (inside the <strong>)
+    const strong = el.querySelector("strong")!;
+    const r = document.createRange();
+    r.selectNodeContents(strong);
+    const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
+    expect(applyCellMark(el, mark("bold"))).toBe(true);
+    expect(el.querySelector("strong")).toBeNull(); // mark removed
+    expect(cellElToText(el)).toBe("a b c");
+  });
+
+  it("#236: sub-range of a marked element → only the selected part loses the mark (split)", () => {
+    const el = cell("**abcdef**");
+    const strong = el.querySelector("strong")!;
+    const t = strong.firstChild as Text; // "abcdef"
+    const r = document.createRange();
+    r.setStart(t, 2); r.setEnd(t, 4); // "cd"
+    const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
+    expect(applyCellMark(el, mark("bold"))).toBe(true);
+    expect(cellElToText(el)).toBe("**ab**cd**ef**"); // outside parts keep the mark
+  });
+
+  it("#236: MIXED selection (marked + plain) → unify-applies once, second press removes (edge case)", () => {
+    const el = cell("a **b** c");
+    const r = document.createRange();
+    r.selectNodeContents(el); // whole cell: plain "a ", bold "b", plain " c"
+    const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
+    expect(applyCellMark(el, mark("bold"))).toBe(true);
+    expect(el.querySelectorAll("strong").length).toBe(1); // ONE unified span (no nesting/adjacent frags)
+    expect(cellElToText(el)).toBe("**a b c**");
+    // second press on the (re-selected whole cell) removes it all
+    expect(applyCellMark(el, mark("bold"))).toBe(true);
+    expect(el.querySelector("strong")).toBeNull();
+    expect(cellElToText(el)).toBe("a b c");
+  });
+
+  it("#236: removing bold KEEPS a nested italic (other marks preserved)", () => {
+    const el = cell("**a *i* b**");
+    const strong = el.querySelector("strong")!;
+    const r = document.createRange();
+    r.selectNodeContents(strong);
+    const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
+    expect(applyCellMark(el, mark("bold"))).toBe(true);
+    expect(el.querySelector("strong")).toBeNull();
+    expect(el.querySelector("em")?.textContent).toBe("i"); // italic survives
+    expect(cellElToText(el)).toBe("a *i* b");
+  });
+
+  it("#236: multi-line (<br>) fully marked selection toggles OFF on both lines", () => {
+    const el = cell("**one**\n**two**");
+    const r = document.createRange();
+    r.selectNodeContents(el); // both bold lines + the <br>
+    const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
+    expect(applyCellMark(el, mark("bold"))).toBe(true);
+    expect(el.querySelector("strong")).toBeNull();
+    expect(el.querySelector("br")).toBeTruthy(); // the line break survives
+    expect(cellElToText(el)).toBe("one\ntwo");
+  });
+
   it("a collapsed / out-of-cell selection is a no-op", () => {
     const el = cell("abc");
     const other = document.createElement("div"); other.textContent = "zzz"; document.body.appendChild(other);
