@@ -14,7 +14,7 @@ export type { MacroTheme }; // #200: re-exported so the Editor can type the redr
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, directiveChainAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen, resolveDirectiveRanges } from "../macros/directive-parser";
-import { parseFenceLine } from "@wikistead/macro-render"; // #198: code-fence attribute parser
+import { parseFenceLine, CALLOUT_TYPES } from "@wikistead/macro-render"; // #198: code-fence attribute parser; #174: callout types
 import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset } from "../macros/md-render";
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
@@ -1306,6 +1306,49 @@ class DetailsSummaryWidget extends WidgetType {
 // (icon large + vertically centred, variant title, nested Markdown body — the shared renderCalloutPanel
 // so the CM widget and nested renderer never drift); caret-in → the raw `:::` source (reveal-on-cursor,
 // per-line boxes below). Display-only / offset-invariant; a click enters (enterMacroAt → reveal raw).
+// #174 / ADR-087 (Class 1 — direct-click metadata): change a callout's TYPE by rewriting the directive name
+// on its OPEN line, keeping the colon run, `[label]`, and body. One offset-invariant Y.Text edit on just the
+// name run (single Y.Text). blockStart is the widget's doc offset (its open line).
+function changeCalloutTypeAt(view: EditorView, blockStart: number, newType: string): void {
+  const line = view.state.doc.lineAt(blockStart);
+  const m = line.text.match(/^(\s*:{3,}\s*)(\w+)/); // colon run + directive name
+  if (!m) return;
+  const nameFrom = line.from + m[1]!.length;
+  const nameTo = nameFrom + m[2]!.length;
+  view.dispatch({ changes: { from: nameFrom, to: nameTo, insert: newType } });
+  view.focus();
+}
+
+// #174 / ADR-087 (Class 1): a small type-picker opened by clicking the callout's icon badge — the direct,
+// per-element metadata edit (faster than opening the whole editUI panel). Floating menu of the callout
+// types; picking one rewrites the directive name in place. Dismiss on outside pointerdown / Escape.
+function openCalloutTypeMenu(view: EditorView, anchor: HTMLElement, blockStart: number): void {
+  document.querySelector(".cm-lp-callout-type-menu")?.remove(); // only one at a time
+  const menu = document.createElement("div");
+  menu.className = "cm-lp-callout-type-menu";
+  menu.setAttribute("data-testid", "callout-type-menu");
+  // Fixed to the viewport at the icon's position — NOT a child of the widget DOM, which CM reconciles away
+  // on the next update (memory: CM floating UI must live outside view.dom). Positioned below the icon badge.
+  const r = anchor.getBoundingClientRect();
+  menu.style.position = "fixed";
+  menu.style.top = `${Math.round(r.bottom + 2)}px`;
+  menu.style.left = `${Math.round(r.left)}px`;
+  for (const ty of CALLOUT_TYPES) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "cm-lp-callout-type-opt";
+    b.textContent = ty;
+    b.setAttribute("data-testid", `callout-type-${ty}`);
+    b.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); changeCalloutTypeAt(view, blockStart, ty); close(); });
+    menu.appendChild(b);
+  }
+  document.body.appendChild(menu);
+  const dismiss = (e: Event) => { if (!menu.contains(e.target as Node)) close(); };
+  const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+  const close = () => { menu.remove(); document.removeEventListener("pointerdown", dismiss, true); document.removeEventListener("keydown", onKey, true); };
+  setTimeout(() => { document.addEventListener("pointerdown", dismiss, true); document.addEventListener("keydown", onKey, true); }, 0);
+}
+
 class CalloutWidget extends WidgetType {
   private ro?: ResizeObserver;
   constructor(readonly containerClass: string, readonly icon: string, readonly label: string, readonly body: string) { super(); }
@@ -1317,6 +1360,15 @@ class CalloutWidget extends WidgetType {
     if (!view.state.readOnly) {
       // A click enters the callout (place the caret in the block → reveal raw source for editing).
       el.addEventListener("mousedown", (e) => { e.preventDefault(); enterMacroAt(view, view.posAtDOM(el)); view.focus(); });
+      // #174 / ADR-087 (Class 1): clicking the icon badge opens the TYPE picker directly (metadata direct-
+      // click), instead of entering raw — stopPropagation so the panel's caret-in handler above doesn't fire.
+      const iconEl = el.querySelector(".cm-lp-callout-panel-icon");
+      if (iconEl instanceof HTMLElement) {
+        iconEl.style.cursor = "pointer";
+        iconEl.style.position = "relative"; // anchor the floating type menu
+        iconEl.setAttribute("data-testid", "callout-type-badge");
+        iconEl.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); openCalloutTypeMenu(view, iconEl, view.posAtDOM(el)); });
+      }
     }
     // Height settles after the nested body renders → re-measure so lines below don't drift.
     this.ro = observeBlockResize(view, el);
@@ -2417,6 +2469,10 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-table-richui-key": { fontSize: "0.72em", fontWeight: "600", letterSpacing: "0.02em" },
   ".cm-lp-table-wrap:hover .cm-lp-table-richui": { opacity: "1" },
   ".cm-lp-table-richui:hover": { opacity: "1" },
+  // #174 / ADR-087 (Class 1): the callout icon-badge type picker.
+  ".cm-lp-callout-type-menu": { position: "absolute", top: "100%", left: "0", zIndex: "10", display: "flex", flexDirection: "column", background: "var(--panel, #fff)", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "3px", boxShadow: "0 2px 8px rgba(0,0,0,0.18)", minWidth: "7em", marginTop: "2px" },
+  ".cm-lp-callout-type-opt": { textAlign: "left", padding: "3px 8px", border: "none", background: "transparent", color: "var(--fg, #222)", cursor: "pointer", borderRadius: "4px", fontSize: "0.85em", textTransform: "capitalize" },
+  ".cm-lp-callout-type-opt:hover": { background: "var(--panel-hover, rgba(127,127,127,0.15))" },
   // #213: columns/tabs structural add/remove bar — bottom-right, shown on hover/selection (same gating
   // as the edit button). Sits below the content so it doesn't overlap the child bodies.
   ".cm-lp-macro-layoutbar": { position: "absolute", bottom: "-0.6em", right: "0", display: "inline-flex", gap: "0.25em", opacity: "0", transition: "opacity 120ms", zIndex: "3", pointerEvents: "auto" },
