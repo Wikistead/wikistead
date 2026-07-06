@@ -24,7 +24,11 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `npx tsx ${ENV_FILES} apps/server/src/index.ts`,
+      // #178 / ADR-084: run the EE composition root (packages/ee-server/src/main.ts) so the e2e stack
+      // exercises the SHIPPING EE build (SCIM etc. mounted via the seam), not the CE-only server.
+      // --conditions=source makes @wikistead/server/ee-host resolve to its TS source (tsx), matching how
+      // apps/server ran from source before the split (no dist build needed for the dev/e2e server).
+      command: `npx tsx --conditions=source ${ENV_FILES} packages/ee-server/src/main.ts`,
       cwd: REPO,
       url: "http://localhost:4010/healthz",
       reuseExistingServer: false,

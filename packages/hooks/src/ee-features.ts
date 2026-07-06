@@ -13,8 +13,11 @@ export type EeMount<Host = unknown> = (host: Host) => Promise<void> | void
 
 let _mount: EeMount | null = null
 
-export function registerEeFeatures(mount: EeMount): void {
-  _mount = mount
+// Generic over the host so the EE composition root can register a mount typed to the CONCRETE host
+// (e.g. the Fastify app) while the seam stores it host-agnostically. getEeFeatures() then invokes it
+// with the actual host (`getEeFeatures()?.(app)`), which is assignable to the stored `unknown` host.
+export function registerEeFeatures<Host = unknown>(mount: EeMount<Host>): void {
+  _mount = mount as EeMount
 }
 
 // Null when no EE composition root has registered (the default — CE/self-host). The CE core calls
