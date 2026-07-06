@@ -65,3 +65,20 @@ test("#216: a pipe table in Live shows a hover RichUI-entry button that opens th
   await sleep(300);
   await expect(page.getByTestId("table-edit")).toBeVisible(); // → the in-editor RichUI table editor opens
 });
+
+// #89 comment 848: the NON-editing pipe table cell must render its inline markdown (WYSIWYG), not show the
+// literal ** / ~~ marks — consistent with the editing island and :::table. The table stays a Tier1 pipe
+// table (inline marks don't promote to :::table — Open formats).
+test("#89: a pipe table cell renders inline markdown when not editing (WYSIWYG, stays pipe)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "table-inline-render");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("| Name | Note |\n| --- | --- |\n| Alice | **bold** x ~~strike~~ |\n\nbelow\n");
+  await sleep(400);
+  const table = page.locator("[data-pane=preview] table.cm-lp-table");
+  await expect(table).toBeVisible();
+  await expect(table.locator("td strong")).toHaveText("bold"); // ** rendered as <strong>, not literal
+  await expect(table.locator("td s")).toHaveText("strike");     // ~~ rendered as <s>
+  expect(await table.innerText()).not.toContain("**"); // no literal marks visible in the rendered cell
+});
