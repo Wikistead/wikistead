@@ -9,6 +9,7 @@ import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, macroPresencePlugin, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { listEditing } from "./live-preview/list-edit";
+import { pasteLinkify } from "./live-preview/paste-linkify";
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette, type PageEmbedPicker } from "./live-preview/palette";
 import { contextMenu } from "./live-preview/context-menu";
@@ -126,6 +127,8 @@ export function mountLivePreview(
       } })))) ]),
       // #202: list-editing keys (Tab/Shift-Tab indent, Enter continuation) — editable surface only.
       ...(opts.readOnly ? [] : [listEditing]),
+      // #223: paste a URL / rich link → Markdown [text](url) (editable surface only; Ctrl+Shift+V pastes plain).
+      ...(opts.readOnly ? [] : [pasteLinkify()]),
       // Task checkboxes are interactive on the editable surface: a click flips the
       // `[ ]`/`[x]` char directly in the Y.Text (a normal draft edit). (Read-only →
       // disabled; the view surface wires its own no-revision persist below.)
