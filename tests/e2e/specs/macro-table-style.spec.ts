@@ -10,7 +10,7 @@ async function pipeTableInEdit(page: any) {
   // #154: a click on the table enters render-active → the IN-EDITOR table editor (table-edit)
   // mounts inside CodeMirror (no modal). Each op commits to the doc per-op (host.replaceSource);
   // Escape exits edit mode → the static render.
-  await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await page.locator("[data-pane=preview] table.cm-lp-table").click(); await sleep(150); await page.keyboard.press("Control+Enter"); // #216: pipe×Live RichUI = Ctrl+Enter opt-in
   await expect(page.getByTestId("table-edit")).toBeVisible();
   expect(await page.getByTestId("macro-modal").count()).toBe(0);
 }
@@ -99,7 +99,7 @@ test("multi-column resize: live preview matches commit (no jump) + all selected 
   await page.click("[data-pane=preview] .cm-content");
   for (const l of ["| A | B | C |", "| - | - | - |", "| 1 | 2 | 3 |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
   await sleep(250);
-  await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await page.locator("[data-pane=preview] table.cm-lp-table").click(); await sleep(150); await page.keyboard.press("Control+Enter"); // #216: pipe×Live RichUI = Ctrl+Enter opt-in
   await expect(page.getByTestId("table-edit")).toBeVisible(); // #154: in-editor, no modal
 
   const grid = page.locator("[data-testid=table-edit] table.cm-lp-table-grid");
@@ -292,7 +292,7 @@ test("toolbar stays inside the container for a rightmost cell (no clip)", async 
   await page.click("[data-pane=preview] .cm-content");
   for (const l of ["| A | B | C | D | E |", "| - | - | - | - | - |", "| 1 | 2 | 3 | 4 | 5 |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
   await sleep(250);
-  await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await page.locator("[data-pane=preview] table.cm-lp-table").click(); await sleep(150); await page.keyboard.press("Control+Enter"); // #216: pipe×Live RichUI = Ctrl+Enter opt-in
   await expect(page.getByTestId("table-edit")).toBeVisible();
 
   // select the rightmost body cell (column E)
@@ -318,7 +318,7 @@ test("#217: the table edit toolbar wraps (no scroll) at narrow width, groups sta
   // a many-column table → a wide toolbar (all ops present) relative to the editor
   for (const l of ["| A | B | C | D | E | F |", "| - | - | - | - | - | - |", "| 1 | 2 | 3 | 4 | 5 | 6 |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
   await sleep(250);
-  await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await page.locator("[data-pane=preview] table.cm-lp-table").click(); await sleep(150); await page.keyboard.press("Control+Enter"); // #216: pipe×Live RichUI = Ctrl+Enter opt-in
   await expect(page.getByTestId("table-edit")).toBeVisible();
   await page.getByTestId("table-edit").locator("td").first().click();
   const bar = page.locator("[data-testid=table-edit] .cm-lp-table-edit-bar");

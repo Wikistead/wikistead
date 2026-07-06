@@ -1,8 +1,9 @@
-import { StateField, StateEffect, Prec, type Extension } from "@codemirror/state";
+import { StateField, StateEffect, Prec, EditorSelection, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { currentMacroTheme } from "../macros/theme";
 import type { InnerEditHost, MacroTier, MacroLevel, MacroSource } from "../macros/registry";
 import { asMacroSource } from "../macros/registry";
+import { tableBlockAt } from "../macros/fence";
 
 // Inline rich-edit state for macros (ADR-022 Part 11, mode-based). The editor is entered
 // by a mouse CLICK on the macro (handled in decorations.ts) — there is no Ctrl+Enter
@@ -91,8 +92,17 @@ const escExit = Prec.high(
           view.dispatch({ effects: setNestedEditActive.of(null) });
           return true;
         }
-        if (view.state.field(macroRenderActiveField)) {
-          view.dispatch({ effects: setMacroRenderActive.of(null) });
+        const active = view.state.field(macroRenderActiveField);
+        if (active) {
+          // #216 comment 820: exiting a TABLE's RichUI returns to the RENDERED widget. A pipe table shows
+          // raw while the caret is inside it (the Live×pipe Markdown-editing layer), so on exit move the
+          // caret PAST the table so it re-renders as a widget rather than lingering as raw. Other macros
+          // keep the caret in place (mermaid/callout raw-on-exit is their existing behaviour).
+          const isTable = !!tableBlockAt(view.state, active.from);
+          view.dispatch({
+            effects: setMacroRenderActive.of(null),
+            ...(isTable ? { selection: EditorSelection.cursor(Math.min(active.to + 1, view.state.doc.length)) } : {}),
+          });
           return true;
         }
       }

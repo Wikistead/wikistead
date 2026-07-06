@@ -21,7 +21,7 @@ test("pipe table → merge promotes to :::table → unmerge demotes back", async
   expect(await page.locator("[data-pane=preview] [data-testid=macro-table]").count()).toBe(0);
 
   // Non-vim: a click enters edit mode (cell-merge toolbar) — no Ctrl+Enter (#5).
-  await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await page.locator("[data-pane=preview] table.cm-lp-table").click(); await sleep(150); await page.keyboard.press("Control+Enter"); // #216: pipe×Live RichUI = Ctrl+Enter opt-in
   const edit = page.getByTestId("table-edit");
   await expect(edit).toBeVisible();
 

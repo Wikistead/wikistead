@@ -637,8 +637,19 @@ class TableWidget extends WidgetType {
   toDOM(view: EditorView) {
     const table = document.createElement("table");
     table.className = "cm-lp-table";
-    // Non-vim: a click enters edit mode directly (#5); vim leaves it to reveal raw.
+    // #216 comment 820: a pipe table is Tier1 pure Markdown — a RAW editing layer, not (yet) a rich macro.
+    // In LIVE, a click places the caret INTO the table so its rows reveal raw for per-row Markdown editing
+    // (Open formats); the RichUI is an explicit OPT-IN via Ctrl+Enter (or the promotion hint on the #174
+    // hover frame). Only WYSIWYG / other modes keep the direct openTableEditing entry (macro atom). Vim
+    // already reveals raw on caret entry; this makes the mouse path match (no click→RichUI for pipe×Live).
     table.addEventListener("mousedown", (e) => {
+      if (view.state.readOnly) return;
+      if (view.state.facet(displayMode) === "live") {
+        e.preventDefault();
+        view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(table)) }); // caret in → reveal raw rows
+        view.focus();
+        return;
+      }
       if (openTableEditing(view, view.posAtDOM(table))) e.preventDefault();
     });
     const thead = document.createElement("thead");
