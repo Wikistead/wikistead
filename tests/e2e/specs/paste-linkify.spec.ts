@@ -68,3 +68,27 @@ test("#223: selected text + pasted URL wraps the selection as the link anchor", 
   expect(link?.text).toBe("my site");
   expect(link?.href).toBe("https://example.com");
 });
+
+// #223 comment 875: with vim ON, `<C-v>` is a vim command (blockwise-visual) that consumes the Ctrl+V keydown
+// and preventDefaults it, so the browser never fires the native paste event — Ctrl+V neither pasted nor
+// linkified in vim mode. The capture keydown now takes plain Ctrl+V back for system paste when vim is enabled,
+// so linkify works in vim ON just like vim OFF, in BOTH normal and insert mode.
+test("#223: vim ON, Ctrl+V URL linkifies in normal AND insert mode", async ({ browser }) => {
+  const page = await ctx(browser);
+  await openScratch(page, "paste-vim");
+  await enterEdit(page);
+  await page.getByTestId("vim-toggle").click();
+  await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-pressed", "true");
+  await page.click("[data-pane=preview] .cm-content");
+
+  // NORMAL mode: previously Ctrl+V hit vim's blockwise-visual and no paste event fired (the reported bug).
+  await page.keyboard.press("Escape");
+  await realPaste(page, "https://example.com/n");
+  expect(await rawText(page)).toContain("[https://example.com/n](https://example.com/n)");
+
+  // INSERT mode: also linkifies (vim does not bind <C-v> in insert).
+  await page.keyboard.press("i");
+  await page.keyboard.type("\n");
+  await realPaste(page, "https://example.com/v");
+  expect(await rawText(page)).toContain("[https://example.com/v](https://example.com/v)");
+});
