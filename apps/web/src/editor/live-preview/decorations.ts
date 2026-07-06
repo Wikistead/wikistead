@@ -2017,8 +2017,21 @@ export const motionAtomProvider = Facet.define<(state: EditorState) => ReadonlyA
 // at its EDGE (from or to), never strictly inside — those stay motion atoms and keep their overshoot
 // clamp. Pure: the motion-atom set for a given caret. (This is why a `:::info`/`:::xxx` block whose
 // body is being edited must not warp j/k across its fences — it's revealed, so it drops out here.)
-export function motionAtomsForCaret(blocks: ReadonlyArray<{ from: number; to: number }>, head: number): { from: number; to: number }[] {
-  return blocks.filter((b) => !(head > b.from && head < b.to)).map((b) => ({ from: b.from, to: b.to }));
+// `lineNo(pos)` maps an offset to its 1-based line number. The "revealed → drop" test is by LINE, not by
+// offset: a block is dropped ONLY when the caret is on an INTERIOR line (strictly between its first and last
+// line) — a revealed block whose body is being edited line-by-line. When the caret is on the block's FIRST
+// or LAST line it sits at a motion EDGE (vertical j/k parks it there), and the block MUST stay a motion atom
+// so the next key can step OFF it in one press. #221: the old OFFSET test (`head > from && head < to`) wrongly
+// dropped a multi-line atom when up-motion parked the caret at its last line's START (`doc.line(last).from`,
+// which is strictly-inside by offset) — so k stepped through the atom line-by-line while j (which parks at
+// the FIRST line's start = `from` exactly, not strictly-inside) did not: the reported k/j asymmetry.
+export function motionAtomsForCaret(
+  blocks: ReadonlyArray<{ from: number; to: number }>,
+  head: number,
+  lineNo: (pos: number) => number,
+): { from: number; to: number }[] {
+  const hLine = lineNo(head);
+  return blocks.filter((b) => !(hLine > lineNo(b.from) && hLine < lineNo(b.to))).map((b) => ({ from: b.from, to: b.to }));
 }
 
 export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
@@ -2027,7 +2040,7 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   // Merge the base block atoms (excluding any the caret is editing inside — motionAtomsForCaret) with
   // any provider atoms (display math, always collapsed), so motion is corrected over both without
   // hijacking line-by-line editing inside a revealed block.
-  const blocks = motionAtomsForCaret(baseBlocks, tr.startState.selection.main.head);
+  const blocks = motionAtomsForCaret(baseBlocks, tr.startState.selection.main.head, (p) => tr.startState.doc.lineAt(p).number);
   for (const provide of tr.startState.facet(motionAtomProvider)) for (const r of provide(tr.startState)) blocks.push(r);
   if (!blocks.length) return tr;
   const oldSel = tr.startState.selection.main;

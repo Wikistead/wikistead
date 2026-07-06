@@ -53,28 +53,38 @@ describe("atomMotionTarget (#183 atom vertical motion)", () => {
 // a directive block whose body is being edited.
 describe("motionAtomsForCaret (#141 revealed block is not a cross-atom)", () => {
   const block = (from: number, to: number) => ({ from, to });
+  const id = (p: number) => p; // identity line-map: treat each offset as its own line (1 line per offset)
 
-  it("DROPS a block the caret sits strictly inside (revealed → line-by-line motion)", () => {
-    // block spans offsets 4..20; caret at 10 is strictly inside → excluded so j/k steps line by line
-    expect(motionAtomsForCaret([block(4, 20)], 10)).toEqual([]);
+  it("DROPS a block the caret sits strictly inside by LINE (revealed → line-by-line motion)", () => {
+    // block spans lines 4..20; caret on line 10 is an INTERIOR line → excluded so j/k steps line by line
+    expect(motionAtomsForCaret([block(4, 20)], 10, id)).toEqual([]);
   });
 
-  it("KEEPS a block whose caret is at its START edge (collapsed atom → still crossed in one step)", () => {
-    // a collapsed atomic widget only ever holds the caret at `from` (never interior) → kept
-    expect(motionAtomsForCaret([block(4, 20)], 4)).toEqual([block(4, 20)]);
+  it("KEEPS a block whose caret is on its FIRST line (motion edge → still crossed in one step)", () => {
+    expect(motionAtomsForCaret([block(4, 20)], 4, id)).toEqual([block(4, 20)]);
   });
 
-  it("KEEPS a block whose caret is at its END edge", () => {
-    expect(motionAtomsForCaret([block(4, 20)], 20)).toEqual([block(4, 20)]);
+  it("KEEPS a block whose caret is on its LAST line (motion edge)", () => {
+    expect(motionAtomsForCaret([block(4, 20)], 20, id)).toEqual([block(4, 20)]);
   });
 
   it("KEEPS a block the caret is entirely outside", () => {
-    expect(motionAtomsForCaret([block(4, 20)], 30)).toEqual([block(4, 20)]);
+    expect(motionAtomsForCaret([block(4, 20)], 30, id)).toEqual([block(4, 20)]);
   });
 
   it("filters only the entered block, keeping the others (mixed set)", () => {
     const bs = [block(0, 5), block(10, 30), block(40, 45)];
-    // caret inside the middle block → only it drops; the others (collapsed) stay motion atoms
-    expect(motionAtomsForCaret(bs, 20)).toEqual([block(0, 5), block(40, 45)]);
+    // caret on an interior line of the middle block → only it drops; the others (collapsed) stay motion atoms
+    expect(motionAtomsForCaret(bs, 20, id)).toEqual([block(0, 5), block(40, 45)]);
+  });
+
+  it("#221: KEEPS a multi-line atom when up-motion parks the caret at its LAST LINE start (offset strictly-inside)", () => {
+    // A 3-line atom: line 1 = offsets [4,8), line 2 = [8,16), line 3 (last) = [16,20]. The offset 16 is the
+    // LAST line's start — strictly inside [4,20] by offset (the old bug DROPPED it, so k stepped through the
+    // atom). By LINE it is the edge (line 3 of 3), so it is KEPT and k steps OFF in one press.
+    const lineNo = (p: number) => (p < 8 ? 1 : p < 16 ? 2 : 3);
+    expect(motionAtomsForCaret([block(4, 20)], 16, lineNo)).toEqual([block(4, 20)]); // kept (was dropped pre-fix)
+    // an INTERIOR line (line 2, e.g. offset 10) still drops — the revealed-body case is preserved.
+    expect(motionAtomsForCaret([block(4, 20)], 10, lineNo)).toEqual([]);
   });
 });
