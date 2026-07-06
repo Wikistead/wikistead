@@ -2380,6 +2380,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   // top-left. fit-content keeps the wrap the table's width so the button aligns to the table's left edge
   // (not the full editor width). The button reuses .cm-lp-macro-edit chrome; reveal it on wrap hover.
   ".cm-lp-table-wrap": { position: "relative", width: "fit-content", maxWidth: "100%" },
+  // #216 comment 853 (device: button didn't show): pin it to the table's top-left CORNER, INSIDE the wrap's
+  // bounds (override the shared -1.55em/left:0 that floats it ABOVE the table, where surrounding content can
+  // clip/occlude it and the hover area doesn't cover it). Inside the corner it's within the table's own hover
+  // region — reliably revealed on table hover and reachable without a hover gap. Panel bg + zIndex keep it
+  // readable over the header cell.
+  ".cm-lp-table-richui": { top: "0.15em", left: "0.15em", zIndex: "4" },
   ".cm-lp-table-wrap:hover .cm-lp-table-richui": { opacity: "1" },
   // #213: columns/tabs structural add/remove bar — bottom-right, shown on hover/selection (same gating
   // as the edit button). Sits below the content so it doesn't overlap the child bodies.

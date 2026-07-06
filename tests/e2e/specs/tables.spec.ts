@@ -52,17 +52,25 @@ test("#216: a pipe table in Live shows a hover RichUI-entry button that opens th
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.insertText("| Name | Age |\n| --- | --- |\n| Alice | 30 |\n\nbelow\n");
   await sleep(400);
-  const wrap = page.locator("[data-pane=preview] .cm-lp-table-wrap");
-  await expect(wrap).toBeVisible();
+  const table = page.locator("[data-pane=preview] table.cm-lp-table");
+  await expect(table).toBeVisible();
   const btn = page.getByTestId("table-richui-enter");
   await expect(btn).toHaveCount(1); // present in the DOM…
   await expect(btn).toHaveAttribute("title", /Ctrl\+Enter/); // …with the shortcut hint in its tooltip
-  expect(await btn.evaluate((el) => getComputedStyle(el).opacity)).toBe("0"); // hidden until hover (subtle)
-  await wrap.hover();
+  expect(await btn.evaluate((el) => getComputedStyle(el).opacity)).toBe("0"); // invisible to the eye until hover
+  // comment 853: hover the TABLE (what a user does) → the button becomes opaque AND is anchored at the
+  // table's top-left CORNER (inside its box, so it's on-screen and reachable), then a REAL click (no force,
+  // through the hover) opens the RichUI — proving it's genuinely reachable, not just opacity-toggled.
+  await table.hover();
   await sleep(150);
-  expect(await btn.evaluate((el) => getComputedStyle(el).opacity)).toBe("1"); // revealed on hover
-  await btn.click({ force: true });
-  await sleep(300);
+  expect(await btn.evaluate((el) => getComputedStyle(el).opacity)).toBe("1"); // now visible to the eye
+  const tb = (await table.boundingBox())!;
+  const bb = (await btn.boundingBox())!;
+  expect(bb.x).toBeGreaterThanOrEqual(tb.x - 2); // at the table's top-left corner, inside its box
+  expect(bb.y).toBeGreaterThanOrEqual(tb.y - 2);
+  expect(bb.x).toBeLessThan(tb.x + tb.width);
+  expect(bb.width).toBeGreaterThan(0); // a real, sized, hit-testable button
+  await btn.click(); // real click (no force) through the hover → reachable
   await expect(page.getByTestId("table-edit")).toBeVisible(); // → the in-editor RichUI table editor opens
 });
 
