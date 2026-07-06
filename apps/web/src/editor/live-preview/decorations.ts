@@ -47,16 +47,14 @@ function openTableEditing(view: EditorView, pos: number): boolean {
   if (view.state.readOnly) return false;
   const tb = tableBlockAt(view.state, pos);
   if (!tb) return false;
-  // vim × pipe table → reveal the raw GFM source (hand-typeable markdown stays keyboard-
-  // editable; the pipe renderer shows raw while the caret is in range). Otherwise (a :::table
-  // directive, or any non-vim surface) → mark the block render-active so the renderer swaps in the
-  // in-editor WYSIWYG table editor (#154). The M1 spike (ADR-054) proved the nested contenteditable
-  // holds focus inside an atomic widget — CM no longer fights it, so the old modal detour is gone.
-  if (view.state.facet(vimEnabled) && tb.tier === "pipe") {
-    view.dispatch({ selection: EditorSelection.cursor(tb.from), effects: setMacroRenderActive.of({ from: tb.from, to: tb.to }) });
-  } else {
-    view.dispatch({ effects: setMacroRenderActive.of({ from: tb.from, to: tb.to }) });
-  }
+  // #216 comment 802 (ADR-101 4-quadrant): an EXPLICIT open (Ctrl+Enter / click) mounts the in-editor
+  // WYSIWYG table editor (#154) for EVERY quadrant — including vim × pipe, which previously only revealed
+  // raw here and so left vim users with NO way to reach the RichUI. Raw row-by-row editing is still fully
+  // available in Live × vim by just navigating the caret INTO the table (the pipe renderer reveals raw on
+  // caret-entry via rangeRevealed — independent of this explicit path); Ctrl+Enter is the deliberate
+  // "give me the rich editor" gesture. The M1 spike (ADR-054) proved the nested contenteditable holds
+  // focus inside an atomic widget even under vim, so there is no focus reason to special-case vim.
+  view.dispatch({ effects: setMacroRenderActive.of({ from: tb.from, to: tb.to }) });
   view.focus();
   return true;
 }
@@ -1768,12 +1766,14 @@ const RENDERERS: BlockRenderer[] = [
       // can't be ENTERED by vertical motion (it's a collapsed widget) — the blockEntry
       // transaction filter redirects motion that would skip it INTO it, then these lines
       // are real and j/k/arrows traverse them one at a time.
-      // GFM pipe table: vim reveals raw source on cursor (openTableEditing puts the caret in
-      // range → rangeRevealed true). A non-vim click/Ctrl+Enter → render-active → the in-editor
-      // WYSIWYG editor (#154, below). Only :::table/Excalidraw — non-typeable macros — never
-      // reveal source (#5).
+      // GFM pipe table (ADR-101 4-quadrant, #216 comment 802): an EXPLICIT open (Ctrl+Enter / click →
+      // openTableEditing sets render-active) mounts the in-editor WYSIWYG editor (#154) in EVERY quadrant,
+      // vim included — the `active` check precedes the raw reveal, so it wins even when the caret sits in
+      // the block. Just NAVIGATING the caret in (rangeRevealed, no active) still shows raw row-by-row
+      // Live × vim's pure-Markdown editing (the deliberate quadrant behaviour). Only :::table/Excalidraw
+      // non-typeable macros — never reveal source (#5).
       const active = ctx.state.field(macroRenderActiveField, false);
-      if (active && active.from <= from && active.to >= to && !ctx.state.facet(vimEnabled) && !ctx.state.readOnly) {
+      if (active && active.from <= from && active.to >= to && !ctx.state.readOnly) {
         ctx.addAtomic(Decoration.replace({ widget: new EditableTableWidget(from, to, doc.sliceString(from, to)), block: true }), from, to);
         return;
       }

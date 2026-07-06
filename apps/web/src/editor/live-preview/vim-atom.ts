@@ -1,7 +1,7 @@
 import { Vim, getCM } from "@replit/codemirror-vim";
 import { EditorState, EditorSelection, type Extension } from "@codemirror/state";
 import { ViewPlugin, type EditorView } from "@codemirror/view";
-import { livePreview, nestedDeleteChange } from "./decorations";
+import { livePreview, nestedDeleteChange, enterMacroCommand } from "./decorations";
 import { nestedSelectionField, setNestedSelection } from "./macro-edit";
 
 // ADR-024 1b (Mode A): dd treats a macro ATOM as one unit — the WHOLE macro source is the
@@ -124,6 +124,15 @@ function atomChordTarget(view: EditorView, operator: "yank" | "delete"): { from:
 // Without this, both pasted an EMPTY macro (vim's register held only the atom's first ::: line).
 export const atomYank: Extension = ViewPlugin.define((view) => {
   const onKeydown = (e: KeyboardEvent) => {
+    // #216 comment 802: in vim mode, Enter (incl. Ctrl+Enter) is consumed by codemirror-vim's keydown
+    // BEFORE the CM Ctrl-Enter keymap runs, so a vim user has NO way to reach a macro/table RichUI (the
+    // editUI edit button is #174-gated). Intercept Ctrl/Cmd+Enter in CAPTURE phase (before vim) and route
+    // it to enterMacroCommand — the same "enter the macro at the caret" the non-vim keymap gives. Only when
+    // vim is ON (vim off → the normal keymap already works) and it actually entered a macro.
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && getCM(view)?.state.vim && !view.state.readOnly) {
+      if (enterMacroCommand(view)) { e.preventDefault(); e.stopImmediatePropagation(); }
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const cm = getCM(view);
     if (e.key === "y") {
