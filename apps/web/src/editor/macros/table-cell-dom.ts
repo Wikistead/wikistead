@@ -9,12 +9,26 @@
 // Cells keep the ADR-037 invariant: text nodes + <br>, innerHTML NEVER read/written. (The inline-decoration
 // toolbar inside a cell — select text → bold/italic — is the redefined follow-up; the cell edits raw source.)
 
+import { renderInlineMarkdownToDom } from "./md-render";
+
 // Render cell text into an element, preserving in-cell newlines as <br> ELEMENTS (never innerHTML).
 export function setCellText(el: HTMLElement, text: string): void {
   el.textContent = "";
   text.split("\n").forEach((part, i) => {
     if (i > 0) el.appendChild(document.createElement("br"));
     if (part) el.appendChild(document.createTextNode(part));
+  });
+}
+
+// #89 (comment 830): the WYSIWYG cell surface. Renders the cell's Markdown source with its INLINE marks
+// SHOWN (bold/italic/strike/code/link) instead of literal `**a**`, per line, joined by <br>. The marks are
+// em/strong/s/code/a built by the shared allowlist-by-construction renderer (renderInlineMarkdownToDom) —
+// NEVER innerHTML, so the ADR-037 / #89 XSS boundary holds. cellElToText reads these back to Markdown.
+export function renderCellInline(el: HTMLElement, text: string): void {
+  el.textContent = "";
+  text.split("\n").forEach((line, i) => {
+    if (i > 0) el.appendChild(document.createElement("br"));
+    el.appendChild(renderInlineMarkdownToDom(line));
   });
 }
 
@@ -28,7 +42,18 @@ export function cellElToText(el: HTMLElement): string {
     else if (node instanceof HTMLBRElement) out += "\n";
     else if (node instanceof HTMLElement) {
       if (node.classList.contains("cm-lp-col-resize") || node.classList.contains("cm-lp-row-resize")) continue;
-      out += cellElToText(node);
+      // #89 (comment 830): serialise the WYSIWYG inline-mark elements back to Markdown source (round-trip),
+      // so the cell's canonical text stays Markdown even though it DISPLAYS decorated. Unknown elements
+      // (never produced by renderCellInline — belt-and-braces) contribute only their text.
+      const inner = cellElToText(node);
+      switch (node.tagName) {
+        case "STRONG": case "B": out += `**${inner}**`; break;
+        case "EM": case "I": out += `*${inner}*`; break;
+        case "S": case "DEL": case "STRIKE": out += `~~${inner}~~`; break;
+        case "CODE": out += `\`${inner}\``; break;
+        case "A": out += `[${inner}](${(node as HTMLAnchorElement).getAttribute("href") ?? ""})`; break;
+        default: out += inner;
+      }
     }
   }
   return out;

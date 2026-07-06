@@ -235,6 +235,21 @@ export function renderMarkdownToDom(src: string, baseOffset?: number): DocumentF
   } finally { renderBase = prevBase; }
 }
 
+// #89 (WYSIWYG cell, comment 830): render a ONE-LINE Markdown string's INLINE marks (bold/italic/strike/
+// code/link) to a sanitized DOM fragment — em/strong/s/code/a via the SAME allowlist-by-construction
+// renderInline the shared renderer uses (raw HTML degrades to escaped text; hrefs are scheme-checked). The
+// table-cell WYSIWYG surface uses this to SHOW `**a**` as bold "a" (marks hidden) while the source stays
+// Markdown, without ever writing innerHTML (ADR-037 / the #89 XSS boundary is preserved).
+export function renderInlineMarkdownToDom(text: string): DocumentFragment {
+  const frag = document.createDocumentFragment();
+  const tree = mdParser.parse(text);
+  let para: SNode | null = null;
+  for (let c = tree.topNode.firstChild; c; c = c.nextSibling) { if (c.name === "Paragraph") { para = c; break; } }
+  if (para) renderInline(para, text, frag);
+  else if (text) frag.appendChild(document.createTextNode(text)); // no paragraph (blank) → literal text
+  return frag;
+}
+
 // #170 / ADR-049 (Y): the shared callout PANEL renderer (single source of truth). A flex 2-column
 // panel — a large icon column (mask-image, currentColor-tinted, vertically centred against the whole
 // panel via CSS align-items) + a main column (variant-coloured title + nested Markdown body). Used by
