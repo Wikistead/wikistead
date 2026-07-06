@@ -67,3 +67,77 @@ test("#89 comment 886 (③): a mark spanning an in-cell <br> decorates BOTH line
   await expect(cell.locator("strong")).toHaveCount(2);
   await expect(cell.locator("br")).toHaveCount(1);
 });
+
+// #236: inline formats TOGGLE — pressing the button on an already-formatted selection REMOVES the mark.
+// Body (floating toolbar / format bubble) and the cell toolbar behave the same; mixed selections unify
+// on the first press and remove on the second. Real Chromium (the WYSIWYG show/no-show class of bugs).
+test("#236: BODY selection toggle — bold applies, re-press removes (no literal ** left)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "body-toggle");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("hello world");
+  await page.keyboard.press("Home");
+  for (let i = 0; i < 5; i++) await page.keyboard.press("Shift+ArrowRight"); // select "hello"
+  await sleep(200);
+  const bubble = page.getByTestId("format-bubble");
+  await expect(bubble).toBeVisible();
+  await bubble.locator("button", { hasText: "B" }).first().click();
+  await sleep(200);
+  let src = await page.locator("[data-pane=preview] .cm-content").innerText();
+  expect(src).toContain("**hello** world"); // applied
+  // selection is kept over "hello" — press B again → removed
+  await expect(bubble).toBeVisible();
+  await bubble.locator("button", { hasText: "B" }).first().click();
+  await sleep(200);
+  src = await page.locator("[data-pane=preview] .cm-content").innerText();
+  expect(src).toContain("hello world");
+  expect(src).not.toContain("**"); // no leftover marks
+});
+
+test("#236: CELL toggle — bold ON then OFF on the same selection; mixed unifies then removes", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "cell-toggle");
+  await enterEdit(page);
+  await openRichUICell(page);
+  const cell = page.getByTestId("table-edit").locator("td").first(); // body cell "1"
+  await cell.dblclick();
+  await sleep(100);
+  await selectCell(cell);
+  await sleep(150);
+  await expect(page.getByTestId("cell-format-bar")).toBeVisible();
+  await page.getByTestId("cell-format-bold").click();
+  await sleep(150);
+  await expect(cell.locator("strong")).toHaveCount(1); // applied (WYSIWYG)
+  // applyCellMark re-selects the whole cell — press again → removed
+  await page.getByTestId("cell-format-bold").click();
+  await sleep(150);
+  await expect(cell.locator("strong")).toHaveCount(0); // toggled off
+  // MIXED: make "1x" where only "1" is bold, select all → unify (one strong), press again → none
+  await page.keyboard.press("ArrowRight"); // collapse the (whole-cell) selection to the end
+  await page.keyboard.type("x"); // cell text now "1x"
+  await selectCell(cell);
+  await page.getByTestId("cell-format-bold").click(); // all bold
+  await sleep(120);
+  const rInfo = await cell.evaluate((el: HTMLElement) => {
+    // unbold just the FIRST character via a sub-range selection
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const t = walker.nextNode() as Text;
+    const r = document.createRange();
+    r.setStart(t, 0); r.setEnd(t, 1);
+    const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
+    document.dispatchEvent(new Event("selectionchange"));
+    return t.nodeValue;
+  });
+  expect(rInfo).toBeTruthy();
+  await page.getByTestId("cell-format-bold").click(); // sub-range removal → split, second char stays bold
+  await sleep(120);
+  await expect(cell.locator("strong")).toHaveCount(1); // mixed state now
+  await selectCell(cell); // whole cell (mixed) → unify
+  await page.getByTestId("cell-format-bold").click();
+  await sleep(120);
+  await expect(cell.locator("strong")).toHaveCount(1); // ONE unified span
+  await page.getByTestId("cell-format-bold").click(); // second press removes all
+  await sleep(120);
+  await expect(cell.locator("strong")).toHaveCount(0);
+});
