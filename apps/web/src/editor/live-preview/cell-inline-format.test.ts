@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from "vitest";
-import { applyCellMark, CELL_MARKS } from "./cell-inline-format";
+import { applyCellMark, applyCellLink, CELL_MARKS } from "./cell-inline-format";
 import { renderCellInline, cellElToText } from "../macros/table-cell-dom";
+import { safeHref } from "../macros/md-render";
 
 // #89 comment 830: a table cell is a WYSIWYG surface — pressing Bold WRAPS the selection in <strong> so it
 // LOOKS bold in place (not literal `**a**`), while the canonical text round-trips to Markdown via
@@ -46,13 +47,42 @@ describe("#89 WYSIWYG cell marks — decorate in place, round-trip to Markdown",
     });
   }
 
-  it("link wraps in <a> and serialises to [text](url)", () => {
+  it("#89 comment 886 (②): applyCellLink wraps in <a href=url> and serialises to [text](url)", () => {
     const el = cell("see docs");
     selectText(el, "docs");
-    applyCellMark(el, mark("link"));
+    expect(applyCellLink(el, "https://example.com/x", safeHref)).toBe(true);
     const a = el.querySelector("a");
     expect(a?.textContent).toBe("docs");
-    expect(cellElToText(el)).toBe("see [docs](url)");
+    expect(a?.getAttribute("href")).toBe("https://example.com/x");
+    expect(cellElToText(el)).toBe("see [docs](https://example.com/x)"); // real destination, not a placeholder
+  });
+
+  it("#89 comment 886 (②): a dangerous URL is rejected (safeHref is the only scheme judge) — no <a>", () => {
+    const el = cell("see docs");
+    selectText(el, "docs");
+    expect(applyCellLink(el, "javascript:alert(1)", safeHref)).toBe(false);
+    expect(el.querySelector("a")).toBeNull(); // stays plain text
+    expect(cellElToText(el)).toBe("see docs");
+  });
+
+  it("#89 comment 886 (③): a mark spanning a <br> wraps PER LINE (both lines decorate, round-trips)", () => {
+    const el = cell("one\ntwo");
+    // select across the <br>: from "one" start to "two" end
+    const texts = Array.from(el.childNodes).filter((n) => n.nodeType === Node.TEXT_NODE) as Text[];
+    const r = document.createRange();
+    r.setStart(texts[0]!, 0);
+    r.setEnd(texts[texts.length - 1]!, (texts[texts.length - 1]!.nodeValue ?? "").length);
+    const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
+    expect(applyCellMark(el, mark("bold"))).toBe(true);
+    // NOT one <strong>one<br>two</strong> (which serialises to `**one\ntwo**` → renderCellInline breaks it),
+    // but a <strong> per line, so cellElToText closes the mark on each line.
+    expect(el.querySelectorAll("strong").length).toBe(2);
+    expect(el.querySelector("br")).toBeTruthy(); // the line break survives outside the marks
+    expect(cellElToText(el)).toBe("**one**\n**two**");
+    // and it re-renders WYSIWYG (both lines bold, no literal **)
+    const el2 = cell("**one**\n**two**");
+    expect(el2.querySelectorAll("strong").length).toBe(2);
+    expect(el2.textContent).toBe("onetwo"); // no literal ** (happy-dom textContent drops the <br>)
   });
 
   it("renderCellInline SHOWS existing marks WYSIWYG (round-trips both ways)", () => {

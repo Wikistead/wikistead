@@ -288,7 +288,13 @@ export const tableInlineEditor: InlineEditor = {
         if (target) target.text = text;
         apply(next); // → host.replaceSource → tier demote → remount
       };
-      const onBlur = () => finish(true);
+      // #89 comment 886 (②): moving focus INTO the cell-link URL popover must NOT commit/exit the cell edit —
+      // the popover edits THIS cell's selection and returns focus on confirm/cancel. Any other blur commits.
+      const onBlur = (e: FocusEvent) => {
+        const to = e.relatedTarget as HTMLElement | null;
+        if (to && to.closest?.(".cm-lp-cell-link-popover")) return;
+        finish(true);
+      };
       let plainPaste = false; // #223: Ctrl+Shift+V requests the next paste be plain (skip linkify)
       const onKey = (ev: KeyboardEvent) => {
         ev.stopPropagation(); // keep keystrokes off the table drag/select handlers
