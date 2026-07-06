@@ -3,6 +3,7 @@ import type { InnerEditHost, InlineEditor, InlineController } from "../macros/re
 import { asMacroSource } from "../macros/registry";
 import { renderCellInline, cellElToText, insertBrAtCaret, insertTextAtCaret, stripZeroWidth } from "../macros/table-cell-dom";
 import { mountCellFormatToolbar } from "./cell-inline-format";
+import { linkifyPaste } from "./paste-linkify";
 
 // #154: the uniform multi-select resize size — PURE so it is unit-testable (the previous impl set
 // every selected column to draggedWidth+delta, ballooning the block so the dragged edge didn't track
@@ -288,15 +289,23 @@ export const tableInlineEditor: InlineEditor = {
         apply(next); // → host.replaceSource → tier demote → remount
       };
       const onBlur = () => finish(true);
+      let plainPaste = false; // #223: Ctrl+Shift+V requests the next paste be plain (skip linkify)
       const onKey = (ev: KeyboardEvent) => {
         ev.stopPropagation(); // keep keystrokes off the table drag/select handlers
+        if ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && (ev.key === "v" || ev.key === "V")) plainPaste = true;
         if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); finish(true); }
         else if (ev.key === "Enter" && ev.shiftKey) { ev.preventDefault(); insertBrAtCaret(); }
         else if (ev.key === "Escape") { ev.preventDefault(); finish(false); }
       };
       const onPaste = (ev: ClipboardEvent) => {
         ev.preventDefault();
-        insertTextAtCaret(ev.clipboardData?.getData("text/plain") ?? "");
+        const plain = ev.clipboardData?.getData("text/plain") ?? "";
+        // #223: linkify a pasted URL / rich link into Markdown [text](url), inserted as TEXT (text+<br>,
+        // ADR-037 — the [](url) is plain text the cell serializer already round-trips, and renderCellInline
+        // shows it clickable). Ctrl+Shift+V (plainNext) bypasses. safeHref is the only scheme judgment.
+        const md = plainPaste ? null : linkifyPaste({ text: plain, html: ev.clipboardData?.getData("text/html") ?? "", selectedText: window.getSelection()?.toString() ?? "" });
+        plainPaste = false;
+        insertTextAtCaret(md ?? plain);
       };
       el.addEventListener("blur", onBlur);
       el.addEventListener("keydown", onKey);

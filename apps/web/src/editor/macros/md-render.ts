@@ -70,7 +70,8 @@ const HEADINGS: Record<string, string> = {
 // 2. Remove the control chars a browser IGNORES inside a URL before evaluating the scheme
 // (TAB/LF/CR/NUL + other C0/DEL) — otherwise `java⇥script:` would slip past the blocklist yet
 // execute once the browser drops the tab. Matching the browser's normalization closes that.
-function safeHref(url: string): string | null {
+// #223: exported so the paste-linkify helper reuses the SAME scheme check (one XSS judgment, ADR-037).
+export function safeHref(url: string): string | null {
   let u = url.trim();
   if (u.length >= 2 && u.startsWith("<") && u.endsWith(">")) u = u.slice(1, -1); // angle-bracket destination
   // eslint-disable-next-line no-control-regex -- deliberately stripping the control chars browsers ignore in URLs
