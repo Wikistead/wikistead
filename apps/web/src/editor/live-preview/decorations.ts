@@ -635,6 +635,10 @@ class TableWidget extends WidgetType {
     return other.source === this.source;
   }
   toDOM(view: EditorView) {
+    // #216 comment 836: wrap the table so a hover-revealed RichUI-entry button can sit at its top-left
+    // (a <button> can't be a direct child of <table>). The wrap is the widget root + resize target.
+    const wrap = document.createElement("div");
+    wrap.className = "cm-lp-table-wrap";
     const table = document.createElement("table");
     table.className = "cm-lp-table";
     // #216 comment 820: a pipe table is Tier1 pure Markdown — a RAW editing layer, not (yet) a rich macro.
@@ -646,11 +650,11 @@ class TableWidget extends WidgetType {
       if (view.state.readOnly) return;
       if (view.state.facet(displayMode) === "live") {
         e.preventDefault();
-        view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(table)) }); // caret in → reveal raw rows
+        view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)) }); // caret in → reveal raw rows
         view.focus();
         return;
       }
-      if (openTableEditing(view, view.posAtDOM(table))) e.preventDefault();
+      if (openTableEditing(view, view.posAtDOM(wrap))) e.preventDefault();
     });
     const thead = document.createElement("thead");
     const tbody = document.createElement("tbody");
@@ -669,10 +673,28 @@ class TableWidget extends WidgetType {
     }
     if (thead.childNodes.length) table.appendChild(thead);
     if (tbody.childNodes.length) table.appendChild(tbody);
+    wrap.appendChild(table);
+    // #216 comment 836: a VISIBLE RichUI-entry button for a pipe (Tier1) table in LIVE — so a non-vim
+    // mouse user discovers how to reach the rich editor without knowing Ctrl+Enter. Hover-revealed, subtle,
+    // top-left (reuses the shared .cm-lp-macro-edit chrome), tooltip names the Ctrl+Enter shortcut. Its
+    // mousedown stops the table's caret-in handler and opens the RichUI (promote pipe → :::table). Shown
+    // only in LIVE (WYSIWYG already enters RichUI on click) and when editable. This is the interim affordance
+    // until the #174 common hover-frame lands (then it folds into that), per comment 836 (don't leave non-vim
+    // users without a visible entry while #174 is in review).
+    if (!view.state.readOnly && view.state.facet(displayMode) === "live") {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cm-lp-macro-edit cm-lp-table-richui";
+      btn.title = "Rich edit (Ctrl+Enter)";
+      btn.innerHTML = MACRO_EDIT_ICON;
+      btn.setAttribute("data-testid", "table-richui-enter");
+      btn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); openTableEditing(view, view.posAtDOM(wrap)); });
+      wrap.appendChild(btn);
+    }
     // Height can shift after first measure (fonts, reflow, edit-mode chrome) → re-measure
     // so lines below a tall table don't drift (ADR-024 motion correctness — common path).
-    this.ro = observeBlockResize(view, table);
-    return table;
+    this.ro = observeBlockResize(view, wrap);
+    return wrap;
   }
   destroy() {
     this.ro?.disconnect();
@@ -2347,6 +2369,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-macro-edit": { left: "0" },
   ".cm-lp-macro-retarget": { left: "0" },
   ".cm-lp-macro-fold": { left: "2em" },
+  // #216 comment 836: the pipe-table wrap positions the hover-revealed RichUI-entry button at the table's
+  // top-left. fit-content keeps the wrap the table's width so the button aligns to the table's left edge
+  // (not the full editor width). The button reuses .cm-lp-macro-edit chrome; reveal it on wrap hover.
+  ".cm-lp-table-wrap": { position: "relative", width: "fit-content", maxWidth: "100%" },
+  ".cm-lp-table-wrap:hover .cm-lp-table-richui": { opacity: "1" },
   // #213: columns/tabs structural add/remove bar — bottom-right, shown on hover/selection (same gating
   // as the edit button). Sits below the content so it doesn't overlap the child bodies.
   ".cm-lp-macro-layoutbar": { position: "absolute", bottom: "-0.6em", right: "0", display: "inline-flex", gap: "0.25em", opacity: "0", transition: "opacity 120ms", zIndex: "3", pointerEvents: "auto" },
