@@ -244,7 +244,91 @@ export async function revokeResourceShareLinks(
       for (const row of cleared) await tx`UPDATE share_links SET revoked_at = now() WHERE id = ${row.id} AND revoked_at IS NULL`
     })
   }
+  // #220 (option A): persist a DURABLE marker for the FGA-delete failures (not just the #109 log above) so
+  // the periodic sweep can retry EXACTLY these links — never re-deriving "failed" from private + revoked_at
+  // NULL (which can't distinguish a revoke-failure zombie from a legitimate active link on a private page).
+  // Best-effort: if the marker write ITSELF fails (DB unreachable), degrade to the log-only #109 behaviour
+  // (the link stays revoked_at NULL and is recovered when a later revoke of the same resource retries it).
+  if (failed.length) {
+    try {
+      await db.tx(async (tx) => {
+        for (const id of failed) await tx`UPDATE share_links SET revoke_failed_at = now() WHERE id = ${id} AND revoked_at IS NULL`
+      })
+    } catch (err) {
+      console.error('[share-link:revoke-mark-failed]', { failed, err: String(err) })
+    }
+  }
   return { revoked: cleared.map((r) => ({ id: r.id, pageId: r.resource_id })), failed }
+}
+
+// #220 (option A): periodic reconcile of the FGA-delete failures recorded by revokeResourceShareLinks. A page
+// or space made private revokes its links; if the FGA delete errored, the link carries revoke_failed_at (a
+// durable marker) and is still live on FGA — a "private but link alive" leak window. This sweep retries the
+// FGA delete for ONLY those marked links (a legitimate active link has revoke_failed_at NULL and is never
+// touched), and on success completes the revoke (revoked_at set, marker cleared). Idempotent: a "did not
+// exist" FGA delete counts as cleared; a still-failing delete leaves the marker for the next sweep.
+//
+// Cross-tenant like the outbox workers, but share_links is FORCE RLS, so it can't be scanned on the app pool
+// without a tenant scope. The `tenants` registry has NO RLS (001), so enumerate it and process each tenant
+// under its own app.tenant_id (set_config), mirroring drainAuditOutbox's per-tenant loop. Returns the number
+// of links healed (FGA cleared + revoke completed).
+export async function sweepShareLinkRevokeFailures(fga: OpenFgaClient): Promise<number> {
+  const tenants = await pool<{ id: string }[]>`SELECT id FROM tenants`
+  let healed = 0
+  for (const { id: tenantId } of tenants) {
+    try {
+      const rows = await pool.begin(async (tx) => {
+        await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+        return tx<Pick<ShareLinkRow, 'id' | 'resource_type' | 'resource_id' | 'capability'>[]>`
+          SELECT id, resource_type, resource_id, capability FROM share_links
+          WHERE revoke_failed_at IS NOT NULL AND revoked_at IS NULL`
+      })
+      for (const row of rows) {
+        const resource: ResourceRef = { type: row.resource_type as ResourceRef['type'], id: row.resource_id }
+        try {
+          await deleteTuples(fga, [{
+            user: `share_link:${row.id}`,
+            relation: relationForResource(resource.type, row.capability as Capability),
+            object: `${resource.type}:${row.resource_id}`,
+          }])
+        } catch (err) {
+          // "did not exist" = already gone → complete the revoke below; any other error → still failing,
+          // leave the marker and retry on the next sweep.
+          if (!String((err as Error)?.message ?? '').includes('did not exist')) continue
+        }
+        // FGA tuple is gone (deleted now, or already absent): finish the revoke durably and clear the marker.
+        await pool.begin(async (tx) => {
+          await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+          await tx`UPDATE share_links SET revoked_at = now(), revoke_failed_at = NULL WHERE id = ${row.id} AND revoked_at IS NULL`
+        })
+        healed++
+      }
+    } catch {
+      // Leave this tenant's marked rows for the next sweep (FGA still down, or a transient DB error).
+    }
+  }
+  return healed
+}
+
+// Start the periodic share-link revoke-failure sweep (call from the server entry, NOT buildApp — tests drive
+// sweepShareLinkRevokeFailures directly, so no stray timer leaks into app.inject). Failures are rare, so the
+// default interval is coarse. The in-process `running` guard prevents overlap within one instance; the
+// per-row `revoked_at IS NULL` guard keeps it idempotent across instances.
+export function startShareLinkSweepWorker(fga: OpenFgaClient, intervalMs = 60000): () => void {
+  let running = false
+  const timer = setInterval(async () => {
+    if (running) return
+    running = true
+    try {
+      await sweepShareLinkRevokeFailures(fga)
+    } catch {
+      /* next tick retries */
+    } finally {
+      running = false
+    }
+  }, intervalMs)
+  timer.unref?.()
+  return () => clearInterval(timer)
 }
 
 export interface MintedGuestToken {
