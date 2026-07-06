@@ -1,4 +1,4 @@
-import { EditorView } from "@codemirror/view";
+import { EditorView, ViewPlugin } from "@codemirror/view";
 import type { Extension } from "@codemirror/state";
 import { safeHref } from "../macros/md-render";
 
@@ -56,29 +56,29 @@ export function linkifyPaste(input: { text: string; html: string; selectedText: 
   return null;
 }
 
-// CM-body paste handler. Ctrl/Cmd+Shift+V requests a PLAIN paste (skip linkify once), the standard
-// "paste without formatting" escape hatch. Reads text/plain + text/html; on a linkify hit, replaces the
-// selection with the Markdown in ONE offset-invariant Y.Text edit (single Y.Text invariant).
+// CM-body paste handler. #223 comment 862: attached as a CAPTURE-phase listener on contentDOM (a ViewPlugin,
+// like image-drop / atomYank) — NOT EditorView.domEventHandlers — so it runs BEFORE CodeMirror's own paste
+// handling (and any other paste listener), which is the robustness fix for the reported "handler never fires
+// on the real device" (something consuming paste first). Ctrl/Cmd+Shift+V requests a PLAIN paste (skip
+// linkify once). On a linkify hit it replaces the selection in ONE offset-invariant Y.Text edit (single
+// Y.Text) and stopImmediatePropagation so CM does not also paste. window.__wksPasteDebug records what the
+// handler saw, so a real-device paste stays inspectable.
 export function pasteLinkify(): Extension {
-  let plainNext = false;
-  return EditorView.domEventHandlers({
-    keydown(e) {
+  return ViewPlugin.define((view) => {
+    let plainNext = false;
+    const onKeydown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "v" || e.key === "V")) plainNext = true;
-      return false;
-    },
-    paste(e, view) {
-      // #223 comment 862 (diagnostic): the paste "works in tests / fails on the reviewer's real Ctrl+V" gap
-      // is unreproducible here. Record what THIS paste actually saw to window.__wksPasteDebug so a real-device
-      // paste can be inspected (did the handler fire? clipboard types? text/plain value? linkifyPaste result?).
+    };
+    const onPaste = (e: ClipboardEvent) => {
       const cd = e.clipboardData;
       const dbg: Record<string, unknown> = {
-        fired: true, readOnly: view.state.readOnly, plainNext, hasClipboardData: !!cd,
+        fired: true, readOnly: view.state.readOnly, plainNext, hasClipboardData: !!cd, phase: "capture",
         types: cd ? Array.from(cd.types) : [], plain: cd?.getData("text/plain"), htmlLen: cd?.getData("text/html")?.length ?? 0,
       };
       try { (window as unknown as { __wksPasteDebug?: unknown }).__wksPasteDebug = dbg; } catch { /* diag only */ }
-      if (view.state.readOnly) { dbg.result = "skip:readOnly"; return false; }
-      if (plainNext) { plainNext = false; dbg.result = "skip:plainNext(Ctrl+Shift+V)"; return false; } // plain paste
-      if (!cd) { dbg.result = "skip:noClipboardData"; return false; }
+      if (view.state.readOnly) { dbg.result = "skip:readOnly"; return; }
+      if (plainNext) { plainNext = false; dbg.result = "skip:plainNext(Ctrl+Shift+V)"; return; }
+      if (!cd) { dbg.result = "skip:noClipboardData"; return; }
       const sel = view.state.selection.main;
       const md = linkifyPaste({
         text: cd.getData("text/plain"),
@@ -86,11 +86,19 @@ export function pasteLinkify(): Extension {
         selectedText: view.state.sliceDoc(sel.from, sel.to),
       });
       dbg.linkifyResult = md;
-      if (md == null) { dbg.result = "no-linkify:default-paste"; return false; } // not a linkify case → CM pastes
+      if (md == null) { dbg.result = "no-linkify:default-paste"; return; } // not a linkify case → CM pastes
       e.preventDefault();
+      e.stopImmediatePropagation(); // capture phase → keep CM's own paste from also running
       view.dispatch(view.state.replaceSelection(md), { scrollIntoView: true });
       dbg.result = "linkified:inserted";
-      return true;
-    },
+    };
+    view.contentDOM.addEventListener("keydown", onKeydown, true);
+    view.contentDOM.addEventListener("paste", onPaste, true); // capture: before CodeMirror's own paste
+    return {
+      destroy() {
+        view.contentDOM.removeEventListener("keydown", onKeydown, true);
+        view.contentDOM.removeEventListener("paste", onPaste, true);
+      },
+    };
   });
 }
