@@ -601,8 +601,19 @@ class ImageWidget extends WidgetType {
 function splitTableRow(line: string): string[] {
   let s = line.trim();
   if (s.startsWith("|")) s = s.slice(1);
-  if (s.endsWith("|")) s = s.slice(0, -1);
-  return s.split("|").map((c) => c.trim());
+  if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1); // trailing bar, but not an escaped \|
+  // #89 comment 886 (①): split on UNESCAPED `|` only. GFM escapes a literal pipe inside a cell as `\|`
+  // (e.g. inside `code` or a URL); the old naive split("|") broke such a cell in two, dropping its code/link.
+  // Unescape `\|` → `|` per cell so the content renders whole.
+  const cells: string[] = [];
+  let cur = "";
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "\\" && s[i + 1] === "|") { cur += "|"; i++; continue; } // escaped pipe → literal
+    if (s[i] === "|") { cells.push(cur); cur = ""; continue; }
+    cur += s[i];
+  }
+  cells.push(cur);
+  return cells.map((c) => c.trim());
 }
 const isDelimiterRow = (cells: string[]) => cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
 
