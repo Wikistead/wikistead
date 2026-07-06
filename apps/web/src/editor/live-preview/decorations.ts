@@ -699,33 +699,34 @@ class TableWidget extends WidgetType {
   }
 }
 
-// #216 comment 874: the RichUI-entry pill for a pipe (Tier1) table in LIVE, shown ON THE RAW-EDITING STATE.
-// When the caret is inside the pipe table its `| a | b |` source is revealed (rangeRevealed) — that is when a
-// writer wants "you can promote this to the rich editor". The pill is BOTH the Ctrl+Enter key HINT (visible
-// "Ctrl+↵" text, not a tooltip) AND a click target; click and Ctrl+Enter both reach openTableEditing (promote
-// pipe → :::table = RichUI). ALWAYS visible (no hover gate — the hover-only version never showed on the
-// reviewer's device, 3×). Anchored to the first revealed line (cm-lp-table-raw = position:relative) and
-// floated just above the first row so it never covers the raw source it advertises.
-class TableRawRichuiPill extends WidgetType {
-  constructor(readonly pos: number) {
+// #216 comment 874 / #174 comment 878 (ADR-087 addendum 2): the SHARED RichUI-entry pill shown ON THE
+// RAW-EDITING STATE of a macro in LIVE. When the caret is inside the macro its raw source is revealed — that
+// is when a writer wants "you can promote this to the rich editor". The pill is BOTH the Ctrl+Enter key HINT
+// (visible "Ctrl+↵" text, not a tooltip) AND a click target; click and Ctrl+Enter both reach the macro's
+// `enter` thunk (openTableEditing for a pipe table → :::table; enterMacroAt for a callout → its editUI).
+// ALWAYS visible (no hover gate — the hover-only version never showed on the reviewer's device, #216). Anchored
+// to the first revealed line (cm-lp-macro-raw = position:relative) and floated just above it so it never covers
+// the raw source. ONE implementation for table + callout (and later macros) so the affordance can't drift.
+class MacroRawRichuiPill extends WidgetType {
+  constructor(readonly pos: number, readonly enter: (view: EditorView, pos: number) => void, readonly testid: string) {
     super();
   }
-  eq(o: TableRawRichuiPill) {
-    return o.pos === this.pos;
+  eq(o: MacroRawRichuiPill) {
+    return o.pos === this.pos && o.enter === this.enter && o.testid === this.testid;
   }
   toDOM(view: EditorView) {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "cm-lp-macro-edit cm-lp-table-richui cm-lp-table-richui-raw";
+    btn.className = "cm-lp-macro-edit cm-lp-macro-richui-raw";
     btn.title = "Rich edit (Ctrl+Enter)";
-    btn.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-table-richui-key">Ctrl+↵</span>';
-    btn.setAttribute("data-testid", "table-richui-enter");
+    btn.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
+    btn.setAttribute("data-testid", this.testid);
     // Own mousedown → open the RichUI; preventDefault so the caret isn't also re-placed, stopPropagation so it
     // does not bubble to the line. ignoreEvent keeps CM from routing the click as an editor gesture.
     btn.addEventListener("mousedown", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      openTableEditing(view, this.pos);
+      this.enter(view, this.pos);
     });
     return btn;
   }
@@ -733,8 +734,8 @@ class TableRawRichuiPill extends WidgetType {
     return true;
   }
 }
-// The first revealed pipe-table line becomes the pill's positioning context (position: relative).
-const tableRawLead = Decoration.line({ attributes: { class: "cm-lp-table-raw" } });
+// The first revealed macro line becomes the pill's positioning context (position: relative).
+const macroRawLead = Decoration.line({ attributes: { class: "cm-lp-macro-raw" } });
 
 // #154 / ADR-025: in-editor WYSIWYG table editing. When a table block is render-active
 // (macroRenderActiveField, set by a non-vim click/entry — openTableEditing), the table renders
@@ -1378,8 +1379,11 @@ class CalloutWidget extends WidgetType {
   toDOM(view: EditorView) {
     const el = renderCalloutPanel(this.containerClass, this.icon, this.label, this.body);
     if (!view.state.readOnly) {
-      // A click enters the callout (place the caret in the block → reveal raw source for editing).
-      el.addEventListener("mousedown", (e) => { e.preventDefault(); enterMacroAt(view, view.posAtDOM(el)); view.focus(); });
+      // #174 comment 878 (ADR-087 addendum 2): a click PLACES THE CARET (reveals raw `:::type[label]` + body),
+      // it does NOT open the editUI panel directly (that was the reversed behaviour the reviewer rejected).
+      // Same plain caret placement the pipe TableWidget uses; the RichUI is reached via the caret-in pill /
+      // Ctrl+Enter (enterMacroAt), matching the table 4-quadrant model.
+      el.addEventListener("mousedown", (e) => { e.preventDefault(); view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(el)) }); view.focus(); });
       // #174 / ADR-087 (Class 1): clicking the icon badge opens the TYPE picker directly (metadata direct-
       // click), instead of entering raw — stopPropagation so the panel's caret-in handler above doesn't fire.
       const iconEl = el.querySelector(".cm-lp-callout-panel-icon");
@@ -1805,6 +1809,14 @@ const RENDERERS: BlockRenderer[] = [
           : box;
         ctx.add(openLine, first.from);
         for (let n = first.number + 1; n <= lastLine.number; n++) ctx.add(box, doc.line(n).from);
+        // #174 comment 878 (ADR-087 addendum 2): caret-in raw editing → the SHARED RichUI-entry pill at the
+        // top-left (the same affordance as the pipe table, #216). Live + editable only. Click / Ctrl+Enter →
+        // enterMacroAt → the callout editUI (type/header/content). macroRawLead adds position:relative to the
+        // open line so the pill anchors and floats just above it (never covering the raw `:::type` source).
+        if (rangeRevealed(ctx.state, first.from, lastLine.to) && ctx.state.facet(displayMode) === "live" && !ctx.state.readOnly) {
+          ctx.add(macroRawLead, first.from);
+          ctx.add(Decoration.widget({ widget: new MacroRawRichuiPill(first.from, enterMacroAt, "callout-richui-enter"), side: -1 }), first.from);
+        }
       }
     },
   },
@@ -1962,8 +1974,8 @@ const RENDERERS: BlockRenderer[] = [
         // rejected). LIVE + editable only: source mode already reveals everything raw, so a pill on every table
         // there would be noise. Mark the first line as the positioning context and float the pill above it.
         if (ctx.state.facet(displayMode) === "live") {
-          ctx.add(tableRawLead, from);
-          ctx.add(Decoration.widget({ widget: new TableRawRichuiPill(from), side: -1 }), from);
+          ctx.add(macroRawLead, from);
+          ctx.add(Decoration.widget({ widget: new MacroRawRichuiPill(from, openTableEditing, "table-richui-enter"), side: -1 }), from);
         }
         return;
       }
@@ -2446,11 +2458,18 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-plantuml-edit-src": { flex: "1 1 16em", minWidth: "12em", minHeight: "8em", resize: "vertical", fontFamily: "var(--font-code, monospace)", fontSize: "0.85em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.5em", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
   ".cm-lp-plantuml-edit-preview": { flex: "1 1 16em", minWidth: "12em", border: "1px dashed var(--border, #888)", borderRadius: "6px", padding: "0.5em", overflow: "auto" },
   // #174 / ADR-087: the callout editUI — a type/label bar above a body textarea.
-  ".cm-lp-callout-edit": { display: "flex", flexDirection: "column", gap: "0.5em" },
-  ".cm-lp-callout-edit-bar": { display: "flex", gap: "0.5em", alignItems: "center", flexWrap: "wrap" },
-  ".cm-lp-callout-edit-type": { fontSize: "0.85em", padding: "0.25em 0.4em", border: "1px solid var(--border, #888)", borderRadius: "6px", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
-  ".cm-lp-callout-edit-label": { flex: "1 1 8em", minWidth: "6em", fontSize: "0.85em", padding: "0.3em 0.5em", border: "1px solid var(--border, #888)", borderRadius: "6px", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
-  ".cm-lp-callout-edit-body": { minHeight: "5em", resize: "vertical", fontFamily: "var(--font-code, monospace)", fontSize: "0.85em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.5em", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
+  // #174 comment 878 point 1: a titled panel with a labelled field per control (Type / Header / Content),
+  // styled with the design-system tokens so it does not read as a bare HTML form.
+  ".cm-lp-callout-edit": { display: "flex", flexDirection: "column", gap: "0.6em", padding: "0.6em", border: "1px solid var(--border, #888)", borderRadius: "8px", background: "var(--panel, var(--bg, #fff))" },
+  ".cm-lp-callout-edit-title": { fontSize: "0.78em", fontWeight: "600", letterSpacing: "0.02em", color: "var(--fg-dim, #888)" },
+  ".cm-lp-callout-edit-bar": { display: "flex", gap: "0.6em", alignItems: "flex-end", flexWrap: "wrap" },
+  ".cm-lp-callout-edit-field": { display: "flex", flexDirection: "column", gap: "0.25em" },
+  ".cm-lp-callout-edit-field:last-child": { flex: "1 1 100%" }, // the Content field spans the panel width
+  ".cm-lp-callout-edit-cap": { fontSize: "0.72em", fontWeight: "600", color: "var(--fg-dim, #888)" },
+  ".cm-lp-callout-edit-type": { fontSize: "0.85em", padding: "0.3em 0.4em", border: "1px solid var(--border, #888)", borderRadius: "6px", background: "var(--bg, #fff)", color: "var(--fg, inherit)", textTransform: "capitalize" },
+  ".cm-lp-callout-edit-field:nth-child(2)": { flex: "1 1 8em" }, // the Header field grows next to Type
+  ".cm-lp-callout-edit-label": { width: "100%", boxSizing: "border-box", minWidth: "6em", fontSize: "0.85em", padding: "0.3em 0.5em", border: "1px solid var(--border, #888)", borderRadius: "6px", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
+  ".cm-lp-callout-edit-body": { width: "100%", boxSizing: "border-box", minHeight: "5em", resize: "vertical", fontFamily: "var(--font-code, monospace)", fontSize: "0.85em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.5em", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
   ".cm-lp-macro-error": {
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
     color: "var(--danger, #c00)",
@@ -2491,26 +2510,16 @@ export const livePreviewTheme = EditorView.baseTheme({
   // top-left. fit-content keeps the wrap the table's width so the button aligns to the table's left edge
   // (not the full editor width). The button reuses .cm-lp-macro-edit chrome; reveal it on wrap hover.
   ".cm-lp-table-wrap": { position: "relative", width: "fit-content", maxWidth: "100%" },
-  // #216 comment 853 (device: button didn't show): pin it to the table's top-left CORNER, INSIDE the wrap's
-  // bounds (override the shared -1.55em/left:0 that floats it ABOVE the table, where surrounding content can
-  // clip/occlude it and the hover area doesn't cover it). Inside the corner it's within the table's own hover
-  // region — reliably revealed on table hover and reachable without a hover gap. Panel bg + zIndex keep it
-  // readable over the header cell.
-  // #216 comment 860: ALWAYS visible (subtle), not hover-gated — the hover-only version never showed on the
-  // reviewer's device. A small pill at the top-left corner: pencil + the Ctrl+↵ key hint. Brightens on hover.
-  ".cm-lp-table-richui": { top: "0.15em", left: "0.15em", zIndex: "4", opacity: "0.55", display: "inline-flex", alignItems: "center", gap: "3px", padding: "1px 5px" },
-  ".cm-lp-table-richui-key": { fontSize: "0.72em", fontWeight: "600", letterSpacing: "0.02em" },
-  ".cm-lp-table-wrap:hover .cm-lp-table-richui": { opacity: "1" },
-  ".cm-lp-table-richui:hover": { opacity: "1" },
-  // #216 comment 874: the RAW-editing variant. Anchored to the first revealed pipe-table line (position
-  // relative) and floated JUST ABOVE the first row so it never covers the `| a | b |` source it advertises.
-  // Always visible (opacity 0.8, full on hover) — reliably recognizable without a hover (the show/no-show
-  // regression was hover-dependency). Solid panel bg + border (inherited from .cm-lp-macro-edit) keeps it
-  // readable if a content line sits directly above. Must follow .cm-lp-table-richui / .cm-lp-macro-edit in
-  // source order so its top/left/opacity win at equal specificity.
-  ".cm-lp-table-raw": { position: "relative" },
-  ".cm-lp-table-richui-raw": { top: "-1.5em", left: "0", opacity: "0.8" },
-  ".cm-lp-table-richui-raw:hover": { opacity: "1" },
+  // #216 comment 874 / #174 comment 878 (ADR-087 addendum 2): the SHARED RichUI-entry pill on the RAW-editing
+  // state of a macro (pipe table + callout). Anchored to the first revealed line (.cm-lp-macro-raw =
+  // position:relative) and floated JUST ABOVE it so it never covers the raw source it advertises. ALWAYS
+  // visible (opacity 0.8, full on hover) — reliably recognizable without a hover (the #216 show/no-show
+  // regression was hover-dependency). Solid panel bg + border are inherited from .cm-lp-macro-edit; this rule
+  // must follow .cm-lp-macro-edit in source order so its top/left/opacity/display win at equal specificity.
+  ".cm-lp-macro-raw": { position: "relative" },
+  ".cm-lp-macro-richui-raw": { top: "-1.5em", left: "0", zIndex: "4", opacity: "0.8", display: "inline-flex", alignItems: "center", gap: "3px", padding: "1px 5px" },
+  ".cm-lp-macro-richui-key": { fontSize: "0.72em", fontWeight: "600", letterSpacing: "0.02em" },
+  ".cm-lp-macro-richui-raw:hover": { opacity: "1" },
   // #174 / ADR-087 (Class 1): the callout icon-badge type picker.
   ".cm-lp-callout-type-menu": { position: "absolute", top: "100%", left: "0", zIndex: "10", display: "flex", flexDirection: "column", background: "var(--panel, #fff)", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "3px", boxShadow: "0 2px 8px rgba(0,0,0,0.18)", minWidth: "7em", marginTop: "2px" },
   ".cm-lp-callout-type-opt": { textAlign: "left", padding: "3px 8px", border: "none", background: "transparent", color: "var(--fg, #222)", cursor: "pointer", borderRadius: "4px", fontSize: "0.85em", textTransform: "capitalize" },

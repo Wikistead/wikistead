@@ -18,10 +18,27 @@ const calloutEditUI: EditUI = {
     let body = lines.slice(1, Math.max(1, lines.length - 1)).join("\n");
     const commit = () => save(asMacroSource(`:::${type}${label ? `[${label}]` : ""}\n${body}\n:::`));
 
+    // #174 comment 878 point 1: a titled panel with a VISIBLE label above every field (Type / Header /
+    // Content) so it does not read as a bare HTML form. Each control sits in a `.cm-lp-callout-edit-field`
+    // group (label + control), styled with the design-system tokens. `field(labelText)` builds the wrapper.
     const wrap = document.createElement("div");
     wrap.className = "cm-lp-callout-edit";
+    const title = document.createElement("div");
+    title.className = "cm-lp-callout-edit-title";
+    title.textContent = "Edit callout";
+    const field = (labelText: string): HTMLLabelElement => {
+      const f = document.createElement("label");
+      f.className = "cm-lp-callout-edit-field";
+      const cap = document.createElement("span");
+      cap.className = "cm-lp-callout-edit-cap";
+      cap.textContent = labelText;
+      f.appendChild(cap);
+      return f;
+    };
+
     const bar = document.createElement("div");
     bar.className = "cm-lp-callout-edit-bar";
+    const typeField = field("Type");
     const typeSel = document.createElement("select");
     typeSel.className = "cm-lp-callout-edit-type";
     typeSel.setAttribute("data-testid", "callout-edit-type");
@@ -31,21 +48,28 @@ const calloutEditUI: EditUI = {
       typeSel.appendChild(o);
     }
     typeSel.addEventListener("change", () => { type = typeSel.value; commit(); });
+    typeField.appendChild(typeSel);
+    const labelField = field("Header");
     const labelIn = document.createElement("input");
     labelIn.className = "cm-lp-callout-edit-label";
     labelIn.value = label;
-    labelIn.setAttribute("aria-label", "Callout label");
+    labelIn.placeholder = "Optional heading";
+    labelIn.setAttribute("aria-label", "Callout header");
     labelIn.setAttribute("data-testid", "callout-edit-label");
     labelIn.addEventListener("change", () => { label = labelIn.value.trim(); commit(); });
-    bar.append(typeSel, labelIn);
+    labelField.appendChild(labelIn);
+    bar.append(typeField, labelField);
+    const bodyField = field("Content");
     const bodyTa = document.createElement("textarea");
     bodyTa.className = "cm-lp-callout-edit-body";
     bodyTa.value = body;
     bodyTa.spellcheck = false;
-    bodyTa.setAttribute("aria-label", "Callout body");
+    bodyTa.placeholder = "Callout content (Markdown)…";
+    bodyTa.setAttribute("aria-label", "Callout content");
     bodyTa.setAttribute("data-testid", "callout-edit-body");
     bodyTa.addEventListener("change", () => { body = bodyTa.value; commit(); });
-    wrap.append(bar, bodyTa);
+    bodyField.appendChild(bodyTa);
+    wrap.append(title, bar, bodyField);
     container.appendChild(wrap);
     const f = setTimeout(() => bodyTa.focus(), 0);
     return { destroy() { clearTimeout(f); wrap.remove(); } };
