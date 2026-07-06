@@ -10,6 +10,7 @@ import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { listEditing } from "./live-preview/list-edit";
 import { pasteLinkify } from "./live-preview/paste-linkify";
+import { titleLinkDecorations, titleLinkSource, type TitleLinkSource } from "./live-preview/title-links-deco";
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette, type PageEmbedPicker } from "./live-preview/palette";
 import { contextMenu } from "./live-preview/context-menu";
@@ -65,7 +66,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; openPageEmbedPicker?: PageEmbedPicker; openEmbedUrlPrompt?: EmbedUrlPrompt; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence } = {},
+  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; openPageEmbedPicker?: PageEmbedPicker; openEmbedUrlPrompt?: EmbedUrlPrompt; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; titleLinks?: TitleLinkSource } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -129,6 +130,12 @@ export function mountLivePreview(
       ...(opts.readOnly ? [] : [listEditing]),
       // #223: paste a URL / rich link → Markdown [text](url) (editable surface only; Ctrl+Shift+V pastes plain).
       ...(opts.readOnly ? [] : [pasteLinkify()]),
+      // #224 / ADR-104: auto internal links. The decoration plugin is always present but INERT until the host
+      // injects `titleLinks` — a dictionary already filtered to the viewer's authorized pages (the authz lives
+      // there, not here) plus a navigate callback that re-confirms `view` at the destination. No source → no
+      // dictionary → no links (safe default), so mounting it unconditionally never leaks.
+      titleLinkDecorations(),
+      ...(opts.titleLinks ? [titleLinkSource.of(opts.titleLinks)] : []),
       // Task checkboxes are interactive on the editable surface: a click flips the
       // `[ ]`/`[x]` char directly in the Y.Text (a normal draft edit). (Read-only →
       // disabled; the view surface wires its own no-revision persist below.)
