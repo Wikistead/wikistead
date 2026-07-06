@@ -1440,7 +1440,7 @@ export interface RenderNode {
   readonly name: string;
   readonly from: number;
   readonly to: number;
-  readonly node: { readonly parent: { readonly parent: { readonly name: string } | null } | null };
+  readonly node: { readonly parent: { readonly name: string; readonly parent: { readonly name: string } | null } | null };
 }
 
 export interface BlockRenderer {
@@ -1810,7 +1810,29 @@ const RENDERERS: BlockRenderer[] = [
       ctx.add(href ? Decoration.mark({ class: "cm-lp-link", attributes: { "data-href": href } }) : linkMark, node.from, node.to);
     },
   },
-  { match: (n) => n === "LinkMark" || n === "URL", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
+  { match: (n) => n === "LinkMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
+  {
+    // #223: a URL node is hidden ONLY when it is a link's DESTINATION (parent is Link → the `(url)` part,
+    // which the [text] label replaces). A STANDALONE URL — a bare autolink, or the URL used AS a link's
+    // visible text (e.g. `[https://x](https://x)`) — must NOT be hidden, or it renders BLANK (the reported
+    // on paste). A bare autolink additionally gets the clickable link style so a pasted / typed URL
+    // shows as a link. safeHref gates the click target (unsafe → plain, non-clickable text).
+    match: (n) => n === "URL",
+    enter: (node, ctx) => {
+      // The link DESTINATION `(url)` — a URL inside a Link whose `(` immediately precedes it — is hidden (the
+      // [text] label stands in for it). A URL used AS the link's visible text (`[https://x](…)`, preceded by
+      // `[`) is inside the Link too but must SHOW — the Link's own cm-lp-link mark already makes it clickable;
+      // hiding it left the label BLANK (#223 ). A bare autolink (parent not a Link) shows + gets the
+      // clickable style.
+      const inLink = node.node.parent?.name === "Link";
+      const isDestination = inLink && ctx.state.doc.sliceString(Math.max(0, node.from - 1), node.from) === "(";
+      if (isDestination) { ctx.hideMarker(node.from, node.to); return; }
+      if (!inLink) { // bare autolink → clickable
+        const href = linkHref(ctx.state.doc.sliceString(node.from, node.to));
+        if (href) ctx.add(Decoration.mark({ class: "cm-lp-link", attributes: { "data-href": href } }), node.from, node.to);
+      }
+    },
+  },
   {
     // Thematic break (`***` / `---` / `___`) → a divider rule. The whole line content is
     // the glyph, so hiding it atomically would make the line un-landable (the caret skips
