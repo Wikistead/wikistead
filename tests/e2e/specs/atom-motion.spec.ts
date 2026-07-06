@@ -292,7 +292,7 @@ test("a :::table widget is reused (not recreated) across selection changes", asy
   await page.keyboard.insertText("| A | B |\n| - | - |\n| 1 | 2 |\n\nL0\nL1\nL2\n");
   await sleep(300);
   // promote the pipe table to a :::table (a cell colour → Tier2 HTML)
-  await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await page.locator("[data-pane=preview] table.cm-lp-table").click(); await sleep(150); await page.keyboard.press("Control+Enter"); // #216: pipe×Live RichUI = Ctrl+Enter opt-in
   await sleep(250);
   await page.getByTestId("table-edit").locator("td").first().click();
   await sleep(150);

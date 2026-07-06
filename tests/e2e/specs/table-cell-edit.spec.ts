@@ -12,7 +12,7 @@ async function openTableInline(page: any) {
   await page.click("[data-pane=preview] .cm-content");
   for (const l of ["| A | B |", "| --- | --- |", "| 1 | 2 |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
   await sleep(250);
-  await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await page.locator("[data-pane=preview] table.cm-lp-table").click(); await sleep(150); await page.keyboard.press("Control+Enter"); // #216: pipe×Live RichUI = Ctrl+Enter opt-in
   // The inline editor mounts inside .cm-content — NO modal overlay.
   await expect(page.getByTestId("table-edit")).toBeVisible();
   expect(await page.getByTestId("macro-modal").count()).toBe(0);
@@ -63,7 +63,7 @@ test("#216: select a cell + type overwrites it (Excel select-then-type); Enter e
   await expect(page.locator("[data-pane=preview] table.cm-lp-table").locator("td").first()).toHaveText("Z");
 
   // Re-enter; Enter on a SELECTED cell edits the EXISTING text (does not overwrite) — append "9" → "Z9".
-  await page.locator("[data-pane=preview] table.cm-lp-table").click();
+  await page.locator("[data-pane=preview] table.cm-lp-table").click(); await sleep(150); await page.keyboard.press("Control+Enter"); // #216: pipe×Live RichUI = Ctrl+Enter opt-in
   await expect(page.getByTestId("table-edit")).toBeVisible();
   await page.getByTestId("table-edit").locator("td").first().click(); // select
   await sleep(120);
