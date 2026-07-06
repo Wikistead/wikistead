@@ -23,17 +23,28 @@ export interface CommentThread {
   createdAt: string;
   resolvedBy: string | null;
   resolvedAt: string | null;
+  lastActivity: string; // ADR-102: max non-deleted comment time — the chat sort key + paging cursor field
   comments: CommentItem[];
+}
+// ADR-102: one page of the cursor-paginated thread list (newest-activity first). `nextCursor` fetches the
+// next-OLDER page; `hasMore` false = the beginning of the list has been reached.
+export interface CommentPage {
+  threads: CommentThread[];
+  hasMore: boolean;
+  nextCursor: string | null;
 }
 export interface Mentionable {
   sub: string;
   displayName: string | null;
 }
 
-export async function listComments(token: string, pageId: string): Promise<CommentThread[] | null> {
+// ADR-102: fetch ONE page of threads (newest-activity first). `before` = the cursor of the oldest loaded
+// thread → the next-older page (absent = the newest page). null = the page is not viewable (404/403).
+export async function listCommentsPage(token: string, pageId: string, before?: string): Promise<CommentPage | null> {
   try {
-    const r = await apiFetch<{ threads: CommentThread[] }>(`/pages/${encodeURIComponent(pageId)}/comments`, token);
-    return r?.threads ?? [];
+    const qs = before ? `?before=${encodeURIComponent(before)}` : "";
+    const r = await apiFetch<CommentPage>(`/pages/${encodeURIComponent(pageId)}/comments${qs}`, token);
+    return r ?? { threads: [], hasMore: false, nextCursor: null };
   } catch (e) {
     if (e instanceof ApiError && (e.status === 404 || e.status === 403)) return null; // not viewable
     throw e;

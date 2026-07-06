@@ -590,6 +590,8 @@
     "reply": "返信…",
     "replyingTo": "返信先:",
     "pagePlaceholder": "ページにコメント…",
-    "empty": "コメントはありません。"
+    "empty": "コメントはありません。",
+    "showReplies": "{{count}}件の返信を表示",
+    "loadOlder": "以前のコメントを読み込む"
   }
 }

@@ -223,12 +223,16 @@ function PageRoute() {
   // only by the editor's Y.Text observer; never re-renders PageRoute/Editor.
   const dirtySig = useRef(createDirtySignal()).current;
   const { data: threads } = useComments(pageId ?? "");
+  // ADR-102: useComments is now an infinite query — flatten the loaded pages to the thread list. (Inline
+  // comments were removed in #214 part 1, so inlineComments is always empty now; openComments is a
+  // member-only count chrome reflecting the LOADED threads — exact for the common < one-page case.)
+  const threadList = useMemo(() => (threads?.pages ?? []).flatMap((p) => p?.threads ?? []), [threads]);
   // Memoized so host re-renders (published poll, dirty signal) don't hand <Editor> a
   // new array ref and defeat its memo — changes only when the thread set changes.
-  const inlineComments = useMemo(() => (threads ?? [])
+  const inlineComments = useMemo(() => threadList
     .filter((t) => t.kind === "inline" && t.anchorStart && t.anchorEnd)
-    .map((t) => ({ threadId: t.id, anchorStart: t.anchorStart!, anchorEnd: t.anchorEnd!, resolved: t.status === "resolved" })), [threads]);
-  const openComments = (threads ?? []).filter((t) => t.status === "open").length;
+    .map((t) => ({ threadId: t.id, anchorStart: t.anchorStart!, anchorEnd: t.anchorEnd!, resolved: t.status === "resolved" })), [threadList]);
+  const openComments = threadList.filter((t) => t.status === "open").length;
 
   // Comments panel is toggled (not always-on); the choice persists. Inline blue
   // underlines stay in the editor regardless — the panel is the thread list layer.
