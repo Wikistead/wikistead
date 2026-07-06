@@ -65,6 +65,33 @@ test("vim k traverses a table's source line-by-line (no skip / overtake)", async
   expect(heads).toEqual([8, 7, 6, 5, 4, 3, 2, 1]); // one line per k, through the table
 });
 
+// #216 comment 802 (ADR-101 4-quadrant): a vim user MUST be able to reach the table RichUI. Just
+// navigating the caret INTO a pipe table shows raw (Live × vim's row-by-row Markdown editing — the k
+// test above), but Ctrl+Enter is the deliberate "open the rich editor" gesture and must mount the
+// WYSIWYG editor even under vim (previously it only revealed raw, leaving vim users no way in).
+test("#216: vim Ctrl+Enter on a pipe table opens the RichUI (raw stays on plain caret entry)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tbl-vim-richui");
+  await enterEdit(page);
+  await buildTable(page);
+  await page.getByTestId("vim-toggle").click();
+  await sleep(300);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  const richUI = () => page.locator("[data-pane=preview] .cm-lp-table-merged, [data-pane=preview] td[contenteditable], [data-pane=preview] th[contenteditable]").count();
+
+  // navigate the caret INTO the table (gg then down onto a table row) → raw, no RichUI (point-2 spec)
+  await page.keyboard.type("gg");
+  await sleep(120);
+  for (let i = 0; i < 3; i++) { await page.keyboard.press("j"); await sleep(90); }
+  expect(await richUI(), "plain caret entry stays raw (row-by-row Markdown)").toBe(0);
+
+  // Ctrl+Enter → the WYSIWYG RichUI mounts even under vim (the fix)
+  await page.keyboard.press("Control+Enter");
+  await sleep(400);
+  expect(await richUI(), "Ctrl+Enter opens the table RichUI under vim").toBeGreaterThanOrEqual(1);
+});
+
 test("vim gg/G jumps land correctly (not the table edge), then j/k step row-by-row", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "tbl-jump");
