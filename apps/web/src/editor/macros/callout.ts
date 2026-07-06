@@ -3,6 +3,8 @@ import { parseDirectiveOpen } from "./directive-parser";
 // #85 slice 2: the callout type list + export htmlRender are the single source of truth in
 // @wikistead/macro-render (shared with the server export). This file adds the editor icon + metadata.
 import { CALLOUT_TYPES, calloutHtmlRender, type CalloutType } from "@wikistead/macro-render";
+import i18n from "../../i18n"; // #174 comment 883: panel strings are localized (en/ja), not hardcoded
+import { calloutTypeOption } from "./callout-type-ui";
 
 // #174 / ADR-087: the shared callout editUI (type / label / body), reached via the single edit button.
 // sourceScope "block" — the editor owns the WHOLE `:::type[label]…:::` so it can change the TYPE (the
@@ -18,14 +20,14 @@ const calloutEditUI: EditUI = {
     let body = lines.slice(1, Math.max(1, lines.length - 1)).join("\n");
     const commit = () => save(asMacroSource(`:::${type}${label ? `[${label}]` : ""}\n${body}\n:::`));
 
-    // #174 comment 878 point 1: a titled panel with a VISIBLE label above every field (Type / Header /
-    // Content) so it does not read as a bare HTML form. Each control sits in a `.cm-lp-callout-edit-field`
-    // group (label + control), styled with the design-system tokens. `field(labelText)` builds the wrapper.
+    // #174 comment 878 point 1 + 883: a titled panel with a VISIBLE, LOCALIZED label above every field
+    // (Type / Header / Content) so it does not read as a bare HTML form. Each control sits in a
+    // `.cm-lp-callout-edit-field` group (label + control), styled with the design-system tokens.
     const wrap = document.createElement("div");
     wrap.className = "cm-lp-callout-edit";
     const title = document.createElement("div");
     title.className = "cm-lp-callout-edit-title";
-    title.textContent = "Edit callout";
+    title.textContent = i18n.t("calloutEdit.title");
     const field = (labelText: string): HTMLLabelElement => {
       const f = document.createElement("label");
       f.className = "cm-lp-callout-edit-field";
@@ -36,40 +38,55 @@ const calloutEditUI: EditUI = {
       return f;
     };
 
-    const bar = document.createElement("div");
-    bar.className = "cm-lp-callout-edit-bar";
-    const typeField = field("Type");
-    const typeSel = document.createElement("select");
-    typeSel.className = "cm-lp-callout-edit-type";
-    typeSel.setAttribute("data-testid", "callout-edit-type");
-    for (const ty of CALLOUT_TYPES) {
-      const o = document.createElement("option"); o.value = ty; o.textContent = ty;
-      if (ty === type) o.selected = true;
-      typeSel.appendChild(o);
-    }
-    typeSel.addEventListener("change", () => { type = typeSel.value; commit(); });
-    typeField.appendChild(typeSel);
-    const labelField = field("Header");
+    // #174 comment 883: the Type field is a row of VISUAL chips — each type's icon + variant colour +
+    // localized name (the shared calloutTypeOption, also used by the icon-badge picker) — instead of a
+    // bare <select>, so the choices read at a glance. aria-pressed marks the current type.
+    const typeField = field(i18n.t("calloutEdit.type"));
+    const typeGroup = document.createElement("div");
+    typeGroup.className = "cm-lp-callout-edit-types";
+    typeGroup.setAttribute("role", "group");
+    typeGroup.setAttribute("aria-label", i18n.t("calloutEdit.type"));
+    typeGroup.setAttribute("data-testid", "callout-edit-type");
+    const renderTypes = () => {
+      typeGroup.textContent = "";
+      for (const ty of CALLOUT_TYPES) {
+        const b = calloutTypeOption(ty, ty === type);
+        b.setAttribute("data-testid", `callout-edit-type-${ty}`);
+        // mousedown (not click) + preventDefault so the panel's focus/selection is not disturbed.
+        b.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (type === ty) return;
+          type = ty;
+          commit();
+          renderTypes(); // re-render so the pressed state moves to the new type
+        });
+        typeGroup.appendChild(b);
+      }
+    };
+    renderTypes();
+    typeField.appendChild(typeGroup);
+
+    const labelField = field(i18n.t("calloutEdit.header"));
     const labelIn = document.createElement("input");
     labelIn.className = "cm-lp-callout-edit-label";
     labelIn.value = label;
-    labelIn.placeholder = "Optional heading";
-    labelIn.setAttribute("aria-label", "Callout header");
+    labelIn.placeholder = i18n.t("calloutEdit.headerPlaceholder");
+    labelIn.setAttribute("aria-label", i18n.t("calloutEdit.header"));
     labelIn.setAttribute("data-testid", "callout-edit-label");
     labelIn.addEventListener("change", () => { label = labelIn.value.trim(); commit(); });
     labelField.appendChild(labelIn);
-    bar.append(typeField, labelField);
-    const bodyField = field("Content");
+    const bodyField = field(i18n.t("calloutEdit.content"));
     const bodyTa = document.createElement("textarea");
     bodyTa.className = "cm-lp-callout-edit-body";
     bodyTa.value = body;
     bodyTa.spellcheck = false;
-    bodyTa.placeholder = "Callout content (Markdown)…";
-    bodyTa.setAttribute("aria-label", "Callout content");
+    bodyTa.placeholder = i18n.t("calloutEdit.contentPlaceholder");
+    bodyTa.setAttribute("aria-label", i18n.t("calloutEdit.content"));
     bodyTa.setAttribute("data-testid", "callout-edit-body");
     bodyTa.addEventListener("change", () => { body = bodyTa.value; commit(); });
     bodyField.appendChild(bodyTa);
-    wrap.append(title, bar, bodyField);
+    wrap.append(title, typeField, labelField, bodyField);
     container.appendChild(wrap);
     const f = setTimeout(() => bodyTa.focus(), 0);
     return { destroy() { clearTimeout(f); wrap.remove(); } };

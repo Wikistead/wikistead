@@ -66,3 +66,15 @@
 .cm-lp-tabs .cm-lp-tabpanel-active{display:block}
 .cm-lp-columns{display:flex;gap:1.2em;align-items:flex-start}
 .cm-lp-columns .cm-lp-column{flex:1 1 0;min-width:0}
+
+/* #174 comment 883: the shared callout TYPE chip (calloutTypeOption) — icon + variant colour + localized
+   name — used by the editUI panel's Type field AND the icon-badge picker. GLOBAL (not the CM baseTheme)
+   because the badge menu is mounted on document.body, outside .cm-editor, where baseTheme never reaches.
+   The variant class (cm-lp-callout-<type>) supplies --cb-color/--cb-icon (above) + the background tint. */
+.cm-lp-callout-type-opt{display:inline-flex;align-items:center;gap:0.35em;padding:0.25em 0.6em;border:1px solid var(--border,#8884);border-radius:6px;background:color-mix(in srgb,var(--cb-color,var(--callout-note,#6e7781)) 8%,transparent);color:var(--fg,#222);cursor:pointer;font:inherit;font-size:0.85em;text-transform:capitalize}
+.cm-lp-callout-type-opt:hover{background:color-mix(in srgb,var(--cb-color,var(--callout-note,#6e7781)) 18%,transparent)}
+.cm-lp-callout-type-opt-icon{width:1em;height:1em;flex:0 0 auto}
+/* the selected chip carries the variant-coloured ring (aria-pressed mirrors it for AT) */
+.cm-lp-callout-type-opt-on{outline:2px solid var(--cb-color,var(--accent,#4ea1ff));outline-offset:1px}
+/* the icon-badge picker menu chrome — global for the same body-mount reason (was baseTheme-only) */
+.cm-lp-callout-type-menu{z-index:60;display:flex;flex-direction:column;gap:3px;background:var(--panel,#fff);border:1px solid var(--border,#888);border-radius:6px;padding:4px;box-shadow:0 2px 8px rgba(0,0,0,0.18);min-width:8em}

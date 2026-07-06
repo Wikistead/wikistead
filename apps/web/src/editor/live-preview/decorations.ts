@@ -18,6 +18,7 @@ import { parseFenceLine, CALLOUT_TYPES } from "@wikistead/macro-render"; // #198
 import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset } from "../macros/md-render";
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
+import { calloutTypeOption } from "../macros/callout-type-ui";
 import { renderCellInline } from "../macros/table-cell-dom";
 import { openMacroModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost, nestedSelectionField, setNestedSelection, nestedEditActiveField, setNestedEditActive, type NestedSelection } from "./macro-edit";
@@ -1355,10 +1356,9 @@ function openCalloutTypeMenu(view: EditorView, anchor: HTMLElement, blockStart: 
   menu.style.top = `${Math.round(r.bottom + 2)}px`;
   menu.style.left = `${Math.round(r.left)}px`;
   for (const ty of CALLOUT_TYPES) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "cm-lp-callout-type-opt";
-    b.textContent = ty;
+    // #174 comment 883: the SAME visual chip (icon + variant colour + localized name) as the editUI panel's
+    // Type field — one shared builder so the two pickers cannot drift.
+    const b = calloutTypeOption(ty, false);
     b.setAttribute("data-testid", `callout-type-${ty}`);
     b.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); changeCalloutTypeAt(view, blockStart, ty); close(); });
     menu.appendChild(b);
@@ -2458,16 +2458,15 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-plantuml-edit-src": { flex: "1 1 16em", minWidth: "12em", minHeight: "8em", resize: "vertical", fontFamily: "var(--font-code, monospace)", fontSize: "0.85em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.5em", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
   ".cm-lp-plantuml-edit-preview": { flex: "1 1 16em", minWidth: "12em", border: "1px dashed var(--border, #888)", borderRadius: "6px", padding: "0.5em", overflow: "auto" },
   // #174 / ADR-087: the callout editUI — a type/label bar above a body textarea.
-  // #174 comment 878 point 1: a titled panel with a labelled field per control (Type / Header / Content),
-  // styled with the design-system tokens so it does not read as a bare HTML form.
+  // #174 comment 878 point 1 + 883: a titled panel with a labelled field per control (Type / Header /
+  // Content), stacked vertically, styled with the design-system tokens so it does not read as a bare form.
   ".cm-lp-callout-edit": { display: "flex", flexDirection: "column", gap: "0.6em", padding: "0.6em", border: "1px solid var(--border, #888)", borderRadius: "8px", background: "var(--panel, var(--bg, #fff))" },
   ".cm-lp-callout-edit-title": { fontSize: "0.78em", fontWeight: "600", letterSpacing: "0.02em", color: "var(--fg-dim, #888)" },
-  ".cm-lp-callout-edit-bar": { display: "flex", gap: "0.6em", alignItems: "flex-end", flexWrap: "wrap" },
   ".cm-lp-callout-edit-field": { display: "flex", flexDirection: "column", gap: "0.25em" },
-  ".cm-lp-callout-edit-field:last-child": { flex: "1 1 100%" }, // the Content field spans the panel width
   ".cm-lp-callout-edit-cap": { fontSize: "0.72em", fontWeight: "600", color: "var(--fg-dim, #888)" },
-  ".cm-lp-callout-edit-type": { fontSize: "0.85em", padding: "0.3em 0.4em", border: "1px solid var(--border, #888)", borderRadius: "6px", background: "var(--bg, #fff)", color: "var(--fg, inherit)", textTransform: "capitalize" },
-  ".cm-lp-callout-edit-field:nth-child(2)": { flex: "1 1 8em" }, // the Header field grows next to Type
+  // #174 comment 883: the Type field is a wrapping row of visual type chips (shared calloutTypeOption).
+  // Chip look itself lives in callout-icons.css (GLOBAL) so the body-mounted badge menu gets it too.
+  ".cm-lp-callout-edit-types": { display: "flex", gap: "0.4em", flexWrap: "wrap" },
   ".cm-lp-callout-edit-label": { width: "100%", boxSizing: "border-box", minWidth: "6em", fontSize: "0.85em", padding: "0.3em 0.5em", border: "1px solid var(--border, #888)", borderRadius: "6px", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
   ".cm-lp-callout-edit-body": { width: "100%", boxSizing: "border-box", minHeight: "5em", resize: "vertical", fontFamily: "var(--font-code, monospace)", fontSize: "0.85em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.5em", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
   ".cm-lp-macro-error": {
@@ -2520,10 +2519,10 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-macro-richui-raw": { top: "-1.5em", left: "0", zIndex: "4", opacity: "0.8", display: "inline-flex", alignItems: "center", gap: "3px", padding: "1px 5px" },
   ".cm-lp-macro-richui-key": { fontSize: "0.72em", fontWeight: "600", letterSpacing: "0.02em" },
   ".cm-lp-macro-richui-raw:hover": { opacity: "1" },
-  // #174 / ADR-087 (Class 1): the callout icon-badge type picker.
-  ".cm-lp-callout-type-menu": { position: "absolute", top: "100%", left: "0", zIndex: "10", display: "flex", flexDirection: "column", background: "var(--panel, #fff)", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "3px", boxShadow: "0 2px 8px rgba(0,0,0,0.18)", minWidth: "7em", marginTop: "2px" },
-  ".cm-lp-callout-type-opt": { textAlign: "left", padding: "3px 8px", border: "none", background: "transparent", color: "var(--fg, #222)", cursor: "pointer", borderRadius: "4px", fontSize: "0.85em", textTransform: "capitalize" },
-  ".cm-lp-callout-type-opt:hover": { background: "var(--panel-hover, rgba(127,127,127,0.15))" },
+  // #174 / ADR-087 (Class 1): the callout icon-badge type picker + the shared type CHIP now live in
+  // callout-icons.css (GLOBAL) — the menu is mounted on document.body, outside .cm-editor, where these
+  // baseTheme rules never applied; and keeping a baseTheme copy would OVERRIDE the global chip look for
+  // the editUI panel's in-editor chips (higher editor-scoped specificity). One source: the global sheet.
   // #213: columns/tabs structural add/remove bar — bottom-right, shown on hover/selection (same gating
   // as the edit button). Sits below the content so it doesn't overlap the child bodies.
   ".cm-lp-macro-layoutbar": { position: "absolute", bottom: "-0.6em", right: "0", display: "inline-flex", gap: "0.25em", opacity: "0", transition: "opacity 120ms", zIndex: "3", pointerEvents: "auto" },
