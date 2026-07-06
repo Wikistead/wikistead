@@ -11,3 +11,13 @@ test-results/
 playwright-report/
 .playwright/
 .env.bak-*
+
+# Private overlays (open-core Option 2 — hide existence). These are SEPARATE upstream checked out
+# into the CE tree by scripts/dev-bootstrap.sh; the public CE repo must contain NO trace of them.
+# EE source, landing page, docs site, and MCP servers all live here and are NEVER published with CE.
+/ee/
+/lp/
+/docs-site/
+/mcp/
+# dev-bootstrap writes the upstream URLs here (never committed).
+/.dev-repos.env
