@@ -67,19 +67,29 @@ export function pasteLinkify(): Extension {
       return false;
     },
     paste(e, view) {
-      if (view.state.readOnly) return false;
-      if (plainNext) { plainNext = false; return false; } // Ctrl+Shift+V → default (plain) paste
+      // #223 comment 862 (diagnostic): the paste "works in tests / fails on the reviewer's real Ctrl+V" gap
+      // is unreproducible here. Record what THIS paste actually saw to window.__wksPasteDebug so a real-device
+      // paste can be inspected (did the handler fire? clipboard types? text/plain value? linkifyPaste result?).
       const cd = e.clipboardData;
-      if (!cd) return false;
+      const dbg: Record<string, unknown> = {
+        fired: true, readOnly: view.state.readOnly, plainNext, hasClipboardData: !!cd,
+        types: cd ? Array.from(cd.types) : [], plain: cd?.getData("text/plain"), htmlLen: cd?.getData("text/html")?.length ?? 0,
+      };
+      try { (window as unknown as { __wksPasteDebug?: unknown }).__wksPasteDebug = dbg; } catch { /* diag only */ }
+      if (view.state.readOnly) { dbg.result = "skip:readOnly"; return false; }
+      if (plainNext) { plainNext = false; dbg.result = "skip:plainNext(Ctrl+Shift+V)"; return false; } // plain paste
+      if (!cd) { dbg.result = "skip:noClipboardData"; return false; }
       const sel = view.state.selection.main;
       const md = linkifyPaste({
         text: cd.getData("text/plain"),
         html: cd.getData("text/html"),
         selectedText: view.state.sliceDoc(sel.from, sel.to),
       });
-      if (md == null) return false; // not a linkify case → let CM paste normally
+      dbg.linkifyResult = md;
+      if (md == null) { dbg.result = "no-linkify:default-paste"; return false; } // not a linkify case → CM pastes
       e.preventDefault();
       view.dispatch(view.state.replaceSelection(md), { scrollIntoView: true });
+      dbg.result = "linkified:inserted";
       return true;
     },
   });
