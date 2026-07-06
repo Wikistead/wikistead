@@ -209,6 +209,9 @@ export async function createPage(
     // explicitly-granted users (page direct grants).
     await writeTuples(fga, [
       { user: `user:${args.userId}`, relation: 'manage', object: `page:${r.id}` },
+      // #218 / ADR-103 prep: structural page#parent tuple (inert until the model change wires it — see
+      // syncPageParentTuple). A new page is a leaf, so it can never introduce a parent cycle.
+      ...(parentId ? [{ user: `page:${parentId}`, relation: 'parent', object: `page:${r.id}` }] : []),
     ])
     outboxId = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: r.id, operation: 'upsert' })
     return r
@@ -835,6 +838,26 @@ async function swapSpaceTuples(
   if (writes.length) await writeTuples(fga, writes) // (2) NEW added; if this throws, see caller rollback
 }
 
+// #218 / ADR-103 prep slice: keep the structural `page#parent` FGA tuple in sync with the DB `parent_id` on
+// every create/move, so the nested private/allow inheritance (`private`/`view_base` `from parent`) can be
+// lit up by the follow-up model change WITHOUT re-deriving live edits. The `parent` relation is currently
+// UNWIRED in model.fga (reserved, not read by any permission relation) — writing it has NO authorization
+// effect yet — so this is inert plumbing that primes the data path (the model DSL flip + a one-off backfill
+// of pre-existing rows are the remaining atomic slice). The tuple is `page:<child>#parent@page:<parent>`.
+// Called only AFTER movePage's existing cycle guard (a page can't move under itself or a descendant), so the
+// parent chain can never form a computed-recursion cycle. Idempotent: a missing delete is success.
+async function syncPageParentTuple(fga: OpenFgaClient, pageId: string, oldParent: string | null, newParent: string | null): Promise<void> {
+  if (oldParent === newParent) return;
+  if (oldParent) {
+    try {
+      await deleteTuples(fga, [{ user: `page:${oldParent}`, relation: 'parent', object: `page:${pageId}` }])
+    } catch (err) {
+      if (!String((err as Error)?.message ?? '').includes('did not exist')) throw err
+    }
+  }
+  if (newParent) await writeTuples(fga, [{ user: `page:${newParent}`, relation: 'parent', object: `page:${pageId}` }])
+}
+
 // Move/reorder a page: change parent_id, position, and optionally its space.
 //
 // Intra-space (no space change): permissions derive from the space and don't
@@ -928,6 +951,7 @@ export async function movePage(
         `
         return row!
       })
+      await syncPageParentTuple(fga, args.pageId, page.parent_id, newParent) // #218 prep (inert until model change)
       emit({ type: 'page.updated', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
       return toPage(r)
     }
@@ -936,6 +960,7 @@ export async function movePage(
       WHERE id = ${args.pageId}
       RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
     `
+    await syncPageParentTuple(fga, args.pageId, page.parent_id, newParent) // #218 prep (inert until model change)
     emit({ type: 'page.updated', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
     return toPage(r)
   }
@@ -959,6 +984,7 @@ export async function movePage(
     await swapSpaceTuples(fga, oldSpace, targetSpace, subtree)
     return r
   })
+  await syncPageParentTuple(fga, args.pageId, page.parent_id, newParent) // #218 prep (inert until model change)
   for (const o of outboxIds) processOutboxAsync(driver, o.id, { tenantId: page.tenant_id, pageId: o.pageId, operation: 'upsert' })
   emit({ type: 'page.updated', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
   return toPage(row as PageRow)
