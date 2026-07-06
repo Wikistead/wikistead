@@ -969,7 +969,13 @@ class MacroWidget extends WidgetType {
     wrap.className = "cm-lp-macro-wrap";
     // ADR-024: the caret resting ON the atom selects it (no separate key) — a ring shows
     // it's selected as a unit (dd/yy operate on it; Ctrl+Enter enters).
-    if (this.selected) wrap.classList.add("cm-lp-atom-sel");
+    // #215 comment 813/817: when a NESTED macro is selected the caret sits on THIS container (so
+    // `selected` is true), but the FOCUS is the inner macro. Show the container as an achromatic
+    // CONTEXT highlight (grey) so the accent ring on the inner nested subtree reads as the focus
+    // two-level highlight (outer = context, inner = focus) makes the nesting depth legible at a glance.
+    const nestedActive = !!(this.nestedSel || this.nestedEdit);
+    if (nestedActive) wrap.classList.add("cm-lp-nested-host");
+    else if (this.selected) wrap.classList.add("cm-lp-atom-sel");
     // #3: an empty macro renders NOTHING from some liveRenders (e.g. mermaid) → it looks
     // like blank space even though a block widget occupies it (so vertical caret motion
     // "jumps" past invisible content). Render a common, visible placeholder for ALL macros
@@ -1004,6 +1010,9 @@ class MacroWidget extends WidgetType {
           const slot = findNestedSlot(rendered, this.nestedSel.anchor);
           if (slot) {
             slot.classList.add("cm-lp-nested-sel");
+            slot.style.position = "relative"; // #215 813: guarantee the slot is the button's offset parent
+                                              // (a CSS class alone lost to a positioned ancestor at depth 3,
+                                              // pinning the pencil to the tabs top instead of the inner macro)
             const edit = document.createElement("button");
             edit.type = "button";
             edit.className = "cm-lp-macro-edit cm-lp-nested-macro-edit";
@@ -1098,7 +1107,10 @@ class MacroWidget extends WidgetType {
       // keyboard user can SEE how to reach the table/columns/tabs rich UI (same target as a click or
       // Ctrl+Enter → enterMacroAt). Only for macros that HAVE a rich UI — the unified editUI OR the
       // legacy richEditUI (hasEditUI, migration-safe per #174). Offset-invariant (never edits).
-      if (hasEditUI(this.macro)) {
+      // #215 comment 813: while a NESTED macro is selected, suppress the CONTAINER's own edit button so
+      // the only pencil on screen is the nested one (drawn adjacent to the inner macro below) — otherwise
+      // two pencils (container top-left + inner) are ambiguous about which macro they edit.
+      if (hasEditUI(this.macro) && !nestedActive) {
         const edit = document.createElement("button");
         edit.type = "button";
         edit.className = "cm-lp-macro-edit";
@@ -2294,8 +2306,14 @@ export const livePreviewTheme = EditorView.baseTheme({
   // button — the same affordance as a top-level macro, at depth. The ring is on the nested subtree (not
   // the container), and the button is anchored to that subtree's top-left (the container's top margin is
   // out of reach). Shown always while selected (no hover needed — the click already selected it).
+  // #215 comment 813/817: two-level highlight — the container HOST that holds the selected nested macro
+  // gets an ACHROMATIC (grey) context outline; the inner selected macro gets the ACCENT ring. So at any
+  // depth the accent marks "the macro you're operating" and the grey marks "the box it lives in".
+  ".cm-lp-nested-host": { outline: "2px solid var(--fg-dim, #888)", outlineOffset: "1px", borderRadius: "4px" },
   ".cm-lp-nested-sel": { position: "relative", outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "2px", borderRadius: "4px" },
-  ".cm-lp-nested-macro-edit": { position: "absolute", top: "2px", left: "2px", opacity: "1", zIndex: "4" },
+  // The nested edit pencil sits ON the selected inner macro's top-left corner (accent-tinted to match its
+  // ring), so it reads as THAT macro's edit affordance — not the container's (suppressed while nested).
+  ".cm-lp-nested-macro-edit": { position: "absolute", top: "-0.9em", left: "-0.4em", opacity: "1", zIndex: "5", borderColor: "var(--accent, #4ea1ff)", color: "var(--accent, #4ea1ff)" },
   ".cm-lp-nested-edit-island": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "2px", borderRadius: "4px" },
   ".cm-lp-nested-edit-src": { width: "100%", minHeight: "4em", boxSizing: "border-box", fontFamily: "var(--font-mono, monospace)", fontSize: "0.85em" },
   ".cm-lp-excalidraw svg": { maxWidth: "100%", height: "auto", pointerEvents: "none" },
