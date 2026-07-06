@@ -593,5 +593,9 @@
     "empty": "No comments yet.",
     "showReplies": "Show {{count}} replies",
     "loadOlder": "Load older comments"
+  },
+  "pageMeta": {
+    "created": "Created",
+    "updated": "Updated"
   }
 }

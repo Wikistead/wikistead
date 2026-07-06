@@ -37,6 +37,13 @@ export interface Page {
   // and next to the title. Exposed only to viewers of the page (non-viewers 404), so it
   // leaks nothing. `restrict`-only (deny) pages are NOT private and show no lock.
   private?: boolean;
+  // #222: title-bar metadata row. createdAt/updatedAt are timestamps; createdBy is the creator's sub,
+  // updatedBy the last-publisher's sub (option A). Present only on the single-page GET (getPage), not the
+  // tree list. Resolved to name/avatar via AuthorChip; null when unrecorded (pre-migration pages).
+  createdAt?: string;
+  updatedAt?: string;
+  createdBy?: string | null;
+  updatedBy?: string | null;
 }
 
 export function useSpaces(enabled = true) {
@@ -374,6 +381,12 @@ export interface PageMeta {
   canManage?: boolean; // gates the per-page permission UI (server re-checks)
   canComment?: boolean; // #100: comment capability (comment_open/grant/edit) — gates the comment composer
   private?: boolean; // #109 Fix B: allowlist-only — drives the lock badge beside the title
+  // #222: title-bar metadata row. createdBy = creator sub, updatedBy = last-publisher sub (option A),
+  // updatedAt = last change time. Resolved to name/avatar via AuthorChip; null when unrecorded.
+  createdAt?: string;
+  updatedAt?: string;
+  createdBy?: string | null;
+  updatedBy?: string | null;
 }
 
 // ── per-page access (Phase 4) ──────────────────────────────────────────────

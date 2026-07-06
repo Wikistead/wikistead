@@ -593,5 +593,9 @@
     "empty": "コメントはありません。",
     "showReplies": "{{count}}件の返信を表示",
     "loadOlder": "以前のコメントを読み込む"
+  },
+  "pageMeta": {
+    "created": "作成",
+    "updated": "更新"
   }
 }
