@@ -90,3 +90,24 @@ test("#89: a pipe table cell renders inline markdown when not editing (WYSIWYG, 
   await expect(table.locator("td s")).toHaveText("strike");     // ~~ rendered as <s>
   expect(await table.innerText()).not.toContain("**"); // no literal marks visible in the rendered cell
 });
+
+// #89 comment 857 (2,3): Ctrl+Enter opens the RichUI on a displayed pipe table (keyboard entry, non-vim),
+// and the RichUI GRID renders each cell's inline markdown (bold/code/link) — consistent with the non-editing
+// table, not raw ** / `` marks.
+test("#89: Ctrl+Enter opens the RichUI and its grid cells render inline markdown (bold/code/link)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "table-richui-render");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("| H | Note |\n| - | - |\n| a | **bold** `code` [lnk](https://x.test) |\n\nbelow\n");
+  await sleep(400);
+  await page.locator("[data-pane=preview] table.cm-lp-table").click(); // caret in → raw
+  await sleep(150);
+  await page.keyboard.press("Control+Enter"); // → RichUI (keyboard entry, no hover)
+  const grid = page.getByTestId("table-edit");
+  await expect(grid).toBeVisible(); // (2) Ctrl+Enter opened the RichUI
+  await expect(grid.locator("td strong")).toHaveText("bold"); // (3) grid renders the decoration…
+  await expect(grid.locator("td code")).toHaveText("code");
+  await expect(grid.locator("td a")).toHaveText("lnk");
+  expect(await grid.innerText()).not.toContain("**"); // …not the raw marks
+});

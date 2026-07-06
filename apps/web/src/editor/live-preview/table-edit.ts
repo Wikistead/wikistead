@@ -318,7 +318,10 @@ export const tableInlineEditor: InlineEditor = {
       row.forEach((cell, c) => {
         if (!cell) return; // covered position
         const el = document.createElement(cell.header ? "th" : "td");
-        el.textContent = cell.text || " ";
+        // #89 comment 857 (3): render the cell's inline markdown (bold/italic/strike/code/link) in the RichUI
+        // grid too, so the grid matches the non-editing table (renderCellInline — allowlist, text+<br>, no
+        // innerHTML). Empty cells keep the visible placeholder. Editing a cell re-renders via renderCellInline.
+        if (cell.text) renderCellInline(el, cell.text); else el.textContent = " ";
         if (cell.colspan > 1) el.colSpan = cell.colspan;
         if (cell.rowspan > 1) el.rowSpan = cell.rowspan;
         if (cell.style) el.setAttribute("style", styleToCss(cell.style)); // #1: render style live (allowlisted)
