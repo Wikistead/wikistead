@@ -2322,9 +2322,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   // depth the accent marks "the macro you're operating" and the grey marks "the box it lives in".
   ".cm-lp-nested-host": { outline: "2px solid var(--fg-dim, #888)", outlineOffset: "1px", borderRadius: "4px" },
   ".cm-lp-nested-sel": { position: "relative", outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "2px", borderRadius: "4px" },
-  // The nested edit pencil sits ON the selected inner macro's top-left corner (accent-tinted to match its
-  // ring), so it reads as THAT macro's edit affordance — not the container's (suppressed while nested).
-  ".cm-lp-nested-macro-edit": { position: "absolute", top: "-0.9em", left: "-0.4em", opacity: "1", zIndex: "5", borderColor: "var(--accent, #4ea1ff)", color: "var(--accent, #4ea1ff)" },
+  // The nested edit pencil sits ON the selected inner macro's top-left corner so it reads as THAT macro's
+  // edit affordance — not the container's (suppressed while nested). #215 comment 834: keep only the
+  // position override; the pencil uses the SAME (normal) color as every other macro's edit button — the
+  // accent ring already marks the focused macro, so tinting the pencil too was redundant.
+  ".cm-lp-nested-macro-edit": { position: "absolute", top: "-0.9em", left: "-0.4em", opacity: "1", zIndex: "5" },
   ".cm-lp-nested-edit-island": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "2px", borderRadius: "4px" },
   ".cm-lp-nested-edit-src": { width: "100%", minHeight: "4em", boxSizing: "border-box", fontFamily: "var(--font-mono, monospace)", fontSize: "0.85em" },
   ".cm-lp-excalidraw svg": { maxWidth: "100%", height: "auto", pointerEvents: "none" },
