@@ -21,3 +21,6 @@ playwright-report/
 /mcp/
 # dev-bootstrap writes the upstream URLs here (never committed).
 /.dev-repos.env
+
+# TypeScript incremental build state (build artifact — never track; caused perpetual diff churn).
+*.tsbuildinfo
