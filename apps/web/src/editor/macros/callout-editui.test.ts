@@ -42,4 +42,14 @@ describe("callout inline editUI (#174 slice 4b)", () => {
     ctrl.destroy();
     expect(container.querySelector('[data-testid="callout-edit-type"]')).toBeNull();
   });
+
+  it("#174 comment 878 point 1: each field carries a visible caption (Type / Header / Content) + placeholders", () => {
+    const container = document.createElement("div");
+    const ctrl = infoCallout.editUI!.mount(container, asMacroSource(":::info\nx\n:::"), ctx, vi.fn());
+    const caps = Array.from(container.querySelectorAll(".cm-lp-callout-edit-cap")).map((e) => e.textContent);
+    expect(caps).toEqual(["Type", "Header", "Content"]); // visible labels, not a bare form
+    expect((container.querySelector('[data-testid="callout-edit-label"]') as HTMLInputElement).placeholder).toBeTruthy();
+    expect((container.querySelector('[data-testid="callout-edit-body"]') as HTMLTextAreaElement).placeholder).toBeTruthy();
+    ctrl.destroy();
+  });
 });
