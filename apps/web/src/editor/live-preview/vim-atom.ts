@@ -212,8 +212,15 @@ export const vimWysiwygCaretGuard: Extension = ViewPlugin.fromClass(
   class {
     constructor(readonly view: EditorView) {}
     update(u: ViewUpdate) {
-      if (!u.selectionSet && !u.docChanged) return;
       const blank = (on: boolean) => this.view.dom.classList.toggle("cm-wys-blank-fatcursor", on);
+      // #238 (review follow-up): the blank-class (and the inline nudge) must react to transitions
+      // that set NEITHER selectionSet NOR docChanged — a displayMode Compartment switch (Live→WYSIWYG),
+      // vim on/off, insert↔normal, and focus return all reconfigure/refocus without a selection change.
+      // The earlier `if (!u.selectionSet && !u.docChanged) return` short-circuited those, so putting the
+      // caret on a table then switching to WYSIWYG left the fat cursor painting `|`/`:` (class never
+      // applied), and leaving WYSIWYG/vim left the class stuck. Fix: recompute the blank class on EVERY
+      // update (it is cheap — facet + vim + one block scan); gate only the nudge DISPATCH below to the
+      // transitions that can actually move the caret onto/off a hidden run.
       if (u.state.facet(displayMode) !== "wysiwyg") { blank(false); return; }
       const vim = getCM(u.view)?.state.vim;
       if (!vim || vim.insertMode) { blank(false); return; } // insert caret keeps between-char semantics (wysiwygInlineSkip)
@@ -229,6 +236,12 @@ export const vimWysiwygCaretGuard: Extension = ViewPlugin.fromClass(
       for (const b of lp.blocks) if (head >= b.from && head < b.to) { onBlockAtom = true; break; }
       blank(onBlockAtom);
       if (onBlockAtom) return; // don't nudge — the caret stays on the atom (ADR-024)
+      // Nudge (a dispatch) only on transitions that can move the caret onto/off a hidden inline run:
+      // a selection/doc change, or a mode/focus transition that brings the caret into WYSIWYG-vim on a
+      // hidden run (the #240 inline case, shared per comment 943 item 3). Unrelated updates (viewport,
+      // measure) don't dispatch.
+      const modeChanged = u.startState.facet(displayMode) !== u.state.facet(displayMode);
+      if (!u.selectionSet && !u.docChanged && !modeChanged && !u.focusChanged) return;
       // Is char[head] inside an INLINE hidden run (single-line)? If so, char[head] is a hidden glyph the
       // fat cursor would paint — move to the nearest visible char in the last motion direction.
       let run: { from: number; to: number } | null = null;
