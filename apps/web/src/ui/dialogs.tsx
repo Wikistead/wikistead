@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { Button } from "./Button";
@@ -74,11 +74,14 @@ export function ConfirmDialog({
   tone = "danger",
   confirmTestId = "confirm-delete",
   stacked = false,
+  warning,
 }: {
   open: boolean;
   message: string;
   onClose: () => void;
   onConfirm: () => void;
+  // #246: optional extra content between the message and the buttons (e.g. a backlink warning on delete).
+  warning?: ReactNode;
   // Defaults preserve the original delete-confirm behavior; non-destructive
   // confirms (e.g. restore a revision) pass a primary tone + their own label.
   title?: string;
@@ -99,6 +102,7 @@ export function ConfirmDialog({
           <DialogTitle>{title ?? t("dialogs.confirmTitle")}</DialogTitle>
           <DialogDescription>{message}</DialogDescription>
         </DialogHeader>
+        {warning}
         <DialogFooter className="mt-4">
           <Button variant="default" type="button" onClick={onClose}>
             {t("common.cancel")}

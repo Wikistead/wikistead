@@ -34,6 +34,61 @@ test("#230: a page shows a backlink from another page that links to it", async (
   await expect(page).toHaveURL(new RegExp(`/p/${linker}$`));
 });
 
+// #246: the page-delete confirm dialog warns when the page is referenced by others (advisory — delete is
+// not blocked). Real Chromium.
+test("#246: delete confirm shows a backlink warning listing the referrers", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const target = await openScratch(page, "del-target");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("target to be deleted.\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(600);
+
+  const linker = await openScratch(page, "del-linker");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(`ref [target](/p/${target}) here\n`);
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(800);
+
+  // Open the target and start the delete flow via the page overflow menu.
+  await page.goto(`/p/${target}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(500);
+  await page.getByTestId("page-overflow-trigger").click();
+  await page.getByTestId("delete-page").click();
+  await expect(page.getByTestId("confirm-dialog")).toBeVisible();
+  // The warning appears with the referrer listed.
+  const warning = page.getByTestId("delete-backlink-warning");
+  await expect(warning).toBeVisible({ timeout: 8000 });
+  await expect(warning).toContainText("del-linker");
+  // Delete is NOT blocked — the confirm button is still present; cancel to avoid deleting.
+  await expect(page.getByTestId("confirm-delete-page")).toBeVisible();
+  await page.keyboard.press("Escape");
+});
+
+test("#246: no backlink warning when the page has no references", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const lonely = await openScratch(page, "del-lonely");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("nobody references me\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(600);
+  await page.goto(`/p/${lonely}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(500);
+  await page.getByTestId("page-overflow-trigger").click();
+  await page.getByTestId("delete-page").click();
+  await expect(page.getByTestId("confirm-dialog")).toBeVisible();
+  await sleep(1200); // give the backlinks fetch time to resolve
+  expect(await page.getByTestId("delete-backlink-warning").count()).toBe(0);
+});
+
 test("#230: a page with no backlinks renders no section (no clutter)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   const lonely = await openScratch(page, "bl-lonely");

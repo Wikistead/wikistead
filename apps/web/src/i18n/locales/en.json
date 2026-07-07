@@ -621,6 +621,10 @@
     "title": "Linked mentions",
     "untitled": "(untitled)"
   },
+  "delete": {
+    "backlinkWarning_one": "This page is referenced by {{count}} page. Deleting it will leave a broken link.",
+    "backlinkWarning_other": "This page is referenced by {{count}} pages. Deleting it will leave broken links."
+  },
   "macro": {
     "excalidrawEmpty": "Empty drawing — click the ✎ button to edit",
     "embedEmpty": "Empty embed — click the ✎ button to add a URL",
