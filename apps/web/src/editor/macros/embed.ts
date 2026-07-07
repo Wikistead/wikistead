@@ -1,5 +1,6 @@
 import type { DirectiveMacro } from "./registry";
 import { embedHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender shared (degrades to a link)
+import i18n from "../../i18n"; // #174 comment 911: empty-state text localized (en/ja)
 
 // :::embed-external — embed an external resource by URL (the body is the URL). #108 / ADR-071 (551)
 // #205 renamed `:::embed` → `:::embed-external` to namespace with `:::embed-page` (embed-<what>).
@@ -18,7 +19,7 @@ export const embedMacro: DirectiveMacro = {
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-embed-external";
     el.setAttribute("data-testid", "macro-embed-external");
-    el.textContent = body.trim() ? "…" : "Empty embed — add a URL"; // host swaps in the iframe / link
+    el.textContent = body.trim() ? "…" : i18n.t("macro.embedEmpty"); // host swaps in the iframe / link
     return el;
   },
   htmlRender: embedHtmlRender, // server/static: a link (no iframe in exported HTML)

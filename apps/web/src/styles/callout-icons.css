@@ -78,3 +78,11 @@
 .cm-lp-callout-type-opt-on{outline:2px solid var(--cb-color,var(--accent,#4ea1ff));outline-offset:1px}
 /* the icon-badge picker menu chrome — global for the same body-mount reason (was baseTheme-only) */
 .cm-lp-callout-type-menu{z-index:60;display:flex;flex-direction:column;gap:3px;background:var(--panel,#fff);border:1px solid var(--border,#888);border-radius:6px;padding:4px;box-shadow:0 2px 8px rgba(0,0,0,0.18);min-width:8em}
+
+/* #174 comment 894: WYSIWYG-reachable edit entry on the callout PANEL (in Live the raw-lead pill covers
+   this; in WYSIWYG the syntax never reveals so the panel needs its own ✎). Shown on panel hover.
+   Descendant selectors override the .cm-lp-macro-edit baseTheme (top:-1.55em, which would sit the
+   button above/outside the panel and make it unclickable). */
+.cm-lp-callout-panel-editable{position:relative}
+.cm-lp-callout-panel-editable .cm-lp-callout-panel-edit{position:absolute;top:0.3em;right:0.4em;bottom:auto;left:auto;opacity:0;transition:opacity 120ms ease;z-index:2}
+.cm-lp-callout-panel-editable:hover .cm-lp-callout-panel-edit{opacity:1}

@@ -620,5 +620,10 @@
   "backlinks": {
     "title": "リンクされた言及",
     "untitled": "(無題)"
+  },
+  "macro": {
+    "excalidrawEmpty": "空の図 — 左上の ✎ ボタンで編集",
+    "embedEmpty": "空の埋め込み — ✎ ボタンで URL を追加",
+    "pageEmbedEmpty": "空のページ埋め込み — ✎ ボタンでページを追加"
   }
 }
