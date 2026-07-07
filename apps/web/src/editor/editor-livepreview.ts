@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, macroPresencePlugin, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, macroPresenceField, macroPresencePlugin, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { listEditing } from "./live-preview/list-edit";
 import { pasteLinkify } from "./live-preview/paste-linkify";
@@ -215,7 +215,7 @@ export function mountLivePreview(
       // #92: host ephemeral-collab seam for a collab-capable modal (excalidraw); {theme} stays narrow.
       ...(opts.ephemeralCollab ? [ephemeralCollab.of(opts.ephemeralCollab)] : []),
       // #92 presence: bridge "editing a macro's modal" onto the page awareness (badge at the anchor).
-      ...(opts.macroPresence ? [macroPresence.of(opts.macroPresence), macroPresencePlugin] : []),
+      ...(opts.macroPresence ? [macroPresence.of(opts.macroPresence), macroPresenceField, macroPresencePlugin] : []),
       yCollab(ytext, provider.awareness),
       remoteCursors, // #8: avatar+name flags (additive overlay; yCollab untouched)
       // Slash command palette + floating selection toolbar (editable surface only; view
