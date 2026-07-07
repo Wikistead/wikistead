@@ -210,6 +210,33 @@ test("#89 comment 896: bold with trailing space commits to valid source (no lite
   await expect(firstCell).not.toContainText("**"); // no literal delimiter leaked
 });
 
+// #89 comment 944: after #896 peels the trailing space outside the mark, a space-including selection must
+// still TOGGLE OFF on the second press (the blank edge node was wrongly counted as "unmarked", so B kept
+// re-applying). Real Chromium: apply bold to "one ", then press bold again on the restored selection → 0.
+test("#89 comment 944: a trailing-space selection toggles bold OFF on the second press", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "cell-ws-toggle");
+  await enterEdit(page);
+  await openRichUICell(page);
+  const cell = page.getByTestId("table-edit").locator("td").first();
+  await cell.dblclick();
+  await sleep(100);
+  await cell.evaluate((el: HTMLElement) => { el.textContent = "one two"; });
+  await cell.evaluate((el: HTMLElement) => {
+    const t = el.firstChild as Text;
+    const r = document.createRange(); r.setStart(t, 0); r.setEnd(t, 4); // "one " (with the trailing space)
+    const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
+    document.dispatchEvent(new Event("selectionchange"));
+  });
+  await sleep(150);
+  await page.getByTestId("cell-format-bold").click(); // ON
+  await sleep(150);
+  await expect(cell.locator("strong")).toHaveCount(1);
+  await page.getByTestId("cell-format-bold").click(); // OFF — applyCellMark restored the same "one " selection
+  await sleep(150);
+  await expect(cell.locator("strong")).toHaveCount(0);
+});
+
 test("#89 comment 896: multi-line (<br>) bold with a per-line trailing space renders both lines bold", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "cell-ws-multiline");

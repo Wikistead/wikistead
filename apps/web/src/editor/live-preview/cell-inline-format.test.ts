@@ -180,6 +180,23 @@ describe("#89 WYSIWYG cell marks — decorate in place, round-trip to Markdown",
     expect(el2.querySelector("strong")?.textContent).toBe("one");
   });
 
+  it("#89 comment 944: a space-including selection can TOGGLE OFF (blank edge nodes don't block coverage)", () => {
+    // After #896 peels the trailing space OUTSIDE the mark, it becomes its own blank text node. The toggle
+    // detector must NOT count that blank node as "unmarked" (else B re-applies forever, never removing).
+    const el = cell("one two");
+    const tn = el.firstChild as Text; // "one two"
+    const r = document.createRange();
+    r.setStart(tn, 0); r.setEnd(tn, 4); // "one " (with the trailing space)
+    const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
+    expect(applyCellMark(el, mark("bold"))).toBe(true);
+    expect(el.querySelector("strong")?.textContent).toBe("one"); // space peeled outside (#896)
+    expect(cellElToText(el)).toBe("**one** two");
+    // applyCellMark restores the SAME "one " selection → a second press must REMOVE the mark (toggle off).
+    expect(applyCellMark(el, mark("bold"))).toBe(true);
+    expect(el.querySelector("strong")).toBeNull();
+    expect(cellElToText(el)).toBe("one two");
+  });
+
   it("#89 comment 896: cellElToText keeps inner-edge whitespace outside the delimiters (defensive)", () => {
     // a <strong> whose inner text has edge spaces (from any path) must serialise to valid Markdown.
     const el = document.createElement("td");
