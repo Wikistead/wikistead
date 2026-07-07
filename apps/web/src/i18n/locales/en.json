@@ -620,5 +620,10 @@
   "backlinks": {
     "title": "Linked mentions",
     "untitled": "(untitled)"
+  },
+  "macro": {
+    "excalidrawEmpty": "Empty drawing — click the ✎ button to edit",
+    "embedEmpty": "Empty embed — click the ✎ button to add a URL",
+    "pageEmbedEmpty": "Empty page embed — click the ✎ button to add a page"
   }
 }

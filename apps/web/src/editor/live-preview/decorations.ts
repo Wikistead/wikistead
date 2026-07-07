@@ -1202,6 +1202,16 @@ class MacroWidget extends WidgetType {
         // #174 / ADR-087: a Lucide SVG pencil (not the ✎ emoji — ADR-052 icon system), top-left, shown
         // on hover/selection. innerHTML of a trusted constant SVG (no user input → XSS-safe).
         edit.innerHTML = MACRO_EDIT_ICON;
+        // #174 comment 911: unify the "✎ Ctrl+↵" affordance across macros — show the SAME visible
+        // Ctrl+↵ key hint (as the callout/table raw-lead pill) next to the pencil, but ONLY when
+        // Ctrl+Enter opens the SAME UI the pencil does. That holds for a richEditUI macro (excalidraw's
+        // modal / a rich grid: Ctrl+Enter and ✎ both open it). It does NOT hold for an editUI-only fence
+        // macro (mermaid/plantuml), whose Ctrl+Enter reveals RAW source, not the editUI — so no hint there
+        // (it would mislead; that asymmetry + their editUI bug is #239).
+        if (this.macro.richEditUI) {
+          edit.innerHTML += '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
+          edit.classList.add("cm-lp-macro-richui-raw");
+        }
         edit.setAttribute("data-testid", "macro-edit");
         edit.addEventListener("mousedown", (e) => {
           e.preventDefault();
@@ -1256,26 +1266,8 @@ class MacroWidget extends WidgetType {
         retarget.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); changeEmbedTarget(view, wrap, this.name); });
         wrap.appendChild(retarget);
       }
-      if (this.foldable) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "cm-lp-macro-fold";
-      btn.title = "Collapse";
-      btn.textContent = "⊟";
-      btn.setAttribute("data-testid", "macro-fold");
-      // mousedown + preventDefault: keep the selection where it is (don't place the
-      // caret into the block, which would reveal raw) and fold the block's range. Use
-      // the button's screen position → doc pos (robust for a block widget) → the fence.
-      btn.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        // posAtDOM maps the block widget's DOM to its start offset (posAtCoords would
-        // map to the line after the block — wrong for a block replace widget).
-        const fence = macroFenceAt(view.state, view.posAtDOM(wrap));
-        if (fence) view.dispatch({ effects: foldEffect.of({ from: fence.from, to: fence.to }) });
-      });
-      wrap.appendChild(btn);
-      }
+      // #174 comment 911: the ⊟ collapse BUTTON is removed from every macro (it cluttered the block
+      // affordances and duplicated fold). vim fold (zc / foldEffect) is a SEPARATE mechanism and stays.
     }
     // mermaid & Excalidraw mount their SVG ASYNCHRONOUSLY → the widget grows after CM
     // measured it short → lines below drift. Re-measure on resize (common path, shared with
@@ -1404,6 +1396,21 @@ class CalloutWidget extends WidgetType {
         iconEl.setAttribute("data-testid", "callout-type-badge");
         iconEl.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); openCalloutTypeMenu(view, iconEl, view.posAtDOM(el)); });
       }
+      // #174 comment 894: a WYSIWYG-reachable edit entry. In Live, clicking the panel reveals raw and the
+      // raw-lead pill opens the editUI; in WYSIWYG the syntax NEVER reveals, so the panel had NO way into
+      // the editUI. Add a ✎ button (with the same Ctrl+↵ hint) ON the panel — click / Ctrl+Enter both reach
+      // enterMacroAt → the callout editUI (type/header/content). Callout is SYMMETRIC (Ctrl+Enter and ✎ open
+      // the same editUI), so the hint is accurate. Shown on panel hover (CSS). stopPropagation so it doesn't
+      // also place the caret (the panel's mousedown above).
+      el.classList.add("cm-lp-callout-panel-editable");
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "cm-lp-macro-edit cm-lp-macro-richui-raw cm-lp-callout-panel-edit";
+      edit.title = "Edit (Ctrl+Enter)";
+      edit.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
+      edit.setAttribute("data-testid", "callout-panel-edit");
+      edit.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(el)); });
+      el.appendChild(edit);
     }
     // Height settles after the nested body renders → re-measure so lines below don't drift.
     this.ro = observeBlockResize(view, el);
@@ -1648,6 +1655,13 @@ const RENDERERS: BlockRenderer[] = [
             const infoStart = line.from + (fence ? fence[0].length : 0);
             // #198 (comment 724): tab (title + lang) + a copy button shown only in a VIEW mode (!srcMode).
             if (infoStart < line.to) ctx.hideMarker(infoStart, line.to, Decoration.replace({ widget: new FenceHeaderWidget(info.lang, info.title, codeBody, !srcMode) }), false);
+          } else if (n === first && !srcMode && !lineRevealed(ctx.state, line.from)) {
+            // #174 comment 911: a fence with NO language (a plain ```) still needs a COPY button — the
+            // opening line has no info string to replace (the CodeMark renderer already hides the ``` ),
+            // so emit a header widget (empty tab + copy button) at the collapsed fence line. Reveal-gated
+            // (skip when the caret is on the line) so it matches the lang'd header's reveal-on-cursor;
+            // Source mode is raw. Empty lang → FenceHeaderWidget shows only the copy button.
+            ctx.add(Decoration.widget({ widget: new FenceHeaderWidget("", undefined, codeBody, true), side: 1 }), line.from);
           }
           continue;
         }
@@ -2556,7 +2570,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   // a pointer sink that captures clicks regardless of z-index, so a button OVER the iframe was unclickable.
   // A row above the widget (in the block's top margin) is never over the iframe, so every macro's buttons
   // (edit / retarget / fold) are reliably clickable — the Notion block-hover pattern, uniform across macros.
-  ".cm-lp-macro-fold, .cm-lp-macro-edit, .cm-lp-macro-retarget": {
+  ".cm-lp-macro-edit, .cm-lp-macro-retarget": {
     position: "absolute",
     top: "-1.55em", // above the content box (outside the iframe/widget), in the block's top margin
     display: "inline-flex", // centres the Lucide SVG (#174) / the fold glyph
@@ -2579,7 +2593,6 @@ export const livePreviewTheme = EditorView.baseTheme({
   // so both take the first slot; fold sits in the second slot next to an edit button (Excalidraw).
   ".cm-lp-macro-edit": { left: "0" },
   ".cm-lp-macro-retarget": { left: "0" },
-  ".cm-lp-macro-fold": { left: "2em" },
   // #216 comment 836: the pipe-table wrap positions the hover-revealed RichUI-entry button at the table's
   // top-left. fit-content keeps the wrap the table's width so the button aligns to the table's left edge
   // (not the full editor width). The button reuses .cm-lp-macro-edit chrome; reveal it on wrap hover.
@@ -2605,7 +2618,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-macro-wrap:hover .cm-lp-macro-layoutbar, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-layoutbar": { opacity: "1" },
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
-  ".cm-lp-macro-wrap:hover .cm-lp-macro-fold, .cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-fold, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget": { opacity: "1" },
+  ".cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget": { opacity: "1" },
   // #215 / ADR-100: the selected NESTED macro (inside a columns/tabs widget) draws its own ring + edit
   // button — the same affordance as a top-level macro, at depth. The ring is on the nested subtree (not
   // the container), and the button is anchored to that subtree's top-left (the container's top margin is

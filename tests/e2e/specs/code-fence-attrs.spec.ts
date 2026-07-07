@@ -161,3 +161,19 @@ test("#198 comment 770: plain & attributed fences share one rounded card base; S
   expect(await page.locator(".cm-lp-code-tab").count()).toBe(0);
   expect(await page.locator(".cm-lp-code-hl").count()).toBe(0);
 });
+
+// #174 comment 911: a fence with NO language (a plain ```) STILL gets a copy button — previously the
+// header was gated on info.lang so a language-less block had no copy affordance.
+test("#174: a fence with no language still gets a copy button", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "fence-nolang");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("top\n```\nplain code line\n```\nbot\n");
+  await sleep(500);
+  await page.getByText("bot").click(); // caret off the fence → header renders (not raw-revealed)
+  await sleep(200);
+  expect(await page.locator(".cm-lp-code-copy").count()).toBe(1); // copy button present with no language
+  // no lang badge (there's no language) but the copy button works
+  expect(await page.locator(".cm-lp-code-tab .cm-lp-code-lang").count()).toBe(0);
+});

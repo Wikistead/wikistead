@@ -2,6 +2,7 @@ import type { FenceMacro, MacroContext, MacroModalController, HostEphemeralColla
 import { asMacroSource } from "./registry";
 import { writeLocalElements, readSceneElements, allElements, reconcile, elementsMap } from "./excalidraw-collab";
 import { excalidrawHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
+import i18n from "../../i18n"; // #174 comment 911: empty-state text is localized (en/ja), points at the ✎ button
 
 // ```excalidraw — body is an Excalidraw scene JSON. The PREVIEW (liveRender) uses
 // Excalidraw's NON-React exportToSvg, so no React enters CodeMirror (ADR-013). The
@@ -61,7 +62,7 @@ export const excalidrawMacro: FenceMacro = {
     const scene = parseScene(body);
     if (!scene.elements.length) {
       el.classList.add("cm-lp-macro-empty");
-      el.textContent = "Empty drawing — click to edit";
+      el.textContent = i18n.t("macro.excalidrawEmpty");
       return el;
     }
     const dark = ctx.theme === "dark";

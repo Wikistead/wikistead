@@ -26,29 +26,21 @@ test("```mermaid macro: renders, folds/expands, round-trips raw source", async (
   await expect(macro).toBeVisible();
   await expect(macro.locator("svg")).toBeVisible({ timeout: 15000 }); // first mermaid load
 
-  // Fold: the corner button collapses the block to the "▶ Mermaid diagram" summary.
-  await macro.hover();
-  await page.locator("[data-pane=preview] [data-testid=macro-fold]").click();
+  // #174 comment 911: the ⊟ fold BUTTON was removed (fold lives on vim za/zo — see
+  // macro-vim-fold.spec). Drive a RE-RENDER via a display-mode round-trip (source → live rebuilds the
+  // widget) to keep the #191 regression guard: the re-rendered diagram must keep its <svg> — the
+  // finally cleanup must remove ONLY the 'd'-prefixed temp, never #<id> (which blanked valid diagrams).
+  await page.getByTestId("displaymode-source").click();
   await sleep(200);
-  const folded = page.locator("[data-pane=preview] [data-testid=macro-folded]");
-  await expect(folded).toBeVisible();
-  await expect(folded).toContainText("Mermaid diagram");
-  expect(await page.locator("[data-pane=preview] [data-testid=macro-mermaid]").count()).toBe(0);
-
-  // Expand: clicking the summary unfolds → the diagram is back.
-  await folded.click();
+  expect(await page.locator("[data-pane=preview] [data-testid=macro-mermaid]").count()).toBe(0); // source = raw
+  await page.getByTestId("displaymode-live").click();
   await sleep(300);
   await expect(page.locator("[data-pane=preview] [data-testid=macro-mermaid]")).toBeVisible();
-  // #191 regression guard: the re-rendered diagram keeps its <svg> — the finally cleanup must remove
-  // ONLY the 'd'-prefixed temp, never #<id> (the rendered svg lives inside the macro; deleting it
-  // blanked valid diagrams on every render). If finally over-removed, this svg would be gone.
   await expect(page.locator("[data-pane=preview] [data-testid=macro-mermaid] svg")).toBeVisible({ timeout: 15000 });
 
-  // Round-trip: caret into the block reveals the raw markdown (offset-invariant — the
-  // canonical source was never mutated by rendering/folding).
-  await page.locator("[data-pane=preview] [data-testid=macro-mermaid]").click();
+  // Round-trip: the canonical source survived rendering (offset-invariant). Switch to Source to read raw.
+  await page.getByTestId("displaymode-source").click();
   await sleep(300);
-  expect(await page.locator("[data-pane=preview] [data-testid=macro-mermaid]").count()).toBe(0);
   const text = await page.locator("[data-pane=preview] .cm-content").innerText();
   expect(text).toContain("```mermaid");
   expect(text).toContain("flowchart TD");

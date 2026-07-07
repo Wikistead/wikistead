@@ -1,5 +1,6 @@
 import type { DirectiveMacro } from "./registry";
 import { transcludeHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
+import i18n from "../../i18n"; // #174 comment 911: empty-state text localized (en/ja)
 
 // :::embed-page — embed another page's content by id (the body is the target page id). The MACRO
 // never fetches: its host-API is {theme} only (ADR-024 trust boundary). The host (live-preview
@@ -19,7 +20,7 @@ export const transcludeMacro: DirectiveMacro = {
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-embed-page";
     el.setAttribute("data-testid", "macro-embed-page");
-    el.textContent = body.trim() ? "…" : "Empty page embed — add a page id"; // host swaps in resolved content
+    el.textContent = body.trim() ? "…" : i18n.t("macro.pageEmbedEmpty"); // host swaps in resolved content
     return el;
   },
   // SSR/export placeholder: the server render pipeline resolves the embed; this is the wrapper
