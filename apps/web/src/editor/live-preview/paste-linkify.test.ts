@@ -30,6 +30,14 @@ describe("#223 linkifyPaste", () => {
     expect(call("vbscript:msgbox(1)")).toBeNull();
   });
 
+  it("#223 comment 895 (A'): normalizes the real Chromium copy fragments (meta / StartFragment / style+rel)", () => {
+    // The 4 shapes a real browser puts on text/html when you copy a link — all must normalize to [text](href).
+    expect(call("", '<meta charset="utf-8"><a href="https://ex.test/p">Docs</a>')).toBe("[Docs](https://ex.test/p)");
+    expect(call("", '<html><body><!--StartFragment--><a href="https://ex.test/p">Docs</a><!--EndFragment--></body></html>')).toBe("[Docs](https://ex.test/p)");
+    expect(call("", '<a href="https://ex.test/p" style="color:blue" rel="noopener" target="_blank">Docs</a>')).toBe("[Docs](https://ex.test/p)");
+    expect(call("", '<meta charset="utf-8"><a style="text-decoration:underline" href="https://ex.test/p" rel="nofollow">Docs</a>')).toBe("[Docs](https://ex.test/p)");
+  });
+
   it("normalizes a rich <a href> paste to [text](href)", () => {
     expect(call("", '<a href="https://example.com/p">Docs</a>')).toBe("[Docs](https://example.com/p)");
   });
