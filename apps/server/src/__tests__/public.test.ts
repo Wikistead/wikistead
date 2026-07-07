@@ -27,6 +27,7 @@ let db: TenantDb
 let spaceId: string
 let publicPageId: string
 let privatePageId: string
+let unpublishedPublicId: string
 
 // Seed a ydoc with known content for the public page
 function makeYdoc(text: string): Buffer {
@@ -50,7 +51,8 @@ beforeAll(async () => {
     tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'Public Page',
   })
   publicPageId = pub.id
-  await adminPool`UPDATE pages SET ydoc = ${makeYdoc('hello public world')} WHERE id = ${publicPageId}`
+  // #227: a PUBLISHED + public page (published_at set). The public surface only exposes published pages.
+  await adminPool`UPDATE pages SET ydoc = ${makeYdoc('hello public world')}, published_md = 'hello public world', published_at = now() WHERE id = ${publicPageId}`
 
   // Write the public tuple
   await writeTuples(fgaClient, [
@@ -62,10 +64,20 @@ beforeAll(async () => {
     tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'Private Page',
   })
   privatePageId = priv.id
+
+  // #227 anti-test fixture: a page that IS public (view_base@user:*) but UNPUBLISHED (published_at NULL) —
+  // a draft toggled public. Its existence/title must NOT leak to anonymous visitors.
+  const unpub = await createPage(db, fgaClient, driver, {
+    tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'Public But Unpublished',
+  })
+  unpublishedPublicId = unpub.id
+  await writeTuples(fgaClient, [{ user: 'user:*', relation: 'view_base', object: `page:${unpublishedPublicId}` }])
 })
 
 afterAll(async () => {
   await deleteTuples(fgaClient, [{ user: 'user:*', relation: 'view_base', object: `page:${publicPageId}` }])
+  await deleteTuples(fgaClient, [{ user: 'user:*', relation: 'view_base', object: `page:${unpublishedPublicId}` }]).catch(() => {})
+  await deletePage(db, fgaClient, driver, { pageId: unpublishedPublicId, userId: 'dev-user' }).catch(() => {})
   await deletePage(db, fgaClient, driver, { pageId: publicPageId, userId: 'dev-user' })
   await deletePage(db, fgaClient, driver, { pageId: privatePageId, userId: 'dev-user' })
   await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user' })
@@ -212,7 +224,7 @@ describe('noindex', () => {
 //   └─ C2 (PRIVATE)           → hidden
 //       └─ G2 (public)        → hidden (only reachable through private C2 — never traversed)
 describe('loadPublicChildTree leak safety', () => {
-  let P: string, C1: string, Cmid: string, Cpub2: string, Cshare: string, C2: string
+  let P: string, C1: string, Cmid: string, Cpub2: string, Cshare: string, C2: string, Cunpub: string
   let G1: string, G3: string, G2: string
   const SHARE = 'share_link:tl'
 
@@ -241,11 +253,18 @@ describe('loadPublicChildTree leak safety', () => {
     await writeTuples(fgaClient, [P, C1, Cpub2, G1, G2].map((id) => ({ user: 'user:*', relation: 'view_base', object: `page:${id}` })))
     // Cshare is genuinely viewable — but only by a share_link principal, never by ANON.
     await writeTuples(fgaClient, [{ user: SHARE, relation: 'view_base', object: `page:${Cshare}` }])
+    // #227: the public surface only exposes PUBLISHED pages — publish the tree so the gate passes.
+    await adminPool`UPDATE pages SET published_at = now() WHERE id = ANY(${adminPool.array([P, C1, Cmid, Cpub2, Cshare, C2, G1, G3, G2])})`
+    // #227 anti-test: Cunpub is public (ANON view) BUT unpublished (published_at NULL) → must NOT appear.
+    Cunpub = await mk('Cunpub public but unpublished', P)
+    await writeTuples(fgaClient, [{ user: 'user:*', relation: 'view_base', object: `page:${Cunpub}` }])
   })
 
   afterAll(async () => {
     await deleteTuples(fgaClient, [P, C1, Cpub2, G1, G2].map((id) => ({ user: 'user:*', relation: 'view_base', object: `page:${id}` })))
     await deleteTuples(fgaClient, [{ user: SHARE, relation: 'view_base', object: `page:${Cshare}` }])
+    await deleteTuples(fgaClient, [{ user: 'user:*', relation: 'view_base', object: `page:${Cunpub}` }]).catch(() => {})
+    await deletePage(db, fgaClient, driver, { pageId: Cunpub, userId: 'dev-user' }).catch(() => {})
     // delete leaves first (children before parents) so the parent_id tree stays consistent
     for (const id of [G1, G3, G2, C1, Cmid, Cpub2, Cshare, C2, P]) {
       await deletePage(db, fgaClient, driver, { pageId: id, userId: 'dev-user' })
@@ -280,6 +299,13 @@ describe('loadPublicChildTree leak safety', () => {
     expect(await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: Cshare })).toBe(false)
     const tree = await loadPublicChildTree(tenant.id, P)
     expect(flatten(tree)).not.toContain(Cshare)
+  })
+
+  it('#227 excludes a PUBLIC-but-UNPUBLISHED child (existence/title must not leak to anonymous)', async () => {
+    // Cunpub has the ANON view grant, so an FGA-only gate would list it — but it is unpublished.
+    expect(await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: Cunpub })).toBe(true)
+    const tree = await loadPublicChildTree(tenant.id, P)
+    expect(flatten(tree)).not.toContain(Cunpub)
   })
 
   it('④ compacts order so a hidden sibling leaves no gap/index/placeholder', async () => {
