@@ -1,7 +1,7 @@
 import { Vim, getCM } from "@replit/codemirror-vim";
 import { EditorState, EditorSelection, type Extension } from "@codemirror/state";
-import { ViewPlugin, type EditorView } from "@codemirror/view";
-import { livePreview, nestedDeleteChange, enterMacroCommand } from "./decorations";
+import { ViewPlugin, type EditorView, type ViewUpdate } from "@codemirror/view";
+import { livePreview, displayMode, nestedDeleteChange, enterMacroCommand } from "./decorations";
 import { nestedSelectionField, setNestedSelection } from "./macro-edit";
 
 // ADR-024 1b (Mode A): dd treats a macro ATOM as one unit — the WHOLE macro source is the
@@ -197,3 +197,55 @@ export const atomYank: Extension = ViewPlugin.define((view) => {
   view.contentDOM.addEventListener("keydown", onKeydown, true); // capture: before vim's handler
   return { destroy() { view.contentDOM.removeEventListener("keydown", onKeydown, true); } };
 });
+
+// #240: in WYSIWYG the vim NORMAL/VISUAL block ("fat") cursor paints the RAW doc char at head — so when
+// the vim caret rests on a HIDDEN inline syntax offset (a link's `[` `](url)`, a `**`/`` ` `` mark), the
+// glyph we hid shows up AS the cursor, and horizontal h/l stops on every hidden char (the "phantom press"
+// + "raw fragment on the cursor"). Live never shows it (reveal-on-cursor); Source is raw. The wysiwyg
+// caret-motion filter (wysiwygInlineSkip) can't fix this — it's a state transactionFilter and can't read
+// vim mode, whose semantics differ (vim rests ON a char, the insert caret rests BETWEEN chars). This
+// VIEW plugin (which CAN read vim via getCM) nudges the vim normal/visual caret OFF an inline hidden run
+// onto the nearest VISIBLE char in the motion direction, so the fat cursor never paints a hidden glyph and
+// h/l step by visible character. Block atoms (a table / `:::` fence the caret sits ON per ADR-024) are
+// LEFT ALONE (that fat-cursor case shares its root with #238). Offset-invariant: only the caret rest moves.
+export const vimWysiwygCaretGuard: Extension = ViewPlugin.fromClass(
+  class {
+    constructor(readonly view: EditorView) {}
+    update(u: ViewUpdate) {
+      if (!u.selectionSet && !u.docChanged) return;
+      if (u.state.facet(displayMode) !== "wysiwyg") return;
+      const vim = getCM(u.view)?.state.vim;
+      if (!vim || vim.insertMode) return; // insert caret keeps between-char semantics (wysiwygInlineSkip)
+      const sel = u.state.selection.main;
+      const head = sel.head;
+      const lp = u.state.field(livePreview, false);
+      if (!lp) return;
+      // Leave block atoms alone (caret sits ON them per ADR-024; that fat-cursor case is #238).
+      for (const b of lp.blocks) if (head >= b.from && head < b.to) return;
+      // Is char[head] inside an INLINE hidden run (single-line)? If so, char[head] is a hidden glyph the
+      // fat cursor would paint — move to the nearest visible char in the last motion direction.
+      let run: { from: number; to: number } | null = null;
+      lp.atomic.between(head, head, (from, to) => {
+        if (from <= head && head < to && u.state.doc.lineAt(from).number === u.state.doc.lineAt(to).number) {
+          run = { from, to };
+          return false;
+        }
+      });
+      if (!run) return;
+      const r = run as { from: number; to: number };
+      const prevHead = u.startState.selection.main.head;
+      const dir = head >= prevHead ? 1 : -1; // forward → exit right of the run; backward → left of it
+      const line = u.state.doc.lineAt(head);
+      // Forward: the position AFTER the run (char[to] is the first visible char). Backward: the last
+      // visible char BEFORE the run (from-1). Clamp to the line so we never jump across a line.
+      const target = dir > 0 ? Math.min(r.to, line.to) : Math.max(r.from - 1, line.from);
+      if (target === head) return;
+      // Defer the dispatch out of the update cycle (a plugin update must not dispatch synchronously).
+      queueMicrotask(() => {
+        const cur = this.view.state.selection.main;
+        if (cur.head !== head) return; // the caret already moved again — don't fight a newer motion
+        this.view.dispatch({ selection: sel.empty ? EditorSelection.cursor(target) : EditorSelection.range(sel.anchor, target) });
+      });
+    }
+  },
+);
