@@ -174,6 +174,11 @@ test("#174: a fence with no language still gets a copy button", async ({ browser
   await page.getByText("bot").click(); // caret off the fence → header renders (not raw-revealed)
   await sleep(200);
   expect(await page.locator(".cm-lp-code-copy").count()).toBe(1); // copy button present with no language
-  // no lang badge (there's no language) but the copy button works
-  expect(await page.locator(".cm-lp-code-tab .cm-lp-code-lang").count()).toBe(0);
+  // #174 comment 948: a lang-less fence must NOT emit an empty tab stub (the "garbage" in the top-left)
+  // the header is just the copy button (kept top-right by margin-left:auto).
+  expect(await page.locator(".cm-lp-code-tab").count()).toBe(0);
+  // margin-left:auto pushes the lone copy button to the right — resolves to a large used margin (the
+  // header width minus the button), confirming it is not stuck at the left.
+  const usedMargin = await page.locator(".cm-lp-code-copy").first().evaluate((el) => parseFloat(getComputedStyle(el).marginLeft));
+  expect(usedMargin).toBeGreaterThan(50);
 });
