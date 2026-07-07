@@ -99,6 +99,20 @@ export function useCreatePage() {
   });
 }
 
+// #248 / ADR-110: save a template (snapshot) from a page. scope decides the audience
+// (personal / space / tenant). The server view-gates the source + writes the FGA tuples.
+export type TemplateScope = "personal" | "space" | "tenant";
+export function useSaveTemplate() {
+  const { token } = useSession();
+  return useMutation({
+    mutationFn: (args: { fromPageId: string; name: string; scope: TemplateScope; spaceId?: string | null }) =>
+      apiFetch<{ id: string }>(`/templates`, token, {
+        method: "POST",
+        body: JSON.stringify({ fromPageId: args.fromPageId, name: args.name, scope: args.scope, spaceId: args.spaceId ?? null }),
+      }),
+  });
+}
+
 // Reparent + reorder, and (3b ②) move across spaces. parentId null = top level
 // of the destination space; afterId null = first child of the target parent.
 // toSpaceId is always sent; the server treats it as a cross-space move only when

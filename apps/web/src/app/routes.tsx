@@ -137,6 +137,7 @@ import { renderMarkdownToDom } from "../editor/macros/md-render"; // #227: publi
 import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useCreatePage, useEntitlements } from "../data/queries";
 import { ConfirmDialog } from "../ui/dialogs";
 import { DeleteBacklinkWarning } from "./DeleteBacklinkWarning";
+import { SaveTemplateDialog } from "./SaveTemplateDialog";
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport, printPageHtml } from "../data/exportApi";
 import { useActiveSpace } from "./ActiveSpace";
@@ -292,6 +293,7 @@ function PageRoute() {
   const [permsOpen, setPermsOpen] = useState(false);
   const [sharing, setSharing] = useState(false); // share dialog (current page)
   const [deleting, setDeleting] = useState(false); // delete-page confirm (current page)
+  const [savingTemplate, setSavingTemplate] = useState(false); // #248: "Save as template" dialog
   const deletePage = useDeletePage();
   const duplicatePage = useCreatePage(); // #229/#242: "Duplicate page" → new page seeded from this one
   const navigate = useNavigate();
@@ -399,6 +401,9 @@ function PageRoute() {
         { onSuccess: (p: { id: string } | null) => { if (p) navigate(`/p/${p.id}?edit=1`); } },
       );
     } : undefined,
+    // #248: save this page's published content as a reusable template. Any member viewing the page may
+    // save (the server view-gates the source + rejects guests); the item is disabled for a draft-only page.
+    onSaveTemplate: spaceId && pageId ? () => setSavingTemplate(true) : undefined,
     commentsOpen,
     onToggleComments: toggleComments,
     openComments,
@@ -499,6 +504,13 @@ function PageRoute() {
       {pageId && diffRevId && <DiffModal pageId={pageId} revId={diffRevId} onClose={closeDiff} />}
       {pageId && <PermissionsDialog pageId={pageId} open={permsOpen} onClose={() => setPermsOpen(false)} />}
       <ShareDialog pageId={sharing ? pageId ?? null : null} onClose={() => setSharing(false)} />
+      <SaveTemplateDialog
+        open={savingTemplate}
+        pageId={savingTemplate ? pageId ?? null : null}
+        spaceId={spaceId ?? null}
+        defaultName={page?.title ?? ""}
+        onClose={() => setSavingTemplate(false)}
+      />
       <ConfirmDialog
         open={deleting}
         message={t("sidebar.deletePageConfirm", { name: page?.title ?? "" })}
