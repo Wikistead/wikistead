@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "../components/ui/dropdown-menu";
-import { ChevronRight, ChevronsUpDown, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Plus, Settings, Share2, Trash2 } from "lucide-react";
+import { ChevronRight, ChevronsUpDown, Copy, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Plus, Settings, Share2, Trash2 } from "lucide-react";
 import {
   useSpaces,
   useCreateSpace,
@@ -151,6 +151,13 @@ export function Sidebar() {
     if (value === "subpage") newPage(d.pageId);
     else if (value === "share") setSharing(d.pageId);
     else if (value === "rename") setRenaming({ pageId: d.pageId, spaceId: d.spaceId, title: d.name });
+    // #242: "Duplicate page" from the tree row — same shape as routes.tsx onDuplicate (seed a new
+    // page from this one, open in edit). No new hook/API; the row menu is canEdit-only and the server
+    // still view-gates the source + edit-gates the destination (two-layer defence).
+    else if (value === "duplicate") createPage.mutate(
+      { spaceId: d.spaceId, title: `${d.name || "Untitled"} (copy)`, fromPageId: d.pageId },
+      { onSuccess: (p) => p && navigate(`/p/${p.id}?edit=1`) },
+    );
     else if (value === "delete") setDeleting({ id: d.pageId, name: d.name });
   };
   // Route the row action through a ref so NodeRow's identity does NOT depend on it.
@@ -223,6 +230,7 @@ export function Sidebar() {
                 <DropdownMenuItem onSelect={() => onRowActionRef.current("subpage", d)} data-testid="add-subpage"><FilePlus size={13} /> {t("sidebar.addSubpage")}</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onRowActionRef.current("share", d)}><Share2 size={13} /> {t("sidebar.share")}</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onRowActionRef.current("rename", d)}><Pencil size={13} /> {t("sidebar.rename")}</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onRowActionRef.current("duplicate", d)} data-testid="tree-duplicate-page"><Copy size={13} /> {t("page.duplicatePage")}</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onRowActionRef.current("delete", d)} data-danger="" variant="destructive"><Trash2 size={13} /> {t("sidebar.delete")}</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
