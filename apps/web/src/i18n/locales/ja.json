@@ -621,6 +621,9 @@
     "title": "リンクされた言及",
     "untitled": "(無題)"
   },
+  "delete": {
+    "backlinkWarning_other": "このページは {{count}} ページから参照されています。削除するとリンク切れになります。"
+  },
   "macro": {
     "excalidrawEmpty": "空の図 — 左上の ✎ ボタンで編集",
     "embedEmpty": "空の埋め込み — ✎ ボタンで URL を追加",

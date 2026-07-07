@@ -136,6 +136,7 @@ import { fetchGuestToken, apiFetch, ApiError, assetUrl, type GuestToken } from "
 import { renderMarkdownToDom } from "../editor/macros/md-render"; // #227: public render via the shared sanitized renderer
 import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useCreatePage, useEntitlements } from "../data/queries";
 import { ConfirmDialog } from "../ui/dialogs";
+import { DeleteBacklinkWarning } from "./DeleteBacklinkWarning";
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport, printPageHtml } from "../data/exportApi";
 import { useActiveSpace } from "./ActiveSpace";
@@ -501,6 +502,7 @@ function PageRoute() {
       <ConfirmDialog
         open={deleting}
         message={t("sidebar.deletePageConfirm", { name: page?.title ?? "" })}
+        warning={<DeleteBacklinkWarning pageId={deleting ? pageId ?? null : null} onNavigate={() => setDeleting(false)} />}
         onClose={() => setDeleting(false)}
         confirmTestId="confirm-delete-page"
         onConfirm={() => {

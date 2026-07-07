@@ -19,6 +19,7 @@ import { apiFetch } from "../data/apiClient";
 import { useSession } from "../session/SessionProvider";
 import { useActiveSpace } from "../app/ActiveSpace";
 import { RenameDialog, ConfirmDialog } from "../ui/dialogs";
+import { DeleteBacklinkWarning } from "../app/DeleteBacklinkWarning";
 import { ShareDialog } from "../ui/ShareDialog";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import { cn } from "../lib/utils";
@@ -357,6 +358,7 @@ export function Sidebar() {
       <ConfirmDialog
         open={deleting !== null}
         message={t("sidebar.deletePageConfirm", { name: deleting?.name ?? "" })}
+        warning={<DeleteBacklinkWarning pageId={deleting?.id ?? null} onNavigate={() => setDeleting(null)} />}
         onClose={() => setDeleting(null)}
         onConfirm={() => {
           if (deleting) deletePage.mutate({ pageId: deleting.id, spaceId: current! });
