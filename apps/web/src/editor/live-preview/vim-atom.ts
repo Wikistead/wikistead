@@ -213,15 +213,22 @@ export const vimWysiwygCaretGuard: Extension = ViewPlugin.fromClass(
     constructor(readonly view: EditorView) {}
     update(u: ViewUpdate) {
       if (!u.selectionSet && !u.docChanged) return;
-      if (u.state.facet(displayMode) !== "wysiwyg") return;
+      const blank = (on: boolean) => this.view.dom.classList.toggle("cm-wys-blank-fatcursor", on);
+      if (u.state.facet(displayMode) !== "wysiwyg") { blank(false); return; }
       const vim = getCM(u.view)?.state.vim;
-      if (!vim || vim.insertMode) return; // insert caret keeps between-char semantics (wysiwygInlineSkip)
+      if (!vim || vim.insertMode) { blank(false); return; } // insert caret keeps between-char semantics (wysiwygInlineSkip)
       const sel = u.state.selection.main;
       const head = sel.head;
       const lp = u.state.field(livePreview, false);
-      if (!lp) return;
-      // Leave block atoms alone (caret sits ON them per ADR-024; that fat-cursor case is #238).
-      for (const b of lp.blocks) if (head >= b.from && head < b.to) return;
+      if (!lp) { blank(false); return; }
+      // #238: on a BLOCK atom (a table / `:::` fence) the caret legitimately sits ON the atom (ADR-024) —
+      // we must NOT move it (that would break atom motion), but the vim fat cursor would then paint the
+      // atom's hidden `|` / `:`. Blank the fat-cursor GLYPH (a class → `.cm-fat-cursor { color: transparent }`)
+      // while the caret is on an atom, so the block cursor stays visible but the leaked syntax char does not.
+      let onBlockAtom = false;
+      for (const b of lp.blocks) if (head >= b.from && head < b.to) { onBlockAtom = true; break; }
+      blank(onBlockAtom);
+      if (onBlockAtom) return; // don't nudge — the caret stays on the atom (ADR-024)
       // Is char[head] inside an INLINE hidden run (single-line)? If so, char[head] is a hidden glyph the
       // fat cursor would paint — move to the nearest visible char in the last motion direction.
       let run: { from: number; to: number } | null = null;
