@@ -134,9 +134,13 @@ export const excalidrawMacro: FenceMacro = {
 
         // #92 canvas cursors: publish this user's live pointer (scene coords) onto the ephemeral
         // awareness so peers can render our cursor. Display-only (never touches the doc/scene).
-        const onPointerUpdate = (p: { payload?: { pointer?: { x: number; y: number }; button?: string } }) => {
-          if (!awareness || !p?.payload?.pointer) return;
-          try { awareness.setLocalStateField("pointer", { x: p.payload.pointer.x, y: p.payload.pointer.y, button: p.payload.button ?? "up" }); } catch { /* gone */ }
+        // #92 comment 982 (①): Excalidraw 0.18 calls onPointerUpdate with { pointer, button, pointersMap }
+        // DIRECTLY — `payload` in the type is the ARG NAME, not a wrapper field. Reading p.payload.pointer was
+        // always undefined, so the local pointer was NEVER published and no peer cursor could appear. Read the
+        // pointer off the argument itself.
+        const onPointerUpdate = (p: { pointer?: { x: number; y: number }; button?: string }) => {
+          if (!awareness || !p?.pointer) return;
+          try { awareness.setLocalStateField("pointer", { x: p.pointer.x, y: p.pointer.y, button: p.button ?? "up" }); } catch { /* gone */ }
         };
 
         root.render(
@@ -164,7 +168,7 @@ export const excalidrawMacro: FenceMacro = {
               if (!ptr) return;
               const color = u?.color ?? "#888";
               collaborators.set(String(clientId), {
-                pointer: { x: ptr.x, y: ptr.y },
+                pointer: { x: ptr.x, y: ptr.y, tool: "pointer" }, // #92: 0.18 CollaboratorPointer requires `tool`
                 button: ptr.button === "down" ? "down" : "up",
                 username: u?.name ?? "",
                 color: { background: color, stroke: color }, // unified with the yCollab caret colour
