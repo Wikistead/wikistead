@@ -141,3 +141,37 @@ test("#236: CELL toggle — bold ON then OFF on the same selection; mixed unifie
   await sleep(120);
   await expect(cell.locator("strong")).toHaveCount(0);
 });
+
+// #236 review fix: after a cell mark toggle the SELECTION must stay put (offset-restore), not
+// jump to the whole cell — otherwise a sub-range's 2nd press re-covers the cell instead of removing.
+test("#236: cell sub-range toggle keeps the selection and round-trips (2nd press removes just that range)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "cell-toggle-sel");
+  await enterEdit(page);
+  await openRichUICell(page);
+  const cell = page.getByTestId("table-edit").locator("td").first();
+  await cell.dblclick();
+  await sleep(100);
+  await selectCell(cell); // selects the cell's "1" → typing replaces it
+  await page.keyboard.type("abcdef");
+  await sleep(80);
+  // select the middle "cd" (offsets 2..4) inside the cell's text node
+  await cell.evaluate((el: HTMLElement) => {
+    const t = Array.from(el.childNodes).find((n) => n.nodeType === Node.TEXT_NODE) as Text;
+    const r = document.createRange(); r.setStart(t, 2); r.setEnd(t, 4);
+    const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
+    document.dispatchEvent(new Event("selectionchange"));
+  });
+  await sleep(120);
+  await page.getByTestId("cell-format-bold").click(); // bold "cd" only
+  await sleep(150);
+  await expect(cell.locator("strong")).toHaveText("cd"); // just cd bolded
+  // the selection must still cover exactly "cd" (NOT the whole cell)
+  const selText = await page.evaluate(() => window.getSelection()?.toString());
+  expect(selText).toBe("cd");
+  // 2nd press removes ONLY cd's bold (round-trip) — cell has no <strong>, text intact
+  await page.getByTestId("cell-format-bold").click();
+  await sleep(150);
+  await expect(cell.locator("strong")).toHaveCount(0);
+  await expect(cell).toHaveText("abcdef");
+});

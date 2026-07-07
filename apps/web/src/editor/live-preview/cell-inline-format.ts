@@ -117,6 +117,58 @@ function wrapPerLine(fragment: DocumentFragment, makeEl: () => HTMLElement): Doc
   return out;
 }
 
+// #236 (review fix): a selection recorded as a cell-TEXT offset range survives a mark toggle,
+// because toggling changes wrapper elements but NOT the visible text. Restoring by offset keeps the
+// user's exact selection — re-selecting the whole cell (the old code) broke the toggle round-trip: a
+// sub-range's 2nd press would see "the whole cell" and re-cover it instead of removing the mark.
+// Offset space matches cellElToText: text chars, with each <br> counting as one '\n'.
+function fragTextLen(node: Node): number {
+  let n = 0;
+  for (const c of Array.from(node.childNodes)) {
+    if (c.nodeType === Node.TEXT_NODE) n += (c.nodeValue ?? "").length;
+    else if (c instanceof HTMLBRElement) n += 1;
+    else n += fragTextLen(c);
+  }
+  return n;
+}
+function cellOffsetOf(el: HTMLElement, node: Node, nodeOffset: number): number {
+  const r = document.createRange();
+  r.setStart(el, 0);
+  try { r.setEnd(node, nodeOffset); } catch { return 0; }
+  return fragTextLen(r.cloneContents());
+}
+function cellPointAt(el: HTMLElement, target: number): { node: Node; offset: number } {
+  let acc = 0;
+  let last: { node: Node; offset: number } = { node: el, offset: 0 };
+  const walk = (node: Node): { node: Node; offset: number } | null => {
+    for (const c of Array.from(node.childNodes)) {
+      if (c.nodeType === Node.TEXT_NODE) {
+        const len = (c.nodeValue ?? "").length;
+        last = { node: c, offset: len };
+        if (acc + len >= target) return { node: c, offset: target - acc };
+        acc += len;
+      } else if (c instanceof HTMLBRElement) {
+        if (acc + 1 > target) { const i = Array.prototype.indexOf.call(c.parentNode!.childNodes, c); return { node: c.parentNode!, offset: i }; }
+        acc += 1;
+      } else {
+        const hit = walk(c);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  };
+  return walk(el) ?? last;
+}
+// Re-select [from,to] (cell-text offsets) after a mutation; falls back to whole-cell only on error.
+function restoreCellSelection(el: HTMLElement, sel: Selection, from: number, to: number): void {
+  const a = cellPointAt(el, from), b = cellPointAt(el, to);
+  const rr = document.createRange();
+  try { rr.setStart(a.node, a.offset); rr.setEnd(b.node, b.offset); }
+  catch { rr.selectNodeContents(el); }
+  sel.removeAllRanges();
+  sel.addRange(rr);
+}
+
 // TOGGLE the current selection's `mark` (#236) — the decoration appears/disappears in place (WYSIWYG).
 // Fully marked selection → remove (extractContents splits partially-covered elements at the range
 // boundaries, so the outside parts KEEP their mark — sub-range removal, word-processor style). Mixed or
@@ -130,6 +182,10 @@ export function applyCellMark(el: HTMLElement, mark: Mark): boolean {
   if (!sel || sel.rangeCount === 0) return false;
   const range = sel.getRangeAt(0);
   if (range.collapsed || !el.contains(range.commonAncestorContainer)) return false;
+  // Record the selection as cell-text offsets BEFORE mutating — mark toggling leaves the text
+  // unchanged, so we restore the SAME range afterward (not a whole-cell reselect).
+  const selFrom = cellOffsetOf(el, range.startContainer, range.startOffset);
+  const selTo = cellOffsetOf(el, range.endContainer, range.endOffset);
   try {
     // Split boundary same-tag elements so the working range's edges sit OUTSIDE them (otherwise the
     // re-insert lands back inside the mark and a "remove" is a no-op — the boundary-shell bug).
@@ -148,10 +204,7 @@ export function applyCellMark(el: HTMLElement, mark: Mark): boolean {
   }
   el.normalize(); // merge any split text nodes so cellElToText reads clean runs
   mergeAdjacent(el, mark.tags); // also drops empty split shells
-  const r2 = document.createRange();
-  r2.selectNodeContents(el); // re-select the whole cell (multiple wrappers may exist after a per-line wrap)
-  sel.removeAllRanges();
-  sel.addRange(r2);
+  restoreCellSelection(el, sel, selFrom, selTo); // keep the user's exact selection (toggle round-trip)
   return true;
 }
 
@@ -168,6 +221,11 @@ export function applyCellLink(el: HTMLElement, url: string, safeHref: (u: string
   // cell). extractContents/insertNode work on any Range, independent of the document selection.
   const r = range ?? (sel && sel.rangeCount ? sel.getRangeAt(0) : null);
   if (!r || r.collapsed || !el.contains(r.commonAncestorContainer)) return false;
+  // Same offset-restore as applyCellMark for the live-selection (toolbar) path (#236 review
+  // fix). The popover path passes an explicit snapshot range and its input already stole focus, so
+  // there is no live cell selection to preserve there.
+  const linkFrom = cellOffsetOf(el, r.startContainer, r.startOffset);
+  const linkTo = cellOffsetOf(el, r.endContainer, r.endOffset);
   try {
     const inserted = wrapPerLine(r.extractContents(), () => { const a = document.createElement("a"); a.setAttribute("href", href); return a; });
     r.insertNode(inserted);
@@ -175,7 +233,7 @@ export function applyCellLink(el: HTMLElement, url: string, safeHref: (u: string
     return false;
   }
   el.normalize();
-  if (sel && !range) { const sr = document.createRange(); sr.selectNodeContents(el); sel.removeAllRanges(); sel.addRange(sr); }
+  if (sel && !range) restoreCellSelection(el, sel, linkFrom, linkTo);
   return true;
 }
 
