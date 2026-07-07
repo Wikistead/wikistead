@@ -354,7 +354,7 @@
     "modeSource": "ソース",
     "modeReading": "リーディング",
     "modeWysiwyg": "WYSIWYG",
-    "useAsTemplate": "テンプレートとして複製"
+    "duplicatePage": "ページを複製"
   },
   "sidebar": {
     "newSpace": "新しいスペース",
