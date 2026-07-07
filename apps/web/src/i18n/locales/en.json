@@ -354,7 +354,7 @@
     "modeSource": "Source",
     "modeReading": "Reading",
     "modeWysiwyg": "WYSIWYG",
-    "useAsTemplate": "Use as template"
+    "duplicatePage": "Duplicate page"
   },
   "sidebar": {
     "newSpace": "New space",

@@ -292,7 +292,7 @@ function PageRoute() {
   const [sharing, setSharing] = useState(false); // share dialog (current page)
   const [deleting, setDeleting] = useState(false); // delete-page confirm (current page)
   const deletePage = useDeletePage();
-  const createFromTemplate = useCreatePage(); // #229: "use as template" → new page seeded from this one
+  const duplicatePage = useCreatePage(); // #229/#242: "Duplicate page" → new page seeded from this one
   const navigate = useNavigate();
 
   // Edit mode + layout are owned here now (PageToolbar is the chrome). editing
@@ -393,7 +393,7 @@ function PageRoute() {
     // in edit mode. Needs a resolved space + an edit-capable user (the server view-gates the source
     // and 403s a non-editor of the destination space regardless).
     onDuplicate: spaceId && pageId && canEdit ? () => {
-      createFromTemplate.mutate(
+      duplicatePage.mutate(
         { spaceId, title: `${page?.title ?? "Untitled"} (copy)`, fromPageId: pageId },
         { onSuccess: (p: { id: string } | null) => { if (p) navigate(`/p/${p.id}?edit=1`); } },
       );

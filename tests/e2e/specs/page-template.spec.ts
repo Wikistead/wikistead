@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { enterEdit, openScratch, sleep } from "../helpers";
 
-// #229: "Use as template" (⋯ menu) creates a NEW page seeded with the current page's published
+// #229/#242: "Duplicate page" (⋯ menu) creates a NEW page seeded with the current page's published
 // content and opens it in edit mode. Real Chromium.
-test("#229: 'Use as template' creates a new page pre-filled with the source content", async ({ browser }) => {
+test("#242: 'Duplicate page' creates a new page pre-filled with the source content", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   const tmpl = await openScratch(page, "tmpl-src");
   await enterEdit(page);
@@ -13,7 +13,7 @@ test("#229: 'Use as template' creates a new page pre-filled with the source cont
   await page.getByTestId("publish-page").click();
   await sleep(700);
 
-  // Open the ⋯ menu and click "Use as template".
+  // Open the ⋯ menu and click "Duplicate page".
   await page.goto(`/p/${tmpl}`);
   await page.waitForSelector("[data-pane=preview] .cm-content");
   await sleep(400);
