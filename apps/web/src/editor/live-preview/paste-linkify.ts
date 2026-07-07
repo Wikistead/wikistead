@@ -1,12 +1,13 @@
 import { EditorView, ViewPlugin } from "@codemirror/view";
-import type { Extension } from "@codemirror/state";
+import type { Extension, EditorState } from "@codemirror/state";
+import { syntaxTree } from "@codemirror/language";
 import { safeHref } from "../macros/md-render";
 import { vimEnabled } from "./decorations";
 
 // #223 / ADR-none (rides on ADR-037 + safeHref): auto-linkify a pasted URL / rich link into Markdown
 // `[text](url)`, so the source stays plain Markdown (Open formats) while the live preview shows it clickable.
-// The SAME `safeHref` is the ONLY scheme judgment (no new XSS boundary): a javascript:/data:/vbscript:/file:
-// href is never linkified (falls back to a plain-text paste). Rich HTML (text/html) is read via DOMParser —
+// The SAME `safeHref` is the ONLY scheme judgment (no new XSS boundary): a javascript:/data:/vbscript:/file
+// href is never linkified (falls back to a plain-text paste). Rich HTML (text/html) is read via DOMParser
 // NEVER innerHTML on a live node — and only the anchor's href (safeHref'd) + textContent are used.
 
 const BARE_URL = /^https?:\/\/\S+$/i; // v1: explicit http/https scheme only (www./scheme-less → plain paste)
@@ -68,6 +69,37 @@ export function linkifyPaste(input: { text: string; html: string; selectedText: 
 // linkify once). On a linkify hit it replaces the selection in ONE offset-invariant Y.Text edit (single
 // Y.Text) and stopImmediatePropagation so CM does not also paste. window.__wksPasteDebug records what the
 // handler saw, so a real-device paste stays inspectable.
+// #223 comment 895 (A, pure + testable): if [from,to] intersects any Link node, EXPAND to whole links
+// and return the complete Markdown source (so a copy over a rendered `[hoge](url)` yields the full source,
+// not the `hoge](` fragment CM's raw-slice copy produced). For a clean single-link selection, also return a
+// safeHref-gated `<a>` HTML (createElement, never innerHTML). Returns null when no link is touched.
+export function linkCopyRange(
+  state: EditorState,
+  selFrom: number,
+  selTo: number,
+): { from: number; to: number; plain: string; html?: string } | null {
+  const tree = syntaxTree(state);
+  let from = selFrom, to = selTo, links = 0;
+  let only: { from: number; to: number } | null = null;
+  tree.iterate({ from: selFrom, to: selTo, enter: (n) => {
+    if (n.name === "Link") { from = Math.min(from, n.from); to = Math.max(to, n.to); links++; only = { from: n.from, to: n.to }; }
+  } });
+  if (links === 0) return null;
+  const plain = state.sliceDoc(from, to);
+  let html: string | undefined;
+  if (links === 1 && only && (only as { from: number; to: number }).from === from && (only as { from: number; to: number }).to === to) {
+    const m = /^\[([^\]]*)\]\(\s*<?([^)>\s]*)>?[^)]*\)$/.exec(plain);
+    const href = m ? safeHref(m[2]!) : null;
+    if (m && href) {
+      const a = document.createElement("a"); // createElement, never innerHTML (ADR-037)
+      a.setAttribute("href", href);
+      a.textContent = m[1]!;
+      html = a.outerHTML;
+    }
+  }
+  return { from, to, plain, html };
+}
+
 export function pasteLinkify(): Extension {
   return ViewPlugin.define((view) => {
     let plainNext = false;
@@ -95,11 +127,16 @@ export function pasteLinkify(): Extension {
       if (view.state.readOnly) { dbg.result = "skip:readOnly"; return; }
       if (plainNext) { plainNext = false; dbg.result = "skip:plainNext(Ctrl+Shift+V)"; return; }
       if (!cd) { dbg.result = "skip:noClipboardData"; return; }
-      // #223 comment 885: only handle pastes aimed at the CM BODY. When a nested island (a table widget or an
-      // editing cell's contenteditable) holds focus, activeElement is NOT contentDOM — leave the paste to that
-      // island's own handler. Otherwise this body handler would insert at view.state.selection.main (the atom
-      // boundary), dropping the paste at the table's edge and breaking the ADR-024 atom invariant.
-      if (document.activeElement !== view.contentDOM) { dbg.result = "skip:nested-focus"; return; }
+      // #223 comment 885/910 (D): only BYPASS this body handler when a NESTED ISLAND actually holds focus
+      // (a table widget or an in-cell contenteditable) — that island has its own paste handler, and inserting
+      // at view.state.selection.main would drop the paste at the atom boundary (ADR-024). Comment 888's guard
+      // `activeElement !== contentDOM` was too broad: a right-click / context-menu paste can leave
+      // activeElement as the BODY or null (focus off contentDOM but NOT in an island), which then skipped
+      // linkify. Precise check: bypass only when activeElement is inside a nested editable island.
+      const ae = document.activeElement as HTMLElement | null;
+      dbg.activeElement = ae ? `${ae.tagName}.${ae.className}`.slice(0, 80) : null;
+      const inNestedIsland = !!ae && ae !== view.contentDOM && !!ae.closest?.(".cm-lp-table, [data-testid=table-edit], .cm-lp-nested-edit-island");
+      if (inNestedIsland) { dbg.result = "skip:nested-focus"; return; }
       const sel = view.state.selection.main;
       const md = linkifyPaste({
         text: cd.getData("text/plain"),
@@ -113,12 +150,36 @@ export function pasteLinkify(): Extension {
       view.dispatch(view.state.replaceSelection(md), { scrollIntoView: true });
       dbg.result = "linkified:inserted";
     };
+    // #223 comment 895 (A — the actual fix is on the COPY side): CodeMirror's own copy/cut only sets
+    // text/plain, and its value is the raw doc slice of the SELECTION — which, over a rendered `[hoge](url)`
+    // link, maps to a doc range that CUTS THROUGH the hidden `[` / `](url)` markers, so copying a link yields
+    // a fragment like `hoge](`. Fix it at the source: on copy/cut, if the selection intersects a Link node,
+    // EXPAND the copied range to whole links and set text/plain to that complete Markdown source. Also set
+    // text/html to a real `<a href>` (createElement, href via safeHref — the SAME single scheme judge, no new
+    // XSS boundary) when the expanded selection is exactly ONE link, so pasting into an external app (or back
+    // here) yields a rich link. Capture phase so it beats CM's own copy handler.
+    const onCopyOrCut = (e: ClipboardEvent) => {
+      const isCut = e.type === "cut";
+      if (isCut && view.state.readOnly) return;
+      const sel = view.state.selection.main;
+      if (sel.empty || !e.clipboardData) return;
+      const copy = linkCopyRange(view.state, sel.from, sel.to);
+      if (!copy) return; // no link touched → let CM copy the selection normally
+      e.clipboardData.setData("text/plain", copy.plain);
+      if (copy.html) e.clipboardData.setData("text/html", copy.html);
+      e.preventDefault();
+      if (isCut) view.dispatch({ changes: { from: copy.from, to: copy.to, insert: "" }, scrollIntoView: true });
+    };
     view.contentDOM.addEventListener("keydown", onKeydown, true);
     view.contentDOM.addEventListener("paste", onPaste, true); // capture: before CodeMirror's own paste
+    view.contentDOM.addEventListener("copy", onCopyOrCut, true); // capture: before CM's own copy
+    view.contentDOM.addEventListener("cut", onCopyOrCut, true);
     return {
       destroy() {
         view.contentDOM.removeEventListener("keydown", onKeydown, true);
         view.contentDOM.removeEventListener("paste", onPaste, true);
+        view.contentDOM.removeEventListener("copy", onCopyOrCut, true);
+        view.contentDOM.removeEventListener("cut", onCopyOrCut, true);
       },
     };
   });

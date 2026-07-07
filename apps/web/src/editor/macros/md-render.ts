@@ -110,7 +110,11 @@ function renderInlineNode(node: SNode, src: string, into: Node): void {
       const urlNode = node.getChild("URL");
       const href = urlNode ? safeHref(txt(src, urlNode)) : null;
       const el = document.createElement(href ? "a" : "span");
-      if (href) { (el as HTMLAnchorElement).href = href; (el as HTMLAnchorElement).rel = "noopener noreferrer nofollow"; }
+      // #223 comment 895 (B): tag the anchor cm-lp-link so it gets the same colour + underline the body
+      // decoration links have. This shared renderer draws links in the static TableWidget, the RichUI grid,
+      // and the in-cell edit island — all inside .cm-editor, where the baseTheme .cm-lp-link rule applies
+      // so a cell link now LOOKS like a link (Tailwind preflight had reset a bare <a> to color:inherit).
+      if (href) { (el as HTMLAnchorElement).href = href; (el as HTMLAnchorElement).rel = "noopener noreferrer nofollow"; el.className = "cm-lp-link"; }
       renderInline(node, src, el); // link text (marks + URL skipped)
       into.appendChild(el);
       return;
