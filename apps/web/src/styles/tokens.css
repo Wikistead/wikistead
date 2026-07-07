@@ -566,3 +566,9 @@ body {
   background: var(--panel-2); color: var(--fg); cursor: pointer;
 }
 .cm-lp-editui-done:hover { background: var(--panel-3); }
+
+/* #238: in WYSIWYG + vim, when the vim block cursor sits ON a macro atom (table / :::), the fat cursor
+   would paint the atom's hidden syntax char (`|` / `:`) as its glyph. vimWysiwygCaretGuard toggles this
+   class on the editor while the caret is on an atom; make the fat-cursor GLYPH transparent so the block
+   cursor stays visible (its background) but the leaked syntax char does not show. */
+.cm-wys-blank-fatcursor .cm-fat-cursor { color: transparent !important; }
