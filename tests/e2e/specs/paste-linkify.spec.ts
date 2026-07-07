@@ -69,11 +69,10 @@ test("#223: selected text + pasted URL wraps the selection as the link anchor", 
   expect(link?.href).toBe("https://example.com");
 });
 
-// #223 comment 875: with vim ON, `<C-v>` is a vim command (blockwise-visual) that consumes the Ctrl+V keydown
-// and preventDefaults it, so the browser never fires the native paste event — Ctrl+V neither pasted nor
-// linkified in vim mode. The capture keydown now takes plain Ctrl+V back for system paste when vim is enabled,
-// so linkify works in vim ON just like vim OFF, in BOTH normal and insert mode.
-test("#223: vim ON, Ctrl+V URL linkifies in normal AND insert mode", async ({ browser }) => {
+// #223 comment 946 (requirement change): Ctrl+V is only taken back from vim in INSERT mode. In NORMAL /
+// VISUAL it stays vim's blockwise-visual (normal-mode paste is the vim `p` register's job — #225). So
+// Ctrl+V linkifies in insert mode, and does NOT paste in normal mode.
+test("#223: vim ON — Ctrl+V linkifies in INSERT mode; NORMAL leaves it to vim (no paste)", async ({ browser }) => {
   const page = await ctx(browser);
   await openScratch(page, "paste-vim");
   await enterEdit(page);
@@ -81,16 +80,31 @@ test("#223: vim ON, Ctrl+V URL linkifies in normal AND insert mode", async ({ br
   await expect(page.getByTestId("vim-toggle")).toHaveAttribute("aria-pressed", "true");
   await page.click("[data-pane=preview] .cm-content");
 
-  // NORMAL mode: previously Ctrl+V hit vim's blockwise-visual and no paste event fired (the reported bug).
+  // NORMAL mode: Ctrl+V is vim's blockwise-visual — it must NOT paste the URL.
   await page.keyboard.press("Escape");
   await realPaste(page, "https://example.com/n");
-  expect(await rawText(page)).toContain("[https://example.com/n](https://example.com/n)");
+  expect(await rawText(page)).not.toContain("example.com/n");
+  await page.keyboard.press("Escape"); // leave any visual-block selection
 
-  // INSERT mode: also linkifies (vim does not bind <C-v> in insert).
+  // INSERT mode: Ctrl+V pastes and linkifies (vim does not bind <C-v> in insert).
   await page.keyboard.press("i");
-  await page.keyboard.type("\n");
   await realPaste(page, "https://example.com/v");
   expect(await rawText(page)).toContain("[https://example.com/v](https://example.com/v)");
+});
+
+// #223 comment 946 (1): the custom right-click context menu bypasses the browser paste event, so its
+// "paste" must route through the same linkify helper. Right-click → ctx-item-paste → URL linkifies.
+test("#223: the context-menu paste linkifies a URL", async ({ browser }) => {
+  const page = await ctx(browser);
+  await openScratch(page, "paste-ctx");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.evaluate(() => navigator.clipboard.writeText("https://example.com/ctx"));
+  await page.locator("[data-pane=preview] .cm-content").click({ button: "right" });
+  await page.getByTestId("context-menu").waitFor({ timeout: 4000 });
+  await page.getByTestId("ctx-item-paste").click();
+  await sleep(400);
+  expect(await rawText(page)).toContain("[https://example.com/ctx](https://example.com/ctx)");
 });
 
 // #223 comment 885: pasting a URL onto a SELECTED (non-editing) RichUI cell must drop it IN the cell (the

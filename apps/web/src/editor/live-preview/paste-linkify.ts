@@ -1,8 +1,8 @@
 import { EditorView, ViewPlugin } from "@codemirror/view";
 import type { Extension, EditorState } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
+import { getCM } from "@replit/codemirror-vim";
 import { safeHref } from "../macros/md-render";
-import { vimEnabled } from "./decorations";
 
 // #223 / ADR-none (rides on ADR-037 + safeHref): auto-linkify a pasted URL / rich link into Markdown
 // `[text](url)`, so the source stays plain Markdown (Open formats) while the live preview shows it clickable.
@@ -105,15 +105,13 @@ export function pasteLinkify(): Extension {
     let plainNext = false;
     const onKeydown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "v" || e.key === "V")) { plainNext = true; return; }
-      // #223 comment 875: with vim ON, `<C-v>` is a vim command (blockwise-visual) — vim's keymap consumes the
-      // Ctrl+V keydown and preventDefaults it, so the browser never fires the `paste` event and this plugin's
-      // capture paste handler never runs (no linkify, and no paste at all). Ctrl+V is the universal system-paste
-      // gesture, so take it back for paste: on a PLAIN Ctrl/Cmd+V (no shift/alt) while vim is enabled, stop the
-      // keydown HERE (capture, before vim's keymap) WITHOUT preventDefault, so vim never converts it and the
-      // browser proceeds to fire the native paste event → our paste handler linkifies. vim's blockwise-visual
-      // stays reachable via <C-q> (codemirror-vim binds it to the same action). Vim OFF needs no interception
-      // (CM has no Ctrl+V keydown binding; it pastes via the native paste event, which we already intercept).
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "v" || e.key === "V") && view.state.facet(vimEnabled)) {
+      // #223 comment 946 (requirement change): only take Ctrl+V back from vim in INSERT mode. In vim
+      // insert mode Ctrl+V should paste (and linkify) — vim doesn't bind it there, but we intercept before
+      // any handler to guarantee the native paste event fires. In NORMAL / VISUAL mode Ctrl+V stays vim's
+      // blockwise-visual (the earlier 879 behaviour of stealing it in every mode is reverted; normal-mode
+      // paste is the vim `p` register's job, tracked in #225). Vim OFF needs no interception (CM has no
+      // Ctrl+V keydown binding; it pastes via the native paste event, which we already intercept).
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "v" || e.key === "V") && getCM(view)?.state.vim?.insertMode) {
         e.stopImmediatePropagation();
       }
     };

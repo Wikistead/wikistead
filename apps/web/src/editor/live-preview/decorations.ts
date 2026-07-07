@@ -2443,7 +2443,7 @@ export const livePreviewTheme = EditorView.baseTheme({
     borderRadius: "3px",
     padding: "0 3px",
   },
-  ".cm-lp-link": { color: "#4ea1ff", textDecoration: "underline" },
+  ".cm-lp-link": { color: "var(--link, #4ea1ff)", textDecoration: "underline" }, // #223: semantic token, not a hardcoded blue
   // In the read-only render links are click-to-open, so show the affordance there.
   ".cm-content[contenteditable=false] .cm-lp-link[data-href]": { cursor: "pointer" },
   // #224 / ADR-104: auto internal links — a subtler affordance than explicit links (dotted underline) so a

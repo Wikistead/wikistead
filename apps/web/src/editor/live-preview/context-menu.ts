@@ -3,6 +3,7 @@ import { StateField, StateEffect, EditorSelection, Prec, type EditorState, type 
 import { syntaxTree } from "@codemirror/language";
 import i18n from "../../i18n";
 import { INLINE_FORMATS } from "./commands";
+import { linkifyPaste, linkCopyRange } from "./paste-linkify";
 
 // M0-4 (ADR-018): the right-click context menu — the superset entry for mouse users.
 // On a selection it offers layer-A decoration (the SAME INLINE_FORMATS as the bubble /
@@ -69,25 +70,65 @@ function selectedText(view: EditorView): string {
   const { from, to } = view.state.selection.main;
   return view.state.doc.sliceString(from, to);
 }
+// #223 comment 946: the custom context menu (this file) bypasses the browser paste/copy events, so the
+// pasteLinkify capture handler never sees a right-click paste, and a right-click copy over a rendered
+// `[hoge](url)` link writes the raw doc slice (the `hoge](` fragment). Route both through the SAME pure
+// helpers (linkifyPaste / linkCopyRange) the native paste path uses — no new XSS judge (safeHref stays the
+// only one). Write text/html via ClipboardItem (createElement `<a>`, never innerHTML) so a copied link
+// round-trips as a rich link.
+async function writeClipboard(plain: string, html?: string): Promise<void> {
+  try {
+    if (html && typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+      await navigator.clipboard.write([new ClipboardItem({
+        "text/plain": new Blob([plain], { type: "text/plain" }),
+        "text/html": new Blob([html], { type: "text/html" }),
+      })]);
+      return;
+    }
+    await navigator.clipboard?.writeText(plain);
+  } catch { /* clipboard unavailable / denied — best effort */ }
+}
 function doCopy(view: EditorView): void {
-  const text = selectedText(view);
-  if (text) void navigator.clipboard?.writeText(text);
+  const { from, to } = view.state.selection.main;
+  if (from !== to) {
+    const copy = linkCopyRange(view.state, from, to); // expand across whole links → complete source (not a fragment)
+    void writeClipboard(copy?.plain ?? view.state.doc.sliceString(from, to), copy?.html);
+  }
   close(view);
 }
 function doCut(view: EditorView): void {
   const { from, to } = view.state.selection.main;
-  const text = view.state.doc.sliceString(from, to);
-  if (text) void navigator.clipboard?.writeText(text);
-  view.dispatch({ changes: { from, to, insert: "" }, selection: EditorSelection.cursor(from) });
+  if (from !== to) {
+    const copy = linkCopyRange(view.state, from, to);
+    void writeClipboard(copy?.plain ?? view.state.doc.sliceString(from, to), copy?.html);
+    // Cut removes the (possibly link-expanded) range so the copied source matches what was removed.
+    const cutFrom = copy?.from ?? from, cutTo = copy?.to ?? to;
+    view.dispatch({ changes: { from: cutFrom, to: cutTo, insert: "" }, selection: EditorSelection.cursor(cutFrom) });
+  }
   view.dispatch({ effects: closeMenu.of(null) });
   view.focus();
 }
 function doPaste(view: EditorView): void {
   close(view);
-  void navigator.clipboard?.readText().then((text) => {
-    if (text) view.dispatch(view.state.replaceSelection(text));
+  // Read BOTH text/html and text/plain (clipboard.read) so a rich link normalizes to `[text](href)`,
+  // matching the native paste path. Fall back to readText (plain) if read()/permission is unavailable.
+  void (async () => {
+    let text = "", html = "";
+    try {
+      const items = await navigator.clipboard.read();
+      for (const it of items) {
+        if (it.types.includes("text/plain")) text = await (await it.getType("text/plain")).text();
+        if (it.types.includes("text/html")) html = await (await it.getType("text/html")).text();
+      }
+    } catch {
+      try { text = await navigator.clipboard.readText(); } catch { /* clipboard denied */ }
+    }
+    const sel = view.state.selection.main;
+    const md = linkifyPaste({ text, html, selectedText: view.state.sliceDoc(sel.from, sel.to) });
+    const insert = md ?? text;
+    if (insert) view.dispatch(view.state.replaceSelection(insert), { scrollIntoView: true });
     view.focus();
-  });
+  })();
 }
 // Clear inline formatting from the selection: strip the common emphasis markers. A simple
 // strip (not an AST unwrap) — adequate for the bubble's layer-A set; leaves text intact.
