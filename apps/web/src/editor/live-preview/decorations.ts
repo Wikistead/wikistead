@@ -123,7 +123,11 @@ class FenceHeaderWidget extends WidgetType {
       l.textContent = this.lang;
       tab.appendChild(l);
     }
-    row.appendChild(tab);
+    // #174 comment 948: a lang-less fence (copy button only) must NOT emit an EMPTY tab — the
+    // .cm-lp-code-tab CSS (padding/bg/border/radius) would render it as a small empty tab "stub". Only
+    // append the tab when it actually has a title or lang; otherwise the header is just the copy button
+    // (kept right by margin-left:auto), and the card's rounded top-left corner stays intact.
+    if (this.title || this.lang) row.appendChild(tab);
     // The copy button — view mode only (Source can select the raw text directly).
     if (this.canCopy) {
       const btn = document.createElement("button");
@@ -2491,6 +2495,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   // The copy button — top-right, subtle until hovered; turns accent on the transient ✓ after a copy.
   ".cm-lp-code-copy": {
     display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+    marginLeft: "auto", // #174 comment 948: stay top-right even when there is no tab (lang-less fence)
     padding: "0.2em", marginBottom: "0.15em", borderRadius: "5px", border: "1px solid transparent",
     background: "transparent", color: "var(--fg-dim, #888)", opacity: "0.65", transition: "opacity 120ms ease, background 120ms ease, color 120ms ease",
   },
