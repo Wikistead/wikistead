@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, macroPresencePlugin, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, macroPresencePlugin, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { listEditing } from "./live-preview/list-edit";
 import { pasteLinkify } from "./live-preview/paste-linkify";
@@ -196,7 +196,7 @@ export function mountLivePreview(
       // ADR-024 atom motion: every block decoration is a single motion-stop — a one-line
       // key lands ON the atom, the next steps past it (macros stay rendered; non-macro
       // blocks reveal on landing). motionKeyTracker gates the overshoot clamp. Editable only.
-      ...(opts.readOnly ? [] : [motionKeyTracker, blockEntry, atomDelete, atomYank]),
+      ...(opts.readOnly ? [] : [motionKeyTracker, blockEntry, wysiwygInlineSkip, atomDelete, atomYank]),
       // #84: a left-gutter grip per top-level block; drag it to reorder (one Yjs op).
       // Display-only gutter + drop indicator; editable surface only.
       ...(opts.readOnly ? [] : [blockDrag]),

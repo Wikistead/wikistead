@@ -2093,9 +2093,33 @@ function buildDecorations(state: EditorState, themeOverride?: MacroTheme): {
 
   return {
     decorations: Decoration.set(all, true),
-    atomic: Decoration.set(hidden, true),
+    // #240: coalesce touching/adjacent hidden ranges before feeding atomicRanges. CM's
+    // skipAtomicRanges only pushes the caret when a position is STRICTLY inside a range
+    // (pos>from && pos<to), so an ISOLATED 1-char hidden marker (a LinkMark bracket, the `(`/`)`
+    // around a link URL, a single backtick) can NEVER be skipped — the caret stops on every hidden
+    // glyph, so crossing a link's `](url)` costs several phantom Arrow presses in WYSIWYG (where
+    // markers never reveal). Merging the adjacent `]`,`(`,url,`)` into one wide run gives it
+    // strictly-inside positions, so motion steps across the whole run at once. Visual hiding
+    // (`decorations`) is untouched; only the atomic set is coalesced.
+    atomic: Decoration.set(coalesceRanges(hidden), true),
     blocks,
   };
+}
+
+// Merge touching/overlapping ranges into contiguous runs (see #240 above). Input need not be sorted;
+// all merged ranges carry a plain hide decoration (atomicRanges only reads the range boundaries).
+function coalesceRanges(ranges: readonly Range<Decoration>[]): Range<Decoration>[] {
+  if (ranges.length <= 1) return ranges.slice();
+  const sorted = ranges.slice().sort((a, b) => a.from - b.from || a.to - b.to);
+  const out: Range<Decoration>[] = [];
+  let from = sorted[0]!.from, to = sorted[0]!.to;
+  for (let i = 1; i < sorted.length; i++) {
+    const r = sorted[i]!;
+    if (r.from <= to) to = Math.max(to, r.to); // touching or overlapping → extend the run
+    else { out.push(hide.range(from, to)); from = r.from; to = r.to; }
+  }
+  out.push(hide.range(from, to));
+  return out;
 }
 
 // A StateField (NOT a ViewPlugin): block decorations — the table render uses one
@@ -2266,6 +2290,38 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
     if (target !== null) return { selection: EditorSelection.cursor(doc.line(target).from), scrollIntoView: true };
   }
   return tr;
+});
+
+// #240: in WYSIWYG a hidden inline run (coalesced above) still leaves ONE phantom stop at its near
+// edge — CM's skipAtomicRanges only pushes a caret STRICTLY inside a range, so a single-char step
+// that lands exactly on a run's boundary (the visually-invisible edge) rests there before the next
+// press jumps across. This filter completes the fix: a one-char horizontal step whose new head lands
+// on a hidden run's near boundary (or, defensively, inside it) snaps across the whole run, so motion
+// is exactly per-VISIBLE-character (zero phantom presses). WYSIWYG-only (Live reveals on cursor,
+// Source is raw; vim ⟂ WYSIWYG per #174). Shift-expansion snaps the head too (selection stays
+// visible-char granular). Display-only: it never changes the doc, only the caret's resting offset.
+export const wysiwygInlineSkip: Extension = EditorState.transactionFilter.of((tr) => {
+  if (tr.docChanged || !tr.selection) return tr;
+  if (tr.startState.facet(displayMode) !== "wysiwyg") return tr;
+  const oldHead = tr.startState.selection.main.head;
+  const newSel = tr.newSelection.main;
+  const newHead = newSel.head;
+  if (Math.abs(newHead - oldHead) !== 1) return tr; // single-char arrow step only (not jumps/word-motion)
+  const atomic = tr.startState.field(livePreview, false)?.atomic;
+  if (!atomic) return tr;
+  const dir = newHead > oldHead ? 1 : -1;
+  let target: number | null = null;
+  atomic.between(newHead, newHead, (from, to) => {
+    if (dir > 0 && newHead === from) target = to;        // entering a run from its left edge → far edge
+    else if (dir < 0 && newHead === to) target = from;   // entering from its right edge
+    else if (newHead > from && newHead < to) target = dir > 0 ? to : from; // defensive: strictly inside
+    if (target !== null) return false;
+  });
+  if (target === null || target === newHead) return tr;
+  return {
+    selection: newSel.empty ? EditorSelection.cursor(target) : EditorSelection.range(newSel.anchor, target),
+    scrollIntoView: true,
+  };
 });
 
 // ADR-024 dd/yy on an atom (Q3, Mode A) live in live-preview/vim-atom.ts — they remap the
