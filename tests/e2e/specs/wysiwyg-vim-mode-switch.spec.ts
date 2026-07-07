@@ -31,18 +31,23 @@ test("#238: mode switch (Live→WYSIWYG) toggles the blank-fatcursor class with 
 
   const hasBlank = () => page.locator("[data-pane=preview] .cm-editor.cm-wys-blank-fatcursor").count();
 
-  // Live: no blank class.
-  expect(await hasBlank()).toBe(0);
+  // In LIVE, a pipe table REVEALS to raw when the caret is inside it (the `|` under the cursor is REAL
+  // text — blanking it would be the opposite bug), so `blocks` doesn't contain the caret → no blank.
+  await expect.poll(hasBlank, { timeout: 4000 }).toBe(0);
 
-  // Switch to WYSIWYG WITHOUT moving the caret → class applied (caret is on the table block atom).
+  // In WYSIWYG the table is a RENDERED widget (never revealed) → the fat cursor would paint the hidden
+  // `|`, so the blank class applies. The mode-switch transition must (re)compute this without a caret move.
   await page.getByTestId("displaymode-wysiwyg").click();
   await sleep(400);
-  await expect
-    .poll(hasBlank, { timeout: 4000 })
-    .toBeGreaterThan(0);
+  await expect.poll(hasBlank, { timeout: 4000 }).toBeGreaterThan(0);
 
-  // Switch back to Live WITHOUT moving the caret → class cleared (no stale transparent fat cursor).
-  await page.getByTestId("displaymode-live").click();
+  // Source shows raw text → class clears.
+  await page.getByTestId("displaymode-source").click();
   await sleep(400);
   await expect.poll(hasBlank, { timeout: 4000 }).toBe(0);
+
+  // Back to WYSIWYG → applied again (transition recompute).
+  await page.getByTestId("displaymode-wysiwyg").click();
+  await sleep(400);
+  await expect.poll(hasBlank, { timeout: 4000 }).toBeGreaterThan(0);
 });
