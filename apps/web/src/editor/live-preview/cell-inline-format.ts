@@ -31,6 +31,11 @@ function rangeFullyMarked(root: HTMLElement, range: Range, tags: readonly string
     r.selectNodeContents(t);
     if (r.compareBoundaryPoints(Range.END_TO_START, range) >= 0 || r.compareBoundaryPoints(Range.START_TO_END, range) <= 0) continue;
     if (!(t.nodeValue ?? "").length) continue;
+    // #89 comment 944: whitespace/ZWSP-only text nodes carry no formatting (like BR). After #896 peels a
+    // selection's edge whitespace OUTSIDE the mark, that whitespace becomes its own blank node; counting
+    // it as "unmarked" made a space-including selection compute fully=false forever, so B could never
+    // TOGGLE OFF (it kept re-applying). Exempt blank nodes: coverage = "all VISIBLE chars are marked".
+    if (isBlankNode(t)) continue;
     sawText = true;
     let marked = false;
     for (let p = t.parentElement; p && p !== root; p = p.parentElement) {
