@@ -35,6 +35,7 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `tenant.embed_providers_updated` | A tenant admin changed the external-embed host allowlist (#108). |
 | `tenant.oidc_updated` | The tenant OIDC login configuration was changed. |
 | `tenant.oidc_recovered` | An operator disabled a locked-out tenant's OIDC out of band (break-glass). |
+| `tenant.saml_recovered` | An operator disabled a locked-out tenant's SAML out of band (break-glass). |
 | `tenant.custom_domain_added` | A custom domain was added (pending verification). |
 | `tenant.custom_domain_verified` | A custom domain was verified and activated. |
 | `tenant.custom_domain_removed` | A custom domain was removed (three-point revocation). |
