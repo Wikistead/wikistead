@@ -106,15 +106,50 @@ function mergeAdjacent(root: HTMLElement, tags: readonly string[]): void {
 // `**a\nb**` (cellElToText), which renderCellInline then splits per line into `**a` + `b**` (both literal,
 // unclosed) — the reported "multi-line cell decoration breaks". Grouping the extracted fragment's top-level
 // nodes at <br> boundaries and wrapping each group keeps every line's mark self-closed and round-trippable.
+// #89 comment 896: EDGE WHITESPACE must stay OUTSIDE the wrapper. A mark whose inner text begins or ends
+// with a space (or the ZWSP insertBrAtCaret drops after a <br>) serialises to `**one **` / `** two**`,
+// which CommonMark's emphasis flanking rules DON'T parse as emphasis (a `**` next to whitespace can't
+// open/close) — so the mark renders as a literal `**` on commit and the styling vanishes. And a
+// whitespace/ZWSP-only line segment must get NO wrapper at all (else `****`, an empty mark, leaks). So:
+// group nodes per line, and for each line peel leading/trailing whitespace+ZWSP out of the wrapper.
+const isBlankNode = (n: Node): boolean => n.nodeType === Node.TEXT_NODE && !/[^\s​]/.test(n.nodeValue ?? "");
 function wrapPerLine(fragment: DocumentFragment, makeEl: () => HTMLElement): DocumentFragment {
   const out = document.createDocumentFragment();
-  let current: HTMLElement | null = null;
+  let line: Node[] = [];
+  const flushLine = () => { if (line.length) wrapLineSegment(out, line, makeEl); line = []; };
   for (const node of Array.from(fragment.childNodes)) {
-    if (node instanceof HTMLBRElement) { out.appendChild(node); current = null; continue; } // line break — end the run
-    if (!current) { current = makeEl(); out.appendChild(current); }
-    current.appendChild(node);
+    if (node instanceof HTMLBRElement) { flushLine(); out.appendChild(node); continue; } // line break — end the run
+    line.push(node);
   }
+  flushLine();
   return out;
+}
+// Wrap ONE line's nodes, but with leading/trailing whitespace+ZWSP kept OUTSIDE the wrapper. A segment
+// with no non-whitespace content gets no wrapper (its text is emitted as-is).
+function wrapLineSegment(out: DocumentFragment, nodes: Node[], makeEl: () => HTMLElement): void {
+  const hasContent = nodes.some((n) => n.nodeType !== Node.TEXT_NODE ? (n.textContent ?? "").length > 0 : !isBlankNode(n));
+  if (!hasContent) { for (const n of nodes) out.appendChild(n); return; } // blank line — no empty mark
+  const seg = nodes.slice();
+  // Peel a leading whitespace run out of the FIRST text node (emit it before the wrapper).
+  if (seg[0]!.nodeType === Node.TEXT_NODE) {
+    const v = seg[0]!.nodeValue ?? "";
+    const lead = v.length - v.replace(/^[\s​]+/, "").length;
+    if (lead === v.length) { out.appendChild(seg.shift()!); } // whole node is whitespace → outside
+    else if (lead > 0) { out.appendChild(document.createTextNode(v.slice(0, lead))); (seg[0] as Text).nodeValue = v.slice(lead); }
+  }
+  // Peel a trailing whitespace run out of the LAST text node (emit it after the wrapper).
+  let trail: Node | null = null;
+  const lastIdx = seg.length - 1;
+  if (seg[lastIdx]!.nodeType === Node.TEXT_NODE) {
+    const v = seg[lastIdx]!.nodeValue ?? "";
+    const tlen = v.length - v.replace(/[\s​]+$/, "").length;
+    if (tlen === v.length) { trail = seg.pop()!; }
+    else if (tlen > 0) { trail = document.createTextNode(v.slice(v.length - tlen)); (seg[lastIdx] as Text).nodeValue = v.slice(0, v.length - tlen); }
+  }
+  const wrapper = makeEl();
+  for (const n of seg) wrapper.appendChild(n);
+  out.appendChild(wrapper);
+  if (trail) out.appendChild(trail);
 }
 
 // #236 (review fix): a selection recorded as a cell-TEXT offset range survives a mark toggle,

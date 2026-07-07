@@ -35,6 +35,20 @@ export function renderCellInline(el: HTMLElement, text: string): void {
 // Read a (contenteditable) cell back to canonical cell text: text nodes verbatim, <br> -> "\n".
 // Reads via the DOM tree (textContent + <br>), NEVER innerHTML, so pasted/typed rich markup
 // cannot survive as markup. Resize-handle spans the editor appends inside the cell are skipped.
+// #89 comment 896 (defensive layer): wrap `inner` in an emphasis delimiter, but keep edge whitespace/ZWSP
+// OUTSIDE the delimiters and emit NOTHING for an all-whitespace inner. `**one **` / `** two**` don't parse
+// as emphasis (CommonMark flanking: a `**` adjacent to whitespace can't open/close), so the mark would
+// render as literal `**` — move the whitespace out (`**one** `) so the source round-trips. Even if a
+// space-edge mark slips in from another path, this keeps the serialised Markdown valid. (Code spans are
+// verbatim and keep their whitespace, so this only applies to strong/em/strikethrough.)
+function wrapMark(inner: string, open: string, close: string): string {
+  const core = inner.replace(/^[\s​]+/, "").replace(/[\s​]+$/, "");
+  if (!core) return inner; // whitespace/ZWSP-only → no empty mark (avoids `****`)
+  const lead = inner.slice(0, inner.length - inner.replace(/^[\s​]+/, "").length);
+  const trail = inner.slice(inner.replace(/[\s​]+$/, "").length);
+  return `${lead}${open}${core}${close}${trail}`;
+}
+
 export function cellElToText(el: HTMLElement): string {
   let out = "";
   for (const node of Array.from(el.childNodes)) {
@@ -47,10 +61,10 @@ export function cellElToText(el: HTMLElement): string {
       // (never produced by renderCellInline — belt-and-braces) contribute only their text.
       const inner = cellElToText(node);
       switch (node.tagName) {
-        case "STRONG": case "B": out += `**${inner}**`; break;
-        case "EM": case "I": out += `*${inner}*`; break;
-        case "S": case "DEL": case "STRIKE": out += `~~${inner}~~`; break;
-        case "CODE": out += `\`${inner}\``; break;
+        case "STRONG": case "B": out += wrapMark(inner, "**", "**"); break;
+        case "EM": case "I": out += wrapMark(inner, "*", "*"); break;
+        case "S": case "DEL": case "STRIKE": out += wrapMark(inner, "~~", "~~"); break;
+        case "CODE": out += `\`${inner}\``; break; // code spans are verbatim — no flanking rule
         case "A": out += `[${inner}](${(node as HTMLAnchorElement).getAttribute("href") ?? ""})`; break;
         default: out += inner;
       }
