@@ -555,3 +555,14 @@ body {
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-corner { background: transparent; }
+
+/* #239: the editUI (mermaid/plantuml/callout inline editor) Done button — a subtle exit affordance,
+   top-right, so the block editor is never a trap (Escape is the keyboard equivalent). */
+.cm-lp-editui-wrap { position: relative; }
+.cm-lp-editui-done {
+  position: absolute; top: 4px; right: 4px; z-index: 3;
+  font: inherit; font-size: 12px; line-height: 1.2;
+  padding: 2px 10px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--panel-2); color: var(--fg); cursor: pointer;
+}
+.cm-lp-editui-done:hover { background: var(--panel-3); }

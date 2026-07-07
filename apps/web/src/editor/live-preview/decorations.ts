@@ -834,11 +834,36 @@ export class EditableEditUIWidget extends WidgetType {
       view.focus();
     };
     dom.__editUICtrl = this.editUI.mount(dom, asMacroSource(this.source), { theme: this.theme }, save);
+    // #239: re-add the Done affordance after each (re)mount — mountInto's replaceChildren above wipes it.
+    const done = document.createElement("button");
+    done.type = "button";
+    done.className = "cm-lp-editui-done";
+    done.textContent = "Done";
+    done.setAttribute("data-testid", "editui-done");
+    done.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); this.exit(dom, view); });
+    dom.appendChild(done);
+  }
+  // #239: EXIT the editUI. ignoreEvent returns true so CM swallows widget-internal events — the
+  // editor-level Escape (escExit) never fires, so a fence editUI (mermaid/plantuml: a plain textarea
+  // with no exit of its own) was a TRAP (open → never back to the rendered diagram). Blur the focused
+  // field first (fires the editUI's `change`→save, commit-on-blur), then clear render-active so the block
+  // re-renders. Offset-invariant (only the edit-active effect; the save is the editUI's own).
+  private exit(dom: EditUIDom, view: EditorView) {
+    const focused = dom.contains(document.activeElement) ? (document.activeElement as HTMLElement) : null;
+    focused?.blur();
+    view.dispatch({ effects: setMacroRenderActive.of(null) });
+    view.focus();
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div") as EditUIDom;
+    wrap.className = "cm-lp-editui-wrap"; // position:relative anchors the Done button (#239)
     wrap.contentEditable = "false"; // atom root (ADR-054): CM keeps the block atomic, no focus reclaim
     this.mountInto(wrap, view);
+    // Escape exits (the keyboard way out; the Done button is added per-mount in mountInto). On wrap so it
+    // survives updateDOM's replaceChildren. Capture so it beats a textarea that might also read Escape.
+    wrap.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); this.exit(wrap, view); }
+    }, true);
     wrap.__editUIRo = observeBlockResize(view, wrap);
     return wrap;
   }
@@ -1598,8 +1623,8 @@ const RENDERERS: BlockRenderer[] = [
         // reveals — entering opens its modal. Otherwise the atom renders.
         const active = ctx.state.field(macroRenderActiveField, false);
         // #174 / ADR-087: a fence macro with the unified inline editUI, render-active → mount its own
-        // editor (EditableEditUIWidget). Inert today (no first-party fence macro declares editUI yet)
-        // the migration hook, symmetric with the directive path.
+        // editor (EditableEditUIWidget). mermaid + plantuml declare editUI: inline (#239) — the ✎ button
+        // enters here; the host wires the Escape/Done exit so the editUI is not a one-way trap.
         // #174 addendum: `active.raw` (Ctrl+Enter) opts OUT of the editUI — it reveals the raw source
         // (falls through to the reveal-on-cursor branch below). The ✎ button enters with raw=false → editUI.
         if (macro.editUI?.present === "inline" && active && !active.raw && active.from <= from && active.to >= to && !ctx.state.readOnly) {
