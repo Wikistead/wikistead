@@ -615,5 +615,9 @@
   },
   "publicPage": {
     "notFound": "ページが見つかりません"
+  },
+  "backlinks": {
+    "title": "リンクされた言及",
+    "untitled": "(無題)"
   }
 }

@@ -168,6 +168,17 @@ export interface ShareLink {
 const linksPath = (r: ShareResource) => `/${r.type}s/${r.id}/share-links`; // /pages/.. | /spaces/..
 const linksKey = (r: ShareResource) => ["share-links", r.type, r.id];
 
+// #230: pages that reference this page (server FGA-view-gates each result).
+export interface Backlink { id: string; title: string }
+export function useBacklinks(pageId: string | null, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["backlinks", pageId],
+    queryFn: () => apiFetch<Backlink[]>(`/pages/${encodeURIComponent(pageId!)}/backlinks`, token).then((r) => r ?? []),
+    enabled: enabled && pageId != null,
+  });
+}
+
 export function useShareLinks(resource: ShareResource | null, enabled = true) {
   const { token } = useSession();
   return useQuery({
