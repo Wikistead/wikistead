@@ -619,7 +619,8 @@
   },
   "backlinks": {
     "title": "リンクされた言及",
-    "untitled": "(無題)"
+    "untitled": "(無題)",
+    "empty": "このページを参照しているページはまだありません。"
   },
   "template": {
     "saveAsTemplate": "テンプレートとして保存",

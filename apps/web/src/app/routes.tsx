@@ -115,7 +115,7 @@ function useDisplayModeShortcut(cycle: () => void, enabled: boolean, chord: stri
 import { Lock } from "lucide-react";
 import { PageTitle } from "./PageTitle";
 import { PageMeta } from "./PageMeta";
-import { BacklinksSection } from "./BacklinksSection";
+import { BacklinksPanel } from "./BacklinksPanel";
 import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
 import { CommentsPanel } from "../comments/CommentsPanel";
@@ -281,12 +281,23 @@ function PageRoute() {
   };
   const closeAttachments = useCallback(() => setAttachmentsOpen(false), []);
 
-  // #206: mutual exclusion — only one right panel (comments / history / attachments) is open at a time.
-  // Opening one closes the others (and clears their persisted-open flag).
-  const closeOtherRightPanels = (keep: "comments" | "history" | "attachments") => {
+  // #230: "Linked mentions" — a right-rail panel opened from the ⋯ menu (was a bottom section that never
+  // rendered in edit mode). Openable in both modes; part of the #206 mutual exclusion.
+  const [backlinksOpen, setBacklinksOpen] = useState(false);
+  const toggleBacklinks = () => {
+    const willOpen = !backlinksOpen;
+    setBacklinksOpen(willOpen);
+    if (willOpen) closeOtherRightPanels("backlinks");
+  };
+  const closeBacklinks = useCallback(() => setBacklinksOpen(false), []);
+
+  // #206: mutual exclusion — only one right panel (comments / history / attachments / backlinks) is open
+  // at a time. Opening one closes the others (and clears their persisted-open flag).
+  const closeOtherRightPanels = (keep: "comments" | "history" | "attachments" | "backlinks") => {
     if (keep !== "comments") { setCommentsOpen(false); try { localStorage.setItem("wks.commentsOpen", "0"); } catch { /* no storage */ } }
     if (keep !== "history") { setHistoryOpen(false); try { localStorage.setItem("wks.historyOpen", "0"); } catch { /* no storage */ } }
     if (keep !== "attachments") setAttachmentsOpen(false);
+    if (keep !== "backlinks") setBacklinksOpen(false);
   };
 
   // Per-page permissions (manage only). Also the invite-to-draft surface.
@@ -411,6 +422,7 @@ function PageRoute() {
     onToggleToc: () => setTocOn(!tocOn),
     onHistory: toggleHistory,
     onAttachments: toggleAttachments,
+    onBacklinks: pageId ? toggleBacklinks : undefined,
     onExport: () => { if (pageId) void downloadPageExport(token, pageId); },
     // #85 bounce: the HTML-export UI entry is SEALED until the post-launch Option-A redesign (a
     // DOM-free render core shared by client + SSR). The current renderMarkdownToHtml output is
@@ -476,7 +488,6 @@ function PageRoute() {
               </div>
             </div>
             <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
-            {!editing && pageId && <BacklinksSection pageId={pageId} />}
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #192: the TOC rail lives in the content's RIGHT WHITESPACE, inside the editor area, so the
                 scrollbar (the editor's, at the far right) is to the RIGHT of the rail — not between them.
@@ -485,7 +496,7 @@ function PageRoute() {
                 #212: the rail shares the RIGHT zone with the comments/history/attachments panels, so it
                 yields (hidden) when one is open — else its pointer-events overlap and swallow clicks on
                 the panel (a right panel and the rail must not both occupy the zone). */}
-            {isWide && tocOn && !commentsOpen && !historyOpen && !attachmentsOpen && (
+            {isWide && tocOn && !commentsOpen && !historyOpen && !attachmentsOpen && !backlinksOpen && (
               /* #212 bounce 3: clear the absolute header band (offset top by --wks-band-h) so the TOC rail
                  isn't hidden under it. */
               <div className="pointer-events-none absolute left-[calc(50%+370px+1rem)] top-[calc(var(--wks-band-h,0px)+0.5rem)] bottom-2 z-[5] w-[210px]">
@@ -500,6 +511,7 @@ function PageRoute() {
         {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={page?.canComment ?? capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} />}
         {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} onCompare={openDiff} onClose={closeHistory} />}
         {pageId && attachmentsOpen && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} onClose={closeAttachments} />}
+        {pageId && backlinksOpen && <BacklinksPanel pageId={pageId} onClose={closeBacklinks} />}
       </div>
       {pageId && diffRevId && <DiffModal pageId={pageId} revId={diffRevId} onClose={closeDiff} />}
       {pageId && <PermissionsDialog pageId={pageId} open={permsOpen} onClose={() => setPermsOpen(false)} />}

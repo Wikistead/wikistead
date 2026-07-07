@@ -619,7 +619,8 @@
   },
   "backlinks": {
     "title": "Linked mentions",
-    "untitled": "(untitled)"
+    "untitled": "(untitled)",
+    "empty": "No pages reference this one yet."
   },
   "template": {
     "saveAsTemplate": "Save as template",

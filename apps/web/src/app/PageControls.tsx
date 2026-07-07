@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Copy, Eye, Code, BookOpen, Sparkles, List, FileStack } from "lucide-react";
+import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Copy, Eye, Code, BookOpen, Sparkles, List, FileStack, Link as LinkIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui/Button";
 import { ToggleButton } from "../ui/ToggleButton";
@@ -57,6 +57,7 @@ export interface PageControlsProps {
   onDelete?: () => void;
   onDuplicate?: () => void; // #229: create a new page seeded from this one (template)
   onSaveTemplate?: () => void; // #248: save this page's published content as a reusable template
+  onBacklinks?: () => void; // #230: open the "Linked mentions" (backlinks) right-rail panel
   dirtySignal?: DirtySignal;
 }
 
@@ -107,6 +108,8 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string): Overflow
   if (p.onPrint) items.push({ value: "print", label: t("page.print"), icon: <Printer size={14} />, testId: "print-page", disabled: true, hint: t("page.printDisabled") });
   if (p.onAttachments) items.push({ value: "attachments", label: t("page.attachments"), icon: <Paperclip size={14} />, testId: "attachments-toggle" });
   if (p.onHistory) items.push({ value: "history", label: t("page.history"), icon: <History size={14} />, testId: "history-toggle" });
+  // #230: "Linked mentions" — open the backlinks right-rail panel (both modes).
+  if (p.onBacklinks) items.push({ value: "backlinks", label: t("backlinks.title"), icon: <LinkIcon size={14} />, testId: "backlinks-toggle" });
   if (p.onPermissions) items.push({ value: "permissions", label: t("page.permissions"), icon: <Shield size={14} />, testId: "permissions-open" });
   // Share in the ⋯ only while EDITING (view mode already has the dedicated Share button).
   // manage-gated by onShare being set (the server re-checks). #4.
@@ -124,6 +127,7 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string): Overflow
 function runOverflow(p: PageControlsProps, v: string) {
   if (v === "duplicate") { p.onDuplicate?.(); return; }
   if (v === "save-template") { p.onSaveTemplate?.(); return; }
+  if (v === "backlinks") { p.onBacklinks?.(); return; }
   if (v === "comments") p.onToggleComments?.();
   else if (v === "export") p.onExport?.();
   else if (v === "export-html") p.onExportHtml?.();

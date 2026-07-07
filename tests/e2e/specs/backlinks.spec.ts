@@ -23,10 +23,13 @@ test("#230: a page shows a backlink from another page that links to it", async (
   await page.getByTestId("publish-page").click();
   await sleep(800);
 
-  // Open the target in READ mode → the backlinks section shows the linker.
+  // #230 (redesign): open the target, then open the "Linked mentions" right-rail panel from the ⋯ menu.
   await page.goto(`/p/${target}`);
   await page.waitForSelector("[data-pane=preview] .cm-content");
-  await expect(page.getByTestId("backlinks")).toBeVisible({ timeout: 10000 });
+  await sleep(400);
+  await page.getByTestId("page-overflow-trigger").click();
+  await page.getByTestId("backlinks-toggle").click();
+  await expect(page.getByTestId("backlinks-panel")).toBeVisible({ timeout: 10000 });
   const link = page.getByTestId(`backlink-${linker}`);
   await expect(link).toBeVisible();
   await expect(link).toHaveText("bl-linker");
@@ -89,7 +92,7 @@ test("#246: no backlink warning when the page has no references", async ({ brows
   expect(await page.getByTestId("delete-backlink-warning").count()).toBe(0);
 });
 
-test("#230: a page with no backlinks renders no section (no clutter)", async ({ browser }) => {
+test("#230: the backlinks panel shows an empty state and opens in edit mode too", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   const lonely = await openScratch(page, "bl-lonely");
   await enterEdit(page);
@@ -100,6 +103,16 @@ test("#230: a page with no backlinks renders no section (no clutter)", async ({ 
   await sleep(600);
   await page.goto(`/p/${lonely}`);
   await page.waitForSelector("[data-pane=preview] .cm-content");
-  await sleep(1500);
-  expect(await page.getByTestId("backlinks").count()).toBe(0);
+  await sleep(400);
+  // Open the panel (read mode) → empty state, not a list. No always-on bottom section anymore.
+  await page.getByTestId("page-overflow-trigger").click();
+  await page.getByTestId("backlinks-toggle").click();
+  await expect(page.getByTestId("backlinks-panel")).toBeVisible();
+  await expect(page.getByTestId("backlinks-empty")).toBeVisible();
+  // #230 redesign: openable in EDIT mode too (the old bottom section never rendered while editing).
+  await page.getByTestId("backlinks-close").click();
+  await enterEdit(page);
+  await page.getByTestId("page-overflow-trigger").click();
+  await page.getByTestId("backlinks-toggle").click();
+  await expect(page.getByTestId("backlinks-panel")).toBeVisible();
 });
