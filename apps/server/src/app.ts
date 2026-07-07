@@ -25,6 +25,7 @@ import { SESSION_COOKIE, readSession } from './auth/session.js'
 import { assertSecretKey } from './auth/secret-crypto.js'
 import { spacesPlugin } from './routes/spaces.js'
 import { pagesPlugin } from './routes/pages.js'
+import { templatesPlugin } from './routes/templates.js'
 import { billingPlugin } from './routes/billing.js'
 import { searchPlugin } from './routes/search.js'
 import { attachmentsPlugin } from './routes/attachments.js'
@@ -342,6 +343,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(aiPlugin)
   await app.register(spacesPlugin)
   await app.register(pagesPlugin)
+  await app.register(templatesPlugin)
   await app.register(billingPlugin)
   await app.register(searchPlugin)
   await app.register(attachmentsPlugin)
