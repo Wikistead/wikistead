@@ -1048,6 +1048,42 @@ export function principalForPage(req: FastifyRequest, pageId: string): { subject
   throw Object.assign(new Error('unauthorized'), { statusCode: 401 })
 }
 
+// #230: backlinks — the pages that reference `pageId` from their PUBLISHED content. Sources are the
+// PERSISTED internal references only: an `:::embed-page\n<id>\n:::` block (the body IS the target id)
+// and an explicit markdown link to `/p/<id>`. (The #224 title-match auto-links are display-only —
+// never in the source — so they are out of scope here and follow #224's finalisation.)
+// Security: the SQL LIKE only prefilters candidates that mention the id string; each candidate is then
+// (a) confirmed to hold a REAL reference (precise regex, not a coincidental substring) and (b) gated
+// by an FGA `view` check for the viewer — so a backlink from a page the viewer can't see is never
+// leaked ("confirm via OpenFGA before display", like listSpaces / the search stage-2 guard).
+export interface Backlink { id: string; title: string }
+export async function getBacklinks(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { pageId: string; subject: string; context?: { current_time: string } },
+): Promise<Backlink[]> {
+  // A real reference = an /p/<id> link OR the id as an embed-page body line. Word-boundary the id so
+  // `/p/ab` doesn't match page `abc`.
+  const idRe = args.pageId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const refRe = new RegExp(`/p/${idRe}(?![\\w-])|(^|\\n)\\s*${idRe}\\s*(\\n|$)`)
+  const rows = await db.sql<{ id: string; title: string; published_md: string }[]>`
+    SELECT id, title, published_md FROM pages
+    WHERE id <> ${args.pageId}
+      AND published_at IS NOT NULL
+      AND published_md IS NOT NULL
+      AND published_md LIKE ${'%' + args.pageId + '%'}
+    ORDER BY updated_at DESC
+    LIMIT 200
+  `
+  const candidates = rows.filter((r) => refRe.test(r.published_md))
+  const out: Backlink[] = []
+  for (const c of candidates) {
+    const ok = await check(fga, args.subject, 'view', { type: 'page', id: c.id }, args.context)
+    if (ok) out.push({ id: c.id, title: c.title })
+  }
+  return out
+}
+
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function pagesPlugin(app: FastifyInstance) {
@@ -1153,6 +1189,13 @@ export async function pagesPlugin(app: FastifyInstance) {
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/published', { config: { guest: 'view' } }, async (req) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
     return getPublished(req.db, app.fga, { pageId: req.params.pageId, subject, context })
+  })
+
+  // #230: backlinks for a page (member or view-guest). Each returned page is FGA-view-gated for the
+  // caller, so this leaks no reference from a page the viewer cannot see.
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/backlinks', { config: { guest: 'view' } }, async (req) => {
+    const { subject, context } = principalForPage(req, req.params.pageId)
+    return getBacklinks(req.db, app.fga, { pageId: req.params.pageId, subject, context })
   })
 
   // External embed resolve (#108 / ADR-071): server-fetch an allowlisted provider URL for a page a

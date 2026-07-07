@@ -615,5 +615,9 @@
   },
   "publicPage": {
     "notFound": "Page not found"
+  },
+  "backlinks": {
+    "title": "Linked mentions",
+    "untitled": "(untitled)"
   }
 }
