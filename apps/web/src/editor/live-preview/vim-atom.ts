@@ -2,7 +2,7 @@ import { Vim, getCM } from "@replit/codemirror-vim";
 import { EditorState, EditorSelection, type Extension } from "@codemirror/state";
 import { ViewPlugin, type EditorView, type ViewUpdate } from "@codemirror/view";
 import { livePreview, displayMode, nestedDeleteChange, enterMacroCommand, setVimMotionActive } from "./decorations";
-import { nestedSelectionField, setNestedSelection } from "./macro-edit";
+import { nestedSelectionField, setNestedSelection, macroRenderActiveField } from "./macro-edit";
 
 // ADR-024 1b (Mode A): dd treats a macro ATOM as one unit — the WHOLE macro source is the
 // delete payload, and the unnamed register gets the whole macro so `p` pastes it back. The
@@ -223,33 +223,33 @@ export const vimWysiwygCaretGuard: Extension = ViewPlugin.fromClass(
         queueMicrotask(() => { try { this.view.dispatch({ effects: setVimMotionActive.of(motionActive) }); } catch { /* view gone */ } });
       }
       const blank = (on: boolean) => this.view.dom.classList.toggle("cm-wys-blank-fatcursor", on);
-      // #238 (review follow-up): the blank-class (and the inline nudge) must react to transitions
-      // that set NEITHER selectionSet NOR docChanged — a displayMode Compartment switch (Live→WYSIWYG),
-      // vim on/off, insert↔normal, and focus return all reconfigure/refocus without a selection change.
-      // The earlier `if (!u.selectionSet && !u.docChanged) return` short-circuited those, so putting the
-      // caret on a table then switching to WYSIWYG left the fat cursor painting `|`/`:` (class never
-      // applied), and leaving WYSIWYG/vim left the class stuck. Fix: recompute the blank class on EVERY
-      // update (it is cheap — facet + vim + one block scan); gate only the nudge DISPATCH below to the
-      // transitions that can actually move the caret onto/off a hidden run.
-      if (u.state.facet(displayMode) !== "wysiwyg") { blank(false); return; }
+      const mode = u.state.facet(displayMode);
       const vim = getCM(u.view)?.state.vim;
-      if (!vim || vim.insertMode) { blank(false); return; } // insert caret keeps between-char semantics (wysiwygInlineSkip)
       const sel = u.state.selection.main;
       const head = sel.head;
       const lp = u.state.field(livePreview, false);
-      if (!lp) { blank(false); return; }
-      // #238: on a BLOCK atom (a table / `:::` fence) the caret legitimately sits ON the atom (ADR-024) —
-      // we must NOT move it (that would break atom motion), but the vim fat cursor would then paint the
-      // atom's hidden `|` / `:`. Blank the fat-cursor GLYPH (a class → `.cm-fat-cursor { color: transparent }`)
-      // while the caret is on an atom, so the block cursor stays visible but the leaked syntax char does not.
+      // #238 comment 978: the vim fat cursor paints the RAW doc char at head. A BLOCK atom (table / `:::`
+      // fence) is rendered as a WIDGET with its raw source hidden in BOTH Live AND WYSIWYG (and while
+      // RichUI is expanded the CM caret stays on the atom), so the leaked `|`/`:` glyph appears in all of
+      // them — the display mode is NOT the essential condition (the earlier WYSIWYG-only gate was too
+      // narrow). It is NOT hidden in Source (raw text — the char under the cursor is real; blanking it
+      // there would be the opposite bug). So: blank on a rendered block atom in any mode except Source.
+      // The inline nudge below stays WYSIWYG-only (Live reveals inline syntax under the caret).
       let onBlockAtom = false;
-      for (const b of lp.blocks) if (head >= b.from && head < b.to) { onBlockAtom = true; break; }
+      if (mode !== "source" && vim && !vim.insertMode && lp) {
+        for (const b of lp.blocks) if (head >= b.from && head < b.to) { onBlockAtom = true; break; }
+        // RichUI: Ctrl+Enter expands table-edit but the CM caret can remain on the atom's range.
+        if (!onBlockAtom) {
+          const active = u.state.field(macroRenderActiveField, false);
+          if (active && head >= active.from && head <= active.to) onBlockAtom = true;
+        }
+      }
       blank(onBlockAtom);
-      if (onBlockAtom) return; // don't nudge — the caret stays on the atom (ADR-024)
-      // Nudge (a dispatch) only on transitions that can move the caret onto/off a hidden inline run:
-      // a selection/doc change, or a mode/focus transition that brings the caret into WYSIWYG-vim on a
-      // hidden run (the #240 inline case, shared per comment 943 item 3). Unrelated updates (viewport,
-      // measure) don't dispatch.
+
+      // Inline nudge (a dispatch) — WYSIWYG-only (Live reveals inline syntax under the caret; the
+      // between-char snap is a WYSIWYG semantic). Skip on a block atom (caret stays per ADR-024), in
+      // insert/non-vim, and on updates that can't have moved the caret onto/off a hidden run.
+      if (mode !== "wysiwyg" || !vim || vim.insertMode || !lp || onBlockAtom) return;
       const modeChanged = u.startState.facet(displayMode) !== u.state.facet(displayMode);
       if (!u.selectionSet && !u.docChanged && !modeChanged && !u.focusChanged) return;
       // Is char[head] inside an INLINE hidden run (single-line)? If so, char[head] is a hidden glyph the
