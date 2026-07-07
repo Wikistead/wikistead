@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Eye, Code, BookOpen, Sparkles, List } from "lucide-react";
+import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Copy, Eye, Code, BookOpen, Sparkles, List } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui/Button";
 import { ToggleButton } from "../ui/ToggleButton";
@@ -55,6 +55,7 @@ export interface PageControlsProps {
   // Delete the page. Set only when the caller may manage the page (FGA `manage`); the
   // server re-checks and 403s regardless (two-layer authz). Undefined → item hidden.
   onDelete?: () => void;
+  onDuplicate?: () => void; // #229: create a new page seeded from this one (template)
   dirtySignal?: DirtySignal;
 }
 
@@ -109,11 +110,15 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string): Overflow
   // Share in the ⋯ only while EDITING (view mode already has the dedicated Share button).
   // manage-gated by onShare being set (the server re-checks). #4.
   if (p.editing && p.onShare) items.push({ value: "share", label: t("page.share"), icon: <Share2 size={14} />, testId: "share-page" });
+  // #229: use this page as a template — create a new page seeded with its content. Any viewer can
+  // (the server view-gates the source); available in both modes.
+  if (p.onDuplicate) items.push({ value: "duplicate", label: t("page.useAsTemplate"), icon: <Copy size={14} />, testId: "duplicate-page" });
   // Delete in BOTH modes; manage-gated by onDelete being set. Destructive (danger). #4.
   if (p.onDelete) items.push({ value: "delete", label: t("page.delete"), icon: <Trash2 size={14} />, testId: "delete-page", danger: true });
   return items;
 }
 function runOverflow(p: PageControlsProps, v: string) {
+  if (v === "duplicate") { p.onDuplicate?.(); return; }
   if (v === "comments") p.onToggleComments?.();
   else if (v === "export") p.onExport?.();
   else if (v === "export-html") p.onExportHtml?.();

@@ -134,7 +134,7 @@ import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, ApiError, assetUrl, type GuestToken } from "../data/apiClient";
 import { renderMarkdownToDom } from "../editor/macros/md-render"; // #227: public render via the shared sanitized renderer
-import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useEntitlements } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useCreatePage, useEntitlements } from "../data/queries";
 import { ConfirmDialog } from "../ui/dialogs";
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport, printPageHtml } from "../data/exportApi";
@@ -292,6 +292,7 @@ function PageRoute() {
   const [sharing, setSharing] = useState(false); // share dialog (current page)
   const [deleting, setDeleting] = useState(false); // delete-page confirm (current page)
   const deletePage = useDeletePage();
+  const createFromTemplate = useCreatePage(); // #229: "use as template" → new page seeded from this one
   const navigate = useNavigate();
 
   // Edit mode + layout are owned here now (PageToolbar is the chrome). editing
@@ -388,6 +389,15 @@ function PageRoute() {
     // (two-layer authz — UI suppression + server enforcement). #4.
     onShare: page?.canManage ? () => setSharing(true) : undefined,
     onDelete: page?.canManage ? () => setDeleting(true) : undefined,
+    // #229: create a new page in this space seeded with this page's published content, and open it
+    // in edit mode. Needs a resolved space + an edit-capable user (the server view-gates the source
+    // and 403s a non-editor of the destination space regardless).
+    onDuplicate: spaceId && pageId && canEdit ? () => {
+      createFromTemplate.mutate(
+        { spaceId, title: `${page?.title ?? "Untitled"} (copy)`, fromPageId: pageId },
+        { onSuccess: (p: { id: string } | null) => { if (p) navigate(`/p/${p.id}?edit=1`); } },
+      );
+    } : undefined,
     commentsOpen,
     onToggleComments: toggleComments,
     openComments,

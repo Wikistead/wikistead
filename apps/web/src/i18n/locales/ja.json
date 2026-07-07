@@ -353,7 +353,8 @@
     "modeLive": "ライブ",
     "modeSource": "ソース",
     "modeReading": "リーディング",
-    "modeWysiwyg": "WYSIWYG"
+    "modeWysiwyg": "WYSIWYG",
+    "useAsTemplate": "テンプレートとして複製"
   },
   "sidebar": {
     "newSpace": "新しいスペース",
