@@ -120,6 +120,25 @@ type page
     # stage-2, public anon) inherits the deny.
     define view: viewable but not restricted
 
+# #241 / ADR-110: page templates. A template is a snapshot (the row lives in the `templates` table with
+# tenant RLS); THIS type carries the audience authorization. Scope is expressed by which tuples exist —
+# ADDITIVE (no existing type changed, so no write ripple):
+#   personal : owner + tenant only            → view = manage (owner or tenant admin)
+#   space    : + space:S                       → view also = viewer from space (that space's viewers)
+#   tenant   : + audience_all@tenant:T         → view also = member from audience_all (all tenant members)
+# Guests (share_link) and public (user:*) NEVER appear here → templates are never guest/public-visible.
+# Changing scope = writing/deleting ONE tuple. A deleted space degrades to owner/admin visibility (the
+# snapshot row stays). manage (rename/delete) = the owner or a tenant admin, re-checked server-side.
+type template
+  relations
+    define tenant: [tenant]
+    define space: [space]
+    # audience_all present (@tenant:T) means the whole tenant is the audience (scope = tenant).
+    define audience_all: [tenant]
+    define owner: [user]
+    define manage: owner or admin from tenant
+    define view: manage or member from audience_all or viewer from space
+
 # Evaluated at check time using current_time from the check context.
 # expires_at is stored in the tuple condition context at write time.
 # Tuples written WITHOUT this condition are permanent (no expiry check).
