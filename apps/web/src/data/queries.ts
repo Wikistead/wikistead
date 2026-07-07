@@ -90,10 +90,10 @@ export function useCreatePage() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { spaceId: string; title: string; parentId?: string | null }) =>
+    mutationFn: (args: { spaceId: string; title: string; parentId?: string | null; fromPageId?: string | null }) =>
       apiFetch<Page>(`/spaces/${args.spaceId}/pages`, token, {
         method: "POST",
-        body: JSON.stringify({ title: args.title, parentId: args.parentId ?? null }),
+        body: JSON.stringify({ title: args.title, parentId: args.parentId ?? null, fromPageId: args.fromPageId ?? null }),
       }),
     onSuccess: (_p, args) => qc.invalidateQueries({ queryKey: ["pages", args.spaceId] }),
   });

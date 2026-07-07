@@ -353,7 +353,8 @@
     "modeLive": "Live",
     "modeSource": "Source",
     "modeReading": "Reading",
-    "modeWysiwyg": "WYSIWYG"
+    "modeWysiwyg": "WYSIWYG",
+    "useAsTemplate": "Use as template"
   },
   "sidebar": {
     "newSpace": "New space",

@@ -176,10 +176,21 @@ export async function createPage(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { tenantId: string; spaceId: string; userId: string; title?: string; parentId?: string | null },
+  args: { tenantId: string; spaceId: string; userId: string; title?: string; parentId?: string | null; fromPageId?: string | null },
 ): Promise<Page> {
   const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'space', id: args.spaceId })
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+
+  // #229: template — seed the new page's DRAFT content from an existing page the creator can VIEW
+  // (any viewable page is usable as a template; no separate registry in v1). The source's PUBLISHED
+  // markdown is the template body; the new page stays an unpublished draft (creator-only) holding it.
+  let seedMd: string | null = null
+  if (args.fromPageId) {
+    const canViewSrc = await check(fga, `user:${args.userId}`, 'view', { type: 'page', id: args.fromPageId })
+    if (!canViewSrc) throw Object.assign(new Error('template not found'), { statusCode: 404 }) // hide existence
+    const [src] = await db.sql<{ published_md: string | null }[]>`SELECT published_md FROM pages WHERE id = ${args.fromPageId}`
+    seedMd = src?.published_md ?? null
+  }
 
   const parentId = args.parentId ?? null
   if (parentId) {
@@ -213,6 +224,13 @@ export async function createPage(
       // syncPageParentTuple). A new page is a leaf, so it can never introduce a parent cycle.
       ...(parentId ? [{ user: `page:${parentId}`, relation: 'parent', object: `page:${r.id}` }] : []),
     ])
+    // #229: seed the draft ydoc with the template body so the editor opens pre-filled (collab loads
+    // pages.ydoc on connect; the canonical Y.Text is 'content'). Stays unpublished until the user publishes.
+    if (seedMd) {
+      const doc = new Y.Doc()
+      doc.getText('content').insert(0, seedMd)
+      await tx`UPDATE pages SET ydoc = ${Buffer.from(Y.encodeStateAsUpdate(doc))} WHERE id = ${r.id}`
+    }
     outboxId = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: r.id, operation: 'upsert' })
     return r
   })
@@ -1087,7 +1105,7 @@ export async function getBacklinks(
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function pagesPlugin(app: FastifyInstance) {
-  app.post<{ Params: { spaceId: string }; Body: { title?: string; parentId?: string | null } }>(
+  app.post<{ Params: { spaceId: string }; Body: { title?: string; parentId?: string | null; fromPageId?: string | null } }>(
     '/spaces/:spaceId/pages', async (req, reply) => {
       const page = await createPage(req.db, app.fga, app.searchDriver, {
         tenantId: req.tenant.id,
@@ -1095,6 +1113,7 @@ export async function pagesPlugin(app: FastifyInstance) {
         userId: req.user.sub,
         title: req.body.title,
         parentId: req.body.parentId ?? null,
+        fromPageId: req.body.fromPageId ?? null, // #229: seed from a template page (view-gated)
       })
       return reply.code(201).send(page)
     },
