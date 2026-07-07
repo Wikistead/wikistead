@@ -165,6 +165,51 @@ describe("#89 WYSIWYG cell marks — decorate in place, round-trip to Markdown",
     expect(cellElToText(el)).toBe("one\ntwo");
   });
 
+  it("#89 comment 896: trailing whitespace stays OUTSIDE the mark (`**one** `, not `**one **`)", () => {
+    // select "one " INCLUDING the trailing space, then bold → the space must land outside the ** so the
+    // emphasis parses (CommonMark flanking: `**one **` is a literal `**`, not emphasis).
+    const el = cell("one two");
+    const tn = el.firstChild as Text; // "one two"
+    const r = document.createRange();
+    r.setStart(tn, 0); r.setEnd(tn, 4); // "one " (with the trailing space)
+    const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
+    expect(applyCellMark(el, mark("bold"))).toBe(true);
+    expect(cellElToText(el)).toBe("**one** two"); // space outside — valid emphasis
+    // and it re-renders as bold (not a literal **)
+    const el2 = cell("**one** two");
+    expect(el2.querySelector("strong")?.textContent).toBe("one");
+  });
+
+  it("#89 comment 896: cellElToText keeps inner-edge whitespace outside the delimiters (defensive)", () => {
+    // a <strong> whose inner text has edge spaces (from any path) must serialise to valid Markdown.
+    const el = document.createElement("td");
+    const strong = document.createElement("strong");
+    strong.textContent = " mid "; // leading + trailing space inside the mark
+    el.appendChild(strong);
+    expect(cellElToText(el)).toBe(" **mid** "); // spaces hoisted out of the **
+    // an all-whitespace mark serialises to just its text (no empty `****`)
+    const el2 = document.createElement("td");
+    const em = document.createElement("em"); em.textContent = "  ";
+    el2.appendChild(em);
+    expect(cellElToText(el2)).toBe("  "); // no `**` at all
+  });
+
+  it("#89 comment 896: multi-line select with a trailing space per line → each line's mark is valid", () => {
+    // "one \ntwo" (line 1 ends with a space) fully selected + bold: line 1 must be `**one** ` (space out),
+    // NOT `**one **` (which would render literal).
+    const el = cell("one \ntwo");
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
+    expect(applyCellMark(el, mark("bold"))).toBe(true);
+    expect(el.querySelectorAll("strong").length).toBe(2); // both lines wrapped
+    expect(cellElToText(el)).toBe("**one** \n**two**"); // line-1 space outside the **
+    // no literal ** / **** leaks and both lines re-render bold
+    const el2 = cell(cellElToText(el));
+    expect(el2.querySelectorAll("strong").length).toBe(2);
+    expect(el2.textContent).not.toContain("*");
+  });
+
   it("a collapsed / out-of-cell selection is a no-op", () => {
     const el = cell("abc");
     const other = document.createElement("div"); other.textContent = "zzz"; document.body.appendChild(other);

@@ -175,3 +175,59 @@ test("#236: cell sub-range toggle keeps the selection and round-trips (2nd press
   await expect(cell.locator("strong")).toHaveCount(0);
   await expect(cell).toHaveText("abcdef");
 });
+
+// #89 comment 896: the earlier tests stopped at the EDIT-ISLAND DOM (<strong>×N) and never verified the
+// COMMIT → static render. Edge whitespace inside a mark serialises to `**one **` which CommonMark won't
+// parse as emphasis → a literal `**` shows in the committed table. Drive edit → commit → static render and
+// assert NO literal `**`/`****` in the static cell and the text is styled.
+test("#89 comment 896: bold with trailing space commits to valid source (no literal ** in the table)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "cell-ws-trail");
+  await enterEdit(page);
+  await openRichUICell(page);
+  const cell = page.getByTestId("table-edit").locator("td").first();
+  await cell.dblclick();
+  await sleep(100);
+  // set the cell content to "one two", select "one " (with trailing space), bold it
+  await cell.evaluate((el: HTMLElement) => { el.textContent = "one two"; });
+  await cell.evaluate((el: HTMLElement) => {
+    const t = el.firstChild as Text;
+    const r = document.createRange(); r.setStart(t, 0); r.setEnd(t, 4); // "one "
+    const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r);
+    document.dispatchEvent(new Event("selectionchange"));
+  });
+  await sleep(150);
+  await page.getByTestId("cell-format-bold").click();
+  await sleep(150);
+  await page.keyboard.press("Enter"); // commit the cell
+  await sleep(150);
+  await page.keyboard.press("Escape"); // exit edit → static render
+  await sleep(300);
+  const tbl = page.locator("[data-pane=preview] table.cm-lp-table");
+  await expect(tbl).toBeVisible();
+  const firstCell = tbl.locator("td").first();
+  await expect(firstCell.locator("strong")).toHaveText("one"); // rendered bold
+  await expect(firstCell).not.toContainText("**"); // no literal delimiter leaked
+});
+
+test("#89 comment 896: multi-line (<br>) bold with a per-line trailing space renders both lines bold", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "cell-ws-multiline");
+  await enterEdit(page);
+  await openRichUICell(page);
+  const cell = page.getByTestId("table-edit").locator("td").first();
+  await cell.dblclick();
+  await sleep(100);
+  await cell.evaluate((el: HTMLElement) => { el.replaceChildren(document.createTextNode("one "), document.createElement("br"), document.createTextNode("two")); });
+  await selectCell(cell);
+  await sleep(150);
+  await page.getByTestId("cell-format-bold").click();
+  await sleep(150);
+  await page.keyboard.press("Enter");
+  await sleep(150);
+  await page.keyboard.press("Escape");
+  await sleep(300);
+  const firstCell = page.locator("[data-pane=preview] table.cm-lp-table td").first();
+  await expect(firstCell.locator("strong")).toHaveCount(2); // both lines bold
+  await expect(firstCell).not.toContainText("**"); // no literal ** / **** leaked
+});
