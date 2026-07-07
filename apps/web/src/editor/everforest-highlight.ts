@@ -15,8 +15,14 @@ const everforestHighlightStyle = HighlightStyle.define([
   { tag: [t.typeName, t.className, t.namespace, t.definition(t.typeName)], color: "var(--hl-type)" },
   { tag: [t.variableName, t.propertyName, t.attributeValue], color: "var(--hl-variable)" },
   { tag: [t.operator, t.derefOperator, t.punctuation, t.separator, t.bracket], color: "var(--hl-operator)" },
-  { tag: [t.tagName, t.attributeName, t.link, t.url, t.labelName], color: "var(--hl-meta)" },
-  { tag: [t.heading], color: "var(--hl-meta)", fontWeight: "bold" },
+  // #223: this HighlightStyle is EDITOR-WIDE (not just code fences), so t.link/t.url/t.heading here also
+  // colour the MARKDOWN document itself. Mapping links AND headings to --hl-meta made both render green
+  // ("links & headings stuck green"). Keep only code-fence meta (tagName/attributeName/labelName) on
+  // --hl-meta; route markdown links/urls to the --link token (same as the rendered .cm-lp-link), and let
+  // headings inherit the foreground colour (bold only — no colour).
+  { tag: [t.tagName, t.attributeName, t.labelName], color: "var(--hl-meta)" },
+  { tag: [t.link, t.url], color: "var(--link)" },
+  { tag: [t.heading], fontWeight: "bold" },
   { tag: [t.invalid], color: "var(--danger)" },
 ])
 
