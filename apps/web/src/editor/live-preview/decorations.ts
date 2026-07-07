@@ -1250,7 +1250,11 @@ class MacroWidget extends WidgetType {
         // (it would mislead; that asymmetry + their editUI bug is #239).
         if (this.macro.richEditUI) {
           edit.innerHTML += '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
-          edit.classList.add("cm-lp-macro-richui-raw");
+          // #254: use the LAYOUT-only hint class (gap for the key), NOT cm-lp-macro-richui-raw — that class
+          // forces opacity:0.8 (always visible), which is only correct for the RAW-editing pill
+          // (MacroRawRichuiPill). On a RENDERED macro the ✎ must stay hover/selection-gated (base opacity:0
+          // + the .cm-lp-macro-wrap:hover / .cm-lp-atom-sel gate), or it shows with no hover/selection.
+          edit.classList.add("cm-lp-macro-edit-hint");
         }
         edit.setAttribute("data-testid", "macro-edit");
         edit.addEventListener("mousedown", (e) => {
@@ -1445,7 +1449,7 @@ class CalloutWidget extends WidgetType {
       el.classList.add("cm-lp-callout-panel-editable");
       const edit = document.createElement("button");
       edit.type = "button";
-      edit.className = "cm-lp-macro-edit cm-lp-macro-richui-raw cm-lp-callout-panel-edit";
+      edit.className = "cm-lp-macro-edit cm-lp-macro-edit-hint cm-lp-callout-panel-edit";
       edit.title = "Edit (Ctrl+Enter)";
       edit.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
       edit.setAttribute("data-testid", "callout-panel-edit");
@@ -2664,6 +2668,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-macro-richui-raw": { top: "-1.5em", left: "0", zIndex: "4", opacity: "0.8", display: "inline-flex", alignItems: "center", gap: "3px", padding: "1px 5px" },
   ".cm-lp-macro-richui-key": { fontSize: "0.72em", fontWeight: "600", letterSpacing: "0.02em" },
   ".cm-lp-macro-richui-raw:hover": { opacity: "1" },
+  // #254: the LAYOUT-only variant for the ✎+Ctrl+↵ hint on a RENDERED macro. Adds the key's gap but NOT
+  // the always-visible opacity of cm-lp-macro-richui-raw, so the button keeps the base opacity:0 and is
+  // revealed only by the hover/selection gate (below for macro-wrap; the callout-panel rule for the panel).
+  ".cm-lp-macro-edit-hint": { gap: "3px" },
+  ".cm-lp-callout-panel-editable:hover .cm-lp-callout-panel-edit": { opacity: "1" },
   // #174 / ADR-087 (Class 1): the callout icon-badge type picker + the shared type CHIP now live in
   // callout-icons.css (GLOBAL) — the menu is mounted on document.body, outside .cm-editor, where these
   // baseTheme rules never applied; and keeping a baseTheme copy would OVERRIDE the global chip look for
