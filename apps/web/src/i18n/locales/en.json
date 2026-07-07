@@ -621,6 +621,31 @@
     "title": "Linked mentions",
     "untitled": "(untitled)"
   },
+  "template": {
+    "saveAsTemplate": "Save as template",
+    "saveTitle": "Save as template",
+    "saveDesc": "Save this page's published content as a reusable template.",
+    "namePlaceholder": "Template name",
+    "scopeLabel": "Who can use this template",
+    "saveAction": "Save template",
+    "saved": "Saved “{{name}}” as a template",
+    "saveFailed": "Could not save the template",
+    "scope": {
+      "personal": "Personal",
+      "space": "This space",
+      "tenant": "Whole tenant"
+    },
+    "scopeHint": {
+      "personal": "Only you (and tenant admins) can use it.",
+      "space": "Everyone who can view this space can use it.",
+      "tenant": "Everyone in the tenant can use it."
+    },
+    "warning": {
+      "space": "Heads up: the current content becomes visible to everyone who can view this space — this is an intentional re-publish.",
+      "tenant": "Heads up: the current content becomes visible to everyone in the tenant — this is an intentional re-publish."
+    },
+    "needsPublish": "Publish the page first to save it as a template."
+  },
   "delete": {
     "backlinkWarning_one": "This page is referenced by {{count}} page. Deleting it will leave a broken link.",
     "backlinkWarning_other": "This page is referenced by {{count}} pages. Deleting it will leave broken links."

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Copy, Eye, Code, BookOpen, Sparkles, List } from "lucide-react";
+import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Copy, Eye, Code, BookOpen, Sparkles, List, FileStack } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui/Button";
 import { ToggleButton } from "../ui/ToggleButton";
@@ -56,6 +56,7 @@ export interface PageControlsProps {
   // server re-checks and 403s regardless (two-layer authz). Undefined → item hidden.
   onDelete?: () => void;
   onDuplicate?: () => void; // #229: create a new page seeded from this one (template)
+  onSaveTemplate?: () => void; // #248: save this page's published content as a reusable template
   dirtySignal?: DirtySignal;
 }
 
@@ -113,12 +114,16 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string): Overflow
   // #229: use this page as a template — create a new page seeded with its content. Any viewer can
   // (the server view-gates the source); available in both modes.
   if (p.onDuplicate) items.push({ value: "duplicate", label: t("page.duplicatePage"), icon: <Copy size={14} />, testId: "duplicate-page" });
+  // #248: save as a reusable template. Requires a published version (a template snapshots published_md),
+  // so a draft-only page shows the item GRAYED OUT with a hint (discoverable, matches the #85 pattern).
+  if (p.onSaveTemplate) items.push({ value: "save-template", label: t("template.saveAsTemplate"), icon: <FileStack size={14} />, testId: "save-template-open", disabled: p.publishState === "draft", hint: p.publishState === "draft" ? t("template.needsPublish") : undefined });
   // Delete in BOTH modes; manage-gated by onDelete being set. Destructive (danger). #4.
   if (p.onDelete) items.push({ value: "delete", label: t("page.delete"), icon: <Trash2 size={14} />, testId: "delete-page", danger: true });
   return items;
 }
 function runOverflow(p: PageControlsProps, v: string) {
   if (v === "duplicate") { p.onDuplicate?.(); return; }
+  if (v === "save-template") { p.onSaveTemplate?.(); return; }
   if (v === "comments") p.onToggleComments?.();
   else if (v === "export") p.onExport?.();
   else if (v === "export-html") p.onExportHtml?.();
