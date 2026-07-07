@@ -405,20 +405,26 @@ class MacroPresenceWidget extends WidgetType {
   ignoreEvent() { return true; }
 }
 
-function buildMacroPresence(view: EditorView): DecorationSet {
-  const pres = view.state.facet(macroPresence);
+function buildMacroPresence(state: EditorState): DecorationSet {
+  const pres = state.facet(macroPresence);
   if (!pres) return Decoration.none;
   const byAnchor = new Map<string, MacroPresencePeer[]>();
   for (const p of pres.peers()) {
     const a = byAnchor.get(p.anchor);
     if (a) a.push(p); else byAnchor.set(p.anchor, [p]);
   }
-  const docLen = view.state.doc.length;
+  const docLen = state.doc.length;
   const ranges: Range<Decoration>[] = [];
   for (const [anchor, peers] of byAnchor) {
     const at = Number(anchor);
     if (!Number.isFinite(at) || at < 0 || at > docLen) continue; // stale anchor (doc changed) → skip
-    ranges.push(Decoration.widget({ widget: new MacroPresenceWidget(peers), side: -1 }).range(at));
+    // #92: a BLOCK widget at side -1 so the badge renders as its own line ABOVE the macro. An inline
+    // widget here is DROPPED by CM because the anchor is the START of the macro's atomic block-replace
+    // range (that line has no inline context to host a widget). A block widget renders adjacent to the
+    // replaced block. side -1 keeps it above; it is display-only (contenteditable=false, ignoreEvent).
+    // Block decorations MUST come from a StateField (not a ViewPlugin — CM forbids plugin block deco),
+    // hence macroPresenceField below rather than a plugin-provided set.
+    ranges.push(Decoration.widget({ widget: new MacroPresenceWidget(peers), side: -1, block: true }).range(at));
   }
   ranges.sort((a, b) => a.from - b.from);
   return Decoration.set(ranges, true);
@@ -426,34 +432,45 @@ function buildMacroPresence(view: EditorView): DecorationSet {
 
 // A stable signature of the current macro-edit peers (anchor+name+color). when nobody is editing a
 // macro modal — which is ALWAYS the case during normal page editing, so the plugin then never reacts.
-function macroPresenceSig(view: EditorView): string {
-  const pres = view.state.facet(macroPresence);
+function macroPresenceSig(state: EditorState): string {
+  const pres = state.facet(macroPresence);
   if (!pres) return "";
   return pres.peers().map((p) => `${p.anchor}:${p.name}:${p.color}`).sort().join("|");
 }
 
-// Renders remote macro-edit presence badges and redraws them when the macro-edit peer SET changes or
-// the doc shifts. Additive overlay; never on the doc/offset/collab-sync path.
+// #92: the presence badges live in a StateField (block widgets can only be provided by a StateField,
+// never a ViewPlugin — CM throws "Block decorations may not be specified via plugins"). It rebuilds when
+// the doc shifts (anchors move) or when macroPresencePlugin dispatches redrawMacroPresence (peer set
+// changed). Between those, the previous set is kept (positions still valid — no doc change).
+export const macroPresenceField = StateField.define<DecorationSet>({
+  create: (state) => buildMacroPresence(state),
+  update(deco, tr) {
+    if (tr.docChanged || tr.effects.some((e) => e.is(redrawMacroPresence))) return buildMacroPresence(tr.state);
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+// Watches the page awareness and asks the field to rebuild when the macro-edit peer SET changes. It
+// provides NO decorations itself (block deco can't come from a plugin) — it only dispatches the effect.
 //
-// #92 regression fix: the previous version dispatched a transaction SYNCHRONOUSLY inside the awareness
-// "change" handler. Awareness fires on every remote CURSOR MOVE / keystroke, and yCollab listens to the
-// same event to render remote carets — a re-entrant view.dispatch during that emission dropped yCollab's
-// cursor updates (remote carets stopped syncing). Now: (a) only act when the macro-edit peer set truly
-// CHANGES (during normal editing the signature is and this is fully inert — zero interference), and
-// (b) defer the dispatch to a frame so it never re-enters CodeMirror mid-awareness-processing.
+// #92 regression fix: never dispatch SYNCHRONOUSLY inside the awareness "change" handler. Awareness fires
+// on every remote CURSOR MOVE / keystroke, and yCollab listens to the same event to render remote carets
+// a re-entrant view.dispatch during that emission dropped yCollab's cursor updates (remote carets stopped
+// syncing). So: (a) only act when the macro-edit peer set truly CHANGES (during normal editing the
+// signature is and this is fully inert — zero interference), and (b) defer the dispatch to a frame so
+// it never re-enters CodeMirror mid-awareness-processing.
 export const macroPresencePlugin = ViewPlugin.fromClass(
   class {
-    decorations: DecorationSet;
     unsub: () => void;
     raf = 0;
     lastSig: string;
     constructor(view: EditorView) {
-      this.decorations = buildMacroPresence(view);
-      this.lastSig = macroPresenceSig(view);
+      this.lastSig = macroPresenceSig(view.state);
       const pres = view.state.facet(macroPresence);
       this.unsub = pres
         ? pres.subscribe(() => {
-            const sig = macroPresenceSig(view);
+            const sig = macroPresenceSig(view.state);
             if (sig === this.lastSig) return; // unchanged (e.g. a plain remote cursor move) → do nothing
             this.lastSig = sig;
             if (this.raf) return;
@@ -461,14 +478,8 @@ export const macroPresencePlugin = ViewPlugin.fromClass(
           })
         : () => {};
     }
-    update(u: ViewUpdate) {
-      if (u.docChanged || u.transactions.some((t) => t.effects.some((e) => e.is(redrawMacroPresence)))) {
-        this.decorations = buildMacroPresence(u.view);
-      }
-    }
     destroy() { if (this.raf) cancelAnimationFrame(this.raf); this.unsub(); }
   },
-  { decorations: (v) => v.decorations },
 );
 // Macros whose body is rendered by the host (not bundled / not the macro). Others ignore the renderer.
 const HOST_RENDERABLE = new Set(["plantuml"]);
