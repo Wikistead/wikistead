@@ -19,7 +19,8 @@ let indexablePageId: string
 
 async function mkPage(noindex: boolean): Promise<string> {
   const [{ id }] = await admin<[{ id: string }]>`
-    INSERT INTO pages (tenant_id, space_id, title, noindex) VALUES (${tenantId}, ${spaceId}, 'P', ${noindex}) RETURNING id`
+    INSERT INTO pages (tenant_id, space_id, title, noindex, published_md, published_at)
+    VALUES (${tenantId}, ${spaceId}, 'P', ${noindex}, 'body', now()) RETURNING id`
   await writeTuples(fgaClient, [{ user: 'user:*', relation: 'view_base', object: `page:${id}` }])
   return id
 }

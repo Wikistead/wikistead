@@ -28,11 +28,17 @@ async function resolveTenantForRequest(host: string) {
 }
 
 // Read page from DB under RLS — tenant isolation is maintained even for public pages.
+// #227: a page can carry the public grant (view_base@user:*) yet be UNPUBLISHED (published_at NULL)
+// a draft that was toggled public, or public-before-publish. Its title/content/existence must NOT leak
+// to anonymous visitors. Every public read here ALSO requires `published_at IS NOT NULL` (unpublished →
+// treated as absent → 404), alongside the FGA view check. The public surface exposes only the PUBLISHED
+// snapshot, never a draft's mere existence.
 async function loadPublicPage(tenantId: string, pageId: string): Promise<PublicPageRow | null> {
   return pool.begin(async (tx) => {
     await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
     const [r] = await tx<PublicPageRow[]>`
       SELECT id, title, published_md, noindex FROM pages WHERE id = ${pageId}
+        AND published_at IS NOT NULL
     `
     return r ?? null
   }) as Promise<PublicPageRow | null>
@@ -54,6 +60,7 @@ async function loadDirectChildren(tenantId: string, parentId: string): Promise<{
     await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
     return tx<{ id: string; title: string }[]>`
       SELECT id, title FROM pages WHERE parent_id = ${parentId}
+        AND published_at IS NOT NULL
       ORDER BY position, created_at LIMIT ${MAX_CHILDREN_PER_NODE}
     `
   }) as Promise<{ id: string; title: string }[]>
@@ -143,6 +150,7 @@ export async function publicPlugin(app: FastifyInstance) {
       return tx<{ id: string; title: string }[]>`
         SELECT id, title FROM pages
         WHERE id = ANY(${pageIds})
+          AND published_at IS NOT NULL
         ORDER BY created_at DESC
       `
     }) as { id: string; title: string }[]
