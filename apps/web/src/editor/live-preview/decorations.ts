@@ -2354,9 +2354,25 @@ export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
 // is exactly per-VISIBLE-character (zero phantom presses). WYSIWYG-only (Live reveals on cursor,
 // Source is raw; vim ⟂ WYSIWYG per #174). Shift-expansion snaps the head too (selection stays
 // visible-char granular). Display-only: it never changes the doc, only the caret's resting offset.
-export const wysiwygInlineSkip: Extension = EditorState.transactionFilter.of((tr) => {
+// #240 comment 960: whether vim is in an ON-CHAR motion mode (normal / visual). wysiwygInlineSkip below
+// uses BETWEEN-char (insert-caret) snap semantics and MUST NOT run for vim normal/visual — there the vim
+// caret rests ON a char and vimWysiwygCaretGuard (vim-atom.ts) already handles hidden-run avoidance;
+// applying the filter too made leftward `h` snap onto a hidden char, which the guard then re-corrected,
+// skipping a visible char (and cascading across adjacent runs). A transactionFilter can't read vim state
+// (it's view-dependent via getCM), so the guard mirrors the mode into this field and the filter reads it.
+export const setVimMotionActive = StateEffect.define<boolean>();
+const vimMotionActive = StateField.define<boolean>({
+  create: () => false,
+  update(v, tr) {
+    for (const e of tr.effects) if (e.is(setVimMotionActive)) return e.value;
+    return v;
+  },
+});
+
+export const wysiwygInlineSkip: Extension = [vimMotionActive, EditorState.transactionFilter.of((tr) => {
   if (tr.docChanged || !tr.selection) return tr;
   if (tr.startState.facet(displayMode) !== "wysiwyg") return tr;
+  if (tr.startState.field(vimMotionActive, false)) return tr; // #240: vim normal/visual — leave it to the guard
   const oldHead = tr.startState.selection.main.head;
   const newSel = tr.newSelection.main;
   const newHead = newSel.head;
@@ -2376,7 +2392,7 @@ export const wysiwygInlineSkip: Extension = EditorState.transactionFilter.of((tr
     selection: newSel.empty ? EditorSelection.cursor(target) : EditorSelection.range(newSel.anchor, target),
     scrollIntoView: true,
   };
-});
+})];
 
 // ADR-024 dd/yy on an atom (Q3, Mode A) live in live-preview/vim-atom.ts — they remap the
 // vim dd/yy *actions* to target the whole macro (register + delete), keeping the register

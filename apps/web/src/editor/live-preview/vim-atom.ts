@@ -1,7 +1,7 @@
 import { Vim, getCM } from "@replit/codemirror-vim";
 import { EditorState, EditorSelection, type Extension } from "@codemirror/state";
 import { ViewPlugin, type EditorView, type ViewUpdate } from "@codemirror/view";
-import { livePreview, displayMode, nestedDeleteChange, enterMacroCommand } from "./decorations";
+import { livePreview, displayMode, nestedDeleteChange, enterMacroCommand, setVimMotionActive } from "./decorations";
 import { nestedSelectionField, setNestedSelection } from "./macro-edit";
 
 // ADR-024 1b (Mode A): dd treats a macro ATOM as one unit — the WHOLE macro source is the
@@ -210,8 +210,18 @@ export const atomYank: Extension = ViewPlugin.define((view) => {
 // LEFT ALONE (that fat-cursor case shares its root with #238). Offset-invariant: only the caret rest moves.
 export const vimWysiwygCaretGuard: Extension = ViewPlugin.fromClass(
   class {
+    vimMotionMirror = false;
     constructor(readonly view: EditorView) {}
     update(u: ViewUpdate) {
+      // #240 comment 960: mirror vim's ON-CHAR motion mode (normal/visual) into a StateField so the
+      // state-level wysiwygInlineSkip filter (which can't read vim) can disable its between-char snap for
+      // vim — otherwise the filter + this guard double-correct and leftward `h` skips a visible char.
+      const vimNow = getCM(u.view)?.state.vim;
+      const motionActive = !!vimNow && !vimNow.insertMode; // normal or visual = on-char rest
+      if (motionActive !== this.vimMotionMirror) {
+        this.vimMotionMirror = motionActive;
+        queueMicrotask(() => { try { this.view.dispatch({ effects: setVimMotionActive.of(motionActive) }); } catch { /* view gone */ } });
+      }
       const blank = (on: boolean) => this.view.dom.classList.toggle("cm-wys-blank-fatcursor", on);
       // #238 (review follow-up): the blank-class (and the inline nudge) must react to transitions
       // that set NEITHER selectionSet NOR docChanged — a displayMode Compartment switch (Live→WYSIWYG),
