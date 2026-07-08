@@ -17,16 +17,28 @@ interface TreeNode {
   children: TreeNode[];
 }
 
-function buildTree(pages: Page[], parentId: string | null): TreeNode[] {
+function subtree(pages: Page[], parentId: string): TreeNode[] {
   return pages
     .filter((p) => (p.parentId ?? null) === parentId)
     .sort((a, b) => a.position - b.position)
-    .map((p) => ({ id: p.id, title: p.title, children: buildTree(pages, p.id) }));
+    .map((p) => ({ id: p.id, title: p.title, children: subtree(pages, p.id) }));
+}
+
+// Build the guest tree from the FGA-filtered page set. A page is a ROOT when it has no parent OR its
+// parent is NOT in the visible set — the latter re-roots a viewable child whose parent the guest cannot
+// see, so a permitted page is never orphaned out of the tree (the parent was already existence-hidden
+// server-side; this is a UX completeness fix, not an authz change — the set is authoritative).
+function buildTree(pages: Page[]): TreeNode[] {
+  const present = new Set(pages.map((p) => p.id));
+  return pages
+    .filter((p) => p.parentId == null || !present.has(p.parentId))
+    .sort((a, b) => a.position - b.position)
+    .map((p) => ({ id: p.id, title: p.title, children: subtree(pages, p.id) }));
 }
 
 export function GuestSidebar({ pages, openId, onOpen }: { pages: Page[]; openId: string | null; onOpen: (id: string) => void }) {
   const { t } = useTranslation();
-  const tree = buildTree(pages, null);
+  const tree = buildTree(pages);
   return (
     <nav className="flex h-full flex-col gap-0.5 overflow-auto p-2 text-[length:var(--text-ui)]" data-testid="guest-sidebar" aria-label={t("share.spaceTitle")}>
       <div className="px-1 pb-1 text-[length:var(--text-xs)] font-medium uppercase tracking-wide text-fg-dim">{t("share.spaceTitle")}</div>
