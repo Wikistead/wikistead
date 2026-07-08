@@ -1,0 +1,88 @@
+/* #227 comment 1056: the anonymous public page body (renderMarkdownToDom output under `.wks-public`) sits
+ * OUTSIDE CodeMirror, so it gets none of the editor's Reading-surface styling — bare <h1>/<ul>/<blockquote>
+ * render with the reset's flat look (heading same size as body, no bullets, no quote rule). Apply a compact
+ * prose style so the public reader matches the in-app Reading surface. Theme tokens only (light/dark aware);
+ * no new colour system. Scoped to `.wks-public [data-testid=public-body]` so it never leaks into chrome. */
+
+.wks-public [data-testid="public-body"] {
+  color: var(--fg);
+  line-height: 1.65;
+  font-size: var(--text-body, 1rem);
+}
+
+.wks-public [data-testid="public-body"] > :first-child { margin-top: 0; }
+
+.wks-public [data-testid="public-body"] h1,
+.wks-public [data-testid="public-body"] h2,
+.wks-public [data-testid="public-body"] h3,
+.wks-public [data-testid="public-body"] h4 {
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 1.6em 0 0.5em;
+}
+.wks-public [data-testid="public-body"] h1 { font-size: 1.9em; }
+.wks-public [data-testid="public-body"] h2 { font-size: 1.5em; }
+.wks-public [data-testid="public-body"] h3 { font-size: 1.25em; }
+.wks-public [data-testid="public-body"] h4 { font-size: 1.1em; }
+
+.wks-public [data-testid="public-body"] p { margin: 0.75em 0; }
+
+.wks-public [data-testid="public-body"] ul,
+.wks-public [data-testid="public-body"] ol {
+  margin: 0.75em 0;
+  padding-left: 1.6em;
+}
+.wks-public [data-testid="public-body"] ul { list-style: disc; }
+.wks-public [data-testid="public-body"] ol { list-style: decimal; }
+.wks-public [data-testid="public-body"] li { margin: 0.25em 0; }
+.wks-public [data-testid="public-body"] li > ul,
+.wks-public [data-testid="public-body"] li > ol { margin: 0.25em 0; }
+
+.wks-public [data-testid="public-body"] blockquote {
+  margin: 0.9em 0;
+  padding: 0.2em 0 0.2em 1em;
+  border-left: 3px solid var(--border, #ccc);
+  color: var(--fg-dim, #666);
+}
+
+.wks-public [data-testid="public-body"] a.cm-lp-link,
+.wks-public [data-testid="public-body"] a {
+  color: var(--accent, #2563eb);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.wks-public [data-testid="public-body"] code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+  background: var(--panel-2, rgba(127, 127, 127, 0.12));
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+.wks-public [data-testid="public-body"] pre {
+  margin: 0.9em 0;
+  padding: 0.85em 1em;
+  overflow-x: auto;
+  background: var(--panel-2, rgba(127, 127, 127, 0.12));
+  border-radius: 6px;
+}
+.wks-public [data-testid="public-body"] pre code { background: none; padding: 0; }
+
+.wks-public [data-testid="public-body"] hr {
+  margin: 1.5em 0;
+  border: 0;
+  border-top: 1px solid var(--border, #ddd);
+}
+
+.wks-public [data-testid="public-body"] table {
+  border-collapse: collapse;
+  margin: 0.9em 0;
+  width: 100%;
+}
+.wks-public [data-testid="public-body"] th,
+.wks-public [data-testid="public-body"] td {
+  border: 1px solid var(--border, #ddd);
+  padding: 0.4em 0.6em;
+  text-align: left;
+}
+.wks-public [data-testid="public-body"] img { max-width: 100%; height: auto; }
