@@ -278,11 +278,13 @@ function taskIndexAt(docText: string, markerFrom: number): number {
 }
 
 class CheckboxWidget extends WidgetType {
-  constructor(readonly checked: boolean, readonly from: number) {
+  // #300: `disabled` is part of the widget identity so a display-mode change (which rebuilds decorations)
+  // actually re-renders the box — otherwise eq would reuse the old DOM and the inert/enabled state stales.
+  constructor(readonly checked: boolean, readonly from: number, readonly disabled: boolean) {
     super();
   }
   eq(other: CheckboxWidget) {
-    return other.checked === this.checked && other.from === this.from;
+    return other.checked === this.checked && other.from === this.from && other.disabled === this.disabled;
   }
   toDOM(view: EditorView) {
     const box = document.createElement("input");
@@ -291,9 +293,8 @@ class CheckboxWidget extends WidgetType {
     box.className = "cm-lp-checkbox";
     box.setAttribute("data-testid", "task-checkbox");
     const ctl = view.state.facet(checkboxControl);
-    // Reading mode (#164 / ADR-056) is read-only → the checkbox is inert (no doc toggle).
-    box.disabled = !ctl || view.state.readOnly;
-    if (ctl && !view.state.readOnly) {
+    box.disabled = this.disabled; // computed at build (#300): !ctl || Reading display mode — NOT view.readOnly
+    if (ctl && !this.disabled) {
       // mousedown + preventDefault: keep editor focus/selection and drive the toggle
       // ourselves (so the rendered state always follows the document, never the native
       // input). The doc/host update re-renders the widget with the new checked state.
@@ -319,8 +320,8 @@ class CheckboxWidget extends WidgetType {
     return false;
   }
 }
-const checkbox = (checked: boolean, from: number) =>
-  Decoration.replace({ widget: new CheckboxWidget(checked, from) });
+const checkbox = (checked: boolean, from: number, disabled: boolean) =>
+  Decoration.replace({ widget: new CheckboxWidget(checked, from, disabled) });
 
 // Image attachments are referenced in the canonical Y.Text by a STABLE id
 // ![alt](wks-attachment:<id>) — never by a presigned URL (those are short-lived
@@ -2087,7 +2088,10 @@ const RENDERERS: BlockRenderer[] = [
     match: (n) => n === "TaskMarker",
     enter: (node, ctx) => {
       const checked = ctx.state.doc.sliceString(node.from + 1, node.from + 2).toLowerCase() === "x";
-      ctx.hideMarker(node.from, node.to, checkbox(checked, node.from));
+      // #300: disabled iff there's no toggle control OR the surface is Reading (clean read-only). NOT
+      // view.state.readOnly — the published VIEW surface is a read-only editor but its box must stay live.
+      const disabled = !ctx.state.facet(checkboxControl) || ctx.state.facet(displayMode) === "reading";
+      ctx.hideMarker(node.from, node.to, checkbox(checked, node.from, disabled));
     },
   },
   {
