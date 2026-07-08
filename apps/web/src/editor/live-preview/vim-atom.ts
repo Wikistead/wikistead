@@ -246,6 +246,11 @@ export const vimWysiwygCaretGuard: Extension = ViewPlugin.fromClass(
       }
       blank(onBlockAtom);
 
+      // #286: a blockwise vim visual selection has >1 range. The inline nudge below rebuilds the selection
+      // to ONE range, which would collapse the rectangle — bail (the between-char snap is irrelevant to a
+      // multi-line block selection). The blank/mirror above already ran (display-only).
+      if (u.state.selection.ranges.length > 1) return;
+
       // Inline nudge (a dispatch) — WYSIWYG-only (Live reveals inline syntax under the caret; the
       // between-char snap is a WYSIWYG semantic). Skip on a block atom (caret stays per ADR-024), in
       // insert/non-vim, and on updates that can't have moved the caret onto/off a hidden run.

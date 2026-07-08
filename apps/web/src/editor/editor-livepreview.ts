@@ -78,6 +78,12 @@ export function mountLivePreview(
       // switch it in place (no remount → collab/presence untouched), like vim.
       ...(opts.displayModeCompartment ? [opts.displayModeCompartment.of(displayModeContent(opts.displayMode ?? "live"))] : [displayMode.of(opts.displayMode ?? "live")]),
       minimalSetup,
+      // #286: minimalSetup omits allowMultipleSelections (basicSetup includes it). Without it, vim's
+      // blockwise visual (Ctrl+V) — which codemirror-vim implements as one selection RANGE per line — has
+      // its extra ranges collapsed to the main one, so a rectangle selects only the caret line. Enable it so
+      // the block selection survives; drawSelection (in minimalSetup) already renders every range. This is
+      // LOCAL, display-only selection state — the single-Y.Text doc / remote presence are untouched.
+      EditorState.allowMultipleSelections.of(true),
       // position:fixed so the palette/bubble/hint escape overflow:hidden ancestors and
       // CM flips them above/below + shifts horizontally to stay within the viewport.
       tooltips({ position: "fixed" }),
@@ -144,11 +150,12 @@ export function mountLivePreview(
       // DEV-only probe: expose the caret's doc line + selection offsets so e2e can
       // assert motion / selection extent. Stripped from prod builds.
       ...(import.meta.env.DEV ? [EditorView.updateListener.of((u) => {
-        const w = window as Window & { __lpHeadLine?: number; __lpHeadLineLog?: number[]; __lpSel?: { from: number; to: number; head: number; anchor: number }; __lpBlocks?: { fromLine: number; toLine: number }[]; __lpMathAtoms?: { fromLine: number; toLine: number }[]; __lpAtomic?: { fromLine: number; toLine: number }[]; __lpVimInsert?: boolean };
+        const w = window as Window & { __lpHeadLine?: number; __lpHeadLineLog?: number[]; __lpSel?: { from: number; to: number; head: number; anchor: number }; __lpRanges?: { from: number; to: number }[]; __lpBlocks?: { fromLine: number; toLine: number }[]; __lpMathAtoms?: { fromLine: number; toLine: number }[]; __lpAtomic?: { fromLine: number; toLine: number }[]; __lpVimInsert?: boolean };
         if (u.selectionSet) {
           const s = u.state.selection.main;
           w.__lpHeadLine = u.state.doc.lineAt(s.head).number;
           w.__lpSel = { from: s.from, to: s.to, head: s.head, anchor: s.anchor };
+          w.__lpRanges = u.state.selection.ranges.map((r) => ({ from: r.from, to: r.to })); // #286: all ranges (blockwise vim = one per line)
           // #183 diagnosis: a rolling log of the caret's LINE across moves, so pressing j/k a few
           // times yields the exact transition sequence (e.g. [1,2,3,4,6] shows line 5 was skipped)
           // WITHOUT hand-noting each step. Bounded so it can't grow unbounded. (window.__lpHeadLineLog
