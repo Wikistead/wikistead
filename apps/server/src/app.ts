@@ -33,6 +33,7 @@ import { revisionsPlugin } from './routes/revisions.js'
 import { publicPlugin } from './routes/public.js'
 import { apiKeysPlugin } from './routes/api-keys.js'
 import { shareLinksPlugin } from './routes/share-links.js'
+import { webhooksPlugin } from './routes/webhooks.js'
 import { authPlugin } from './routes/auth.js'
 import { accountPlugin } from './routes/account.js'
 import { signupPlugin } from './routes/signup.js'
@@ -176,7 +177,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     // /auth/login + /auth/callback (added in C3) establish the session, so they
     // must be reachable WITHOUT one.
     if (req.url === '/healthz' || req.url === '/readyz' ||
-        req.url.startsWith('/webhooks/') || req.url.startsWith('/public/') ||
+        req.url.startsWith('/webhooks/stripe') || req.url.startsWith('/public/') || // ONLY the Stripe inbound
+        // receiver is public here — NOT all of /webhooks/ (the outbound-webhook admin CRUD /webhooks/:id is
+        // a member/admin route and must go through auth; #228 collided with the old broad /webhooks/ prefix).
         req.url.startsWith('/auth/login') || req.url.startsWith('/auth/callback') ||
         req.url.startsWith('/auth/saml/') || // SAML SP-initiated login + ACS establish the session (#135)
         req.url.startsWith('/scim/v2/') || // SCIM uses its own scm_ bearer scheme; authenticated in scimPlugin (#134)
@@ -336,6 +339,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(brandingPlugin)
   await app.register(tenantOidcPlugin)
   await app.register(orphanDraftsPlugin)
+  await app.register(webhooksPlugin)
   await app.register(customDomainsPlugin)
   await app.register(enrollmentPlugin)
   await app.register(tenantSamlPlugin)

@@ -19,6 +19,7 @@ import { renderPlantuml } from '../plantuml-render.js'
 import { assertPageViewable } from '../page-view-gate.js'
 import { revokeResourceShareLinks } from './share-links.js'
 import { getTemplate } from './templates.js'
+import { enqueueWebhookOutbox } from './webhooks.js'
 
 // #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames —
 // the exact form isAllowlistedEmbed matches. Strip a scheme, path/query/fragment, port, whitespace and
@@ -402,6 +403,10 @@ export async function publishPage(
     `
     publishedAt = p.published_at
     outboxId = await enqueueOutbox(tx, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' })
+    // #228 / ADR-108: enqueue the page.published webhook IN this tx (reliable — a commit-then-crash still
+    // delivers). Thin payload (ids/actor only). The drain applies the private/draft existence-hiding
+    // filter at send time (by then page#space is written below, so a published page is deliverable).
+    await enqueueWebhookOutbox(tx, { tenantId: draft.tenant_id, eventType: 'page.published', payload: { pageId: args.pageId, revisionId, actorId: args.createdBy, occurredAt: new Date().toISOString() } })
   })
   // AFTER the DB commit (fail-closed: a tx failure above leaves the page gated):
   // release space inheritance, THEN reindex so buildSearchDoc sees the published

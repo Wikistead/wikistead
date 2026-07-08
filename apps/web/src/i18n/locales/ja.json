@@ -143,7 +143,8 @@
     "api": "API",
     "embeds": "外部埋め込み",
     "billing": "課金",
-    "orphans": "孤立ドラフト"
+    "orphans": "孤立ドラフト",
+    "webhooks": "Webhook"
   },
   "adminEmbeds": {
     "title": "外部埋め込み",
@@ -696,5 +697,18 @@
     "tabName": "タブ名",
     "moveLeft": "左へ移動",
     "moveRight": "右へ移動"
+  },
+  "adminWebhooks": {
+    "title": "Webhook",
+    "body": "イベント発生時に署名付き通知を外部 URL に送信します。署名シークレットは一度だけ表示されます。",
+    "createTitle": "Webhook を追加",
+    "url": "Webhook URL",
+    "create": "追加",
+    "secretOnce": "署名シークレットを今コピーしてください（一度だけ表示されます）。",
+    "copy": "シークレットをコピー",
+    "delete": "Webhook を削除",
+    "disabled": "無効",
+    "empty": "Webhook はまだありません。",
+    "createFailed": "問題が発生しました"
   }
 }

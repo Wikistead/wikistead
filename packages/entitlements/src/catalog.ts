@@ -63,6 +63,13 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     enforcedAt: 'POST /templates (inert while unlimited)',
     downgrade: 'over-cap blocks new templates; existing templates are kept',
   },
+  webhooks: {
+    title: 'Outbound webhooks',
+    summary: 'Event-notification webhooks. Self-host on (Community First); Cloud is Personal and up.',
+    unit: 'boolean',
+    enforcedAt: 'POST /webhooks (creation)',
+    downgrade: 'creation blocked; already-created hooks keep delivering',
+  },
   historyRetentionDays: {
     title: 'History retention',
     summary: 'Page revision history a member can see and restore, in days.',

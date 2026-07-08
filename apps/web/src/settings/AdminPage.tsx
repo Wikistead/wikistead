@@ -8,6 +8,7 @@ import { AdminSpacesTab } from "./AdminSpacesTab";
 import { TenantBrandingTab } from "./TenantBrandingTab";
 import { AdminAuthTab } from "./AdminAuthTab";
 import { AdminApiTab } from "./AdminApiTab";
+import { AdminWebhooksTab } from "./AdminWebhooksTab";
 import { AdminEmbedsTab } from "./AdminEmbedsTab";
 import { AdminBillingTab } from "./AdminBillingTab";
 import { AdminOrphanDraftsTab } from "./AdminOrphanDraftsTab";
@@ -25,6 +26,7 @@ function useAdminTabs(): SettingsTab[] {
     { key: "branding", label: t("adminNav.branding"), to: "/admin/branding" },
     { key: "auth", label: t("adminNav.auth"), to: "/admin/auth" },
     { key: "api", label: t("adminNav.api"), to: "/admin/api" },
+    { key: "webhooks", label: t("adminNav.webhooks"), to: "/admin/webhooks" },
     { key: "embeds", label: t("adminNav.embeds"), to: "/admin/embeds" },
     { key: "billing", label: t("adminNav.billing"), to: "/admin/billing" },
     { key: "orphans", label: t("adminNav.orphans"), to: "/admin/orphan-drafts" },
@@ -61,6 +63,7 @@ export function AdminRoutes() {
       <Route path="branding" element={<TenantBrandingTab />} />
       <Route path="auth" element={<AdminAuthTab />} />
       <Route path="api" element={<AdminApiTab />} />
+      <Route path="webhooks" element={<AdminWebhooksTab />} />
       <Route path="embeds" element={<AdminEmbedsTab />} />
       <Route path="billing" element={<AdminBillingTab />} />
       <Route path="orphan-drafts" element={<AdminOrphanDraftsTab />} />
