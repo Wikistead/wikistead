@@ -1550,7 +1550,12 @@ export async function pagesPlugin(app: FastifyInstance) {
   // public — but ONLY while the tenant parent switch is ON (guardrail 1: OFF ⇒ 403, a second layer over the
   // hidden UI so the API is the fortress). DELETE (make non-public) is always allowed — revoking is safe.
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/public', async (req) => {
-    return { public: await isPagePublic(app.fga, { pageId: req.params.pageId, userId: req.user.sub }) }
+    // `public` = this page's OWN grant (the toggle's state). #253 review: also report `effectivePublic`
+    // whether an anonymous reader can actually reach the page (its own grant OR via a PUBLIC SPACE), so the
+    // UI can warn "publicly reachable via space" when the own toggle reads OFF but the page is world-readable.
+    const own = await isPagePublic(app.fga, { pageId: req.params.pageId, userId: req.user.sub })
+    const effectivePublic = await check(app.fga, 'user:anonymous', 'view', { type: 'page', id: req.params.pageId })
+    return { public: own, effectivePublic }
   })
   app.post<{ Params: { pageId: string } }>('/pages/:pageId/public', async (req, reply) => {
     if (!(await publicSurfaceEnabled(req.db))) throw Object.assign(new Error('public surface disabled for this tenant'), { statusCode: 403 })

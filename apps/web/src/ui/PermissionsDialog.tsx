@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, useTenantGroups, useShareLinks, type PageRelation } from "../data/queries";
+import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, usePublished, useTenantGroups, useShareLinks, type PageRelation } from "../data/queries";
 import { ConfirmDialog } from "./dialogs";
 import { notify } from "./toast";
 import { Select } from "./Select";
@@ -36,12 +36,32 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   // whole public surface is hidden and toggling would be a no-op). public⊥private, so it's disabled while the
   // page is private. The server is the fortress (re-checks manage / parent-switch / published / private).
   const { data: surfaceOn } = usePublicSurface(open);
-  const { data: isPublic } = usePagePublic(pageId, open && !!surfaceOn);
+  const { data: publicState } = usePagePublic(pageId, open && !!surfaceOn);
+  const isPublic = !!publicState?.public;
+  // #253 review ④: the page is world-readable via a PUBLIC SPACE even though its OWN toggle reads OFF.
+  const publicViaSpace = !!publicState?.effectivePublic && !isPublic;
+  const { data: published } = usePublished(pageId);
+  const isPublished = !!published?.publishedAt; // #253 review ①: only a published page can be made public
   const setPublic = useSetPublic(pageId);
   const applyPublic = (v: boolean) => setPublic.mutate(v, {
     onSuccess: () => notify.success(t("toast.saved")),
-    onError: () => notify.error(t("toast.actionFailed")),
+    // #253 review ②: the server returns a SPECIFIC reason (400 draft / 403 parent switch / 409 private);
+    // surface it instead of the generic "something went wrong".
+    onError: (err) => {
+      const status = (err as { status?: number })?.status;
+      const key = status === 400 ? "permissions.publicErrorDraft"
+        : status === 403 ? "permissions.publicErrorSurface"
+        : status === 409 ? "permissions.publicErrorPrivate"
+        : "toast.actionFailed";
+      notify.error(t(key));
+    },
   });
+  // #253 review ③: once public, expose the shareable /pub/<id> URL with a copy button.
+  const publicUrl = `${window.location.origin}/pub/${pageId}`;
+  const copyPublicUrl = async () => {
+    try { await navigator.clipboard.writeText(publicUrl); notify.success(t("toast.copied")); }
+    catch { notify.error(t("toast.actionFailed")); }
+  };
   const [mode, setMode] = useState<"user" | "group">("user");
   const [sub, setSub] = useState("");
   const [groupName, setGroupName] = useState("");
@@ -109,15 +129,35 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
         {/* #253 / ADR-113: PUBLIC (anonymous) toggle — only offered when the tenant parent switch is ON.
             public⊥private → disabled while private. Only a PUBLISHED page can go public (server enforces 400). */}
         {surfaceOn && (
-          <label className="mt-2 flex items-start gap-2 rounded-md border border-border p-2" data-testid="public-toggle-row">
-            <input type="checkbox" className="mt-0.5" data-testid="public-toggle" checked={!!isPublic}
-              disabled={setPublic.isPending || !!isPrivate}
-              onChange={(e) => applyPublic(e.target.checked)} />
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm text-foreground">{t("permissions.publicTitle")}</span>
-              <span className="block text-xs text-fg-dim">{isPrivate ? t("permissions.publicPrivateConflict") : isPublic ? t("permissions.publicOnHint") : t("permissions.publicHint")}</span>
-            </span>
-          </label>
+          <div className="mt-2 rounded-md border border-border p-2" data-testid="public-toggle-row">
+            <label className="flex items-start gap-2">
+              {/* #253 review ①: a DRAFT can't be public (server 400) — disable the toggle and say why, so it's
+                  never a click-then-fail. private ⊥ public keeps it disabled while private. */}
+              <input type="checkbox" className="mt-0.5" data-testid="public-toggle" checked={isPublic}
+                disabled={setPublic.isPending || !!isPrivate || !isPublished}
+                onChange={(e) => applyPublic(e.target.checked)} />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm text-foreground">{t("permissions.publicTitle")}</span>
+                <span className="block text-xs text-fg-dim">
+                  {isPrivate ? t("permissions.publicPrivateConflict")
+                    : !isPublished ? t("permissions.publicDraftHint")
+                    : isPublic ? t("permissions.publicOnHint")
+                    : t("permissions.publicHint")}
+                </span>
+              </span>
+            </label>
+            {/* #253 review ③: the shareable public URL + copy, shown once the page is public. */}
+            {isPublic && (
+              <div className="mt-2 flex items-center gap-2" data-testid="public-url-row">
+                <Input inputSize="sm" readOnly className="min-w-0 flex-1 font-mono text-xs" value={publicUrl} data-testid="public-url" aria-label={t("permissions.publicUrlLabel")} onFocus={(e) => e.currentTarget.select()} />
+                <Button variant="default" size="sm" data-testid="public-url-copy" onClick={copyPublicUrl}>{t("permissions.copyUrl")}</Button>
+              </div>
+            )}
+            {/* #253 review ④: reachable publicly via a public SPACE even though this page's own toggle is OFF. */}
+            {publicViaSpace && (
+              <p className="mt-2 text-xs text-fg-dim" data-testid="public-via-space">{t("permissions.publicViaSpace")}</p>
+            )}
+          </div>
         )}
 
         <p className="mt-3 text-xs font-medium text-fg-dim">{isPrivate ? t("permissions.allowlistTitle") : t("permissions.grantTitle")}</p>
