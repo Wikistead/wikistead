@@ -344,3 +344,26 @@ test("#217: the table edit toolbar wraps (no scroll) at narrow width, groups sta
   expect(m.allWithin, "every op button is within the bar bounds (nothing clipped off)").toBe(true);
   expect(m.groupsIntact, "each logical group stays on one row (wraps as a unit)").toBe(true);
 });
+
+// #256: the structural-op + no-fill buttons used environment-dependent Unicode glyphs (⊞ ✕ ⌀) that broke
+// on some fonts. They must now be trusted static SVG icons (no font fallback). Real Chromium.
+test("#256: table structural-op / no-fill buttons render as SVG icons, not font glyphs", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "table-icons");
+  await enterEdit(page);
+  await pipeTableInEdit(page);
+
+  // Select a column → the column ops group shows.
+  await selectCol(page, 0, 1);
+  for (const id of ["table-col-insert-before", "table-col-insert-after", "table-col-delete"]) {
+    await expect(page.getByTestId(id).locator("svg")).toHaveCount(1);
+    expect(((await page.getByTestId(id).textContent()) ?? "").trim(), `${id} must have no glyph text`).toBe("");
+  }
+  // Select a row → the row ops group shows.
+  await selectRow(page, 0, 1);
+  for (const id of ["table-row-insert-above", "table-row-insert-below", "table-row-delete"]) {
+    await expect(page.getByTestId(id).locator("svg")).toHaveCount(1);
+  }
+  // The "no fill" colour swatch is an SVG too (was the ⌀ glyph).
+  await expect(page.getByTestId("table-bg-clear").locator("svg")).toHaveCount(1);
+});
