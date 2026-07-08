@@ -972,9 +972,10 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
           )}
         </div>
       </div>
-      {/* #227 ①: TOC on/off toggle — parity with the member Reading view. Shown when the page has
-          headings on a wide screen; flips the device-local pref that also gates the rail below. */}
-      {isWide && toc.headings.length > 0 && (
+      {/* #227 ①: TOC on/off toggle — parity with the member Reading view. #227 shown at ANY width
+          (the member toggle isn't width-gated); it flips the device-local pref that gates BOTH the wide rail and
+          the narrow overlay below. Was isWide-guarded, so a narrow screen lost the toggle entirely (the bug). */}
+      {toc.headings.length > 0 && (
         <button
           type="button"
           data-testid="public-toc-toggle"
@@ -995,6 +996,12 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
             <Toc headings={toc.headings} activeFrom={toc.activeFrom} depth={3} onJump={toc.jump} variant="rail" />
           </div>
         </div>
+      )}
+      {/* #227 on NARROW screens use the SAME member overlay variant (routes.tsx member ~510) instead of
+          a public-only reimplementation — the overlay fades in while scrolling (driven by usePublicToc's
+          subscribeScroll). This closes the "TOC/toggle vanish on a small screen" gap the user reported. */}
+      {!isWide && tocOn && toc.headings.length > 0 && (
+        <Toc headings={toc.headings} activeFrom={toc.activeFrom} depth={3} onJump={toc.jump} variant="overlay" subscribeScroll={toc.subscribeScroll} />
       )}
     </div>
   );
