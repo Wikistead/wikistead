@@ -104,29 +104,41 @@ export const mermaidMacro: FenceMacro = {
       preview.className = "cm-lp-mermaid cm-lp-mermaid-edit-preview";
       preview.setAttribute("data-testid", "mermaid-edit-preview");
       let gen = 0; // guards against a stale async render landing after a newer edit
-      const renderPreview = (code: string) => {
+      let debounce: ReturnType<typeof setTimeout> | undefined;
+      const applyRender = (code: string) => {
         const trimmed = code.trim();
-        if (!trimmed) { preview.textContent = ""; return; }
+        if (!trimmed) { preview.style.minHeight = ""; preview.textContent = ""; return; }
         const myId = nextId();
         const mine = ++gen;
+        // #282: while the async re-render is in flight, HOLD the pane's current height as min-height so it
+        // doesn't collapse (a mid-typing invalid diagram would otherwise shrink to a 1-line error and bounce
+        // back — the "right half flickers" + the doc height crossing the viewport → the scrollbar flashing).
+        const held = preview.offsetHeight;
+        if (held > 0) preview.style.minHeight = `${held}px`;
         void loadMermaid(ctx.theme).then(async (mermaid) => {
           try {
             const { svg } = await mermaid.render(myId, trimmed);
-            if (mine === gen) preview.innerHTML = svg; // mermaid-sanitized (securityLevel: strict)
+            if (mine === gen) { preview.innerHTML = svg; preview.style.minHeight = ""; } // release once the new size is in
           } catch {
-            if (mine === gen) preview.textContent = "Invalid mermaid diagram";
+            if (mine === gen) preview.textContent = "Invalid mermaid diagram"; // keep min-height → no collapse
           } finally {
             document.getElementById("d" + myId)?.remove(); // mermaid's temp/error node (see liveRender)
           }
         }).catch(() => { /* mermaid failed to load (offline/test env) — the preview just stays empty */ });
       };
+      // #282: debounce so a per-keystroke burst of async renders (each flashing the preview) collapses into
+      // ONE render after the user pauses — cuts the flash frequency and the height-vibration.
+      const renderPreview = (code: string) => {
+        if (debounce != null) clearTimeout(debounce);
+        debounce = setTimeout(() => applyRender(code), 150);
+      };
       ta.addEventListener("input", () => renderPreview(ta.value)); // local live preview, no doc write
       ta.addEventListener("change", () => save(asMacroSource(ta.value))); // commit to Y.Text on blur
-      renderPreview(source);
+      applyRender(source); // initial render is immediate (no debounce) so the preview shows on mount
       wrap.append(ta, preview);
       container.appendChild(wrap);
       const focus = setTimeout(() => ta.focus(), 0);
-      return { destroy() { clearTimeout(focus); gen++; wrap.remove(); } };
+      return { destroy() { clearTimeout(focus); if (debounce != null) clearTimeout(debounce); gen++; wrap.remove(); } };
     },
   },
   // M3 wires HTML export server-side. mermaid renders in the browser, so the static
