@@ -64,7 +64,9 @@ describe('#104 space-link guest HTTP view', () => {
 
   it('is DENIED an out-of-space page (no cross-space leak)', async () => {
     const res = await app.inject({ method: 'GET', url: `/pages/${PB}/published`, headers: H })
-    expect(res.statusCode).toBe(403)
+    // #262: a view-denied page read is 404 (existence-hiding — never confirm the page exists), not 403.
+    // A cross-space guest leaks LESS with 404 than 403. (The list endpoint below stays 403 = token-scope.)
+    expect(res.statusCode).toBe(404)
   })
 
   it('cannot list another space pages with this link (403)', async () => {
