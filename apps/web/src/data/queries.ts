@@ -553,7 +553,13 @@ export function usePagePublic(pageId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["page-public", pageId],
-    queryFn: () => apiFetch<{ public: boolean }>(`/pages/${encodeURIComponent(pageId)}/public`, token).then((r) => r?.public ?? false),
+    // #253 review: `public` = the page's OWN grant (toggle state); `effectivePublic` = whether an anonymous
+    // reader can actually reach it (own grant OR via a public space) — the UI warns when they diverge.
+    queryFn: () =>
+      apiFetch<{ public: boolean; effectivePublic: boolean }>(`/pages/${encodeURIComponent(pageId)}/public`, token).then((r) => ({
+        public: r?.public ?? false,
+        effectivePublic: r?.effectivePublic ?? false,
+      })),
     enabled: enabled && pageId.length > 0,
   });
 }

@@ -40,3 +40,67 @@ test("#253 UI: admin enables the surface, a manager makes a page public via the 
   await expect(anon.getByTestId("public-title")).toBeVisible();
   await expect(anon.getByTestId("public-body")).toContainText("body text");
 });
+
+// #253 review ①: a DRAFT can't be made public — the toggle is DISABLED with a "publish first" hint (never a
+// click-then-fail), and no public URL is shown. Real Chromium.
+test("#253 review: a draft page disables the public toggle with a publish-first hint", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const id = await openScratch(page, "pubui-draft");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("# Draft public\n\nbody\n");
+  await sleep(300);
+  // ensure the tenant public surface is ON (admin tab)
+  await page.goto("/admin/public");
+  const surface = page.getByTestId("public-surface-toggle");
+  await expect(surface).toBeVisible();
+  await sleep(500); // let the surface query load before reading its checked state (#253 race)
+  if (!(await surface.isChecked())) await surface.click();
+  await expect(surface).toBeChecked();
+  // open the (still-DRAFT) page's Permissions dialog → the public toggle is DISABLED + shows the draft hint.
+  await page.goto(`/p/${id}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(400);
+  await page.click("[data-testid=page-overflow-trigger]");
+  await page.click("[data-testid=permissions-open]");
+  await expect(page.getByTestId("permissions-dialog")).toBeVisible();
+  await expect(page.getByTestId("public-toggle")).toBeVisible({ timeout: 8000 }); // surface ON → toggle offered
+  await expect(page.getByTestId("public-toggle")).toBeDisabled();
+  await expect(page.getByTestId("public-toggle-row")).toContainText(/publish/i);
+  await expect(page.getByTestId("public-url-row")).toHaveCount(0); // not public → no URL yet
+});
+
+// #253 review ③: once a published page is made public, the dialog surfaces the shareable /pub/<id> URL with
+// a working copy button. Real Chromium (real clipboard).
+test("#253 review: a public page shows a copyable /pub URL", async ({ browser }) => {
+  const page = await (await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] })).newPage();
+  const id = await openScratch(page, "pubui-url");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("# Public URL\n\nbody\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click(); // publish in edit mode
+  await sleep(800);
+  // surface ON
+  await page.goto("/admin/public");
+  const surface = page.getByTestId("public-surface-toggle");
+  await expect(surface).toBeVisible();
+  await sleep(500); // let the surface query load before reading its checked state (#253 race)
+  if (!(await surface.isChecked())) await surface.click();
+  await expect(surface).toBeChecked();
+  // open Permissions → make public → the URL row appears with a copy button.
+  await page.goto(`/p/${id}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(400);
+  await page.click("[data-testid=page-overflow-trigger]");
+  await page.click("[data-testid=permissions-open]");
+  const pub = page.getByTestId("public-toggle");
+  await expect(pub).toBeEnabled({ timeout: 8000 });
+  await pub.click();
+  await sleep(500);
+  await expect(page.getByTestId("public-url-row")).toBeVisible();
+  await expect(page.getByTestId("public-url")).toHaveValue(new RegExp(`/pub/${id}$`));
+  await page.getByTestId("public-url-copy").click();
+  await sleep(200);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(`/pub/${id}`);
+});
