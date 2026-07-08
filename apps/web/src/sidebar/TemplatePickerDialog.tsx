@@ -2,15 +2,19 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileStack } from "lucide-react";
 import { renderMarkdownToHtml } from "@wikistead/macro-render";
+import { previewMacroRegistry } from "../editor/preview-macro-registry";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Button } from "../ui/Button";
 import { useTemplates, useTemplateBody, type TemplateSummary } from "../data/queries";
 
 // #250 / ADR-110: the "create from template" picker (opened from the sidebar split- ▾). Lists the
 // templates the user can view (server FGA-filtered), grouped by scope — Personal / This space / Tenant
-// with a live sanitized preview (renderMarkdownToHtml with the empty macro registry: client-side draw only,
-// embed/transclude never server-resolved). Choosing one calls onPick(templateId); the caller creates the
-// page (server re-checks template view + destination edit — two-layer defence).
+// with a live sanitized preview. #267: the preview renders first-party macros (callout/columns/tabs/…) via
+// previewMacroRegistry so they look RENDERED instead of a wall of degrade-to-source — it excludes the one
+// TRUSTED-passthrough macro (`:::table`) because the client preview has no downstream sanitizer (see that
+// file). Still client-only: the embed htmlRenders are static placeholders that never fetch (ADR-110's real
+// concern was server-resolving embeds). Choosing one calls onPick(templateId); the caller creates the page
+// (server re-checks template view + destination edit — two-layer defence).
 export function TemplatePickerDialog({
   open,
   spaceId,
@@ -53,7 +57,7 @@ export function TemplatePickerDialog({
         ) : empty ? (
           <p className="py-8 text-center text-fg-dim" data-testid="template-picker-empty">{t("templatePicker.empty")}</p>
         ) : (
-          <div className="flex min-h-[18rem] gap-3">
+          <div className="flex max-h-[60vh] min-h-[18rem] gap-3">
             {/* Left: the grouped list. */}
             <ul className="w-1/2 min-w-0 overflow-auto border-r border-border pr-2">
               {groups.map((g) => (
@@ -88,7 +92,7 @@ export function TemplatePickerDialog({
                   <div
                     className="text-[length:var(--text-body)] leading-relaxed [&_h1]:mb-2 [&_h1]:text-[length:var(--text-lg)] [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:mt-3 [&_h2]:font-semibold [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_code]:rounded [&_code]:bg-panel-2 [&_code]:px-1"
                     data-testid="template-picker-preview-body"
-                    dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(body.data.body).toString() }}
+                    dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(body.data.body, previewMacroRegistry()).toString() }}
                   />
                 )}
               </div>

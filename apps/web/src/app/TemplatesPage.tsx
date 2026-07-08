@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Eye, FileStack, Pencil, Trash2, X } from "lucide-react";
 import { renderMarkdownToHtml } from "@wikistead/macro-render";
+import { previewMacroRegistry } from "../editor/preview-macro-registry";
 import { useTemplates, useTemplateBody, useRenameTemplate, useDeleteTemplate, type TemplateSummary } from "../data/queries";
 import { RenameDialog, ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
@@ -89,9 +90,11 @@ export function TemplatesRoute() {
   );
 }
 
-// A read-only preview of the template's frozen body. Rendered by the SHARED sanitized renderer
-// (renderMarkdownToHtml with the EMPTY macro registry — so embed/transclude are NOT server-resolved,
-// per ADR-110: the preview is a client-side sanitized draw only, never a data-fetching surface).
+// A read-only preview of the template's frozen body. Rendered by the shared sanitized renderer with the
+// previewMacroRegistry (#267: callout/columns/… render instead of degrade-to-source; `:::table` stays
+// source because the client preview has no downstream sanitizer — see preview-macro-registry.ts). Still a
+// client-side draw only — the embed htmlRenders are static placeholders that never fetch, so this stays
+// within ADR-110's "no data-fetching preview surface" (whose concern was server-resolving embeds).
 function TemplatePreview({ tpl, onClose }: { tpl: TemplateSummary; onClose: () => void }) {
   const { t } = useTranslation();
   const { data, isLoading } = useTemplateBody(tpl.id);
@@ -111,8 +114,11 @@ function TemplatePreview({ tpl, onClose }: { tpl: TemplateSummary; onClose: () =
           <div
             className="text-[length:var(--text-body)] leading-relaxed [&_h1]:mb-2 [&_h1]:text-[length:var(--text-lg)] [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:mt-3 [&_h2]:font-semibold [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_code]:rounded [&_code]:bg-panel-2 [&_code]:px-1"
             data-testid="template-preview-body"
-            // renderMarkdownToHtml returns SafeHtml (sanitized); .toString() is its escaped HTML string.
-            dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(data.body).toString() }}
+            // #267: renderMarkdownToHtml returns SafeHtml (markup with every interpolated value escaped by
+            // construction); .toString() yields that HTML for dangerouslySetInnerHTML. previewMacroRegistry
+            // renders the first-party SafeHtml macros (callout/columns/…) but excludes `:::table` (TRUSTED
+            // passthrough) since this client preview has no downstream sanitizer.
+            dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(data.body, previewMacroRegistry()).toString() }}
           />
         )}
       </div>
