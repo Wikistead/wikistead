@@ -143,7 +143,8 @@
     "api": "API",
     "embeds": "Embeds",
     "billing": "Billing",
-    "orphans": "Orphan drafts"
+    "orphans": "Orphan drafts",
+    "webhooks": "Webhooks"
   },
   "adminEmbeds": {
     "title": "External embeds",
@@ -697,5 +698,18 @@
     "tabName": "Tab name",
     "moveLeft": "Move left",
     "moveRight": "Move right"
+  },
+  "adminWebhooks": {
+    "title": "Webhooks",
+    "body": "Send a signed event notification to an external URL when things happen. The signing secret is shown once.",
+    "createTitle": "Add a webhook",
+    "url": "Webhook URL",
+    "create": "Add",
+    "secretOnce": "Copy the signing secret now — it is shown only once.",
+    "copy": "Copy secret",
+    "delete": "Delete webhook",
+    "disabled": "Disabled",
+    "empty": "No webhooks yet.",
+    "createFailed": "Something went wrong"
   }
 }

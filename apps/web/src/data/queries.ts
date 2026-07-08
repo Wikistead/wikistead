@@ -768,6 +768,30 @@ export function useRevokeApiKey() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }),
   });
 }
+
+// #228 / ADR-108: outbound webhooks (admin console CRUD). The secret is returned ONCE on creation.
+export interface WebhookSummary { id: string; url: string; event_filter: string[] | null; active: boolean; failure_count: number; createdAt: string }
+export interface WebhookCreated { id: string; secret: string }
+export function useWebhooks() {
+  const { token } = useSession();
+  return useQuery({ queryKey: ["webhooks"], queryFn: () => apiFetch<WebhookSummary[]>("/webhooks", token).then((r) => r ?? []) });
+}
+export function useCreateWebhook() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { url: string; eventFilter?: string[] | null }) => apiFetch<WebhookCreated>("/webhooks", token, { method: "POST", body: JSON.stringify(args) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["webhooks"] }),
+  });
+}
+export function useDeleteWebhook() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<null>(`/webhooks/${encodeURIComponent(id)}`, token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["webhooks"] }),
+  });
+}
 export function useApiPolicy() {
   const { token } = useSession();
   return useQuery({ queryKey: ["api-policy"], queryFn: () => apiFetch<{ maxScope: ApiScope }>("/admin/api-policy", token) });

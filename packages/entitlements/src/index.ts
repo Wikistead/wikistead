@@ -53,6 +53,11 @@ export interface Entitlements {
   // placeholder; the gate reads this resolved boolean (entitlement⟂authz separation).
   apiAccess: boolean
 
+  // Outbound webhooks (#228 / ADR-108). Gates POST /webhooks creation. self-host on (Community First),
+  // Cloud = Personal and up (free off, pro/team on) — comment 1000. The gate reads this resolved boolean;
+  // already-created hooks keep delivering after a downgrade (issuance gate only, like apiAccess).
+  webhooks: boolean
+
   // Custom domain (#123 / ADR-065). Gates adding/verifying a tenant custom domain (docs.acme.com).
   // A Pro value lever: self-host on (Community First), Cloud free off, Cloud Pro/Team on. WHICH plans
   // is a business placeholder; the gate reads this resolved boolean. Losing it revokes the domain
@@ -110,6 +115,7 @@ export const UNLIMITED: Entitlements = {
   maxSeats: Infinity,
   maxSpaces: Infinity,
   maxTemplates: Infinity,
+  webhooks: true,
   historyRetentionDays: Infinity,
   maxStorageBytes: Infinity,
   branding: true,

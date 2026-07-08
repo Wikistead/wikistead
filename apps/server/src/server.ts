@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { buildApp } from './app.js'
 import { startOutboxWorker } from './search/index.js'
 import { startAuditDrainWorker } from './audit/outbox.js'
+import { startWebhookDrainWorker } from './routes/webhooks.js'
 import { startShareLinkSweepWorker } from './routes/share-links.js'
 import { fgaClient } from '@wikistead/authz'
 import { assertProductionFgaPersistent } from './openfga-guard.js'
@@ -37,6 +38,11 @@ export async function startServer(): Promise<FastifyInstance> {
   // privatisation so a "private but link alive on FGA" leak window self-heals. Coarse interval (failures
   // are rare); started here (not buildApp) so inject-driven tests don't spawn a timer.
   startShareLinkSweepWorker(fgaClient, Number(process.env.SHARE_LINK_SWEEP_POLL_MS ?? 60000))
+
+  // Background webhook delivery (#228 / ADR-108): drains the in-tx webhook outbox, signs (HMAC) and POSTs
+  // each event to matching active hooks via the pinned SSRF-safe client. Started here (not buildApp) so
+  // inject-driven tests don't spawn a timer.
+  startWebhookDrainWorker(fgaClient, Number(process.env.WEBHOOK_OUTBOX_POLL_MS ?? 5000))
 
   return app
 }
