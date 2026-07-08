@@ -1,5 +1,5 @@
 import { parser, Strikethrough, Table } from "@lezer/markdown";
-import { directiveExtension, parseDirectiveOpen } from "./directive-parser";
+import { directiveExtension, parseDirectiveOpen, resolveDirectiveRanges, type ResolvedDirective } from "./directive-parser";
 import { findDirectiveMacro, findFenceMacro } from "./registry";
 import { currentMacroTheme } from "./theme";
 
@@ -46,6 +46,21 @@ let renderBase: number | null = null;
 let pendingBaseOffset: number | null = null;
 export function setPendingBaseOffset(v: number | null): void { pendingBaseOffset = v; }
 export function takePendingBaseOffset(): number | null { const v = pendingBaseOffset; pendingBaseOffset = null; return v; }
+
+// #267: lezer's markdown grammar early-closes a nested `:::tabs` at an inner directive's close, so the
+// Directive node's `to` is wrong and slicing by it truncates a multi-tab/column body. resolveDirectiveRanges
+// (stack-based, Pandoc semantics) is the single truth for `:::` ranges (same fix as fence.ts for the CM
+// widgets). Memoised per source string so the hot render path scans each body once. Bounded.
+const rdCache = new Map<string, ResolvedDirective[]>();
+function resolvedDirectivesFor(src: string): ResolvedDirective[] {
+  let r = rdCache.get(src);
+  if (!r) {
+    r = resolveDirectiveRanges(src);
+    if (rdCache.size > 64) rdCache.clear();
+    rdCache.set(src, r);
+  }
+  return r;
+}
 function tagMacro(el: HTMLElement, relFrom: number, name: string): void {
   if (renderBase == null) return; // non-nested / untagged render → inert (byte-identical to before #215)
   el.dataset.macPos = String(renderBase + relFrom);
@@ -139,7 +154,10 @@ function stripMarks(node: SNode, src: string, mark: string): string {
   return out;
 }
 
-function renderBlock(node: SNode, src: string, into: Node): void {
+// Returns the absolute end offset it CONSUMED when it rendered a `:::` directive whose lezer range was
+// corrected/extended by the resolver (#267), so the caller skips the sibling nodes lezer leaked past the
+// early-close; void for every other block.
+function renderBlock(node: SNode, src: string, into: Node): number | void {
   if (HEADINGS[node.name]) { const el = document.createElement(HEADINGS[node.name]!); renderInline(node, src, el); into.appendChild(el); return; }
   switch (node.name) {
     case "Paragraph": { const el = document.createElement("p"); renderInline(node, src, el); into.appendChild(el); return; }
@@ -201,7 +219,11 @@ function renderBlock(node: SNode, src: string, into: Node): void {
       // Container macros call renderMarkdownToDom on their sub-bodies, so nesting recurses here to any
       // depth. Unknown name / no liveRender / a macro that THROWS → the safe generic box (never break
       // the whole render). liveRender only gets `{theme}` (ADR-024 narrow host-API) — display-only.
-      const full = src.slice(node.from, node.to);
+      // #267: use the resolver's corrected end (lezer early-closes nested :::tabs). `dirTo` also becomes this
+      // block's consumed range so renderBlocks skips the sibling nodes lezer leaked past the early-close.
+      const rd = resolvedDirectivesFor(src).find((d) => d.from === node.from);
+      const dirTo = rd ? rd.to : node.to;
+      const full = src.slice(node.from, dirTo);
       const nl = full.indexOf("\n");
       const parsed = parseDirectiveOpen(nl === -1 ? full : full.slice(0, nl));
       const macro = parsed ? findDirectiveMacro(parsed.name) : undefined;
@@ -222,7 +244,7 @@ function renderBlock(node: SNode, src: string, into: Node): void {
         try { el = macro.liveRender(lines.join("\n"), { theme: currentMacroTheme() }); }
         catch { /* a macro that throws must not break the render → fall through to the generic box */ }
         finally { setPendingBaseOffset(null); nestedDirectiveDepth--; }
-        if (el) { tagMacro(el, node.from, parsed!.name); into.appendChild(el); return; } // #215: tag for nested hit-test
+        if (el) { tagMacro(el, node.from, parsed!.name); into.appendChild(el); return dirTo; } // #215: tag for nested hit-test
       }
       // #170 / ADR-049 (Y): a CONTAINER directive with an icon = a typed callout. It has no
       // liveRender (its body stays Markdown), so render the shared callout PANEL (icon + title +
@@ -237,10 +259,20 @@ function renderBlock(node: SNode, src: string, into: Node): void {
           tagMacro(panel, node.from, parsed!.name); // #215: tag for nested hit-test (anchor in the OUTER src coords)
           into.appendChild(panel);
         } finally { nestedDirectiveDepth--; }
-        return;
+        return dirTo;
       }
+      // Generic fallback (unknown/depth-capped directive). When the resolver corrected the range, render the
+      // CORRECTED body recursively (not the lezer node's truncated children) so a nested container still shows
+      // all its content; otherwise keep the plain node walk. #267.
       const el = document.createElement("div"); el.className = "cm-lp-md-directive";
-      renderBlocks(node, src, el); into.appendChild(el); return;
+      if (rd) {
+        const bodyLines = full.split("\n").slice(1);
+        if (bodyLines.length && /^\s*:::+\s*$/.test(bodyLines[bodyLines.length - 1]!)) bodyLines.pop();
+        el.appendChild(renderMarkdownToDom(bodyLines.join("\n"), nestedBodyBase ?? undefined));
+      } else {
+        renderBlocks(node, src, el);
+      }
+      into.appendChild(el); return dirTo;
     }
     // Unknown block (incl. HTMLBlock) → literal text, safe.
     default: { const p = document.createElement("p"); p.textContent = txt(src, node); into.appendChild(p); }
@@ -250,9 +282,12 @@ function renderBlock(node: SNode, src: string, into: Node): void {
 // Render the BLOCK children of a container (skipping marks); leaf inline content under a block
 // without block children is handled by renderBlock's inline path.
 function renderBlocks(parent: SNode, src: string, into: Node): void {
+  let skipUntil = -1; // #267: a corrected `:::` directive range consumes the sibling nodes lezer leaked
   for (let c = parent.firstChild; c; c = c.nextSibling) {
     if (MARKS.has(c.name)) continue;
-    renderBlock(c, src, into);
+    if (c.from < skipUntil) continue;
+    const consumed = renderBlock(c, src, into);
+    if (typeof consumed === "number" && consumed > skipUntil) skipUntil = consumed;
   }
 }
 

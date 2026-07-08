@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Eye, FileStack, Pencil, Trash2, X } from "lucide-react";
-import { renderMarkdownToHtml } from "@wikistead/macro-render";
-import { previewMacroRegistry } from "../editor/preview-macro-registry";
+import { renderMarkdownToDom } from "../editor/macros/md-render";
 import { useTemplates, useTemplateBody, useRenameTemplate, useDeleteTemplate, type TemplateSummary } from "../data/queries";
 import { RenameDialog, ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
@@ -90,14 +89,19 @@ export function TemplatesRoute() {
   );
 }
 
-// A read-only preview of the template's frozen body. Rendered by the shared sanitized renderer with the
-// previewMacroRegistry (#267: callout/columns/… render instead of degrade-to-source; `:::table` stays
-// source because the client preview has no downstream sanitizer — see preview-macro-registry.ts). Still a
-// client-side draw only — the embed htmlRenders are static placeholders that never fetch, so this stays
-// within ADR-110's "no data-fetching preview surface" (whose concern was server-resolving embeds).
+// A read-only preview of the template's frozen body. #267: rendered by renderMarkdownToDom — the same client
+// DOM renderer the public reader uses — so ALL first-party macros render (callout/columns/tabs recurse, a
+// `:::table` builds a real table, mermaid/plantuml draw). It IS the XSS boundary (text nodes from an
+// allowlist, never innerHTML), so no dangerouslySetInnerHTML. Client-side draw only — embed macros are static
+// placeholders that never fetch (ADR-110's concern was server-resolving embeds).
 function TemplatePreview({ tpl, onClose }: { tpl: TemplateSummary; onClose: () => void }) {
   const { t } = useTranslation();
   const { data, isLoading } = useTemplateBody(tpl.id);
+  const [previewEl, setPreviewEl] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!previewEl) return;
+    previewEl.replaceChildren(data?.body != null ? renderMarkdownToDom(data.body) : document.createDocumentFragment());
+  }, [previewEl, data]);
   return (
     <div className="mt-4 rounded-md border border-border" data-testid="template-preview-panel">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
@@ -112,13 +116,9 @@ function TemplatePreview({ tpl, onClose }: { tpl: TemplateSummary; onClose: () =
           <p className="text-fg-dim">{t("common.loading")}</p>
         ) : (
           <div
-            className="text-[length:var(--text-body)] leading-relaxed [&_h1]:mb-2 [&_h1]:text-[length:var(--text-lg)] [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:mt-3 [&_h2]:font-semibold [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_code]:rounded [&_code]:bg-panel-2 [&_code]:px-1"
+            ref={setPreviewEl}
+            className="cm-lp-md-preview text-[length:var(--text-body)] leading-relaxed"
             data-testid="template-preview-body"
-            // #267: renderMarkdownToHtml returns SafeHtml (markup with every interpolated value escaped by
-            // construction); .toString() yields that HTML for dangerouslySetInnerHTML. previewMacroRegistry
-            // renders the first-party SafeHtml macros (callout/columns/…) but excludes `:::table` (TRUSTED
-            // passthrough) since this client preview has no downstream sanitizer.
-            dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(data.body, previewMacroRegistry()).toString() }}
           />
         )}
       </div>
