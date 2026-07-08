@@ -1091,7 +1091,7 @@ function findNestedSlot(root: HTMLElement, anchor: number): HTMLElement | null {
 // #221: fields stashed on the widget's DOM so updateDOM can reuse it on a selection-only change (see
 // MacroWidget.updateDOM). __mwKey is the rendered-content identity; __mwRo/__mwObjUrl are the async
 // resources whose ownership must travel with the DOM so the current instance's destroy releases them.
-type MwDom = HTMLElement & { __mwKey?: { body: string; theme: MacroTheme; name: string; foldable: boolean; align: FenceAlign }; __mwRo?: ResizeObserver; __mwObjUrl?: string };
+type MwDom = HTMLElement & { __mwKey?: { body: string; theme: MacroTheme; name: string; foldable: boolean; align: FenceAlign; wysiwyg: boolean }; __mwRo?: ResizeObserver; __mwObjUrl?: string };
 
 class MacroWidget extends WidgetType {
   private ro?: ResizeObserver;
@@ -1102,7 +1102,7 @@ class MacroWidget extends WidgetType {
   // are the display-only selection / edit-active state intersecting THIS widget (null otherwise), driving
   // the nested ring + edit button + editUI island. Stable string keys in eq so an unrelated selection
   // move never churns this widget (the project design notes "widget eq ").
-  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string, readonly selected: boolean, readonly theme: MacroTheme, readonly from = 0, readonly to = 0, readonly bodyFrom = 0, readonly nestedSel: NestedSelection | null = null, readonly nestedEdit: NestedSelection | null = null, readonly align: FenceAlign = "center") {
+  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string, readonly selected: boolean, readonly theme: MacroTheme, readonly from = 0, readonly to = 0, readonly bodyFrom = 0, readonly nestedSel: NestedSelection | null = null, readonly nestedEdit: NestedSelection | null = null, readonly align: FenceAlign = "center", readonly wysiwyg = false) {
     super();
   }
   private nestedKey(v: NestedSelection | null) { return v ? `${v.nested.from}:${v.nested.to}:${v.anchor}` : ""; }
@@ -1116,7 +1116,7 @@ class MacroWidget extends WidgetType {
     // #200: `theme` is part of the key so a light/dark switch INVALIDATES the widget and CM
     // rebuilds it → liveRender re-runs and re-exports the SVG for the new theme (a macro like
     // Excalidraw bakes colours into its output, so it can't follow the theme via CSS alone).
-    return other.name === this.name && other.body === this.body && other.foldable === this.foldable && other.selected === this.selected && other.theme === this.theme && other.align === this.align
+    return other.name === this.name && other.body === this.body && other.foldable === this.foldable && other.selected === this.selected && other.theme === this.theme && other.align === this.align && other.wysiwyg === this.wysiwyg
       && this.nestedKey(other.nestedSel) === this.nestedKey(this.nestedSel) && this.nestedKey(other.nestedEdit) === this.nestedKey(this.nestedEdit);
   }
   toDOM(view: EditorView) {
@@ -1179,6 +1179,40 @@ class MacroWidget extends WidgetType {
             edit.innerHTML = MACRO_EDIT_ICON;
             edit.setAttribute("data-testid", "nested-macro-edit");
             edit.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterNestedMacroAt(view, this.nestedSel!); });
+            slot.appendChild(edit);
+          }
+        }
+        // #174 comment 1003 / ADR-100 (WYSIWYG nested parity): in WYSIWYG the raw syntax NEVER reveals, so a
+        // nested macro inside a layout container had NO way into its editUI — a top-level callout got a hover
+        // ✎ (comment 894) but the nested equivalent was missing (nested edit was click-to-select only, which
+        // leans on a reveal path WYSIWYG lacks). Give every EDITABLE nested slot the same hover-gated ✎ (→ its
+        // editUI via enterNestedMacroAt), matching the top-level panel. WYSIWYG-only: Live keeps click-to-
+        // select → pencil (its reveal path already reaches the editUI). Skip the slot already carrying the
+        // selection/edit affordance (single pencil). Offset-invariant — the button never edits the doc.
+        if (this.wysiwyg) {
+          const activeAnchor = this.nestedEdit?.anchor ?? this.nestedSel?.anchor ?? null;
+          for (const slot of Array.from(rendered.querySelectorAll<HTMLElement>("[data-mac-pos]"))) {
+            const anchor = Number(slot.dataset.macPos);
+            if (!Number.isFinite(anchor) || anchor === activeAnchor) continue;
+            const m = innermostMacroAt(view.state, anchor);
+            if (!m) continue;
+            // Callout TYPE names (warning/note/…) aren't registered individually — they resolve to the single
+            // noteCalloutMacro (as mountNestedEditIsland does); so fall back for a known callout type.
+            const macro = m.kind === "fence"
+              ? findFenceMacro(m.name)
+              : (findDirectiveMacro(m.name) ?? (CALLOUT_TYPES.includes(m.name as (typeof CALLOUT_TYPES)[number]) ? noteCalloutMacro : undefined));
+            if (!macro || !hasEditUI(macro)) continue;
+            slot.style.position = "relative"; // offset parent for the absolutely-positioned pencil
+            const edit = document.createElement("button");
+            edit.type = "button";
+            // Hover-gated variant (the base .cm-lp-nested-macro-edit is opacity:1 — only drawn on selection);
+            // -hover overrides to opacity:0 + reveals on the slot's :hover (CSS below).
+            edit.className = "cm-lp-macro-edit cm-lp-nested-macro-edit cm-lp-nested-macro-edit-hover";
+            edit.title = "Edit";
+            edit.innerHTML = MACRO_EDIT_ICON; // no Ctrl+↵ hint: keyboard entry needs the macro SELECTED first
+            edit.setAttribute("data-testid", "nested-macro-edit");
+            const container = { from: this.from, to: this.to };
+            edit.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterNestedMacroAt(view, { nested: { from: m.from, to: m.to }, anchor, container }); });
             slot.appendChild(edit);
           }
         }
@@ -1376,7 +1410,7 @@ class MacroWidget extends WidgetType {
     this.ro = observeBlockResize(view, wrap);
     // #221 comment 845: keep enough on the DOM for updateDOM to reuse it on a SELECTION-only change
     // (identity of the rendered content + the live ResizeObserver, so destroy still disconnects it).
-    (wrap as MwDom).__mwKey = { body: this.body, theme: this.theme, name: this.name, foldable: this.foldable, align: this.align };
+    (wrap as MwDom).__mwKey = { body: this.body, theme: this.theme, name: this.name, foldable: this.foldable, align: this.align, wysiwyg: this.wysiwyg };
     (wrap as MwDom).__mwRo = this.ro;
     return wrap;
   }
@@ -1390,8 +1424,8 @@ class MacroWidget extends WidgetType {
     const prev = (dom as MwDom).__mwKey;
     const nestedNow = !!(this.nestedSel || this.nestedEdit);
     const nestedBefore = dom.classList.contains("cm-lp-nested-host");
-    if (!prev || prev.body !== this.body || prev.theme !== this.theme || prev.name !== this.name || prev.foldable !== this.foldable || prev.align !== this.align || nestedNow || nestedBefore) {
-      return false; // content / theme / nested affordance / #255 align changed → let CM rebuild via toDOM
+    if (!prev || prev.body !== this.body || prev.theme !== this.theme || prev.name !== this.name || prev.foldable !== this.foldable || prev.align !== this.align || prev.wysiwyg !== this.wysiwyg || nestedNow || nestedBefore) {
+      return false; // content / theme / nested affordance / #255 align / #174 wysiwyg nested-✎ changed → rebuild via toDOM
     }
     this.ro = (dom as MwDom).__mwRo; // adopt the live ResizeObserver so this instance's destroy() disconnects it
     this.objectUrl = (dom as MwDom).__mwObjUrl; // adopt any host-rendered blob url so destroy() revokes it
@@ -1885,7 +1919,10 @@ const RENDERERS: BlockRenderer[] = [
         const nestedSel = nsf && nsf.nested.from >= from && nsf.nested.to <= to ? nsf : null;
         const nef = ctx.state.field(nestedEditActiveField, false);
         const nestedEdit = nef && nef.nested.from >= from && nef.nested.to <= to ? nef : null;
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editUI: macro.editUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme, from, to, bodyFrom, nestedSel, nestedEdit), block: true }), from, to);
+        // #174 comment 1003: layout containers in WYSIWYG draw hover ✎ on their nested editable slots (below);
+        // the flag is part of eq so a display-mode switch rebuilds the widget (eq ignores the live facet).
+        const wysiwygNested = (open!.name === "columns" || open!.name === "tabs") && ctx.state.facet(displayMode) === "wysiwyg";
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editUI: macro.editUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme, from, to, bodyFrom, nestedSel, nestedEdit, "center", wysiwygNested), block: true }), from, to);
         return macro.revealOnCursor ? false : undefined;
       }
       if (macro.collapsible && !rangeRevealed(ctx.state, first.from, lastLine.to)) {
@@ -2495,8 +2532,14 @@ export function enterMacroAt(view: EditorView, pos: number, raw = false): boolea
 // Ctrl+Enter (ADR-024 Q1): enter the macro atom at the caret. event.key "Enter" is
 // layout/JIS-safe. Bound via the editor keymap; remappable later (#4).
 export function enterMacroCommand(view: EditorView): boolean {
-  // #174 addendum: Ctrl+Enter reveals RAW source (raw=true) — for a ``` editUI macro (mermaid) that means
-  // the vim-editable source, NOT the editUI (which the ✎ button opens). Harmless for other macros.
+  // #174 comment 1003 / ADR-100 (innermost-wins): if a NESTED macro (inside a columns/tabs container) is
+  // selected, Ctrl+Enter opens ITS editUI — the same target as the nested ✎ — not the container's. In
+  // WYSIWYG the container is one atom (the caret can't sit inside), so a nested macro is reached by click
+  // (setNestedSelection); this makes the keyboard entry match the mouse one for the selected nested macro.
+  const nsel = view.state.field(nestedSelectionField, false);
+  if (nsel && enterNestedMacroAt(view, nsel)) return true;
+  // #174 addendum: otherwise Ctrl+Enter reveals RAW source (raw=true) — for a ``` editUI macro (mermaid)
+  // that means the vim-editable source, NOT the editUI (which the ✎ button opens). Harmless for others.
   return enterMacroAt(view, view.state.selection.main.head, true);
 }
 
@@ -2766,6 +2809,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   // position override; the pencil uses the SAME (normal) color as every other macro's edit button — the
   // accent ring already marks the focused macro, so tinting the pencil too was redundant.
   ".cm-lp-nested-macro-edit": { position: "absolute", top: "-0.9em", left: "-0.4em", opacity: "1", zIndex: "5" },
+  // #174 comment 1003: the WYSIWYG hover variant. Unlike the selection pencil (drawn only when selected, so
+  // opacity:1), this one sits on EVERY editable nested slot, so it must be hover-gated — opacity:0 until the
+  // slot itself is hovered. `>` keeps it to the pencil that is a direct child of the hovered [data-mac-pos].
+  ".cm-lp-nested-macro-edit-hover": { opacity: "0", transition: "opacity 120ms" },
+  "[data-mac-pos]:hover > .cm-lp-nested-macro-edit-hover": { opacity: "1" },
   ".cm-lp-nested-edit-island": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "2px", borderRadius: "4px" },
   ".cm-lp-nested-edit-src": { width: "100%", minHeight: "4em", boxSizing: "border-box", fontFamily: "var(--font-mono, monospace)", fontSize: "0.85em" },
   ".cm-lp-excalidraw svg": { maxWidth: "100%", height: "auto", pointerEvents: "none" },
