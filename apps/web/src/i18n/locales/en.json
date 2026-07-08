@@ -375,6 +375,7 @@
   "sidebar": {
     "searchSpaces": "Search spaces…",
     "noSpacesMatch": "No spaces match.",
+    "moreSpacesHint": "{{count}} more — search to filter",
     "newSpace": "New space",
     "renameSpace": "Rename space",
     "spaceName": "Space name",

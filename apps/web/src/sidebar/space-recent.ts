@@ -48,3 +48,11 @@ export function visibleSpaces(spaces: Space[], currentId: string | undefined, qu
   }
   return out;
 }
+
+// #263 rejection ①: how many viewable spaces are hidden by the bounded default list, so the switcher can
+// tell the user "there are more — search to find them" instead of silently truncating. Zero while a query
+// is active (search spans ALL viewable spaces, so nothing is hidden) and never negative.
+export function hiddenSpaceCount(total: number, shown: number, query: string): number {
+  if (query.trim()) return 0;
+  return Math.max(0, total - shown);
+}
