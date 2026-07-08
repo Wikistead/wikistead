@@ -133,3 +133,25 @@ test("#287: 'show all' reveals every viewable space (name-sorted), and one can b
   await sleep(400);
   await expect(page.getByTestId("space-switcher")).toContainText(zebraName);
 });
+
+// #295: a search that matches NO space must show the "no spaces match" empty message. cmdk's <CommandEmpty>
+// never fired (the always-present rename/new items kept its internal count >= 2), so the message was dead
+// code and the menu looked frozen. Now it's rendered explicitly when a non-empty query matches nothing.
+test("#295: a non-matching space search shows the empty message; a matching one does not", async ({ page }) => {
+  await openDemo(page);
+  await page.waitForSelector("[data-testid=space-switcher]");
+  await sleep(300);
+  await page.click("[data-testid=space-switcher]");
+  await expect(page.getByTestId("space-menu")).toBeVisible();
+
+  // a query that matches nothing → 0 options AND the explicit empty message.
+  await page.getByTestId("space-search").fill("zzz-no-such-space-zzz");
+  await sleep(200);
+  await expect(page.locator("[data-testid=space-menu] [data-testid=space-option]")).toHaveCount(0);
+  await expect(page.getByTestId("space-empty")).toBeVisible();
+
+  // clearing the query hides the empty message (spaces are listed again).
+  await page.getByTestId("space-search").fill("");
+  await sleep(200);
+  await expect(page.getByTestId("space-empty")).toHaveCount(0);
+});
