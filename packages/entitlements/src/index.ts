@@ -27,6 +27,11 @@ export interface Entitlements {
   // The POST /spaces gate stays but is inert while this is Infinity.
   maxSpaces: number
 
+  // #252 / ADR-110: reusable page templates a tenant may hold. All plans UNLIMITED for now (templates
+  // are a knowledge-first primitive, not a paid lever); the seam exists so a future tier could cap it
+  // without touching the save path. The POST /templates gate is inert while this is Infinity.
+  maxTemplates: number
+
   // Page revision history a member can see/restore, in days. Infinity = keep all.
   // Enforced at read time in the revisions routes (limited tiers expose only the
   // recent window; older revisions are hidden and not restorable).
@@ -104,6 +109,7 @@ export const UNLIMITED: Entitlements = {
   guestAccess: true,
   maxSeats: Infinity,
   maxSpaces: Infinity,
+  maxTemplates: Infinity,
   historyRetentionDays: Infinity,
   maxStorageBytes: Infinity,
   branding: true,

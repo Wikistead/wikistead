@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, writeTuples, deleteObjectTuples } from '@wikistead/authz'
+import { resolveEntitlements } from '@wikistead/entitlements'
 import type { TenantDb } from '../db/index.js'
 
 // #241 / ADR-110: page templates — the SAVE path. A template is a SNAPSHOT of a page's published Markdown
@@ -15,7 +16,7 @@ export type TemplateScope = 'personal' | 'space' | 'tenant'
 export async function saveTemplate(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { tenantId: string; userId: string; fromPageId: string; name: string; scope: TemplateScope; spaceId?: string | null },
+  args: { tenantId: string; userId: string; fromPageId: string; name: string; scope: TemplateScope; spaceId?: string | null; plan?: string },
 ): Promise<{ id: string }> {
   const subject = `user:${args.userId}`
   // The saver must be able to VIEW the source page — else 404 (existence-hidden, never 403, so a
@@ -37,6 +38,18 @@ export async function saveTemplate(
     if (!canViewSpace) throw httpError(404, 'not found')
   }
   const id = await db.tx(async (tx) => {
+    // #252 / ADR-110: maxTemplates entitlement seam. All plans are UNLIMITED for now, so `isFinite` is
+    // false and this is INERT (no count, no `if (plan === ...)` branching — the entitlement is the only
+    // place a cap would ever be decided). Enforced in-tx (like maxSpaces) so a future finite cap is
+    // race-free. entitlement(ce) is the bastion; the UI is advisory.
+    if (args.plan !== undefined) {
+      const ent = resolveEntitlements(args.plan)
+      if (isFinite(ent.maxTemplates)) {
+        await tx`SELECT pg_advisory_xact_lock(hashtext(${`template:${args.tenantId}`}))`
+        const [{ count }] = await tx<[{ count: string }]>`SELECT count(*)::text AS count FROM templates`
+        if (Number(count) >= ent.maxTemplates) throw httpError(403, 'template limit reached')
+      }
+    }
     const [row] = await tx<[{ id: string }]>`
       INSERT INTO templates (tenant_id, name, body_md, source_page_id, scope, space_id, created_by)
       VALUES (${args.tenantId}, ${name}, ${src.published_md}, ${args.fromPageId}, ${args.scope},
@@ -129,6 +142,7 @@ export async function templatesPlugin(app: FastifyInstance) {
         name: name ?? '',
         scope,
         spaceId: spaceId ?? null,
+        plan: req.tenant.plan, // #252: entitlement seam (inert while maxTemplates is Infinity)
       })
       return reply.code(201).send(t)
     },

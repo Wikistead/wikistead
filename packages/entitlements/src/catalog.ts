@@ -56,6 +56,13 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     enforcedAt: 'POST /spaces (inert while unlimited)',
     downgrade: 'over-cap blocks new spaces; existing spaces are kept',
   },
+  maxTemplates: {
+    title: 'Page templates',
+    summary: 'Reusable page templates a tenant may hold. A knowledge-first primitive, not a paid lever — unlimited on all plans.',
+    unit: 'count',
+    enforcedAt: 'POST /templates (inert while unlimited)',
+    downgrade: 'over-cap blocks new templates; existing templates are kept',
+  },
   historyRetentionDays: {
     title: 'History retention',
     summary: 'Page revision history a member can see and restore, in days.',
