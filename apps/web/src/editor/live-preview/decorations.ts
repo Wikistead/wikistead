@@ -94,10 +94,8 @@ const headingLine = (level: number) =>
   Decoration.line({ attributes: { class: `cm-lp-h cm-lp-h${level}` } });
 const quoteLine = Decoration.line({ attributes: { class: "cm-lp-quote" } });
 const hrLine = Decoration.line({ attributes: { class: "cm-lp-hr" } });
-// #255 comment 1036: a STANDALONE image (the whole line is just the image) centres by default, like a
-// rendered diagram macro. An INLINE image (text on the same line) stays in the flow — so this is a LINE
-// decoration only added when the image is the sole content of its line.
-const imgCenterLine = Decoration.line({ attributes: { class: "cm-lp-img-center" } });
+// #255 comment 1073: a STANDALONE image is now a full ATOM (StandaloneImageWidget) whose wrap carries the
+// cm-lp-align-* class, so the old cm-lp-img-center line decoration is retired (the widget centres itself).
 
 // #198 / ADR-094: a header band shown ABOVE a code fence that carries attributes — a filename/title
 // plus a muted language label. Display-only (contenteditable=false, ignoreEvent), block widget on the
@@ -471,6 +469,45 @@ function changeEmbedTarget(view: EditorView, wrap: HTMLElement, name: string): v
 
 const ATTACHMENT_REF = /^!\[([^\]]*)\]\(wks-attachment:([^)\s]+)\)$/;
 
+// #255 comment 1073/1074: a standalone image carries its alignment as a query on its OWN opaque scheme
+// `![alt](wks-attachment:<id>?align=left)`. The surface notation stays standard Markdown (the URL is
+// opaque); center is the default and writes NO query, so existing docs are unchanged. Parse splits the id
+// from the query so the resolver still gets the clean id.
+type ImageRef = { alt: string; id: string; align: FenceAlign };
+function parseImageRef(text: string): ImageRef | null {
+  const m = ATTACHMENT_REF.exec(text.trim());
+  if (!m) return null;
+  const alt = m[1]!, raw = m[2]!;
+  const q = raw.indexOf("?");
+  if (q === -1) return { alt, id: raw, align: "center" };
+  const a = new URLSearchParams(raw.slice(q + 1)).get("align");
+  return { alt, id: raw.slice(0, q), align: a === "left" || a === "right" ? a : "center" };
+}
+// The STANDALONE image (its line is nothing but the image) at `pos`, or null — used by Ctrl+Enter reveal,
+// the right-click align menu, and the render gate. Range = the image markdown within the line.
+function imageBlockAt(state: EditorState, pos: number): { from: number; to: number; ref: ImageRef } | null {
+  const line = state.doc.lineAt(pos);
+  const ref = parseImageRef(line.text);
+  if (!ref) return null;
+  const lead = line.text.length - line.text.trimStart().length;
+  const from = line.from + lead;
+  return { from, to: from + line.text.trim().length, ref };
+}
+// #255: rewrite a standalone image's `?align=` query (center → left → right → center; center DROPS the
+// query so an untagged image stays untagged). One offset-invariant Y.Text replace of the image markdown.
+export function setImageAlign(view: EditorView, pos: number, align: FenceAlign): void {
+  const img = imageBlockAt(view.state, pos);
+  if (!img) return;
+  const q = align === "center" ? "" : `?align=${align}`;
+  const next = `![${img.ref.alt}](wks-attachment:${img.ref.id}${q})`;
+  if (next === view.state.doc.sliceString(img.from, img.to)) return;
+  view.dispatch({ changes: { from: img.from, to: img.to, insert: next }, userEvent: "input" });
+}
+// #255: the standalone image at `pos` if it is one (so the context menu offers alignment only there).
+export function imageAlignAt(state: EditorState, pos: number): number | null {
+  return imageBlockAt(state, pos) ? state.doc.lineAt(pos).from : null;
+}
+
 // Renders an image from a wks-attachment reference. src is filled in
 // asynchronously from the resolver; on load error (e.g. the presigned URL
 // expired) it re-resolves ONCE (refresh) before giving up — TTL caching means a
@@ -512,6 +549,89 @@ class ImageWidget extends WidgetType {
   ignoreEvent() {
     return false; // clicks pass through so the cursor can enter → reveal raw
   }
+}
+
+// #255 comment 1073: a STANDALONE image (its line is only the image) is a first-class ATOM, like a
+// diagram macro — a click SELECTS it (ring), never reveals raw; hover/selection shows a top-left btnRow
+// (an align toggle + a reveal pill); raw source is reached only via Ctrl+Enter / the pill (explicit entry,
+// gated on macroRenderActiveField — NOT caret-landing). Alignment (center default) drives the wrap's
+// text-align. Inline images (text on the line) keep the plain ImageWidget + reveal-on-cursor.
+type SiDom = HTMLElement & { __siRo?: ResizeObserver; __siKey?: string };
+class StandaloneImageWidget extends WidgetType {
+  private ro?: ResizeObserver;
+  constructor(readonly id: string, readonly alt: string, readonly align: FenceAlign, readonly selected: boolean) {
+    super();
+  }
+  private key() { return `${this.id} ${this.alt} ${this.align}`; }
+  eq(o: StandaloneImageWidget) { return o.id === this.id && o.alt === this.alt && o.align === this.align && o.selected === this.selected; }
+  toDOM(view: EditorView) {
+    const wrap = document.createElement("div") as SiDom;
+    wrap.className = "cm-lp-macro-wrap cm-lp-image-wrap";
+    wrap.classList.add(`cm-lp-align-${this.align}`); // center default; drives text-align (same as diagrams)
+    if (this.selected) wrap.classList.add("cm-lp-atom-sel");
+    const img = document.createElement("img");
+    img.className = "cm-lp-image";
+    img.alt = this.alt;
+    img.setAttribute("data-testid", "macro-image");
+    const resolve = view.state.facet(imageResolver);
+    const load = (refresh: boolean) => { void resolve(this.id, { refresh }).then((url) => { if (url) img.src = url; }); };
+    let retried = false;
+    img.addEventListener("error", () => { if (retried) return; retried = true; load(true); });
+    load(false);
+    wrap.appendChild(img);
+    // A click SELECTS the atom (caret on it → ring), never reveals raw (ADR-024 for macros; #255 extends it
+    // to images). The reveal pill / Ctrl+Enter are the explicit way to the raw markdown.
+    wrap.addEventListener("mousedown", (e) => {
+      if (view.state.readOnly || e.button !== 0) return; // left-click selects; right-click → context menu
+      e.preventDefault();
+      view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)) });
+      view.focus();
+    });
+    if (!view.state.readOnly) {
+      const btnRow = document.createElement("div");
+      btnRow.className = "cm-lp-macro-btnrow";
+      // reveal pill — the ✎ affordance; images have no rich editor, so it reveals the RAW markdown (like a
+      // ``` source macro). Ctrl+↵ hint mirrors the diagram raw-entry pill.
+      const reveal = document.createElement("button");
+      reveal.type = "button";
+      reveal.className = "cm-lp-macro-edit cm-lp-macro-edit-hint";
+      reveal.title = "Edit";
+      reveal.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
+      reveal.setAttribute("data-testid", "macro-edit");
+      reveal.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(wrap), true); });
+      btnRow.appendChild(reveal);
+      // align toggle — same ALIGN_ICON + cycle as diagrams, writing the `?align=` query.
+      const alignBtn = document.createElement("button");
+      alignBtn.type = "button";
+      alignBtn.className = "cm-lp-macro-align";
+      alignBtn.title = `Align: ${this.align}`;
+      alignBtn.innerHTML = ALIGN_ICON[this.align];
+      alignBtn.setAttribute("data-testid", "macro-align");
+      alignBtn.setAttribute("data-align", this.align);
+      alignBtn.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const next: FenceAlign = this.align === "center" ? "left" : this.align === "left" ? "right" : "center";
+        setImageAlign(view, view.posAtDOM(wrap), next);
+      });
+      btnRow.appendChild(alignBtn);
+      wrap.appendChild(btnRow);
+    }
+    this.ro = observeBlockResize(view, img);
+    wrap.__siRo = this.ro;
+    wrap.__siKey = this.key();
+    return wrap;
+  }
+  // A selection-only change (ring toggle) must NOT rebuild — that would re-resolve the image (flicker). Reuse
+  // the DOM when the rendered content (id/alt/align) is identical and only `selected` differs.
+  updateDOM(dom: HTMLElement): boolean {
+    if ((dom as SiDom).__siKey !== this.key()) return false;
+    this.ro = (dom as SiDom).__siRo;
+    dom.classList.toggle("cm-lp-atom-sel", this.selected);
+    return true;
+  }
+  destroy(dom: HTMLElement) { (dom as SiDom).__siRo?.disconnect(); }
+  ignoreEvent() { return false; }
 }
 
 // Splits a GFM table row into trimmed cell strings, dropping the leading/trailing
@@ -2073,17 +2193,27 @@ const RENDERERS: BlockRenderer[] = [
     // line. Offset-invariant: replace hides the range but never shifts offsets.
     match: (n) => n === "Image",
     enter: (node, ctx) => {
-      const m = ATTACHMENT_REF.exec(ctx.state.doc.sliceString(node.from, node.to));
-      if (!m) return;
-      if (lineRevealed(ctx.state, node.from)) return;
-      // #255 comment 1036: centre a STANDALONE image (its line is nothing but the image); leave an INLINE
-      // image (text on the line) in the flow. The line decoration must come BEFORE the replace in the same
-      // enter — CM sorts them, and the line deco applies only while rendered (revealed lines returned above).
+      const src = ctx.state.doc.sliceString(node.from, node.to);
+      const ref = parseImageRef(src);
+      if (!ref) return; // not our attachment ref → leave as raw markdown (no arbitrary external <img>)
       const line = ctx.state.doc.lineAt(node.from);
-      if (line.text.trim() === ctx.state.doc.sliceString(node.from, node.to).trim()) {
-        ctx.add(imgCenterLine, line.from);
+      const standalone = line.text.trim() === src.trim();
+      if (standalone) {
+        // #255 comment 1073: a standalone image is an ATOM (like a diagram) — reveal ONLY on explicit entry
+        // (Ctrl+Enter / the pill → macroRenderActiveField), NEVER on caret landing. The wrap's align class
+        // centres/aligns it, so the old cm-lp-img-center line deco is no longer needed.
+        const active = ctx.state.field(macroRenderActiveField, false);
+        if (active && active.from <= node.from && active.to >= node.to) return; // revealed → raw markdown
+        ctx.addAtomic(
+          Decoration.replace({ widget: new StandaloneImageWidget(ref.id, ref.alt, ref.align, atomSelected(ctx.state, node.from, node.to)), block: true }),
+          node.from,
+          node.to,
+        );
+        return;
       }
-      ctx.addAtomic(Decoration.replace({ widget: new ImageWidget(m[2]!, m[1]!) }), node.from, node.to);
+      // Inline image (text on the line): unchanged — reveal on caret landing, plain widget, stays in flow.
+      if (lineRevealed(ctx.state, node.from)) return;
+      ctx.addAtomic(Decoration.replace({ widget: new ImageWidget(ref.id, ref.alt) }), node.from, node.to);
     },
   },
 ];
@@ -2451,6 +2581,14 @@ export function enterMacroAt(view: EditorView, pos: number, raw = false): boolea
   const dir = directiveMacroAt(view.state, pos);
   if (dir) {
     view.dispatch({ selection: EditorSelection.cursor(dir.from), effects: setMacroRenderActive.of({ from: dir.from, to: dir.to }) });
+    view.focus();
+    return true;
+  }
+  // #255 comment 1073: a standalone image has no rich editor — entering it reveals its RAW markdown
+  // (explicit-entry via macroRenderActiveField), the same as a ``` source macro.
+  const img = imageBlockAt(view.state, pos);
+  if (img) {
+    view.dispatch({ selection: EditorSelection.cursor(img.from), effects: setMacroRenderActive.of({ from: img.from, to: img.to, raw: true }) });
     view.focus();
     return true;
   }
