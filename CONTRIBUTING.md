@@ -28,8 +28,8 @@ Please open an **Issue**:
 
 ## Security
 
-Please do **not** file security vulnerabilities in public issues. Use the project's private
-security contact / advisory channel (to be published before launch).
+Please do **not** file security vulnerabilities in public issues. Report them privately —
+see [`SECURITY.md`](./SECURITY.md) for the process (GitHub private vulnerability reporting).
 
 ## Building from source (self-hosting / inspection)
 
