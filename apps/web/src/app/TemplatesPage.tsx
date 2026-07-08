@@ -1,15 +1,17 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { ArrowLeft, FileStack, Pencil, Trash2 } from "lucide-react";
-import { useTemplates, useRenameTemplate, useDeleteTemplate, type TemplateSummary } from "../data/queries";
+import { ArrowLeft, Eye, FileStack, Pencil, Trash2, X } from "lucide-react";
+import { renderMarkdownToHtml } from "@wikistead/macro-render";
+import { useTemplates, useTemplateBody, useRenameTemplate, useDeleteTemplate, type TemplateSummary } from "../data/queries";
 import { RenameDialog, ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
 
 // #249 / ADR-110: the /templates management page. Lists the templates the user can view (server
 // FGA-filtered — scope containment enforced server-side), with a scope badge, rename, and delete. Actions
 // are hidden on templates the user can't manage (canManage from the server); the server re-checks anyway
-// (two-layer defence). Preview via the shared sanitized renderer is a follow-up.
+// (two-layer defence). A read-only preview renders the frozen body via the shared sanitized renderer
+// (client-side only — embed/transclude are not server-resolved).
 export function TemplatesRoute() {
   const { t } = useTranslation();
   const { data, isLoading } = useTemplates();
@@ -17,6 +19,7 @@ export function TemplatesRoute() {
   const del = useDeleteTemplate();
   const [renaming, setRenaming] = useState<TemplateSummary | null>(null);
   const [deleting, setDeleting] = useState<TemplateSummary | null>(null);
+  const [previewing, setPreviewing] = useState<TemplateSummary | null>(null);
   const templates = data ?? [];
 
   return (
@@ -43,6 +46,9 @@ export function TemplatesRoute() {
                 {t(`template.scope.${tpl.scope}`)}
               </span>
               <span className="min-w-0 flex-1 truncate" data-testid="template-name">{tpl.name}</span>
+              <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground" title={t("templates.preview")} data-testid="template-preview" onClick={() => setPreviewing(tpl)}>
+                <Eye size={14} />
+              </button>
               {tpl.canManage && (
                 <>
                   <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground" title={t("templates.rename")} data-testid="template-rename" onClick={() => setRenaming(tpl)}>
@@ -78,6 +84,38 @@ export function TemplatesRoute() {
           setDeleting(null);
         }}
       />
+      {previewing && <TemplatePreview tpl={previewing} onClose={() => setPreviewing(null)} />}
+    </div>
+  );
+}
+
+// A read-only preview of the template's frozen body. Rendered by the SHARED sanitized renderer
+// (renderMarkdownToHtml with the EMPTY macro registry — so embed/transclude are NOT server-resolved,
+// per ADR-110: the preview is a client-side sanitized draw only, never a data-fetching surface).
+function TemplatePreview({ tpl, onClose }: { tpl: TemplateSummary; onClose: () => void }) {
+  const { t } = useTranslation();
+  const { data, isLoading } = useTemplateBody(tpl.id);
+  return (
+    <div className="mt-4 rounded-md border border-border" data-testid="template-preview-panel">
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <Eye size={14} className="text-fg-dim" />
+        <span className="min-w-0 flex-1 truncate font-medium">{tpl.name}</span>
+        <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground" title={t("common.close")} data-testid="template-preview-close" onClick={onClose}>
+          <X size={14} />
+        </button>
+      </div>
+      <div className="max-h-[24rem] overflow-auto px-4 py-3">
+        {isLoading || !data ? (
+          <p className="text-fg-dim">{t("common.loading")}</p>
+        ) : (
+          <div
+            className="text-[length:var(--text-body)] leading-relaxed [&_h1]:mb-2 [&_h1]:text-[length:var(--text-lg)] [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:mt-3 [&_h2]:font-semibold [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_code]:rounded [&_code]:bg-panel-2 [&_code]:px-1"
+            data-testid="template-preview-body"
+            // renderMarkdownToHtml returns SafeHtml (sanitized); .toString() is its escaped HTML string.
+            dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(data.body).toString() }}
+          />
+        )}
+      </div>
     </div>
   );
 }

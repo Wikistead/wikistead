@@ -664,6 +664,7 @@
     "renamed": "テンプレートをリネームしました",
     "deleted": "テンプレートを削除しました",
     "deleteConfirm": "テンプレート「{{name}}」を削除しますか？この操作は取り消せません。",
-    "actionFailed": "問題が発生しました"
+    "actionFailed": "問題が発生しました",
+    "preview": "プレビュー"
   }
 }

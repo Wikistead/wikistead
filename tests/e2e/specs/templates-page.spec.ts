@@ -29,6 +29,13 @@ test("#249: a saved template appears on /templates and can be renamed and delete
   await expect(row).toBeVisible({ timeout: 8000 });
   await expect(row.getByTestId("template-scope-badge")).toBeVisible();
 
+  // Preview renders the frozen body via the shared sanitized renderer (client-side draw).
+  await row.getByTestId("template-preview").click();
+  const body = page.getByTestId("template-preview-body");
+  await expect(body).toBeVisible({ timeout: 8000 });
+  await expect(body.locator("h1")).toHaveText("Sprint template");
+  await page.getByTestId("template-preview-close").click();
+
   // Rename it.
   await row.getByTestId("template-rename").click();
   const input = page.locator("[data-testid=rename-dialog] input").first();
