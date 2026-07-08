@@ -2721,6 +2721,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
   ".cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap:hover .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-align": { opacity: "1" },
+  // #174 point 3: innermost-wins for the edit ✎. Hovering a NESTED macro slot reveals THAT slot's own ✎;
+  // while it does, suppress the CONTAINER's ✎ (its own direct btnrow) so the inner and outer buttons never
+  // co-occur. `:has([data-mac-pos]:hover)` scopes it to the container holding the hovered slot; `>` keeps it
+  // to the container's own btnrow, so the nested ✎ (appended to the slot, not in the btnrow) is unaffected.
+  ".cm-lp-macro-wrap:has([data-mac-pos]:hover) > .cm-lp-macro-btnrow .cm-lp-macro-edit": { opacity: "0", pointerEvents: "none" },
   // #215 / ADR-100: the selected NESTED macro (inside a columns/tabs widget) draws its own ring + edit
   // button — the same affordance as a top-level macro, at depth. The ring is on the nested subtree (not
   // the container), and the button is anchored to that subtree's top-left (the container's top margin is

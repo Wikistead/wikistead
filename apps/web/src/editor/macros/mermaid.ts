@@ -40,14 +40,21 @@ export const mermaidMacro: FenceMacro = {
     el.setAttribute("data-testid", "macro-mermaid");
     const code = body.trim();
     if (!code) return el;
+    // #174 point 1: render the SVG into a dedicated CHILD, not el.innerHTML. When this macro is nested in a
+    // columns/tabs container, the WYSIWYG hover-✎ is appended to `el` (the tagged slot); setting
+    // el.innerHTML async would WIPE that pencil (the info callout kept its pencil only because its render is
+    // synchronous). Replacing just the `fig` child leaves el's other children (the pencil) intact.
+    const fig = document.createElement("div");
+    fig.className = "cm-lp-mermaid-fig";
+    el.appendChild(fig);
     const id = nextId();
     void loadMermaid(ctx.theme).then(async (mermaid) => {
       try {
         const { svg } = await mermaid.render(id, code);
-        el.innerHTML = svg; // sanitized by mermaid (securityLevel: strict)
+        fig.innerHTML = svg; // sanitized by mermaid (securityLevel: strict)
       } catch {
         el.classList.add("cm-lp-macro-error");
-        el.textContent = "Invalid mermaid diagram"; // in-macro only (suppressErrorRendering stops the body bomb)
+        fig.textContent = "Invalid mermaid diagram"; // in-macro only (suppressErrorRendering stops the body bomb)
       } finally {
         // Belt-and-suspenders (#191): mermaid.render appends a temp element PREFIXED with 'd' (d<id>)
         // to the DOM for measurement; on an error path it can linger. Remove only THAT — never #<id>,

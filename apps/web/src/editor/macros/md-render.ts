@@ -1,4 +1,4 @@
-import { parser, Strikethrough } from "@lezer/markdown";
+import { parser, Strikethrough, Table } from "@lezer/markdown";
 import { directiveExtension, parseDirectiveOpen } from "./directive-parser";
 import { findDirectiveMacro, findFenceMacro } from "./registry";
 import { currentMacroTheme } from "./theme";
@@ -14,7 +14,11 @@ import { currentMacroTheme } from "./theme";
 // #89 comment 848: GFM Strikethrough (`~~x~~`) so the shared renderer emits <s> (renderInline already has the
 // case; the base CommonMark parser didn't produce the node). GFM is the target format (Open formats), and the
 // table-cell inline-format toolbar's strike must round-trip to a rendered <s> in the non-editing cell too.
-const mdParser = parser.configure([directiveExtension, Strikethrough]);
+// #174 point 4: GFM Table so a pipe table nested inside a columns/tabs/transclude widget renders as a real
+// <table> instead of the raw `| a | b |` source (the shared server renderer gets the same extension). The
+// Table render case below builds the DOM node-by-node (textContent only), so it stays inside the XSS
+// boundary — a cell's content is inline markdown, never raw HTML.
+const mdParser = parser.configure([directiveExtension, Strikethrough, Table]);
 // @lezer/common isn't a direct dependency — derive the SyntaxNode type from the parser instead.
 type SNode = ReturnType<typeof mdParser.parse>["topNode"];
 
@@ -167,6 +171,29 @@ function renderBlock(node: SNode, src: string, into: Node): void {
       pre.appendChild(code); into.appendChild(pre); return;
     }
     case "HorizontalRule": into.appendChild(document.createElement("hr")); return;
+    case "Table": {
+      // #174 point 4: GFM pipe table → a real <table>. TableHeader row → <th>s in a <thead>; each TableRow
+      // → <td>s in a <tbody>; TableDelimiter (the `|---|` separator) is skipped. Cell content is inline
+      // markdown rendered via renderInline (textContent only — no innerHTML — so it's XSS-safe).
+      const table = document.createElement("table");
+      table.className = "cm-lp-md-table";
+      let tbody: HTMLElement | null = null;
+      for (let row = node.firstChild; row; row = row.nextSibling) {
+        const isHeader = row.name === "TableHeader";
+        if (!isHeader && row.name !== "TableRow") continue; // skip TableDelimiter
+        const tr = document.createElement("tr");
+        for (let cell = row.firstChild; cell; cell = cell.nextSibling) {
+          if (cell.name !== "TableCell") continue;
+          const td = document.createElement(isHeader ? "th" : "td");
+          renderInline(cell, src, td);
+          tr.appendChild(td);
+        }
+        if (isHeader) { const thead = document.createElement("thead"); thead.appendChild(tr); table.appendChild(thead); }
+        else { if (!tbody) { tbody = document.createElement("tbody"); table.appendChild(tbody); } tbody.appendChild(tr); }
+      }
+      into.appendChild(table);
+      return;
+    }
     case "Directive": {
       // ADR-085 shared macro renderer: dispatch a nested directive to its registered macro's
       // liveRender (the SINGLE source of truth) so a `:::callout`/`:::columns` etc. INSIDE a

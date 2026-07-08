@@ -1,4 +1,4 @@
-import { parser, Strikethrough } from "@lezer/markdown";
+import { parser, Strikethrough, Table } from "@lezer/markdown";
 import { directiveExtension, parseDirectiveOpen } from "./directive-parser.js";
 import { SafeHtml, html, joinSafe, unsafeHtml } from "./safe-html.js";
 
@@ -32,7 +32,10 @@ const EMPTY_REGISTRY: MacroHtmlRegistry = { fence: () => undefined, directive: (
 // #89 comment 848: GFM Strikethrough so the SERVER renderer emits <s> for `~~x~~` too — client (apps/web
 // md-render) and server must stay a single source of truth (ADR-085), so a strikethrough table cell renders
 // identically in the editor and on the published page. The Strikethrough case already exists below.
-const mdParser = parser.configure([directiveExtension, Strikethrough]);
+// #174 point 4: GFM Table so a pipe table (incl. one nested in columns/tabs/transclude) renders as a real
+// <table> here too — the client md-render gets the same extension, keeping the single source of truth
+// (ADR-085). Cell content goes through the `html` tag (escaped), so this stays inside the XSS boundary.
+const mdParser = parser.configure([directiveExtension, Strikethrough, Table]);
 type SNode = ReturnType<typeof mdParser.parse>["topNode"];
 
 // Mark/structural nodes whose own text must NOT be emitted.
@@ -154,6 +157,27 @@ function renderBlock(node: SNode, src: string, macros: MacroHtmlRegistry): SafeH
       return html`<pre><code>${body}</code></pre>`;
     }
     case "HorizontalRule": return unsafeHtml("<hr>");
+    case "Table": {
+      // #174 point 4: GFM pipe table → a real <table>. TableHeader → <th>s in <thead>; each TableRow →
+      // <td>s in <tbody>; TableDelimiter (the `|---|` separator) is skipped. Cell content is inline markdown
+      // through the `html` tag (every value escaped) — the same XSS-safe boundary as every other case.
+      let head: SafeHtml | null = null;
+      const bodyRows: SafeHtml[] = [];
+      for (let row = node.firstChild; row; row = row.nextSibling) {
+        const isHeader = row.name === "TableHeader";
+        if (!isHeader && row.name !== "TableRow") continue;
+        const cells: SafeHtml[] = [];
+        for (let cell = row.firstChild; cell; cell = cell.nextSibling) {
+          if (cell.name !== "TableCell") continue;
+          cells.push(isHeader ? html`<th>${renderInline(cell, src)}</th>` : html`<td>${renderInline(cell, src)}</td>`);
+        }
+        const tr = html`<tr>${joinSafe(cells)}</tr>`;
+        if (isHeader) head = html`<thead>${tr}</thead>`;
+        else bodyRows.push(tr);
+      }
+      const body = bodyRows.length ? html`<tbody>${joinSafe(bodyRows)}</tbody>` : html``;
+      return html`<table>${head ?? html``}${body}</table>`;
+    }
     case "Directive": {
       const full = txt(src, node);
       const nl = full.indexOf("\n");

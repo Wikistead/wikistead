@@ -38,6 +38,25 @@ function resolveFence(state: EditorState, pos: number, side: -1 | 1) {
   return node;
 }
 
+// #174 point 1: a fence NESTED inside a directive container (```mermaid in a `:::tab`/`:::column`) is NOT a
+// FencedCode node in the WHOLE-DOC syntax tree — the directive body isn't block-reparsed — so tree
+// resolution fails even though the nested-macro anchor sits exactly on the ``` open line. Resolve it by a
+// text scan from that line instead: match the open fence, then find the matching close (same marker char,
+// length ≥ the open's, no info string), or fall to the doc end if unterminated. Returns line-based [from,to].
+function resolveFenceByText(doc: Text, pos: number): { from: number; to: number } | null {
+  const openLine = doc.lineAt(pos);
+  const m = /^(\s*)(`{3,}|~{3,})/.exec(openLine.text);
+  if (!m) return null; // pos isn't on a fence-open line → not a text-resolvable fence
+  const marker = m[2]![0]!; // "`" or "~"
+  const minLen = m[2]!.length;
+  const closeRe = new RegExp(`^\\s*\\${marker}{${minLen},}\\s*$`); // a bare closing fence, ≥ the open's length
+  for (let n = openLine.number + 1; n <= doc.lines; n++) {
+    const line = doc.line(n);
+    if (closeRe.test(line.text)) return { from: openLine.from, to: line.to };
+  }
+  return { from: openLine.from, to: doc.length }; // unterminated fence → to the end of the doc
+}
+
 export interface MacroFence {
   readonly from: number; // start of the opening fence line (whole-block range)
   readonly to: number; // end of the closing fence line
@@ -53,15 +72,17 @@ export function macroFenceAt(state: EditorState, pos: number): MacroFence | null
   // Resolve from both sides: a position at the block's far edge (e.g. FencedCode.to,
   // which posAtDOM can yield for a block widget) misses the node with side +1 only.
   const node = resolveFence(state, pos, 1) ?? resolveFence(state, pos, -1);
-  if (!node) return null;
   const doc = state.doc;
-  const from = doc.lineAt(node.from).from;
-  const to = doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1)).to;
-  const lang = fenceLang(doc.lineAt(node.from).text);
+  // #174 point 1: fall back to a text scan for a directive-nested fence the tree doesn't expose.
+  const range = node
+    ? { from: doc.lineAt(node.from).from, to: doc.lineAt(Math.max(node.from, Math.min(node.to, doc.length) - 1)).to }
+    : resolveFenceByText(doc, pos);
+  if (!range) return null;
+  const lang = fenceLang(doc.lineAt(range.from).text);
   if (!lang) return null;
   const macro = findFenceMacro(lang);
   if (!macro) return null;
-  return { from, to, lang, macro, body: fenceBody(doc, node.from, node.to) };
+  return { from: range.from, to: range.to, lang, macro, body: fenceBody(doc, range.from, range.to) };
 }
 
 export interface MacroDirective {

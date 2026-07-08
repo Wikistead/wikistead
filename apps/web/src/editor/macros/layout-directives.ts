@@ -228,6 +228,15 @@ export const detailsMacro: DirectiveMacro = {
   htmlRender: detailsHtmlRender, // #85: single source of truth in @wikistead/macro-render
 };
 
+// #174 point 2: the active tab is DISPLAY-ONLY state, but #174 (5b69765) put selection/wysiwyg into the
+// MacroWidget's eq/updateDOM keys, so clicking a nested macro now re-renders the tabs widget on EVERY click
+// — which used to reset the active tab to the first (the v1 "resets on re-render" caveat broke in practice).
+// Persist the active index across re-renders in a module-level Map keyed by the tabs macro's anchor (`base`,
+// the absolute doc offset of its body — stable while the doc above is unchanged). Pure display state: no
+// doc/offset/presence is touched (same discipline as nestedSelectionField). Safe as a module singleton for
+// the same reason as the render-depth counter — rendering is fully synchronous.
+const tabActiveIndex = new Map<number, number>();
+
 export function tabsLiveRender(body: string): HTMLElement {
   const base = takePendingBaseOffset(); // #215 / ADR-100: absolute base of `body` (null = untagged render)
   const items = parseLayoutItems(body, "tab");
@@ -249,13 +258,16 @@ export function tabsLiveRender(body: string): HTMLElement {
     const activate = () => {
       for (const b of Array.from(bar.children)) b.classList.toggle("cm-lp-tab-active", b === btn);
       for (const p of Array.from(panels.children)) (p as HTMLElement).classList.toggle("cm-lp-tabpanel-active", p === panel);
+      if (base != null) tabActiveIndex.set(base, i); // #174 point 2: remember across re-renders (display-only)
     };
-    // Switching tabs is DISPLAY-ONLY local state (resets on a re-render — acceptable v1; doc/
-    // offset/presence untouched). stopPropagation so a tab click doesn't enter the atom (reveal).
+    // Switching tabs is DISPLAY-ONLY local state. stopPropagation so a tab click doesn't enter the atom.
     btn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); activate(); });
     bar.appendChild(btn);
     panels.appendChild(panel);
-    if (i === 0) activate(); // default to the first tab (after both are in the DOM)
+    // #174 point 2: restore the persisted active tab (keyed by the macro anchor) instead of always the first,
+    // so a re-render triggered by a nested-macro click keeps the tab the user was on. Clamp to a valid index.
+    const wantActive = Math.min(base != null ? (tabActiveIndex.get(base) ?? 0) : 0, items.length - 1);
+    if (i === wantActive) activate();
   });
   wrap.append(bar, panels);
   return wrap;
