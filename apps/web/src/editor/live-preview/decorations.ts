@@ -2337,6 +2337,7 @@ export function motionAtomsForCaret(
 
 export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   if (tr.docChanged || !tr.selection) return tr;
+  if (tr.newSelection.ranges.length > 1) return tr; // #286: a blockwise vim selection (multi-range) — don't rebuild it to one cursor
   const baseBlocks = tr.startState.field(livePreview, false)?.blocks ?? [];
   // Merge the base block atoms (excluding any the caret is editing inside — motionAtomsForCaret) with
   // any provider atoms (display math, always collapsed), so motion is corrected over both without
@@ -2397,6 +2398,7 @@ const vimMotionActive = StateField.define<boolean>({
 
 export const wysiwygInlineSkip: Extension = [vimMotionActive, EditorState.transactionFilter.of((tr) => {
   if (tr.docChanged || !tr.selection) return tr;
+  if (tr.newSelection.ranges.length > 1) return tr; // #286: leave a blockwise vim selection (multi-range) intact
   if (tr.startState.facet(displayMode) !== "wysiwyg") return tr;
   if (tr.startState.field(vimMotionActive, false)) return tr; // #240: vim normal/visual — leave it to the guard
   const oldHead = tr.startState.selection.main.head;
