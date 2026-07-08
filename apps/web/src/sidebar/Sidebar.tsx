@@ -20,6 +20,7 @@ import { apiFetch } from "../data/apiClient";
 import { useSession } from "../session/SessionProvider";
 import { useActiveSpace } from "../app/ActiveSpace";
 import { RenameDialog, ConfirmDialog } from "../ui/dialogs";
+import { notify } from "../ui/toast";
 import { DeleteBacklinkWarning } from "../app/DeleteBacklinkWarning";
 import { ShareDialog } from "../ui/ShareDialog";
 import { TemplatePickerDialog } from "./TemplatePickerDialog";
@@ -366,7 +367,15 @@ export function Sidebar() {
         warning={<DeleteBacklinkWarning pageId={deleting?.id ?? null} onNavigate={() => setDeleting(null)} />}
         onClose={() => setDeleting(null)}
         onConfirm={() => {
-          if (deleting) deletePage.mutate({ pageId: deleting.id, spaceId: current! });
+          if (deleting) {
+            // #275: match the page-⋯ delete path (routes.tsx) — a success/error toast, and if the deleted
+            // page is the one currently OPEN, navigate home so its (now-404) body doesn't linger as a ghost.
+            const wasOpen = deleting.id === pageId;
+            deletePage.mutate({ pageId: deleting.id, spaceId: current! }, {
+              onSuccess: () => { notify.success(t("toast.pageDeleted")); if (wasOpen) navigate("/", { replace: true }); },
+              onError: () => notify.error(t("toast.actionFailed")),
+            });
+          }
           setDeleting(null);
         }}
       />
