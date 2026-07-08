@@ -60,9 +60,15 @@ Open **http://localhost:5173/p/demo**. The API resolves the tenant from the Host
 header, so the web calls it on `dev.localhost:4000` (see `apps/web/.env.example`).
 Run app services in containers too: `docker compose --profile apps up -d --build`.
 
-> ⚠️ The server integration tests run against this same dev middleware and
-> `billing.test` wipes `tenant_dev` spaces, so `pnpm test` destroys the demo seed.
-> Re-run `db:seed` afterwards (or use the isolated e2e stack: `pnpm setup:e2e`).
+The server integration tests run against their **own isolated stack** (separate
+containers, ports, and volumes — dev data is never touched):
+```bash
+pnpm setup:server-test          # bring up + migrate + seed the server-test middleware
+pnpm --filter @wikistead/server test
+pnpm teardown:server-test       # (optional) tear it down + wipe its volumes
+```
+`apps/server/vitest.config.ts` loads `.env.server-test`, so `pnpm test` connects to
+that stack, not the dev one. Set it up once; the containers persist between runs.
 
 - OpenFGA playground: http://localhost:3000
 - Meilisearch: http://localhost:7700  ·  SeaweedFS S3 gateway: http://localhost:9000

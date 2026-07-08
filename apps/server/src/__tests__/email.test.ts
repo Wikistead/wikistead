@@ -4,7 +4,9 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { resolveEmailDriver, SmtpEmailDriver, NoopEmailDriver } from '../email/index.js'
 
-const MAILPIT_API = 'http://localhost:8025/api/v1'
+// #268: read Mailpit's HTTP API from env (the isolated server-test stack uses a distinct host
+// port); defaults to the dev port so a plain `docker compose up` checkout still works.
+const MAILPIT_API = process.env.MAILPIT_API_URL ?? 'http://localhost:8025/api/v1'
 
 describe('resolveEmailDriver', () => {
   const saved = process.env.SMTP_HOST
@@ -21,7 +23,9 @@ describe('resolveEmailDriver', () => {
 describe('SmtpEmailDriver (real SMTP via Mailpit)', () => {
   it('delivers an email that Mailpit captures', async () => {
     await fetch(`${MAILPIT_API}/messages`, { method: 'DELETE' }) // clear
-    const driver = new SmtpEmailDriver({ host: 'localhost', port: 1025, secure: false, from: 'wikistead <test@wikistead.local>' })
+    // #268: send to the SMTP port from env (server-test Mailpit is on a distinct port) so the send
+    // target matches MAILPIT_API_URL; defaults to the dev port for a plain checkout.
+    const driver = new SmtpEmailDriver({ host: process.env.SMTP_HOST ?? 'localhost', port: Number(process.env.SMTP_PORT ?? 1025), secure: false, from: 'wikistead <test@wikistead.local>' })
     const to = `p13-${Date.now()}@example.test`
     await driver.send({ to, subject: 'P1.3 email check', html: '<p>hello</p>', text: 'hello' })
 
