@@ -936,6 +936,13 @@ function mountNestedEditIsland(view: EditorView, slot: HTMLElement, sel: NestedS
   const host = document.createElement("div");
   host.className = "cm-lp-nested-edit-island";
   host.setAttribute("data-testid", "nested-edit-island");
+  // #265: stop mousedown from bubbling to CM's content DOM (the same guard the raw nested-source textarea
+  // below already uses). Without it, clicking into the island's body/label/type-chips reaches CM's mousedown
+  // handler, which posAtCoords→moves the caret OUT of the container atom — clearing nestedEditActiveField
+  // and tearing the island down the instant you click into it (reported as "the island opens but can't be
+  // written to; the outer columns swallows the input"). Not preventDefault — the field still focuses
+  // natively; keydown still reaches CM so Escape (escExit) can back out of the island.
+  host.addEventListener("mousedown", (e) => e.stopPropagation());
   const clearAndRender = () => { view.dispatch({ effects: setNestedEditActive.of(null) }); view.focus(); };
   if (m.kind === "directive") {
     const macro = findDirectiveMacro(m.name) ?? noteCalloutMacro;
@@ -1347,6 +1354,10 @@ class MacroWidget extends WidgetType {
     this.ro = undefined;
   }
   ignoreEvent() {
+    // #265: do NOT blanket-ignore island events here — that would also swallow keydown, so the CM-level
+    // escExit (Escape backs out of the nested island) would never fire. The island's caret-swallow bug is
+    // fixed at the DOM edge instead (mountNestedEditIsland stops mousedown propagation), which keeps the
+    // keyboard path — including Escape — reaching CM.
     return false; // clicks pass through so the cursor can enter → reveal raw
   }
 }
