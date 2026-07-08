@@ -15,6 +15,7 @@ import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage } from '../routes/pages.js'
 import { createShareLink, mintTokenForShareLink } from '../routes/share-links.js'
 import { hashSharePassword, verifySharePassword } from '../routes/share-link-password.js'
+import { check, writeTuples } from '@wikistead/authz'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -73,6 +74,27 @@ describe('#233 mint password gate (3-way)', () => {
     const link = await mkLink({ password: 's3cret' })
     await admin`UPDATE share_links SET expires_at = now() - interval '1 hour' WHERE id = ${link.id}`
     expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, 's3cret')).toBeNull()
+  })
+})
+
+describe('#233 space-link password ⊥ private page (ADR-107 required integration test)', () => {
+  it('a space-link guest with the CORRECT password still cannot view a private page (#244 pair marker)', async () => {
+    // A published, PRIVATE page in the space (both markers — the #244 pair; page#space so it would
+    // otherwise inherit space-viewer).
+    const priv = (await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'Private in space' })).id
+    await admin`UPDATE pages SET published_md = 'secret', published_at = now() WHERE id = ${priv}`
+    await writeTuples(fgaClient, [
+      { user: `space:${spaceId}`, relation: 'space', object: `page:${priv}` },
+      { user: 'user:*', relation: 'private', object: `page:${priv}` },
+      { user: 'share_link:*', relation: 'private', object: `page:${priv}` },
+    ])
+    // A SPACE share link WITH a password.
+    const link = await createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'space', id: spaceId }, capability: 'view', expiresInSeconds: null, password: 'openplease' })
+    // The correct password mints a token (the password gate passes)...
+    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, 'openplease')).not.toBe('password_required')
+    // ...but the space-link guest STILL cannot view the private page — password protects the space, it does
+    // not grant private pages. #244's share_link:* private marker cuts the space-viewer inheritance.
+    expect(await check(fgaClient, `share_link:${link.id}`, 'view', { type: 'page', id: priv })).toBe(false)
   })
 })
 
