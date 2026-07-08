@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, macroPresenceField, macroPresencePlugin, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
+import { livePreview, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { listEditing } from "./live-preview/list-edit";
 import { pasteLinkify } from "./live-preview/paste-linkify";
@@ -48,6 +48,7 @@ import type { ImageUploader } from "./live-preview/commands";
 import { attachImageDrop } from "./live-preview/image-drop";
 import { cmTheme } from "../styles/cm-theme";
 import { remoteCursors } from "./remote-cursors";
+import { macroPresenceOverlay } from "./macro-presence-overlay";
 
 // The CodeMirror EditorView is built ONCE (a React effect that doesn't re-run on HMR),
 // so hot-swapping this module would leave a STALE view running the old extensions (a
@@ -214,10 +215,13 @@ export function mountLivePreview(
       ...(opts.openEmbedUrlPrompt ? [embedUrlPrompt.of(opts.openEmbedUrlPrompt)] : []),
       // #92: host ephemeral-collab seam for a collab-capable modal (excalidraw); {theme} stays narrow.
       ...(opts.ephemeralCollab ? [ephemeralCollab.of(opts.ephemeralCollab)] : []),
-      // #92 presence: bridge "editing a macro's modal" onto the page awareness (badge at the anchor).
-      ...(opts.macroPresence ? [macroPresence.of(opts.macroPresence), macroPresenceField, macroPresencePlugin] : []),
+      // #92 presence: bridge "editing a macro's modal" onto the page awareness (read by the overlay below).
+      ...(opts.macroPresence ? [macroPresence.of(opts.macroPresence)] : []),
       yCollab(ytext, provider.awareness),
       remoteCursors, // #8: avatar+name flags (additive overlay; yCollab untouched)
+      // #92 comment 982 (②③): macro-presence as an outline + top-right avatar on EVERY occupied macro block
+      // (modal-editing OR remote caret on the atom). Read-only overlay AFTER yCollab (it reads its awareness).
+      ...(opts.macroPresence ? [macroPresenceOverlay] : []),
       // Slash command palette + floating selection toolbar (editable surface only; view
       // guests get neither). The `/` palette owns image insert (P): uploadImage + the
       // container (the host, so the hidden file input survives CM's DOM reconcile) go

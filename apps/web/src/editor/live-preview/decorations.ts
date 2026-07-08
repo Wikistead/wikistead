@@ -372,8 +372,6 @@ export const macroPresence = Facet.define<MacroPresence, MacroPresence | null>({
   combine: (values) => (values.length ? values[values.length - 1]! : null),
 });
 
-// Force a presence redraw when awareness changes (independent of doc edits).
-const redrawMacroPresence = StateEffect.define<null>();
 // #200: dispatched by the editor when the light/dark theme changes, so buildDecorations re-runs and
 // rebuilds macro widgets with the new theme (their eq keys on theme → CM recreates them → liveRender
 // re-exports for the new theme). The effect CARRIES the new theme (React's resolved value): a live
@@ -381,112 +379,11 @@ const redrawMacroPresence = StateEffect.define<null>();
 // ThemeProvider updates the DOM — so buildDecorations uses this payload as the theme override.
 export const redrawMacros = StateEffect.define<MacroTheme>();
 
-// The peer badge shown at a macro's anchor: one coloured dot per remote editor + a count and an
-// "editing" label. Display-only (contenteditable=false, ignoreEvent) so it never enters the atom.
-class MacroPresenceWidget extends WidgetType {
-  constructor(readonly peers: MacroPresencePeer[]) { super(); }
-  eq(other: MacroPresenceWidget) {
-    return this.peers.length === other.peers.length &&
-      this.peers.every((p, i) => p.name === other.peers[i]!.name && p.color === other.peers[i]!.color);
-  }
-  toDOM() {
-    const wrap = document.createElement("span");
-    wrap.className = "cm-lp-macro-presence";
-    wrap.contentEditable = "false";
-    wrap.setAttribute("data-testid", "macro-presence");
-    for (const p of this.peers) {
-      const dot = document.createElement("span");
-      dot.className = "cm-lp-macro-presence-dot";
-      dot.style.background = p.color;
-      dot.title = p.name;
-      wrap.appendChild(dot);
-    }
-    const label = document.createElement("span");
-    label.className = "cm-lp-macro-presence-label";
-    const names = this.peers.map((p) => p.name).join(", ");
-    label.textContent = this.peers.length === 1 ? `${names} editing` : `${this.peers.length} editing`;
-    wrap.appendChild(label);
-    return wrap;
-  }
-  ignoreEvent() { return true; }
-}
+// #92 comment 982 (②③): the presence badge (a block widget above the macro) was replaced by an
+// outline + top-right avatar overlay generalised to every macro block — see macro-presence-overlay.ts
+// (a read-only measure overlay, the presence-safe pattern shared with remote-cursors). The `macroPresence`
+// facet + MacroPresence/MacroPresencePeer types above stay (the awareness bridge the overlay reads).
 
-function buildMacroPresence(state: EditorState): DecorationSet {
-  const pres = state.facet(macroPresence);
-  if (!pres) return Decoration.none;
-  const byAnchor = new Map<string, MacroPresencePeer[]>();
-  for (const p of pres.peers()) {
-    const a = byAnchor.get(p.anchor);
-    if (a) a.push(p); else byAnchor.set(p.anchor, [p]);
-  }
-  const docLen = state.doc.length;
-  const ranges: Range<Decoration>[] = [];
-  for (const [anchor, peers] of byAnchor) {
-    const at = Number(anchor);
-    if (!Number.isFinite(at) || at < 0 || at > docLen) continue; // stale anchor (doc changed) → skip
-    // #92: a BLOCK widget at side -1 so the badge renders as its own line ABOVE the macro. An inline
-    // widget here is DROPPED by CM because the anchor is the START of the macro's atomic block-replace
-    // range (that line has no inline context to host a widget). A block widget renders adjacent to the
-    // replaced block. side -1 keeps it above; it is display-only (contenteditable=false, ignoreEvent).
-    // Block decorations MUST come from a StateField (not a ViewPlugin — CM forbids plugin block deco),
-    // hence macroPresenceField below rather than a plugin-provided set.
-    ranges.push(Decoration.widget({ widget: new MacroPresenceWidget(peers), side: -1, block: true }).range(at));
-  }
-  ranges.sort((a, b) => a.from - b.from);
-  return Decoration.set(ranges, true);
-}
-
-// A stable signature of the current macro-edit peers (anchor+name+color). when nobody is editing a
-// macro modal — which is ALWAYS the case during normal page editing, so the plugin then never reacts.
-function macroPresenceSig(state: EditorState): string {
-  const pres = state.facet(macroPresence);
-  if (!pres) return "";
-  return pres.peers().map((p) => `${p.anchor}:${p.name}:${p.color}`).sort().join("|");
-}
-
-// #92: the presence badges live in a StateField (block widgets can only be provided by a StateField,
-// never a ViewPlugin — CM throws "Block decorations may not be specified via plugins"). It rebuilds when
-// the doc shifts (anchors move) or when macroPresencePlugin dispatches redrawMacroPresence (peer set
-// changed). Between those, the previous set is kept (positions still valid — no doc change).
-export const macroPresenceField = StateField.define<DecorationSet>({
-  create: (state) => buildMacroPresence(state),
-  update(deco, tr) {
-    if (tr.docChanged || tr.effects.some((e) => e.is(redrawMacroPresence))) return buildMacroPresence(tr.state);
-    return deco;
-  },
-  provide: (f) => EditorView.decorations.from(f),
-});
-
-// Watches the page awareness and asks the field to rebuild when the macro-edit peer SET changes. It
-// provides NO decorations itself (block deco can't come from a plugin) — it only dispatches the effect.
-//
-// #92 regression fix: never dispatch SYNCHRONOUSLY inside the awareness "change" handler. Awareness fires
-// on every remote CURSOR MOVE / keystroke, and yCollab listens to the same event to render remote carets
-// a re-entrant view.dispatch during that emission dropped yCollab's cursor updates (remote carets stopped
-// syncing). So: (a) only act when the macro-edit peer set truly CHANGES (during normal editing the
-// signature is and this is fully inert — zero interference), and (b) defer the dispatch to a frame so
-// it never re-enters CodeMirror mid-awareness-processing.
-export const macroPresencePlugin = ViewPlugin.fromClass(
-  class {
-    unsub: () => void;
-    raf = 0;
-    lastSig: string;
-    constructor(view: EditorView) {
-      this.lastSig = macroPresenceSig(view.state);
-      const pres = view.state.facet(macroPresence);
-      this.unsub = pres
-        ? pres.subscribe(() => {
-            const sig = macroPresenceSig(view.state);
-            if (sig === this.lastSig) return; // unchanged (e.g. a plain remote cursor move) → do nothing
-            this.lastSig = sig;
-            if (this.raf) return;
-            this.raf = requestAnimationFrame(() => { this.raf = 0; view.dispatch({ effects: redrawMacroPresence.of(null) }); });
-          })
-        : () => {};
-    }
-    destroy() { if (this.raf) cancelAnimationFrame(this.raf); this.unsub(); }
-  },
-);
 // Macros whose body is rendered by the host (not bundled / not the macro). Others ignore the renderer.
 const HOST_RENDERABLE = new Set(["plantuml"]);
 
@@ -2694,11 +2591,8 @@ export const livePreviewTheme = EditorView.baseTheme({
   // #108 external embed: a responsive 16:9 sandboxed iframe; the degrade link is a plain inline link.
   ".cm-lp-embed-frame": { display: "block", width: "100%", aspectRatio: "16 / 9", border: "1px solid var(--border, #3a3a3a)", borderRadius: "6px", background: "var(--panel, #1e1e1e)" },
   ".cm-lp-embed-degrade": { display: "inline-block", wordBreak: "break-all" },
-  // #92 presence badge: a small "N editing" pill with a coloured dot per remote editor, drawn just
-  // before a macro whose modal a peer has open. Display-only; sits inline at the anchor.
-  ".cm-lp-macro-presence": { display: "inline-flex", alignItems: "center", gap: "0.25em", margin: "0 0.35em 0 0", padding: "0.05em 0.4em", borderRadius: "999px", background: "var(--panel-2, #2d2d2e)", border: "1px solid var(--border, #3a3a3a)", fontSize: "0.75em", verticalAlign: "middle", userSelect: "none" },
-  ".cm-lp-macro-presence-dot": { display: "inline-block", width: "0.6em", height: "0.6em", borderRadius: "50%", flex: "0 0 auto" },
-  ".cm-lp-macro-presence-label": { color: "var(--fg-dim, #9a9a9a)", whiteSpace: "nowrap" },
+  // #92 presence (comment 982 ②③): the old inline "N editing" badge was replaced by the outline + avatar
+  // overlay in macro-presence-overlay.ts (its own baseTheme). Nothing to style here anymore.
   // pointer-events:none on the SVG so a click on the diagram falls through to the macro
   // container (CM then places the caret → reveal-on-cursor shows the raw source). An
   // SVG-internal click can't be mapped to a doc position, so without this clicking a
