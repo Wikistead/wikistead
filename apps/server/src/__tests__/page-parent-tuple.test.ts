@@ -9,7 +9,7 @@ import type { TenantDb } from '../db/index.js'
 import { fgaClient } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, movePage } from '../routes/pages.js'
+import { createPage, movePage, MAX_PAGE_DEPTH } from '../routes/pages.js'
 import type { Tenant } from '@wikistead/types'
 
 const driver = new LogicalSearchDriver()
@@ -62,4 +62,27 @@ describe('#218 page#parent tuple sync (inert plumbing, ADR-103 prep)', () => {
     await movePage(db, fgaClient, driver, { pageId: child.id, userId: 'dev-user', parentId: null, afterId: null })
     expect(await parentsOf(child.id)).toEqual([]) // reparented to root → no parent tuple
   })
+})
+
+// #218 / ADR-103 prep slice ③ (approval comment 996, decision 3): the create/move depth cap that keeps the
+// inherited-authz parent chain resolvable under OpenFGA's resolution-depth limit.
+describe('#218 depth guard (ADR-103 comment 996 decision 3)', () => {
+  it('createPage allows nesting up to MAX_PAGE_DEPTH and rejects one level beyond', async () => {
+    let parent = await mk('d-0') // depth 0
+    for (let d = 1; d <= MAX_PAGE_DEPTH; d++) parent = await mk(`d-${d}`, parent.id) // depths 1..MAX (allowed)
+    // `parent` is now at depth MAX_PAGE_DEPTH; a child would be MAX+1 → rejected.
+    await expect(mk('too-deep', parent.id)).rejects.toMatchObject({ statusCode: 400 })
+  }, 30_000)
+
+  it('movePage rejects a move whose relocated subtree would exceed the cap', async () => {
+    let deep = await mk('m-0')
+    for (let d = 1; d < MAX_PAGE_DEPTH; d++) deep = await mk(`m-${d}`, deep.id) // `deep` at depth MAX-1
+    const sub = await mk('sub-root') // depth 0
+    const subChild = await mk('sub-child', sub.id) // subtree height 1
+    // moving `sub` under `deep`: deepest node lands at (MAX-1) + 1 + 1 = MAX+1 → rejected, subtree untouched.
+    await expect(
+      movePage(db, fgaClient, driver, { pageId: sub.id, userId: 'dev-user', parentId: deep.id, afterId: null }),
+    ).rejects.toMatchObject({ statusCode: 400 })
+    expect(await parentsOf(subChild.id)).toEqual([sub.id]) // unchanged
+  }, 30_000)
 })

@@ -211,6 +211,11 @@ export async function createPage(
     // a page in the SAME space (the composite FK already blocks cross-tenant).
     const [p] = await db.sql<{ space_id: string }[]>`SELECT space_id FROM pages WHERE id = ${parentId}`
     if (!p || p.space_id !== args.spaceId) throw Object.assign(new Error('parent not in space'), { statusCode: 400 })
+    // #218 / ADR-103 (comment 996 decision 3): cap nesting depth so the inherited-authz parent chain stays
+    // resolvable under OpenFGA's resolution-depth limit. The new leaf's depth = parent depth + 1.
+    if ((await ancestorDepth(db, parentId)) + 1 > MAX_PAGE_DEPTH) {
+      throw Object.assign(new Error(`max nesting depth (${MAX_PAGE_DEPTH}) exceeded`), { statusCode: 400 })
+    }
   }
   // Append to the end of its sibling list (max position + 1).
   const [{ pos }] = await db.sql<[{ pos: number | null }]>`
@@ -843,6 +848,41 @@ async function descendantIds(db: TenantDb, rootId: string): Promise<string[]> {
   return rows.map((r) => r.id)
 }
 
+// #218 / ADR-103 prep slice ③ (approval comment 996, decision 3): a max page-nesting depth, enforced at
+// the create/move write boundary. ADR-103 makes `private`/allow inherit through the `parent` chain
+// (`private from parent`, `*_from_parent`), so an authz Check resolves ~one hop per nesting level; OpenFGA's
+// default resolution depth is 25, and unbounded nesting would eventually make deep pages un-resolvable (the
+// Check errors → that page's authz FAILS). Cap depth well under that limit with margin. Inert today (the
+// `parent` relation isn't wired into the model yet) but a required guard the model flip depends on — landed
+// separately so the atomic flip carries no separable scaffolding.
+export const MAX_PAGE_DEPTH = 10 // 0-indexed: a top-level page is depth 0, so up to 11 nesting levels.
+
+// Depth of a page = its number of ancestors (0 for a top-level page). Walks parent_id up to the root.
+async function ancestorDepth(db: TenantDb, id: string): Promise<number> {
+  const [r] = await db.sql<[{ n: number }]>`
+    WITH RECURSIVE anc AS (
+      SELECT parent_id FROM pages WHERE id = ${id}
+      UNION ALL
+      SELECT p.parent_id FROM pages p JOIN anc ON p.id = anc.parent_id WHERE anc.parent_id IS NOT NULL
+    )
+    SELECT count(*) FILTER (WHERE parent_id IS NOT NULL)::int AS n FROM anc
+  `
+  return r?.n ?? 0
+}
+
+// Height of the subtree rooted at `id` = the deepest descendant's distance below it (0 for a leaf).
+async function subtreeHeight(db: TenantDb, id: string): Promise<number> {
+  const [r] = await db.sql<[{ h: number }]>`
+    WITH RECURSIVE d AS (
+      SELECT id, 0 AS lvl FROM pages WHERE id = ${id}
+      UNION ALL
+      SELECT p.id, d.lvl + 1 FROM pages p JOIN d ON p.parent_id = d.id
+    )
+    SELECT COALESCE(MAX(lvl), 0)::int AS h FROM d
+  `
+  return r?.h ?? 0
+}
+
 // Swap each page's direct `space:<id>#space@page:<id>` grant from oldSpace to
 // newSpace, in the ORDER delete-OLD → add-NEW (ADR-003). Authorization for a
 // page derives solely from its space (page#parent is unwired), so a cross-space
@@ -958,6 +998,11 @@ export async function movePage(
     if (newParent === args.pageId) throw Object.assign(new Error('cannot nest under itself'), { statusCode: 400 })
     if ((await descendantIds(db, args.pageId)).includes(newParent)) {
       throw Object.assign(new Error('cannot nest under own descendant'), { statusCode: 400 })
+    }
+    // #218 / ADR-103 (comment 996 decision 3): the MOVED subtree's deepest node lands at
+    // newParent depth + 1 + the subtree's own height — cap it under the resolution-depth limit.
+    if ((await ancestorDepth(db, newParent)) + 1 + (await subtreeHeight(db, args.pageId)) > MAX_PAGE_DEPTH) {
+      throw Object.assign(new Error(`max nesting depth (${MAX_PAGE_DEPTH}) exceeded`), { statusCode: 400 })
     }
   }
 
