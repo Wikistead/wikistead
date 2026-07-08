@@ -40,7 +40,7 @@ function sniffImage(b: Uint8Array): { mime: string; ext: string } | null {
 export async function createSpace(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { tenantId: string; userId: string; name: string; plan: string },
+  args: { tenantId: string; userId: string; name: string; plan: string; personal?: boolean },
 ): Promise<Space> {
   const ent = resolveEntitlements(args.plan)
   // maxSpaces is enforced ATOMICALLY (#129 / ADR-044): the count + insert run in ONE tx, gated
@@ -48,17 +48,20 @@ export async function createSpace(
   // check and both insert (the old count-outside-the-tx race). The lock is tenant-scoped (no
   // cross-tenant contention) and auto-releases at tx end; the count runs under tenant RLS.
   // entitlement(ce) is the bastion — the UI count is advisory; the server enforces here.
+  // #226 / ADR-106: a PERSONAL space is EXEMPT from maxSpaces (it is per-member, not part of the shared-
+  // space budget) — the auto-create must always succeed, so it skips the cap. This is a resource-kind
+  // distinction (personal vs shared), NOT a plan branch: the cap value still comes from the resolver.
   const row = await db.tx(async (tx) => {
-    if (isFinite(ent.maxSpaces)) {
+    if (!args.personal && isFinite(ent.maxSpaces)) {
       await tx`SELECT pg_advisory_xact_lock(hashtext(${`space:${args.tenantId}`}))`
-      const [{ count }] = await tx<[{ count: string }]>`SELECT count(*)::text AS count FROM spaces`
+      const [{ count }] = await tx<[{ count: string }]>`SELECT count(*)::text AS count FROM spaces WHERE personal_owner_sub IS NULL`
       if (Number(count) >= ent.maxSpaces) {
         throw Object.assign(new Error('space limit reached'), { statusCode: 403 })
       }
     }
     const [r] = await tx<SpaceRow[]>`
-      INSERT INTO spaces (tenant_id, name)
-      VALUES (${args.tenantId}, ${args.name})
+      INSERT INTO spaces (tenant_id, name, personal_owner_sub)
+      VALUES (${args.tenantId}, ${args.name}, ${args.personal ? args.userId : null})
       RETURNING id, tenant_id, name, created_at
     `
     await writeTuples(fga, [
@@ -70,6 +73,30 @@ export async function createSpace(
   const space = toSpace(row as SpaceRow)
   emit({ type: 'space.created', tenantId: args.tenantId, spaceId: space.id, actorId: args.userId })
   return space
+}
+
+// #226 / ADR-106: idempotently ensure a member's owner-only personal space exists. Called best-effort on
+// first sign-in (a failure must NOT block login). A fast-path read short-circuits the common case; the
+// partial UNIQUE(tenant_id, personal_owner_sub) is the RACE AUTHORITY, so two concurrent first-logins can't
+// both insert — the loser catches the unique violation and treats it as already-created. One member = one
+// personal space; personal spaces are maxSpaces-exempt (createSpace personal path), so this always succeeds.
+export async function ensurePersonalSpace(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { tenantId: string; userId: string; name: string; plan: string },
+): Promise<void> {
+  const [existing] = await db.sql<{ id: string }[]>`
+    SELECT id FROM spaces WHERE personal_owner_sub = ${args.userId} LIMIT 1`
+  if (existing) return
+  try {
+    await createSpace(db, fga, { tenantId: args.tenantId, userId: args.userId, name: args.name, plan: args.plan, personal: true })
+  } catch (err) {
+    // A concurrent first-login won the race → the UNIQUE index rejected this insert. That's success, not
+    // failure: the personal space exists. Any OTHER error is swallowed by the best-effort caller (login
+    // must not break), but re-throwing a non-unique error here would surface a real bug in tests.
+    const code = (err as { code?: string })?.code
+    if (code !== '23505') throw err // 23505 = unique_violation (already created by the winning login)
+  }
 }
 
 // List the spaces the user is allowed to VIEW. RLS gives only tenant isolation;

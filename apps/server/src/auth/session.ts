@@ -12,6 +12,7 @@ import { coerceGroups } from './oidc.js'
 import { enrollEligible } from './enroll-policy.js'
 import { getEnrollConfig } from './enroll-domains.js'
 import { enrolUnderSeatCap } from './invites.js'
+import { ensurePersonalSpace } from '../routes/spaces.js'
 
 export const SESSION_COOKIE = 'wks_sess'
 
@@ -188,6 +189,14 @@ export async function establishMemberSession(
     await syncMemberGroups(deps.fga, tenant.id, claims.sub, prevRow?.groups ?? [], r.groups)
     return r
   })
+  // #226 / ADR-106: ensure the member has an owner-only personal space (idempotent, maxSpaces-exempt).
+  // BEST-EFFORT — a failure here must never block login (the space is a convenience, not a credential),
+  // so it runs after the session-critical work and swallows errors. The DB UNIQUE index makes concurrent
+  // first-logins race-safe. Named after the member (server-side, no i18n); the owner can rename it.
+  try {
+    const name = claims.name?.trim() || claims.email?.split('@')[0] || 'Personal'
+    await ensurePersonalSpace(deps.db, deps.fga, { tenantId: tenant.id, userId: claims.sub, name, plan: tenant.plan })
+  } catch { /* personal-space creation is best-effort; never block login */ }
   return createSession(deps.valkey, {
     tenantId: tenant.id,
     sub: claims.sub,
