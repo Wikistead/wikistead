@@ -72,3 +72,46 @@ test("#282: the mermaid editUI preview holds its height while typing an invalid 
   // … but the pane HELD its height (min-height) instead of collapsing to the 1-line error.
   expect(h1).toBeGreaterThanOrEqual(h0 - 8);
 });
+
+// #282 (3rd cause,): mermaid.render with no container appends a ~150px in-flow node at <body> for
+// text measurement; with no overflow clamp on html/body the WINDOW overflows and its scrollbar flashes
+// ("a scrollbar further right, appearing and vanishing"). This IS machine-checkable headless (contrary to
+// the earlier "human only" note): watch <body>'s direct children for an in-flow node added mid-render, and
+// watch the document's overflow. The off-flow sandbox (position:fixed, visibility:hidden) must keep both 0.
+test("#282: each mermaid render measures off-flow — no in-flow node hits <body>, the window never overflows", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "editui-282-body");
+  await enterEdit(page);
+  await openMermaidEditUI(page);
+  await sleep(400);
+  // Install the watcher AFTER mount so we only measure the renders we trigger below.
+  await page.evaluate(() => {
+    const rec = { inflow: 0, baseOver: document.documentElement.scrollHeight - document.documentElement.clientHeight, maxOver: 0 };
+    (window as Window & typeof globalThis & { __wks282?: typeof rec }).__wks282 = rec;
+    const mo = new MutationObserver((muts) => {
+      for (const m of muts) {
+        for (const n of Array.from(m.addedNodes)) {
+          if (n.nodeType !== 1) continue;
+          const el = n as HTMLElement;
+          if (el.parentElement !== document.body) continue; // only DIRECT body children
+          const cs = getComputedStyle(el);
+          // an in-flow, space-taking, visible node is what overflows the window
+          if ((cs.position === "static" || cs.position === "relative") && cs.visibility !== "hidden" && el.offsetHeight > 0) rec.inflow++;
+        }
+      }
+      const over = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+      if (over > rec.maxOver) rec.maxOver = over;
+    });
+    mo.observe(document.body, { childList: true });
+  });
+  // Fire several distinct renders (each a fresh mermaid.render → a fresh measuring node).
+  await page.locator("[data-pane=preview] [data-testid=mermaid-edit-src]").click();
+  for (const t of ["flowchart TD\n  A-->B\n  B-->C", "flowchart LR\n  X-->Y", "flowchart TD\n  P-->Q\n  Q-->R\n  R-->S"]) {
+    await page.keyboard.press("Control+a");
+    await page.keyboard.type(t);
+    await sleep(350); // > debounce + render
+  }
+  const rec = await page.evaluate(() => (window as Window & typeof globalThis & { __wks282?: { inflow: number; baseOver: number; maxOver: number } }).__wks282!);
+  expect(rec.inflow, "mermaid appended an in-flow node to <body> during render (window scrollbar flash)").toBe(0);
+  expect(rec.maxOver, "the document overflowed vertically during a render").toBeLessThanOrEqual(rec.baseOver + 2);
+});
