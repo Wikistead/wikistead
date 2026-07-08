@@ -29,6 +29,8 @@ async function publish(id: string) { await admin`UPDATE pages SET published_md =
 beforeAll(async () => {
   tenant = (await new TenantRegistry(pool).findBySlug('dev'))!
   db = await acquireTenantDb(tenant)
+  // #253 / ADR-113: the tenant parent switch must be ON for the public surface (default OFF).
+  await admin`INSERT INTO tenant_settings (tenant_id, public_enabled) VALUES (${tenant.id}, true) ON CONFLICT (tenant_id) DO UPDATE SET public_enabled = true`
   pubSpace = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'pub-space-227' })).id
   otherSpace = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'nonpub-space-227' })).id
   const mk = async (space: string, parent: string | null, title: string) => (await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId: space, userId: 'dev-user', title, parentId: parent })).id

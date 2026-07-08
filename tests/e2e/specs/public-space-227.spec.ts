@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { enterEdit, openScratch, sleep } from "../helpers";
+import { enterEdit, openScratch, setPublicSurface, sleep } from "../helpers";
 
 // #227 / ADR-030 (option b): the anonymous read-only PUBLIC reader-chrome for a public space. An anonymous
 // browser context (no session) browses a public space in the app shell's sidebar (its published+public page
@@ -47,6 +47,7 @@ test("#227: an anonymous visitor browses a public space via the sidebar reader-c
   await sleep(800);
   // Make demo_space a PUBLIC space (anonymous viewer).
   await fgaWrite({ user: "user:*", relation: "viewer", object: "space:demo_space" }).catch(() => {}); // idempotent (may already be public from a prior run)
+  await setPublicSurface(authed, true); // #253: the tenant parent switch must be ON for the public surface
 
   // Anonymous context (no cookies/session) → the public reader-chrome.
   const anon = await (await browser.newContext()).newPage();

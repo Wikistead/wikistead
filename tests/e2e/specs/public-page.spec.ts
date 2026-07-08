@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { enterEdit, openScratch, sleep } from "../helpers";
+import { enterEdit, openScratch, setPublicSurface, sleep } from "../helpers";
 
 // #227 / ADR-030: the PUBLIC page view (/pub/:pageId) — the frontend consumer of GET /public/pages/:id.
 // An ANONYMOUS browser context (no session/cookies) renders a published-public page's title + sanitized
@@ -37,6 +37,7 @@ test("#227: an anonymous visitor renders a public page at /pub/:id (title + sani
   await authed.getByTestId("publish-page").click();
   await sleep(800); // publish flush
   await makePublic(id);
+  await setPublicSurface(authed, true); // #253: the tenant parent switch must be ON for the public surface
 
   // 2. FRESH anonymous context (no cookies/session) renders it.
   const anon = await (await browser.newContext()).newPage();
@@ -59,9 +60,44 @@ test("#227: a NON-public page shows not-found to an anonymous visitor (existence
   await sleep(300);
   await authed.getByTestId("publish-page").click();
   await sleep(600);
+  await setPublicSurface(authed, true); // surface ON — proving the 404 below is the page's non-public state, not the switch
   // published but NOT public → anonymous 404 → not-found screen
   const anon = await (await browser.newContext()).newPage();
   await anon.goto(`/pub/${id}`);
   await expect(anon.getByTestId("public-not-found")).toBeVisible();
   expect(await anon.getByTestId("public-title").count()).toBe(0);
+});
+
+// #253 / ADR-113 (guardrail 1): the tenant PARENT SWITCH. A page that IS public renders while the switch is
+// ON, then 404s the instant it is turned OFF — the whole public surface is hidden tenant-wide, non-destructively
+// (the grant is untouched, so turning it back ON restores the page). The server is the fortress: this is the
+// read-time gate, not the hidden UI.
+test("#253: the tenant parent switch OFF hides an otherwise-public page (404), ON restores it", async ({ browser }) => {
+  const authed = await (await browser.newContext()).newPage();
+  const id = await openScratch(authed, "pub-switch");
+  await enterEdit(authed);
+  await authed.click("[data-pane=preview] .cm-content");
+  await authed.keyboard.insertText("# Switchable\n\nvisible only while the surface is on\n");
+  await sleep(400);
+  await authed.getByTestId("publish-page").click();
+  await sleep(800);
+  await makePublic(id);
+
+  // Switch ON → the public page renders.
+  await setPublicSurface(authed, true);
+  const anon1 = await (await browser.newContext()).newPage();
+  await anon1.goto(`/pub/${id}`);
+  await expect(anon1.getByTestId("public-title")).toBeVisible();
+
+  // Switch OFF → the SAME public page 404s (parent-switch gate), no grant change.
+  await setPublicSurface(authed, false);
+  const anon2 = await (await browser.newContext()).newPage();
+  await anon2.goto(`/pub/${id}`);
+  await expect(anon2.getByTestId("public-not-found")).toBeVisible();
+
+  // Switch back ON → restored (non-destructive).
+  await setPublicSurface(authed, true);
+  const anon3 = await (await browser.newContext()).newPage();
+  await anon3.goto(`/pub/${id}`);
+  await expect(anon3.getByTestId("public-title")).toBeVisible();
 });

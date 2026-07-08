@@ -764,6 +764,87 @@ export async function unsetPagePrivate(
   emit({ type: 'page.made_non_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
 }
 
+// #253 / ADR-113: make a PUBLISHED page anonymously public (or revoke it). Mirrors setPagePrivate — the
+// public grant is the SAME existing `view_base@user:*` (PUBLIC_GRANT), so no new FGA type; manage-gated +
+// audited (#177) + outbox-reindexed. Five guardrails (ADR-113): the tenant parent switch (a READ-TIME gate,
+// enforced in the public routes — publicSurfaceEnabled), manager/admin only (requireManage), audit,
+// noindex=true set in the SAME tx (guardrail 4), published-only (draft → 400), and public⊥private held at
+// the write boundary (a private page is rejected just before the write, TOCTOU-minimised).
+export async function setPagePublic(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; tenantId: string; userId: string; plan?: string },
+): Promise<void> {
+  await requireManage(fga, args.userId, args.pageId)
+  // published-only: a draft has no public snapshot to serve (would leak an in-progress page).
+  const [p] = await db.sql<{ published_at: Date | null }[]>`SELECT published_at FROM pages WHERE id = ${args.pageId}`
+  if (!p || p.published_at == null) throw Object.assign(new Error('only a published page can be made public'), { statusCode: 400 })
+  // public⊥private: never make a private page public. Read the marker at the LAST moment before the write to
+  // minimise the TOCTOU window (a concurrent privatise still can't co-exist — the reindex resolves is_public
+  // from FGA, and setPagePrivate strips PUBLIC_GRANT).
+  if (await readPagePrivate(fga, args.pageId)) throw Object.assign(new Error('a private page cannot be made public'), { statusCode: 409 })
+  const oid = await db.tx(async (tx) => {
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.made_public', target: `page:${args.pageId}` })
+    }
+    // Guardrail 4: force noindex ON in the SAME tx as the public grant so a newly-public page is never
+    // crawler-indexed by default (opt-in indexing is a future ticket — ADR-113 decision 3).
+    await tx`UPDATE pages SET noindex = true WHERE id = ${args.pageId}`
+    const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+    await writeTuples(fga, [PUBLIC_GRANT(args.pageId)]) // view_base@user:* — is_public flips true on reindex
+    return o
+  })
+  processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+  emit({ type: 'page.made_public', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
+}
+
+export async function unsetPagePublic(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; tenantId: string; userId: string; plan?: string },
+): Promise<void> {
+  await requireManage(fga, args.userId, args.pageId)
+  const oid = await db.tx(async (tx) => {
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.made_non_public', target: `page:${args.pageId}` })
+    }
+    const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+    // Remove the anonymous grant (idempotent — the page may not be public). Exactly one tuple, so no orphan.
+    await deleteTuples(fga, [PUBLIC_GRANT(args.pageId)]).catch(() => {})
+    return o
+  })
+  processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+  emit({ type: 'page.made_non_public', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
+}
+
+// #253 / ADR-113 (guardrail 1): the tenant parent switch, read FRESH (like ai_enabled) so an admin turning
+// it OFF takes effect immediately. This is the READ-TIME gate every anonymous public route consults — OFF ⇒
+// the whole public surface 404s uniformly, WITHOUT touching any index or grant (non-destructive; ON restores).
+export async function publicSurfaceEnabled(db: TenantDb): Promise<boolean> {
+  const [row] = await db.sql<{ public_enabled: boolean }[]>`SELECT public_enabled FROM tenant_settings LIMIT 1` // RLS-scoped to this tenant (like ai_enabled)
+  return row?.public_enabled === true
+}
+
+// Admin: flip the tenant parent switch. Upserts the settings row, preserving other columns (mirrors
+// setTenantAiEnabled). Turning it OFF is non-destructive (no grants/index touched) — the read-time gate
+// simply hides the surface until it is turned back ON.
+export async function setTenantPublicEnabled(db: TenantDb, tenantId: string, enabled: boolean): Promise<void> {
+  await db.sql`
+    INSERT INTO tenant_settings (tenant_id, public_enabled)
+    VALUES (${tenantId}, ${enabled})
+    ON CONFLICT (tenant_id) DO UPDATE SET public_enabled = ${enabled}, updated_at = now()
+  `
+}
+
+// Manage-gated read of a page's public state (view_base@user:*) for the toggle UI's authoritative read.
+export async function isPagePublic(fga: OpenFgaClient, args: { pageId: string; userId: string }): Promise<boolean> {
+  await requireManage(fga, args.userId, args.pageId)
+  const { tuples } = await fga.read({ object: `page:${args.pageId}`, relation: 'view_base' })
+  return (tuples ?? []).some(({ key }) => key?.relation === 'view_base' && key.user === 'user:*')
+}
+
 // Is the page private (allowlist mode)? Manage-gated read for the permissions UI.
 export async function isPagePrivate(
   fga: OpenFgaClient,
@@ -1429,5 +1510,39 @@ export async function pagesPlugin(app: FastifyInstance) {
       pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub, plan: req.tenant.plan,
     })
     return reply.code(204).send()
+  })
+  // #253 / ADR-113: per-page anonymous public toggle. GET = current state (manage-gated). POST makes it
+  // public — but ONLY while the tenant parent switch is ON (guardrail 1: OFF ⇒ 403, a second layer over the
+  // hidden UI so the API is the fortress). DELETE (make non-public) is always allowed — revoking is safe.
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/public', async (req) => {
+    return { public: await isPagePublic(app.fga, { pageId: req.params.pageId, userId: req.user.sub }) }
+  })
+  app.post<{ Params: { pageId: string } }>('/pages/:pageId/public', async (req, reply) => {
+    if (!(await publicSurfaceEnabled(req.db))) throw Object.assign(new Error('public surface disabled for this tenant'), { statusCode: 403 })
+    await setPagePublic(req.db, app.fga, app.searchDriver, {
+      pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub, plan: req.tenant.plan,
+    })
+    return reply.code(204).send()
+  })
+  app.delete<{ Params: { pageId: string } }>('/pages/:pageId/public', async (req, reply) => {
+    await unsetPagePublic(req.db, app.fga, app.searchDriver, {
+      pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub, plan: req.tenant.plan,
+    })
+    return reply.code(204).send()
+  })
+  // #253 / ADR-113 (guardrail 1): the tenant PARENT SWITCH, admin-only (mirrors /admin/ai-settings). GET =
+  // current state (drives the hidden-toggle UI); PUT flips it. The switch is the tenant-wide master gate for
+  // the whole anonymous public surface (read-time gate in publicPlugin).
+  app.get('/admin/public-settings', async (req, reply) => {
+    const ok = await app.fga.check({ user: `user:${req.user.sub}`, relation: 'admin', object: `tenant:${req.tenant.id}` })
+    if (!ok.allowed) return reply.code(403).send({ error: 'admin only' })
+    return { publicEnabled: await publicSurfaceEnabled(req.db) }
+  })
+  app.put<{ Body: { enabled?: boolean } }>('/admin/public-settings', async (req, reply) => {
+    const ok = await app.fga.check({ user: `user:${req.user.sub}`, relation: 'admin', object: `tenant:${req.tenant.id}` })
+    if (!ok.allowed) return reply.code(403).send({ error: 'admin only' })
+    if (typeof req.body?.enabled !== 'boolean') return reply.code(400).send({ error: 'enabled (boolean) required' })
+    await setTenantPublicEnabled(req.db, req.tenant.id, req.body.enabled)
+    return { publicEnabled: req.body.enabled }
   })
 }

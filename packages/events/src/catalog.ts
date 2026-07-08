@@ -25,6 +25,8 @@ export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   'page.access_unrestricted': 'A principal was un-restricted from a page.',
   'page.made_private': 'A page was made private (allowlist — space inheritance cut, public stripped).',
   'page.made_non_private': 'A page was made non-private (space inheritance resumed).',
+  'page.made_public': 'A published page was made anonymously public (view_base@user:* granted; noindex on).',
+  'page.made_non_public': 'A page was made non-public (the anonymous view_base@user:* grant revoked).',
   // Spaces
   'space.created': 'A space was created.',
   'space.updated': 'A space was updated.',
