@@ -4,7 +4,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "../components/ui/dropdown-menu";
-import { ChevronDown, ChevronRight, ChevronsUpDown, Copy, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Plus, Settings, Share2, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Plus, Settings, Share2, Trash2 } from "lucide-react";
+import { SpaceSwitcher } from "./SpaceSwitcher";
 import {
   useSpaces,
   useCreateSpace,
@@ -281,24 +282,15 @@ export function Sidebar() {
     <div className="relative flex h-full min-w-0 flex-col overflow-hidden text-[length:var(--text-ui)]" data-testid="sidebar">
       {/* Space switcher — the space is a separate layer, not a tree root. */}
       <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
-        <DropdownMenu modal={false}>
-          <DropdownMenuTrigger className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-sm px-1 py-0.5 font-semibold text-foreground transition-colors duration-[120ms] hover:bg-panel-2" data-testid="space-switcher">
-            {currentSpace && <SpaceIcon id={currentSpace.id} name={currentSpace.name} image={currentSpace.iconImageUrl} size={20} data-testid="space-icon" />}
-            <span className="overflow-hidden text-ellipsis whitespace-nowrap">{currentSpace?.name || t("sidebar.noSpace")}</span>
-            <ChevronsUpDown size={14} />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" data-testid="space-menu">
-            {spaces.map((s) => (
-              <DropdownMenuItem key={s.id} onSelect={() => setActiveSpaceId(s.id)} data-testid="space-option">
-                <SpaceIcon id={s.id} name={s.name} image={s.iconImageUrl} size={18} />
-                {s.name || t("sidebar.untitledSpace")}
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            {currentSpace && canManage && <DropdownMenuItem onSelect={() => { if (currentSpace) setRenamingSpace({ id: currentSpace.id, name: currentSpace.name }); }}><Pencil size={13} /> {t("sidebar.renameSpace")}</DropdownMenuItem>}
-            <DropdownMenuItem onSelect={() => setCreatingSpace(true)}><Plus size={13} /> {t("sidebar.newSpace")}</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <SpaceSwitcher
+          spaces={spaces}
+          currentId={current}
+          currentSpace={currentSpace}
+          canManage={canManage}
+          onSelect={setActiveSpaceId}
+          onRename={() => { if (currentSpace) setRenamingSpace({ id: currentSpace.id, name: currentSpace.name }); }}
+          onNewSpace={() => setCreatingSpace(true)}
+        />
         {current && (canEdit || canManage) && (
           <div className="flex flex-none gap-0.5">
             {/* #250: split — the button creates a blank page immediately; the adjacent ▾ opens the
