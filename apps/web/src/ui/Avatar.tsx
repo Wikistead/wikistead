@@ -37,7 +37,10 @@ export function Avatar({ name, src, seed, glyph, size = 24, shape = "circle", ti
     background: showImg ? undefined : colorFromString(seed ?? name),
   };
   const cls = cn(
-    "inline-flex flex-none select-none items-center justify-center overflow-hidden font-semibold uppercase leading-none text-white",
+    // #288: whitespace-nowrap so a 2-glyph monogram can never WRAP to two stacked rows (which the fixed
+    // px box + overflow-hidden then clipped, making the same name look different per call-site size). It
+    // stays on one line and clips horizontally if it ever overflows.
+    "inline-flex flex-none select-none items-center justify-center overflow-hidden whitespace-nowrap font-semibold uppercase leading-none text-white",
     shape === "rounded" ? "rounded-[24%]" : "rounded-full", // rounded square = object/space; circle = person
     className,
   );

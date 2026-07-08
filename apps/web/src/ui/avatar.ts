@@ -30,8 +30,17 @@ export function colorFromString(seed: string): string {
 export function initials(name: string): string {
   const trimmed = (name ?? "").trim();
   if (!trimmed) return "?";
-  // A single non-ASCII grapheme (CJK, emoji) stands on its own.
-  if (/^[^\x00-\x7F]/.test(trimmed)) return Array.from(trimmed)[0];
+  const graphemes = Array.from(trimmed);
+  // #288: any non-ASCII glyph (CJK / emoji) → a SINGLE glyph. A half-width + full-width pair like "2"
+  // (from "246 …") has an unstable width, so the chip stretches and wraps differently per size /
+  // per call site. Pick ONE glyph: a leading LETTER (ASCII or CJK) is meaningful on its own; a leading
+  // digit/symbol is not, so skip to the first non-ASCII glyph (the meaningful CJK/emoji) — "246 …" → .
+  if (graphemes.some((g) => /[^\x00-\x7F]/.test(g))) {
+    const first = graphemes[0]!;
+    if (/\p{L}/u.test(first)) return first;
+    return graphemes.find((g) => /[^\x00-\x7F]/.test(g)) ?? first;
+  }
+  // Pure ASCII/Latin: two words → first letter of the first + last; one word → its first 1–2 chars.
   const words = trimmed.split(/\s+/);
   if (words.length >= 2) return (words[0][0] + words[words.length - 1][0]).toUpperCase();
   return trimmed.slice(0, 2).toUpperCase();
