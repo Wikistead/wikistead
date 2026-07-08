@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from "vitest";
-import { visibleSpaces, recordRecentSpace, hiddenSpaceCount } from "./space-recent";
+import { visibleSpaces, recordRecentSpace, hiddenSpaceCount, allSpacesSorted } from "./space-recent";
 import type { Space } from "../data/queries";
 
 const mk = (id: string, name: string): Space => ({ id, name });
@@ -52,5 +52,18 @@ describe("#263 rejection ①: hiddenSpaceCount (surface the silent truncation)",
   it("while searching, nothing is hidden (search spans ALL spaces)", () => {
     expect(hiddenSpaceCount(16, 4, "263")).toBe(0);
     expect(hiddenSpaceCount(16, 4, "  ")).toBe(12); // whitespace-only is not a query
+  });
+});
+
+describe("#287 allSpacesSorted (the 'show all' browse list)", () => {
+  it("returns EVERY space, name-sorted case-insensitively (not the bounded/recency order)", () => {
+    const s = [mk("a", "Zebra"), mk("b", "alpha"), mk("c", "Mango")];
+    expect(allSpacesSorted(s).map((x) => x.name)).toEqual(["alpha", "Mango", "Zebra"]);
+    expect(allSpacesSorted(s).length).toBe(3); // all, not capped
+  });
+  it("does not mutate the input array", () => {
+    const s = [mk("a", "B"), mk("b", "A")];
+    allSpacesSorted(s);
+    expect(s.map((x) => x.id)).toEqual(["a", "b"]);
   });
 });

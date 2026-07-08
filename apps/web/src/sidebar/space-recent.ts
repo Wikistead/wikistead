@@ -56,3 +56,10 @@ export function hiddenSpaceCount(total: number, shown: number, query: string): n
   if (query.trim()) return 0;
   return Math.max(0, total - shown);
 }
+
+// #287: the "show all" list — EVERY viewable space, NAME-sorted (case-insensitive) for browsing when you
+// can't remember a name. Distinct from the bounded default (current + recents order): this is the full set
+// to scan. Same server-FGA-filtered `spaces` set — no new fetch, no new permission surface.
+export function allSpacesSorted(spaces: Space[]): Space[] {
+  return [...spaces].sort((a, b) => (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" }));
+}

@@ -376,6 +376,7 @@
     "searchSpaces": "Search spaces…",
     "noSpacesMatch": "No spaces match.",
     "moreSpacesHint": "{{count}} more — search to filter",
+    "showAllSpaces": "Show all spaces ({{count}} more)",
     "newSpace": "New space",
     "renameSpace": "Rename space",
     "spaceName": "Space name",
