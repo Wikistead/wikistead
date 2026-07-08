@@ -4,7 +4,7 @@ import { ChevronsUpDown, Pencil, Plus } from "lucide-react";
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty, CommandGroup, CommandSeparator } from "../components/ui/command";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import type { Space } from "../data/queries";
-import { visibleSpaces, recordRecentSpace, hiddenSpaceCount } from "./space-recent";
+import { visibleSpaces, recordRecentSpace, hiddenSpaceCount, allSpacesSorted } from "./space-recent";
 
 // #263: the space switcher. #226 auto-creates a personal space per member, so a flat list of every
 // viewable space grows unbounded (a tenant admin sees everyone's). The default view is now BOUNDED — the
@@ -26,6 +26,7 @@ export function SpaceSwitcher({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState(false); // #287: "show all" — full name-sorted list
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -41,9 +42,14 @@ export function SpaceSwitcher({
   // whose scroll-into-view drags the overflow-hidden sidebar root horizontally (scrollLeft>0) → the whole
   // header row visibly shifts left. Focusing with { preventScroll: true } ourselves eliminates that shift.
   const focusSearch = () => boxRef.current?.querySelector<HTMLInputElement>("[data-slot=command-input]")?.focus({ preventScroll: true });
-  useEffect(() => { if (open) focusSearch(); }, [open]);
+  useEffect(() => { if (open) { focusSearch(); setExpanded(false); } }, [open]); // #287: reset "show all" on each open
 
-  const list = useMemo(() => visibleSpaces(spaces, currentId, query), [spaces, currentId, query]);
+  // #287: a query always searches ALL spaces (bounded/expanded is only for the no-query browse). With no
+  // query, "expanded" shows every space name-sorted; otherwise the bounded default (current + recents).
+  const list = useMemo(
+    () => (!query.trim() && expanded ? allSpacesSorted(spaces) : visibleSpaces(spaces, currentId, query)),
+    [spaces, currentId, query, expanded],
+  );
   const hidden = hiddenSpaceCount(spaces.length, list.length, query);
 
   const select = (id: string) => { onSelect(id); recordRecentSpace(id); setOpen(false); setQuery(""); };
@@ -74,17 +80,12 @@ export function SpaceSwitcher({
                   </CommandItem>
                 ))}
                 {hidden > 0 && (
-                  // #263 rejection ①: the default list is capped, so surface that more exist rather than
-                  // truncating silently. A plain (non-cmdk) row so Enter never "selects" it; clicking it
-                  // just moves focus to the search input.
-                  <button
-                    type="button"
-                    data-testid="space-more-hint"
-                    onMouseDown={(e) => { e.preventDefault(); focusSearch(); }}
-                    className="flex w-full items-center px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    {t("sidebar.moreSpacesHint", { count: hidden })}
-                  </button>
+                  // #287: the default list is capped, so offer a SELECTABLE "show all" item (↑↓/Enter/click)
+                  // that expands to every viewable space, name-sorted, for browsing when the name is
+                  // forgotten (#263 shipped this as a display-only hint; this makes it an actual entry point).
+                  <CommandItem value="__show-all" onSelect={() => setExpanded(true)} data-testid="space-show-all" className="text-muted-foreground">
+                    {t("sidebar.showAllSpaces", { count: hidden })}
+                  </CommandItem>
                 )}
               </CommandGroup>
               <CommandSeparator />

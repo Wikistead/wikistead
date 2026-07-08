@@ -90,12 +90,46 @@ test("#263: a truncation hint appears when spaces exceed the default cap, and hi
 
   await page.click("[data-testid=space-switcher]");
   await expect(page.getByTestId("space-menu")).toBeVisible();
-  // empty query → capped list + a "more" hint
+  // empty query → capped list + the "show all" entry point (#287)
   await expect(page.locator("[data-testid=space-menu] [data-testid=space-option]")).toHaveCount(8);
-  await expect(page.getByTestId("space-more-hint")).toBeVisible();
+  await expect(page.getByTestId("space-show-all")).toBeVisible();
 
-  // searching spans ALL spaces → nothing is hidden → the hint is gone
+  // searching spans ALL spaces → nothing is hidden → the entry point is gone
   await page.getByTestId("space-search").fill(`Cap-${tag}-3`);
   await sleep(200);
-  await expect(page.getByTestId("space-more-hint")).toHaveCount(0);
+  await expect(page.getByTestId("space-show-all")).toHaveCount(0);
+});
+
+// #287: "show all" expands the capped default into the FULL name-sorted list, so a space that wasn't in the
+// bounded default (current + recents) can be found by browsing. Real Chromium.
+test("#287: 'show all' reveals every viewable space (name-sorted), and one can be selected", async ({ page }) => {
+  await openDemo(page);
+  const tag = Date.now().toString(36);
+  // a uniquely-named space that sorts LATE (won't be in the current+recents default) — so it only appears
+  // after expanding "show all".
+  const zebraName = `Zzz-showall-${tag}`;
+  await mkSpace(page, zebraName);
+  for (let i = 0; i < 9; i++) await mkSpace(page, `Fill-${tag}-${i}`); // push well past the cap of 8
+  await page.reload();
+  await page.waitForSelector("[data-testid=space-switcher]");
+  await sleep(400);
+
+  await page.click("[data-testid=space-switcher]");
+  await expect(page.getByTestId("space-menu")).toBeVisible();
+  const options = page.locator("[data-testid=space-menu] [data-testid=space-option]");
+  await expect(options).toHaveCount(8); // bounded default
+  // the late-sorting space is NOT in the bounded default…
+  await expect(page.locator("[data-testid=space-menu]", { hasText: zebraName })).toHaveCount(0);
+
+  // click "show all" → the full list; the previously-hidden space now appears.
+  await page.getByTestId("space-show-all").click();
+  await sleep(200);
+  expect(await options.count()).toBeGreaterThan(8);
+  const zebra = options.filter({ hasText: zebraName }).first();
+  await expect(zebra).toBeVisible();
+
+  // selecting it switches the active space.
+  await zebra.click();
+  await sleep(400);
+  await expect(page.getByTestId("space-switcher")).toContainText(zebraName);
 });

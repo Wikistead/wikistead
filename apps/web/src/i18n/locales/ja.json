@@ -376,6 +376,7 @@
     "searchSpaces": "スペースを検索…",
     "noSpacesMatch": "一致するスペースがありません。",
     "moreSpacesHint": "他 {{count}} スペース — 検索で絞り込み",
+    "showAllSpaces": "すべてのスペースを表示（他 {{count}} 件）",
     "newSpace": "新しいスペース",
     "renameSpace": "スペース名を変更",
     "spaceName": "スペース名",
