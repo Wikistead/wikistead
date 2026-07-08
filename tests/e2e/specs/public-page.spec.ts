@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { enterEdit, openScratch, setPublicSurface, sleep } from "../helpers";
 
-// #227 / ADR-030: the PUBLIC page view (/pub/:pageId) — the frontend consumer of GET /public/pages/:id.
+// #227 / ADR-030: the PUBLIC page view /pub/:pageId) — the frontend consumer of GET /public/pages/:id.
 // An ANONYMOUS browser context (no session/cookies) renders a published-public page's title + sanitized
 // body; a non-public page shows the not-found screen (existence hidden). The make-public step writes the
 // FGA tuple (view_base@user:*) directly against the e2e OpenFGA — the same idiom the server tests use
@@ -106,6 +106,73 @@ test("#227 review: the public page has the member title band and a working TOC",
   await expect(anon.getByTestId("toc")).toHaveCount(0); // hidden
   await anon.getByTestId("public-toc-toggle").click();
   await expect(anon.getByTestId("toc")).toBeVisible(); // shown again
+});
+
+// #227on a NARROW screen the public reader must reuse the MEMBER TOC UI — the toggle stays visible
+// and a scroll overlay appears (the old public-only impl was wide-only, so the TOC + toggle vanished when the
+// window was small). Real Chromium at 600px.
+test("#227the public TOC works on a narrow screen (toggle + scroll overlay, member parity)", async ({ browser }) => {
+  const authed = await (await browser.newContext()).newPage();
+  const id = await openScratch(authed, "pub-toc-narrow");
+  await enterEdit(authed);
+  await authed.click("[data-pane=preview] .cm-content");
+  const filler = Array.from({ length: 25 }, (_, i) => `para ${i}`).join("\n\n");
+  await authed.keyboard.insertText(`# Top Title\n\n## Alpha Section\n\n${filler}\n\n## Bravo Section\n\n${filler}\n\n## Charlie Section\n\n${filler}\n`);
+  await sleep(400);
+  await authed.getByTestId("publish-page").click();
+  await sleep(800);
+  await makePublic(id);
+  await setPublicSurface(authed, true);
+
+  // anonymous, NARROW viewport (< the wide breakpoint, so the rail does NOT apply — the overlay path does).
+  const anon = await (await browser.newContext({ viewport: { width: 600, height: 800 } })).newPage();
+  await anon.goto(`/pub/${id}`);
+  await expect(anon.getByTestId("public-title")).toBeVisible();
+
+  // ① the toggle is present on a narrow screen (was isWide-gated → absent, the reported bug).
+  const toggle = anon.getByTestId("public-toc-toggle");
+  await expect(toggle).toBeVisible();
+
+  // ② the overlay TOC exists (tocOn default) and fades IN while scrolling (member overlay behaviour).
+  const overlay = anon.locator('[data-testid=toc][data-variant=overlay]');
+  await expect(overlay).toHaveCount(1);
+  await anon.locator(".wks-public > div").first().evaluate((el) => { el.scrollTop = 500; });
+  await sleep(150);
+  await expect(overlay).toHaveCSS("opacity", "1"); // visible while scrolling
+  await expect(overlay.getByTestId("toc-item")).toHaveCount(4);
+
+  // ③ the toggle OFF removes the overlay entirely (device-local pref, same as the rail).
+  await toggle.click();
+  await expect(anon.getByTestId("toc")).toHaveCount(0);
+});
+
+// #267 : the callout BOX (tint + left bar) and default-CENTER diagrams must also render on the
+// PUBLIC reader — it uses the same renderMarkdownToDom outside .cm-editor. Two-surface regression for #267.
+test("#267 波及: the public reader shows the callout box + centers a mermaid diagram", async ({ browser }) => {
+  const authed = await (await browser.newContext()).newPage();
+  const id = await openScratch(authed, "pub-callout-mermaid");
+  await enterEdit(authed);
+  await authed.click("[data-pane=preview] .cm-content");
+  await authed.keyboard.insertText("# Doc\n\n:::info\nHeads up **note**\n:::\n\n```mermaid\nflowchart TD\n  A --> B\n```\n");
+  await sleep(500);
+  await authed.getByTestId("publish-page").click();
+  await sleep(800);
+  await makePublic(id);
+  await setPublicSurface(authed, true);
+
+  const anon = await (await browser.newContext({ viewport: { width: 1360, height: 800 } })).newPage();
+  await anon.goto(`/pub/${id}`);
+  const body = anon.getByTestId("public-body");
+  // the callout renders as a PANEL with a real background tint + a left colour bar (not flat text).
+  const panel = body.locator("[data-testid=callout-panel]");
+  await expect(panel).toHaveCount(1);
+  const box = await panel.evaluate((el) => { const cs = getComputedStyle(el); return { bg: cs.backgroundColor, bar: parseFloat(cs.borderLeftWidth) }; });
+  expect(box.bg).not.toBe("rgba(0, 0, 0, 0)");
+  expect(box.bar).toBeGreaterThan(0);
+  // the mermaid diagram is centered by default (#255), matching the editor.
+  const mermaid = body.locator(".cm-lp-mermaid").first();
+  await expect(mermaid).toHaveClass(/cm-lp-align-center/);
+  expect(await mermaid.evaluate((el) => getComputedStyle(el).alignItems)).toBe("center");
 });
 
 test("#227: a NON-public page shows not-found to an anonymous visitor (existence hidden)", async ({ browser }) => {

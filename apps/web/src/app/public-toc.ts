@@ -23,10 +23,18 @@ export function usePublicToc(bodyEl: HTMLElement | null, ready: boolean): {
   headings: Heading[];
   activeFrom: number | null;
   jump: (from: number) => void;
+  // #227a scroll subscription so the narrow-screen OVERLAY TOC can reuse the member's Toc wiring
+  // (the overlay shows while scrolling, driven by this). Stable identity (a ref), so Toc's effect is stable.
+  subscribeScroll: (fn: () => void) => () => void;
 } {
   const [headings, setHeadings] = useState<Heading[]>([]);
   const [activeFrom, setActiveFrom] = useState<number | null>(null);
   const elsRef = useRef<HTMLElement[]>([]);
+  const subsRef = useRef<Set<() => void>>(new Set());
+  const subscribeScroll = useRef((fn: () => void) => {
+    subsRef.current.add(fn);
+    return () => { subsRef.current.delete(fn); };
+  }).current;
 
   useEffect(() => {
     if (!bodyEl || !ready) { setHeadings([]); setActiveFrom(null); elsRef.current = []; return; }
@@ -53,13 +61,16 @@ export function usePublicToc(bodyEl: HTMLElement | null, ready: boolean): {
       setActiveFrom(active);
     };
     recompute();
+    // #227on scroll, recompute the active heading AND notify overlay subscribers (member parity —
+    // the narrow overlay fades in while scrolling). resize only needs the recompute.
+    const onScroll = () => { recompute(); subsRef.current.forEach((fn) => fn()); };
     const sc = scrollParent(bodyEl);
-    sc.addEventListener("scroll", recompute, { passive: true } as AddEventListenerOptions);
-    window.addEventListener("scroll", recompute, { passive: true });
+    sc.addEventListener("scroll", onScroll, { passive: true } as AddEventListenerOptions);
+    window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", recompute);
     return () => {
-      sc.removeEventListener("scroll", recompute);
-      window.removeEventListener("scroll", recompute);
+      sc.removeEventListener("scroll", onScroll);
+      window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", recompute);
     };
   }, [bodyEl, ready]);
@@ -67,5 +78,5 @@ export function usePublicToc(bodyEl: HTMLElement | null, ready: boolean): {
   const jump = (from: number) => {
     elsRef.current[from]?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
-  return { headings, activeFrom, jump };
+  return { headings, activeFrom, jump, subscribeScroll };
 }
