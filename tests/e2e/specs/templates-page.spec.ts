@@ -8,7 +8,9 @@ test("#249: a saved template appears on /templates and can be renamed and delete
   const src = await openScratch(page, `tpl-mgmt-${Date.now()}`);
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.insertText("# Sprint template\n\n- goals\n");
+  // Include an XSS payload so the preview's sanitized-render boundary is exercised (the frozen body is
+  // rendered client-side via renderMarkdownToHtml → SafeHtml — raw HTML must be escaped, not live).
+  await page.keyboard.insertText("# Sprint template\n\n- goals\n\n<img src=x onerror=alert(1)>\n");
   await sleep(300);
   await page.getByTestId("publish-page").click();
   await sleep(700);
@@ -34,6 +36,9 @@ test("#249: a saved template appears on /templates and can be renamed and delete
   const body = page.getByTestId("template-preview-body");
   await expect(body).toBeVisible({ timeout: 8000 });
   await expect(body.locator("h1")).toHaveText("Sprint template");
+  // Sanitization: the raw <img onerror> must be ESCAPED text, never a live element (XSS boundary).
+  await expect(body.locator("img")).toHaveCount(0);
+  await expect(body).toContainText("onerror=alert(1)");
   await page.getByTestId("template-preview-close").click();
 
   // Rename it.
