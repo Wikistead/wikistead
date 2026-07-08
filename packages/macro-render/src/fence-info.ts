@@ -9,11 +9,16 @@
 // attribute is never dropped on round-trip. Pure + DOM-free → shared by the editor and the server HTML
 // export (single source of truth, ADR-085).
 
+export type FenceAlign = "left" | "center" | "right";
+
 export interface FenceInfo {
   lang: string;
   title?: string;
   showLineNumbers?: boolean;
   highlight?: ReadonlyArray<readonly [number, number]>; // inclusive 1-based line ranges (single line = [n,n])
+  // #255: horizontal alignment for a rendered diagram fence (mermaid/plantuml/excalidraw). CENTER is the
+  // default and writes NO attribute (existing docs stay unchanged and centre) — only left/right serialize.
+  align?: FenceAlign;
   extra: string[]; // unknown attributes, kept verbatim for a lossless round-trip
 }
 
@@ -84,6 +89,7 @@ export function parseFenceInfo(info: string): FenceInfo {
     const raw = t.slice(eq + 1);
     const val = raw.length >= 2 && (raw[0] === '"' || raw[0] === "'") && raw[raw.length - 1] === raw[0] ? raw.slice(1, -1) : raw;
     if (key === "title") out.title = val;
+    else if (key === "align" && (val === "left" || val === "center" || val === "right")) out.align = val;
     else out.extra.push(t);
   }
   return out;
@@ -105,6 +111,7 @@ export function serializeFenceInfo(info: FenceInfo): string {
   if (info.title !== undefined) parts.push(`title="${info.title}"`);
   if (info.showLineNumbers) parts.push("showLineNumbers");
   if (info.highlight && info.highlight.length) parts.push(serializeRanges(info.highlight));
+  if (info.align && info.align !== "center") parts.push(`align=${info.align}`); // #255: center = default (no attr)
   parts.push(...info.extra);
   return parts.filter((p) => p !== "").join(" ");
 }

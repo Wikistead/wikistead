@@ -42,4 +42,28 @@ describe("parseFenceInfo (#198)", () => {
     expect(f.title).toBeUndefined();
     expect(f.extra).toEqual([]);
   });
+
+  // #255: the `align=` attribute for diagram fences. center is the default and MUST NOT serialize
+  // (existing docs stay unchanged); only left/right round-trip.
+  it("parses align=left|right|center and defaults to undefined", () => {
+    expect(parseFenceInfo("mermaid align=left").align).toBe("left");
+    expect(parseFenceInfo("mermaid align=right").align).toBe("right");
+    expect(parseFenceInfo("mermaid align=center").align).toBe("center");
+    expect(parseFenceInfo("mermaid").align).toBeUndefined();
+    expect(parseFenceInfo("mermaid align=bogus").align).toBeUndefined(); // invalid → not set (kept in extra)
+  });
+
+  it("serializes only left/right (center is the default = no attribute)", () => {
+    expect(serializeFenceInfo({ lang: "mermaid", align: "left", extra: [] })).toBe("mermaid align=left");
+    expect(serializeFenceInfo({ lang: "mermaid", align: "right", extra: [] })).toBe("mermaid align=right");
+    expect(serializeFenceInfo({ lang: "mermaid", align: "center", extra: [] })).toBe("mermaid");
+    expect(serializeFenceInfo({ lang: "mermaid", extra: [] })).toBe("mermaid");
+  });
+
+  it("round-trips align alongside title (order-independent parse)", () => {
+    const f = parseFenceLine('```mermaid title="Flow" align=right');
+    expect(f?.align).toBe("right");
+    expect(f?.title).toBe("Flow");
+    expect(serializeFenceInfo(f!)).toBe('mermaid title="Flow" align=right');
+  });
 });
