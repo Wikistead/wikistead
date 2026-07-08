@@ -103,6 +103,20 @@ export async function ensurePersonalSpace(
 // per-space view authorization is enforced here so the sidebar never lists (or
 // leaks the name of) a space the user cannot access — the same "confirm via
 // OpenFGA before display" rule the search two-stage guard follows (the project design notes).
+// #270: minimal space header for the GUEST reader-chrome — ONLY the name + public icon (never accent,
+// capability, members, or any other field). A space-link guest is authorised to see the space they were
+// shared into (their share_link is a `viewer` on it), so its name/icon is safe to show the recipient; the
+// caller (the guest route) enforces the resource binding. RLS-scoped to the tenant.
+export async function getSpaceInfo(db: TenantDb, spaceId: string): Promise<{ name: string; iconImageUrl: string | null } | null> {
+  const [row] = await db.sql<{ name: string; icon_image_key: string | null }[]>`
+    SELECT s.name, ss.icon_image_key
+    FROM spaces s LEFT JOIN space_settings ss ON ss.space_id = s.id
+    WHERE s.id = ${spaceId}
+  `
+  if (!row) return null
+  return { name: row.name, iconImageUrl: row.icon_image_key ? `/spaces/${spaceId}/icon-image` : null }
+}
+
 export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: string): Promise<Space[]> {
   // accent_key (space branding, Phase 5c) joined in so the client can apply the
   // space ▷ tenant ▷ default accent cascade without a per-space fetch.

@@ -9,11 +9,12 @@ const H = { Authorization: "Bearer dev-token", "content-type": "application/json
 
 test("#245: space-link guest gets the sidebar tree, no member chrome, opens a page", async ({ browser }) => {
   // Find a space that has at least one guest-listable (published) page.
-  const spaces = (await (await fetch(`${API}/spaces`, { headers: H })).json()) as { id: string }[];
+  const spaces = (await (await fetch(`${API}/spaces`, { headers: H })).json()) as { id: string; name: string }[];
   let spaceId = "";
+  let spaceName = "";
   for (const s of spaces) {
     const pages = (await (await fetch(`${API}/spaces/${s.id}/pages`, { headers: H })).json()) as { id: string }[];
-    if (pages.length > 0) { spaceId = s.id; break; }
+    if (pages.length > 0) { spaceId = s.id; spaceName = s.name; break; }
   }
   expect(spaceId, "a space with pages exists").toBeTruthy();
 
@@ -30,6 +31,8 @@ test("#245: space-link guest gets the sidebar tree, no member chrome, opens a pa
 
   // The guest reader-chrome sidebar renders the page tree.
   await expect(guest.getByTestId("guest-sidebar")).toBeVisible({ timeout: 10000 });
+  // #270: the header shows the real SPACE NAME (not the generic "Shared space" label).
+  await expect(guest.getByTestId("guest-space-heading")).toContainText(spaceName, { timeout: 10000 });
   const rows = guest.getByTestId("guest-tree-page");
   await expect(rows.first()).toBeVisible({ timeout: 10000 });
 

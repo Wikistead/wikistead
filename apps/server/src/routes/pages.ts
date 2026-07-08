@@ -19,6 +19,7 @@ import { renderPlantuml } from '../plantuml-render.js'
 import { assertPageViewable } from '../page-view-gate.js'
 import { revokeResourceShareLinks } from './share-links.js'
 import { getTemplate } from './templates.js'
+import { getSpaceInfo } from './spaces.js'
 import { enqueueWebhookOutbox } from './webhooks.js'
 
 // #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames
@@ -1322,6 +1323,25 @@ export async function pagesPlugin(app: FastifyInstance) {
       return reply.code(401).send({ error: 'unauthorized' })
     }
     return listPages(req.db, app.fga, { spaceId: req.params.spaceId, subject, context })
+  })
+
+  // #270: the guest reader-chrome's space HEADER (name + public icon only). Guest-capable + resource-bound
+  // (same guard as /pages): a member sees any space they can view; a space-link guest ONLY its bound space.
+  // No accent/capability/members — getSpaceInfo returns just name + iconImageUrl.
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/info', { config: { guest: 'view' } }, async (req, reply) => {
+    if (!req.user) {
+      if (!req.guest || req.guest.resource.type !== 'space' || req.guest.resource.id !== req.params.spaceId) {
+        return reply.code(req.guest ? 403 : 401).send({ error: req.guest ? 'forbidden' : 'unauthorized' })
+      }
+    } else {
+      // A member must be able to VIEW the space (existence-hidden 404 otherwise, like the page read path #262).
+      if (!(await check(app.fga, `user:${req.user.sub}`, 'view', { type: 'space', id: req.params.spaceId }))) {
+        return reply.code(404).send({ error: 'not found' })
+      }
+    }
+    const info = await getSpaceInfo(req.db, req.params.spaceId)
+    if (!info) return reply.code(404).send({ error: 'not found' })
+    return info
   })
 
   // Pages overview for space managers (Phase 5 #5) — space#manage gated.

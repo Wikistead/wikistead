@@ -623,6 +623,7 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
   const tenant = m?.[1] ?? "";
   const spaceId = m?.[2] ?? "";
   const [pages, setPages] = useState<Page[] | null>(null);
+  const [space, setSpace] = useState<{ name: string; iconImageUrl: string | null } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -630,6 +631,11 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
     apiFetch<Page[]>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
       .then((r) => { if (!cancelled) setPages(r ?? []); })
       .catch(() => { if (!cancelled) setPages([]); });
+    // #270: the space header (name + public icon only) so the guest sidebar shows the real space, not a
+    // fixed "Shared space" label. Best-effort — a failure just falls back to the label.
+    apiFetch<{ name: string; iconImageUrl: string | null }>(`/spaces/${encodeURIComponent(spaceId)}/info`, token)
+      .then((r) => { if (!cancelled && r) setSpace(r); })
+      .catch(() => { /* keep the fallback label */ });
     return () => { cancelled = true; };
   }, [spaceId, token]);
 
@@ -641,7 +647,7 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
     : null;
 
   return (
-    <AppShell sidebar={<GuestSidebar pages={pages ?? []} openId={openId} onOpen={setOpenId} />}>
+    <AppShell sidebar={<GuestSidebar pages={pages ?? []} space={space ?? undefined} openId={openId} onOpen={setOpenId} />}>
       {pageMinted ? (
         // key on the page id so switching pages in the tree remounts the editor cleanly.
         <GuestPageContent key={openId} minted={pageMinted} />

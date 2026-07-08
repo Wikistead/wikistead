@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, FileText } from "lucide-react";
 import type { Page } from "../data/queries";
+import { SpaceIcon } from "../ui/SpaceIcon";
 
 // #245 / ADR-112: the guest reader-chrome sidebar. A space share-link guest browses the linked space's
 // page tree exactly like a member — but this is a READ-ONLY, member-chrome-free tree. It renders NO space
@@ -36,12 +37,19 @@ function buildTree(pages: Page[]): TreeNode[] {
     .map((p) => ({ id: p.id, title: p.title, children: subtree(pages, p.id) }));
 }
 
-export function GuestSidebar({ pages, openId, onOpen }: { pages: Page[]; openId: string | null; onOpen: (id: string) => void }) {
+export function GuestSidebar({ pages, space, openId, onOpen }: { pages: Page[]; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void }) {
   const { t } = useTranslation();
   const tree = buildTree(pages);
+  // #270: the header shows the real space name + icon (member-parity), falling back to the generic label
+  // only when the space info hasn't loaded. The icon uses the public /spaces/:id/icon-image (guest-readable),
+  // and SpaceIcon falls back to an initials chip if there is no uploaded image.
+  const heading = space?.name || t("share.spaceTitle");
   return (
-    <nav className="flex h-full flex-col gap-0.5 overflow-auto p-2 text-[length:var(--text-ui)]" data-testid="guest-sidebar" aria-label={t("share.spaceTitle")}>
-      <div className="px-1 pb-1 text-[length:var(--text-xs)] font-medium uppercase tracking-wide text-fg-dim">{t("share.spaceTitle")}</div>
+    <nav className="flex h-full flex-col gap-0.5 overflow-auto p-2 text-[length:var(--text-ui)]" data-testid="guest-sidebar" aria-label={heading}>
+      <div className="flex items-center gap-1.5 px-1 pb-1.5 font-semibold text-foreground" data-testid="guest-space-heading">
+        {space ? <SpaceIcon id={space.name} name={space.name} image={space.iconImageUrl} size={18} /> : null}
+        <span className="truncate">{heading}</span>
+      </div>
       {tree.length === 0 ? (
         <div className="px-1 py-2 text-fg-dim" data-testid="guest-sidebar-empty">{t("share.spaceEmpty")}</div>
       ) : (

@@ -72,3 +72,21 @@ describe('#245 guest sidebar capability boundary', () => {
     expect(res.statusCode).toBe(403)
   })
 })
+
+describe('#270 guest space header (GET /spaces/:id/info)', () => {
+  it('a space-link guest gets ONLY the space name + icon (no accent/capability/members/id)', async () => {
+    const tok = await mintGuestToken(guestCfg, { tenantId: TENANT, shareLinkId: SPACE_LINK, resource: { type: 'space', id: SPACE }, capability: 'view' })
+    const res = await app.inject({ method: 'GET', url: `/spaces/${SPACE}/info`, headers: { host: 'dev.localhost', authorization: `Bearer ${tok}` } })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as Record<string, unknown>
+    expect(body.name).toBe('gs245')
+    expect(body.iconImageUrl).toBeNull() // no uploaded icon → null (client falls back to an initials chip)
+    expect(Object.keys(body).sort()).toEqual(['iconImageUrl', 'name']) // NO other field leaks
+  })
+
+  it('a PAGE-scoped guest link cannot read the space header (403 — resource-bound)', async () => {
+    const tok = await mintGuestToken(guestCfg, { tenantId: TENANT, shareLinkId: PAGE_LINK, resource: { type: 'page', id: PUB }, capability: 'view' })
+    const res = await app.inject({ method: 'GET', url: `/spaces/${SPACE}/info`, headers: { host: 'dev.localhost', authorization: `Bearer ${tok}` } })
+    expect(res.statusCode).toBe(403)
+  })
+})
