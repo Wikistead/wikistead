@@ -51,6 +51,40 @@ test("#227: an anonymous visitor renders a public page at /pub/:id (title + sani
   await expect(body).toContainText("<script>alert(1)</script>");
 });
 
+// #227 comment 1078 ①②: the public reader reuses the member frosted TITLE BAND (read-only PageTitle) and
+// shows a TABLE OF CONTENTS built from the rendered body's headings (jump + scroll-sync). Real Chromium.
+test("#227 review: the public page has the member title band and a working TOC", async ({ browser }) => {
+  const authed = await (await browser.newContext()).newPage();
+  const id = await openScratch(authed, "pub-toc");
+  await enterEdit(authed);
+  await authed.click("[data-pane=preview] .cm-content");
+  // multiple headings + tall bodies so the TOC has entries and jumping actually scrolls.
+  const filler = Array.from({ length: 25 }, (_, i) => `para ${i}`).join("\n\n");
+  await authed.keyboard.insertText(`# Top Title\n\n## Alpha Section\n\n${filler}\n\n## Bravo Section\n\n${filler}\n\n## Charlie Section\n\n${filler}\n`);
+  await sleep(400);
+  await authed.getByTestId("publish-page").click();
+  await sleep(800);
+  await makePublic(id);
+  await setPublicSurface(authed, true);
+
+  // anonymous, WIDE viewport (≥1200px so the TOC rail shows).
+  const anon = await (await browser.newContext({ viewport: { width: 1360, height: 800 } })).newPage();
+  await anon.goto(`/pub/${id}`);
+  // ① the frosted band renders the PAGE title through the read-only PageTitle (page-title inside public-title).
+  await expect(anon.getByTestId("public-title")).toBeVisible();
+  await expect(anon.getByTestId("public-title").getByTestId("page-title")).toHaveText("pub-toc"); // the page title
+  // ② the TOC rail shows an item per heading.
+  const toc = anon.getByTestId("toc");
+  await expect(toc).toBeVisible();
+  const items = toc.getByTestId("toc-item");
+  await expect(items).toHaveCount(4); // Top Title + Alpha/Bravo/Charlie
+  // clicking the last section jumps to it (its heading ends up near the top of the viewport).
+  await items.filter({ hasText: "Charlie" }).click();
+  await sleep(600); // smooth-scroll settle
+  const top = await anon.getByTestId("public-body").locator("h2", { hasText: "Charlie Section" }).evaluate((el) => el.getBoundingClientRect().top);
+  expect(top).toBeLessThan(200); // scrolled into view near the top
+});
+
 test("#227: a NON-public page shows not-found to an anonymous visitor (existence hidden)", async ({ browser }) => {
   const authed = await (await browser.newContext()).newPage();
   const id = await openScratch(authed, "pub-hidden");
