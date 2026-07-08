@@ -663,7 +663,16 @@ export async function listPageRestrictions(
 // both public and private (the write-boundary invariant → is_public becomes false on reindex). The allow
 // list itself is the existing grant/revoke path; this pair only flips the marker. Manage-gated + audited
 // (#177) + reindexed, like restrict.
-const PRIVATE_MARKER = (pageId: string) => ({ user: 'user:*', relation: 'private', object: `page:${pageId}` })
+// #244 / ADR-098 addendum: the private marker is a PAIR — `private@user:*` AND `private@share_link:*`.
+// OpenFGA's typed wildcard `user:*` matches ONLY user-type principals, so without share_link:* a space
+// share-link guest (share_link:Y) slipped past `... but not private` and read private pages via
+// `viewer from space`. Both are ALWAYS written/deleted together (a lone user:* over-permits guests; a
+// lone share_link:* over-denies members). Reads (readPagePrivate/isPagePrivate/doc-builder) still key on
+// user:* — the pair is always in sync, so user:* presence remains the private predicate.
+const PRIVATE_MARKERS = (pageId: string) => [
+  { user: 'user:*', relation: 'private', object: `page:${pageId}` },
+  { user: 'share_link:*', relation: 'private', object: `page:${pageId}` },
+]
 const PUBLIC_GRANT = (pageId: string) => ({ user: 'user:*', relation: 'view_base', object: `page:${pageId}` })
 
 // Read the private marker WITHOUT a manage gate (#109 Fix B): the lock badge is shown to
@@ -687,7 +696,7 @@ export async function setPagePrivate(
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.made_private', target: `page:${args.pageId}` })
     }
     const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
-    await writeTuples(fga, [PRIVATE_MARKER(args.pageId)])
+    await writeTuples(fga, PRIVATE_MARKERS(args.pageId))
     // public⊥private invariant: strip the public grant so is_public can't survive privatisation. Idempotent
     // (ignore "not found" — the page may not be public). This is the write-boundary that closes the leak
     // where a private page still indexes as public.
@@ -723,8 +732,10 @@ export async function unsetPagePrivate(
     }
     const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
     // Clearing private resumes space inheritance; it does NOT restore public (one-way — a re-publish or
-    // an explicit public toggle re-adds view_base@user:* if desired).
-    await deleteTuples(fga, [PRIVATE_MARKER(args.pageId)]).catch(() => {})
+    // an explicit public toggle re-adds view_base@user:* if desired). Delete each marker INDEPENDENTLY:
+    // a legacy page privatised before the #244 backfill has only user:*, and a single batch delete of a
+    // missing share_link:* would fail the whole write and leave the page stuck private.
+    await Promise.all(PRIVATE_MARKERS(args.pageId).map((m) => deleteTuples(fga, [m]).catch(() => {})))
     return o
   })
   processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
