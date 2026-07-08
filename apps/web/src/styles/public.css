@@ -75,6 +75,27 @@
   border-radius: 6px;
 }
 .wks-public [data-testid="public-body"] pre code { background: none; padding: 0; }
+/* #227②: the copy button on a public code block (added by addCodeCopyButtons; the <pre> is set
+ * position:relative inline). Appears on hover/focus, top-right, clear of the horizontal scrollbar. */
+.wks-public [data-testid="public-body"] pre .cm-lp-code-copy {
+  position: absolute;
+  top: 0.4em;
+  right: 0.4em;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25em;
+  border: none;
+  border-radius: 4px;
+  background: var(--panel-3, rgba(127, 127, 127, 0.2));
+  color: var(--fg-dim, #888);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.wks-public [data-testid="public-body"] pre:hover .cm-lp-code-copy,
+.wks-public [data-testid="public-body"] pre .cm-lp-code-copy:focus-visible { opacity: 1; }
+.wks-public [data-testid="public-body"] pre .cm-lp-code-copy:hover { color: var(--fg); }
+.wks-public [data-testid="public-body"] pre .cm-lp-code-copy.cm-lp-code-copied { color: var(--accent); opacity: 1; }
 
 .wks-public [data-testid="public-body"] hr {
   margin: 1.5em 0;
