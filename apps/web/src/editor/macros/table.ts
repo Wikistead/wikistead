@@ -1,4 +1,4 @@
-import type { DirectiveMacro, MacroTier, MacroLevel, MacroModalEditor, InnerEditHost, InlineController } from "./registry";
+import type { DirectiveMacro, MacroTier, MacroLevel } from "./registry";
 import { asMacroSource } from "./registry";
 import { parseHtml, styleToCss, parseTableSource, toHtml, toPipe, representableAsPipe, type Grid } from "./table-model";
 import { renderCellInline } from "./table-cell-dom";
@@ -55,38 +55,9 @@ export function renderHtmlTable(html: string): HTMLTableElement {
   return gridToTable(parseHtml(html));
 }
 
-// The table's MODAL editor (#86 / ADR-036): mounts the existing view-free tableInlineEditor in
-// the modal overlay (OUTSIDE CodeMirror), so a cell can be contenteditable without CM stealing
-// focus. openTableModal passes the table block's FULL current source (pipe table OR :::table);
-// the editor parses both. A toolbar op (merge/style/…) calls replaceSource → we re-render so the
-// modal reflects it; getBody returns the current source (openTableModal applies the tier on save,
-// demoting a span/style-free table back to a plain pipe table — open formats).
-export const tableModalEditor: MacroModalEditor = {
-  async mount(container, body, ctx) {
-    let current = body;
-    let ctrl: InlineController | null = null;
-    const render = () => {
-      ctrl?.destroy();
-      container.replaceChildren();
-      ctrl = tableInlineEditor.mount(container, host);
-      // The modal frame owns Save/Cancel, so the editor's in-toolbar "Done" (host.exit, a
-      // no-op here) is redundant — drop it to avoid a dead button (#86).
-      container.querySelector('[data-testid="table-done"]')?.remove();
-    };
-    const host: InnerEditHost = {
-      theme: ctx.theme,
-      getSource: () => current,
-      replaceSource: (next) => { current = next; render(); },
-      exit: () => { /* the modal frame owns close/save */ },
-      // #153 / ADR-054: in the MODAL path there is no EditorView to fight for focus, so this is a
-      // plain focus hand-off (the modal frame owns focus). The CM-host bridge (macro-edit.ts) is
-      // where the focus-guard semantics matter; the in-editor WYSIWYG cell path (#154) uses that.
-      beginTextEdit: (target: HTMLElement) => { target.focus(); return { end: () => {} }; },
-    };
-    render();
-    return { getBody: () => current, destroy: () => ctrl?.destroy() };
-  },
-};
+// #156 / #152-S4: the table MODAL editor (tableModalEditor) is removed — tables edit IN-EDITOR now
+// (richEditUI below, present:"inline"). The modal was #86's original path; #154/#155 replaced it and #156
+// deletes the dead fallback. Excalidraw keeps its modal (openMacroModal) as the non-text-macro exception.
 
 export const tableMacro: DirectiveMacro = {
   kind: "directive",

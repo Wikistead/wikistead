@@ -1,10 +1,9 @@
 import { EditorView } from "@codemirror/view";
 import type { FenceMacro, DirectiveMacro, MacroTheme, MacroSource } from "../macros/registry";
 import { asMacroSource } from "../macros/registry";
-import { macroFenceAt, directiveMacroAt, tableBlockAt } from "../macros/fence";
+import { macroFenceAt, directiveMacroAt } from "../macros/fence";
 import { autoDemote } from "../macros/tier-cap";
 import { ephemeralCollab, macroPresence } from "./decorations";
-import { tableModalEditor, tableTier } from "../macros/table";
 
 // Rich-edit a macro block in a modal (ADR-022 Part 3 / #86 for the table). The overlay is plain
 // DOM — the macro mounts its own editor INSIDE it, NEVER in CodeMirror (ADR-013), so an embedded
@@ -111,21 +110,7 @@ export function openMacroModal(
   });
 }
 
-// The table modal (#86): a table is a pipe table OR a :::table directive, so it uses tableBlockAt
-// (handles both) and feeds the editor the FULL block source. On save the tier auto-demotes a
-// span/style-free table back to a plain GFM pipe table (open formats).
-export function openTableModal(view: EditorView, getPos: () => number, theme: MacroTheme): void {
-  const start = tableBlockAt(view.state, getPos());
-  if (!start) return;
-  const originalSource = asMacroSource(view.state.sliceDoc(start.from, start.to));
-  let getBody: () => MacroSource = () => originalSource;
-  const frame = modalFrame(view, "Table", () => {
-    const cur = tableBlockAt(view.state, getPos());
-    if (!cur) return;
-    view.dispatch({ changes: { from: cur.from, to: cur.to, insert: autoDemote(tableTier, getBody()) } });
-  });
-  void tableModalEditor.mount(frame.content, originalSource, { theme }).then((c) => {
-    getBody = () => c.getBody();
-    frame.onMounted(() => c.destroy());
-  });
-}
+// #156 / #152-S4: the table MODAL path (openTableModal + tableModalEditor) is removed. Tables now edit
+// IN-EDITOR (#154 — table.ts richEditUI: { present: "inline", editor: tableInlineEditor }); the modal was a
+// dead fallback with no callers left once #155 landed the in-editor structural ops. openMacroModal (above)
+// stays for Excalidraw (a non-text macro that legitimately keeps a modal — ADR-051 exception).
