@@ -1,5 +1,5 @@
 import postgres from "postgres";
-import { seedFixtures, E2E } from "./fixtures";
+import { seedFixtures, seedFgaFixtures, E2E } from "./fixtures";
 import { startE2eIssuer } from "./oidc-issuer";
 
 // Runs once before the suite. Seeds security fixtures, and stands up a real
@@ -12,6 +12,9 @@ const REDIRECT = "http://dev.localhost:5180/auth/callback";
 
 export default async function globalSetup() {
   await seedFixtures();
+  // #279: re-assert the shared demo/acme FGA tuples every run, so a run left broken by a spec that deleted
+  // one (e.g. `space:demo_space#space@page:demo`) self-heals here instead of staying broken forever.
+  await seedFgaFixtures();
 
   // Fixed port so the (separate) API process can reference the issuer via static
   // env (PLATFORM_OIDC_ISSUER); it serves both tenant_oidc (login.spec) and the
