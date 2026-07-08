@@ -55,7 +55,7 @@ test("#267: template preview renders ALL macros (callout/tabs/table), scrolls, a
   // (renders as a real table but the onerror cell is inert), a top-level <script>, and a long scroll tail.
   const long = Array.from({ length: 40 }, (_, i) => `Paragraph line ${i} lorem ipsum dolor sit amet.`).join("\n\n");
   await page.keyboard.insertText(
-    `# Macro template\n\n:::note\nHello **bold** callout\n:::\n\n::::tabs\n:::tab[One]\nAlpha\n:::\n:::tab[Two]\nBravo\n:::\n::::\n\n:::table\n<table><tr><td><img src=x onerror="window.__xss267=1"></td></tr></table>\n:::\n\n<script>window.__xss267=1</script>\n\n${long}\n`,
+    `# Macro template\n\n:::note\nHello **bold** callout\n:::\n\n\`\`\`mermaid\nflowchart TD\n  A --> B\n\`\`\`\n\n::::tabs\n:::tab[One]\nAlpha\n:::\n:::tab[Two]\nBravo\n:::\n::::\n\n:::table\n<table><tr><td><img src=x onerror="window.__xss267=1"></td></tr></table>\n:::\n\n<script>window.__xss267=1</script>\n\n${long}\n`,
   );
   await sleep(500);
   await page.getByTestId("publish-page").click();
@@ -79,6 +79,23 @@ test("#267: template preview renders ALL macros (callout/tabs/table), scrolls, a
   await expect(preview.locator("[data-testid=callout-panel]")).toHaveCount(1);
   await expect(preview.locator("[data-testid=callout-panel] strong")).toHaveText("bold");
   expect(await preview.innerText()).not.toContain(":::note");
+
+  // (1b) #267 point 1: the callout PANEL shows its BOX — a background tint + a left colour bar — even
+  // though the preview is OUTSIDE .cm-editor (the tint/bar used to come only from the .cm-editor baseTheme,
+  // so the box vanished in the preview). Global CSS now backs it: the panel has a non-transparent tint.
+  const calloutBg = await preview.locator("[data-testid=callout-panel]").evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { bg: cs.backgroundColor, bar: cs.borderLeftWidth };
+  });
+  expect(calloutBg.bg, "callout panel has no background tint (the box is missing)").not.toBe("rgba(0, 0, 0, 0)");
+  expect(calloutBg.bg).not.toBe("transparent");
+  expect(parseFloat(calloutBg.bar), "callout panel has no left colour bar").toBeGreaterThan(0);
+
+  // (1c) #267 point 2: a rendered mermaid diagram is CENTERED by default (#255), matching the editor
+  // md-render tags it cm-lp-align-center and the global align CSS (not the .cm-editor baseTheme) centers it.
+  const mermaid = preview.locator(".cm-lp-mermaid").first();
+  await expect(mermaid).toHaveClass(/cm-lp-align-center/);
+  expect(await mermaid.evaluate((el) => getComputedStyle(el).alignItems)).toBe("center");
 
   // (2) the NESTED :::tabs renders BOTH tabs (early-close corrected) and leaks no literal ":::".
   const tabs = preview.locator("[data-testid=macro-tabs]");

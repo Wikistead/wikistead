@@ -1,7 +1,13 @@
 import { parser, Strikethrough, Table } from "@lezer/markdown";
+import { parseFenceInfo } from "@wikistead/macro-render"; // #267: read a diagram fence's align= (default center)
 import { directiveExtension, parseDirectiveOpen, resolveDirectiveRanges, type ResolvedDirective } from "./directive-parser";
 import { findDirectiveMacro, findFenceMacro } from "./registry";
 import { currentMacroTheme } from "./theme";
+
+// #267: rendered diagram fences default to CENTER (#255) and can carry an align= attribute — mirror the
+// editor's set (decorations.ts) so this out-of-editor render path centers them the same way. Text macros
+// (callout/table/columns) never align.
+const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 
 // #90 S0 (A′ shared) — render a Markdown source string to a SANITIZED DOM fragment, for use
 // INSIDE a block-widget macro (columns / tabs) that can't reach CodeMirror's own renderers (the
@@ -177,10 +183,20 @@ function renderBlock(node: SNode, src: string, into: Node): number | void {
       // liveRender only gets `{theme}` (ADR-024 narrow host-API) — display-only.
       if (node.name === "FencedCode") {
         const info = node.getChild("CodeInfo");
-        const lang = info ? txt(src, info).trim().split(/\s+/)[0] : null;
+        const fence = info ? parseFenceInfo(txt(src, info)) : null; // #267: full parse for lang + align=
+        const lang = fence ? fence.lang : null;
         const macro = lang ? findFenceMacro(lang) : undefined;
         if (macro?.liveRender) {
-          try { const el = macro.liveRender(body, { theme: currentMacroTheme() }); tagMacro(el, node.from, lang!); into.appendChild(el); return; } // #215: tag for nested hit-test
+          try {
+            const el = macro.liveRender(body, { theme: currentMacroTheme() });
+            tagMacro(el, node.from, lang!); // #215: tag for nested hit-test
+            // #267: a rendered diagram is centred by default (#255). The editor centres via the widget's
+            // cm-lp-align-* wrap; this render path (preview/public/nested) has no wrap, so the diagram sat
+            // left. Apply the SAME class here (global CSS backs .cm-lp-align-* outside .cm-editor).
+            if (DIAGRAM_MACROS.has(lang!)) el.classList.add(`cm-lp-align-${fence!.align ?? "center"}`);
+            into.appendChild(el);
+            return;
+          }
           catch { /* a macro that throws must not break the render → fall through to plain code */ }
         }
       }
