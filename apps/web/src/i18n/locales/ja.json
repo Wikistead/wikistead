@@ -553,7 +553,8 @@
     "table": "テーブル",
     "divider": "区切り線",
     "image": "画像",
-    "link": "リンク"
+    "link": "リンク",
+    "insertTemplate": "テンプレートを挿入"
   },
   "calloutEdit": {
     "title": "コールアウトを編集",

@@ -13,9 +13,11 @@ import { makeDiagramRenderer } from "./diagram-renderer";
 import { makeTranscludeResolver } from "./transclude-resolver";
 import { PageEmbedPicker } from "./PageEmbedPicker";
 import { EmbedUrlModal } from "./EmbedUrlModal";
-import type { PageEmbedPicker as PageEmbedPickerFn } from "./live-preview/palette";
+import { TemplatePickerDialog } from "../sidebar/TemplatePickerDialog";
+import type { PageEmbedPicker as PageEmbedPickerFn, TemplateInsertPicker as TemplateInsertPickerFn } from "./live-preview/palette";
 import type { EmbedUrlPrompt as EmbedUrlPromptFn } from "./live-preview/decorations";
 import { useEmbedProviders } from "../data/queries";
+import { apiFetch } from "../data/apiClient";
 import { createAnchor, resolveAnchor } from "./comment-anchors";
 import { setCommentRanges, type CommentRange } from "./live-preview/comment-highlights";
 import type { DirtySignal } from "./dirtySignal";
@@ -258,6 +260,26 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     embedUrlResolve.current = null;
     r?.(url);
   }, []);
+  // #251 / ADR-110: the "/"-palette "Insert template" picker. Same stash/open/resolve pattern as the embed
+  // picker; on selection we fetch the chosen template's body (view-gated by the server) and resolve the CM
+  // callback with it (the palette inserts it at the caret). Cancel resolves null (doc untouched).
+  const [tplInsertOpen, setTplInsertOpen] = useState(false);
+  const tplInsertResolve = useRef<((body: string | null) => void) | null>(null);
+  const openTemplateInsertPicker = useCallback<TemplateInsertPickerFn>((onInsert) => {
+    tplInsertResolve.current = onInsert;
+    setTplInsertOpen(true);
+  }, []);
+  const handleTemplateInsertPick = useCallback(async (templateId: string | null) => {
+    setTplInsertOpen(false);
+    const resolve = tplInsertResolve.current;
+    tplInsertResolve.current = null;
+    if (!resolve) return;
+    if (!templateId) { resolve(null); return; }
+    try {
+      const tpl = await apiFetch<{ body: string }>(`/templates/${encodeURIComponent(templateId)}`, apiToken);
+      resolve(tpl?.body ?? null);
+    } catch { resolve(null); }
+  }, [apiToken]);
 
   // Dev-only probe for the isolation invariant (ADR-013): editor content is not in
   // React state, so typing must NOT re-render this component (read before/after).
@@ -329,6 +351,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       embedProviders,
       openPageEmbedPicker,
       openEmbedUrlPrompt,
+      openTemplateInsertPicker,
       uploadImage: onUploadImage,
       vim,
       vimCompartment,
@@ -373,7 +396,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     };
     // vim excluded (Compartment reconfigure, not a remount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, renderDiagram, resolveTransclude, embedProviders, openPageEmbedPicker, openEmbedUrlPrompt, onUploadImage]);
+  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, renderDiagram, resolveTransclude, embedProviders, openPageEmbedPicker, openEmbedUrlPrompt, openTemplateInsertPicker, onUploadImage]);
 
   // vim on/off: reconfigure the Compartment IN PLACE (no remount → collab/presence
   // untouched). Only meaningful on the edit surface.
@@ -443,6 +466,9 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       {/* #205 part 2: the :::embed-page title-search picker (opened from the slash command). */}
       <PageEmbedPicker open={embedPickerOpen} onPick={handleEmbedPick} />
       <EmbedUrlModal open={embedUrlState.open} current={embedUrlState.current} onSubmit={handleEmbedUrl} />
+      {/* #251: "/"-palette Insert template picker. spaceId is null here (the page's space isn't threaded
+          into the editor), so the "This space" group shows all space-scope templates the user can view. */}
+      <TemplatePickerDialog open={tplInsertOpen} spaceId={null} onClose={() => handleTemplateInsertPick(null)} onPick={handleTemplateInsertPick} />
     </div>
   );
 });
