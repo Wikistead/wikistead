@@ -1,0 +1,63 @@
+# Server integration-test middleware — FULLY ISOLATED from the dev AND e2e stacks.
+#   - separate compose project (name: wikistead-server-test) => separate containers/network
+#   - separate named volumes => test seed/teardown never touches dev (or e2e) data
+#   - distinct host ports => can run alongside both the dev and e2e stacks
+# This is the #268 fix: `pnpm --filter @wikistead/server test` runs against THIS stack
+# (via .env.server-test), so the destructive tests (billing.test wipes spaces,
+# plan-freeze mutates members, the tenant/oidc tests INSERT rows) never touch the dev DB.
+name: wikistead-server-test
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: app
+    ports: ["5434:5432"]
+    volumes:
+      - srvtest_pgdata:/var/lib/postgresql/data
+      - ./infra/db/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  valkey:
+    image: valkey/valkey:8
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    ports: ["6381:6379"]
+
+  openfga:
+    image: openfga/openfga:latest
+    command: run
+    environment:
+      OPENFGA_DATASTORE_ENGINE: memory
+    ports: ["8092:8080", "8093:8081"]
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.10
+    environment:
+      MEILI_MASTER_KEY: dev_master_key_change_me
+      MEILI_ENV: development
+    ports: ["7702:7700"]
+    volumes: ["srvtest_meilidata:/meili_data"]
+
+  # Storage: SeaweedFS S3 on host :9003 (matches the e2e stack's storage choice).
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://dev.localhost:5180"
+    ports: ["9003:8333"]
+    volumes:
+      - srvtest_seaweeddata:/data
+      - ./infra/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ["1027:1025", "8027:8025"] # distinct host ports so dev + e2e + server-test coexist
+
+volumes:
+  srvtest_pgdata:
+  srvtest_meilidata:
+  srvtest_seaweeddata:

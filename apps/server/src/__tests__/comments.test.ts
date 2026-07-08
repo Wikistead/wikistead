@@ -149,7 +149,9 @@ describe('tenant isolation', () => {
 })
 
 describe('@mention (directory scoped to page-viewers; notification best-effort)', () => {
-  const MAILPIT = 'http://localhost:8025/api/v1'
+  // #268: the isolated server-test stack runs Mailpit on a distinct host port; read it from env
+  // (defaults to the dev port so a plain `docker compose up` checkout still works).
+  const MAILPIT = process.env.MAILPIT_API_URL ?? 'http://localhost:8025/api/v1'
   const clearMail = () => fetch(`${MAILPIT}/messages`, { method: 'DELETE' })
   // Returns true as soon as a message to `addr` appears; false after the window.
   async function mailedTo(addr: string, windowMs = 1500): Promise<boolean> {

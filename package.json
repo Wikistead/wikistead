@@ -24,7 +24,9 @@
     "dev:up": "docker compose up -d && node scripts/dev-setup.mjs",
     "setup:e2e": "node tests/e2e/scripts/up.mjs",
     "test:e2e": "pnpm --filter @wikistead/e2e e2e",
-    "teardown:e2e": "node tests/e2e/scripts/down.mjs"
+    "teardown:e2e": "node tests/e2e/scripts/down.mjs",
+    "setup:server-test": "node scripts/server-test-up.mjs",
+    "teardown:server-test": "node scripts/server-test-down.mjs"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
