@@ -60,9 +60,11 @@ test("an empty macro renders a visible 'Empty …' placeholder (not blank space)
   await page.keyboard.type("/mermaid");
   await expect(page.getByTestId("slash-palette")).toBeVisible();
   await page.keyboard.press("Enter");
-  await sleep(400);
-  // Non-vim renders every macro regardless of caret position (#5), so even with the caret
-  // inside the fence the placeholder shows.
+  await sleep(300);
+  // #271: inserting a fence macro from the palette REVEALS its raw source (so you can type), so it isn't
+  // the rendered placeholder yet. Escape exits raw → the empty fence renders as the placeholder.
+  await page.keyboard.press("Escape");
+  await sleep(300);
   const ph = page.locator("[data-pane=preview] [data-testid=macro-empty]");
   await expect(ph).toBeVisible();
   await expect(ph).toContainText("mermaid"); // names the macro
