@@ -677,5 +677,16 @@
     "empty": "No templates yet. Save a page as a template from its ⋯ menu.",
     "selectPrompt": "Select a template to preview it.",
     "use": "Use template"
+  },
+  "layoutEdit": {
+    "tabN": "Tab {{n}}",
+    "columnN": "Column {{n}}",
+    "addTab": "Add tab",
+    "addColumn": "Add column",
+    "removeTab": "Remove tab",
+    "removeColumn": "Remove column",
+    "tabName": "Tab name",
+    "moveLeft": "Move left",
+    "moveRight": "Move right"
   }
 }
