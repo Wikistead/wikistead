@@ -3,7 +3,8 @@ import { EditorView } from "@codemirror/view";
 import { currentMacroTheme } from "../macros/theme";
 import type { InnerEditHost, MacroTier, MacroLevel, MacroSource } from "../macros/registry";
 import { asMacroSource } from "../macros/registry";
-import { tableBlockAt } from "../macros/fence";
+import { tableBlockAt, macroFenceAt } from "../macros/fence";
+import { Vim, getCM } from "@replit/codemirror-vim";
 
 // Inline rich-edit state for macros (ADR-022 Part 11, mode-based). The editor is entered
 // by a mouse CLICK on the macro (handled in decorations.ts) — there is no Ctrl+Enter
@@ -94,14 +95,25 @@ const escExit = Prec.high(
         }
         const active = view.state.field(macroRenderActiveField);
         if (active) {
+          // #283: in vim, this Esc was SWALLOWED (return true), so codemirror-vim never saw it and the raw
+          // edit session left vim stuck in INSERT mode (a second Esc was needed). Forward the Esc to vim
+          // first so one press both exits raw AND returns to normal. No-op in normal mode / non-vim.
+          const cm = getCM(view);
+          if (cm?.state.vim) { try { Vim.handleKey(cm, "<Esc>", "mapping"); } catch { /* vim unavailable */ } }
           // #216 comment 820: exiting a TABLE's RichUI returns to the RENDERED widget. A pipe table shows
-          // raw while the caret is inside it (the Live×pipe Markdown-editing layer), so on exit move the
-          // caret PAST the table so it re-renders as a widget rather than lingering as raw. Other macros
-          // keep the caret in place (mermaid/callout raw-on-exit is their existing behaviour).
+          // raw while the caret is inside it, so move the caret PAST the table so it re-renders as a widget.
+          // #283: a FENCE macro (mermaid/plantuml) must also normalize the caret — otherwise it lingers on a
+          // hidden body line INSIDE the re-rendered atom (the #271 trapped-caret state, via Esc). Move it to
+          // the atom's near edge (its opening line). A callout keeps its caret (raw-on-exit is its behaviour).
           const isTable = !!tableBlockAt(view.state, active.from);
+          const exitTo = isTable
+            ? Math.min(active.to + 1, view.state.doc.length)
+            : macroFenceAt(view.state, active.from)
+              ? active.from
+              : null;
           view.dispatch({
             effects: setMacroRenderActive.of(null),
-            ...(isTable ? { selection: EditorSelection.cursor(Math.min(active.to + 1, view.state.doc.length)) } : {}),
+            ...(exitTo != null ? { selection: EditorSelection.cursor(exitTo) } : {}),
           });
           return true;
         }
