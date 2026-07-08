@@ -68,11 +68,15 @@ test("wks-attachment image renders as <img>; the doc holds only the id", async (
   expect(src).toMatch(/^https?:\/\//);
   expect(src).not.toContain("wks-attachment");
 
-  // (3) reveal-on-cursor: moving the cursor onto the image line (Ctrl+Home → doc
-  // start, where the image is) replaces the <img> widget with editable raw markdown.
-  // (Keyboard, not a click — the 1x1 test image is too small to click reliably.)
+  // (3) #255: a standalone image is an ATOM — moving the cursor onto its line (Ctrl+Home) SELECTS it
+  // (ring), it does NOT reveal raw. Raw markdown is reached only via explicit entry (Ctrl+Enter).
   await page.locator("[data-pane=preview] .cm-content").focus();
   await page.keyboard.press("Control+Home");
+  await sleep(300);
+  expect(await page.locator("[data-pane=preview] img.cm-lp-image").count(), "caret-on-line selects, not reveals").toBe(1);
+  await expect(page.locator("[data-pane=preview] .cm-lp-image-wrap.cm-lp-atom-sel")).toHaveCount(1);
+  // Ctrl+Enter → NOW reveal the raw markdown.
+  await page.keyboard.press("Control+Enter");
   await sleep(300);
   expect(await page.locator("[data-pane=preview] img.cm-lp-image").count()).toBe(0);
 
@@ -111,21 +115,19 @@ test("the / image command uploads and inserts a wks-attachment reference", async
   await expect(page.getByTestId("slash-item-image")).toBeVisible();
   await page.keyboard.press("Enter");
 
-  // The caret lands on the inserted image line → raw is revealed; it references the
-  // attachment by id with the filename as alt text.
-  await expect
-    .poll(async () => page.locator("[data-pane=preview] .cm-content").innerText(), { timeout: 10_000 })
-    .toMatch(/!\[shot\.png\]\(wks-attachment:/);
-
-  // Move the caret off the line → the reference renders as an <img> that loads.
-  await page.keyboard.press("End");
-  await page.keyboard.press("Enter");
-  await sleep(400);
+  // #255: the inserted standalone image renders as an ATOM (raw hidden). It loads from the attachment…
   const img = page.locator("[data-pane=preview] img.cm-lp-image");
-  await expect(img).toBeVisible();
+  await expect(img).toBeVisible({ timeout: 10_000 });
   await expect
     .poll(async () => img.evaluate((el: HTMLImageElement) => el.naturalWidth), { timeout: 6000 })
     .toBeGreaterThan(0);
+  // …and revealing its raw (Ctrl+Home selects it, Ctrl+Enter reveals) shows the wks-attachment ref with the
+  // filename as alt text.
+  await page.keyboard.press("Control+Home");
+  await page.keyboard.press("Control+Enter");
+  await expect
+    .poll(async () => page.locator("[data-pane=preview] .cm-content").innerText(), { timeout: 6000 })
+    .toMatch(/!\[shot\.png\]\(wks-attachment:/);
 });
 
 test("drag-and-drop an image file onto the editor uploads and inserts it", async ({ page }) => {
@@ -159,20 +161,18 @@ test("drag-and-drop an image file onto the editor uploads and inserts it", async
   await page.dispatchEvent("[data-pane=preview] .cm-content", "dragover", { dataTransfer: dt });
   await page.dispatchEvent("[data-pane=preview] .cm-content", "drop", { dataTransfer: dt });
 
-  // the reference is inserted (caret lands on its line → raw revealed)
-  await expect
-    .poll(async () => page.locator("[data-pane=preview] .cm-content").innerText(), { timeout: 10_000 })
-    .toMatch(/!\[dropped\.png\]\(wks-attachment:/);
-
-  // move the caret off the line → it renders as an <img> that actually loads
-  await page.keyboard.press("End");
-  await page.keyboard.press("Enter");
-  await sleep(400);
+  // #255: the reference is inserted and renders as a standalone image ATOM that loads…
   const img = page.locator("[data-pane=preview] img.cm-lp-image");
-  await expect(img).toBeVisible();
+  await expect(img).toBeVisible({ timeout: 10_000 });
   await expect
     .poll(async () => img.evaluate((el: HTMLImageElement) => el.naturalWidth), { timeout: 6000 })
     .toBeGreaterThan(0);
+  // …and revealing its raw (Ctrl+Home selects, Ctrl+Enter reveals) shows the wks-attachment ref.
+  await page.keyboard.press("Control+Home");
+  await page.keyboard.press("Control+Enter");
+  await expect
+    .poll(async () => page.locator("[data-pane=preview] .cm-content").innerText(), { timeout: 6000 })
+    .toMatch(/!\[dropped\.png\]\(wks-attachment:/);
 });
 
 // 2e-1 regression guard: in the DEFAULT read-only view mode, reveal-on-cursor is

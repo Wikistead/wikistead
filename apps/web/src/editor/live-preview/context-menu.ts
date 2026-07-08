@@ -4,7 +4,7 @@ import { syntaxTree } from "@codemirror/language";
 import i18n from "../../i18n";
 import { INLINE_FORMATS } from "./commands";
 import { linkifyPaste, linkCopyRange } from "./paste-linkify";
-import { diagramFenceAt, setDiagramAlign } from "./decorations"; // #255: right-click diagram alignment
+import { diagramFenceAt, setDiagramAlign, imageAlignAt, setImageAlign } from "./decorations"; // #255: right-click diagram/image alignment
 import type { FenceAlign } from "@wikistead/macro-render";
 
 // M0-4 (ADR-018): the right-click context menu — the superset entry for mouse users.
@@ -19,7 +19,7 @@ import type { FenceAlign } from "@wikistead/macro-render";
 
 type MenuKind = "selection" | "link" | "plain";
 interface LinkRange { from: number; to: number; urlFrom: number; urlTo: number }
-interface MenuState { pos: number; kind: MenuKind; link?: LinkRange; diagramFrom?: number }
+interface MenuState { pos: number; kind: MenuKind; link?: LinkRange; diagramFrom?: number; imageFrom?: number }
 
 const openMenu = StateEffect.define<MenuState>();
 const closeMenu = StateEffect.define<null>();
@@ -208,6 +208,13 @@ function menuTooltip(v: MenuState): Tooltip {
           item(`align-${a}`, i18n.t(`contextMenu.align${a[0]!.toUpperCase()}${a.slice(1)}`), () => { setDiagramAlign(view, v.pos, a); close(view); });
         }
       }
+      // #255 comment 1073: a standalone image at the click → the SAME alignment entries (writes ?align=).
+      if (v.imageFrom != null) {
+        sep();
+        for (const a of ["left", "center", "right"] as FenceAlign[]) {
+          item(`align-${a}`, i18n.t(`contextMenu.align${a[0]!.toUpperCase()}${a.slice(1)}`), () => { setImageAlign(view, v.pos, a); close(view); });
+        }
+      }
 
       // Outside-click dismissal via a document listener (the menu lives in the fixed
       // tooltip layer, so editor-level handlers don't see clicks elsewhere on the page).
@@ -248,7 +255,8 @@ const menuEvents = Prec.highest(
       }
       // #255: a rendered diagram fence (mermaid/plantuml/excalidraw) at the click → offer alignment.
       const diagramFrom = diagramFenceAt(view.state, pos) ?? undefined;
-      view.dispatch({ effects: openMenu.of({ pos, kind, link, diagramFrom }) });
+      const imageFrom = imageAlignAt(view.state, pos) ?? undefined; // #255: standalone image alignment
+      view.dispatch({ effects: openMenu.of({ pos, kind, link, diagramFrom, imageFrom }) });
       e.preventDefault();
       return true;
     },
