@@ -90,10 +90,12 @@ export function useCreatePage() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { spaceId: string; title: string; parentId?: string | null; fromPageId?: string | null }) =>
+    mutationFn: (args: { spaceId: string; title?: string; parentId?: string | null; fromPageId?: string | null; templateId?: string | null }) =>
       apiFetch<Page>(`/spaces/${args.spaceId}/pages`, token, {
         method: "POST",
-        body: JSON.stringify({ title: args.title, parentId: args.parentId ?? null, fromPageId: args.fromPageId ?? null }),
+        // #250: templateId seeds the draft from a template snapshot (title defaults to the template name
+        // server-side when omitted). fromPageId (#229 "duplicate") stays supported and mutually exclusive.
+        body: JSON.stringify({ title: args.title, parentId: args.parentId ?? null, fromPageId: args.fromPageId ?? null, templateId: args.templateId ?? null }),
       }),
     onSuccess: (_p, args) => qc.invalidateQueries({ queryKey: ["pages", args.spaceId] }),
   });

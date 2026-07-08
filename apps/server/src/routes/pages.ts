@@ -18,6 +18,7 @@ import { resolveTranscludeRef } from '../transclude-resolve.js'
 import { renderPlantuml } from '../plantuml-render.js'
 import { assertPageViewable } from '../page-view-gate.js'
 import { revokeResourceShareLinks } from './share-links.js'
+import { getTemplate } from './templates.js'
 
 // #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames —
 // the exact form isAllowlistedEmbed matches. Strip a scheme, path/query/fragment, port, whitespace and
@@ -176,16 +177,27 @@ export async function createPage(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { tenantId: string; spaceId: string; userId: string; title?: string; parentId?: string | null; fromPageId?: string | null },
+  args: { tenantId: string; spaceId: string; userId: string; title?: string; parentId?: string | null; fromPageId?: string | null; templateId?: string | null },
 ): Promise<Page> {
+  // Destination gate FIRST: creating a page here needs `edit` on the space. This runs BEFORE any
+  // template resolution, so a template-seeded create can never bypass the destination's authz (a
+  // non-editor gets 403 regardless of any templateId/fromPageId they pass).
   const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'space', id: args.spaceId })
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
-  // #229: template — seed the new page's DRAFT content from an existing page the creator can VIEW
-  // (any viewable page is usable as a template; no separate registry in v1). The source's PUBLISHED
-  // markdown is the template body; the new page stays an unpublished draft (creator-only) holding it.
+  // Seed the new page's DRAFT content. Two sources, both view-gated and existence-hidden (404):
+  //   #250 templateId — a `templates` snapshot (view = manage or space/tenant audience); title defaults
+  //                      to the template name. This is the real template system.
+  //   #229 fromPageId — "duplicate a page": any page the creator can VIEW; its PUBLISHED md is the body.
+  // Either way the new page stays an unpublished, creator-only draft holding the seeded body.
   let seedMd: string | null = null
-  if (args.fromPageId) {
+  let seedTitle = args.title
+  if (args.templateId) {
+    const tpl = await getTemplate(db, fga, { userId: args.userId, id: args.templateId })
+    if (!tpl) throw Object.assign(new Error('template not found'), { statusCode: 404 }) // hide existence
+    seedMd = tpl.body
+    if (seedTitle == null || seedTitle === '') seedTitle = tpl.name
+  } else if (args.fromPageId) {
     const canViewSrc = await check(fga, `user:${args.userId}`, 'view', { type: 'page', id: args.fromPageId })
     if (!canViewSrc) throw Object.assign(new Error('template not found'), { statusCode: 404 }) // hide existence
     const [src] = await db.sql<{ published_md: string | null }[]>`SELECT published_md FROM pages WHERE id = ${args.fromPageId}`
@@ -210,7 +222,7 @@ export async function createPage(
   const row = await db.tx(async (tx) => {
     const [r] = await tx<PageRow[]>`
       INSERT INTO pages (tenant_id, space_id, parent_id, title, position, created_by)
-      VALUES (${args.tenantId}, ${args.spaceId}, ${parentId}, ${args.title ?? ''}, ${position}, ${args.userId})
+      VALUES (${args.tenantId}, ${args.spaceId}, ${parentId}, ${seedTitle ?? ''}, ${position}, ${args.userId})
       RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
     `
     // Visibility gate (Phase 4): a new page is a DRAFT — do NOT link it to its
@@ -1116,7 +1128,7 @@ export async function getBacklinks(
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function pagesPlugin(app: FastifyInstance) {
-  app.post<{ Params: { spaceId: string }; Body: { title?: string; parentId?: string | null; fromPageId?: string | null } }>(
+  app.post<{ Params: { spaceId: string }; Body: { title?: string; parentId?: string | null; fromPageId?: string | null; templateId?: string | null } }>(
     '/spaces/:spaceId/pages', async (req, reply) => {
       const page = await createPage(req.db, app.fga, app.searchDriver, {
         tenantId: req.tenant.id,
@@ -1124,7 +1136,8 @@ export async function pagesPlugin(app: FastifyInstance) {
         userId: req.user.sub,
         title: req.body.title,
         parentId: req.body.parentId ?? null,
-        fromPageId: req.body.fromPageId ?? null, // #229: seed from a template page (view-gated)
+        fromPageId: req.body.fromPageId ?? null, // #229: seed from a page ("duplicate", view-gated)
+        templateId: req.body.templateId ?? null, // #250: seed from a template snapshot (view-gated)
       })
       return reply.code(201).send(page)
     },

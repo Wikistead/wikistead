@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "../components/ui/dropdown-menu";
-import { ChevronRight, ChevronsUpDown, Copy, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Plus, Settings, Share2, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsUpDown, Copy, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Plus, Settings, Share2, Trash2 } from "lucide-react";
 import {
   useSpaces,
   useCreateSpace,
@@ -21,6 +21,7 @@ import { useActiveSpace } from "../app/ActiveSpace";
 import { RenameDialog, ConfirmDialog } from "../ui/dialogs";
 import { DeleteBacklinkWarning } from "../app/DeleteBacklinkWarning";
 import { ShareDialog } from "../ui/ShareDialog";
+import { TemplatePickerDialog } from "./TemplatePickerDialog";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import { cn } from "../lib/utils";
 
@@ -123,14 +124,23 @@ export function Sidebar() {
   // destruction from the sidebar; #1).
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const [sharing, setSharing] = useState<string | null>(null);
+  const [pickingTemplate, setPickingTemplate] = useState(false);
 
   const { ref: treeBox, size } = useSize();
 
   const newPage = (parentId: string | null) => {
     if (!current) return;
-    // A new page is created as a DRAFT and opens straight in the editor (?edit=1) —
+    // A new page is created as a DRAFT and opens straight in the editor (?edit=1)
     // it has no published content yet, so view mode would just be empty.
     createPage.mutate({ spaceId: current, parentId, title: "Untitled" }, { onSuccess: (p) => p && navigate(`/p/${p.id}?edit=1`) });
+  };
+
+  // #250: create from a template — seed a new draft from a template snapshot, then open it in edit. The
+  // server re-checks template view + destination edit; title defaults to the template name server-side.
+  const newPageFromTemplate = (templateId: string) => {
+    if (!current) return;
+    setPickingTemplate(false);
+    createPage.mutate({ spaceId: current, templateId }, { onSuccess: (p) => p && navigate(`/p/${p.id}?edit=1`) });
   };
 
   // DnD within the active space: reparent (drop onto a page) or reorder (drop at root).
@@ -176,14 +186,14 @@ export function Sidebar() {
     const hasChildren = (d.children?.length ?? 0) > 0;
     // #193 (rebuilt as ONE structure): react-arborist positions each row in a wrapper of exactly
     // rowHeight(32px) × 100%, and passes us `style` = the depth indent (paddingLeft) only + the
-    // dragHandle ref. So the ONE correct layout is:
-    //   OUTER  = h-full w-full → fills RA's 32px×full-width slot EXACTLY (box-border px-1 = a 4px edge
-    //            inset inside that width, so the highlight never touches the scrollbar).
-    //   INNER  = h-full w-full flex row = the highlight AND the click target. Because OUTER is now
-    //            h-full, INNER's h-full resolves to the full 32px (the earlier bounce failed because
-    //            OUTER had no height, so h-full/stretch collapsed to content height → the vertical gap).
-    //   ROW    = chevron + icon + name(flex-1 min-w-0 truncate → ellipsis when narrow, full when wide)
-    //            + badge/dot/actions(flex-none → never clipped; the name shrinks first).
+    // dragHandle ref. So the ONE correct layout is
+    // OUTER = h-full w-full → fills RA's 32px×full-width slot EXACTLY (box-border px-1 = a 4px edge
+    // inset inside that width, so the highlight never touches the scrollbar).
+    // INNER = h-full w-full flex row = the highlight AND the click target. Because OUTER is now
+    // h-full, INNER's h-full resolves to the full 32px (the earlier bounce failed because
+    // OUTER had no height, so h-full/stretch collapsed to content height → the vertical gap).
+    // ROW = chevron + icon + name(flex-1 min-w-0 truncate → ellipsis when narrow, full when wide)
+    // + badge/dot/actions(flex-none → never clipped; the name shrinks first).
     // Click area == highlight == the whole slot; no horizontal overflow; width-resize keeps all of it.
     const indent = typeof (style as { paddingLeft?: number }).paddingLeft === "number" ? (style as { paddingLeft: number }).paddingLeft : 0;
     return (
@@ -291,7 +301,10 @@ export function Sidebar() {
         </DropdownMenu>
         {current && (canEdit || canManage) && (
           <div className="flex flex-none gap-0.5">
+            {/* #250: split — the button creates a blank page immediately; the adjacent ▾ opens the
+                template picker (blank stays the fast default, templates are one extra click). */}
             {canEdit && <button type="button" className={headerBtn} title={t("sidebar.newPage")} aria-label={t("sidebar.newPage")} data-testid="new-page" onClick={() => newPage(null)}><FilePlus size={15} /></button>}
+            {canEdit && <button type="button" className={headerBtn} title={t("templatePicker.title")} aria-label={t("templatePicker.title")} data-testid="new-page-from-template" onClick={() => setPickingTemplate(true)}><ChevronDown size={13} /></button>}
             {canManage && <button type="button" className={headerBtn} title={t("sidebar.spaceSettings")} aria-label={t("sidebar.spaceSettings")} data-testid="space-settings-open" onClick={() => current && navigate(`/spaces/${current}/settings`)}><Settings size={15} /></button>}
           </div>
         )}
@@ -383,6 +396,7 @@ export function Sidebar() {
         onSubmit={(name) => { createSpace.mutate(name, { onSuccess: (s) => s && setActiveSpaceId(s.id) }); setCreatingSpace(false); }}
       />
       <ShareDialog pageId={sharing} onClose={() => setSharing(null)} />
+      <TemplatePickerDialog open={pickingTemplate} spaceId={current} onClose={() => setPickingTemplate(false)} onPick={newPageFromTemplate} />
       {/* #193: drag-to-resize handle on the sidebar's right edge. */}
       <div
         onPointerDown={onResizeStart}
