@@ -562,7 +562,10 @@ class StandaloneImageWidget extends WidgetType {
   constructor(readonly id: string, readonly alt: string, readonly align: FenceAlign, readonly selected: boolean) {
     super();
   }
-  private key() { return `${this.id} ${this.alt} ${this.align}`; }
+  // #255 `align` is NOT in the reuse key — an align-only change updates the DOM in place
+  // (updateDOM), never rebuilds. A rebuild re-resolves the <img> async, so its height collapses to 0
+  // while it reloads, the doc shrinks, and CM loses its scroll position (jumps to top).
+  private key() { return `${this.id} ${this.alt}`; }
   eq(o: StandaloneImageWidget) { return o.id === this.id && o.alt === this.alt && o.align === this.align && o.selected === this.selected; }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div") as SiDom;
@@ -611,7 +614,8 @@ class StandaloneImageWidget extends WidgetType {
       alignBtn.addEventListener("mousedown", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        const next: FenceAlign = this.align === "center" ? "left" : this.align === "left" ? "right" : "center";
+        const cur = (alignBtn.getAttribute("data-align") as FenceAlign) || "center"; // #255 read live align
+        const next: FenceAlign = cur === "center" ? "left" : cur === "left" ? "right" : "center";
         setImageAlign(view, view.posAtDOM(wrap), next);
       });
       btnRow.appendChild(alignBtn);
@@ -628,6 +632,10 @@ class StandaloneImageWidget extends WidgetType {
     if ((dom as SiDom).__siKey !== this.key()) return false;
     this.ro = (dom as SiDom).__siRo;
     dom.classList.toggle("cm-lp-atom-sel", this.selected);
+    // #255 apply an align-only change in place (keep the loaded <img>) instead of rebuilding.
+    for (const a of ["left", "center", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, a === this.align);
+    const alignBtn = dom.querySelector<HTMLButtonElement>(".cm-lp-macro-align");
+    if (alignBtn) { alignBtn.innerHTML = ALIGN_ICON[this.align]; alignBtn.title = `Align: ${this.align}`; alignBtn.setAttribute("data-align", this.align); }
     return true;
   }
   destroy(dom: HTMLElement) { (dom as SiDom).__siRo?.disconnect(); }
@@ -1385,7 +1393,8 @@ class MacroWidget extends WidgetType {
         alignBtn.addEventListener("mousedown", (e) => {
           e.preventDefault();
           e.stopPropagation();
-          const next: FenceAlign = this.align === "center" ? "left" : this.align === "left" ? "right" : "center";
+          const cur = (alignBtn.getAttribute("data-align") as FenceAlign) || "center"; // #255 read live align
+          const next: FenceAlign = cur === "center" ? "left" : cur === "left" ? "right" : "center";
           setDiagramAlign(view, view.posAtDOM(wrap), next);
         });
         btnRow.appendChild(alignBtn);
@@ -1459,12 +1468,20 @@ class MacroWidget extends WidgetType {
     const prev = (dom as MwDom).__mwKey;
     const nestedNow = !!(this.nestedSel || this.nestedEdit);
     const nestedBefore = dom.classList.contains("cm-lp-nested-host");
-    if (!prev || prev.body !== this.body || prev.theme !== this.theme || prev.name !== this.name || prev.foldable !== this.foldable || prev.align !== this.align || prev.wysiwyg !== this.wysiwyg || nestedNow || nestedBefore) {
-      return false; // content / theme / nested affordance / #255 align / #174 wysiwyg nested-✎ changed → rebuild via toDOM
+    if (!prev || prev.body !== this.body || prev.theme !== this.theme || prev.name !== this.name || prev.foldable !== this.foldable || prev.wysiwyg !== this.wysiwyg || nestedNow || nestedBefore) {
+      return false; // content / theme / nested affordance / #174 wysiwyg nested-✎ changed → rebuild via toDOM
     }
     this.ro = (dom as MwDom).__mwRo; // adopt the live ResizeObserver so this instance's destroy() disconnects it
     this.objectUrl = (dom as MwDom).__mwObjUrl; // adopt any host-rendered blob url so destroy() revokes it
     dom.classList.toggle("cm-lp-atom-sel", this.selected); // selection ring only — the rendered content stays
+    // #255 an align-only change is applied IN PLACE (keep the rendered SVG/img) — rebuilding would
+    // re-render mermaid / re-resolve the diagram async, collapsing its height → the doc shrinks → CM jumps.
+    if (DIAGRAM_MACROS.has(this.name)) {
+      for (const a of ["left", "center", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, a === this.align);
+      const ab = dom.querySelector<HTMLButtonElement>(".cm-lp-macro-align");
+      if (ab) { ab.innerHTML = ALIGN_ICON[this.align]; ab.title = `Align: ${this.align}`; ab.setAttribute("data-align", this.align); }
+      if (prev) prev.align = this.align;
+    }
     return true;
   }
   destroy() {
