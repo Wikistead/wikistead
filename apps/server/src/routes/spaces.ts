@@ -290,6 +290,17 @@ const SPACE_CAPS: SpaceCapability[] = ['view', 'edit', 'manage']
 const CAP_TO_RELATION: Record<SpaceCapability, string> = { view: 'viewer', edit: 'editor', manage: 'manager' }
 const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', editor: 'edit', manager: 'manage' }
 
+// #258 / ADR-110: a member VIEW grant writes BOTH `viewer` (unchanged — pages inherit view via
+// view_base_from_space = viewer from space, and existing readers of `viewer` are untouched) AND
+// `viewer_member` (the member-only relation template#view inherits, so a public/shared space never exposes
+// its space-scoped templates to guests/anon). Additive: no existing `viewer` tuple is migrated. Only for the
+// `viewer` relation (member/group grants — validateSpaceGrant already forbids wildcard/share_link here);
+// editor/manager grants are single-tuple as before. Revoke deletes the same pair (kept in sync).
+function spaceGrantTuples(grantee: string, relation: string, spaceId: string): { user: string; relation: string; object: string }[] {
+  const base = { user: grantee, relation, object: `space:${spaceId}` }
+  return relation === 'viewer' ? [base, { user: grantee, relation: 'viewer_member', object: `space:${spaceId}` }] : [base]
+}
+
 function validateSpaceGrant(grantee: string, capability: string): asserts capability is SpaceCapability {
   if (!SPACE_CAPS.includes(capability as SpaceCapability)) {
     throw Object.assign(new Error('relation must be view, edit, or manage'), { statusCode: 400 })
@@ -357,6 +368,38 @@ async function reindexPublishedPages(db: TenantDb, driver: SearchDriver, tenantI
   for (const e of entries) processOutboxAsync(driver, e.id, { tenantId, pageId: e.pageId, operation: 'upsert' })
 }
 
+// #258 one-time migration: existing `space:S#viewer@<member>` tuples predate viewer_member, so template#view
+// (now `viewer_member from space`) wouldn't see those members until re-granted. Copy each member/group viewer
+// grant to viewer_member. Idempotent (skips ones already present) and safe to re-run. Wildcards/share_link are
+// NOT copied — they must stay viewer-only so a public/shared space never leaks its templates to guests/anon.
+// prod runner enumerates `SELECT id FROM spaces` (admin pool) and passes the ids; returns tuples written.
+export async function backfillSpaceViewerMembers(fga: OpenFgaClient, spaceIds: string[]): Promise<number> {
+  const isMember = (u?: string) => !!u && (/^user:[^*\s]+$/.test(u) || /^group:[^\s]+#member$/.test(u))
+  let written = 0
+  for (const spaceId of spaceIds) {
+    // A migration must be exhaustive: page through ALL of the space's tuples (fga.read caps a single
+    // page at ~50–100), else members past the first page never get viewer_member — and since we always
+    // re-read from page 1, a re-run would keep missing them. Accumulate the full set before writing.
+    const viewerMembers = new Set<string>()
+    const haveViewerMember = new Set<string>()
+    let token: string | undefined
+    do {
+      const page = await fga.read({ object: `space:${spaceId}` }, token ? { continuationToken: token } : undefined)
+      for (const t of page.tuples ?? []) {
+        if (t.key?.relation === 'viewer' && isMember(t.key.user)) viewerMembers.add(t.key.user)
+        else if (t.key?.relation === 'viewer_member' && t.key.user) haveViewerMember.add(t.key.user)
+      }
+      token = page.continuation_token || undefined
+    } while (token)
+    const toWrite = [...viewerMembers].filter((u) => !haveViewerMember.has(u))
+    if (toWrite.length) {
+      await writeTuples(fga, toWrite.map((user) => ({ user, relation: 'viewer_member', object: `space:${spaceId}` })))
+      written += toWrite.length
+    }
+  }
+  return written
+}
+
 export async function grantSpaceAccess(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -371,7 +414,7 @@ export async function grantSpaceAccess(
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_granted', target: `space:${args.spaceId}` })
     }
-    await writeTuples(fga, [{ user: args.grantee, relation, object: `space:${args.spaceId}` }])
+    await writeTuples(fga, spaceGrantTuples(args.grantee, relation, args.spaceId))
   })
   await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
   emit({ type: 'space.access_granted', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
@@ -391,7 +434,7 @@ export async function revokeSpaceAccess(
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_revoked', target: `space:${args.spaceId}` })
     }
-    await deleteTuples(fga, [{ user: args.grantee, relation, object: `space:${args.spaceId}` }])
+    await deleteTuples(fga, spaceGrantTuples(args.grantee, relation, args.spaceId))
   })
   await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
   emit({ type: 'space.access_revoked', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
