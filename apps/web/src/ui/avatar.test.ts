@@ -27,6 +27,13 @@ describe("initials", () => {
   it("CJK / emoji → a single leading grapheme (no upper-casing)", () => {
     expect(initials("山田太郎")).toBe("山");
   });
+  it("#288: any non-ASCII name yields ONE stable-width glyph (no mixed half+full-width)", () => {
+    expect(initials("246 被リンク警告の確認")).toBe("被"); // digit-led → first meaningful CJK glyph, not "2"
+    expect(initials("被リンク")).toBe("被");
+    expect(initials("A被リンク")).toBe("A"); // a leading ASCII letter is meaningful on its own
+    expect(initials("🎉 party")).toBe("🎉"); // emoji-led → the emoji
+    expect(Array.from(initials("42 テスト")).length).toBe(1); // always a single grapheme
+  });
   it("empty / whitespace → '?'", () => {
     expect(initials("")).toBe("?");
     expect(initials("   ")).toBe("?");
