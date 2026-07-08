@@ -325,7 +325,12 @@
     "spaceTitle": "Shared space",
     "spaceEmpty": "This space has no published pages yet.",
     "backToSpace": "Back to pages",
-    "spacePickPrompt": "Select a page to read."
+    "spacePickPrompt": "Select a page to read.",
+    "passwordTitle": "Password required",
+    "passwordPrompt": "This link is password-protected.",
+    "passwordLabel": "Password",
+    "passwordWrong": "Incorrect password. Try again.",
+    "passwordSubmit": "Unlock"
   },
   "page": {
     "edit": "Edit",
@@ -411,7 +416,8 @@
     "copyUrl": "Copy URL",
     "revoke": "Revoke",
     "copied": "Copied link to clipboard.",
-    "done": "Done"
+    "done": "Done",
+    "password": "Password (optional)"
   },
   "permissions": {
     "title": "Permissions",

@@ -246,10 +246,10 @@ export function useCreateShareLink() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { resource: ShareResource; capability: "view" | "comment" | "edit"; expiresInSeconds: number | null }) =>
+    mutationFn: (args: { resource: ShareResource; capability: "view" | "comment" | "edit"; expiresInSeconds: number | null; password?: string | null }) =>
       apiFetch<ShareLink>("/share-links", token, {
         method: "POST",
-        body: JSON.stringify({ resource: args.resource, capability: args.capability, expiresInSeconds: args.expiresInSeconds }),
+        body: JSON.stringify({ resource: args.resource, capability: args.capability, expiresInSeconds: args.expiresInSeconds, password: args.password ?? null }),
       }),
     onSuccess: (_l, args) => qc.invalidateQueries({ queryKey: linksKey(args.resource) }),
   });

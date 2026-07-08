@@ -44,11 +44,13 @@ describe('share link lifecycle', () => {
     expect(link.capability).toBe('view')
     expect(await checkRelation(fgaClient, `share_link:${link.id}`, 'view', { type: 'page', id: pageId })).toBe(true)
 
-    const minted = await mintTokenForShareLink(fgaClient, tenant.id, link.id)
-    expect(minted).not.toBeNull()
-    expect(minted!.readOnly).toBe(true)
-    expect(minted!.docName).toBe(`t:${tenant.id}:p:${pageId}`)
-    const claims = await verifyGuestToken(guestCfg, minted!.token)
+    const mintedR = await mintTokenForShareLink(fgaClient, tenant.id, link.id)
+    expect(mintedR).not.toBeNull()
+    expect(mintedR).not.toBe('password_required')
+    const minted = mintedR as Exclude<typeof mintedR, null | 'password_required'>
+    expect(minted.readOnly).toBe(true)
+    expect(minted.docName).toBe(`t:${tenant.id}:p:${pageId}`)
+    const claims = await verifyGuestToken(guestCfg, minted.token)
     expect(claims.shareLinkId).toBe(link.id)
     expect(claims.capability).toBe('view')
     expect(claims.resource).toEqual({ type: 'page', id: pageId })
@@ -60,9 +62,10 @@ describe('share link lifecycle', () => {
     const link = await createShareLink(db, fgaClient, {
       tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'edit', expiresInSeconds: null,
     })
-    const minted = await mintTokenForShareLink(fgaClient, tenant.id, link.id)
-    expect(minted!.readOnly).toBe(false)
-    expect(minted!.capability).toBe('edit')
+    const mintedR = await mintTokenForShareLink(fgaClient, tenant.id, link.id)
+    const minted = mintedR as Exclude<typeof mintedR, null | 'password_required'>
+    expect(minted.readOnly).toBe(false)
+    expect(minted.capability).toBe('edit')
     await revokeShareLink(db, fgaClient, { id: link.id, userId: 'dev-user', tenantId: tenant.id })
   })
 

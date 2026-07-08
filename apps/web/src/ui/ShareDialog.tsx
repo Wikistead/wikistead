@@ -31,6 +31,7 @@ export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | nu
 
   const [capability, setCapability] = useState<"view" | "edit">("view");
   const [expiry, setExpiry] = useState<number | null>(null);
+  const [password, setPassword] = useState(""); // #233: optional password (issuance only)
   const [copied, setCopied] = useState<string | null>(null);
 
   const linkUrl = (id: string) => `${location.origin}/share/${id}`;
@@ -70,13 +71,22 @@ export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | nu
             size="sm"
             options={EXPIRY_OPTIONS.map((o) => ({ value: String(o.seconds), label: t(o.key) }))}
           />
+          <Input
+            type="password"
+            value={password}
+            aria-label={t("shareDialog.password")}
+            placeholder={t("shareDialog.password")}
+            data-testid="share-password"
+            className="h-8 w-40 text-sm"
+            onChange={(e) => setPassword(e.target.value)}
+          />
           <Button
             variant="primary"
             size="sm"
             data-testid="create-link"
             disabled={!resource || create.isPending}
-            onClick={() => resource && create.mutate({ resource, capability: isSpace ? "view" : capability, expiresInSeconds: expiry }, {
-              onSuccess: () => notify.success(t("toast.linkCreated")),
+            onClick={() => resource && create.mutate({ resource, capability: isSpace ? "view" : capability, expiresInSeconds: expiry, password: password.trim() || null }, {
+              onSuccess: () => { notify.success(t("toast.linkCreated")); setPassword(""); },
               onError: () => notify.error(t("toast.actionFailed")),
             })}
           >
