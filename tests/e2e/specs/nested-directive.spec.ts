@@ -128,8 +128,16 @@ test("#215: a nested callout selects, edits via its own editUI island, and delet
   // <select> — the assertion was stale. Check the chip group the callout editUI actually renders.
   await expect(page.locator("[data-pane=preview] [data-testid=nested-edit-island] [data-testid=callout-edit-type]")).toHaveCount(1);
   expect(await layout(), "layout stays side-by-side while the nested editUI island is open").toEqual({ n: 2, sideBySide: true });
+  // #265: changing the TYPE via a chip in the nested island must round-trip to the source — the note becomes
+  // a warning (a nested callout's type is editable at depth, not just top-level). Was reported as "can't
+  // change type" (the assertion above only proved the chips render; this proves they FUNCTION at depth).
+  await page.locator("[data-pane=preview] [data-testid=nested-edit-island] [data-testid=callout-edit-type-warning]").click({ force: true });
+  await sleep(300);
   await page.keyboard.press("Escape");
-  await sleep(250);
+  await sleep(300);
+  // the nested callout re-rendered as a WARNING (source :::note → :::warning), sibling column intact.
+  await expect(page.locator("[data-pane=preview] .cm-lp-column .cm-lp-callout-warning")).toHaveCount(1);
+  await expect(page.locator("[data-pane=preview] .cm-lp-column .cm-lp-callout-note")).toHaveCount(0);
 
   // (4) Deletion: Backspace on the selected nested note removes ONLY it — container + sibling intact.
   await page.getByText("AAA note").click();
