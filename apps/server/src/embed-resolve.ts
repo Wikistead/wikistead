@@ -29,7 +29,8 @@ export async function resolveEmbed(
   deps: { fga: OpenFgaClient; fetcher?: Fetcher },
   args: { principal: string; pageId: string; url: string; allowlist: readonly string[]; context?: CheckContext },
 ): Promise<{ contentType: string; body: string }> {
-  // (1) Page-view gate FIRST — throws 403 if the principal cannot view the page (no fetch happens).
+  // (1) Page-view gate FIRST — throws 404 not-found (#280 existence-hiding) if the principal cannot
+  // view the page (no fetch happens). The allowlist/SSRF rejections below stay 403 (page IS viewable).
   await assertPageViewable(deps.fga, args.principal, args.pageId, args.context)
 
   // (2) Provider allowlist (exact host). Default empty ⇒ deny all external embeds (opt-in).

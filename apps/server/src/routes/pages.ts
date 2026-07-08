@@ -1464,9 +1464,9 @@ export async function pagesPlugin(app: FastifyInstance) {
     const { subject, context } = principalForPage(req, req.params.pageId)
     const r = await resolveTranscludeRef({ db: req.db, fga: app.fga }, { principal: subject, refPageId: req.params.refId, context })
     if (r.ok) return { content: r.content }
-    // denied → 403 (existence-hiding, uniform); cycle/depth → 422 (the host page IS viewable — this
-    // is the user's own structure, not an existence leak).
-    return reply.code(r.reason === 'denied' ? 403 : 422).send({ error: 'transclude not available', reason: r.reason })
+    // denied → 404 (#280/#262 existence-hiding, uniform: unviewable ≡ unpublished ≡ absent ref);
+    // cycle/depth → 422 (the host page IS viewable — this is the user's own structure, not a leak).
+    return reply.code(r.reason === 'denied' ? 404 : 422).send({ error: 'transclude not available', reason: r.reason })
   })
 
   // PlantUML render (#140 / ADR-074): host-mediated server render of a plantuml fence's source via
@@ -1474,7 +1474,7 @@ export async function pagesPlugin(app: FastifyInstance) {
   // success; 204 = degrade-to-source (unconfigured / endpoint failure) so the macro shows the fence.
   app.post<{ Params: { pageId: string }; Body: { source?: string } }>('/pages/:pageId/plantuml/render', { config: { guest: 'view' } }, async (req, reply) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
-    await assertPageViewable(app.fga, subject, req.params.pageId, context) // 403 if not a viewer
+    await assertPageViewable(app.fga, subject, req.params.pageId, context) // 404 not-found if not a viewer (#280)
     const source = req.body?.source
     if (typeof source !== 'string' || !source.trim()) return reply.code(400).send({ error: 'source is required' })
     const png = await renderPlantuml(source)

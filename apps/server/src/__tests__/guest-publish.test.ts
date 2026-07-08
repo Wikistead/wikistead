@@ -117,7 +117,7 @@ describe('guest HTTP path: published read + publish authorization', () => {
   })
 
   it('a guest token CANNOT resolve an image on a different page (FGA falls naturally — tuple is the bind)', async () => {
-    expect((await download(viewTok, attB)).statusCode).toBe(403)
+    expect((await download(viewTok, attB)).statusCode).toBe(404) // #280: view-denied download is existence-hidden (404), like a missing attachment id
   })
 
   it('a cross-tenant guest token is rejected for image download (401 at the hook)', async () => {
@@ -135,7 +135,7 @@ describe('guest HTTP path: published read + publish authorization', () => {
     expect((await app.inject({ method: 'DELETE', url: `/share-links/${viewLinkId}`, headers: devNoBody })).statusCode).toBe(204)
     expect((await guestPublish(editTok, pageA)).statusCode).toBe(403) // publish (edit action) → 403
     expect((await guestGet(viewTok, pageA)).statusCode).toBe(404) // #262: revoked → view-denied read is existence-hidden (404)
-    expect((await download(viewTok, attA)).statusCode).toBe(403) // a NEW download request after revoke is denied
+    expect((await download(viewTok, attA)).statusCode).toBe(404) // #280: revoked → view-denied download is existence-hidden (404) too
   })
 
   it('a cross-tenant guest token is rejected (401)', async () => {
