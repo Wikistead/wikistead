@@ -270,15 +270,23 @@ test("insert-below and delete a row via the contextual toolbar", async ({ browse
 
 // #3: the add affordances are now ATTACHED to the table (a "+" in the header band / below
 // the last row), not a disconnected labeled bottom bar.
-test("the add-column/add-row + handles are attached to the table grid", async ({ browser }) => {
+test("column/row insert+delete ops live on the contextual toolbar (not in-grid handles or a disconnected bar)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "tableaddattached");
   await enterEdit(page);
   await pipeTableInEdit(page);
-  // both "+" handles live INSIDE the grid table (not a sibling actions bar)
-  expect(await page.locator("[data-testid=table-edit] table.cm-lp-table-grid [data-testid=table-add-col]").count()).toBe(1);
-  expect(await page.locator("[data-testid=table-edit] table.cm-lp-table-grid [data-testid=table-add-row]").count()).toBe(1);
-  // the old disconnected actions bar is gone
+  // #197: the in-grid `+` handles were REMOVED — insert/delete for a column OR row is now on the selected
+  // cell's op toolbar. Select a cell → the col/row op groups appear.
+  await page.getByTestId("table-edit").locator("td").first().click();
+  await sleep(150);
+  await expect(page.getByTestId("table-col-insert-before")).toBeVisible();
+  await expect(page.getByTestId("table-col-insert-after")).toBeVisible();
+  await expect(page.getByTestId("table-col-delete")).toBeVisible();
+  await expect(page.getByTestId("table-row-insert-above")).toBeVisible();
+  await expect(page.getByTestId("table-row-insert-below")).toBeVisible();
+  await expect(page.getByTestId("table-row-delete")).toBeVisible();
+  // the old in-grid handles + the disconnected actions bar are both gone (#197).
+  expect(await page.locator("[data-testid=table-add-col], [data-testid=table-add-row]").count()).toBe(0);
   expect(await page.locator(".cm-lp-table-actions").count()).toBe(0);
 });
 
