@@ -134,7 +134,8 @@ import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, ApiError, assetUrl, type GuestToken } from "../data/apiClient";
 import { renderMarkdownToDom } from "../editor/macros/md-render"; // #227: public render via the shared sanitized renderer
-import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useCreatePage, useEntitlements } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useCreatePage, useEntitlements, type Page } from "../data/queries";
+import { GuestSidebar } from "./GuestSidebar";
 import { ConfirmDialog } from "../ui/dialogs";
 import { DeleteBacklinkWarning } from "./DeleteBacklinkWarning";
 import { SaveTemplateDialog } from "./SaveTemplateDialog";
@@ -583,55 +584,46 @@ function ShareRoute() {
   return state.minted.docName.includes(":s:") ? <GuestSpace minted={state.minted} /> : <GuestPage minted={state.minted} />;
 }
 
-// Space-link guest landing (#104): list the published pages the space link exposes, then open
-// one as a guest page (reusing the SAME space token — the server authorizes in-space pages).
+// Space-link guest reader-chrome (#245 / ADR-112): show the linked space's page tree in the REAL sidebar
+// slot — the guest browses exactly like a member — then open a page in the content area. The tree comes
+// from GET /spaces/:id/pages (guest-capable, per-page FGA-gated on the share_link principal), synthesised
+// from the token's single space; the member-only GET /spaces is never called (Decision 0). No member
+// chrome (switcher/settings/create/rename/delete/unpublished dots) — GuestSidebar renders a read-only tree.
+// (Ships only after #244, which stops private pages from appearing in a space-guest's tree.)
 function GuestSpace({ minted }: { minted: GuestToken }) {
   const { t } = useTranslation();
-  const { token, docName } = minted;
+  const { token, docName, capability } = minted;
   const m = /^t:(.+?):s:(.+)$/.exec(docName);
   const tenant = m?.[1] ?? "";
   const spaceId = m?.[2] ?? "";
-  const [pages, setPages] = useState<{ id: string; title: string }[] | null>(null);
+  const [pages, setPages] = useState<Page[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch<{ id: string; title: string }[]>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
+    apiFetch<Page[]>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
       .then((r) => { if (!cancelled) setPages(r ?? []); })
       .catch(() => { if (!cancelled) setPages([]); });
     return () => { cancelled = true; };
   }, [spaceId, token]);
 
-  if (openId) {
-    // View-only page access via the space token (server re-checks in-space authority).
-    const pageMinted: GuestToken = { token, docName: `t:${tenant}:p:${openId}`, capability: "view", readOnly: true };
-    return <GuestPage minted={pageMinted} onBack={() => setOpenId(null)} />;
-  }
+  // The page opens via the SAME space token; the server re-checks in-space authority. Edit-capable space
+  // links carry their capability into the page (Decision 2/C — the tree is read-only chrome, but a page
+  // opened from an edit link is editable); view links open read-only.
+  const pageMinted: GuestToken | null = openId
+    ? { token, docName: `t:${tenant}:p:${openId}`, capability, readOnly: capability !== "edit" }
+    : null;
+
   return (
-    <AppShell>
-      <div style={{ padding: 16, maxWidth: 640 }}>
-        <h2 style={{ marginTop: 0 }}>{t("share.spaceTitle")}</h2>
-        {pages == null ? (
-          <div>{t("share.opening")}</div>
-        ) : pages.length === 0 ? (
-          <div style={{ color: "var(--fg-dim)" }}>{t("share.spaceEmpty")}</div>
-        ) : (
-          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 4 }}>
-            {pages.map((p) => (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  data-testid="guest-space-page"
-                  onClick={() => setOpenId(p.id)}
-                  style={{ width: "100%", textAlign: "left", padding: "8px 10px", background: "transparent", border: "1px solid var(--border)", borderRadius: 6, cursor: "pointer" }}
-                >
-                  {p.title || t("common.untitled")}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+    <AppShell sidebar={<GuestSidebar pages={pages ?? []} openId={openId} onOpen={setOpenId} />}>
+      {pageMinted ? (
+        // key on the page id so switching pages in the tree remounts the editor cleanly.
+        <GuestPageContent key={openId} minted={pageMinted} />
+      ) : (
+        <div className="flex h-full items-center justify-center p-8 text-center text-fg-dim" data-testid="guest-space-welcome">
+          {pages == null ? t("share.opening") : t("share.spacePickPrompt")}
+        </div>
+      )}
     </AppShell>
   );
 }
@@ -641,7 +633,11 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
 // collab — the live draft never reaches a view guest's browser); EDIT links join
 // the collab draft to co-edit and can Publish. The published content is fetched
 // over HTTP with the guest token (the server re-checks the share_link's authority).
-function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void }) {
+// The guest page CONTENT (no AppShell) — reused both by the page-link route (GuestPage, wrapped in a
+// chrome-less AppShell) and by the space-link reader-chrome (GuestSpace, rendered inside an AppShell whose
+// sidebar is the guest page tree). Keeping the AppShell out of here lets the space layout own a single
+// shell with the sidebar slot (#245 / ADR-112).
+function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () => void }) {
   const { t } = useTranslation();
   const { token, docName, capability } = minted;
   const pageId = docName.replace(/^t:.+?:p:/, "");
@@ -717,7 +713,6 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
     onToggleToc: () => setTocOn(!tocOn),
   };
   return (
-    <AppShell>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         {onBack && (
           <button type="button" onClick={onBack} data-testid="guest-space-back" style={{ alignSelf: "flex-start", margin: "8px 12px 0", padding: "4px 8px", background: "transparent", border: "1px solid var(--border)", borderRadius: 6, cursor: "pointer" }}>
@@ -743,8 +738,13 @@ function GuestPage({ minted, onBack }: { minted: GuestToken; onBack?: () => void
           {commentsOpen && <CommentsPanel pageId={pageId} canComment={canComment} anchorGetterRef={anchorGetterRef} onClose={() => setCommentsOpen(false)} token={token} />}
         </div>
       </div>
-    </AppShell>
   );
+}
+
+// Page-link guest route: a single page, NO space tree (a page-scoped link grants no authority to traverse
+// the space — #245 / ADR-112 Decision 3). Chrome-less AppShell wrapping the page content.
+function GuestPage({ minted }: { minted: GuestToken }) {
+  return <AppShell><GuestPageContent minted={minted} /></AppShell>;
 }
 
 // Cloud signup landing (platform origin). Public — no session yet. Starts the
