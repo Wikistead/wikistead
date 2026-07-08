@@ -94,6 +94,10 @@ const headingLine = (level: number) =>
   Decoration.line({ attributes: { class: `cm-lp-h cm-lp-h${level}` } });
 const quoteLine = Decoration.line({ attributes: { class: "cm-lp-quote" } });
 const hrLine = Decoration.line({ attributes: { class: "cm-lp-hr" } });
+// #255 comment 1036: a STANDALONE image (the whole line is just the image) centres by default, like a
+// rendered diagram macro. An INLINE image (text on the same line) stays in the flow — so this is a LINE
+// decoration only added when the image is the sole content of its line.
+const imgCenterLine = Decoration.line({ attributes: { class: "cm-lp-img-center" } });
 
 // #198 / ADR-094: a header band shown ABOVE a code fence that carries attributes — a filename/title
 // plus a muted language label. Display-only (contenteditable=false, ignoreEvent), block widget on the
@@ -1202,6 +1206,13 @@ class MacroWidget extends WidgetType {
       // #215 comment 813: while a NESTED macro is selected, suppress the CONTAINER's own edit button so
       // the only pencil on screen is the nested one (drawn adjacent to the inner macro below) — otherwise
       // two pencils (container top-left + inner) are ambiguous about which macro they edit.
+      // #255 comment 1040: the top-left action buttons (✎ edit, ⬍ align) live in ONE flex row instead of
+      // fixed `left` offsets. The #174 "Ctrl+↵" hint widens the ✎ past the old 1.7em magic number, so the
+      // align toggle overlapped it. A flex row auto-spaces them regardless of each button's width and needs
+      // no re-tuning as buttons come and go. Retarget (embeds) is a separate top-right control, unaffected.
+      const btnRow = document.createElement("div");
+      btnRow.className = "cm-lp-macro-btnrow";
+      wrap.appendChild(btnRow);
       if (hasEditUI(this.macro) && !nestedActive) {
         const edit = document.createElement("button");
         edit.type = "button";
@@ -1230,7 +1241,7 @@ class MacroWidget extends WidgetType {
           e.stopPropagation();
           enterMacroAt(view, view.posAtDOM(wrap));
         });
-        wrap.appendChild(edit);
+        btnRow.appendChild(edit);
       }
       // #255: a rendered DIAGRAM macro gets an ALIGN toggle just right of the ✎ — one click cycles
       // center → left → right, rewriting the fence `align=` attribute (center drops the attr). Same
@@ -1250,7 +1261,7 @@ class MacroWidget extends WidgetType {
           const next: FenceAlign = this.align === "center" ? "left" : this.align === "left" ? "right" : "center";
           setDiagramAlign(view, view.posAtDOM(wrap), next);
         });
-        wrap.appendChild(alignBtn);
+        btnRow.appendChild(alignBtn);
       }
       // #213: columns/tabs get structural add/remove — a `+` appends a child :::column/:::tab and a `−`
       // removes the last one (real Y.Text edits via addLayoutItem/removeLastLayoutItem). Shown on hover/
@@ -2054,6 +2065,13 @@ const RENDERERS: BlockRenderer[] = [
       const m = ATTACHMENT_REF.exec(ctx.state.doc.sliceString(node.from, node.to));
       if (!m) return;
       if (lineRevealed(ctx.state, node.from)) return;
+      // #255 comment 1036: centre a STANDALONE image (its line is nothing but the image); leave an INLINE
+      // image (text on the line) in the flow. The line decoration must come BEFORE the replace in the same
+      // enter — CM sorts them, and the line deco applies only while rendered (revealed lines returned above).
+      const line = ctx.state.doc.lineAt(node.from);
+      if (line.text.trim() === ctx.state.doc.sliceString(node.from, node.to).trim()) {
+        ctx.add(imgCenterLine, line.from);
+      }
       ctx.addAtomic(Decoration.replace({ widget: new ImageWidget(m[2]!, m[1]!) }), node.from, node.to);
     },
   },
@@ -2567,6 +2585,9 @@ export const livePreviewTheme = EditorView.baseTheme({
   // header is always readable in any theme — no accent tint that could clash with the header text.
   ".cm-lp-table th": { background: "var(--panel-2, #f0f1f3)", color: "var(--fg)", fontWeight: "700" },
   ".cm-lp-image": { maxWidth: "100%", height: "auto", borderRadius: "4px", verticalAlign: "bottom" },
+  // #255 comment 1036: a standalone-image line centres its (inline) <img>. Display-only — the line deco is
+  // dropped when the line reveals raw for editing, so it never shifts offsets or affects motion.
+  ".cm-lp-img-center": { textAlign: "center" },
   // Macro block (e.g. ```mermaid). The wrap is relative so the fold button can sit in
   // a corner; the rendered DOM is whatever the macro's liveRender returns.
   // padding NOT margin: CM measures a block widget's height via getBoundingClientRect /
@@ -2652,12 +2673,12 @@ export const livePreviewTheme = EditorView.baseTheme({
     pointerEvents: "auto",
     transition: "opacity 120ms",
   },
-  // Left-aligned row (top-left of the block). edit and retarget never co-occur (editUI macros vs embeds),
-  // so both take the first slot; fold sits in the second slot next to an edit button (Excalidraw).
-  ".cm-lp-macro-edit": { left: "0" },
-  ".cm-lp-macro-retarget": { left: "0" },
-  // #255: the diagram align toggle sits just RIGHT of the ✎ (which is at left:0), same top row.
-  ".cm-lp-macro-align": { left: "1.7em" },
+  // #255 comment 1040: the top-left action buttons flow in ONE flex row (no fixed `left` magic numbers), so
+  // the ✎ + its "Ctrl+↵" hint (#174) and the align toggle never overlap regardless of width. The row is the
+  // positioned element; its buttons flow statically inside it.
+  ".cm-lp-macro-btnrow": { position: "absolute", top: "-1.55em", left: "0", display: "inline-flex", alignItems: "center", gap: "4px", zIndex: "3" },
+  ".cm-lp-macro-btnrow > .cm-lp-macro-edit, .cm-lp-macro-btnrow > .cm-lp-macro-align": { position: "static", top: "auto", left: "auto" },
+  ".cm-lp-macro-retarget": { left: "0" }, // embeds: a separate top-left control (no edit/align co-occur)
   // #216 comment 836: the pipe-table wrap positions the hover-revealed RichUI-entry button at the table's
   // top-left. fit-content keeps the wrap the table's width so the button aligns to the table's left edge
   // (not the full editor width). The button reuses .cm-lp-macro-edit chrome; reveal it on wrap hover.
