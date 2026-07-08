@@ -114,6 +114,15 @@ export async function publicPlugin(app: FastifyInstance) {
     if (!tenant) return reply.code(404).send({ error: 'not found' })
     const spacePublic = await checkRelation(fgaClient, ANON, 'viewer', { type: 'space', id: req.params.spaceId })
     if (!spacePublic) return reply.code(404).send({ error: 'not found' })
+    // The FGA viewer check is GLOBAL across the shared store; also require the space to belong to THIS
+    // tenant (RLS) so a cross-tenant public-space UUID is a uniform 404 too — not a 200 empty tree that
+    // confirms "this UUID is a public space somewhere" (existence-hiding, review note).
+    const inTenant = await pool.begin(async (tx) => {
+      await tx`SELECT set_config('app.tenant_id', ${tenant.id}, true)`
+      const [r] = await tx<{ id: string }[]>`SELECT id FROM spaces WHERE id = ${req.params.spaceId}`
+      return !!r
+    })
+    if (!inTenant) return reply.code(404).send({ error: 'not found' })
     const roots = await loadPublicSpaceRoots(tenant.id, req.params.spaceId)
     const tree: PublicChild[] = []
     for (const r of roots) {
