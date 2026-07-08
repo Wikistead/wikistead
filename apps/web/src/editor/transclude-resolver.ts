@@ -19,7 +19,7 @@ export function makeTranscludeResolver(token: string, hostPageId: string, fetche
         `${API_URL}/pages/${encodeURIComponent(hostPageId)}/transclude/${encodeURIComponent(ref)}`,
         { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} },
       );
-      if (res.status !== 200) return null; // 403 denied (existence-hiding) / 422 cycle|depth → placeholder
+      if (res.status !== 200) return null; // 404 denied (#280 existence-hiding) / 422 cycle|depth → placeholder
       const body = (await res.json()) as { content?: string };
       return typeof body.content === "string" ? body.content : null;
     } catch {

@@ -8,8 +8,12 @@ import type { OpenFgaClient } from '@openfga/sdk'
 // gate the caller MUST pass first, so a macro/embed can never self-authorize (the narrow host-API,
 // ADR-024). `context` carries a guest's time so an expired/revoked share_link denies.
 //
-// Throws 403 on denial (the attachment convention). Embeds that must hide existence (a transclude of
-// a page the viewer can't see) wrap this and render an identical denied PLACEHOLDER instead (#108).
+// Throws 404 'not found' on denial (#280 / #262 existence-hiding uniformity): a view-denied embedded
+// resource (attachment download, embed, plantuml render, transclude) is INDISTINGUISHABLE from a
+// non-existent one — same status AND body ('not found') — so a `view` gate never becomes an existence
+// oracle. The message matches the genuine not-found path (e.g. a missing attachment id). This is the
+// READ/DISPLAY convention; operation APIs (edit/manage) keep their own 403 gates. Embeds that render a
+// placeholder use canViewPage (below) instead of catching this throw (#108).
 export async function assertPageViewable(
   fga: OpenFgaClient,
   principal: string,
@@ -17,7 +21,7 @@ export async function assertPageViewable(
   context?: CheckContext,
 ): Promise<void> {
   const canView = await check(fga, principal, 'view', { type: 'page', id: pageId }, context)
-  if (!canView) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  if (!canView) throw Object.assign(new Error('not found'), { statusCode: 404 })
 }
 
 // Boolean form for callers that render a placeholder rather than throwing (existence-hiding embeds).

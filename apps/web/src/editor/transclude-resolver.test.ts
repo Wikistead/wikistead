@@ -1,7 +1,8 @@
 // Host-mediated transclude resolver (#108 / ADR-071). The macro never fetches; this is the host
 // side. Verified with an injected fetcher: 200 → the referenced content; every existence-hiding /
-// failure path (403 denied, 422 cycle|depth, empty ref, missing content, network error) → null so
-// the widget shows the same placeholder (a viewer can't distinguish "denied" from "absent").
+// failure path (404 denied — #280 existence-hiding, 422 cycle|depth, empty ref, missing content,
+// network error) → null so the widget shows the same placeholder (a viewer can't distinguish
+// "denied" from "absent").
 import { describe, it, expect } from "vitest";
 import { makeTranscludeResolver } from "./transclude-resolver";
 
@@ -23,8 +24,8 @@ describe("makeTranscludeResolver (#108 / ADR-071)", () => {
     expect(calls[0]).toMatch(/\/pages\/host-1\/transclude\/ref-2$/);
   });
 
-  it("returns null for 403 (denied) and 422 (cycle/depth) — same placeholder, no existence oracle", async () => {
-    expect(await makeTranscludeResolver("t", "h", stub(new Response("{}", { status: 403 })).fetcher)("r")).toBeNull();
+  it("returns null for 404 (denied, #280) and 422 (cycle/depth) — same placeholder, no existence oracle", async () => {
+    expect(await makeTranscludeResolver("t", "h", stub(new Response("{}", { status: 404 })).fetcher)("r")).toBeNull();
     expect(await makeTranscludeResolver("t", "h", stub(new Response("{}", { status: 422 })).fetcher)("r")).toBeNull();
   });
 

@@ -23,7 +23,9 @@ const base = { principal: 'user:u', pageId: 'ok', url: 'https://embed.example.co
 describe('resolveEmbed (#108 / ADR-071 external embed gates)', () => {
   it('a non-viewer of the page is denied and NO fetch happens', async () => {
     const { fetcher, calls } = stubFetcher('hi', { 'content-type': 'text/html' })
-    await expect(resolveEmbed({ fga: fga(false), fetcher }, base)).rejects.toMatchObject({ statusCode: 403 })
+    // #280: the page-view gate throws 404 not-found (existence-hiding), not 403 — a non-viewer can't
+    // tell the page exists. (An allowlist/SSRF rejection below keeps 403: the page IS viewable there.)
+    await expect(resolveEmbed({ fga: fga(false), fetcher }, base)).rejects.toMatchObject({ statusCode: 404 })
     expect(calls).toHaveLength(0) // page-view gate is first — no egress for a non-viewer
   })
 
