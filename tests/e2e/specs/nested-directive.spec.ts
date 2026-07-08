@@ -119,12 +119,14 @@ test("#215: a nested callout selects, edits via its own editUI island, and delet
   await expect(page.locator("[data-pane=preview] [data-testid=nested-macro-edit]")).toHaveCount(1);
   expect(await layout(), "layout stays side-by-side while a nested macro is selected").toEqual({ n: 2, sideBySide: true });
 
-  // (2) RichUI: the edit button opens the callout's OWN editUI island (type select + label + body),
+  // (2) RichUI: the edit button opens the callout's OWN editUI island (type picker + label + body),
   // in place — the structured macro-unit editor, not the parent columns' flat source dump.
   await page.locator("[data-pane=preview] [data-testid=nested-macro-edit]").first().click({ force: true });
   await sleep(350);
   await expect(page.locator("[data-pane=preview] [data-testid=nested-edit-island]")).toHaveCount(1);
-  await expect(page.locator("[data-pane=preview] [data-testid=nested-edit-island] select")).toHaveCount(1); // callout type dropdown
+  // #259: the callout type control is a row of VISUAL chips (calloutTypeOption, #174), NOT a bare
+  // <select> — the assertion was stale. Check the chip group the callout editUI actually renders.
+  await expect(page.locator("[data-pane=preview] [data-testid=nested-edit-island] [data-testid=callout-edit-type]")).toHaveCount(1);
   expect(await layout(), "layout stays side-by-side while the nested editUI island is open").toEqual({ n: 2, sideBySide: true });
   await page.keyboard.press("Escape");
   await sleep(250);
