@@ -81,11 +81,18 @@ export interface GuestToken {
 // Guest landing: exchange a share-link id for a short-lived guest token. No auth
 // (the link id is the capability). Any failure -> null (server answers a uniform
 // 404 for missing/revoked/expired so we cannot distinguish — by design).
-export async function fetchGuestToken(linkId: string): Promise<GuestToken | null> {
+// #233 / ADR-107: a 3-way result. A GuestToken on success; "password_required" for a LIVE password link
+// with no/wrong password (HTTP 401 — the caller shows a password prompt); null for a dead link (404) or
+// any other failure (uniform — no existence/password oracle). `password` re-POSTs the mint with the entry.
+export type GuestTokenResult = GuestToken | "password_required" | null;
+export async function fetchGuestToken(linkId: string, password?: string): Promise<GuestTokenResult> {
   const res = await fetch(`${API_URL}/public/share-links/${encodeURIComponent(linkId)}/token`, {
     method: "POST",
     credentials: "include",
+    headers: password !== undefined ? { "content-type": "application/json" } : undefined,
+    body: password !== undefined ? JSON.stringify({ password }) : undefined,
   });
+  if (res.status === 401) return "password_required"; // needs a password (429 throttle also falls through to null)
   if (!res.ok) return null;
   return (await res.json()) as GuestToken;
 }

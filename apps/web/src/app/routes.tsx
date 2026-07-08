@@ -554,27 +554,55 @@ function PageRoute() {
 function ShareRoute() {
   const { t } = useTranslation();
   const { linkId } = useParams<{ linkId: string }>();
-  const [state, setState] = useState<{ status: "loading" | "denied" | "ok"; minted?: GuestToken }>({
+  // #233 / ADR-107: FOUR states — loading / denied (dead link) / password_required (a live password link) /
+  // ok. The password prompt re-POSTs the mint with the entry; a wrong one lands back on password_required
+  // with a generic error (wrong ≡ missing — no oracle).
+  const [state, setState] = useState<{ status: "loading" | "denied" | "password" | "ok"; minted?: GuestToken; error?: boolean }>({
     status: "loading",
   });
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const attempt = useCallback((pw?: string) => {
+    if (!linkId) { setState({ status: "denied" }); return; }
+    setSubmitting(true);
+    fetchGuestToken(linkId, pw).then((minted) => {
+      setSubmitting(false);
+      if (minted === "password_required") setState((s) => ({ status: "password", error: s.status === "password" }));
+      else setState(minted ? { status: "ok", minted } : { status: "denied" });
+    });
+  }, [linkId]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!linkId) {
-      setState({ status: "denied" });
-      return;
-    }
+    if (!linkId) { setState({ status: "denied" }); return; }
+    // First attempt with no password: a non-password link returns a token; a password link returns
+    // password_required (→ show the prompt) without the user typing anything they don't need to.
     fetchGuestToken(linkId).then((minted) => {
       if (cancelled) return;
-      setState(minted ? { status: "ok", minted } : { status: "denied" });
+      if (minted === "password_required") setState({ status: "password" });
+      else setState(minted ? { status: "ok", minted } : { status: "denied" });
     });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [linkId]);
 
   if (state.status === "loading") {
     return <AppShell><div style={{ padding: 16 }}>{t("share.opening")}</div></AppShell>;
+  }
+  if (state.status === "password") {
+    return (
+      <AppShell>
+        <div className="mx-auto mt-16 flex max-w-sm flex-col gap-3 p-4" data-testid="share-password-form">
+          <h2 className="text-[length:var(--text-lg)] font-semibold">{t("share.passwordTitle")}</h2>
+          <p className="text-fg-dim">{t("share.passwordPrompt")}</p>
+          <form onSubmit={(e) => { e.preventDefault(); if (password) attempt(password); }} className="flex flex-col gap-2">
+            <Input type="password" value={password} autoFocus aria-label={t("share.passwordLabel")} data-testid="share-password-input" onChange={(e) => setPassword(e.target.value)} />
+            {state.error && <p className="text-[var(--danger)]" data-testid="share-password-error">{t("share.passwordWrong")}</p>}
+            <Button variant="primary" type="submit" disabled={!password || submitting} data-testid="share-password-submit">{t("share.passwordSubmit")}</Button>
+          </form>
+        </div>
+      </AppShell>
+    );
   }
   if (state.status === "denied" || !state.minted) {
     return <AppShell><div style={{ padding: 16 }}>{t("share.invalid")}</div></AppShell>;

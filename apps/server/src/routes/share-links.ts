@@ -8,6 +8,7 @@ import type { Capability, ResourceRef } from '@wikistead/types'
 import { pool } from '../db/pool.js'
 import { resolveTenantFromHost, loadTenant } from '../tenant.js'
 import type { TenantDb } from '../db/index.js'
+import { hashSharePassword, verifySharePassword } from './share-link-password.js'
 import type IORedis from 'ioredis'
 
 // Rate-limit windows for the public share-link exchange (#107 / ADR-026). Starting points —
@@ -19,12 +20,31 @@ const EXCHANGE_RL_WINDOW_S = 60
 const EXCHANGE_RL_IP_MAX = Number(process.env.EXCHANGE_RL_IP_MAX ?? 30)
 const EXCHANGE_RL_LINK_MAX = Number(process.env.EXCHANGE_RL_LINK_MAX ?? 10)
 
+// #233 / ADR-107 (comment 967): the DEDICATED wrong-password throttle. per (link, IP) 5/min AND per link
+// 30/hour, fixed-window, bumped ONLY on a wrong/missing password. Confirmed values (coded like EXCHANGE_RL_*).
+const PW_RL_WINDOW_S = 60
+const PW_RL_IP_MAX = 5
+const PW_RL_HOUR_S = 3600
+const PW_RL_LINK_MAX = 30
+
 // Fixed-window counter: INCR the key, set the TTL on the first hit, return whether still within
 // `max`. One round-trip + an occasional EXPIRE; idempotent under concurrency (INCR is atomic).
 async function bumpRateBucket(valkey: IORedis, key: string, max: number): Promise<boolean> {
   const n = await valkey.incr(key)
   if (n === 1) await valkey.expire(key, EXCHANGE_RL_WINDOW_S)
   return n <= max
+}
+// #233: bump with an explicit window (the wrong-password buckets use 60s vs 3600s), else identical.
+async function bumpDurationBucket(valkey: IORedis, key: string, windowS: number): Promise<boolean> {
+  const n = await valkey.incr(key)
+  if (n === 1) await valkey.expire(key, windowS)
+  return n <= (windowS === PW_RL_HOUR_S ? PW_RL_LINK_MAX : PW_RL_IP_MAX)
+}
+// #233: READ-ONLY check (no INCR) — is this wrong-password bucket already AT its max? Used in the
+// preHandler to reject a brute-forcer before processing; the count is only ever raised by a wrong password.
+async function peekRateBucket(valkey: IORedis, key: string, max: number): Promise<boolean> {
+  const v = await valkey.get(key)
+  return (v == null ? 0 : Number(v)) < max
 }
 
 interface ShareLinkRow {
@@ -37,6 +57,7 @@ interface ShareLinkRow {
   created_by: string
   created_at: Date
   revoked_at: Date | null
+  password_hash?: string | null // #233: null = no password
 }
 export interface ShareLink {
   id: string
@@ -93,6 +114,7 @@ export async function createShareLink(
     resource: ResourceRef
     capability: Capability
     expiresInSeconds: number | null
+    password?: string | null // #233 / ADR-107: optional password (set at issuance only)
   },
 ): Promise<ShareLink> {
   if (args.resource.type !== 'page' && args.resource.type !== 'space') {
@@ -113,14 +135,18 @@ export async function createShareLink(
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
   const expiresAt = args.expiresInSeconds != null ? new Date(Date.now() + args.expiresInSeconds * 1000) : null
+  // #233: hash the optional password (scrypt + salt) OUTSIDE the tx (KDF is slow); a blank/whitespace
+  // password is treated as none. Plaintext never touches the DB.
+  const pw = args.password?.trim() ? args.password : null
+  const passwordHash = pw ? await hashSharePassword(pw) : null
 
   // INSERT (DB-generated v4 id) + FGA grant in one tx; FGA failure rolls back. resource_type
   // is stored verbatim so revoke deletes exactly the right tuple (1 link = 1 resource).
   const row = await db.tx(async (tx) => {
     const [r] = await tx<ShareLinkRow[]>`
-      INSERT INTO share_links (tenant_id, resource_type, resource_id, capability, expires_at, created_by)
+      INSERT INTO share_links (tenant_id, resource_type, resource_id, capability, expires_at, created_by, password_hash)
       VALUES (${args.tenantId}, ${args.resource.type}, ${args.resource.id}, ${args.capability},
-              ${expiresAt}, ${`user:${args.userId}`})
+              ${expiresAt}, ${`user:${args.userId}`}, ${passwordHash})
       RETURNING id, tenant_id, resource_type, resource_id, capability, expires_at, created_by, created_at, revoked_at
     `
     await writeTuples(fga, [
@@ -342,17 +368,25 @@ export interface MintedGuestToken {
 // link id is the capability. Tenant comes from the request Host (RLS stays on;
 // no bypass). Returns null for EVERY failure mode so the caller can answer 404
 // uniformly and leak nothing about a link's existence/state to an enumerator.
+// #233 / ADR-107: mint is now 3-way. `null` = a DEAD link (unknown / revoked / expired / FGA-denied) —
+// a UNIFORM 404 that never reveals whether the link exists OR whether it has a password. `'password_required'`
+// = a LIVE link that needs a password and none/a wrong one was given (wrong ≡ missing — no oracle). A token
+// = success. The password branch runs ONLY after every dead-state check, so a dead link can never surface
+// `password_required` (existence-hiding).
+export type MintResult = MintedGuestToken | null | 'password_required'
+
 export async function mintTokenForShareLink(
   fga: OpenFgaClient,
   tenantId: string,
   id: string,
-): Promise<MintedGuestToken | null> {
+  password?: string | null,
+): Promise<MintResult> {
   // Fast first-pass under RLS (NOT the security gate): cheaply reject obviously
   // dead links before touching FGA.
   const row = (await pool.begin(async (tx) => {
     await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
     const [r] = await tx<ShareLinkRow[]>`
-      SELECT id, tenant_id, resource_type, resource_id, capability, expires_at, created_by, created_at, revoked_at
+      SELECT id, tenant_id, resource_type, resource_id, capability, expires_at, created_by, created_at, revoked_at, password_hash
       FROM share_links WHERE id = ${id}
     `
     return r ?? null
@@ -377,6 +411,13 @@ export async function mintTokenForShareLink(
   })
   if (!allowed) return null
 
+  // #233 / ADR-107: password gate — LAST, after every dead-state + the authoritative FGA check, so a dead
+  // link never reaches here (existence-hiding: dead → 404, live+password → 401). Wrong ≡ missing (both
+  // fail the verify → the same 'password_required'), so there is no wrong-vs-missing oracle.
+  if (row.password_hash) {
+    if (!password || !(await verifySharePassword(password, row.password_hash))) return 'password_required'
+  }
+
   // Token TTL is the SHORT of the configured guest TTL and the link's remaining
   // life. Short TTL is what bounds how long an already-connected guest keeps
   // access after revocation (the project design notes: connected guests hold the JWT until exp).
@@ -399,7 +440,7 @@ export async function mintTokenForShareLink(
 // ── Fastify plugin ─────────────────────────────────────────────────────────
 
 export async function shareLinksPlugin(app: FastifyInstance) {
-  app.post<{ Body: { resource: ResourceRef; capability: Capability; expiresInSeconds?: number | null } }>(
+  app.post<{ Body: { resource: ResourceRef; capability: Capability; expiresInSeconds?: number | null; password?: string | null } }>(
     '/share-links',
     async (req, reply) => {
       const link = await createShareLink(req.db, app.fga, {
@@ -409,6 +450,7 @@ export async function shareLinksPlugin(app: FastifyInstance) {
         resource: req.body.resource,
         capability: req.body.capability,
         expiresInSeconds: req.body.expiresInSeconds ?? null,
+        password: req.body.password ?? null, // #233: optional password (set at issuance only)
       })
       return reply.code(201).send(link)
     },
@@ -435,13 +477,25 @@ export async function shareLinksPlugin(app: FastifyInstance) {
   // (prod runs >1). NB: implemented directly on the existing ioredis (app.valkey) rather than
   // pulling in @fastify/rate-limit (ADR-026's suggestion) — the confirmed mechanism is two
   // ORDERED buckets, which the plugin can't express cleanly, and this adds no new dependency.
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { id: string }; Body: { password?: string } }>(
     '/public/share-links/:id/token',
     {
       preHandler: async (req, reply) => {
         const ip = req.ip
         const id = req.params.id
-        // Bump BOTH buckets regardless of outcome (the per-link bucket must not depend on the
+        // #233: BEFORE bumping the general buckets, check the DEDICATED wrong-password buckets (which are
+        // bumped in the handler on a wrong/missing password) so a brute-forcer is stopped by the narrow
+        // limit first. These NEVER become an existence oracle: they only ever hold counts for links that
+        // reached the password branch (which is past every dead-state check), so their 429 reveals nothing
+        // a 401 didn't already. per (link, IP) 5/min AND per link 30/hour (ADR-107 comment 967).
+        const pwIpOk = await peekRateBucket(app.valkey, `rl:slxpw:ip:${id}:${ip}`, PW_RL_IP_MAX)
+        const pwLinkOk = await peekRateBucket(app.valkey, `rl:slxpw:link:${id}`, PW_RL_LINK_MAX)
+        if (!pwIpOk || !pwLinkOk) {
+          const ttl = await app.valkey.ttl(pwIpOk ? `rl:slxpw:link:${id}` : `rl:slxpw:ip:${id}:${ip}`)
+          reply.header('Retry-After', String(Math.max(1, ttl)))
+          return reply.code(429).send({ error: 'too many requests' })
+        }
+        // Bump BOTH general buckets regardless of outcome (the per-link bucket must not depend on the
         // lookup succeeding — no success/existence oracle). 429 if EITHER is over its window.
         const okIp = await bumpRateBucket(app.valkey, `rl:slx:ip:${ip}`, EXCHANGE_RL_IP_MAX)
         const okLink = await bumpRateBucket(app.valkey, `rl:slx:link:${id}`, EXCHANGE_RL_LINK_MAX)
@@ -458,7 +512,16 @@ export async function shareLinksPlugin(app: FastifyInstance) {
       // Uniform 404 for unknown tenant too — never reveal anything to an enumerator.
       if (!tenant) return reply.code(404).send({ error: 'not found' })
 
-      const minted = await mintTokenForShareLink(app.fga, tenant.id, req.params.id)
+      const minted = await mintTokenForShareLink(app.fga, tenant.id, req.params.id, req.body?.password)
+      if (minted === 'password_required') {
+        // #233: a live password link with no/wrong password. Bump the DEDICATED wrong-password buckets
+        // (ONLY on this branch — a correct password never bumps them; a dead link returns 404 above and
+        // never reaches here) then 401. per (link, IP) 5/min + per link 30/hour, fixed-window.
+        const ip = req.ip
+        await bumpDurationBucket(app.valkey, `rl:slxpw:ip:${req.params.id}:${ip}`, PW_RL_WINDOW_S)
+        await bumpDurationBucket(app.valkey, `rl:slxpw:link:${req.params.id}`, PW_RL_HOUR_S)
+        return reply.code(401).send({ error: 'password_required' })
+      }
       if (!minted) return reply.code(404).send({ error: 'not found' })
       return reply.send(minted)
     },

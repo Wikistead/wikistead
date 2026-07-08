@@ -325,7 +325,12 @@
     "spaceTitle": "共有スペース",
     "spaceEmpty": "このスペースにはまだ公開ページがありません。",
     "backToSpace": "ページ一覧へ戻る",
-    "spacePickPrompt": "ページを選んで閲覧してください。"
+    "spacePickPrompt": "ページを選んで閲覧してください。",
+    "passwordTitle": "パスワードが必要です",
+    "passwordPrompt": "このリンクはパスワードで保護されています。",
+    "passwordLabel": "パスワード",
+    "passwordWrong": "パスワードが違います。もう一度お試しください。",
+    "passwordSubmit": "開く"
   },
   "page": {
     "edit": "編集",
@@ -411,7 +416,8 @@
     "copyUrl": "URL をコピー",
     "revoke": "取り消し",
     "copied": "リンクをクリップボードにコピーしました。",
-    "done": "完了"
+    "done": "完了",
+    "password": "パスワード（任意）"
   },
   "permissions": {
     "title": "権限",
