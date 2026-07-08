@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from "vitest";
-import { visibleSpaces, recordRecentSpace } from "./space-recent";
+import { visibleSpaces, recordRecentSpace, hiddenSpaceCount } from "./space-recent";
 import type { Space } from "../data/queries";
 
 const mk = (id: string, name: string): Space => ({ id, name });
@@ -38,5 +38,19 @@ describe("#263 visibleSpaces (bounded default + search)", () => {
   it("the default set is capped (never unbounded)", () => {
     const many = Array.from({ length: 30 }, (_, i) => mk(`s${i}`, `S${i}`));
     expect(visibleSpaces(many, "s0", "").length).toBe(8);
+  });
+});
+
+describe("#263 rejection ①: hiddenSpaceCount (surface the silent truncation)", () => {
+  it("empty query: reports how many viewable spaces are NOT shown", () => {
+    expect(hiddenSpaceCount(16, 8, "")).toBe(8); // 16 viewable, 8 shown → 8 hidden
+  });
+  it("empty query, nothing hidden when everything fits", () => {
+    expect(hiddenSpaceCount(5, 5, "")).toBe(0);
+    expect(hiddenSpaceCount(3, 8, "")).toBe(0); // never negative
+  });
+  it("while searching, nothing is hidden (search spans ALL spaces)", () => {
+    expect(hiddenSpaceCount(16, 4, "263")).toBe(0);
+    expect(hiddenSpaceCount(16, 4, "  ")).toBe(12); // whitespace-only is not a query
   });
 });
