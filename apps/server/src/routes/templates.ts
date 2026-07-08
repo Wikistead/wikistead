@@ -67,17 +67,18 @@ const canView = (fga: OpenFgaClient, userId: string, id: string) =>
 const canManage = (fga: OpenFgaClient, userId: string, id: string) =>
   fga.check({ user: `user:${userId}`, relation: 'manage', object: `template:${id}` }).then((r) => r.allowed ?? false)
 
-export interface TemplateSummary { id: string; name: string; scope: TemplateScope; spaceId: string | null; createdBy: string; createdAt: string }
+export interface TemplateSummary { id: string; name: string; scope: TemplateScope; spaceId: string | null; createdBy: string; createdAt: string; canManage: boolean }
 
 // The tenant's templates the user may VIEW (server FGA-filtered — scope containment is enforced here, not
-// by reading the columns). RLS scopes `db` to the tenant, so cross-tenant rows never appear.
+// by reading the columns). RLS scopes `db` to the tenant, so cross-tenant rows never appear. `canManage`
+// lets the UI hide rename/delete on templates the user can't manage (the server still re-checks — #249).
 export async function listTemplates(db: TenantDb, fga: OpenFgaClient, args: { userId: string }): Promise<TemplateSummary[]> {
   const rows = await db.sql<{ id: string; name: string; scope: TemplateScope; space_id: string | null; created_by: string; created_at: Date }[]>`
     SELECT id, name, scope, space_id, created_by, created_at FROM templates ORDER BY created_at DESC`
   const out: TemplateSummary[] = []
   for (const r of rows) {
     if (await canView(fga, args.userId, r.id)) {
-      out.push({ id: r.id, name: r.name, scope: r.scope, spaceId: r.space_id, createdBy: r.created_by, createdAt: r.created_at.toISOString() })
+      out.push({ id: r.id, name: r.name, scope: r.scope, spaceId: r.space_id, createdBy: r.created_by, createdAt: r.created_at.toISOString(), canManage: await canManage(fga, args.userId, r.id) })
     }
   }
   return out

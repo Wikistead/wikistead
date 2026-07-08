@@ -113,6 +113,44 @@ export function useSaveTemplate() {
   });
 }
 
+// #249 / ADR-110: the /templates management surface. The server FGA-filters the list by `view`, so the
+// client shows exactly what it is told (no client-side scope filtering). Rename/delete are manage-gated
+// server-side (the UI only hides the actions as the first layer).
+export interface TemplateSummary { id: string; name: string; scope: TemplateScope; spaceId: string | null; createdBy: string; createdAt: string; canManage: boolean }
+export function useTemplates(enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["templates"],
+    queryFn: () => apiFetch<TemplateSummary[]>(`/templates`, token).then((r) => r ?? []),
+    enabled,
+  });
+}
+export function useTemplateBody(id: string | null) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["template", id],
+    queryFn: () => apiFetch<{ id: string; name: string; scope: TemplateScope; body: string }>(`/templates/${encodeURIComponent(id!)}`, token),
+    enabled: id != null,
+  });
+}
+export function useRenameTemplate() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; name: string }) =>
+      apiFetch<void>(`/templates/${encodeURIComponent(args.id)}`, token, { method: "PATCH", body: JSON.stringify({ name: args.name }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["templates"] }),
+  });
+}
+export function useDeleteTemplate() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/templates/${encodeURIComponent(id)}`, token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["templates"] }),
+  });
+}
+
 // Reparent + reorder, and (3b ②) move across spaces. parentId null = top level
 // of the destination space; afterId null = first child of the target parent.
 // toSpaceId is always sent; the server treats it as a cross-space move only when

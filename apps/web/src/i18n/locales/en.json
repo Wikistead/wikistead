@@ -655,5 +655,16 @@
     "excalidrawEmpty": "Empty drawing — click the ✎ button to edit",
     "embedEmpty": "Empty embed — click the ✎ button to add a URL",
     "pageEmbedEmpty": "Empty page embed — click the ✎ button to add a page"
+  },
+  "templates": {
+    "title": "Templates",
+    "back": "Back to app",
+    "empty": "No templates yet. Save a page as a template from its ⋯ menu.",
+    "name": "Template name",
+    "rename": "Rename template",
+    "renamed": "Template renamed",
+    "deleted": "Template deleted",
+    "deleteConfirm": "Delete the template “{{name}}”? This cannot be undone.",
+    "actionFailed": "Something went wrong"
   }
 }
