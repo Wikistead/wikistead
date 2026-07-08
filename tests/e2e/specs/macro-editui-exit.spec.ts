@@ -47,3 +47,28 @@ test("#239: the Done button exits the editUI back to the rendered diagram", asyn
   await expect(page.locator("[data-pane=preview] [data-testid=macro-mermaid]")).toBeVisible();
   expect(await page.locator("[data-pane=preview] [data-testid=mermaid-edit-src]").count()).toBe(0);
 });
+
+// #282: typing in the mermaid editUI must not COLLAPSE the live preview pane (the "right half flickers").
+// A mid-typing invalid diagram used to shrink the preview to a 1-line error and bounce back, flashing the
+// pane and toggling the scrollbar. Fix: hold the pane's height (min-height) during the async re-render +
+// debounce the render. The height collapse IS measurable headless; the scrollbar flash itself needs a
+// classic (space-taking) scrollbar which headless lacks (see the ticket) → that stays a human check.
+test("#282: the mermaid editUI preview holds its height while typing an invalid diagram (no collapse)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "editui-282");
+  await enterEdit(page);
+  await openMermaidEditUI(page);
+  const preview = page.locator("[data-pane=preview] [data-testid=mermaid-edit-preview]");
+  await sleep(500); // the initial valid diagram renders → a real preview height
+  const h0 = await preview.evaluate((el) => el.getBoundingClientRect().height);
+  expect(h0).toBeGreaterThan(40); // a rendered SVG, not collapsed
+
+  // Replace the source with text mermaid can't parse — the debounced render fails …
+  await page.locator("[data-pane=preview] [data-testid=mermaid-edit-src]").click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("this is definitely not a valid mermaid diagram");
+  await sleep(500); // > debounce (150ms) + render
+  const h1 = await preview.evaluate((el) => el.getBoundingClientRect().height);
+  // … but the pane HELD its height (min-height) instead of collapsing to the 1-line error.
+  expect(h1).toBeGreaterThanOrEqual(h0 - 8);
+});
