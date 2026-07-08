@@ -284,7 +284,7 @@ function PageRoute() {
   };
   const closeAttachments = useCallback(() => setAttachmentsOpen(false), []);
 
-  // #230: "Linked mentions" — a right-rail panel opened from the ⋯ menu (was a bottom section that never
+  // #230: "Backlinks" — a right-rail panel opened from the ⋯ menu (was a bottom section that never
   // rendered in edit mode). Openable in both modes; part of the #206 mutual exclusion.
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   const toggleBacklinks = () => {

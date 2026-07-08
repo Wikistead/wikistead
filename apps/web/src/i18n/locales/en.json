@@ -655,9 +655,9 @@
     "notFound": "Page not found"
   },
   "backlinks": {
-    "title": "Linked mentions",
+    "title": "Backlinks",
     "untitled": "(untitled)",
-    "empty": "No pages reference this one yet."
+    "empty": "No pages link here yet."
   },
   "template": {
     "saveAsTemplate": "Save as template",
