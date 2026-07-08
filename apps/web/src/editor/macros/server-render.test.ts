@@ -213,3 +213,23 @@ describe("renderMarkdownToHtml — built-in M2 directives (#85 slice 2)", () => 
     expect(h).toContain('<span class="embed-link">'); // rendered as inert text instead
   });
 });
+
+// #296: nested directives (a :::tabs with 2 tabs) — lezer early-closes the parent at the first inner
+// close, so the string renderer used to truncate the body (2nd tab dropped to a generic box) and leak the
+// dangling ':::' as body text. render.ts now consumes resolveDirectiveRanges + skips the leaked siblings.
+describe("renderMarkdownToHtml — #296 nested directive ranges", () => {
+  const reg = builtinMacroRegistry();
+  it("renders BOTH tabs of a nested :::tabs and leaks no literal ':::'", () => {
+    const src = "::::tabs\n:::tab[One]\nAlpha content\n:::\n:::tab[Two]\nBravo content\n:::\n::::";
+    const h = out(src, reg);
+    expect(h).toContain("Alpha content"); // tab 1
+    expect(h).toContain("Bravo content"); // tab 2 — not dropped by the early-close
+    expect(h).not.toContain(":::"); // no dangling close marker leaked as body text
+    expect(h).not.toContain("wks-directive"); // the 2nd tab did NOT fall to the generic fallback box
+  });
+
+  it("a non-nested directive is unchanged (no over-skip of following blocks)", () => {
+    const h = out(":::columns\nc1\n:::\n\nAfter the block.", reg);
+    expect(h).toContain("After the block."); // the sibling AFTER a simple directive still renders
+  });
+});
