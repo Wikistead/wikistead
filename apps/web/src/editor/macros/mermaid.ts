@@ -27,6 +27,33 @@ function loadMermaid(theme: MacroContext["theme"]) {
   return mermaidP;
 }
 
+// #282 (3): `mermaid.render(id, code)` with NO 3rd arg makes mermaid 11 append its text-measuring
+// node in-flow at document.body — a ~150px node with no hidden style. html/body/#root have no overflow
+// clamp, so for the render's duration the WINDOW overflows and its scrollbar flashes ("a scrollbar
+// further right, appearing and vanishing"). Fix: give each render its OWN off-flow sandbox as the 3rd
+// arg (svgContainingElement), so the temp node lands there, not in the body flow. position:fixed keeps
+// it out of the document flow (visibility:hidden + a REAL width so text still measures — display:none
+// would collapse the layout mermaid needs, the #174 hidden-tab class). Per-render (never a shared
+// singleton: mermaid does innerHTML= and would wipe a concurrent render's in-progress node — the page
+// lays out many diagrams at once). Removing the sandbox in finally also disposes mermaid's temp node,
+// so the old getElementById("d"+id) cleanup is folded in here.
+async function renderMermaidOffscreen(
+  mermaid: Awaited<ReturnType<typeof loadMermaid>>,
+  id: string,
+  code: string,
+  width: number,
+): Promise<{ svg: string }> {
+  const sandbox = document.createElement("div");
+  const w = Math.max(1, Math.round(width) || document.body.clientWidth || 800);
+  sandbox.style.cssText = `position:fixed;left:-10000px;top:0;width:${w}px;visibility:hidden;pointer-events:none`;
+  document.body.appendChild(sandbox);
+  try {
+    return await mermaid.render(id, code, sandbox);
+  } finally {
+    sandbox.remove(); // disposes mermaid's temp measuring node with it
+  }
+}
+
 export const mermaidMacro: FenceMacro = {
   kind: "fence",
   lang: "mermaid",
@@ -61,20 +88,15 @@ export const mermaidMacro: FenceMacro = {
       const id = nextId(); // fresh id per paint so a re-paint can't collide with the previous svg's id (#191)
       void loadMermaid(ctx.theme).then(async (mermaid) => {
         try {
-          const { svg } = await mermaid.render(id, code);
+          // #282: measure in an off-flow sandbox at the element's real width, so the window never overflows.
+          const { svg } = await renderMermaidOffscreen(mermaid, id, code, el.clientWidth);
           fig.innerHTML = svg; // sanitized by mermaid (securityLevel: strict)
           paintedWidth = el.clientWidth;
         } catch {
           el.classList.add("cm-lp-macro-error");
           fig.textContent = "Invalid mermaid diagram"; // in-macro only (suppressErrorRendering stops the body bomb)
         } finally {
-          // Belt-and-suspenders (#191): mermaid.render appends a temp element PREFIXED with 'd' (d<id>)
-          // to the DOM for measurement; on an error path it can linger. Remove only THAT — never #<id>,
-          // which is the id of the RENDERED <svg> we assigned into `el` above (removing it deleted valid
-          // diagrams — #191 review regression: mermaid names the output svg `${id}`, so
-          // getElementById(id) found the real figure inside `el`, not a stray temp).
-          document.getElementById("d" + id)?.remove(); // mermaid prefixes the temp/error container with 'd'
-          painting = false;
+          painting = false; // #282: the sandbox (with mermaid's temp node) is disposed inside renderMermaidOffscreen
         }
       });
     };
@@ -117,12 +139,11 @@ export const mermaidMacro: FenceMacro = {
         if (held > 0) preview.style.minHeight = `${held}px`;
         void loadMermaid(ctx.theme).then(async (mermaid) => {
           try {
-            const { svg } = await mermaid.render(myId, trimmed);
+            // #282: sandbox the measuring node off-flow so a per-keystroke render never flashes the window bar.
+            const { svg } = await renderMermaidOffscreen(mermaid, myId, trimmed, preview.clientWidth);
             if (mine === gen) { preview.innerHTML = svg; preview.style.minHeight = ""; } // release once the new size is in
           } catch {
             if (mine === gen) preview.textContent = "Invalid mermaid diagram"; // keep min-height → no collapse
-          } finally {
-            document.getElementById("d" + myId)?.remove(); // mermaid's temp/error node (see liveRender)
           }
         }).catch(() => { /* mermaid failed to load (offline/test env) — the preview just stays empty */ });
       };
