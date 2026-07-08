@@ -142,9 +142,17 @@
     "auth": "Authentication",
     "api": "API",
     "embeds": "Embeds",
+    "public": "Public access",
     "billing": "Billing",
     "orphans": "Orphan drafts",
     "webhooks": "Webhooks"
+  },
+  "adminPublic": {
+    "title": "Public access",
+    "body": "The master switch for this workspace's anonymous public pages. While it's off, every public page is unreachable (returns not-found) — a structural block against accidental exposure. Turning it off is non-destructive: per-page public settings are kept and restored when you turn it back on.",
+    "toggleTitle": "Allow public pages in this workspace",
+    "onHint": "On — pages marked public can be viewed by anyone with the link.",
+    "offHint": "Off — all public pages are hidden, even if individually marked public."
   },
   "adminEmbeds": {
     "title": "External embeds",
@@ -446,6 +454,10 @@
     "privateTitle": "Make this page private",
     "privateHint": "Only the people you list below can view or edit it; space members no longer inherit access, and it won't be public. Child pages are not made private automatically.",
     "privateOnHint": "This page is private — only the people in the allow list below can access it. Space members do not inherit access.",
+    "publicTitle": "Make this page public",
+    "publicHint": "Anyone with the link can view the published page anonymously — no account needed. Only published pages can be made public; it's excluded from search engines.",
+    "publicOnHint": "This page is public — anyone can view the published version anonymously.",
+    "publicPrivateConflict": "A private page can't be made public. Turn off private first.",
     "grantTitle": "Access",
     "allowlistTitle": "Allow list (only these people can access this private page)",
     "privateConfirmTitle": "Make this page private?",

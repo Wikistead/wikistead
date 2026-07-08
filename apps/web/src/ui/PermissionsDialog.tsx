@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePage, useTenantGroups, useShareLinks, type PageRelation } from "../data/queries";
+import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, useTenantGroups, useShareLinks, type PageRelation } from "../data/queries";
 import { ConfirmDialog } from "./dialogs";
 import { notify } from "./toast";
 import { Select } from "./Select";
@@ -29,6 +29,16 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   const activeLinks = shareLinks?.length ?? 0;
   const [confirmPrivate, setConfirmPrivate] = useState(false);
   const applyPrivate = (v: boolean) => setPrivate.mutate(v, {
+    onSuccess: () => notify.success(t("toast.saved")),
+    onError: () => notify.error(t("toast.actionFailed")),
+  });
+  // #253 / ADR-113: the per-page PUBLIC toggle is offered ONLY when the tenant parent switch is ON (else the
+  // whole public surface is hidden and toggling would be a no-op). public⊥private, so it's disabled while the
+  // page is private. The server is the fortress (re-checks manage / parent-switch / published / private).
+  const { data: surfaceOn } = usePublicSurface(open);
+  const { data: isPublic } = usePagePublic(pageId, open && !!surfaceOn);
+  const setPublic = useSetPublic(pageId);
+  const applyPublic = (v: boolean) => setPublic.mutate(v, {
     onSuccess: () => notify.success(t("toast.saved")),
     onError: () => notify.error(t("toast.actionFailed")),
   });
@@ -95,6 +105,20 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             <span className="block text-xs text-fg-dim">{isPrivate ? t("permissions.privateOnHint") : t("permissions.privateHint")}</span>
           </span>
         </label>
+
+        {/* #253 / ADR-113: PUBLIC (anonymous) toggle — only offered when the tenant parent switch is ON.
+            public⊥private → disabled while private. Only a PUBLISHED page can go public (server enforces 400). */}
+        {surfaceOn && (
+          <label className="mt-2 flex items-start gap-2 rounded-md border border-border p-2" data-testid="public-toggle-row">
+            <input type="checkbox" className="mt-0.5" data-testid="public-toggle" checked={!!isPublic}
+              disabled={setPublic.isPending || !!isPrivate}
+              onChange={(e) => applyPublic(e.target.checked)} />
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm text-foreground">{t("permissions.publicTitle")}</span>
+              <span className="block text-xs text-fg-dim">{isPrivate ? t("permissions.publicPrivateConflict") : isPublic ? t("permissions.publicOnHint") : t("permissions.publicHint")}</span>
+            </span>
+          </label>
+        )}
 
         <p className="mt-3 text-xs font-medium text-fg-dim">{isPrivate ? t("permissions.allowlistTitle") : t("permissions.grantTitle")}</p>
         <div className="flex items-center gap-2">

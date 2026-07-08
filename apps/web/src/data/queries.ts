@@ -547,6 +547,48 @@ export function useSetPrivate(pageId: string) {
   });
 }
 
+// #253 / ADR-113 — per-page anonymous PUBLIC toggle (published pages only; the anonymous view_base@user:*
+// grant). Manager/admin-gated server-side; the POST also requires the tenant parent switch to be ON (403).
+export function usePagePublic(pageId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["page-public", pageId],
+    queryFn: () => apiFetch<{ public: boolean }>(`/pages/${encodeURIComponent(pageId)}/public`, token).then((r) => r?.public ?? false),
+    enabled: enabled && pageId.length > 0,
+  });
+}
+export function useSetPublic(pageId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (makePublic: boolean) =>
+      apiFetch<null>(`/pages/${encodeURIComponent(pageId)}/public`, token, { method: makePublic ? "POST" : "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["page-public", pageId] });
+      qc.invalidateQueries({ queryKey: ["page", pageId] });
+    },
+  });
+}
+// #253 / ADR-113 — the tenant PARENT SWITCH (admin-only): the master gate for the whole anonymous public
+// surface. Drives whether the per-page public toggle is even offered.
+export function usePublicSurface(enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["admin-public-settings"],
+    queryFn: () => apiFetch<{ publicEnabled: boolean }>(`/admin/public-settings`, token).then((r) => r?.publicEnabled ?? false),
+    enabled,
+  });
+}
+export function useSetPublicSurface() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiFetch<{ publicEnabled: boolean }>(`/admin/public-settings`, token, { method: "PUT", body: JSON.stringify({ enabled }) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin-public-settings"] }); },
+  });
+}
+
 // The tenant's group-name source for the group-grant picker (#163). manage-gated server-side
 // (group names can be sensitive), so scope the query to a space the caller manages.
 export function useTenantGroups(spaceId: string, enabled = true) {
