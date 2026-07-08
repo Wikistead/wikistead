@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { enterEdit, openScratch, sleep } from "../helpers";
 
-// #230: the "Linked mentions" section on a page lists pages that link to it via a persisted /p/<id>
+// #230: the "Backlinks" section on a page lists pages that link to it via a persisted /p/<id>
 // link (server FGA-view-gated). Real Chromium: create a target, publish a second page linking to it,
 // then open the target and see the backlink; click it to navigate.
 test("#230: a page shows a backlink from another page that links to it", async ({ browser }) => {
@@ -23,13 +23,14 @@ test("#230: a page shows a backlink from another page that links to it", async (
   await page.getByTestId("publish-page").click();
   await sleep(800);
 
-  // #230 (redesign): open the target, then open the "Linked mentions" right-rail panel from the ⋯ menu.
+  // #230 (redesign): open the target, then open the "Backlinks" right-rail panel from the ⋯ menu.
   await page.goto(`/p/${target}`);
   await page.waitForSelector("[data-pane=preview] .cm-content");
   await sleep(400);
   await page.getByTestId("page-overflow-trigger").click();
   await page.getByTestId("backlinks-toggle").click();
   await expect(page.getByTestId("backlinks-panel")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByTestId("backlinks-panel")).toContainText("Backlinks"); // #230 heading wording
   const link = page.getByTestId(`backlink-${linker}`);
   await expect(link).toBeVisible();
   await expect(link).toHaveText("bl-linker");

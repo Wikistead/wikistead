@@ -4,7 +4,7 @@ import { Link as LinkIcon } from "lucide-react";
 import { RightPanel } from "../ui/RightPanel";
 import { useBacklinks } from "../data/queries";
 
-// #230 (review redesign): "Linked mentions" as a right-rail panel opened from the ⋯ menu (was a
+// #230 (review redesign): "Backlinks" as a right-rail panel opened from the ⋯ menu (was a
 // bottom section that never rendered in edit mode). Server FGA-view-gates each result — the panel shows
 // exactly what the endpoint returns (no client-side filtering / re-count). Openable in edit mode too.
 export function BacklinksPanel({ pageId, onClose }: { pageId: string; onClose: () => void }) {
