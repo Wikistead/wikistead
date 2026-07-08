@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { renderMarkdownToDom, renderCalloutPanel } from "./md-render";
 import { registerMacro } from "./registry";
+import { tabsMacro } from "./layout-directives";
 import { html, unsafeHtml } from "./safe-html";
 
 function root(src: string): HTMLElement {
@@ -154,6 +155,20 @@ describe("renderMarkdownToDom — nested macro dispatch (ADR-085 / #185)", () =>
       kind: "directive", name: "adr085throw", exportFidelity: "degrade",
       htmlRender: () => unsafeHtml(""), liveRender: () => { throw new Error("boom"); },
     });
+  });
+
+  it("#267: a nested :::tabs renders BOTH tabs — lezer early-closes the parent, the resolver corrects the range", () => {
+    registerMacro(tabsMacro);
+    // lezer's grammar early-closes `::::tabs` at the first `:::tab` close, so the OLD node.to sliced only
+    // tab One and leaked tab Two (+ a bare `:::`) as siblings. The resolver-corrected range feeds the full
+    // body to the tabs macro, so parseLayoutItems sees both tabs; renderBlocks skips the leaked siblings.
+    const src = "::::tabs\n:::tab[One]\nAAA\n:::\n:::tab[Two]\nBBB\n:::\n::::";
+    const r = root(src);
+    const tabsEl = r.querySelector("[data-testid=macro-tabs]");
+    expect(tabsEl, "the tabs widget rendered").toBeTruthy();
+    expect(Array.from(tabsEl!.querySelectorAll(".cm-lp-tab")).map((b) => b.textContent)).toEqual(["One", "Two"]);
+    // nothing leaked past the early-close: no bare `:::` paragraph as a sibling of the widget.
+    expect(r.textContent).not.toContain(":::");
   });
 
   it("caps nested LIVE directive rendering depth (#90) — deeper directives degrade to plain content, not more widgets", () => {

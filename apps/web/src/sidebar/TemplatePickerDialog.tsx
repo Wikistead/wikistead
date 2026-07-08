@@ -1,20 +1,21 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileStack } from "lucide-react";
-import { renderMarkdownToHtml } from "@wikistead/macro-render";
-import { previewMacroRegistry } from "../editor/preview-macro-registry";
+import { renderMarkdownToDom } from "../editor/macros/md-render";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Button } from "../ui/Button";
 import { useTemplates, useTemplateBody, type TemplateSummary } from "../data/queries";
 
 // #250 / ADR-110: the "create from template" picker (opened from the sidebar split- ▾). Lists the
 // templates the user can view (server FGA-filtered), grouped by scope — Personal / This space / Tenant
-// with a live sanitized preview. #267: the preview renders first-party macros (callout/columns/tabs/…) via
-// previewMacroRegistry so they look RENDERED instead of a wall of degrade-to-source — it excludes the one
-// TRUSTED-passthrough macro (`:::table`) because the client preview has no downstream sanitizer (see that
-// file). Still client-only: the embed htmlRenders are static placeholders that never fetch (ADR-110's real
-// concern was server-resolving embeds). Choosing one calls onPick(templateId); the caller creates the page
-// (server re-checks template view + destination edit — two-layer defence).
+// with a live preview. #267: the preview renders via renderMarkdownToDom — the SAME client DOM renderer the
+// public reader (#227) uses — so ALL first-party macros render (callout/columns/tabs recurse their body,
+// `:::table` builds a real table from its escaped-cell model, mermaid/plantuml draw). It builds the DOM
+// node-by-node from an allowlist (textContent, never innerHTML), so it is the XSS boundary itself — no
+// dangerouslySetInnerHTML, no sanitizer-sharing (that's why the old previewMacroRegistry table-exclusion is
+// gone). Still client-only: the embed macros are static placeholders that never fetch (ADR-110's concern was
+// server-resolving embeds). Choosing one calls onPick(templateId); the caller creates the page (server
+// re-checks template view + destination edit — two-layer defence).
 export function TemplatePickerDialog({
   open,
   spaceId,
@@ -30,6 +31,13 @@ export function TemplatePickerDialog({
   const { data, isLoading } = useTemplates(open);
   const [selected, setSelected] = useState<string | null>(null);
   const body = useTemplateBody(open ? selected : null);
+  // #267: render the frozen body with the public-reader DOM renderer via a ref + replaceChildren (no
+  // dangerouslySetInnerHTML — renderMarkdownToDom IS the sanitizer, building text nodes from an allowlist).
+  const [previewEl, setPreviewEl] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!previewEl) return;
+    previewEl.replaceChildren(body.data?.body != null ? renderMarkdownToDom(body.data.body) : document.createDocumentFragment());
+  }, [previewEl, body.data]);
 
   // Group into the three ADR-110 buckets. Space-scope templates are shown only for the CURRENT space
   // (the picker is contextual to where the page will be created); personal/tenant are always relevant.
@@ -90,9 +98,9 @@ export function TemplatePickerDialog({
                   <p className="text-fg-dim">{t("common.loading")}</p>
                 ) : (
                   <div
-                    className="text-[length:var(--text-body)] leading-relaxed [&_h1]:mb-2 [&_h1]:text-[length:var(--text-lg)] [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:mt-3 [&_h2]:font-semibold [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_code]:rounded [&_code]:bg-panel-2 [&_code]:px-1"
+                    ref={setPreviewEl}
+                    className="cm-lp-md-preview text-[length:var(--text-body)] leading-relaxed"
                     data-testid="template-picker-preview-body"
-                    dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(body.data.body, previewMacroRegistry()).toString() }}
                   />
                 )}
               </div>
