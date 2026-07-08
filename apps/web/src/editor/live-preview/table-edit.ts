@@ -85,6 +85,15 @@ const ICON: Record<string, string> = {
   alignLeft: I('<path d="M2 4h12M2 8h7M2 12h10"/>'),
   alignCenter: I('<path d="M2 4h12M5 8h6M3 12h10"/>'),
   alignRight: I('<path d="M2 4h12M7 8h7M4 12h10"/>'),
+  // #256: insert/delete/no-fill were Unicode glyphs (U+229E ⊞, ✕, ⌀) that fall back to system fonts and
+  // break (tofu / mixed weight) on some environments. Replace with trusted static SVG (Lucide-family look
+  // thin round strokes at 16px, matching the merge/align icons above) so no font fallback ever occurs.
+  colInsBefore: I('<rect x="9" y="2.5" width="4.5" height="11" rx="1"/><path d="M3.5 8h3.5M5.25 6.25v3.5"/>'),
+  colInsAfter: I('<rect x="2.5" y="2.5" width="4.5" height="11" rx="1"/><path d="M9 8h3.5M10.75 6.25v3.5"/>'),
+  rowInsAbove: I('<rect x="2.5" y="9" width="11" height="4.5" rx="1"/><path d="M6.25 5.25h3.5M8 3.5v3.5"/>'),
+  rowInsBelow: I('<rect x="2.5" y="2.5" width="11" height="4.5" rx="1"/><path d="M6.25 10.75h3.5M8 9v3.5"/>'),
+  del: I('<path d="M3 4.5h10M6.5 4.5V3.2a.7.7 0 0 1 .7-.7h1.6a.7.7 0 0 1 .7.7v1.3M4.6 4.5l.6 8a1 1 0 0 0 1 .9h3.6a1 1 0 0 0 1-.9l.6-8M6.6 7v3.5M9.4 7v3.5"/>'),
+  noFill: I('<circle cx="8" cy="8" r="5.5"/><path d="M4.1 4.1l7.8 7.8"/>'),
 };
 function svgBtn(svg: string, testid: string, title: string): HTMLButtonElement {
   const b = document.createElement("button");
@@ -119,15 +128,15 @@ export const tableInlineEditor: InlineEditor = {
     // only when its kind is selected (via the column/row handle), so before/after is clear.
     const colOps = document.createElement("span");
     colOps.className = "cm-lp-table-ops";
-    const colInsL = btn("⊞←", "table-col-insert-before"); colInsL.title = "Insert column before";
-    const colInsR = btn("⊞→", "table-col-insert-after"); colInsR.title = "Insert column after";
-    const colDel = btn("✕", "table-col-delete"); colDel.title = "Delete column";
+    const colInsL = svgBtn(ICON.colInsBefore!, "table-col-insert-before", "Insert column before");
+    const colInsR = svgBtn(ICON.colInsAfter!, "table-col-insert-after", "Insert column after");
+    const colDel = svgBtn(ICON.del!, "table-col-delete", "Delete column");
     colOps.append(colInsL, colInsR, colDel);
     const rowOps = document.createElement("span");
     rowOps.className = "cm-lp-table-ops";
-    const rowInsT = btn("⊞↑", "table-row-insert-above"); rowInsT.title = "Insert row above";
-    const rowInsB = btn("⊞↓", "table-row-insert-below"); rowInsB.title = "Insert row below";
-    const rowDel = btn("✕", "table-row-delete"); rowDel.title = "Delete row";
+    const rowInsT = svgBtn(ICON.rowInsAbove!, "table-row-insert-above", "Insert row above");
+    const rowInsB = svgBtn(ICON.rowInsBelow!, "table-row-insert-below", "Insert row below");
+    const rowDel = svgBtn(ICON.del!, "table-row-delete", "Delete row");
     rowOps.append(rowInsT, rowInsB, rowDel);
     // #217 (comment 772): the bar WRAPS at a narrow width (flex-wrap on the bar) but each LOGICAL GROUP is
     // an indivisible unit (a `cm-lp-table-ops` span with flex-shrink:0 and no internal wrap), so groups
@@ -144,7 +153,7 @@ export const tableInlineEditor: InlineEditor = {
       sw.title = p.title;
       sw.setAttribute("data-testid", "table-bg-" + p.id);
       sw.style.background = p.value ?? "transparent";
-      if (!p.value) sw.textContent = "⌀"; // "no fill"
+      if (!p.value) sw.innerHTML = ICON.noFill!; // #256: "no fill" — trusted static SVG, not a font glyph
       // #209: set the background AND a contrast-matched text colour so the cell is legible in both themes.
       sw.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ bg: p.value, color: contrastColor(p.value) }); });
       colorGroup.appendChild(sw);
