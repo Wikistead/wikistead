@@ -14,7 +14,9 @@ export type { MacroTheme }; // #200: re-exported so the Editor can type the redr
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, directiveChainAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen, resolveDirectiveRanges } from "../macros/directive-parser";
-import { parseFenceLine, CALLOUT_TYPES } from "@wikistead/macro-render"; // #198: code-fence attribute parser; #174: callout types
+import { parseFenceLine, CALLOUT_TYPES, type FenceAlign } from "@wikistead/macro-render"; // #198: code-fence attribute parser; #174: callout types
+// #255: rendered diagram macros are centred by default and take a fence `align=` attribute (others don't).
+const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset } from "../macros/md-render";
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
@@ -1069,7 +1071,7 @@ class MacroWidget extends WidgetType {
   // are the display-only selection / edit-active state intersecting THIS widget (null otherwise), driving
   // the nested ring + edit button + editUI island. Stable string keys in eq so an unrelated selection
   // move never churns this widget (the project design notes "widget eq ").
-  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string, readonly selected: boolean, readonly theme: MacroTheme, readonly from = 0, readonly to = 0, readonly bodyFrom = 0, readonly nestedSel: NestedSelection | null = null, readonly nestedEdit: NestedSelection | null = null) {
+  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string, readonly selected: boolean, readonly theme: MacroTheme, readonly from = 0, readonly to = 0, readonly bodyFrom = 0, readonly nestedSel: NestedSelection | null = null, readonly nestedEdit: NestedSelection | null = null, readonly align: FenceAlign = "center") {
     super();
   }
   private nestedKey(v: NestedSelection | null) { return v ? `${v.nested.from}:${v.nested.to}:${v.anchor}` : ""; }
@@ -1083,12 +1085,16 @@ class MacroWidget extends WidgetType {
     // #200: `theme` is part of the key so a light/dark switch INVALIDATES the widget and CM
     // rebuilds it → liveRender re-runs and re-exports the SVG for the new theme (a macro like
     // Excalidraw bakes colours into its output, so it can't follow the theme via CSS alone).
-    return other.name === this.name && other.body === this.body && other.foldable === this.foldable && other.selected === this.selected && other.theme === this.theme
+    return other.name === this.name && other.body === this.body && other.foldable === this.foldable && other.selected === this.selected && other.theme === this.theme && other.align === this.align
       && this.nestedKey(other.nestedSel) === this.nestedKey(this.nestedSel) && this.nestedKey(other.nestedEdit) === this.nestedKey(this.nestedEdit);
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
     wrap.className = "cm-lp-macro-wrap";
+    // #255: a rendered DIAGRAM macro (mermaid/plantuml/excalidraw) is centred by DEFAULT (align="center")
+    // and can be pushed left/right via the fence `align=` attribute. Only diagrams align (text macros
+    // callout/table/columns — are unaffected). The class drives `text-align` on the wrap (below).
+    if (DIAGRAM_MACROS.has(this.name)) wrap.classList.add(`cm-lp-align-${this.align}`);
     // ADR-024: the caret resting ON the atom selects it (no separate key) — a ring shows
     // it's selected as a unit (dd/yy operate on it; Ctrl+Enter enters).
     // #215 comment 813/817: when a NESTED macro is selected the caret sits on THIS container (so
@@ -1651,7 +1657,9 @@ const RENDERERS: BlockRenderer[] = [
           return;
         }
         if (active && !macro.richEditUI && active.from <= from && active.to >= to) return; // entered → source
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), macro.foldable ?? true, lang!, atomSelected(ctx.state, from, to), ctx.macroTheme), block: true }), from, to);
+        // #255: the diagram fence's `align=` attribute (default center) drives the widget's alignment.
+        const fenceAlign = DIAGRAM_MACROS.has(lang!) ? (parseFenceLine(doc.lineAt(node.from).text)?.align ?? "center") : "center";
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), macro.foldable ?? true, lang!, atomSelected(ctx.state, from, to), ctx.macroTheme, 0, 0, 0, null, null, fenceAlign), block: true }), from, to);
         return;
       }
       const first = doc.lineAt(node.from).number;
@@ -2583,6 +2591,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   // Display-only (never edits/offsets).
   ".cm-lp-macro-wrap:hover:not(.cm-lp-atom-sel)": { outline: "1px solid var(--border, #888)", outlineOffset: "1px", borderRadius: "4px" },
   ".cm-lp-macro": { display: "block", overflowX: "auto" },
+  // #255: diagram alignment (mermaid/plantuml/excalidraw). Column flex on the wrap centres/pushes the
+  // rendered block (align-items works regardless of the child's display; the absolute ✎ button is
+  // out of flow, unaffected). Center is the default; only diagram wraps carry a cm-lp-align-* class.
+  ".cm-lp-align-center": { display: "flex", flexDirection: "column", alignItems: "center" },
+  ".cm-lp-align-left": { display: "flex", flexDirection: "column", alignItems: "flex-start" },
+  ".cm-lp-align-right": { display: "flex", flexDirection: "column", alignItems: "flex-end" },
   // #108 external embed: a responsive 16:9 sandboxed iframe; the degrade link is a plain inline link.
   ".cm-lp-embed-frame": { display: "block", width: "100%", aspectRatio: "16 / 9", border: "1px solid var(--border, #3a3a3a)", borderRadius: "6px", background: "var(--panel, #1e1e1e)" },
   ".cm-lp-embed-degrade": { display: "inline-block", wordBreak: "break-all" },

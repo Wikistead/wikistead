@@ -16,4 +16,4 @@ export {
 } from "./directives.js";
 export type { CalloutType } from "./directives.js";
 export { parseFenceInfo, parseFenceLine, serializeFenceInfo } from "./fence-info.js";
-export type { FenceInfo } from "./fence-info.js";
+export type { FenceInfo, FenceAlign } from "./fence-info.js";
