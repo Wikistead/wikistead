@@ -341,6 +341,7 @@
     "passwordPrompt": "This link is password-protected.",
     "passwordLabel": "Password",
     "passwordWrong": "Incorrect password. Try again.",
+    "passwordThrottled": "Too many attempts. Please wait a moment and try again.",
     "passwordSubmit": "Unlock"
   },
   "page": {

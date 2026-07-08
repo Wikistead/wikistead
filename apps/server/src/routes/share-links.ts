@@ -514,12 +514,21 @@ export async function shareLinksPlugin(app: FastifyInstance) {
 
       const minted = await mintTokenForShareLink(app.fga, tenant.id, req.params.id, req.body?.password)
       if (minted === 'password_required') {
-        // #233: a live password link with no/wrong password. Bump the DEDICATED wrong-password buckets
-        // (ONLY on this branch — a correct password never bumps them; a dead link returns 404 above and
-        // never reaches here) then 401. per (link, IP) 5/min + per link 30/hour, fixed-window.
-        const ip = req.ip
-        await bumpDurationBucket(app.valkey, `rl:slxpw:ip:${req.params.id}:${ip}`, PW_RL_WINDOW_S)
-        await bumpDurationBucket(app.valkey, `rl:slxpw:link:${req.params.id}`, PW_RL_HOUR_S)
+        // #233: a live password link. Bump the DEDICATED wrong-password buckets ONLY when a password
+        // was actually SUBMITTED and rejected — NOT on the prompt-display path where no password is
+        // sent. ShareRoute first POSTs with no password to discover the link needs one (React
+        // StrictMode even double-fires that), so counting the empty-password 401 would exhaust the
+        // 5/min bucket on the very first load and lock the user out after a single typo (review
+        // #233). The 401 response is identical either way, so wrong≡missing is preserved — the
+        // throttle only reflects information the requester already has (whether they submitted a
+        // password), so it is not a new existence oracle. A correct password never reaches here; a
+        // dead link returns 404 above. per (link, IP) 5/min + per link 30/hour, fixed-window.
+        const submittedPassword = typeof req.body?.password === 'string' && req.body.password.length > 0
+        if (submittedPassword) {
+          const ip = req.ip
+          await bumpDurationBucket(app.valkey, `rl:slxpw:ip:${req.params.id}:${ip}`, PW_RL_WINDOW_S)
+          await bumpDurationBucket(app.valkey, `rl:slxpw:link:${req.params.id}`, PW_RL_HOUR_S)
+        }
         return reply.code(401).send({ error: 'password_required' })
       }
       if (!minted) return reply.code(404).send({ error: 'not found' })

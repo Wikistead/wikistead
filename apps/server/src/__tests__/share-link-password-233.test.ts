@@ -118,4 +118,23 @@ describe('#233 wrong-password throttle (HTTP)', () => {
     // even the CORRECT password is 429 while the window is tripped (cools down after).
     expect((await post('s3cret')).statusCode).toBe(429)
   })
+
+  it('the prompt-display path (no-password POST) never consumes the budget — no 1-typo lockout', async () => {
+    // review #233 ShareRoute first POSTs with NO password to discover the link needs
+    // one (React StrictMode double-fires it), so counting those 401s exhausted the 5/min bucket on
+    // the very first load. A dedicated IP isolates this link's buckets from the other HTTP tests.
+    const link = await mkLink({ password: 's3cret' })
+    const ip = '10.60.60.1'
+    const post = (password?: string) => app.inject({
+      method: 'POST', url: `/public/share-links/${link.id}/token`,
+      headers: { host: 'dev.localhost', 'content-type': 'application/json', 'x-forwarded-for': ip },
+      payload: password === undefined ? {} : { password },
+    })
+    // Several prompt-display loads (a StrictMode double-fire plus a reload) — all 401, none counted.
+    for (let i = 0; i < 3; i++) expect((await post()).statusCode, `prompt ${i + 1}`).toBe(401)
+    // The user STILL has the full 5 wrong-attempt budget: 5 SUBMITTED wrong passwords 401 …
+    for (let i = 0; i < 5; i++) expect((await post('wrong')).statusCode, `wrong ${i + 1}`).toBe(401)
+    // … and only the 6th SUBMITTED wrong password trips 429 (the prompt loads did not eat into it).
+    expect((await post('wrong')).statusCode).toBe(429)
+  })
 })

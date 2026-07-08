@@ -54,3 +54,37 @@ test("#233: a password-protected link prompts, rejects a wrong password, unlocks
   await expect(guest.locator("[data-pane=preview] .cm-content")).toBeVisible({ timeout: 10000 });
   await expect(guest.getByTestId("share-password-form")).toHaveCount(0);
 });
+
+// #233 review opening the link (the prompt-display POST) must NOT consume the
+// wrong-password budget — a user who mistypes a few times can still unlock. Before the fix, the
+// prompt-display 401 counted, so a single typo (plus a reload) locked the user out.
+test("#233 opening the link + several wrong tries never locks out the correct password", async ({ browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  await openDemo(member);
+  await enterSplit(member);
+  await resetDoc(member);
+  await member.locator("[data-pane=preview] .cm-content").click();
+  await member.keyboard.insertText("# Secret doc 2\n");
+  await sleep(400);
+  await member.getByTestId("publish-page").click().catch(() => {});
+  await sleep(500);
+
+  const url = await createPasswordLink(member, "hunter2");
+  const guest = await (await browser.newContext()).newPage();
+  await guest.goto(url);
+  await expect(guest.getByTestId("share-password-form")).toBeVisible({ timeout: 10000 });
+
+  // Three wrong attempts — each shows the generic error, NEVER the throttled notice (3 is under the
+  // 5-per-minute wrong-password limit, and the prompt-display load did not eat into it).
+  for (let i = 0; i < 3; i++) {
+    await guest.getByTestId("share-password-input").fill(`nope${i}`);
+    await guest.getByTestId("share-password-submit").click();
+    await expect(guest.getByTestId("share-password-error")).toBeVisible({ timeout: 8000 });
+    await expect(guest.getByTestId("share-password-throttled")).toHaveCount(0);
+  }
+  // The correct password STILL unlocks (the throttle never tripped from opening + a few typos).
+  await guest.getByTestId("share-password-input").fill("hunter2");
+  await guest.getByTestId("share-password-submit").click();
+  await expect(guest.locator("[data-pane=preview] .cm-content")).toBeVisible({ timeout: 10000 });
+  await expect(guest.getByTestId("share-password-form")).toHaveCount(0);
+});
