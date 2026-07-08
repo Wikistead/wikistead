@@ -25,6 +25,14 @@
 .wks-public [data-testid="public-body"] h3 { font-size: 1.25em; }
 .wks-public [data-testid="public-body"] h4 { font-size: 1.1em; }
 
+/* #227 ②: a TOC jump (scrollIntoView block:start) must land BELOW the frosted title band, not behind
+ * it. The band's real height is published as --wks-band-h on .wks-public (a 2-line title makes it taller, so
+ * a fixed value can't work); scroll-margin-top offsets the landing by that much + a hair of clearance. Covers
+ * every heading level the TOC can target (h1–h6). */
+.wks-public [data-testid="public-body"] :is(h1, h2, h3, h4, h5, h6) {
+  scroll-margin-top: calc(var(--wks-band-h, 5.5rem) + 0.5rem);
+}
+
 .wks-public [data-testid="public-body"] p { margin: 0.75em 0; }
 
 .wks-public [data-testid="public-body"] ul,

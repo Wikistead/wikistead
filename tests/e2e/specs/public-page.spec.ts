@@ -78,11 +78,24 @@ test("#227 review: the public page has the member title band and a working TOC",
   await expect(toc).toBeVisible();
   const items = toc.getByTestId("toc-item");
   await expect(items).toHaveCount(4); // Top Title + Alpha/Bravo/Charlie
-  // clicking the last section jumps to it (its heading ends up near the top of the viewport).
+
+  // #227 ①: the TOC rail must stay VIEWPORT-FIXED — scrolling the content must NOT carry the rail
+  // off-screen (the bug: the rail sat in the scroll container, so scrollTop 800 pushed its items to top<0).
+  const firstItemTopBefore = await items.first().evaluate((el) => el.getBoundingClientRect().top);
+  await anon.locator(".wks-public > div").first().evaluate((el) => { el.scrollTop = 800; });
+  await sleep(200);
+  const firstItemTopAfter = await items.first().evaluate((el) => el.getBoundingClientRect().top);
+  expect(firstItemTopAfter).toBeGreaterThan(0); // still on screen after scrolling
+  expect(Math.abs(firstItemTopAfter - firstItemTopBefore)).toBeLessThan(24); // barely moved (fixed, not scrolled away)
+
+  // #227 ②: clicking a section jumps to it and the heading lands BELOW the frosted band, not behind it
+  // (the bug: scrollIntoView with no scroll-margin put the heading at top≈40px, inside the blurred band).
   await items.filter({ hasText: "Charlie" }).click();
   await sleep(600); // smooth-scroll settle
-  const top = await anon.getByTestId("public-body").locator("h2", { hasText: "Charlie Section" }).evaluate((el) => el.getBoundingClientRect().top);
-  expect(top).toBeLessThan(200); // scrolled into view near the top
+  const headingTop = await anon.getByTestId("public-body").locator("h2", { hasText: "Charlie Section" }).evaluate((el) => el.getBoundingClientRect().top);
+  const bandBottom = await anon.getByTestId("public-band").evaluate((el) => el.getBoundingClientRect().bottom);
+  expect(headingTop).toBeLessThan(300); // it DID scroll near the top…
+  expect(headingTop).toBeGreaterThanOrEqual(bandBottom - 6); // …but clears the band (not hidden behind the blur)
 });
 
 test("#227: a NON-public page shows not-found to an anonymous visitor (existence hidden)", async ({ browser }) => {

@@ -891,6 +891,8 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
   const { t } = useTranslation();
   const [state, setState] = useState<{ status: "loading" | "notfound" | "ok"; page?: { id: string; title: string; content: string; noindex: boolean; children: PublicChildNode[] } }>({ status: "loading" });
   const [bodyEl, setBodyEl] = useState<HTMLDivElement | null>(null); // callback ref → reactive for the TOC hook
+  const [outerEl, setOuterEl] = useState<HTMLDivElement | null>(null); // #227 non-scrolling positioning context
+  const [bandEl, setBandEl] = useState<HTMLDivElement | null>(null); // #227 ②: publish the band's real height
   const isWide = useMediaQuery("(min-width: 1200px)");
 
   useEffect(() => {
@@ -924,33 +926,53 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
   // (React runs effects in declaration order — collecting before replaceChildren would see an empty DOM).
   const toc = usePublicToc(bodyEl, state.status === "ok");
 
+  // #227 ②: publish the frosted band's ACTUAL height as --wks-band-h on the outer wrapper (a 2-line
+  // title makes the band taller, so a fixed value can't clear it). Mirrors the member bandRef ResizeObserver.
+  // The body headings read it via scroll-margin-top (public.css) so a TOC jump lands BELOW the band, and the
+  // rail's top offset clears it. Set on the outer (non-scrolling) element so it inherits down to the headings.
+  useEffect(() => {
+    if (!outerEl || !bandEl) return;
+    const publish = () => outerEl.style.setProperty("--wks-band-h", `${bandEl.offsetHeight}px`);
+    publish();
+    const ro = new ResizeObserver(publish);
+    ro.observe(bandEl);
+    return () => ro.disconnect();
+  }, [outerEl, bandEl, state]);
+
   if (state.status === "loading") return <div style={{ padding: 24 }} />;
   if (state.status === "notfound") {
     return <div data-testid="public-not-found" style={{ padding: 24, fontFamily: "var(--font-body, sans-serif)" }}>{t("publicPage.notFound")}</div>;
   }
   const page = state.page!;
   return (
-    <div className="wks-public relative h-full overflow-y-auto" style={{ fontFamily: "var(--font-body, sans-serif)" }}>
-      {/* #227 ① : the member frosted title BAND, reused read-only. Sticky so it frosts the content scrolling
-          under it in BOTH layouts (window-scroll single page / AppShell-scroll space route). PageTitle with
-          no onRename renders a plain read-only <h1> — no edit affordances leak into the public view. */}
-      <div className="sticky top-0 z-20 pb-6">
-        <div aria-hidden="true" className="absolute inset-x-0 inset-y-0 bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_90%,transparent)] via-[color-mix(in_srgb,var(--bg)_42%,transparent)] to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_55%,transparent)]" />
-        <div className="relative mx-auto w-full max-w-[46rem] px-5 pt-8" data-testid="public-title">
-          <PageTitle title={page.title} />
+    // #227 ①: the OUTER wrapper is the non-scrolling positioning context (like the member editor area,
+    // routes.tsx ~450). The scroller is the INNER div — so the TOC rail, positioned absolutely on THIS outer
+    // wrapper, stays viewport-fixed instead of scrolling away with the content. h-full is bounded by the
+    // parent in both layouts (AppShell main on the space route; the route container on /pub/:id).
+    <div ref={setOuterEl} className="wks-public relative h-full" style={{ fontFamily: "var(--font-body, sans-serif)" }}>
+      <div className="h-full overflow-y-auto">
+        {/* #227 ① : the member frosted title BAND, reused read-only. Sticky so it frosts the content scrolling
+            under it. PageTitle with no onRename renders a plain read-only <h1> — no edit affordances leak. The
+            band's height is published as --wks-band-h (bandEl ResizeObserver) so the rail + heading offsets clear it. */}
+        <div ref={setBandEl} data-testid="public-band" className="sticky top-0 z-20 pb-6">
+          <div aria-hidden="true" className="absolute inset-x-0 inset-y-0 bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_90%,transparent)] via-[color-mix(in_srgb,var(--bg)_42%,transparent)] to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_55%,transparent)]" />
+          <div className="relative mx-auto w-full max-w-[46rem] px-5 pt-8" data-testid="public-title">
+            <PageTitle title={page.title} />
+          </div>
+        </div>
+        <div className="mx-auto w-full max-w-[46rem] px-5 pb-16">
+          <div ref={setBodyEl} data-testid="public-body" />
+          {showChildren && page.children.length > 0 && (
+            <nav data-testid="public-children" style={{ marginTop: 32, borderTop: "1px solid var(--border, #ddd)", paddingTop: 12 }}>
+              <PublicTree nodes={page.children} />
+            </nav>
+          )}
         </div>
       </div>
-      <div className="mx-auto w-full max-w-[46rem] px-5 pb-16">
-        <div ref={setBodyEl} data-testid="public-body" />
-        {showChildren && page.children.length > 0 && (
-          <nav data-testid="public-children" style={{ marginTop: 32, borderTop: "1px solid var(--border, #ddd)", paddingTop: 12 }}>
-            <PublicTree nodes={page.children} />
-          </nav>
-        )}
-      </div>
-      {/* #227 ②: the TOC rail in the right whitespace on wide screens (same look as the member Reading rail). */}
+      {/* #227 ②: the TOC rail in the right whitespace on wide screens (same look as the member Reading rail).
+          On the OUTER (non-scrolling) wrapper + top offset by --wks-band-h so it clears the band and stays put. */}
       {isWide && toc.headings.length > 0 && (
-        <div className="pointer-events-none absolute left-[calc(50%+368px)] top-[5.5rem] bottom-2 z-[5] w-[210px]">
+        <div className="pointer-events-none absolute left-[calc(50%+368px)] top-[calc(var(--wks-band-h,5.5rem)+0.5rem)] bottom-2 z-[5] w-[210px]">
           <div className="pointer-events-auto h-full">
             <Toc headings={toc.headings} activeFrom={toc.activeFrom} depth={3} onJump={toc.jump} variant="rail" />
           </div>
