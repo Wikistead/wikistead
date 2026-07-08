@@ -131,12 +131,14 @@ export const tableInlineEditor: InlineEditor = {
     const colInsL = svgBtn(ICON.colInsBefore!, "table-col-insert-before", "Insert column before");
     const colInsR = svgBtn(ICON.colInsAfter!, "table-col-insert-after", "Insert column after");
     const colDel = svgBtn(ICON.del!, "table-col-delete", "Delete column");
+    colDel.classList.add("cm-lp-table-edit-btn-danger"); // #256 comment 1035: destructive → --danger (red)
     colOps.append(colInsL, colInsR, colDel);
     const rowOps = document.createElement("span");
     rowOps.className = "cm-lp-table-ops";
     const rowInsT = svgBtn(ICON.rowInsAbove!, "table-row-insert-above", "Insert row above");
     const rowInsB = svgBtn(ICON.rowInsBelow!, "table-row-insert-below", "Insert row below");
     const rowDel = svgBtn(ICON.del!, "table-row-delete", "Delete row");
+    rowDel.classList.add("cm-lp-table-edit-btn-danger"); // #256 comment 1035: destructive → --danger (red)
     rowOps.append(rowInsT, rowInsB, rowDel);
     // #217 (comment 772): the bar WRAPS at a narrow width (flex-wrap on the bar) but each LOGICAL GROUP is
     // an indivisible unit (a `cm-lp-table-ops` span with flex-shrink:0 and no internal wrap), so groups

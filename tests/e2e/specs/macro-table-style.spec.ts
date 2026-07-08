@@ -243,6 +243,10 @@ test("insert-after and delete a column via the contextual toolbar", async ({ bro
   expect(await colCount(page)).toBe(3);
 
   await selectCol(page, 0, 1);
+  // #256 comment 1035: the DELETE op is styled destructive (--danger). Assert the danger class is wired
+  // (the actual red is a review visual); insert/merge/align/no-fill stay the default colour.
+  await expect(page.getByTestId("table-col-delete")).toHaveClass(/cm-lp-table-edit-btn-danger/);
+  await expect(page.getByTestId("table-col-insert-after")).not.toHaveClass(/cm-lp-table-edit-btn-danger/);
   await page.getByTestId("table-col-delete").click();
   await sleep(150);
   expect(await colCount(page)).toBe(2);
@@ -263,6 +267,7 @@ test("insert-below and delete a row via the contextual toolbar", async ({ browse
   expect(await rowCount(page)).toBe(3);
 
   await selectRow(page, 0, 1);
+  await expect(page.getByTestId("table-row-delete")).toHaveClass(/cm-lp-table-edit-btn-danger/); // #256: destructive → --danger
   await page.getByTestId("table-row-delete").click();
   await sleep(150);
   expect(await rowCount(page)).toBe(2);
