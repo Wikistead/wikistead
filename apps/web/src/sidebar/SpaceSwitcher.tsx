@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronsUpDown, Pencil, Plus } from "lucide-react";
-import { Command, CommandInput, CommandList, CommandItem, CommandEmpty, CommandGroup, CommandSeparator } from "../components/ui/command";
+import { Command, CommandInput, CommandList, CommandItem, CommandGroup, CommandSeparator } from "../components/ui/command";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import type { Space } from "../data/queries";
 import { visibleSpaces, recordRecentSpace, hiddenSpaceCount, allSpacesSorted } from "./space-recent";
@@ -71,7 +71,15 @@ export function SpaceSwitcher({
           <Command shouldFilter={false} className="bg-transparent">
             <CommandInput value={query} onValueChange={setQuery} placeholder={t("sidebar.searchSpaces")} data-testid="space-search" />
             <CommandList className="max-h-[40vh]">
-              <CommandEmpty>{t("sidebar.noSpacesMatch")}</CommandEmpty>
+              {/* #295: cmdk's <CommandEmpty> only fires when its internal filtered count is 0, but the rename
+                  and new-space items below are always present (count >= 2), so it NEVER rendered and the
+                  message was dead code. shouldFilter is off (we filter app-side into `list`), so render the
+                  no-match message explicitly when a non-empty query matches no space. */}
+              {query.trim() !== "" && list.length === 0 && (
+                <div className="px-3 py-4 text-center text-sm text-muted-foreground" data-testid="space-empty">
+                  {t("sidebar.noSpacesMatch")}
+                </div>
+              )}
               <CommandGroup>
                 {list.map((s) => (
                   <CommandItem key={s.id} value={`space:${s.id}`} onSelect={() => select(s.id)} data-testid="space-option">
