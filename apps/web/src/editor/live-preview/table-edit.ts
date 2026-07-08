@@ -307,7 +307,17 @@ export const tableInlineEditor: InlineEditor = {
         el.removeEventListener("paste", onPaste);
         editHandle?.end(); // #154: hand focus back (view.focus() inline; no-op in the modal)
         editHandle = null;
-        if (!commit) { apply(grid); return; } // Esc → discard: remount from the current grid
+        if (!commit) {
+          // #266: Esc DISCARDS the typed text and exits cell-edit, staying in the table editor (Excel/
+          // Sheets/Notion semantics; a second Esc — via escExit — exits the whole table editor). The grid is
+          // unchanged, so apply(grid)→host.replaceSource is a no-op and would leave the cell's contenteditable
+          // DOM (holding the discarded text) in place. Restore the cell's display in place and re-select it.
+          el.classList.remove("cm-lp-cell-editing");
+          el.removeAttribute("contenteditable");
+          paintCellDisplay(el, r, c, cur);
+          selected.clear(); selected.add(`${r},${c}`); anchor = [r, c]; applySel();
+          return;
+        }
         const text = stripZeroWidth(cellElToText(el));
         const next: Grid = grid.map((row) => row.map((cl) => (cl ? { ...cl } : null)));
         const target = next[r]?.[c];
@@ -350,33 +360,40 @@ export const tableInlineEditor: InlineEditor = {
       el.addEventListener("paste", onPaste);
     };
 
+    // #266: paint a cell's NON-EDITING display — its inline content (or the placeholder) plus the border
+    // resize handles. Used at mount AND to restore a cell after its edit is DISCARDED (Esc): the grid is
+    // unchanged then, so a host.replaceSource remount never fires and the cell's contenteditable DOM (with
+    // the typed-but-discarded text) would otherwise linger.
+    const paintCellDisplay = (el: HTMLElement, r: number, c: number, cell: NonNullable<Grid[number][number]>) => {
+      el.replaceChildren();
+      if (cell.text) renderCellInline(el, cell.text); else el.textContent = " ";
+      el.appendChild(resizeHandle("cm-lp-col-resize", r === 0 ? "table-col-resize-" + c : "", (e) => {
+        const cols = dragCols(c); // affected set, fixed at drag start (selection can't change mid-drag)
+        dragSize(e, "x", cols.flatMap(colCellsOf), cols.length, (px) => applyColWidths(cols, px + "px"));
+      }));
+      el.appendChild(resizeHandle("cm-lp-row-resize", c === 0 ? "table-row-resize-" + r : "", (e) => {
+        const rows = dragRows(r);
+        dragSize(e, "y", rows.flatMap(rowCellsOf), rows.length, (px) => applyRowHeights(rows, px + "px"));
+      }));
+    };
+
     grid.forEach((row, r) => {
       const trow = document.createElement("tr");
       // #197: no row-select handle (the 1/2 number column is removed); rows start with data cells.
       row.forEach((cell, c) => {
         if (!cell) return; // covered position
         const el = document.createElement(cell.header ? "th" : "td");
-        // #89 comment 857 (3): render the cell's inline markdown (bold/italic/strike/code/link) in the RichUI
-        // grid too, so the grid matches the non-editing table (renderCellInline — allowlist, text+<br>, no
-        // innerHTML). Empty cells keep the visible placeholder. Editing a cell re-renders via renderCellInline.
-        if (cell.text) renderCellInline(el, cell.text); else el.textContent = " ";
         if (cell.colspan > 1) el.colSpan = cell.colspan;
         if (cell.rowspan > 1) el.rowSpan = cell.rowspan;
         if (cell.style) el.setAttribute("style", styleToCss(cell.style)); // #1: render style live (allowlisted)
         const key = `${r},${c}`;
         el.dataset.cellkey = key;
         cellEls.set(key, el);
-        // Resize on the cell BORDERS (#1): right edge = column width, bottom edge = row
-        // height. The interior is for drag-select. Border handles stopPropagation so they
-        // never start a selection. testid only on the representative cell per col/row.
-        el.appendChild(resizeHandle("cm-lp-col-resize", r === 0 ? "table-col-resize-" + c : "", (e) => {
-          const cols = dragCols(c); // affected set, fixed at drag start (selection can't change mid-drag)
-          dragSize(e, "x", cols.flatMap(colCellsOf), cols.length, (px) => applyColWidths(cols, px + "px"));
-        }));
-        el.appendChild(resizeHandle("cm-lp-row-resize", c === 0 ? "table-row-resize-" + r : "", (e) => {
-          const rows = dragRows(r);
-          dragSize(e, "y", rows.flatMap(rowCellsOf), rows.length, (px) => applyRowHeights(rows, px + "px"));
-        }));
+        // #89 (857): render the cell's inline markdown (bold/italic/strike/code/link) in the RichUI grid so it
+        // matches the non-editing table; plus the border resize handles (#1) — right edge = column width,
+        // bottom edge = row height (the interior is for drag-select). Factored so a discarded edit restores
+        // the exact same display (#266).
+        paintCellDisplay(el, r, c, cell);
         // Rectangular drag-select: pointerdown anchors here; moving extends the rectangle.
         el.addEventListener("pointerdown", (e) => {
           if (editing) return; // a cell is being typed into — let the browser place the caret

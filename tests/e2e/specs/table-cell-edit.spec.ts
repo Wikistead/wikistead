@@ -102,7 +102,12 @@ test("Shift+Enter inserts an in-cell newline → promotes to :::table with a <br
   await expect(macroTable.locator("td").first()).toContainText("y");
 });
 
-test("Escape while editing a cell discards the typed text (stays in edit mode)", async ({ browser }) => {
+// #266: Escape semantics for cell editing are DECIDED (Excel/Sheets/Notion): Escape DISCARDS the typed
+// text and EXITS the cell edit, staying in the table editor with the cell re-selected; a SECOND Escape
+// (escExit) exits the whole table editor to the static render. Before the fix the discard was a no-op —
+// the grid was unchanged so host.replaceSource never remounted and the cell's contenteditable DOM (with
+// the discarded text) lingered (the long-unowned table-cell-edit.spec failure). Real Chromium.
+test("Escape while editing a cell discards the typed text and exits the cell edit (two-level exit)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "celldiscard");
   await enterEdit(page);
@@ -114,9 +119,12 @@ test("Escape while editing a cell discards the typed text (stays in edit mode)",
   await page.keyboard.type("DISCARDME");
   await page.keyboard.press("Escape"); // cancel the cell edit (NOT the whole editor)
   await sleep(200);
-  // still IN the inline editor (Escape cancelled only the cell), and the cell reverted to "1".
+  // still IN the inline table editor (Escape cancelled only the cell), the cell reverted to "1", and it is
+  // no longer in edit mode (contenteditable dropped) — a plain, re-selected cell.
   await expect(page.getByTestId("table-edit")).toBeVisible();
-  await expect(page.getByTestId("table-edit").locator("td").first()).toHaveText("1");
+  const firstCell = page.getByTestId("table-edit").locator("td").first();
+  await expect(firstCell).toHaveText("1");
+  await expect(firstCell).not.toHaveAttribute("contenteditable", "true");
 
   await page.keyboard.press("Escape"); // now exit the editor → static render
   await sleep(200);
