@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, writeTuples } from '@wikistead/authz'
+import { check, writeTuples, deleteObjectTuples } from '@wikistead/authz'
 import type { TenantDb } from '../db/index.js'
 
 // #241 / ADR-110: page templates — the SAVE path. A template is a SNAPSHOT of a page's published Markdown
@@ -59,6 +59,58 @@ export async function saveTemplate(
   return { id }
 }
 
+// #249: template MANAGEMENT (list / preview / rename / delete). `view` and `manage` (owner or tenant
+// admin) are the template FGA relations (#247). Existence-hiding: a non-viewer gets 404 (never 403, so they
+// can't probe which templates exist); a viewer who is not a manager gets 403 on rename/delete.
+const canView = (fga: OpenFgaClient, userId: string, id: string) =>
+  fga.check({ user: `user:${userId}`, relation: 'view', object: `template:${id}` }).then((r) => r.allowed ?? false)
+const canManage = (fga: OpenFgaClient, userId: string, id: string) =>
+  fga.check({ user: `user:${userId}`, relation: 'manage', object: `template:${id}` }).then((r) => r.allowed ?? false)
+
+export interface TemplateSummary { id: string; name: string; scope: TemplateScope; spaceId: string | null; createdBy: string; createdAt: string }
+
+// The tenant's templates the user may VIEW (server FGA-filtered — scope containment is enforced here, not
+// by reading the columns). RLS scopes `db` to the tenant, so cross-tenant rows never appear.
+export async function listTemplates(db: TenantDb, fga: OpenFgaClient, args: { userId: string }): Promise<TemplateSummary[]> {
+  const rows = await db.sql<{ id: string; name: string; scope: TemplateScope; space_id: string | null; created_by: string; created_at: Date }[]>`
+    SELECT id, name, scope, space_id, created_by, created_at FROM templates ORDER BY created_at DESC`
+  const out: TemplateSummary[] = []
+  for (const r of rows) {
+    if (await canView(fga, args.userId, r.id)) {
+      out.push({ id: r.id, name: r.name, scope: r.scope, spaceId: r.space_id, createdBy: r.created_by, createdAt: r.created_at.toISOString() })
+    }
+  }
+  return out
+}
+
+// The frozen body for a preview. null → 404 (not viewable / missing — existence-hidden).
+export async function getTemplate(db: TenantDb, fga: OpenFgaClient, args: { userId: string; id: string }): Promise<{ id: string; name: string; scope: TemplateScope; body: string } | null> {
+  if (!(await canView(fga, args.userId, args.id))) return null
+  const [r] = await db.sql<{ id: string; name: string; scope: TemplateScope; body_md: string }[]>`SELECT id, name, scope, body_md FROM templates WHERE id = ${args.id}`
+  return r ? { id: r.id, name: r.name, scope: r.scope, body: r.body_md } : null
+}
+
+export async function renameTemplate(db: TenantDb, fga: OpenFgaClient, args: { userId: string; id: string; name: string }): Promise<void> {
+  if (!(await canView(fga, args.userId, args.id))) throw httpError(404, 'not found') // existence-hidden
+  if (!(await canManage(fga, args.userId, args.id))) throw httpError(403, 'forbidden') // viewable, not a manager
+  const name = (args.name ?? '').trim()
+  if (!name) throw httpError(400, 'name is required')
+  const res = await db.sql`UPDATE templates SET name = ${name}, updated_at = now() WHERE id = ${args.id}`
+  if (res.count === 0) throw httpError(404, 'not found')
+}
+
+export async function deleteTemplate(db: TenantDb, fga: OpenFgaClient, args: { userId: string; id: string }): Promise<void> {
+  if (!(await canView(fga, args.userId, args.id))) throw httpError(404, 'not found')
+  if (!(await canManage(fga, args.userId, args.id))) throw httpError(403, 'forbidden')
+  // Delete the row AND all its FGA tuples — no orphan tuple survives (so the id 404s afterwards and can't be
+  // re-resolved). Row first inside the tx; the FGA delete last (a failure rolls the row back).
+  await db.tx(async (tx) => {
+    const res = await tx`DELETE FROM templates WHERE id = ${args.id}`
+    if (res.count === 0) throw httpError(404, 'not found')
+    await deleteObjectTuples(fga, `template:${args.id}`)
+  })
+}
+
 export async function templatesPlugin(app: FastifyInstance) {
   // Save a template from a page. Member-only (no `config.guest` → a guest token never reaches here); the
   // explicit guard makes the "guests cannot save" boundary legible and defends against a misconfig.
@@ -80,4 +132,30 @@ export async function templatesPlugin(app: FastifyInstance) {
       return reply.code(201).send(t)
     },
   )
+
+  // #249: management — all member-only (no config.guest → a guest token 401s). Server re-checks authz on
+  // every op (the UI hiding non-manage actions is only the first layer).
+  app.get('/templates', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ error: 'unauthorized' })
+    return listTemplates(req.db, app.fga, { userId: req.user.sub })
+  })
+
+  app.get<{ Params: { id: string } }>('/templates/:id', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ error: 'unauthorized' })
+    const t = await getTemplate(req.db, app.fga, { userId: req.user.sub, id: req.params.id })
+    if (!t) return reply.code(404).send({ error: 'not found' })
+    return t
+  })
+
+  app.patch<{ Params: { id: string }; Body: { name?: string } }>('/templates/:id', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ error: 'unauthorized' })
+    await renameTemplate(req.db, app.fga, { userId: req.user.sub, id: req.params.id, name: req.body?.name ?? '' })
+    return reply.code(204).send()
+  })
+
+  app.delete<{ Params: { id: string } }>('/templates/:id', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ error: 'unauthorized' })
+    await deleteTemplate(req.db, app.fga, { userId: req.user.sub, id: req.params.id })
+    return reply.code(204).send()
+  })
 }
