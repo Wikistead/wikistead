@@ -21,6 +21,7 @@ import "./styles/print.css";
 import "./styles/macro-modal.css";
 import "./styles/table-edit.css"; // #86: table editor runs in the modal (outside CM baseTheme)
 import "./styles/callout-icons.css"; // #158-C4: callout header icons (Lucide mask-image)
+import "./styles/public.css"; // #227: prose styling for the anonymous public page body (outside CM)
 import "katex/dist/katex.min.css"; // #158-C3: KaTeX math rendering (MIT, self-hosted)
 
 // StrictMode is intentional: it double-invokes effects in dev, which exercises

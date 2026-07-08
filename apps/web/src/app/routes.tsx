@@ -185,7 +185,7 @@ function PageRoute() {
   const publish = usePublish(pageId ?? "");
   const renamePage = useRenamePage();
 
-  // Opening any page makes its space the active one, so the sidebar follows —
+  // Opening any page makes its space the active one, so the sidebar follows
   // including when arriving from cross-space search or a share link.
   const { setActiveSpaceId } = useActiveSpace();
   const openSpaceId = page?.spaceId;
@@ -433,7 +433,7 @@ function PageRoute() {
     // PageControls (export-html item is disabled). The handler is kept for when the redesign re-enables it.
     onExportHtml: () => { if (pageId) void downloadPageExport(token, pageId, "html"); },
     // #207 part 2: print the full server-rendered HTML (all macros static, no raw ::: leak) rather
-    // than window.print() on the virtualised CM surface. Fall back to the live-surface print only when
+    // than window.print on the virtualised CM surface. Fall back to the live-surface print only when
     // the page has no exportable HTML (unpublished draft → 404), so drafts can still be printed.
     onPrint: () => {
       if (pageId) void printPageHtml(token, pageId).then((ok) => { if (!ok) window.print(); });
@@ -934,7 +934,7 @@ function PublicPageRoute() {
 // #227 / ADR-030 (comment 966, option b): the anonymous read-only PUBLIC reader-chrome for a public space.
 // Reuses the app shell with a READ-ONLY sidebar (the space's published+public page tree) — the anonymous
 // visitor browses a public space exactly like a member, but every fetch is a PUBLIC endpoint
-// (/public/spaces/:id/pages + /public/pages/:id), member routes are never touched (no session → no login
+// /public/spaces/:id/pages + /public/pages/:id), member routes are never touched (no session → no login
 // bounce), and there is NO member chrome (search / user menu / edit / create). A non-public space → 404.
 function PublicSpaceSidebar({ nodes, openId, onOpen }: { nodes: PublicChildNode[]; openId: string | null; onOpen: (id: string) => void }) {
   return (
@@ -950,7 +950,10 @@ function PublicSpaceNode({ node, depth, openId, onOpen }: { node: PublicChildNod
         type="button"
         data-testid="public-tree-page"
         onClick={() => onOpen(node.id)}
-        className={`flex w-full min-w-0 items-center gap-1.5 truncate rounded px-1 py-1 text-left ${openId === node.id ? "bg-panel-2" : "hover:bg-panel-2"}`}
+        // #227 comment 1056: match the member sidebar's selected-row look (accent tint + medium weight) so the
+        // public reader-chrome carries the tenant accent (applied to :root by BrandingApplier) instead of a
+        // flat panel colour — the gap. Theme-token based (light/dark aware).
+        className={`flex w-full min-w-0 items-center gap-1.5 truncate rounded px-1 py-1 text-left ${openId === node.id ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium" : "hover:bg-panel-2"}`}
         style={{ paddingLeft: `${depth * 12 + 6}px` }}
       >
         <span className="truncate">{node.title}</span>
