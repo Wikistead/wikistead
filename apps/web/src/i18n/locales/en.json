@@ -667,5 +667,11 @@
     "deleteConfirm": "Delete the template “{{name}}”? This cannot be undone.",
     "actionFailed": "Something went wrong",
     "preview": "Preview"
+  },
+  "templatePicker": {
+    "title": "New page from template",
+    "empty": "No templates yet. Save a page as a template from its ⋯ menu.",
+    "selectPrompt": "Select a template to preview it.",
+    "use": "Use template"
   }
 }
