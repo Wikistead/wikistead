@@ -2855,6 +2855,11 @@ export const livePreviewTheme = EditorView.baseTheme({
     padding: "2px 6px",
   },
   ".cm-lp-table-edit-btn:hover": { background: "var(--panel-2, rgba(127,127,127,0.15))" },
+  // #256 comment 1035: the DELETE ops (column/row) read in the --danger semantic token so a destructive
+  // action is visually distinct from insert/merge/align/no-fill. currentColor drives the SVG stroke, and
+  // the hover uses a soft danger tint. --danger is defined for both light and dark (tokens.css).
+  ".cm-lp-table-edit-btn-danger": { color: "var(--danger, #cf222e)" },
+  ".cm-lp-table-edit-btn-danger:hover": { background: "color-mix(in srgb, var(--danger, #cf222e) 14%, transparent)" },
   ".cm-lp-table-edit th, .cm-lp-table-edit td": { cursor: "pointer", position: "relative" },
   ".cm-lp-col-resize": {
     position: "absolute",
