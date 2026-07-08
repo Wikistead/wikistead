@@ -33,6 +33,7 @@
     "plan:reconcile": "tsx --env-file=../../.env src/scripts/plan-reconcile.ts",
     "tenant:promote": "tsx --env-file=../../.env src/scripts/promote-tenant.ts",
     "private:backfill": "tsx --env-file=../../.env src/scripts/private-sharelink-backfill.ts",
+    "viewer-member:backfill": "tsx --env-file=../../.env src/scripts/viewer-member-backfill.ts",
     "test": "vitest run"
   },
   "dependencies": {

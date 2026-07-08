@@ -43,12 +43,19 @@ type space
     define tenant: [tenant]
     define manager: [user, group#member] or admin from tenant
     define editor: [user, group#member] or manager
+    # #258 / ADR-110: viewer_member = space members who can view (NO public wildcard, NO share_link). It is
+    # the MEMBER-ONLY subset of viewer, used by template#view so a public/shared space never exposes its
+    # space-scoped templates to guests/anon. Kept as a DIRECT-assignable relation (its own tuples) so the
+    # space-grant write path writes it for member grants; wildcards/share_link go to `viewer` only. viewer
+    # keeps its own direct types too (backward compat — #100 write-ripple: don't strip a direct-assign type)
+    # and unions viewer_member in, so page inheritance (view_base_from_space = viewer from space) is unchanged.
+    define viewer_member: [user, group#member] or editor
     # user:* here means public space — only set this tuple intentionally.
     # space-scoped share links: one tuple (space:S#viewer@share_link:Y) grants
     # view access to every page in S. Revoke = delete that tuple (1 op).
     # Permanent links omit condition; time-bounded links use non_expired.
     # (Issuance API implemented in #104 / ADR-038.)
-    define viewer: [user, group#member, user:*, share_link, share_link with non_expired] or editor
+    define viewer: [user, group#member, user:*, share_link, share_link with non_expired] or viewer_member
     define admin: admin from tenant
     # Comment AUDIENCE switch at the space level (#100 / ADR-029 Option B). Toggling comments on a
     # space writes/deletes these wildcard tuples (is_public-style; FGA stays the source of truth):
@@ -131,9 +138,13 @@ type page
 # tenant RLS); THIS type carries the audience authorization. Scope is expressed by which tuples exist —
 # ADDITIVE (no existing type changed, so no write ripple):
 #   personal : owner + tenant only            → view = manage (owner or tenant admin)
-#   space    : + space:S                       → view also = viewer from space (that space's viewers)
+#   space    : + space:S                       → view also = viewer_member from space (that space's MEMBERS)
 #   tenant   : + audience_all@tenant:T         → view also = member from audience_all (all tenant members)
 # Guests (share_link) and public (user:*) NEVER appear here → templates are never guest/public-visible.
+# #258: template#view inherits `viewer_member from space`, NOT `viewer from space`. viewer includes the
+# public wildcard + share_link (a public/shared space's pages are anon-viewable), so inheriting it would
+# leak space-scoped templates to guests/anon (the documented hard boundary above). viewer_member is the
+# member-only subset, so the boundary holds — asserted by the space-scope × public/shared anti-tests.
 # Changing scope = writing/deleting ONE tuple. A deleted space degrades to owner/admin visibility (the
 # snapshot row stays). manage (rename/delete) = the owner or a tenant admin, re-checked server-side.
 type template
@@ -144,7 +155,7 @@ type template
     define audience_all: [tenant]
     define owner: [user]
     define manage: owner or admin from tenant
-    define view: manage or member from audience_all or viewer from space
+    define view: manage or member from audience_all or viewer_member from space
 
 # Evaluated at check time using current_time from the check context.
 # expires_at is stored in the tuple condition context at write time.

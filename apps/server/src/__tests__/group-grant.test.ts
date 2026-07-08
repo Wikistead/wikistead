@@ -82,6 +82,8 @@ describe('#163 grant access to a group by name', () => {
       spaceId, tenantId: T, userId: MANAGER, grantee: groupGrantee(T, GROUP), capability: 'view',
     })
     expect(await checkRelation(fgaClient, `user:${MEMBER}`, 'viewer', { type: 'space', id: spaceId })).toBe(true) // member of Engineering resolves
+    // #258: a member VIEW grant also writes viewer_member (the member-only subset template#view inherits).
+    expect(await checkRelation(fgaClient, `user:${MEMBER}`, 'viewer_member', { type: 'space', id: spaceId })).toBe(true)
     expect(await checkRelation(fgaClient, `user:${STRANGER}`, 'viewer', { type: 'space', id: spaceId })).toBe(false) // not in the group
     // the access list resolves the hashed grantee id back to the human group name (#163 display)
     const listed = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: MANAGER })
@@ -90,6 +92,7 @@ describe('#163 grant access to a group by name', () => {
       spaceId, tenantId: T, userId: MANAGER, grantee: groupGrantee(T, GROUP), capability: 'view',
     })
     expect(await checkRelation(fgaClient, `user:${MEMBER}`, 'viewer', { type: 'space', id: spaceId })).toBe(false) // revoke removes it
+    expect(await checkRelation(fgaClient, `user:${MEMBER}`, 'viewer_member', { type: 'space', id: spaceId })).toBe(false) // #258: revoke removes the pair
   })
 
   it('granting a PAGE to a group by name resolves view for a synced member', async () => {
