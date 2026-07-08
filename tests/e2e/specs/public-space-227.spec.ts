@@ -1,0 +1,66 @@
+import { test, expect } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { enterEdit, openScratch, sleep } from "../helpers";
+
+// #227 / ADR-030 (option b): the anonymous read-only PUBLIC reader-chrome for a public space. An anonymous
+// browser context (no session) browses a public space in the app shell's sidebar (its published+public page
+// tree) and reads a page in the content area — with NO member chrome. The space is made public by writing
+// space:S#viewer@user:* directly against the e2e OpenFGA (no public-toggle route yet — #253).
+const repoEnv = readFileSync(fileURLToPath(new URL("../../../.env.e2e.local", import.meta.url)), "utf8");
+const STORE = /OPENFGA_STORE_ID=(.+)/.exec(repoEnv)![1]!.trim();
+const MODEL = /OPENFGA_MODEL_ID=(.+)/.exec(repoEnv)![1]!.trim();
+const FGA = "http://localhost:8090";
+
+async function fgaWrite(tuple: { user: string; relation: string; object: string }) {
+  const res = await fetch(`${FGA}/stores/${STORE}/write`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ writes: { tuple_keys: [tuple] }, authorization_model_id: MODEL }),
+  });
+  if (!res.ok) throw new Error(`fga write failed: ${res.status} ${await res.text()}`);
+}
+async function fgaDelete(tuple: { user: string; relation: string; object: string }) {
+  await fetch(`${FGA}/stores/${STORE}/write`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ deletes: { tuple_keys: [tuple] }, authorization_model_id: MODEL }),
+  }).catch(() => {});
+}
+
+// Restore demo_space to NON-public after this file — making it public is shared e2e-FGA state that would
+// otherwise leak a "non-public demo_space page" assumption in other specs (e.g. public-page.spec).
+test.afterAll(async () => {
+  await fgaDelete({ user: "user:*", relation: "viewer", object: "space:demo_space" });
+});
+
+test("#227: an anonymous visitor browses a public space via the sidebar reader-chrome, no member chrome", async ({ browser }) => {
+  // Authed: create + publish a page in demo_space (publish writes page#space → anon-viewable in a public space).
+  const authed = await (await browser.newContext()).newPage();
+  const title = `pub-space-${Date.now()}`; // this is the page TITLE the sidebar tree shows (not the body H1)
+  await openScratch(authed, title);
+  await enterEdit(authed);
+  await authed.click("[data-pane=preview] .cm-content");
+  await authed.keyboard.insertText("# Public space page\n\nvisible to anyone\n");
+  await sleep(400);
+  await authed.getByTestId("publish-page").click();
+  await sleep(800);
+  // Make demo_space a PUBLIC space (anonymous viewer).
+  await fgaWrite({ user: "user:*", relation: "viewer", object: "space:demo_space" }).catch(() => {}); // idempotent (may already be public from a prior run)
+
+  // Anonymous context (no cookies/session) → the public reader-chrome.
+  const anon = await (await browser.newContext()).newPage();
+  await anon.goto("/pub/space/demo_space");
+  await expect(anon.getByTestId("public-sidebar")).toBeVisible({ timeout: 10000 });
+  const row = anon.getByTestId("public-tree-page").filter({ hasText: title }).first();
+  await expect(row).toBeVisible({ timeout: 10000 });
+
+  // NO member chrome: no user menu / search / new-page for an anonymous public visitor.
+  await expect(anon.getByTestId("user-menu")).toHaveCount(0);
+  await expect(anon.getByTestId("new-page")).toHaveCount(0);
+
+  // Clicking a page renders its sanitized body in the content area.
+  await row.click();
+  await expect(anon.getByTestId("public-body").locator("h1")).toHaveText("Public space page", { timeout: 10000 });
+  await expect(anon.getByTestId("public-body")).toContainText("visible to anyone");
+});
