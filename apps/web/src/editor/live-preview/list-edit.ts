@@ -83,11 +83,14 @@ function continuedMarker(lineText: string, forward: boolean): string | null {
   const m = MARKER_RE.exec(lineText);
   if (!m) return null;
   const [, indent, token, delim, ws] = m;
+  // #301: a GFM task item (`- [ ]` / `1. [x]`) continues with an UNCHECKED `[ ] ` box — the same rule the
+  // Enter path (insertNewlineContinueMarkdown) uses; never clone a checked box. Non-task lists are unchanged.
+  const task = /^\[[ xX]\]\s/.test(lineText.slice(m[0].length)) ? "[ ] " : "";
   if (/^\d+$/.test(token!)) {
     const n = parseInt(token!, 10);
-    return `${indent}${forward ? n + 1 : Math.max(1, n)}${delim}${ws}`; // ordered: next number (o) / same (O)
+    return `${indent}${forward ? n + 1 : Math.max(1, n)}${delim}${ws}${task}`; // ordered: next number (o) / same (O)
   }
-  return `${indent}${token}${delim}${ws}`; // bullet: repeat
+  return `${indent}${token}${delim}${ws}${task}`; // bullet: repeat
 }
 let vimListMapped = false;
 function ensureVimListMappings(): void {
