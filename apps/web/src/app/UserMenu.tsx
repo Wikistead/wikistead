@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Shield, LogOut, Settings } from "lucide-react";
+import { Shield, LogOut, Settings, FileStack } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../session/SessionProvider";
 import { Avatar } from "../ui/Avatar";
@@ -21,6 +21,9 @@ export function UserMenu({ onLogout }: { onLogout: () => void }) {
       <DropdownMenuContent align="end" data-testid="user-menu-content">
         <DropdownMenuItem onSelect={() => navigate("/settings/account")} data-testid="user-menu-account">
           <Settings size={14} /> {t("userMenu.accountSettings")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => navigate("/templates")} data-testid="user-menu-templates">
+          <FileStack size={14} /> {t("templates.title")}
         </DropdownMenuItem>
         {isAdmin && (
           <DropdownMenuItem onSelect={() => navigate("/admin")} data-testid="user-menu-admin">
