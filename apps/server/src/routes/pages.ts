@@ -795,6 +795,15 @@ export async function setPagePublic(
     await writeTuples(fga, [PUBLIC_GRANT(args.pageId)]) // view_base@user:* — is_public flips true on reindex
     return o
   })
+  // #253 review (TOCTOU self-heal): the pre-write private check (:786) is outside the tx, so a concurrent
+  // setPagePrivate could land its markers BETWEEN that check and the grant write above, leaving a private page
+  // with a live view_base@user:* (anonymous world-readable, no self-heal — the higher-stakes leak the reviewer
+  // flagged). Re-read private AFTER the write; if it is now private, REVOKE the grant we just wrote so
+  // private always wins (public⊥private converges without an advisory lock). Idempotent.
+  if (await readPagePrivate(fga, args.pageId)) {
+    await deleteTuples(fga, [PUBLIC_GRANT(args.pageId)]).catch(() => {})
+    throw Object.assign(new Error('a private page cannot be made public'), { statusCode: 409 })
+  }
   processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
   emit({ type: 'page.made_public', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
 }
