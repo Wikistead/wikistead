@@ -53,6 +53,12 @@
 :is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive) code{font-family:var(--font-code);background:rgba(127,127,127,0.18);border-radius:3px;padding:0 3px}
 :is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive) pre{font-family:var(--font-code);background:rgba(127,127,127,0.12);border-radius:4px;padding:0.5em 0.7em;overflow:auto}
 :is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive) pre code{background:none;padding:0}
+/* #174 (2): a GFM pipe table nested inside a column/tab/transclude (rendered by md-render as
+   .cm-lp-md-table) got NO table styling — it collapsed to a bordersless, padless skeleton. Give it the
+   shared bordered look (theme tokens, light/dark). Header cells are emphasised like the top-level table. */
+:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive) .cm-lp-md-table{border-collapse:collapse;margin:0;font-size:0.95em}
+:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive) .cm-lp-md-table :is(th,td){border:1px solid var(--border,#888);padding:0.3em 0.6em;text-align:left;vertical-align:top}
+:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive) .cm-lp-md-table th{font-weight:700;background:rgba(127,127,127,0.12)}
 
 /* #185 (re-bounce): the tab-switch styling lives in the CM baseTheme (.cm-editor-scoped), but the
    NESTED tabs rendered by renderMarkdownToDom (a tabs macro inside another tab/column) can sit in DOM

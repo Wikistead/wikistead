@@ -7,7 +7,7 @@ import { openScratch, enterEdit, sleep } from "../helpers";
 // resolver fixed the range LAYER (motion/reveal/fence-hide) but the tabs WIDGET body was still sliced
 // from lezer's `node.to`, so the widget only split the first tab and the rest leaked. Driving the widget
 // range from the resolver (directiveMacroAt) + skipping the orphaned sibling nodes fixes it. This test
-// asserts the WIDGET STRUCTURE (both tab buttons, both columns, tab switching), not just marker leak —
+// asserts the WIDGET STRUCTURE (both tab buttons, both columns, tab switching), not just marker leak
 // the old "innerText contains CCC" passed BECAUSE the second tab leaked as visible text (the bug itself).
 test("#185 comment 781: nested tabs>columns builds a real widget — both tabs, both columns, no leak", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
@@ -153,7 +153,7 @@ test("#215: a nested callout selects, edits via its own editUI island, and delet
 
 // #265 (review rejection): the earlier #215 assertions used force:true clicks, which bypass the real
 // failure — a nested callout's editUI island OPENS but you can't WRITE to it because the outer columns atom
-// swallows the input/focus (MacroWidget.ignoreEvent()=false). This test drives the island with REAL clicks
+// swallows the input/focus (MacroWidget.ignoreEvent=false). This test drives the island with REAL clicks
 // and REAL typing (no force): the body edit and the type-chip change must both take effect at depth. Real
 // Chromium — a focus/event-routing concern happy-dom + synthetic force-clicks can't exercise.
 test("#265: a nested callout island accepts REAL typing + a REAL type-chip click (input not swallowed)", async ({ browser }) => {
@@ -199,4 +199,40 @@ test("#265: a nested callout island accepts REAL typing + a REAL type-chip click
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("AAA note EDITED");
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("BBB text");
   expect(errs, errs.join(" | ")).toHaveLength(0);
+});
+
+// #174 a mermaid diagram AND a GFM pipe table nested inside a tab must render at FULL SIZE once the
+// tab activates. Before the fix, mermaid rendered while its panel was display:none (measured 0 width → a
+// degenerate sliver), and the nested table had no border/padding CSS (a padless skeleton). The old #174-1/4
+// specs only asserted existence, so both regressions passed. This asserts GEOMETRY, on the initially-hidden
+// second tab (the worst case).
+test("#174 nested mermaid + pipe table lay out at full size when a hidden tab activates", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1200, height: 800 } })).newPage();
+  await openScratch(page, "nested-geom");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(
+    "::::tabs\n:::tab[One]\nplain\n:::\n:::tab[Two]\n```mermaid\nflowchart LR\n  Alpha --> Beta --> Gamma --> Delta\n```\n\n| Col A | Col B |\n| --- | --- |\n| one | two |\n:::\n::::\n\nend\n",
+  );
+  await sleep(1000);
+  await page.keyboard.press("Control+End"); // caret out of the macro
+  await sleep(300);
+
+  const tabs = page.locator("[data-pane=preview] [data-testid=macro-tabs]");
+  await expect(tabs).toHaveCount(1);
+  // Activate the SECOND tab — it was display:none, so mermaid first rendered degenerate (the bug).
+  await tabs.locator(".cm-lp-tab", { hasText: "Two" }).click();
+  await sleep(900); // mermaid async re-render on becoming visible (ResizeObserver)
+
+  const active = tabs.locator(".cm-lp-tabpanel-active");
+  // 1: the mermaid SVG lays out at a real width (a hidden-render sliver was ~87px).
+  const svgW = await active.locator("[data-testid=macro-mermaid] svg").evaluate((el) => el.getBoundingClientRect().width);
+  expect(svgW).toBeGreaterThan(200);
+  // 2: the nested pipe table is a real bordered table (width + cell padding), not a padless skeleton.
+  const table = active.locator("table.cm-lp-md-table");
+  await expect(table).toHaveCount(1);
+  const tableW = await table.evaluate((el) => el.getBoundingClientRect().width);
+  expect(tableW).toBeGreaterThan(100);
+  const cellPad = await table.locator("td").first().evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft));
+  expect(cellPad).toBeGreaterThan(0);
 });

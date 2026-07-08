@@ -18,7 +18,7 @@ function loadMermaid(theme: MacroContext["theme"]) {
   if (!mermaidP) {
     mermaidP = import("mermaid").then(({ default: mermaid }) => {
       // suppressErrorRendering (#191): on a syntax error mermaid otherwise injects a "bomb" error
-      // diagram into the DOM (body), which accumulates on every re-render/keystroke. Suppress it —
+      // diagram into the DOM (body), which accumulates on every re-render/keystroke. Suppress it
       // we render our own in-macro error message in the catch below.
       mermaid.initialize({ startOnLoad: false, securityLevel: "strict", suppressErrorRendering: true, theme: theme === "dark" ? "dark" : "default" });
       return mermaid;
@@ -47,23 +47,40 @@ export const mermaidMacro: FenceMacro = {
     const fig = document.createElement("div");
     fig.className = "cm-lp-mermaid-fig";
     el.appendChild(fig);
-    const id = nextId();
-    void loadMermaid(ctx.theme).then(async (mermaid) => {
-      try {
-        const { svg } = await mermaid.render(id, code);
-        fig.innerHTML = svg; // sanitized by mermaid (securityLevel: strict)
-      } catch {
-        el.classList.add("cm-lp-macro-error");
-        fig.textContent = "Invalid mermaid diagram"; // in-macro only (suppressErrorRendering stops the body bomb)
-      } finally {
-        // Belt-and-suspenders (#191): mermaid.render appends a temp element PREFIXED with 'd' (d<id>)
-        // to the DOM for measurement; on an error path it can linger. Remove only THAT — never #<id>,
-        // which is the id of the RENDERED <svg> we assigned into `el` above (removing it deleted valid
-        // diagrams — #191 review regression: mermaid names the output svg `${id}`, so
-        // getElementById(id) found the real figure inside `el`, not a stray temp).
-        document.getElementById("d" + id)?.remove(); // mermaid prefixes the temp/error container with 'd'
-      }
-    });
+    // #174 (1): mermaid sizes a diagram by MEASURING text via layout. Inside a display:none tab
+    // panel that measures 0, so the SVG comes out degenerate (a tiny sliver). Paint once now; then re-paint
+    // ONCE the element first gains a real width — a ResizeObserver fires when the tab activates (display:none
+    // → block gives it a layout box). Only the `fig` child is replaced, so a nested WYSIWYG pencil appended to
+    // `el` survives (per the note above). Guarded (painting / paintedWidth) so a normally-visible diagram that
+    // rendered correctly on the first paint doesn't re-render churn.
+    let paintedWidth = 0; // the width the current SVG was laid out at (0 = never at a real width)
+    let painting = false;
+    const paint = () => {
+      if (painting) return;
+      painting = true;
+      const id = nextId(); // fresh id per paint so a re-paint can't collide with the previous svg's id (#191)
+      void loadMermaid(ctx.theme).then(async (mermaid) => {
+        try {
+          const { svg } = await mermaid.render(id, code);
+          fig.innerHTML = svg; // sanitized by mermaid (securityLevel: strict)
+          paintedWidth = el.clientWidth;
+        } catch {
+          el.classList.add("cm-lp-macro-error");
+          fig.textContent = "Invalid mermaid diagram"; // in-macro only (suppressErrorRendering stops the body bomb)
+        } finally {
+          // Belt-and-suspenders (#191): mermaid.render appends a temp element PREFIXED with 'd' (d<id>)
+          // to the DOM for measurement; on an error path it can linger. Remove only THAT — never #<id>,
+          // which is the id of the RENDERED <svg> we assigned into `el` above (removing it deleted valid
+          // diagrams — #191 review regression: mermaid names the output svg `${id}`, so
+          // getElementById(id) found the real figure inside `el`, not a stray temp).
+          document.getElementById("d" + id)?.remove(); // mermaid prefixes the temp/error container with 'd'
+          painting = false;
+        }
+      });
+    };
+    paint();
+    const ro = new ResizeObserver(() => { if (paintedWidth === 0 && el.clientWidth > 0) paint(); });
+    ro.observe(el);
     return el;
   },
   // #174 / ADR-087: the unified inline editUI — the first first-party consumer of the editUI framework.
