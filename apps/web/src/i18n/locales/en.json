@@ -315,6 +315,8 @@
     "signInTitle": "Sign in to wikistead",
     "signInBody": "Continue with your organization's identity provider.",
     "signIn": "Sign in",
+    "errorAccess": "Sign-in couldn't be completed. Please try again or contact your workspace administrator.",
+    "errorSeatFull": "This workspace has reached its member limit. Ask an administrator to free a seat or upgrade.",
     "joinTitle": "Create your wikistead workspace",
     "joinBody": "Sign up with your identity provider to get started.",
     "signUp": "Sign up",
