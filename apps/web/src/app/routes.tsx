@@ -872,17 +872,17 @@ function PublicTree({ nodes }: { nodes: PublicChildNode[] }) {
   );
 }
 
-function PublicPageRoute() {
+// The rendered body of a single public page (no chrome). `showChildren` appends the page's own public
+// child tree as nav links (used by the standalone /pub/:id view; the space reader-chrome hides it because
+// the sidebar already provides navigation). Reused by PublicPageRoute and PublicSpaceRoute (#227).
+function PublicPageContent({ pageId, showChildren }: { pageId: string; showChildren: boolean }) {
   const { t } = useTranslation();
-  const { pageId } = useParams<{ pageId: string }>();
   const [state, setState] = useState<{ status: "loading" | "notfound" | "ok"; page?: { id: string; title: string; content: string; noindex: boolean; children: PublicChildNode[] } }>({ status: "loading" });
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
-    if (!pageId) { setState({ status: "notfound" }); return; }
-    // Plain unauthenticated fetch — the endpoint is anonymous by design (404 = not public / absent).
     fetch(assetUrl(`/public/pages/${encodeURIComponent(pageId)}`))
       .then(async (res) => {
         if (cancelled) return;
@@ -893,13 +893,11 @@ function PublicPageRoute() {
     return () => { cancelled = true; };
   }, [pageId]);
 
-  // Sanitized body render (display-only DOM; never innerHTML with user content).
   useEffect(() => {
     if (state.status !== "ok" || !bodyRef.current) return;
     bodyRef.current.replaceChildren(renderMarkdownToDom(state.page!.content));
   }, [state]);
 
-  // #124: mirror the server's X-Robots-Tag as <meta name="robots"> for the SPA-rendered page.
   useEffect(() => {
     if (state.status !== "ok" || !state.page!.noindex) return;
     const meta = document.createElement("meta");
@@ -918,7 +916,7 @@ function PublicPageRoute() {
     <div className="wks-public" style={{ maxWidth: "46rem", margin: "0 auto", padding: "32px 20px", fontFamily: "var(--font-body, sans-serif)" }}>
       <h1 data-testid="public-title" style={{ marginTop: 0 }}>{page.title}</h1>
       <div ref={bodyRef} data-testid="public-body" />
-      {page.children.length > 0 && (
+      {showChildren && page.children.length > 0 && (
         <nav data-testid="public-children" style={{ marginTop: 32, borderTop: "1px solid var(--border, #ddd)", paddingTop: 12 }}>
           <PublicTree nodes={page.children} />
         </nav>
@@ -927,10 +925,81 @@ function PublicPageRoute() {
   );
 }
 
+function PublicPageRoute() {
+  const { pageId } = useParams<{ pageId: string }>();
+  if (!pageId) return <div data-testid="public-not-found" style={{ padding: 24 }} />;
+  return <PublicPageContent pageId={pageId} showChildren />;
+}
+
+// #227 / ADR-030 (comment 966, option b): the anonymous read-only PUBLIC reader-chrome for a public space.
+// Reuses the app shell with a READ-ONLY sidebar (the space's published+public page tree) — the anonymous
+// visitor browses a public space exactly like a member, but every fetch is a PUBLIC endpoint
+// (/public/spaces/:id/pages + /public/pages/:id), member routes are never touched (no session → no login
+// bounce), and there is NO member chrome (search / user menu / edit / create). A non-public space → 404.
+function PublicSpaceSidebar({ nodes, openId, onOpen }: { nodes: PublicChildNode[]; openId: string | null; onOpen: (id: string) => void }) {
+  return (
+    <nav className="flex h-full flex-col gap-0.5 overflow-auto p-2 text-[length:var(--text-ui)]" data-testid="public-sidebar">
+      {nodes.map((n) => <PublicSpaceNode key={n.id} node={n} depth={0} openId={openId} onOpen={onOpen} />)}
+    </nav>
+  );
+}
+function PublicSpaceNode({ node, depth, openId, onOpen }: { node: PublicChildNode; depth: number; openId: string | null; onOpen: (id: string) => void }) {
+  return (
+    <div>
+      <button
+        type="button"
+        data-testid="public-tree-page"
+        onClick={() => onOpen(node.id)}
+        className={`flex w-full min-w-0 items-center gap-1.5 truncate rounded px-1 py-1 text-left ${openId === node.id ? "bg-panel-2" : "hover:bg-panel-2"}`}
+        style={{ paddingLeft: `${depth * 12 + 6}px` }}
+      >
+        <span className="truncate">{node.title}</span>
+      </button>
+      {node.children.map((c) => <PublicSpaceNode key={c.id} node={c} depth={depth + 1} openId={openId} onOpen={onOpen} />)}
+    </div>
+  );
+}
+function PublicSpaceRoute() {
+  const { t } = useTranslation();
+  const { spaceId } = useParams<{ spaceId: string }>();
+  const [tree, setTree] = useState<PublicChildNode[] | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!spaceId) { setNotFound(true); return; }
+    fetch(assetUrl(`/public/spaces/${encodeURIComponent(spaceId)}/pages`))
+      .then(async (res) => {
+        if (cancelled) return;
+        if (!res.ok) { setNotFound(true); return; }
+        const t = (await res.json()) as PublicChildNode[];
+        setTree(t);
+        setOpenId(t[0]?.id ?? null); // open the first public page by default
+      })
+      .catch(() => { if (!cancelled) setNotFound(true); });
+    return () => { cancelled = true; };
+  }, [spaceId]);
+
+  if (notFound) return <AppShell><div data-testid="public-not-found" style={{ padding: 24 }}>{t("publicPage.notFound")}</div></AppShell>;
+  return (
+    <AppShell sidebar={<PublicSpaceSidebar nodes={tree ?? []} openId={openId} onOpen={setOpenId} />}>
+      {openId ? (
+        <PublicPageContent key={openId} pageId={openId} showChildren={false} />
+      ) : (
+        <div className="flex h-full items-center justify-center p-8 text-fg-dim" data-testid="public-space-empty">
+          {tree == null ? "" : t("share.spacePickPrompt")}
+        </div>
+      )}
+    </AppShell>
+  );
+}
+
 export function AppRoutes() {
   return (
     <Routes>
       <Route path="/p/:pageId" element={<PageRoute />} />
+      <Route path="/pub/space/:spaceId" element={<PublicSpaceRoute />} />
       <Route path="/pub/:pageId" element={<PublicPageRoute />} />
       <Route path="/share/:linkId" element={<ShareRoute />} />
       <Route path="/invite" element={<InviteRoute />} />

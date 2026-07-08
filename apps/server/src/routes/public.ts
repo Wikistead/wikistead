@@ -86,9 +86,43 @@ export async function loadPublicChildTree(
   return out
 }
 
+// #227 / ADR-030: the TOP-LEVEL public pages of a space (parent_id NULL, published). Each is then
+// individually ANON-view-checked by the caller before it (and its public subtree) enters the tree — a
+// non-public/unpublished root and its whole subtree never appear, with no observable gap.
+async function loadPublicSpaceRoots(tenantId: string, spaceId: string): Promise<{ id: string; title: string }[]> {
+  return pool.begin(async (tx) => {
+    await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+    return tx<{ id: string; title: string }[]>`
+      SELECT id, title FROM pages WHERE space_id = ${spaceId} AND parent_id IS NULL
+        AND published_at IS NOT NULL
+      ORDER BY position, created_at LIMIT ${MAX_CHILDREN_PER_NODE}
+    `
+  }) as Promise<{ id: string; title: string }[]>
+}
+
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function publicPlugin(app: FastifyInstance) {
+  // GET /public/spaces/:spaceId/pages — the published+public page tree of a PUBLIC space (#227 / ADR-030),
+  // for the anonymous read-only reader-chrome. The space must be anonymously viewable
+  // (space:S#viewer@user:*) — else 404 (existence-hidden). Every node is individually ANON-view-checked
+  // (loadPublicSpaceRoots + loadPublicChildTree) and published-gated, so an unpublished / non-public /
+  // private page and its whole subtree never appear. No new authz — reuses the same per-node ANON check as
+  // the page tree. principalForPage is untouched: this is a PUBLIC endpoint (no member routes for anon).
+  app.get<{ Params: { spaceId: string } }>('/public/spaces/:spaceId/pages', async (req, reply) => {
+    const tenant = await resolveTenantForRequest(req.headers.host ?? '')
+    if (!tenant) return reply.code(404).send({ error: 'not found' })
+    const spacePublic = await checkRelation(fgaClient, ANON, 'viewer', { type: 'space', id: req.params.spaceId })
+    if (!spacePublic) return reply.code(404).send({ error: 'not found' })
+    const roots = await loadPublicSpaceRoots(tenant.id, req.params.spaceId)
+    const tree: PublicChild[] = []
+    for (const r of roots) {
+      if (!(await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: r.id }))) continue
+      tree.push({ id: r.id, title: r.title, children: await loadPublicChildTree(tenant.id, r.id) })
+    }
+    return reply.send(tree)
+  })
+
   // GET /public/pages/:pageId — single public page read-only render
   app.get<{ Params: { pageId: string } }>('/public/pages/:pageId', async (req, reply) => {
     const tenant = await resolveTenantForRequest(req.headers.host ?? '')
