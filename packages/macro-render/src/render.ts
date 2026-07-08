@@ -1,5 +1,5 @@
 import { parser, Strikethrough, Table } from "@lezer/markdown";
-import { directiveExtension, parseDirectiveOpen } from "./directive-parser.js";
+import { directiveExtension, parseDirectiveOpen, resolveDirectiveRanges, type ResolvedDirective } from "./directive-parser.js";
 import { SafeHtml, html, joinSafe, unsafeHtml } from "./safe-html.js";
 
 // #85 / ADR-059 + ADR-085: the SERVER-SIDE, DOM-FREE markdown → HTML renderer for published / static
@@ -121,6 +121,23 @@ function stripMarks(node: SNode, src: string, mark: string): string {
 }
 
 // The inner body of a directive: drop the opening line and the closing ::: line.
+// #296: lezer's markdown grammar early-closes a nested `:::tabs` at an inner directive's close, so the
+// Directive node's `to` truncates a multi-tab body and the leaked close leaks a literal `:::`.
+// resolveDirectiveRanges (Pandoc-stack single truth, same fix as the editor's fence.ts / md-render.ts) gives
+// the corrected end. Memoised per source string (bounded).
+const rdCache = new Map<string, ResolvedDirective[]>();
+function resolvedFor(src: string): ResolvedDirective[] {
+  let r = rdCache.get(src);
+  if (!r) { r = resolveDirectiveRanges(src); if (rdCache.size > 64) rdCache.clear(); rdCache.set(src, r); }
+  return r;
+}
+// The absolute end offset a block CONSUMES: the resolver-corrected end for a `:::` directive, else node.to.
+function consumedEnd(node: SNode, src: string): number {
+  if (node.name !== "Directive") return node.to;
+  const rd = resolvedFor(src).find((d) => d.from === node.from);
+  return rd ? rd.to : node.to;
+}
+
 function directiveBody(full: string): string {
   const lines = full.split("\n").slice(1);
   if (lines.length && /^\s*:::+\s*$/.test(lines[lines.length - 1]!)) lines.pop();
@@ -179,7 +196,9 @@ function renderBlock(node: SNode, src: string, macros: MacroHtmlRegistry): SafeH
       return html`<table>${head ?? html``}${body}</table>`;
     }
     case "Directive": {
-      const full = txt(src, node);
+      // #296: slice with the resolver-corrected end (lezer early-closes a nested :::tabs), so a multi-item
+      // body reaches the macro whole. renderBlocks skips the sibling nodes lezer leaked past the early-close.
+      const full = src.slice(node.from, consumedEnd(node, src));
       const nl = full.indexOf("\n");
       const parsed = parseDirectiveOpen(nl === -1 ? full : full.slice(0, nl));
       const macro = parsed ? macros.directive(parsed.name) : undefined;
@@ -202,9 +221,13 @@ function renderBlock(node: SNode, src: string, macros: MacroHtmlRegistry): SafeH
 
 function renderBlocks(parent: SNode, src: string, macros: MacroHtmlRegistry): SafeHtml {
   const parts: SafeHtml[] = [];
+  let skipUntil = -1; // #296: a resolver-corrected directive range consumes the sibling nodes lezer leaked
   for (let c = parent.firstChild; c; c = c.nextSibling) {
     if (MARKS.has(c.name)) continue;
+    if (c.from < skipUntil) continue;
     parts.push(renderBlock(c, src, macros));
+    const end = consumedEnd(c, src);
+    if (end > skipUntil) skipUntil = end;
   }
   return joinSafe(parts, "\n");
 }
