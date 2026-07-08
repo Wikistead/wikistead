@@ -42,6 +42,26 @@ test("#202: vim normal o/O continue the list marker", async ({ browser }) => {
   expect(await page.locator("[data-pane=preview] .cm-content").innerText(), "O did not continue the marker").toMatch(/- Y|• Y/);
 });
 
+// #301: vim o/O on a GFM TASK item continues with an UNCHECKED checkbox (`- [ ] `), matching the Enter
+// path — the marker continuation used to know only bullets/ordered, so o on a task line dropped the `[ ]`.
+test("#301: vim o on a task item continues with an unchecked checkbox (never clones [x])", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "list-vim-task-o");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("- [x] done\nplain\n");
+  await sleep(500);
+  await page.getByTestId("vim-toggle").click();
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+
+  await page.keyboard.press("g"); await page.keyboard.press("g"); await sleep(80); // to the task line
+  await page.keyboard.press("o"); await page.keyboard.type("next"); await page.keyboard.press("Escape"); await sleep(150);
+  const text = await page.locator("[data-pane=preview] .cm-content").innerText();
+  expect(text, "o did not continue the task checkbox").toContain("[ ] next"); // unchecked continuation
+  expect(text, "cloned the checked box instead of a fresh one").not.toContain("[x] next");
+});
+
 // #202 (comment 761): nested ORDERED lists count INDEPENDENTLY per level (a nested list restarts, not
 // merged into the parent's run) and get a per-level ordinal STYLE (1.→a.→i.), keyed off the same nesting
 // depth as the bullet glyphs so the two hierarchies read consistently. The rendered ordinal comes from
