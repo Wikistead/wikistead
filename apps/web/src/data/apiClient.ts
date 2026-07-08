@@ -81,10 +81,12 @@ export interface GuestToken {
 // Guest landing: exchange a share-link id for a short-lived guest token. No auth
 // (the link id is the capability). Any failure -> null (server answers a uniform
 // 404 for missing/revoked/expired so we cannot distinguish — by design).
-// #233 / ADR-107: a 3-way result. A GuestToken on success; "password_required" for a LIVE password link
-// with no/wrong password (HTTP 401 — the caller shows a password prompt); null for a dead link (404) or
-// any other failure (uniform — no existence/password oracle). `password` re-POSTs the mint with the entry.
-export type GuestTokenResult = GuestToken | "password_required" | null;
+// #233 / ADR-107: a 4-way result. A GuestToken on success; "password_required" for a LIVE password link
+// with no/wrong password (HTTP 401 — the caller shows a password prompt); "rate_limited" when the
+// wrong-password throttle has tripped (HTTP 429 — the caller keeps the prompt but shows a cool-down
+// message instead of dropping to the dead-link view, #233); null for a dead link (404) or any
+// other failure (uniform — no existence/password oracle). `password` re-POSTs the mint with the entry.
+export type GuestTokenResult = GuestToken | "password_required" | "rate_limited" | null;
 export async function fetchGuestToken(linkId: string, password?: string): Promise<GuestTokenResult> {
   const res = await fetch(`${API_URL}/public/share-links/${encodeURIComponent(linkId)}/token`, {
     method: "POST",
@@ -92,7 +94,8 @@ export async function fetchGuestToken(linkId: string, password?: string): Promis
     headers: password !== undefined ? { "content-type": "application/json" } : undefined,
     body: password !== undefined ? JSON.stringify({ password }) : undefined,
   });
-  if (res.status === 401) return "password_required"; // needs a password (429 throttle also falls through to null)
+  if (res.status === 401) return "password_required"; // needs a password
+  if (res.status === 429) return "rate_limited"; // throttled — keep the prompt, show a cool-down notice
   if (!res.ok) return null;
   return (await res.json()) as GuestToken;
 }

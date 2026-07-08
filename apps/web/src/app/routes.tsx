@@ -555,8 +555,9 @@ function ShareRoute() {
   const { linkId } = useParams<{ linkId: string }>();
   // #233 / ADR-107: FOUR states — loading / denied (dead link) / password_required (a live password link) /
   // ok. The password prompt re-POSTs the mint with the entry; a wrong one lands back on password_required
-  // with a generic error (wrong ≡ missing — no oracle).
-  const [state, setState] = useState<{ status: "loading" | "denied" | "password" | "ok"; minted?: GuestToken; error?: boolean }>({
+  // with a generic error (wrong ≡ missing — no oracle). #233a 429 (wrong-password throttle) keeps
+  // the prompt with a cool-down notice ("throttled") instead of dropping to the dead-link view.
+  const [state, setState] = useState<{ status: "loading" | "denied" | "password" | "ok"; minted?: GuestToken; error?: "wrong" | "throttled" }>({
     status: "loading",
   });
   const [password, setPassword] = useState("");
@@ -567,7 +568,10 @@ function ShareRoute() {
     setSubmitting(true);
     fetchGuestToken(linkId, pw).then((minted) => {
       setSubmitting(false);
-      if (minted === "password_required") setState((s) => ({ status: "password", error: s.status === "password" }));
+      // A submitted attempt: a wrong password lands back on the prompt with the generic error; a 429
+      // keeps the prompt with the cool-down notice (never the dead-link view — the user just typed).
+      if (minted === "password_required") setState({ status: "password", error: "wrong" });
+      else if (minted === "rate_limited") setState({ status: "password", error: "throttled" });
       else setState(minted ? { status: "ok", minted } : { status: "denied" });
     });
   }, [linkId]);
@@ -576,10 +580,12 @@ function ShareRoute() {
     let cancelled = false;
     if (!linkId) { setState({ status: "denied" }); return; }
     // First attempt with no password: a non-password link returns a token; a password link returns
-    // password_required (→ show the prompt) without the user typing anything they don't need to.
+    // password_required (→ show the prompt) without the user typing anything they don't need to. This
+    // prompt-display POST is NOT counted by the wrong-password throttle (#233, server-side).
     fetchGuestToken(linkId).then((minted) => {
       if (cancelled) return;
       if (minted === "password_required") setState({ status: "password" });
+      else if (minted === "rate_limited") setState({ status: "password", error: "throttled" });
       else setState(minted ? { status: "ok", minted } : { status: "denied" });
     });
     return () => { cancelled = true; };
@@ -596,7 +602,8 @@ function ShareRoute() {
           <p className="text-fg-dim">{t("share.passwordPrompt")}</p>
           <form onSubmit={(e) => { e.preventDefault(); if (password) attempt(password); }} className="flex flex-col gap-2">
             <Input type="password" value={password} autoFocus aria-label={t("share.passwordLabel")} data-testid="share-password-input" onChange={(e) => setPassword(e.target.value)} />
-            {state.error && <p className="text-[var(--danger)]" data-testid="share-password-error">{t("share.passwordWrong")}</p>}
+            {state.error === "wrong" && <p className="text-[var(--danger)]" data-testid="share-password-error">{t("share.passwordWrong")}</p>}
+            {state.error === "throttled" && <p className="text-[var(--danger)]" data-testid="share-password-throttled">{t("share.passwordThrottled")}</p>}
             <Button variant="primary" type="submit" disabled={!password || submitting} data-testid="share-password-submit">{t("share.passwordSubmit")}</Button>
           </form>
         </div>

@@ -341,6 +341,7 @@
     "passwordPrompt": "このリンクはパスワードで保護されています。",
     "passwordLabel": "パスワード",
     "passwordWrong": "パスワードが違います。もう一度お試しください。",
+    "passwordThrottled": "試行回数が多すぎます。しばらくおいてから再度お試しください。",
     "passwordSubmit": "開く"
   },
   "page": {
