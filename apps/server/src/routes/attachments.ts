@@ -134,10 +134,14 @@ export async function downloadAttachment(
   args: { id: string; subject: string; context?: { current_time: string } },
 ): Promise<{ downloadUrl: string; filename: string; expiresAt: string }> {
   const [row] = await db.sql<AttachmentRow[]>`SELECT * FROM attachments WHERE id = ${args.id}`
-  if (!row || row.status === 'pending') throw Object.assign(new Error('not found'), { statusCode: 404 })
-  if (row.status === 'deleted') throw Object.assign(new Error('gone'), { statusCode: 410 })
-
+  if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 }) // no row → 404 (and no page_id to gate on)
+  // #297: the view gate runs BEFORE the status checks. Otherwise a soft-DELETED attachment returned 410 Gone
+  // to ANYONE who knew its id — a NON-viewer of the page could distinguish a deleted attachment (410) from a
+  // confirmed-but-view-denied one (404) = a deletion-state oracle. Gating first makes a non-viewer get a
+  // uniform 404 (assertPageViewable is existence-hiding, #280); only a real viewer ever sees pending/410.
   await assertPageViewable(fga, args.subject, row.page_id, args.context) // #108/ADR-071 host-mediated gate
+  if (row.status === 'pending') throw Object.assign(new Error('not found'), { statusCode: 404 })
+  if (row.status === 'deleted') throw Object.assign(new Error('gone'), { statusCode: 410 })
 
   const downloadUrl = await storage.presignGet(row.s3_key, { ttlSeconds: GET_TTL })
   return { downloadUrl, filename: row.filename, expiresAt: new Date(Date.now() + GET_TTL * 1000).toISOString() }
