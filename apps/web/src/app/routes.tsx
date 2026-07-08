@@ -1012,6 +1012,10 @@ export function AppRoutes() {
       <Route path="/settings/members" element={<Navigate to="/admin/members" replace />} />
       <Route path="/join" element={<JoinRoute />} />
       <Route path="/join/workspace" element={<WorkspaceRoute />} />
+      {/* #261: the auth callback redirects failures to /login?error=<kind>. A dedicated route renders the
+          sign-in screen so the error query survives (the catch-all below would rewrite it to /p/demo and
+          drop it). */}
+      <Route path="/login" element={<LoginScreen />} />
       {/* Dev default: the seeded demo page. Real landing/space routing is a
           next-stage screen. */}
       <Route path="*" element={<Navigate to="/p/demo" replace />} />
