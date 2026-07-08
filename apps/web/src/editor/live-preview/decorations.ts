@@ -2735,6 +2735,22 @@ export const livePreviewTheme = EditorView.baseTheme({
     fontSize: "0.95em",
   },
   // #90 columns: the A′ widget lays its inner column DOM out as an even flex row.
+  // #257: the STRUCTURED layout editUI panel — an item bar (tab/column chips + add), an edit area (label +
+  // content textarea + remove/reorder for the active item), and a live preview. Panel edit, not reveal.
+  ".cm-lp-layout-edit-structured": { display: "flex", flexDirection: "column", gap: "0.5em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.6em", background: "var(--panel, transparent)" },
+  ".cm-lp-layout-edit-bar": { display: "flex", flexWrap: "wrap", gap: "0.25em", alignItems: "center", borderBottom: "1px solid var(--border, #888)", paddingBottom: "0.4em" },
+  ".cm-lp-layout-edit-chip": { border: "1px solid transparent", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", padding: "0.25em 0.6em", borderRadius: "4px", fontSize: "0.9em" },
+  ".cm-lp-layout-edit-chip:hover": { color: "var(--fg, inherit)", background: "var(--panel-2, rgba(128,128,128,0.12))" },
+  ".cm-lp-layout-edit-chip-active": { color: "var(--fg, inherit)", background: "var(--panel-2, rgba(128,128,128,0.18))", borderColor: "var(--border, #888)", fontWeight: "600" },
+  ".cm-lp-layout-edit-add": { border: "1px dashed var(--border, #888)", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", padding: "0.15em 0.55em", borderRadius: "4px", lineHeight: "1" },
+  ".cm-lp-layout-edit-add:hover": { color: "var(--fg, inherit)", borderColor: "var(--accent, #4ea1ff)" },
+  ".cm-lp-layout-edit-area": { display: "flex", flexWrap: "wrap", gap: "0.4em", alignItems: "flex-start" },
+  ".cm-lp-layout-edit-label": { flex: "1 1 100%", boxSizing: "border-box", padding: "0.3em 0.5em", border: "1px solid var(--border, #888)", borderRadius: "4px", background: "var(--bg, transparent)", color: "var(--fg, inherit)", fontSize: "0.9em" },
+  ".cm-lp-layout-edit-content": { flex: "1 1 100%", boxSizing: "border-box", minHeight: "5em", resize: "vertical", padding: "0.4em 0.5em", border: "1px solid var(--border, #888)", borderRadius: "4px", background: "var(--bg, transparent)", color: "var(--fg, inherit)", fontFamily: "var(--font-code, monospace)", fontSize: "0.9em" },
+  ".cm-lp-layout-edit-remove, .cm-lp-layout-edit-move": { border: "1px solid var(--border, #888)", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", padding: "0.2em 0.55em", borderRadius: "4px", fontSize: "0.85em" },
+  ".cm-lp-layout-edit-remove:hover": { color: "var(--danger, #e5534b)", borderColor: "var(--danger, #e5534b)" },
+  ".cm-lp-layout-edit-move:hover": { color: "var(--fg, inherit)", borderColor: "var(--accent, #4ea1ff)" },
+  ".cm-lp-layout-edit-preview": { borderTop: "1px solid var(--border, #888)", paddingTop: "0.5em" },
   ".cm-lp-columns": { display: "flex", gap: "1.2em", alignItems: "flex-start" },
   ".cm-lp-column": { flex: "1 1 0", minWidth: "0" },
   ".cm-lp-column > :first-child": { marginTop: "0" },

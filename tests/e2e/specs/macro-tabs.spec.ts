@@ -33,7 +33,48 @@ test("::::tabs: tab bar + active panel, switch is display-only, edited via the e
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("::::tabs"); // still a widget
   await page.locator("[data-pane=preview] [data-testid=macro-edit]").first().click({ force: true });
   await sleep(300);
-  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit-src]")).toBeVisible(); // editUI source panel
+  // #257: the STRUCTURED panel — a tab bar (chips) + a per-tab content editor, NOT a raw `:::tab` textarea.
+  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit]")).toBeVisible();
+  const chips = page.locator("[data-pane=preview] [data-testid=layout-edit-chip]");
+  await expect(chips).toHaveCount(2);
+  // The active tab's content is edited directly (markers hidden); the first tab shows "first **a**".
+  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit-content]")).toHaveValue(/first/);
+});
+
+// #257: the structured tabs panel edits each tab's content (markers hidden), switches tabs in-panel, adds a
+// tab, and reassembles the container body on save — a round-trip through the single Y.Text.
+test("#257: tabs editUI panel — switch tabs, edit content, add a tab, round-trips the source", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "tabs-257");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("::::tabs\n:::tab[One]\nalpha\n:::\n:::tab[Two]\nbeta\n:::\n::::\n\nbelow\n");
+  await sleep(400);
+  await page.locator("[data-pane=preview] [data-testid=macro-edit]").first().click({ force: true });
+  await sleep(300);
+  const content = page.locator("[data-pane=preview] [data-testid=layout-edit-content]");
+  await expect(content).toHaveValue("alpha"); // active = first tab
+
+  // Switch to the second tab in-panel → its content loads.
+  await page.locator("[data-pane=preview] [data-testid=layout-edit-chip]", { hasText: "Two" }).click();
+  await expect(content).toHaveValue("beta");
+
+  // Edit the second tab's content and commit (blur), then add a third tab.
+  await content.fill("beta-edited");
+  await content.blur();
+  await sleep(300);
+  await page.locator("[data-pane=preview] [data-testid=layout-edit-add]").click();
+  await sleep(400);
+  // The add committed to the doc → the panel re-mounts from the new source with 3 tabs (round-trip).
+  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit-chip]")).toHaveCount(3);
+  // The edited second tab survived the round-trip: re-select it and confirm its content re-parsed from doc.
+  await page.locator("[data-pane=preview] [data-testid=layout-edit-chip]", { hasText: "Two" }).click();
+  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit-content]")).toHaveValue("beta-edited");
+
+  // Exit → the block re-renders as the tabs widget with all three tabs (rendered, not raw).
+  await page.keyboard.press("Escape");
+  await sleep(300);
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-tabs] .cm-lp-tab")).toHaveCount(3);
 });
 
 // XSS boundary (parity with ::::columns): a tab panel's inner Markdown is rendered via the S0

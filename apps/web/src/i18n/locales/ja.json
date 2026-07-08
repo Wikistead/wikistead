@@ -676,5 +676,16 @@
     "empty": "テンプレートはまだありません。ページの ⋯ メニューから「テンプレートとして保存」できます。",
     "selectPrompt": "テンプレートを選ぶとプレビューが表示されます。",
     "use": "このテンプレートを使う"
+  },
+  "layoutEdit": {
+    "tabN": "タブ {{n}}",
+    "columnN": "カラム {{n}}",
+    "addTab": "タブを追加",
+    "addColumn": "カラムを追加",
+    "removeTab": "タブを削除",
+    "removeColumn": "カラムを削除",
+    "tabName": "タブ名",
+    "moveLeft": "左へ移動",
+    "moveRight": "右へ移動"
   }
 }
