@@ -9,14 +9,26 @@ import { resolve } from 'node:path'
 //
 // process.loadEnvFile is Node.js 20.12+ built-in and does NOT override an already-set var,
 // so load .env.server-test.local (the bootstrapped FGA store/model ids) FIRST, then
-// .env.server-test. If the isolated stack was never set up, fall back to the root .env
-// (legacy behaviour) so a bare checkout still resolves *some* config and fails with a clear
-// connection error pointing at setup:server-test rather than a cryptic missing-var crash.
+// .env.server-test.
+//
+// #269 SAFETY VALVE: the server suite is DESTRUCTIVE (billing.test wipes spaces, the tenant/oidc
+// tests mutate rows). It MUST run only against the isolated server-test stack, NEVER the dev DB —
+// a recurring accident that wiped the user's dev data. .env.server-test sets WIKISTEAD_TEST_STACK;
+// if it is not 'server-test' after loading (file deleted, never set up, or DATABASE_URL repointed at
+// dev), we FAIL FAST with a setup hint rather than silently connecting to — and destroying — dev.
 function loadEnv() {
   const root = resolve(import.meta.dirname, '../..')
-  const serverTest = ['.env.server-test.local', '.env.server-test'].map((f) => resolve(root, f))
-  const files = serverTest.some((p) => existsSync(p)) ? serverTest : [resolve(root, '.env')]
-  for (const p of files) if (existsSync(p)) (process as any).loadEnvFile(p)
+  for (const f of ['.env.server-test.local', '.env.server-test']) {
+    const p = resolve(root, f)
+    if (existsSync(p)) (process as any).loadEnvFile(p)
+  }
+  if (process.env.WIKISTEAD_TEST_STACK !== 'server-test') {
+    throw new Error(
+      'Refusing to run the server test suite outside the isolated server-test stack ' +
+        '(WIKISTEAD_TEST_STACK != "server-test"). Run `pnpm setup:server-test` first — the suite is ' +
+        'destructive and must NOT touch the dev DB (#268/#269).',
+    )
+  }
 }
 loadEnv()
 
