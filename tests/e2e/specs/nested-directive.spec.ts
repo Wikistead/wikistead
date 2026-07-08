@@ -150,3 +150,53 @@ test("#215: a nested callout selects, edits via its own editUI island, and delet
   expect(await layout(), "both columns still render side-by-side after the nested delete").toEqual({ n: 2, sideBySide: true });
   expect(errs, errs.join(" | ")).toHaveLength(0);
 });
+
+// #265 (review rejection): the earlier #215 assertions used force:true clicks, which bypass the real
+// failure — a nested callout's editUI island OPENS but you can't WRITE to it because the outer columns atom
+// swallows the input/focus (MacroWidget.ignoreEvent()=false). This test drives the island with REAL clicks
+// and REAL typing (no force): the body edit and the type-chip change must both take effect at depth. Real
+// Chromium — a focus/event-routing concern happy-dom + synthetic force-clicks can't exercise.
+test("#265: a nested callout island accepts REAL typing + a REAL type-chip click (input not swallowed)", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1000, height: 700 } })).newPage();
+  const errs: string[] = [];
+  page.on("pageerror", (e) => errs.push(String(e)));
+  await openScratch(page, "nested-real-input");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("top\n\n::::columns\n:::column\n:::note\nAAA note\n:::\n:::\n:::column\nBBB text\n:::\n::::\n\nbot\n");
+  await sleep(800);
+
+  // Open the nested note's editUI island via REAL clicks (no force).
+  await page.getByText("bot").click();
+  await page.getByText("AAA note").click();
+  await sleep(300);
+  await page.locator("[data-pane=preview] [data-testid=nested-macro-edit]").first().click();
+  await sleep(350);
+  const island = page.locator("[data-pane=preview] [data-testid=nested-edit-island]");
+  await expect(island).toHaveCount(1);
+
+  // (A) REAL typing into the body textarea must land (the swallow bug ate the keystrokes / focus).
+  const body = island.locator("[data-testid=callout-edit-body]");
+  await body.click(); // real click to focus (the reported bug: this click was swallowed → island torn down)
+  await expect(island).toHaveCount(1); // still open after clicking into it (not destroyed by a caret-move)
+  await page.keyboard.press("End");
+  await page.keyboard.type(" EDITED");
+  await expect(body).toHaveValue(/AAA note EDITED/); // the field actually received the keys
+  // Blur the body (real click on the label input) → its change fires → commit → source round-trips.
+  await island.locator("[data-testid=callout-edit-label]").click();
+  await sleep(300);
+
+  // (B) REAL click (no force) on the WARNING type chip → the type changes at depth.
+  await page.locator("[data-pane=preview] [data-testid=nested-edit-island] [data-testid=callout-edit-type-warning]").click();
+  await sleep(300);
+
+  // Exit the island (click outside) and assert BOTH edits took: the nested callout is a WARNING whose body
+  // carries the typed text, and the sibling column is untouched.
+  await page.getByText("bot").click();
+  await sleep(400);
+  await expect(page.locator("[data-pane=preview] .cm-lp-column .cm-lp-callout-warning")).toHaveCount(1);
+  await expect(page.locator("[data-pane=preview] .cm-lp-column .cm-lp-callout-note")).toHaveCount(0);
+  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("AAA note EDITED");
+  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("BBB text");
+  expect(errs, errs.join(" | ")).toHaveLength(0);
+});
