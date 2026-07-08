@@ -149,6 +149,21 @@ describe("renderMarkdownToHtml — macro dispatch + fidelity (#85)", () => {
   });
 });
 
+describe("renderMarkdownToHtml — GFM table (#174 point 4)", () => {
+  it("renders a pipe table as a <table> (th header + td body)", () => {
+    const h = out("| A | B |\n| - | - |\n| 1 | 2 |\n");
+    expect(h).toContain("<table>");
+    expect(h).toContain("<thead><tr><th>A</th><th>B</th></tr></thead>");
+    expect(h).toContain("<td>1</td>");
+    expect(h).toContain("<td>2</td>");
+  });
+  it("escapes cell content (XSS boundary holds — no raw HTML from a cell)", () => {
+    const h = out('| h |\n| - |\n| <script>boom()</script> |\n');
+    expect(h).not.toContain("<script>boom()</script>");
+    expect(h).toContain("&lt;script&gt;");
+  });
+});
+
 // #85 slice 2: the SERVER export dispatches the real built-in M2 directive htmlRenders (single source
 // of truth in @wikistead/macro-render — the same code the editor uses), via builtinMacroRegistry.
 describe("renderMarkdownToHtml — built-in M2 directives (#85 slice 2)", () => {

@@ -10,6 +10,21 @@ function root(src: string): HTMLElement {
   return d;
 }
 
+describe("renderMarkdownToDom — GFM table (#174 point 4)", () => {
+  it("renders a pipe table as a real <table> (thead th + tbody td)", () => {
+    const d = root("| A | B |\n| - | - |\n| 1 | 2 |\n");
+    const table = d.querySelector("table");
+    expect(table).not.toBeNull();
+    expect(Array.from(d.querySelectorAll("thead th")).map((c) => c.textContent)).toEqual(["A", "B"]);
+    expect(Array.from(d.querySelectorAll("tbody td")).map((c) => c.textContent)).toEqual(["1", "2"]);
+  });
+  it("keeps the XSS boundary: a cell's raw HTML is inert text, never an element", () => {
+    const d = root('| h |\n| - |\n| <img src=x onerror="boom()"> |\n');
+    expect(d.querySelector("img")).toBeNull(); // no live element from cell text
+    expect(d.querySelector("td")?.textContent).toContain("<img");
+  });
+});
+
 describe("renderMarkdownToDom (#90 S0)", () => {
   it("renders common Markdown to elements", () => {
     const d = root("# Title\n\npara **bold** _i_ `c`\n\n- a\n- b\n");
