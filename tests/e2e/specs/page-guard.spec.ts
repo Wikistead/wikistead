@@ -10,9 +10,11 @@ test("a non-existent page is not an editable phantom", async ({ page }) => {
   await page.goto("/p/does-not-exist-xyz-123");
   await sleep(600);
 
-  // the guard rendered (forbidden for an unknown page with no FGA grant; 404 if the row
-  // is missing but access is inherited) — either way, a clear non-editable state
-  await expect(page.locator("[data-testid=page-forbidden], [data-testid=page-not-found]")).toBeVisible();
+  // #262: the guard shows a UNIFORM "not found" — whether the page is missing OR the member lacks view
+  // access, the client renders the SAME not-found state (existence-hiding; a "forbidden" message would leak
+  // that the page exists). The old page-forbidden branch is gone.
+  await expect(page.getByTestId("page-not-found")).toBeVisible();
+  expect(await page.getByTestId("page-forbidden").count()).toBe(0);
   // and there is NO edit affordance / editable surface at all
   expect(await page.getByTestId("edit-toggle").count()).toBe(0);
   expect(await page.locator("[data-pane=preview] .cm-content").count()).toBe(0);

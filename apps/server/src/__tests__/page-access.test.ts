@@ -10,7 +10,7 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check, deleteObjectTuples, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver, buildSearchDoc } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, unrestrictPageAccess, listPageRestrictions, setPagePrivate, unsetPagePrivate, isPagePrivate, listPages, getPage } from '../routes/pages.js'
+import { createPage, grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, unrestrictPageAccess, listPageRestrictions, setPagePrivate, unsetPagePrivate, isPagePrivate, listPages, getPage, getPublished } from '../routes/pages.js'
 import { createShareLink, listShareLinks, revokeShareLink, revokeResourceShareLinks } from '../routes/share-links.js'
 import { drainAuditOutbox } from '../audit/outbox.js'
 import type { Tenant } from '@wikistead/types'
@@ -298,5 +298,29 @@ describe('per-page private (ADR-098 allowlist)', () => {
     expect(await drainAuditOutbox()).toBeGreaterThanOrEqual(1)
     const rows = await db.sql<{ action: string; target: string; actor: string }[]>`SELECT action, target, actor FROM audit_log WHERE tenant_id = ${TENANT} ORDER BY seq`
     expect(rows.some((r) => r.action === 'page.made_private' && r.target === `page:${pageId}` && r.actor === 'user:dev-user')).toBe(true)
+  })
+})
+
+// #262: existence-hiding on the READ/DISPLAY path. A member without view access to a page, a non-existent
+// page id, and an unknown/cross-tenant id must be INDISTINGUISHABLE — all a uniform 404, never a 403 that
+// says "you don't have access" (which confirms the page exists). Mirrors the public surface (#227) and
+// share-links. Edit/manage ops keep their 403 (an action failure is a separate signal).
+describe('#262 existence-hiding on the page read path (uniform 404, no 403 leak)', () => {
+  it('getPage: view-denied real page ≡ non-existent id ≡ unknown/cross-tenant id (all 404)', async () => {
+    const hidden = (await createPage(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user', title: `hidden-${Date.now().toString(36)}` })).id // a dev-user draft STRANGER can't view
+    await expect(getPage(db, fgaClient, { pageId: hidden, userId: STRANGER })).rejects.toMatchObject({ statusCode: 404 }) // view-denied real page
+    await expect(getPage(db, fgaClient, { pageId: 'no_such_page_xyz', userId: STRANGER })).rejects.toMatchObject({ statusCode: 404 }) // non-existent
+    await expect(getPage(db, fgaClient, { pageId: '00000000-0000-0000-0000-000000000000', userId: STRANGER })).rejects.toMatchObject({ statusCode: 404 }) // unknown/cross-tenant
+    await deleteObjectTuples(fgaClient, `page:${hidden}`).catch(() => {})
+    await admin`DELETE FROM pages WHERE id = ${hidden}`.catch(() => {})
+  })
+
+  it('getPublished: the same three cases are a uniform 404 (no "forbidden" leak)', async () => {
+    const hidden = (await createPage(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user', title: `hidpub-${Date.now().toString(36)}` })).id
+    await expect(getPublished(db, fgaClient, { pageId: hidden, subject: `user:${STRANGER}` })).rejects.toMatchObject({ statusCode: 404 })
+    await expect(getPublished(db, fgaClient, { pageId: 'no_such_page_xyz', subject: `user:${STRANGER}` })).rejects.toMatchObject({ statusCode: 404 })
+    await expect(getPublished(db, fgaClient, { pageId: '00000000-0000-0000-0000-000000000000', subject: `user:${STRANGER}` })).rejects.toMatchObject({ statusCode: 404 })
+    await deleteObjectTuples(fgaClient, `page:${hidden}`).catch(() => {})
+    await admin`DELETE FROM pages WHERE id = ${hidden}`.catch(() => {})
   })
 })

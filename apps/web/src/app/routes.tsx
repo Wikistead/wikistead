@@ -370,16 +370,14 @@ function PageRoute() {
 
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
-  // A page that doesn't exist (404) or isn't accessible (403) must NOT present an
-  // editable phantom surface (it would have no space → unpublishable). Show a clear
-  // state inside the member chrome instead.
+  // A page that doesn't exist or isn't accessible must NOT present an editable phantom surface (it would
+  // have no space → unpublishable). #262: the server now returns a uniform 404 for both "no such page" and
+  // "no view access" (existence-hiding), so the client shows ONE not-found state — a
+  // message would leak that the page exists.
   if (pageId && pageQ.isError) {
-    const code = (pageQ.error as ApiError | undefined)?.status;
     return (
       <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
-        <div style={{ padding: 24 }} data-testid={code === 403 ? "page-forbidden" : "page-not-found"}>
-          {t(code === 403 ? "page.forbidden" : "page.notFound")}
-        </div>
+        <div style={{ padding: 24 }} data-testid="page-not-found">{t("page.notFound")}</div>
       </AppShell>
     );
   }
