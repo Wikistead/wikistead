@@ -4,6 +4,8 @@ import { syntaxTree } from "@codemirror/language";
 import i18n from "../../i18n";
 import { INLINE_FORMATS } from "./commands";
 import { linkifyPaste, linkCopyRange } from "./paste-linkify";
+import { diagramFenceAt, setDiagramAlign } from "./decorations"; // #255: right-click diagram alignment
+import type { FenceAlign } from "@wikistead/macro-render";
 
 // M0-4 (ADR-018): the right-click context menu — the superset entry for mouse users.
 // On a selection it offers layer-A decoration (the SAME INLINE_FORMATS as the bubble /
@@ -17,7 +19,7 @@ import { linkifyPaste, linkCopyRange } from "./paste-linkify";
 
 type MenuKind = "selection" | "link" | "plain";
 interface LinkRange { from: number; to: number; urlFrom: number; urlTo: number }
-interface MenuState { pos: number; kind: MenuKind; link?: LinkRange }
+interface MenuState { pos: number; kind: MenuKind; link?: LinkRange; diagramFrom?: number }
 
 const openMenu = StateEffect.define<MenuState>();
 const closeMenu = StateEffect.define<null>();
@@ -196,6 +198,17 @@ function menuTooltip(v: MenuState): Tooltip {
         item("insert", i18n.t("contextMenu.insert"), () => doInsert(view));
       }
 
+      // #255: a rendered diagram fence adds alignment entries (left / center / right). Robust right-click
+      // path (the ✎-adjacent hover button is the convenience). Rewrites the fence `align=` attribute.
+      if (v.diagramFrom != null) {
+        sep();
+        for (const a of ["left", "center", "right"] as FenceAlign[]) {
+          // Pass the ORIGINAL click pos (which diagramFenceAt already resolved) — setDiagramAlign
+          // re-resolves the fence from it; the opening-line boundary offset can miss the node.
+          item(`align-${a}`, i18n.t(`contextMenu.align${a[0]!.toUpperCase()}${a.slice(1)}`), () => { setDiagramAlign(view, v.pos, a); close(view); });
+        }
+      }
+
       // Outside-click dismissal via a document listener (the menu lives in the fixed
       // tooltip layer, so editor-level handlers don't see clicks elsewhere on the page).
       // Deferred a tick so the opening right-click's own mouseup/down doesn't close it.
@@ -233,7 +246,9 @@ const menuEvents = Prec.highest(
         const l = linkAt(view.state, pos);
         if (l) { kind = "link"; link = l; } else { kind = "plain"; }
       }
-      view.dispatch({ effects: openMenu.of({ pos, kind, link }) });
+      // #255: a rendered diagram fence (mermaid/plantuml/excalidraw) at the click → offer alignment.
+      const diagramFrom = diagramFenceAt(view.state, pos) ?? undefined;
+      view.dispatch({ effects: openMenu.of({ pos, kind, link, diagramFrom }) });
       e.preventDefault();
       return true;
     },

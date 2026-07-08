@@ -580,7 +580,10 @@
     "paste": "Paste",
     "editLink": "Edit link",
     "clearFormat": "Clear formatting",
-    "insert": "Insert…"
+    "insert": "Insert…",
+    "alignLeft": "Align left",
+    "alignCenter": "Align center",
+    "alignRight": "Align right"
   },
   "members": {
     "title": "Members",

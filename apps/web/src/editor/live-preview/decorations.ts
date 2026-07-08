@@ -14,7 +14,7 @@ export type { MacroTheme }; // #200: re-exported so the Editor can type the redr
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, directiveChainAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen, resolveDirectiveRanges } from "../macros/directive-parser";
-import { parseFenceLine, CALLOUT_TYPES, type FenceAlign } from "@wikistead/macro-render"; // #198: code-fence attribute parser; #174: callout types
+import { parseFenceLine, parseFenceInfo, serializeFenceInfo, CALLOUT_TYPES, type FenceAlign } from "@wikistead/macro-render"; // #198: code-fence attribute parser; #174: callout types; #255: align rewrite
 // #255: rendered diagram macros are centred by default and take a fence `align=` attribute (others don't).
 const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset } from "../macros/md-render";
@@ -941,6 +941,37 @@ function removeLastLayoutItem(view: EditorView, pos: number, childName: "column"
   view.dispatch({ changes: { from: fromLine.from, to: Math.min(toLine.to + 1, view.state.doc.length) }, userEvent: "delete" });
 }
 
+// #255: rewrite a rendered diagram fence's horizontal alignment by setting its `align=` attribute (CENTER
+// is the default → the attribute is DROPPED, so an existing untagged block stays untagged). Resolves the
+// fence at `pos` via macroFenceAt (posAtDOM lands on the closing ``` for a block atom, so we can't trust the
+// raw position). One offset-invariant Y.Text replace of the OPENING fence line — round-trips with title/
+// highlight (serializeFenceInfo is order-stable). Only diagram fences carry align (guarded by the caller).
+export function setDiagramAlign(view: EditorView, pos: number, align: FenceAlign): void {
+  const f = macroFenceAt(view.state, pos);
+  if (!f) return;
+  const line = view.state.doc.lineAt(f.from);
+  const m = /^(\s*)([`~]{3,})(.*)$/.exec(line.text);
+  if (!m) return;
+  const info = parseFenceInfo(m[3]!);
+  if (!DIAGRAM_MACROS.has(info.lang)) return;
+  info.align = align;
+  const next = `${m[1]}${m[2]}${serializeFenceInfo(info)}`;
+  if (next === line.text) return;
+  view.dispatch({ changes: { from: line.from, to: line.to, insert: next }, userEvent: "input" });
+}
+// #255: the diagram fence at `pos` (its opening-line offset) if it's a rendered diagram macro, else null
+// so the context menu can offer alignment only where it applies.
+export function diagramFenceAt(state: EditorState, pos: number): number | null {
+  const f = macroFenceAt(state, pos);
+  return f && DIAGRAM_MACROS.has(f.lang) ? f.from : null;
+}
+// #255: align glyphs (three stacked bars, justified per side) — trusted constant SVGs (no user input).
+const ALIGN_ICON: Record<FenceAlign, string> = {
+  left: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h13M3 12h18M3 18h13"/></svg>',
+  center: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6h12M3 12h18M6 18h12"/></svg>',
+  right: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 6h13M3 12h18M8 18h13"/></svg>',
+};
+
 // #215 / ADR-100: nested-macro parity. Four consumers (select / edit / render / delete) key off ONE
 // question — "what is the innermost macro at this interaction point?" — so a click selects exactly what
 // the edit button opens and Backspace/dd/Delete removes. `resolveNestedAnchor` is input-device-independent
@@ -1060,7 +1091,7 @@ function findNestedSlot(root: HTMLElement, anchor: number): HTMLElement | null {
 // #221: fields stashed on the widget's DOM so updateDOM can reuse it on a selection-only change (see
 // MacroWidget.updateDOM). __mwKey is the rendered-content identity; __mwRo/__mwObjUrl are the async
 // resources whose ownership must travel with the DOM so the current instance's destroy releases them.
-type MwDom = HTMLElement & { __mwKey?: { body: string; theme: MacroTheme; name: string; foldable: boolean }; __mwRo?: ResizeObserver; __mwObjUrl?: string };
+type MwDom = HTMLElement & { __mwKey?: { body: string; theme: MacroTheme; name: string; foldable: boolean; align: FenceAlign }; __mwRo?: ResizeObserver; __mwObjUrl?: string };
 
 class MacroWidget extends WidgetType {
   private ro?: ResizeObserver;
@@ -1270,6 +1301,26 @@ class MacroWidget extends WidgetType {
         });
         wrap.appendChild(edit);
       }
+      // #255: a rendered DIAGRAM macro gets an ALIGN toggle just right of the ✎ — one click cycles
+      // center → left → right, rewriting the fence `align=` attribute (center drops the attr). Same
+      // hover/selection gating as ✎ (CSS). Suppressed while a nested macro is selected (no diagram nests
+      // in a layout child in v1, but keep the single-pencil rule). Right-click also offers align (below).
+      if (DIAGRAM_MACROS.has(this.name) && !nestedActive) {
+        const alignBtn = document.createElement("button");
+        alignBtn.type = "button";
+        alignBtn.className = "cm-lp-macro-align";
+        alignBtn.title = `Align: ${this.align}`;
+        alignBtn.innerHTML = ALIGN_ICON[this.align];
+        alignBtn.setAttribute("data-testid", "macro-align");
+        alignBtn.setAttribute("data-align", this.align);
+        alignBtn.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const next: FenceAlign = this.align === "center" ? "left" : this.align === "left" ? "right" : "center";
+          setDiagramAlign(view, view.posAtDOM(wrap), next);
+        });
+        wrap.appendChild(alignBtn);
+      }
       // #213: columns/tabs get structural add/remove — a `+` appends a child :::column/:::tab and a `−`
       // removes the last one (real Y.Text edits via addLayoutItem/removeLastLayoutItem). Shown on hover/
       // selection (a hover row at the bottom-right, off the widget content). This is the structural-edit
@@ -1325,7 +1376,7 @@ class MacroWidget extends WidgetType {
     this.ro = observeBlockResize(view, wrap);
     // #221 comment 845: keep enough on the DOM for updateDOM to reuse it on a SELECTION-only change
     // (identity of the rendered content + the live ResizeObserver, so destroy still disconnects it).
-    (wrap as MwDom).__mwKey = { body: this.body, theme: this.theme, name: this.name, foldable: this.foldable };
+    (wrap as MwDom).__mwKey = { body: this.body, theme: this.theme, name: this.name, foldable: this.foldable, align: this.align };
     (wrap as MwDom).__mwRo = this.ro;
     return wrap;
   }
@@ -1339,8 +1390,8 @@ class MacroWidget extends WidgetType {
     const prev = (dom as MwDom).__mwKey;
     const nestedNow = !!(this.nestedSel || this.nestedEdit);
     const nestedBefore = dom.classList.contains("cm-lp-nested-host");
-    if (!prev || prev.body !== this.body || prev.theme !== this.theme || prev.name !== this.name || prev.foldable !== this.foldable || nestedNow || nestedBefore) {
-      return false; // content / theme / nested affordance changed → let CM rebuild via toDOM
+    if (!prev || prev.body !== this.body || prev.theme !== this.theme || prev.name !== this.name || prev.foldable !== this.foldable || prev.align !== this.align || nestedNow || nestedBefore) {
+      return false; // content / theme / nested affordance / #255 align changed → let CM rebuild via toDOM
     }
     this.ro = (dom as MwDom).__mwRo; // adopt the live ResizeObserver so this instance's destroy() disconnects it
     this.objectUrl = (dom as MwDom).__mwObjUrl; // adopt any host-rendered blob url so destroy() revokes it
@@ -2645,7 +2696,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   // a pointer sink that captures clicks regardless of z-index, so a button OVER the iframe was unclickable.
   // A row above the widget (in the block's top margin) is never over the iframe, so every macro's buttons
   // (edit / retarget / fold) are reliably clickable — the Notion block-hover pattern, uniform across macros.
-  ".cm-lp-macro-edit, .cm-lp-macro-retarget": {
+  ".cm-lp-macro-edit, .cm-lp-macro-retarget, .cm-lp-macro-align": {
     position: "absolute",
     top: "-1.55em", // above the content box (outside the iframe/widget), in the block's top margin
     display: "inline-flex", // centres the Lucide SVG (#174) / the fold glyph
@@ -2668,6 +2719,8 @@ export const livePreviewTheme = EditorView.baseTheme({
   // so both take the first slot; fold sits in the second slot next to an edit button (Excalidraw).
   ".cm-lp-macro-edit": { left: "0" },
   ".cm-lp-macro-retarget": { left: "0" },
+  // #255: the diagram align toggle sits just RIGHT of the ✎ (which is at left:0), same top row.
+  ".cm-lp-macro-align": { left: "1.7em" },
   // #216 comment 836: the pipe-table wrap positions the hover-revealed RichUI-entry button at the table's
   // top-left. fit-content keeps the wrap the table's width so the button aligns to the table's left edge
   // (not the full editor width). The button reuses .cm-lp-macro-edit chrome; reveal it on wrap hover.
@@ -2698,7 +2751,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-macro-wrap:hover .cm-lp-macro-layoutbar, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-layoutbar": { opacity: "1" },
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
-  ".cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget": { opacity: "1" },
+  ".cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap:hover .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-align": { opacity: "1" },
   // #215 / ADR-100: the selected NESTED macro (inside a columns/tabs widget) draws its own ring + edit
   // button — the same affordance as a top-level macro, at depth. The ring is on the nested subtree (not
   // the container), and the button is anchored to that subtree's top-left (the container's top margin is
