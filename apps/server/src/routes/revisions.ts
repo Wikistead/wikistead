@@ -65,7 +65,7 @@ export async function listRevisions(
   args: { pageId: string; userId: string; plan: string },
 ): Promise<RevisionSummary[]> {
   const canView = await check(fga, `user:${args.userId}`, 'view', { type: 'page', id: args.pageId })
-  if (!canView) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  if (!canView) throw Object.assign(new Error('not found'), { statusCode: 404 }) // #262: existence-hiding on the read path (history is a display of the page)
 
   // Plan-gated retention: free tiers only expose recent history.
   const rows = await db.sql<RevisionRow[]>`
@@ -103,7 +103,7 @@ export async function getRevisionContent(
   args: { pageId: string; revId: string; userId: string; plan: string },
 ): Promise<{ content: string }> {
   const canView = await check(fga, `user:${args.userId}`, 'view', { type: 'page', id: args.pageId })
-  if (!canView) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  if (!canView) throw Object.assign(new Error('not found'), { statusCode: 404 }) // #262: existence-hiding on the read path
   const [rev] = await db.sql<[{ ydoc: Buffer | null; ydoc_key: string | null }]>`
     SELECT ydoc, ydoc_key FROM revisions
     WHERE id = ${args.revId} AND page_id = ${args.pageId} AND created_at >= ${retentionCutoff(args.plan)}

@@ -363,7 +363,6 @@
     "permissions": "権限",
     "delete": "ページを削除",
     "notFound": "このページは存在しません。削除されたか、リンクが誤っている可能性があります。",
-    "forbidden": "このページにアクセスする権限がありません。",
     "displayMode": "表示モード",
     "modeLive": "ライブ",
     "modeSource": "ソース",

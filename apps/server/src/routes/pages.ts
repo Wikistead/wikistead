@@ -21,7 +21,7 @@ import { revokeResourceShareLinks } from './share-links.js'
 import { getTemplate } from './templates.js'
 import { enqueueWebhookOutbox } from './webhooks.js'
 
-// #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames —
+// #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames
 // the exact form isAllowlistedEmbed matches. Strip a scheme, path/query/fragment, port, whitespace and
 // leading dots; require a dotted hostname; drop empties, non-hostnames and duplicates. (https is
 // implied — the client only ever iframes https hosts.) Pure + exported for unit tests.
@@ -72,7 +72,7 @@ function toPage(r: PageRow): Page {
   // columns (listPages); together they drive the sidebar's 3-state badge
   // (Draft / Published / Unpublished changes). `published` is a cheap check
   // (published_at IS NOT NULL) — the heavy published_md is not read for the tree.
-  // #222: createdBy/updatedBy (author subs) are present only when the SELECT included them (getPage) —
+  // #222: createdBy/updatedBy (author subs) are present only when the SELECT included them (getPage)
   // they feed the title-bar metadata row; undefined for the tree list (not needed there).
   return { id: r.id, tenantId: r.tenant_id, spaceId: r.space_id, parentId: r.parent_id, title: r.title, position: r.position, createdAt: r.created_at, updatedAt: r.updated_at, hasUnpublishedChanges: r.has_unpublished_changes ?? false, published: r.published ?? false, createdBy: r.created_by ?? null, updatedBy: r.updated_by ?? null }
 }
@@ -96,7 +96,7 @@ function positionBetween(before: number | null, after: number | null): number {
   return (before + after) / 2
 }
 
-// A gap is COLLAPSED when the midpoint between two neighbours is not STRICTLY between them —
+// A gap is COLLAPSED when the midpoint between two neighbours is not STRICTLY between them
 // i.e. inserting there would produce a position equal to a neighbour (float exhaustion or
 // duplicate/equal positions). Only meaningful with two finite neighbours.
 export function gapCollapsed(before: number | null, after: number | null): boolean {
@@ -186,10 +186,10 @@ export async function createPage(
   const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'space', id: args.spaceId })
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
-  // Seed the new page's DRAFT content. Two sources, both view-gated and existence-hidden (404):
-  //   #250 templateId — a `templates` snapshot (view = manage or space/tenant audience); title defaults
-  //                      to the template name. This is the real template system.
-  //   #229 fromPageId — "duplicate a page": any page the creator can VIEW; its PUBLISHED md is the body.
+  // Seed the new page's DRAFT content. Two sources, both view-gated and existence-hidden (404)
+  // #250 templateId — a `templates` snapshot (view = manage or space/tenant audience); title defaults
+  // to the template name. This is the real template system.
+  // #229 fromPageId — "duplicate a page": any page the creator can VIEW; its PUBLISHED md is the body.
   // Either way the new page stays an unpublished, creator-only draft holding the seeded body.
   let seedMd: string | null = null
   let seedTitle = args.title
@@ -294,7 +294,11 @@ export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: 
   // fortress (it re-derives readOnly from FGA per document, so a forged edit button
   // still cannot write). null = no view access at all → 403.
   const access = await checkMemberAccess(fga, args.userId, { type: 'page', id: args.pageId })
-  if (!access) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  // #262: existence-hiding on the READ/DISPLAY path — "no view access" and "no such page" return the SAME
+  // 404 so a member can't tell a page they lack access to from one that doesn't exist ( leaks
+  // existence). Uniform 404, like the public surface (#227) and share-links. Edit/manage ops keep their 403s
+  // (an action failure is a different signal from a hidden resource).
+  if (!access) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const [row] = await db.sql<PageRow[]>`
     SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at, has_unpublished_changes,
            created_by, updated_by
@@ -413,7 +417,7 @@ export async function publishPage(
     // filter at send time (by then page#space is written below, so a published page is deliverable).
     await enqueueWebhookOutbox(tx, { tenantId: draft.tenant_id, eventType: 'page.published', payload: { pageId: args.pageId, revisionId, actorId: args.createdBy, occurredAt: new Date().toISOString() } })
   })
-  // AFTER the DB commit (fail-closed: a tx failure above leaves the page gated):
+  // AFTER the DB commit (fail-closed: a tx failure above leaves the page gated)
   // release space inheritance, THEN reindex so buildSearchDoc sees the published
   // state. If this FGA write fails, the page stays gated and a retry publish (no-op
   // path) repairs it; the two-stage search guard keeps stage-2 FGA authoritative.
@@ -483,7 +487,7 @@ export async function toggleTask(
     // Lightweight audit (ADR-019 D2 / #97): who toggled which checkbox to what, when. NOT in
     // the revision/diff history (a toggle is interactive state). In the same tx as the flip,
     // so the log can never disagree with the published state. `actor` uses the human-readable
-    // principal (`user:`/`guest:` = createdBy), matching the attribution label revisions store —
+    // principal (`user:`/`guest:` = createdBy), matching the attribution label revisions store
     // NOT the FGA `subject` (`share_link:`), which is the authz check identity only.
     await tx`
       INSERT INTO checkbox_events (tenant_id, page_id, actor, checkbox_index, checked)
@@ -494,7 +498,7 @@ export async function toggleTask(
   return { publishedAt }
 }
 
-// Release space inheritance for a page: write `page#space` if absent (idempotent —
+// Release space inheritance for a page: write `page#space` if absent (idempotent
 // OpenFGA rejects duplicate writes, so we check first). Returns whether it wrote.
 async function ensurePageSpaceLink(fga: OpenFgaClient, pageId: string, spaceId: string): Promise<boolean> {
   const { tuples } = await fga.read({ object: `page:${pageId}` })
@@ -515,7 +519,9 @@ export async function getPublished(
   args: { pageId: string; subject: string; context?: { current_time: string } },
 ): Promise<{ publishedMd: string | null; publishedAt: Date | null; hasUnpublishedChanges: boolean; canComment: boolean }> {
   const canView = await check(fga, args.subject, 'view', { type: 'page', id: args.pageId }, args.context)
-  if (!canView) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  // #262: existence-hiding — view-denied returns the SAME 404 as a missing page (a "published" read is a
+  // display path). Uniform 404 with getPage + the public surface.
+  if (!canView) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const [row] = await db.sql<[{ published_md: string | null; published_at: Date | null; ydoc: Buffer | null }]>`
     SELECT published_md, published_at, ydoc FROM pages WHERE id = ${args.pageId}
   `
@@ -754,7 +760,7 @@ export async function unsetPagePrivate(
     }
     const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
     // Clearing private resumes space inheritance; it does NOT restore public (one-way — a re-publish or
-    // an explicit public toggle re-adds view_base@user:* if desired). Delete each marker INDEPENDENTLY:
+    // an explicit public toggle re-adds view_base@user:* if desired). Delete each marker INDEPENDENTLY
     // a legacy page privatised before the #244 backfill has only user:*, and a single batch delete of a
     // missing share_link:* would fail the whole write and leave the page stuck private.
     await Promise.all(PRIVATE_MARKERS(args.pageId).map((m) => deleteTuples(fga, [m]).catch(() => {})))
@@ -888,7 +894,7 @@ export async function listPageAccess(
 
 // Pages overview for a space (Phase 5 #5). space#manage gated — a manager sees the
 // pages ONLY of a space they manage (RLS scopes to the tenant; the space#manage
-// check is the authority), so nothing leaks beyond their authority. Per page:
+// check is the authority), so nothing leaks beyond their authority. Per page
 // published state, the cheap unpublished-changes flag, the count of DIRECT page
 // grants (user/group only — never share_link/wildcard/the space link), and the
 // count of active share links.
@@ -1206,12 +1212,12 @@ export async function deletePage(
 // Resolve the request principal (member OR guest) for a page action. Returns the FGA subject,
 // the attribution id, and (guests) the time context for the share_link condition.
 //
-// Guest token binding:
-//  - a PAGE token is bound to its own page (a token for page A can never read page B).
-//  - a SPACE token (#104) is accepted for ANY page — the per-route FGA check re-derives
-//    authority (page#view ← viewer from space), so it grants ONLY published pages in that
-//    space and never an out-of-space page or a draft. (Space links are view-only, so the
-//    edit-gated routes reject the token at the auth hook before this is reached.)
+// Guest token binding
+// - a PAGE token is bound to its own page (a token for page A can never read page B).
+// - a SPACE token (#104) is accepted for ANY page — the per-route FGA check re-derives
+// authority (page#view ← viewer from space), so it grants ONLY published pages in that
+// space and never an out-of-space page or a draft. (Space links are view-only, so the
+// edit-gated routes reject the token at the auth hook before this is reached.)
 export function principalForPage(req: FastifyRequest, pageId: string): { subject: string; createdBy: string; context?: { current_time: string } } {
   if (req.user) {
     return { subject: `user:${req.user.sub}`, createdBy: `user:${req.user.sub}` }
@@ -1231,7 +1237,7 @@ export function principalForPage(req: FastifyRequest, pageId: string): { subject
 
 // #230: backlinks — the pages that reference `pageId` from their PUBLISHED content. Sources are the
 // PERSISTED internal references only: an `:::embed-page\n<id>\n:::` block (the body IS the target id)
-// and an explicit markdown link to `/p/<id>`. (The #224 title-match auto-links are display-only —
+// and an explicit markdown link to `/p/<id>`. (The #224 title-match auto-links are display-only
 // never in the source — so they are out of scope here and follow #224's finalisation.)
 // Security: the SQL LIKE only prefilters candidates that mention the id string; each candidate is then
 // (a) confirmed to hold a REAL reference (precise regex, not a coincidental substring) and (b) gated

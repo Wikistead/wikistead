@@ -105,8 +105,8 @@ describe('guest HTTP path: published read + publish authorization', () => {
   })
 
   it('resource binding: a token for page A cannot read/publish page B', async () => {
-    expect((await guestGet(viewTok, pageB)).statusCode).toBe(403)
-    expect((await guestPublish(editTok, pageB)).statusCode).toBe(403)
+    expect((await guestGet(viewTok, pageB)).statusCode).toBe(403) // token-scope error (bound to page A) — the guest hook rejects before getPublished; uniform for any page B, so no existence leak (#262 targets the member read path)
+    expect((await guestPublish(editTok, pageB)).statusCode).toBe(403) // publish is an edit ACTION → keeps 403
   })
 
   // ── internal-resource (image) resolution: page-view gated, guest principal ──
@@ -133,8 +133,8 @@ describe('guest HTTP path: published read + publish authorization', () => {
     const devNoBody = { host: 'dev.localhost', authorization: 'Bearer dev-token' } // no content-type (empty DELETE body)
     expect((await app.inject({ method: 'DELETE', url: `/share-links/${editLinkId}`, headers: devNoBody })).statusCode).toBe(204)
     expect((await app.inject({ method: 'DELETE', url: `/share-links/${viewLinkId}`, headers: devNoBody })).statusCode).toBe(204)
-    expect((await guestPublish(editTok, pageA)).statusCode).toBe(403)
-    expect((await guestGet(viewTok, pageA)).statusCode).toBe(403)
+    expect((await guestPublish(editTok, pageA)).statusCode).toBe(403) // publish (edit action) → 403
+    expect((await guestGet(viewTok, pageA)).statusCode).toBe(404) // #262: revoked → view-denied read is existence-hidden (404)
     expect((await download(viewTok, attA)).statusCode).toBe(403) // a NEW download request after revoke is denied
   })
 
