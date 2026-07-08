@@ -35,6 +35,16 @@ const imageUploader = Facet.define<(() => void) | null, (() => void) | null>({
   combine: (vals) => vals.find((v) => v != null) ?? null,
 });
 
+// #251 / ADR-110: the host seam for the "/"-palette "Insert template" command. The host opens its
+// template picker (the same list/preview asset as the sidebar #250 picker) and calls back with the chosen
+// template's body markdown (or null on cancel). Its presence GATES the command's visibility (guests /
+// picker-less surfaces never see it). The insert is a single offset-invariant Y.Text edit at the caret —
+// never a replace of the page, and the title is untouched.
+export type TemplateInsertPicker = (onInsert: (body: string | null) => void) => void;
+const templateInsertPicker = Facet.define<TemplateInsertPicker | null, TemplateInsertPicker | null>({
+  combine: (vals) => vals.find((v) => v != null) ?? null,
+});
+
 // #205 part 2 / #210: the host page-picker seam is homed in decorations.ts (with the other host
 // seams) so the post-insert "change target" affordance reuses it too. When absent (guests /
 // picker-less surfaces) the embed-page command falls back to inserting the raw `:::embed-page`
@@ -108,7 +118,37 @@ function commandList(state: EditorState): PaletteCommand[] {
     return c;
   });
   const base = [...COMMANDS, ...macros];
-  return state.facet(imageUploader) ? [...base, IMAGE_COMMAND] : base;
+  const withImage = state.facet(imageUploader) ? [...base, IMAGE_COMMAND] : base;
+  // #251: append "Insert template" only when the host wired the picker seam (uploader-less/guest surfaces
+  // never see it). Its action opens the picker and inserts the chosen body at the caret.
+  const tplPicker = state.facet(templateInsertPicker);
+  return tplPicker
+    ? [...withImage, { ...INSERT_TEMPLATE_COMMAND, action: (view: EditorView) => openTemplateInsert(view, tplPicker) }]
+    : withImage;
+}
+
+// #251: "Insert template" command (layer P — insert, selection-independent). The token is removed by
+// applyAt (like image/embed), then the action opens the host picker; the chosen body is inserted at the
+// caret. Gated by the templateInsertPicker facet.
+const INSERT_TEMPLATE_COMMAND: PaletteCommand = {
+  id: "insert-template",
+  label: () => i18n.t("palette.insertTemplate"),
+  alias: "template",
+  keywords: "template insert reuse snippet boilerplate",
+  insert: "",
+  caret: 0,
+};
+
+// Open the host template picker and, on selection, insert the template BODY at the caret (where applyAt
+// already removed the "/query" token). Cancel (null) leaves the doc untouched. One offset-invariant Y.Text
+// edit — no view/Yjs access from here; the picker + body fetch are host-owned.
+function openTemplateInsert(view: EditorView, open: TemplateInsertPicker): void {
+  open((body) => {
+    if (body == null) { view.focus(); return; }
+    const at = view.state.selection.main.head;
+    view.dispatch({ changes: { from: at, insert: body }, selection: EditorSelection.cursor(at + body.length), scrollIntoView: true });
+    view.focus();
+  });
 }
 
 // Open the host page picker and, on selection, insert `:::embed-page\n<id>\n:::` at the caret (where
@@ -553,10 +593,11 @@ function imageInsert(upload: ImageUploader, container?: HTMLElement): Extension 
   return [imageUploader.of(() => input.click()), lifecycle];
 }
 
-export function slashPalette(opts: { uploadImage?: ImageUploader; container?: HTMLElement; openPageEmbedPicker?: PageEmbedPicker } = {}): Extension {
+export function slashPalette(opts: { uploadImage?: ImageUploader; container?: HTMLElement; openPageEmbedPicker?: PageEmbedPicker; openTemplateInsertPicker?: TemplateInsertPicker } = {}): Extension {
   // Order matters: vimVisualField before vimHintField (the field reads it); both before
   // the floating toolbar's bubble (added after slashPalette) so the bubble can read it.
   const core = [dismissedField, paletteField, decorateField, vimVisualField, vimHintField, paletteKeymap, decorateKeys, backslashDecorate, vimVisualSync];
   const ext = opts.uploadImage ? [...core, imageInsert(opts.uploadImage, opts.container)] : core;
-  return opts.openPageEmbedPicker ? [...ext, pageEmbedPicker.of(opts.openPageEmbedPicker)] : ext;
+  const withEmbed = opts.openPageEmbedPicker ? [...ext, pageEmbedPicker.of(opts.openPageEmbedPicker)] : ext;
+  return opts.openTemplateInsertPicker ? [...withEmbed, templateInsertPicker.of(opts.openTemplateInsertPicker)] : withEmbed;
 }

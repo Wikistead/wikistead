@@ -33,7 +33,9 @@ export function TemplatePickerDialog({
     const all = data ?? [];
     return [
       { key: "personal", items: all.filter((x) => x.scope === "personal") },
-      { key: "space", items: all.filter((x) => x.scope === "space" && x.spaceId === spaceId) },
+      // When a space is given (sidebar #250) show only that space's templates; when null (the #251 insert
+      // picker, which isn't threaded the page's space) show every space-scope template the user can view.
+      { key: "space", items: all.filter((x) => x.scope === "space" && (spaceId == null || x.spaceId === spaceId)) },
       { key: "tenant", items: all.filter((x) => x.scope === "tenant") },
     ].filter((g) => g.items.length > 0);
   }, [data, spaceId]);

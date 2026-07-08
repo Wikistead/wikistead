@@ -553,7 +553,8 @@
     "table": "Table",
     "divider": "Divider",
     "image": "Image",
-    "link": "Link"
+    "link": "Link",
+    "insertTemplate": "Insert template"
   },
   "calloutEdit": {
     "title": "Edit callout",
