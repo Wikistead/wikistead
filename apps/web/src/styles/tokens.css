@@ -526,6 +526,11 @@ body {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* #282: reserve the vertical scrollbar's width at ALL times. A per-keystroke macro RichUI edit makes the
+     doc height oscillate across the viewport boundary, so the scrollbar appears/disappears on every key; on
+     a classic (non-overlay) scrollbar that changes the content width and the right edge flickers. A stable
+     gutter keeps the content width constant regardless of the scrollbar, killing the flicker class-wide. */
+  scrollbar-gutter: stable;
 }
 /* Clearance at the very end of the document so the LAST line can scroll clear of the
    bottom-corner floating controls (VIM toggle / ACTIONS, ~52px band). This must match the
