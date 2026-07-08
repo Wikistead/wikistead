@@ -112,7 +112,8 @@ function useDisplayModeShortcut(cycle: () => void, enabled: boolean, chord: stri
     return () => window.removeEventListener("keydown", onKey);
   }, [cycle, enabled, chord]);
 }
-import { Lock } from "lucide-react";
+import { List, Lock } from "lucide-react";
+import { addCodeCopyButtons } from "../editor/live-preview/code-copy";
 import { PageTitle } from "./PageTitle";
 import { PageMeta } from "./PageMeta";
 import { BacklinksPanel } from "./BacklinksPanel";
@@ -894,6 +895,7 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
   const [outerEl, setOuterEl] = useState<HTMLDivElement | null>(null); // #227 non-scrolling positioning context
   const [bandEl, setBandEl] = useState<HTMLDivElement | null>(null); // #227 ②: publish the band's real height
   const isWide = useMediaQuery("(min-width: 1200px)");
+  const { on: tocOn, setOn: setTocOn } = useTocPref(); // #227 ①: TOC on/off parity with the member view
 
   useEffect(() => {
     let cancelled = false;
@@ -911,7 +913,8 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
   useEffect(() => {
     if (state.status !== "ok" || !bodyEl) return;
     bodyEl.replaceChildren(renderMarkdownToDom(state.page!.content));
-  }, [state, bodyEl]);
+    addCodeCopyButtons(bodyEl, t("contextMenu.copy")); // #227 ②: copy button parity for public code blocks
+  }, [state, bodyEl, t]);
 
   useEffect(() => {
     if (state.status !== "ok" || !state.page!.noindex) return;
@@ -969,10 +972,25 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
           )}
         </div>
       </div>
+      {/* #227 ①: TOC on/off toggle — parity with the member Reading view. Shown when the page has
+          headings on a wide screen; flips the device-local pref that also gates the rail below. */}
+      {isWide && toc.headings.length > 0 && (
+        <button
+          type="button"
+          data-testid="public-toc-toggle"
+          aria-pressed={tocOn}
+          aria-label={t("toc.toggle")}
+          title={t("toc.toggle")}
+          onClick={() => setTocOn(!tocOn)}
+          className={`absolute right-3 top-[calc(var(--wks-band-h,5.5rem)+0.5rem)] z-10 rounded p-1.5 ${tocOn ? "bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-[var(--accent)]" : "text-fg-dim hover:bg-panel-2"}`}
+        >
+          <List size={16} />
+        </button>
+      )}
       {/* #227 ②: the TOC rail in the right whitespace on wide screens (same look as the member Reading rail).
           On the OUTER (non-scrolling) wrapper + top offset by --wks-band-h so it clears the band and stays put. */}
-      {isWide && toc.headings.length > 0 && (
-        <div className="pointer-events-none absolute left-[calc(50%+368px)] top-[calc(var(--wks-band-h,5.5rem)+0.5rem)] bottom-2 z-[5] w-[210px]">
+      {isWide && tocOn && toc.headings.length > 0 && (
+        <div className="pointer-events-none absolute left-[calc(50%+368px)] top-[calc(var(--wks-band-h,5.5rem)+2.75rem)] bottom-2 z-[5] w-[210px]">
           <div className="pointer-events-auto h-full">
             <Toc headings={toc.headings} activeFrom={toc.activeFrom} depth={3} onJump={toc.jump} variant="rail" />
           </div>

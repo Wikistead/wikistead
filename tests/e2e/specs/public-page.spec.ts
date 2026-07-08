@@ -60,7 +60,7 @@ test("#227 review: the public page has the member title band and a working TOC",
   await authed.click("[data-pane=preview] .cm-content");
   // multiple headings + tall bodies so the TOC has entries and jumping actually scrolls.
   const filler = Array.from({ length: 25 }, (_, i) => `para ${i}`).join("\n\n");
-  await authed.keyboard.insertText(`# Top Title\n\n## Alpha Section\n\n${filler}\n\n## Bravo Section\n\n${filler}\n\n## Charlie Section\n\n${filler}\n`);
+  await authed.keyboard.insertText(`# Top Title\n\n## Alpha Section\n\n\`\`\`js\nconst answer = 42;\n\`\`\`\n\n${filler}\n\n## Bravo Section\n\n${filler}\n\n## Charlie Section\n\n${filler}\n`);
   await sleep(400);
   await authed.getByTestId("publish-page").click();
   await sleep(800);
@@ -96,6 +96,16 @@ test("#227 review: the public page has the member title band and a working TOC",
   const bandBottom = await anon.getByTestId("public-band").evaluate((el) => el.getBoundingClientRect().bottom);
   expect(headingTop).toBeLessThan(300); // it DID scroll near the top…
   expect(headingTop).toBeGreaterThanOrEqual(bandBottom - 6); // …but clears the band (not hidden behind the blur)
+
+  // #227 ②: a public code block gets a copy button (parity with the editor fence header).
+  await expect(anon.getByTestId("public-body").locator("pre .cm-lp-code-copy")).toHaveCount(1);
+
+  // #227 ①: a TOC on/off toggle hides/shows the rail (device-local pref, parity with the member view).
+  await expect(anon.getByTestId("toc")).toBeVisible(); // on by default (useTocPref default ON)
+  await anon.getByTestId("public-toc-toggle").click();
+  await expect(anon.getByTestId("toc")).toHaveCount(0); // hidden
+  await anon.getByTestId("public-toc-toggle").click();
+  await expect(anon.getByTestId("toc")).toBeVisible(); // shown again
 });
 
 test("#227: a NON-public page shows not-found to an anonymous visitor (existence hidden)", async ({ browser }) => {
