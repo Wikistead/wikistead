@@ -6,6 +6,7 @@ import { INLINE_FORMATS, insertImage, insertLink, type InlineFormat, type ImageU
 import { orderByRecency, recordUse } from "./palette-recency";
 import { contextHintTooltip } from "./hint";
 import { registeredMacros } from "../macros";
+import { setMacroRenderActive } from "./macro-edit";
 
 // Slash command palette (Step I / M0-1 — see ADR-017). Triggered by `/` at a line
 // start OR after whitespace while editing. Lists block insert/toggle commands (layer
@@ -24,6 +25,11 @@ interface PaletteCommand {
   insert: string; // the Markdown template inserted in place of the "/query" token
   caret: number | [number, number]; // caret offset (or selection range) within `insert`
   action?: (view: EditorView) => void; // custom action instead of a template insert (e.g. image picker)
+  // #271: a fence macro that renders as an atom widget with a hidden body (mermaid/plantuml). Inserting
+  // its template lands the caret INSIDE the fence, which the atom hides — so the insert must also reveal
+  // the raw source (the same entered/raw state as Ctrl+Enter), or the caret is trapped invisibly. Modal
+  // fence macros (excalidraw) are excluded — their edit is a modal, not raw-in-place.
+  revealRaw?: boolean;
 }
 
 // Holds the image-insert trigger (opening the host's file picker), supplied by
@@ -100,6 +106,8 @@ function macroCommands(): PaletteCommand[] {
       keywords: m.slash!.keywords,
       insert: m.slash!.insert,
       caret: m.slash!.caret ?? m.slash!.insert.length,
+      // #271: reveal raw on insert for atom-rendered fence macros whose edit is in-place (not modal).
+      revealRaw: m.kind === "fence" && (m.editUI?.present ?? m.richEditUI?.present) !== "modal",
     }));
 }
 
@@ -270,7 +278,14 @@ function applyAt(view: EditorView, cmd: PaletteCommand): void {
   const selection = Array.isArray(cmd.caret)
     ? EditorSelection.range(at + cmd.caret[0], at + cmd.caret[1])
     : EditorSelection.cursor(at + cmd.caret);
-  view.dispatch({ changes: { from: v.from, to: head, insert: cmd.insert }, selection, scrollIntoView: true });
+  // #271: for an atom-rendered fence macro (mermaid/plantuml), the caret above lands inside the fence
+  // body, which the atom widget hides — so also enter its raw state (same as Ctrl+Enter) in this same
+  // transaction so the source is visible, typing shows, doc-line motion walks the raw lines, and exiting
+  // renders the diagram. `from/to` are the fence's post-insert range. Non-fence templates just insert.
+  const effects = cmd.revealRaw
+    ? setMacroRenderActive.of({ from: at, to: at + cmd.insert.length, raw: true })
+    : undefined;
+  view.dispatch({ changes: { from: v.from, to: head, insert: cmd.insert }, selection, effects, scrollIntoView: true });
   view.focus();
 }
 
