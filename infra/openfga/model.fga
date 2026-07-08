@@ -47,7 +47,7 @@ type space
     # space-scoped share links: one tuple (space:S#viewer@share_link:Y) grants
     # view access to every page in S. Revoke = delete that tuple (1 op).
     # Permanent links omit condition; time-bounded links use non_expired.
-    # TODO(phase: guest): implement space-scoped share link issuance API.
+    # (Issuance API implemented in #104 / ADR-038.)
     define viewer: [user, group#member, user:*, share_link, share_link with non_expired] or editor
     define admin: admin from tenant
     # Comment AUDIENCE switch at the space level (#100 / ADR-029 Option B). Toggling comments on a
@@ -69,14 +69,21 @@ type page
     # permission relation yet — space is the sole inheritance level for now.
     define parent: [page]
 
-    # #109 / ADR-098: per-page PRIVATE (allowlist) marker. Populating `private@user:*` makes the page
-    # private: the space-inherited grant paths (manager/editor/viewer from space) are cut, so ONLY the
-    # explicit direct grants (the allow list) remain — for view AND edit AND manage (no back door). An
-    # empty marker is a 1:1 no-op (the space paths pass through), so existing pages are unchanged. This is
-    # the whitelist counterpart to `restricted` (blocklist); the two compose (deny still wins — see view).
+    # #109 / ADR-098: per-page PRIVATE (allowlist) marker. Populating the marker makes the page private:
+    # the space-inherited grant paths (manager/editor/viewer from space) are cut, so ONLY the explicit
+    # direct grants (the allow list) remain — for view AND edit AND manage (no back door). An empty marker
+    # is a 1:1 no-op (the space paths pass through), so existing pages are unchanged. This is the whitelist
+    # counterpart to `restricted` (blocklist); the two compose (deny still wins — see view).
+    # #244 / ADR-098 addendum: the marker is a PAIR — [user:*, share_link:*]. OpenFGA's typed wildcard
+    # `user:*` matches ONLY user-type principals, so a space share-link guest (share_link:Y) slipped past
+    # `... but not private` and read private pages via `viewer from space`. share_link:* closes that hole.
+    # Both wildcards are always written/deleted together in the write path (a lone user:* over-permits
+    # guests; a lone share_link:* over-denies members). `share_link:*` precedent: space#comment_open (:59).
     # public⊥private is a WRITE-BOUNDARY invariant (setting private strips view_base@user:* → is_public
     # false), enforced in the write path, not here — the model can't subtract the DIRECT user:* grant.
-    define private: [user:*]
+    # (#218 will extend this line to `... or private from parent` for nested-page inheritance; rebase onto
+    # this pair when it lands.)
+    define private: [user:*, share_link:*]
 
     # Each `... from space` inheritance is gated by `but not private` via a helper (OpenFGA forbids mixing
     # `or` and `but not` at one level). Private → the helper is empty → only direct grants survive.
