@@ -27,6 +27,20 @@ export async function createScratchPage(page: Page, title = "Scratch"): Promise<
   }, { api: API, title });
 }
 
+// #253 / ADR-113: flip the tenant PARENT SWITCH (tenant_settings.public_enabled) via the admin API. The
+// whole anonymous public surface 404s while this is OFF (default), so any spec that expects public rendering
+// must turn it ON first. dev-token is a tenant admin in dev mode. The caller's page must be at the app origin.
+export async function setPublicSurface(page: Page, enabled: boolean): Promise<void> {
+  await page.evaluate(async ({ api, enabled }) => {
+    const r = await fetch(`${api}/admin/public-settings`, {
+      method: "PUT",
+      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!r.ok) throw new Error(`public-settings PUT failed: ${r.status}`);
+  }, { api: API, enabled });
+}
+
 // Convenience for single-client editor specs: load the app, create a scratch page, open
 // it, and wait for the surface. Returns the page id.
 export async function openScratch(page: Page, title = "Scratch"): Promise<string> {

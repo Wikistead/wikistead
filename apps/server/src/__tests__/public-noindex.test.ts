@@ -29,6 +29,8 @@ beforeAll(async () => {
   const slug = `noidx-${Date.now().toString(36)}`
   host = `${slug}.localhost`
   ;({ tenantId } = await provisionTenant(fgaClient, { slug, admin: { sub: 'noidx-owner' } }))
+  // #253 / ADR-113: the tenant parent switch must be ON for the public surface (default OFF).
+  await admin`INSERT INTO tenant_settings (tenant_id, public_enabled) VALUES (${tenantId}, true) ON CONFLICT (tenant_id) DO UPDATE SET public_enabled = true`
   ;[{ id: spaceId }] = await admin<[{ id: string }]>`
     INSERT INTO spaces (tenant_id, name) VALUES (${tenantId}, 'noidx-space') RETURNING id`
   noindexPageId = await mkPage(true)

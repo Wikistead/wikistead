@@ -27,6 +27,19 @@ async function resolveTenantForRequest(host: string) {
   return loadTenant(slug, domain)
 }
 
+// #253 / ADR-113 (guardrail 1 — the tenant PARENT SWITCH, read-time gate): the whole anonymous public
+// surface is OFF unless the tenant admin turned it on (tenant_settings.public_enabled, default false). OFF ⇒
+// every public route 404s uniformly (existence-hidden), WITHOUT touching any index or grant — non-destructive,
+// so turning it back ON restores every public page (like the non-destructive billing freeze). The server is
+// the fortress here: the hidden toggle UI is convenience; this gate is the guarantee.
+async function tenantPublicEnabled(tenantId: string): Promise<boolean> {
+  return pool.begin(async (tx) => {
+    await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+    const [r] = await tx<{ public_enabled: boolean }[]>`SELECT public_enabled FROM tenant_settings WHERE tenant_id = ${tenantId}`
+    return r?.public_enabled === true
+  }) as Promise<boolean>
+}
+
 // Read page from DB under RLS — tenant isolation is maintained even for public pages.
 // #227: a page can carry the public grant (view_base@user:*) yet be UNPUBLISHED (published_at NULL)
 // a draft that was toggled public, or public-before-publish. Its title/content/existence must NOT leak
@@ -112,6 +125,7 @@ export async function publicPlugin(app: FastifyInstance) {
   app.get<{ Params: { spaceId: string } }>('/public/spaces/:spaceId/pages', async (req, reply) => {
     const tenant = await resolveTenantForRequest(req.headers.host ?? '')
     if (!tenant) return reply.code(404).send({ error: 'not found' })
+    if (!(await tenantPublicEnabled(tenant.id))) return reply.code(404).send({ error: 'not found' }) // #253: tenant parent switch OFF ⇒ whole public surface hidden
     const spacePublic = await checkRelation(fgaClient, ANON, 'viewer', { type: 'space', id: req.params.spaceId })
     if (!spacePublic) return reply.code(404).send({ error: 'not found' })
     // The FGA viewer check is GLOBAL across the shared store; also require the space to belong to THIS
@@ -136,6 +150,7 @@ export async function publicPlugin(app: FastifyInstance) {
   app.get<{ Params: { pageId: string } }>('/public/pages/:pageId', async (req, reply) => {
     const tenant = await resolveTenantForRequest(req.headers.host ?? '')
     if (!tenant) return reply.code(404).send({ error: 'not found' })
+    if (!(await tenantPublicEnabled(tenant.id))) return reply.code(404).send({ error: 'not found' }) // #253: tenant parent switch OFF ⇒ whole public surface hidden
 
     // Public check via user:anonymous (not user:*).
     // Returns true if page:X#view@user:* exists OR space:S#viewer@user:* applies.
@@ -176,6 +191,7 @@ export async function publicPlugin(app: FastifyInstance) {
   app.get('/public/pages', async (req, reply) => {
     const tenant = await resolveTenantForRequest(req.headers.host ?? '')
     if (!tenant) return reply.code(404).send({ error: 'not found' })
+    if (!(await tenantPublicEnabled(tenant.id))) return reply.code(404).send({ error: 'not found' }) // #253: tenant parent switch OFF ⇒ whole public surface hidden
 
     // list_objects returns public page IDs across the entire shared FGA store.
     // RLS (withTenant) then narrows to this tenant's pages only.

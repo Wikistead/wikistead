@@ -19,6 +19,9 @@ export type DomainEvent =
   // #109 / ADR-098: per-page private (allowlist) toggle. `made_private` also strips public (view@user:*).
   | { type: 'page.made_private'; tenantId: string; pageId: string; actorId: string }
   | { type: 'page.made_non_private'; tenantId: string; pageId: string; actorId: string }
+  // #253 / ADR-113: per-page anonymous public toggle (view_base@user:* grant/revoke; noindex forced on).
+  | { type: 'page.made_public'; tenantId: string; pageId: string; actorId: string }
+  | { type: 'page.made_non_public'; tenantId: string; pageId: string; actorId: string }
   // ── Spaces ───────────────────────────────────────────────────────────
   | { type: 'space.created';  tenantId: string; spaceId: string; actorId: string }
   | { type: 'space.updated';  tenantId: string; spaceId: string; actorId: string }
