@@ -229,6 +229,59 @@ test("insert a column and a row from a selected cell's ops (stays Tier-1 pipe)",
   expect(await tbl.locator("tr").first().locator("th,td").count()).toBe(3); // 3 columns
 });
 
+// #260: with a MULTI-cell selection, "insert after / below" must land OUTSIDE the selection (past its
+// right/bottom edge), not in its middle. Real Chromium.
+async function pipe3x2InEdit(page: any) {
+  await page.click("[data-pane=preview] .cm-content");
+  for (const l of ["| A | B | C |", "| - | - | - |", "| a | b | c |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
+  await sleep(250);
+  await page.locator("[data-pane=preview] table.cm-lp-table").click(); await sleep(150); await page.keyboard.press("Control+Enter");
+  await expect(page.getByTestId("table-edit")).toBeVisible();
+}
+const cellText = (page: any, key: string) => page.locator(`[data-testid=table-edit] [data-cellkey="${key}"]`).innerText();
+
+test("#260: insert-after a multi-column selection lands past the RIGHT edge (not the middle)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "multicol-insert");
+  await enterEdit(page);
+  await pipe3x2InEdit(page); // 3 cols (A B C / a b c)
+
+  await dragCells(page, "1,0", "1,1"); // select body cells a,b → columns 0..1
+  await sleep(120);
+  await page.getByTestId("table-col-insert-after").click();
+  await sleep(200);
+  expect(await colCount(page)).toBe(4);
+  // header order must be A | B | <new empty> | C — the new column is AFTER the selection's right edge (col 1),
+  // NOT between A and B (the pre-fix middle-insert bug).
+  expect((await cellText(page, "0,0")).trim()).toBe("A");
+  expect((await cellText(page, "0,1")).trim()).toBe("B");
+  expect((await cellText(page, "0,2")).trim()).toBe("");
+  expect((await cellText(page, "0,3")).trim()).toBe("C");
+});
+
+test("#260: insert-below a multi-row selection lands past the BOTTOM edge (single-select unchanged)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "multirow-insert");
+  await enterEdit(page);
+  // 2 cols × 3 rows (header H1 H2 / r1c0 r1c1 / r2c0 r2c1)
+  await page.click("[data-pane=preview] .cm-content");
+  for (const l of ["| H1 | H2 |", "| - | - |", "| p | q |", "| x | y |", "", "below"]) { await page.keyboard.type(l); await page.keyboard.press("Enter"); }
+  await sleep(250);
+  await page.locator("[data-pane=preview] table.cm-lp-table").click(); await sleep(150); await page.keyboard.press("Control+Enter");
+  await expect(page.getByTestId("table-edit")).toBeVisible();
+
+  await dragCells(page, "1,0", "2,0"); // select rows 1..2 (col 0): p, x
+  await sleep(120);
+  await page.getByTestId("table-row-insert-below").click();
+  await sleep(200);
+  expect(await rowCount(page)).toBe(4);
+  // new row is AFTER the bottom edge (row 2), so col-0 reads H1 | p | x | <empty> — not p | <empty> | x.
+  expect((await cellText(page, "0,0")).trim()).toBe("H1");
+  expect((await cellText(page, "1,0")).trim()).toBe("p");
+  expect((await cellText(page, "2,0")).trim()).toBe("x");
+  expect((await cellText(page, "3,0")).trim()).toBe("");
+});
+
 // #1: insert before/after the selected column, and delete a column, from the toolbar.
 test("insert-after and delete a column via the contextual toolbar", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();

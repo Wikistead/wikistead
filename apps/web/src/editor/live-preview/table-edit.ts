@@ -173,6 +173,10 @@ export const tableInlineEditor: InlineEditor = {
     let selMode: "cells" | "col" | "row" = "cells";
     let selCol = -1;
     let selRow = -1;
+    // #260: the selection's OUTER right/bottom edge (span-aware), so "insert after / below" a MULTI-cell
+    // selection lands OUTSIDE the selection instead of in its middle. Single selection → equals selCol/selRow.
+    let selColEnd = -1;
+    let selRowEnd = -1;
 
     const applySel = () => {
       // Light fill on every selected cell; a thick accent border ONLY on the selection's
@@ -201,6 +205,17 @@ export const tableInlineEditor: InlineEditor = {
       selMode = fullH && lc === hc ? "col" : fullW && lr === hr ? "row" : "cells";
       selCol = lc;
       selRow = lr;
+      // #260: outer edges for "insert after / below". Start from the rectangle's right/bottom, then extend
+      // past any merged cell that spans beyond it (rowspan/colspan) so the edge is the merge's OUTER side.
+      selColEnd = hc;
+      selRowEnd = hr;
+      for (const k of selected) {
+        const [r, c] = k.split(",").map(Number) as [number, number];
+        const cell = grid[r]?.[c];
+        if (!cell) continue;
+        selColEnd = Math.max(selColEnd, c + cell.colspan - 1);
+        selRowEnd = Math.max(selRowEnd, r + cell.rowspan - 1);
+      }
       applySel();
     };
 
@@ -535,10 +550,10 @@ export const tableInlineEditor: InlineEditor = {
     });
     // Structural ops (#1) — operate on the selected column / row (selCol / selRow).
     colInsL.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selCol >= 0) apply(insertColAt(grid, selCol)); });
-    colInsR.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selCol >= 0) apply(insertColAt(grid, selCol + 1)); });
+    colInsR.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selCol >= 0) apply(insertColAt(grid, selColEnd + 1)); }); // #260: after the selection's RIGHT edge
     colDel.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selCol >= 0) apply(deleteColAt(grid, selCol)); });
     rowInsT.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selRow >= 0) apply(insertRowAt(grid, selRow)); });
-    rowInsB.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selRow >= 0) apply(insertRowAt(grid, selRow + 1)); });
+    rowInsB.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selRow >= 0) apply(insertRowAt(grid, selRowEnd + 1)); }); // #260: below the selection's BOTTOM edge
     rowDel.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (selRow >= 0) apply(deleteRowAt(grid, selRow)); });
     alignL.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ align: "left" }); });
     alignC.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); patchStyle({ align: "center" }); });
