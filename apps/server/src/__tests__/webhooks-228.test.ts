@@ -34,6 +34,7 @@ beforeAll(async () => {
   spaceId = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'wh-space' })).id
   pubPage = (await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'Published' })).id
   privPage = (await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'Private' })).id
+  await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id}` // clear any rows leaked by a prior crashed run (shared dev tenant; outboxCount asserts are tenant-wide)
   await admin`UPDATE pages SET published_at = now() WHERE id IN (${pubPage}, ${privPage})`
   await writeTuples(fgaClient, [
     { user: `space:${spaceId}`, relation: 'space', object: `page:${pubPage}` }, // published/linked → deliverable
@@ -88,6 +89,25 @@ describe('#228 drain — existence-hiding + SSRF', () => {
     expect(await outboxCount(tenant.id)).toBe(0) // the private-page row was dropped (not retried)
     const [hook] = await admin<{ failure_count: number }[]>`SELECT failure_count FROM webhooks WHERE id = ${id}`
     expect(hook!.failure_count).toBe(0) // NO delivery attempt → no failure bump (never reached the URL)
+  })
+
+  it('RETRIES (does not drop) a page.published whose page#space link has not landed yet (#228 review 指摘2)', async () => {
+    // A page published but NOT yet space-linked (the FGA page#space write lands just AFTER the publish tx, so
+    // the outbox row can briefly out-race it) and NOT private → 'not-ready'. It must be rescheduled, never
+    // permanently dropped, and never delivered while unlinked.
+    const notLinked = (await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'RacePending' })).id
+    await admin`UPDATE pages SET published_at = now() WHERE id = ${notLinked}` // no page#space tuple, no private marker
+    const { id } = await createWebhook(db, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', url: 'https://127.0.0.1/hook' })
+    hookIds.push(id)
+    await db.tx((tx) => enqueueWebhookOutbox(tx, { tenantId: tenant.id, eventType: 'page.published', payload: { pageId: notLinked } }))
+    await drainWebhookOutbox(fgaClient)
+    const rows = await admin<{ attempts: number; next_attempt_at: Date }[]>`SELECT attempts, next_attempt_at FROM webhook_outbox WHERE tenant_id = ${tenant.id}`
+    expect(rows.length).toBe(1) // retried, NOT dropped
+    expect(rows[0]!.attempts).toBe(1) // one attempt burned, rescheduled with backoff
+    expect(rows[0]!.next_attempt_at.getTime()).toBeGreaterThan(Date.now()) // future (backoff), not due
+    const [hook] = await admin<{ failure_count: number }[]>`SELECT failure_count FROM webhooks WHERE id = ${id}`
+    expect(hook!.failure_count).toBe(0) // never delivered → no failure bump
+    await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id}`
   })
 
   it('a blocked (SSRF) delivery URL fails and, after N failures, auto-disables the hook', async () => {
