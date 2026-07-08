@@ -121,6 +121,7 @@ import { ShareDialog } from "../ui/ShareDialog";
 import { CommentsPanel } from "../comments/CommentsPanel";
 import { Toc } from "../toc/Toc";
 import { useTocPref } from "../toc/useTocPref";
+import { usePublicToc } from "./public-toc"; // #227: TOC for the public reader (headings from the rendered DOM)
 import type { Heading } from "../editor/headings";
 import { HistoryPanel } from "../history/HistoryPanel";
 import { DiffModal } from "../history/DiffModal";
@@ -882,7 +883,8 @@ function PublicTree({ nodes }: { nodes: PublicChildNode[] }) {
 function PublicPageContent({ pageId, showChildren }: { pageId: string; showChildren: boolean }) {
   const { t } = useTranslation();
   const [state, setState] = useState<{ status: "loading" | "notfound" | "ok"; page?: { id: string; title: string; content: string; noindex: boolean; children: PublicChildNode[] } }>({ status: "loading" });
-  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [bodyEl, setBodyEl] = useState<HTMLDivElement | null>(null); // callback ref → reactive for the TOC hook
+  const isWide = useMediaQuery("(min-width: 1200px)");
 
   useEffect(() => {
     let cancelled = false;
@@ -898,9 +900,9 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
   }, [pageId]);
 
   useEffect(() => {
-    if (state.status !== "ok" || !bodyRef.current) return;
-    bodyRef.current.replaceChildren(renderMarkdownToDom(state.page!.content));
-  }, [state]);
+    if (state.status !== "ok" || !bodyEl) return;
+    bodyEl.replaceChildren(renderMarkdownToDom(state.page!.content));
+  }, [state, bodyEl]);
 
   useEffect(() => {
     if (state.status !== "ok" || !state.page!.noindex) return;
@@ -911,19 +913,41 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
     return () => meta.remove();
   }, [state]);
 
+  // #227 ②: declared AFTER the replaceChildren effect so its heading collection runs on the POPULATED body
+  // (React runs effects in declaration order — collecting before replaceChildren would see an empty DOM).
+  const toc = usePublicToc(bodyEl, state.status === "ok");
+
   if (state.status === "loading") return <div style={{ padding: 24 }} />;
   if (state.status === "notfound") {
     return <div data-testid="public-not-found" style={{ padding: 24, fontFamily: "var(--font-body, sans-serif)" }}>{t("publicPage.notFound")}</div>;
   }
   const page = state.page!;
   return (
-    <div className="wks-public" style={{ maxWidth: "46rem", margin: "0 auto", padding: "32px 20px", fontFamily: "var(--font-body, sans-serif)" }}>
-      <h1 data-testid="public-title" style={{ marginTop: 0 }}>{page.title}</h1>
-      <div ref={bodyRef} data-testid="public-body" />
-      {showChildren && page.children.length > 0 && (
-        <nav data-testid="public-children" style={{ marginTop: 32, borderTop: "1px solid var(--border, #ddd)", paddingTop: 12 }}>
-          <PublicTree nodes={page.children} />
-        </nav>
+    <div className="wks-public relative h-full overflow-y-auto" style={{ fontFamily: "var(--font-body, sans-serif)" }}>
+      {/* #227 ① : the member frosted title BAND, reused read-only. Sticky so it frosts the content scrolling
+          under it in BOTH layouts (window-scroll single page / AppShell-scroll space route). PageTitle with
+          no onRename renders a plain read-only <h1> — no edit affordances leak into the public view. */}
+      <div className="sticky top-0 z-20 pb-6">
+        <div aria-hidden="true" className="absolute inset-x-0 inset-y-0 bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_90%,transparent)] via-[color-mix(in_srgb,var(--bg)_42%,transparent)] to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_55%,transparent)]" />
+        <div className="relative mx-auto w-full max-w-[46rem] px-5 pt-8" data-testid="public-title">
+          <PageTitle title={page.title} />
+        </div>
+      </div>
+      <div className="mx-auto w-full max-w-[46rem] px-5 pb-16">
+        <div ref={setBodyEl} data-testid="public-body" />
+        {showChildren && page.children.length > 0 && (
+          <nav data-testid="public-children" style={{ marginTop: 32, borderTop: "1px solid var(--border, #ddd)", paddingTop: 12 }}>
+            <PublicTree nodes={page.children} />
+          </nav>
+        )}
+      </div>
+      {/* #227 ②: the TOC rail in the right whitespace on wide screens (same look as the member Reading rail). */}
+      {isWide && toc.headings.length > 0 && (
+        <div className="pointer-events-none absolute left-[calc(50%+368px)] top-[5.5rem] bottom-2 z-[5] w-[210px]">
+          <div className="pointer-events-auto h-full">
+            <Toc headings={toc.headings} activeFrom={toc.activeFrom} depth={3} onJump={toc.jump} variant="rail" />
+          </div>
+        </div>
       )}
     </div>
   );
