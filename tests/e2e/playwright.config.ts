@@ -12,6 +12,7 @@ export default defineConfig({
   workers: 1,
   timeout: 60_000,
   globalSetup: "./global-setup.ts",
+  globalTeardown: "./global-teardown.ts", // #279: fail a run that broke the shared demo FGA fixture
   reporter: [["list"]],
   use: {
     // Same-origin (ADR-016): the browser hits the web origin only; Vite proxies

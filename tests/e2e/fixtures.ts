@@ -1,4 +1,94 @@
 import postgres from "postgres";
+import { readFileSync } from "node:fs";
+
+// #279: the shared demo fixture's FGA tuples (esp. `space:demo_space#space@page:demo`) are seeded once by
+// `fga:seed` at stack init, NOT re-asserted per run — so if a spec deletes one, every later run stays broken
+// (page:demo view=false → share.spec / guest-sidebar-245 fail). seedFgaFixtures() re-writes the core demo/
+// acme hierarchy tuples idempotently on every globalSetup, so the next run always self-heals; the
+// globalTeardown integrity check (assertDemoFixtureIntact) fails a run that leaves the fixture broken, so the
+// culprit spec is caught red-handed. We talk to OpenFGA over its plain HTTP API (like Meili above) to avoid
+// adding @openfga/sdk as an e2e dependency. The store/model ids are dynamic → read from the e2e env files
+// (globalSetup isn't launched with --env-file, so parse them ourselves; .env.e2e.local overrides .env.e2e).
+
+// The core shared-fixture tuples — the demo + acme hierarchy from infra/openfga/seed.ts (the conditioned,
+// per-spec-managed share links are intentionally excluded; specs own those).
+const CORE_FGA_TUPLES = [
+  { user: "user:dev-user", relation: "admin", object: "tenant:tenant_dev" },
+  { user: "user:dev-user", relation: "member", object: "tenant:tenant_dev" },
+  { user: "tenant:tenant_dev", relation: "tenant", object: "space:demo_space" },
+  { user: "user:dev-user", relation: "manager", object: "space:demo_space" },
+  { user: "space:demo_space", relation: "space", object: "page:demo" },
+  { user: "share_link:demo_view_perm", relation: "view_base", object: "page:demo" },
+  { user: "user:acme-admin", relation: "admin", object: "tenant:tenant_acme" },
+  { user: "tenant:tenant_acme", relation: "tenant", object: "space:acme_space" },
+  { user: "user:acme-admin", relation: "manager", object: "space:acme_space" },
+  { user: "space:acme_space", relation: "space", object: "page:acme_page" },
+] as const;
+// The one tuple whose loss caused #279 — the teardown integrity check asserts it survives the run.
+const DEMO_PAGE_TUPLE = { user: "space:demo_space", relation: "space", object: "page:demo" };
+
+function fgaEnv(): { apiUrl: string; storeId: string; modelId: string } {
+  const parse = (rel: string): Record<string, string> => {
+    try {
+      const text = readFileSync(new URL(rel, import.meta.url), "utf8");
+      const out: Record<string, string> = {};
+      for (const line of text.split("\n")) {
+        const t = line.trim();
+        if (!t || t.startsWith("#") || !t.includes("=")) continue;
+        const i = t.indexOf("=");
+        out[t.slice(0, i).trim()] = t.slice(i + 1).trim();
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  };
+  const env = { ...parse("../../.env.e2e"), ...parse("../../.env.e2e.local") };
+  return {
+    apiUrl: env.OPENFGA_API_URL ?? "http://localhost:8081",
+    storeId: env.OPENFGA_STORE_ID ?? "",
+    modelId: env.OPENFGA_MODEL_ID ?? "",
+  };
+}
+
+async function fga(path: string, body: unknown, apiUrl: string, storeId: string) {
+  return fetch(`${apiUrl}/stores/${storeId}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// Idempotently (re-)assert the core shared-fixture tuples. delete-then-write per tuple: OpenFGA rejects
+// writing a tuple that already exists AND deleting one that doesn't, so each op is tried and its error
+// swallowed — the end state is exactly the CORE set present.
+export async function seedFgaFixtures(): Promise<void> {
+  const { apiUrl, storeId, modelId } = fgaEnv();
+  if (!storeId) return; // no e2e FGA configured (unit-only run) — nothing to seed
+  for (const t of CORE_FGA_TUPLES) {
+    const key = { user: t.user, relation: t.relation, object: t.object };
+    try { await fga("/write", { deletes: { tuple_keys: [key] } }, apiUrl, storeId); } catch { /* absent */ }
+    try {
+      await fga("/write", { writes: { tuple_keys: [key] }, authorization_model_id: modelId }, apiUrl, storeId);
+    } catch { /* best effort */ }
+  }
+}
+
+// #279 integrity check (globalTeardown): fail the run if the demo page tuple didn't survive, so the spec
+// that deleted it is caught in that run rather than silently breaking the NEXT one.
+export async function assertDemoFixtureIntact(): Promise<void> {
+  const { apiUrl, storeId } = fgaEnv();
+  if (!storeId) return;
+  const res = await fga("/read", { tuple_key: DEMO_PAGE_TUPLE }, apiUrl, storeId);
+  const json = (await res.json().catch(() => ({}))) as { tuples?: unknown[] };
+  if (!json.tuples || json.tuples.length === 0) {
+    throw new Error(
+      "#279 fixture integrity: the shared `space:demo_space#space@page:demo` tuple was DELETED during this run. " +
+        "A spec must not mutate the shared demo fixture — use a scratch resource + afterAll cleanup. " +
+        "seedFgaFixtures() will self-heal the next run, but fix the offending spec.",
+    );
+  }
+}
 
 // Coordinates of the ISOLATED e2e middleware (docker-compose.e2e.yml). Fixed by
 // that compose file, so the harness can hardcode them.
