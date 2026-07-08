@@ -665,6 +665,7 @@
     "renamed": "Template renamed",
     "deleted": "Template deleted",
     "deleteConfirm": "Delete the template “{{name}}”? This cannot be undone.",
-    "actionFailed": "Something went wrong"
+    "actionFailed": "Something went wrong",
+    "preview": "Preview"
   }
 }
