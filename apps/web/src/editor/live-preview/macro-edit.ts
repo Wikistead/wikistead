@@ -102,9 +102,10 @@ const escExit = Prec.high(
           if (cm?.state.vim) { try { Vim.handleKey(cm, "<Esc>", "mapping"); } catch { /* vim unavailable */ } }
           // #216 comment 820: exiting a TABLE's RichUI returns to the RENDERED widget. A pipe table shows
           // raw while the caret is inside it, so move the caret PAST the table so it re-renders as a widget.
-          // #283: a FENCE macro (mermaid/plantuml) must also normalize the caret — otherwise it lingers on a
-          // hidden body line INSIDE the re-rendered atom (the #271 trapped-caret state, via Esc). Move it to
-          // the atom's near edge (its opening line). A callout keeps its caret (raw-on-exit is its behaviour).
+          // #283: a FENCE macro's active-raw exit moved the caret to its opening line. #243 (ADR-111 C1/C4):
+          // mermaid/plantuml raw is now the CARET-IN reveal (no `active`), and Ctrl+Enter/✎ open the editUI
+          // (which handles its own Escape) — so this active-based fence path is no longer reached for them; it
+          // stays as the table exit + a safety net for any active fence. A callout keeps its caret (raw-on-exit).
           const isTable = !!tableBlockAt(view.state, active.from);
           const exitTo = isTable
             ? Math.min(active.to + 1, view.state.doc.length)

@@ -203,16 +203,18 @@ function menuTooltip(v: MenuState): Tooltip {
       if (v.diagramFrom != null) {
         sep();
         for (const a of ["left", "center", "right"] as FenceAlign[]) {
-          // Pass the ORIGINAL click pos (which diagramFenceAt already resolved) — setDiagramAlign
-          // re-resolves the fence from it; the opening-line boundary offset can miss the node.
-          item(`align-${a}`, i18n.t(`contextMenu.align${a[0]!.toUpperCase()}${a.slice(1)}`), () => { setDiagramAlign(view, v.pos, a); close(view); });
+          // #255/#243: pass the RESOLVED fence `from` (v.diagramFrom), not the raw click pos — a center-click
+          // on a tall diagram lands on the block's END boundary, which setDiagramAlign's re-resolve would
+          // miss (the same boundary problem the diagramFrom fallback above solves). diagramFrom is the fence's
+          // opening position, so the re-resolve always lands on the node.
+          item(`align-${a}`, i18n.t(`contextMenu.align${a[0]!.toUpperCase()}${a.slice(1)}`), () => { setDiagramAlign(view, v.diagramFrom!, a); close(view); });
         }
       }
       // #255 comment 1073: a standalone image at the click → the SAME alignment entries (writes ?align=).
       if (v.imageFrom != null) {
         sep();
         for (const a of ["left", "center", "right"] as FenceAlign[]) {
-          item(`align-${a}`, i18n.t(`contextMenu.align${a[0]!.toUpperCase()}${a.slice(1)}`), () => { setImageAlign(view, v.pos, a); close(view); });
+          item(`align-${a}`, i18n.t(`contextMenu.align${a[0]!.toUpperCase()}${a.slice(1)}`), () => { setImageAlign(view, v.imageFrom!, a); close(view); });
         }
       }
 
@@ -254,8 +256,16 @@ const menuEvents = Prec.highest(
         if (l) { kind = "link"; link = l; } else { kind = "plain"; }
       }
       // #255: a rendered diagram fence (mermaid/plantuml/excalidraw) at the click → offer alignment.
-      const diagramFrom = diagramFenceAt(view.state, pos) ?? undefined;
-      const imageFrom = imageAlignAt(view.state, pos) ?? undefined; // #255: standalone image alignment
+      // #255/#243: posAtCoords on a TALL block widget can land on the block's END boundary (a center-click
+      // on a top-anchored diagram), where syntaxTree resolves to the PARENT and macroFenceAt misses the
+      // fence. Fall back to the clicked widget element's own doc position (posAtDOM → its `from`), which
+      // always lands inside the fence. (Before #243 the widget mousedown moved the caret into the fence,
+      // masking this; #243 stopped moving the caret on right-click so the widget stays rendered.)
+      const wrapEl = (e.target as HTMLElement | null)?.closest?.(".cm-lp-macro-wrap") as HTMLElement | null;
+      let wrapPos: number | null = null;
+      if (wrapEl) { try { wrapPos = view.posAtDOM(wrapEl); } catch { wrapPos = null; } }
+      const diagramFrom = diagramFenceAt(view.state, pos) ?? (wrapPos != null ? diagramFenceAt(view.state, wrapPos) : null) ?? undefined;
+      const imageFrom = imageAlignAt(view.state, pos) ?? (wrapPos != null ? imageAlignAt(view.state, wrapPos) : null) ?? undefined; // #255: standalone image alignment
       view.dispatch({ effects: openMenu.of({ pos, kind, link, diagramFrom, imageFrom }) });
       e.preventDefault();
       return true;
