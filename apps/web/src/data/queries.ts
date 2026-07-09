@@ -365,14 +365,21 @@ export function usePublish(pageId: string) {
 }
 
 // Personal account settings (ADR-020). Self-scope server-side (WHERE sub = req.user.sub).
+// #289 / ADR-115: per-user editor chrome visibility. null = never enrolled → all chrome shown.
+export interface EditorChromeVisibility {
+  vimToggleVisible: boolean;
+  modesVisible: { live: boolean; source: boolean; reading: boolean; wysiwyg: boolean };
+}
 export interface AccountSettings {
   displayName: string | null;         // effective: override ?? OIDC ?? null
   oidcDisplayName: string | null;     // IdP value (for the "reset to IdP name" affordance)
   displayNameOverride: string | null; // null = using the OIDC name
   editorKeymap: "default" | "vim" | "local"; // startup-mode preference (keymap)
-  editorDisplayMode: "live" | "source" | "local"; // startup display mode (ADR-056 / #164)
+  editorDisplayMode: "live" | "source" | "wysiwyg" | "local"; // startup display mode (ADR-056 / #164 · #289 wysiwyg)
   keybindings: Record<string, string>; // commandId → chord override (ADR-021); {} = defaults
   hasAvatar: boolean;
+  editorChrome: EditorChromeVisibility | null; // #289: visibility only (startup mode stays above)
+  onboardingCompletedAt: string | null; // #289: null → the first-run two-question flow fires once
 }
 export function useAccountSettings() {
   const { token, status } = useSession();
@@ -387,7 +394,7 @@ export function useUpdateAccountSettings() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { displayNameOverride?: string | null; editorKeymap?: "default" | "vim" | "local"; editorDisplayMode?: "live" | "source" | "local"; keybindings?: Record<string, string> }) =>
+    mutationFn: (body: { displayNameOverride?: string | null; editorKeymap?: "default" | "vim" | "local"; editorDisplayMode?: "live" | "source" | "wysiwyg" | "local"; keybindings?: Record<string, string>; editorChrome?: EditorChromeVisibility | null; onboardingCompleted?: boolean }) =>
       apiFetch<AccountSettings>("/me/settings", token, { method: "PATCH", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["account-settings"] }),
   });

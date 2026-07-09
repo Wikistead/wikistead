@@ -75,12 +75,43 @@ describe('account settings (ADR-020)', () => {
     await expect(updateAccountSettings(db, { subject: SUB_A, editorKeymap: 'emacs' })).rejects.toMatchObject({ statusCode: 400 })
   })
 
-  it('display-mode pref round-trips (live/source/local), defaults to local, rejects invalid (#164-3)', async () => {
+  it('display-mode pref round-trips (live/source/wysiwyg/local), defaults to local, rejects invalid (#164-3 · #289)', async () => {
     expect((await getAccountSettings(db, { subject: SUB_B })).editorDisplayMode).toBe('local') // null → 'local'
-    for (const m of ['live', 'source', 'local'] as const) {
+    for (const m of ['live', 'source', 'wysiwyg', 'local'] as const) {
+      // #289 / ADR-115: 'wysiwyg' joined the startup set (the wysiwyg persona boots there)
       expect((await updateAccountSettings(db, { subject: SUB_A, editorDisplayMode: m })).editorDisplayMode).toBe(m)
     }
-    await expect(updateAccountSettings(db, { subject: SUB_A, editorDisplayMode: 'wysiwyg' })).rejects.toMatchObject({ statusCode: 400 }) // not a startup choice in phase 1
+    // 'reading' stays a mid-session display state, deliberately NOT a startup value
+    await expect(updateAccountSettings(db, { subject: SUB_A, editorDisplayMode: 'reading' })).rejects.toMatchObject({ statusCode: 400 })
+  })
+
+  it('#289 / ADR-115: editorChrome round-trips with strict shape; onboarding marker is one-way', async () => {
+    // default (never enrolled): null chrome + null onboarding marker
+    const before = await getAccountSettings(db, { subject: SUB_B })
+    expect(before.editorChrome).toBeNull()
+    expect(before.onboardingCompletedAt).toBeNull()
+
+    const chrome = { vimToggleVisible: false, modesVisible: { live: false, source: false, reading: true, wysiwyg: true } }
+    const after = await updateAccountSettings(db, { subject: SUB_A, editorChrome: chrome, onboardingCompleted: true })
+    expect(after.editorChrome).toEqual(chrome)
+    expect(after.onboardingCompletedAt).not.toBeNull()
+
+    // marker is one-way: repeating keeps the ORIGINAL timestamp; false is rejected outright
+    const again = await updateAccountSettings(db, { subject: SUB_A, onboardingCompleted: true })
+    expect(again.onboardingCompletedAt).toBe(after.onboardingCompletedAt)
+    await expect(updateAccountSettings(db, { subject: SUB_A, onboardingCompleted: false as unknown as boolean })).rejects.toMatchObject({ statusCode: 400 })
+
+    // strict shape: junk / missing keys / non-boolean / extra keys all 400
+    await expect(updateAccountSettings(db, { subject: SUB_A, editorChrome: 'junk' })).rejects.toMatchObject({ statusCode: 400 })
+    await expect(updateAccountSettings(db, { subject: SUB_A, editorChrome: { vimToggleVisible: true } })).rejects.toMatchObject({ statusCode: 400 })
+    await expect(updateAccountSettings(db, { subject: SUB_A, editorChrome: { vimToggleVisible: 'yes', modesVisible: chrome.modesVisible } })).rejects.toMatchObject({ statusCode: 400 })
+    await expect(updateAccountSettings(db, { subject: SUB_A, editorChrome: { ...chrome, extra: 1 } })).rejects.toMatchObject({ statusCode: 400 })
+    await expect(updateAccountSettings(db, { subject: SUB_A, editorChrome: { vimToggleVisible: true, modesVisible: { live: true } } })).rejects.toMatchObject({ statusCode: 400 })
+
+    // explicit null resets to defaults (all shown)
+    expect((await updateAccountSettings(db, { subject: SUB_A, editorChrome: null })).editorChrome).toBeNull()
+    // self-scope: B untouched throughout
+    expect((await getAccountSettings(db, { subject: SUB_B })).editorChrome).toBeNull()
   })
 
   it('keybindings round-trip; reject unknown command / duplicate key / reserved key (ADR-021)', async () => {

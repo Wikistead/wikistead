@@ -40,6 +40,11 @@ export interface PageControlsProps {
   displayMode?: "live" | "source" | "reading" | "wysiwyg";
   onCycleDisplayMode?: () => void;
   onSetDisplayMode?: (m: "live" | "source" | "reading" | "wysiwyg") => void;
+  // #289 / ADR-115: per-user chrome visibility (member setting; guests get the full chrome).
+  // showVimToggle=false hides the vim BUTTON only (Ctrl+Alt+V still works); visibleModes filters
+  // the display-mode segment (the cycle key skips hidden modes at the hook level).
+  showVimToggle?: boolean;
+  visibleModes?: ("live" | "source" | "reading" | "wysiwyg")[];
   onShare?: () => void;
   commentsOpen?: boolean;
   onToggleComments?: () => void;
@@ -173,7 +178,7 @@ export function PageVim(p: PageControlsProps) {
     <div className="pointer-events-none absolute bottom-4 left-4 z-10 flex items-center gap-2">
       {/* #212: vim is the same common ToggleButton as TOC (filled=ON + aria-pressed), not a bespoke
           switch — state reads from the fill (a11y: not colour-only). Keeps the "Vim" text label. */}
-      {p.onToggleVim && (
+      {p.onToggleVim && p.showVimToggle !== false && (
         <ToggleButton
           pressed={!!p.vim}
           onToggle={p.onToggleVim}
@@ -190,7 +195,7 @@ export function PageVim(p: PageControlsProps) {
       {p.onSetDisplayMode && (
         <div role="radiogroup" aria-label={t("page.displayMode")} data-testid="displaymode-segment" data-mode={dm}
           className="pointer-events-auto inline-flex items-center gap-0.5 rounded-full bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] p-1 shadow-md backdrop-blur">
-          {DISPLAY_MODES.map(({ mode, Icon, labelKey }) => {
+          {DISPLAY_MODES.filter(({ mode }) => !p.visibleModes || p.visibleModes.includes(mode)).map(({ mode, Icon, labelKey }) => {
             const active = dm === mode;
             return (
               <button key={mode} type="button" role="radio" aria-checked={active}
@@ -261,7 +266,7 @@ export function PageControlsMobile(p: PageControlsProps) {
             <>
               {p.onPublish && <DropdownMenuItem disabled={p.publishing || !canPublish} onSelect={() => p.onPublish?.()} data-testid="m-publish-page"><UploadCloud size={14} /> {t("page.publish")}</DropdownMenuItem>}
               <DropdownMenuItem onSelect={p.onDone} data-testid="m-view-toggle"><X size={14} /> {t("page.done")}</DropdownMenuItem>
-              {p.onToggleVim && <DropdownMenuItem onSelect={p.onToggleVim} data-testid="m-vim-toggle"><SquareTerminal size={14} /> Vim {p.vim ? t("common.on") : t("common.off")}</DropdownMenuItem>}
+              {p.onToggleVim && p.showVimToggle !== false && <DropdownMenuItem onSelect={p.onToggleVim} data-testid="m-vim-toggle"><SquareTerminal size={14} /> Vim {p.vim ? t("common.on") : t("common.off")}</DropdownMenuItem>}
               {p.onCycleDisplayMode && <DropdownMenuItem onSelect={p.onCycleDisplayMode} data-testid="m-displaymode-toggle">{p.displayMode === "source" ? <Code size={14} /> : p.displayMode === "reading" ? <BookOpen size={14} /> : p.displayMode === "wysiwyg" ? <Sparkles size={14} /> : <Eye size={14} />} {t("page.displayMode")}: {t(p.displayMode === "source" ? "page.modeSource" : p.displayMode === "reading" ? "page.modeReading" : p.displayMode === "wysiwyg" ? "page.modeWysiwyg" : "page.modeLive")}</DropdownMenuItem>}
             </>
           ) : (
