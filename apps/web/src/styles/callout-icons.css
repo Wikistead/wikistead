@@ -44,27 +44,31 @@
    the body's checkboxes stay interactive. The header progress ring is a follow-up open-line decoration. */
 .cm-lp-callout-todo,.cm-lp-todo{--cb-color:var(--accent,#4ea1ff);--cb-icon:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%22m3%2017%202%202%204-4%22%3E%3C%2Fpath%3E%3Cpath%20d%3D%22m3%207%202%202%204-4%22%3E%3C%2Fpath%3E%3Cpath%20d%3D%22M13%206h8%22%3E%3C%2Fpath%3E%3Cpath%20d%3D%22M13%2012h8%22%3E%3C%2Fpath%3E%3Cpath%20d%3D%22M13%2018h8%22%3E%3C%2Fpath%3E%3C%2Fsvg%3E")}
 /* #290: the :::todo progress ring — a side:1 widget on the open line, absolutely positioned to the line's
-   right edge so it clears the CSS ::before(icon)/::after(label) header. --accent arc over a dim track. */
+   right edge so it clears the CSS ::after(label) header.
+   #290 (1): NOT accent — grey track, ORANGE progress arc (--callout-warning), and the arc turns
+   GREEN (--callout-tip) at 100%: colour is the completion cue (the centre ✓ is gone, user re-ruling).
+   Shared by all three ring surfaces (macro header / title band / sidebar), light+dark via the tokens. */
 .cm-lp-todo-ring{position:absolute;right:0.7em;top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;gap:0.3em;font-size:0.78em;color:var(--fg-dim,#888);pointer-events:none}
 .cm-lp-todo-ring-track{fill:none;stroke:color-mix(in srgb,var(--fg-dim,#888) 35%,transparent);stroke-width:2.5}
-.cm-lp-todo-ring-arc{fill:none;stroke:var(--accent,#4ea1ff);stroke-width:2.5;stroke-linecap:round;transition:stroke-dashoffset 200ms ease}
+.cm-lp-todo-ring-arc{fill:none;stroke:var(--callout-warning,#d29922);stroke-width:2.5;stroke-linecap:round;transition:stroke-dashoffset 200ms ease,stroke 200ms ease}
+.cm-lp-todo-ring-arc.cm-lp-todo-ring-complete{stroke:var(--callout-tip,#2ea043)}
 .cm-lp-todo-ring-label{font-variant-numeric:tabular-nums}
 /* #290: the header "remove ring" (demote) button — hover-shown on the editable surface, left of the
    ring so the two don't overlap. Absolute on the open line's right edge. */
 .cm-lp-todo-demote{position:absolute;right:3.6em;top:50%;transform:translateY(-50%);border:none;background:transparent;color:var(--fg-dim,#888);cursor:pointer;font-size:0.85em;line-height:1;padding:0.15em 0.3em;border-radius:4px;opacity:0;transition:opacity 120ms ease}
 .cm-lp-todo:hover .cm-lp-todo-demote{opacity:1}
 .cm-lp-todo-demote:hover{background:color-mix(in srgb,var(--fg-dim,#888) 18%,transparent);color:var(--fg,#222)}
-/* #290: a micro "pop" when a task checkbox is ticked ON. #290 (2): triggered by a one-shot class the
-   TOGGLE handler adds — NOT the `:checked` selector, which replayed every time the box re-mounted on a
-   reveal/unreveal under the caret (the reported "pops every time it reveals" bug). Motion tokens; the global
-   prefers-reduced-motion rule (tokens.css) neutralises it. */
-@keyframes wks-cb-pop{0%{transform:scale(1)}45%{transform:scale(1.3)}100%{transform:scale(1)}}
-.cm-lp-checkbox.wks-cb-just-toggled{animation:wks-cb-pop var(--dur-base,180ms) var(--ease-out,ease)}
-/* #290 (1): the checkmark shown in a 100% ring. Hidden by default (only appended at done===total); it
-   draws in via stroke-dashoffset when the completion TRANSITION class is present (armed toggle), else static. */
-.cm-lp-todo-ring-check{fill:none;stroke:var(--accent,#4ea1ff);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-@keyframes wks-ring-check-in{from{stroke-dashoffset:12}to{stroke-dashoffset:0}}
-.cm-lp-todo-ring-check-in{stroke-dasharray:12;animation:wks-ring-check-in var(--dur-base,180ms) var(--ease-out,ease)}
+/* (#290 (5): the check-ON pop animation is removed — a toggle is an immediate state change only.) */
+/* #290 (3): the list-checks icon moves out of the open line into the LEFT GUTTER, vertically centred
+   against the WHOLE block — the callout-panel look. Per-line boxes have non-uniform heights, so the widget
+   (TodoIconWidget, on the open line) MEASURES the block and sets `top` itself; this supplies the paint. The
+   0.35em top is only the pre-measure fallback for one frame. */
+.cm-lp-todo.cm-lp-directive-label::before{display:none}
+.cm-lp-todo-icon{position:absolute;left:0.65em;top:0.35em;width:1.5em;height:1.5em;background-color:var(--cb-color,var(--accent,#4ea1ff));-webkit-mask:var(--cb-icon) center/contain no-repeat;mask:var(--cb-icon) center/contain no-repeat;pointer-events:none}
+/* #290 (4): round the todo BOX like the callout panel (callout-icons.css .cm-lp-callout-panel — keep
+   the radii equal; the e2e asserts the computed values match). Per-line boxes → explicit corner classes. */
+.cm-lp-todo.cm-lp-todo-first{border-top-left-radius:4px;border-top-right-radius:4px}
+.cm-lp-todo.cm-lp-todo-last{border-bottom-left-radius:4px;border-bottom-right-radius:4px}
 /* #290 (increment A): the title-band page-progress ring flows inline (not absolute like the macro header).
    #290 (3): `display:block` on the svg removes the inline-baseline sink so the ring centres on the meta
    row / sidebar row instead of floating above the text baseline. */

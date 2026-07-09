@@ -241,11 +241,39 @@ class BulletWidget extends WidgetType {
 class TodoRingWidget extends WidgetType {
   constructor(readonly done: number, readonly total: number) { super(); }
   eq(o: TodoRingWidget) { return o.done === this.done && o.total === this.total; }
-  // #290 (1): animate the checkmark ONLY when this ring reaches 100% inside the just-completed window
-  // (a real check-ON), not on a reveal re-mount of an already-full ring. eq keys on done/total, so this
-  // widget rebuilds exactly when the count changes — the arm gate then distinguishes toggle from reveal.
-  toDOM() { return renderProgressRing(this.done, this.total, this.done >= this.total && ringCompleteArmed()) ?? document.createElement("span"); }
+  // #290 (1)(2): completion is expressed by COLOUR alone (the arc turns green at 100% — a class
+  // renderProgressRing sets); the centre-checkmark + its arm window are gone (user re-ruling).
+  toDOM() { return renderProgressRing(this.done, this.total) ?? document.createElement("span"); }
   ignoreEvent() { return true; } // display-only — clicks pass through to the line
+}
+
+// #290 (3): the :::todo list-checks icon, left gutter, vertically CENTRED against the WHOLE block
+// the callout-panel look. The block is per-line boxes with NON-uniform heights (the header line is ~2 rows),
+// so pure CSS can't centre across it; instead the icon is measured into place after mount: walk the block's
+// contiguous .cm-lp-todo sibling lines, then set `top` so the icon centre = the block centre (relative to the
+// open line the widget sits on, so it scrolls with the block). eq keys on the block's line count + task
+// counts — any edit inside the block rebuilds the widget and re-measures. Display-only.
+class TodoIconWidget extends WidgetType {
+  constructor(readonly lineCount: number, readonly done: number, readonly total: number) { super(); }
+  eq(o: TodoIconWidget) { return o.lineCount === this.lineCount && o.done === this.done && o.total === this.total; }
+  toDOM() {
+    const el = document.createElement("span");
+    el.className = "cm-lp-todo-icon";
+    el.setAttribute("data-testid", "todo-block-icon");
+    el.setAttribute("aria-hidden", "true");
+    requestAnimationFrame(() => {
+      const line = el.closest(".cm-line") as HTMLElement | null;
+      if (!line || !line.classList.contains("cm-lp-todo")) return;
+      let top = line, bottom = line;
+      while (top.previousElementSibling instanceof HTMLElement && top.previousElementSibling.classList.contains("cm-lp-todo")) top = top.previousElementSibling;
+      while (bottom.nextElementSibling instanceof HTMLElement && bottom.nextElementSibling.classList.contains("cm-lp-todo")) bottom = bottom.nextElementSibling;
+      const blockCenter = (top.getBoundingClientRect().top + bottom.getBoundingClientRect().bottom) / 2;
+      const lineTop = line.getBoundingClientRect().top;
+      el.style.top = `${blockCenter - lineTop - el.getBoundingClientRect().height / 2}px`;
+    });
+    return el;
+  }
+  ignoreEvent() { return true; }
 }
 
 // #290 / ADR-114: the :::todo header "remove ring" (demote) button — the explicit affordance that
@@ -372,24 +400,8 @@ export function taskStatePosAt(docText: string, index: number): number {
   return -1;
 }
 
-// #290 (2): the check-ON "pop" must fire ONLY on a real toggle, never when the widget re-mounts because
-// the line revealed/unrevealed under the caret (the old `.cm-lp-checkbox:checked` CSS animation replayed on
-// every reveal — annoying). A toggle-ON arms this with the box's offset; the very next widget that mounts
-// CHECKED at that offset (the doc-flip re-render) consumes it and plays the pop. A reveal re-mount never arms
-// it, so it stays silent. (Date.now is host app code — the workflow-script clock ban doesn't apply here.)
-let pendingCheckPop: number | null = null;
-// #290 (1): a task completing (a check-ON that may take a :::todo block / the page to 100%) opens a short
-// window in which a ring reaching done===total plays its checkmark-appear animation. A reveal re-mount of an
-// already-100% ring outside the window stays static, so it never replays.
-let ringCompleteArmedUntil = 0;
-function armTaskComplete() { ringCompleteArmedUntil = Date.now() + 800; }
-export function ringCompleteArmed(): boolean { return Date.now() < ringCompleteArmedUntil; }
-// Play the one-shot check-ON pop on a checkbox <input> and self-remove the class when it ends (a bare class,
-// NOT the `:checked` selector, so only a real toggle triggers it).
-function popCheckbox(box: HTMLElement) {
-  box.classList.add("wks-cb-just-toggled");
-  box.addEventListener("animationend", () => box.classList.remove("wks-cb-just-toggled"), { once: true });
-}
+// #290 (5): the check-ON "pop" micro-animation (and its toggle-only arming machinery) is GONE
+// the user ruled it out (it read as flicker after a click). A toggle is an immediate state change only.
 
 class CheckboxWidget extends WidgetType {
   // #300: `disabled` is part of the widget identity so a display-mode change (which rebuilds decorations)
@@ -408,29 +420,19 @@ class CheckboxWidget extends WidgetType {
     box.setAttribute("data-testid", "task-checkbox");
     const ctl = view.state.facet(checkboxControl);
     box.disabled = this.disabled; // computed at build (#300/#314): !ctl — NOT view.readOnly, NOT Reading
-    // #290 (2): this widget mounted CHECKED at an offset a toggle-ON just armed → it IS the doc-flip
-    // re-render (not a reveal re-mount), so play the pop once. Cleared so a later reveal re-mount stays silent.
-    if (this.checked && pendingCheckPop === this.from) {
-      pendingCheckPop = null;
-      popCheckbox(box);
-    }
     if (ctl && !this.disabled) {
       // mousedown + preventDefault: keep editor focus/selection and drive the toggle
       // ourselves (so the rendered state always follows the document, never the native
       // input). The doc/host update re-renders the widget with the new checked state.
       box.addEventListener("mousedown", (e) => {
         e.preventDefault();
-        const turningOn = !this.checked; // #290 pop + ring-complete window only on check-ON
-        if (turningOn) { armTaskComplete(); pendingCheckPop = this.from; }
         if (ctl.mode === "edit") {
-          // editable surface: flipping the doc re-renders the widget immediately (the new CHECKED widget
-          // consumes pendingCheckPop above and pops).
+          // editable surface: flipping the doc re-renders the widget immediately.
           view.dispatch({ changes: { from: this.from + 1, to: this.from + 2, insert: this.checked ? " " : "x" } });
         } else {
           // read-only published surface: the doc here is NOT the draft, so it won't re-render until the host
-          // refetches — flip the SAME box for responsiveness, and pop it directly (no re-render to consume the arm).
+          // refetches — flip the SAME box for responsiveness.
           box.checked = !this.checked;
-          if (turningOn) { pendingCheckPop = null; popCheckbox(box); }
           const index = taskIndexAt(view.state.doc.toString(), this.from);
           ctl.onToggle(index, this.from, this.checked);
         }
@@ -2362,6 +2364,13 @@ const RENDERERS: BlockRenderer[] = [
           if (total > 0) ctx.add(Decoration.widget({ widget: new TodoRingWidget(done, total), side: 1 }), first.to);
           // #290: a "remove ring" (demote) button in the header, editable surface only (hover-shown).
           if (!ctx.state.readOnly) ctx.add(Decoration.widget({ widget: new TodoDemoteWidget(first.from), side: 1 }), first.to);
+          // #290 (3): the block-centred list-checks icon (measured into place — see TodoIconWidget;
+          // the open-line ::before icon is suppressed in callout-icons.css).
+          ctx.add(Decoration.widget({ widget: new TodoIconWidget(lastLine.number - first.number + 1, done, total), side: 1 }), first.to);
+          // #290 (4): round the BOX like the callout panel — per-line boxes need explicit first/last
+          // corner classes (the panel gets its radius on one element; see callout-icons.css for the values).
+          ctx.add(Decoration.line({ attributes: { class: "cm-lp-todo-first" } }), first.from);
+          ctx.add(Decoration.line({ attributes: { class: "cm-lp-todo-last" } }), lastLine.from);
         }
         // #174 comment 878 (ADR-087 addendum 2): caret-in raw editing → the SHARED RichUI-entry pill at the
         // top-left (the same affordance as the pipe table, #216). Live + editable only. Click / Ctrl+Enter →
