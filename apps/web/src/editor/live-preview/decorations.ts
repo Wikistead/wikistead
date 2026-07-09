@@ -406,7 +406,7 @@ class CheckboxWidget extends WidgetType {
     box.className = "cm-lp-checkbox";
     box.setAttribute("data-testid", "task-checkbox");
     const ctl = view.state.facet(checkboxControl);
-    box.disabled = this.disabled; // computed at build (#300): !ctl || Reading display mode — NOT view.readOnly
+    box.disabled = this.disabled; // computed at build (#300/#314): !ctl — NOT view.readOnly, NOT Reading
     // #290(2): this widget mounted CHECKED at an offset a toggle-ON just armed → it IS the doc-flip
     // re-render (not a reveal re-mount), so play the pop once. Cleared so a later reveal re-mount stays silent.
     if (this.checked && pendingCheckPop === this.from) {
@@ -2395,9 +2395,11 @@ const RENDERERS: BlockRenderer[] = [
     match: (n) => n === "TaskMarker",
     enter: (node, ctx) => {
       const checked = ctx.state.doc.sliceString(node.from + 1, node.from + 2).toLowerCase() === "x";
-      // #300: disabled iff there's no toggle control OR the surface is Reading (clean read-only). NOT
-      // view.state.readOnly — the published VIEW surface is a read-only editor but its box must stay live.
-      const disabled = !ctx.state.facet(checkboxControl) || ctx.state.facet(displayMode) === "reading";
+      // #300/#314: disabled iff there's no toggle control (no edit permission / no view handler). NOT
+      // view.state.readOnly — the published VIEW surface is a read-only editor but its box must stay
+      // live. Reading display mode does NOT disable it (#314): Reading blocks PROSE edits, but the task
+      // toggle is an allowed read-surface operation (ADR-019), same as the published view surface.
+      const disabled = !ctx.state.facet(checkboxControl);
       ctx.hideMarker(node.from, node.to, checkbox(checked, node.from, disabled));
     },
   },
