@@ -1,0 +1,133 @@
+import { test, expect, type Page } from "@playwright/test";
+import { openDemo, sleep } from "../helpers";
+
+// #317: an EDIT-capability share-link guest can tick a view-mode task checkbox (ADR-019) — the
+// server route already accepted guest:'edit'; the client never passed onToggleTask on the guest
+// surface, so the box rendered permanently disabled. authz boundary: a VIEW-capability guest stays
+// disabled in the UI AND the server 403s a direct call (two-layer). Matrix companion to #300/#303/
+// #314 (member × view/Reading were covered; this adds guest × view and guest × Reading).
+const API = "http://dev.localhost:4010";
+
+async function newPageWithTask(page: Page, title: string): Promise<string> {
+  const id = await page.evaluate(async ({ api, title }) => {
+    const r = await fetch(`${api}/spaces/demo_space/pages`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    return (await r.json()).id as string;
+  }, { api: API, title });
+  // author the task via the member surface (collab persists it), then publish
+  await page.goto(`/p/${id}?edit=1`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("- [ ] guest ship it");
+  await sleep(2800); // collab persist debounce
+  await page.evaluate(async ({ api, id }) => {
+    await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+  }, { api: API, id });
+  return id;
+}
+
+async function shareUrl(page: Page, pageId: string, capability: "view" | "edit"): Promise<string> {
+  const id = await page.evaluate(async ({ api, pageId, capability }) => {
+    const r = await fetch(`${api}/share-links`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ resource: { type: "page", id: pageId }, capability, expiresInSeconds: null }),
+    });
+    return (await r.json()).id as string;
+  }, { api: API, pageId, capability });
+  return `/share/${id}`;
+}
+
+const publishedMd = (p: Page, pageId: string) =>
+  p.evaluate(async ({ api, id }) => {
+    const r = await fetch(`${api}/pages/${id}/published`, { headers: { Authorization: "Bearer dev-token" } });
+    return ((await r.json()) as { publishedMd: string | null }).publishedMd;
+  }, { api: API, id: pageId });
+
+test("#317 guest EDIT link: a view-mode checkbox click persists to published_md and survives reload", async ({ browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  await openDemo(member);
+  const pageId = await newPageWithTask(member, "guest-cb-edit");
+  const url = await shareUrl(member, pageId, "edit");
+
+  const guest = await (await browser.newContext()).newPage();
+  await guest.goto(url);
+  await guest.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(800);
+
+  const box = guest.getByTestId("task-checkbox");
+  await expect(box).toBeVisible();
+  await expect(box).toBeEnabled(); // the #317 bug: permanently disabled on the guest surface
+  await box.click();
+
+  // the no-revision endpoint folds the flip into published_md (server accepted the guest actor)
+  await expect.poll(() => publishedMd(member, pageId), { timeout: 6000 }).toContain("- [x] guest ship it");
+
+  // the guest surface refetches + a reload still shows the ticked box
+  await guest.reload();
+  await guest.waitForSelector("[data-pane=preview] .cm-content");
+  await expect(guest.getByTestId("task-checkbox")).toBeChecked();
+});
+
+test("#317 guest VIEW link: checkbox stays disabled AND the server rejects a direct toggle (two-layer)", async ({ browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  await openDemo(member);
+  const pageId = await newPageWithTask(member, "guest-cb-view");
+  const url = await shareUrl(member, pageId, "view");
+  const linkId = url.split("/").pop()!;
+
+  const guest = await (await browser.newContext()).newPage();
+  await guest.goto(url);
+  await guest.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(800);
+
+  const box = guest.getByTestId("task-checkbox");
+  await expect(box).toBeVisible();
+  await expect(box).toBeDisabled(); // UI layer: view guests can't tick
+
+  // Server bastion: exchange the link for a guest token and call the toggle directly → 403.
+  const status = await guest.evaluate(async ({ api, linkId, pageId }) => {
+    const tok = await (await fetch(`${api}/public/share-links/${linkId}/token`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    })).json() as { token: string };
+    const r = await fetch(`${api}/pages/${pageId}/tasks/toggle`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${tok.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ index: 0 }),
+    });
+    return r.status;
+  }, { api: API, linkId, pageId });
+  // 401 is the established contract for a VIEW token on a guest:'edit' route (the auth hook rejects
+  // before the handler — same as guest publish, see guest-publish.test.ts "hook rejects → 401").
+  expect(status).toBe(401);
+  expect(await publishedMd(member, pageId)).toContain("- [ ] guest ship it"); // unchanged
+});
+
+test("#317 guest × Reading (edit link): the checkbox flips the draft (#314 parity for guests)", async ({ browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  await openDemo(member);
+  const pageId = await newPageWithTask(member, "guest-cb-reading");
+  const url = await shareUrl(member, pageId, "edit");
+
+  const guest = await (await browser.newContext()).newPage();
+  await guest.goto(url);
+  await guest.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(800);
+  await guest.click("[data-testid=edit-toggle]");
+  await guest.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(600); // collab sync
+  await guest.getByTestId("displaymode-reading").click();
+  await sleep(300);
+
+  const box = guest.getByTestId("task-checkbox");
+  await expect(box).toBeVisible();
+  await expect(box).toBeEnabled(); // #314: Reading blocks prose edits, not task ticks
+  await box.click();
+  await sleep(300);
+  await expect(box).toBeChecked(); // the draft flipped (a normal Y.Text edit over guest collab)
+});
