@@ -391,7 +391,6 @@
     "share": "Share",
     "rename": "Rename",
     "delete": "Delete",
-    "draft": "Draft",
     "draftTitle": "Draft (not published)",
     "unpublished": "Unpublished changes",
     "private": "Private (allowlist only)",

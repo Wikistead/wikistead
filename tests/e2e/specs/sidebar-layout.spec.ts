@@ -3,7 +3,7 @@ import { openScratch, enterEdit, sleep } from "../helpers";
 
 // #193: the sidebar page-row must, at ANY width (drag-resizable 180–480px), keep
 //   (1) the name truncated with an ellipsis when it can't fit,
-//   (2) the draft badge / unpublished dot fully visible (never clipped),
+//   (2) the unpublished dot fully visible (never clipped),
 //   (3) no horizontal overflow of the row (highlight == slot),
 // and the sidebar background must NOT leak in edit mode.
 // happy-dom has no layout engine, so this is verified in a REAL browser with real
@@ -28,9 +28,10 @@ async function rowGeom(page: Page) {
       ellipsis: getComputedStyle(el).textOverflow,
       right: el.getBoundingClientRect().right,
     })),
-    // The badge (draft) OR the unpublished dot — whichever this row has.
+    // The unpublished dot, when this row has one. (#315 removed the draft text pill — draft is
+    // now the left file-icon swap, which cannot clip on the right edge.)
     badge: await row.evaluate((el) => {
-      const b = el.querySelector("[data-testid=tree-draft-badge],[data-testid=unpublished-dot]") as HTMLElement | null;
+      const b = el.querySelector("[data-testid=unpublished-dot]") as HTMLElement | null;
       return b ? { right: b.getBoundingClientRect().right, width: b.getBoundingClientRect().width } : null;
     }),
     rowOverflow: await row.evaluate((el) => {
