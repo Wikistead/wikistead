@@ -99,10 +99,18 @@ export function mountLivePreview(
       // the viewport top — UNDER the band. A top scroll-margin equal to the band height (--wks-band-h,
       // published by routes.tsx bandRef; inherited onto the CM DOM) keeps the caret below the band. 0 when
       // there is no band (var unset). Pairs with `.cm-content { padding-top: var(--wks-band-h) }`.
+      // #306: vim-style `scrolloff` — a large scroll margin (~25% of the viewport on each side) keeps the
+      // caret inside the middle ~50% band on ANY cursor motion (j/k, G/gg, search jump), scrolling
+      // typewriter-style once it reaches a band edge. It composes with the two existing clearances by taking
+      // the MAX: the 25% band is normally larger than both the header band (--wks-band-h) and the bottom
+      // control strip (72px), so those intents (caret never hidden under the band / behind the controls) are
+      // subsumed; near the document ends scrollIntoView simply moves as far as it can (natural, like vim). Not
+      // gated on vim — plain keyboard navigation benefits equally and it avoids a mode branch.
       EditorView.scrollMargins.of((view) => {
         const raw = getComputedStyle(view.dom).getPropertyValue("--wks-band-h").trim();
-        const top = raw.endsWith("px") ? parseFloat(raw) : 0;
-        return { top: Number.isFinite(top) ? top : 0, bottom: 72 };
+        const bandH = raw.endsWith("px") && Number.isFinite(parseFloat(raw)) ? parseFloat(raw) : 0;
+        const off = view.scrollDOM.clientHeight * 0.25; // the scrolloff band (0 before first layout → the maxes below still hold)
+        return { top: Math.max(bandH, off), bottom: Math.max(72, off) };
       }),
       // GFM base (tables) + fenced-code highlighting. The doc stays plain markdown.
       markdownExtension(),
