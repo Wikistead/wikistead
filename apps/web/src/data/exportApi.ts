@@ -3,28 +3,48 @@
 // from the blob, honoring the server's filename.
 const API_URL = (import.meta as any).env?.VITE_API_URL ?? "/api";
 
-// #85 / ADR-059: "html" hits the server render→sanitize path (a single page's published HTML);
-// "md" (default) is the Markdown export (subtree + bundled images).
-export async function downloadPageExport(token: string, pageId: string, format: "md" | "html" = "md"): Promise<boolean> {
-  const path = format === "html" ? "export.html" : "export";
-  const res = await fetch(`${API_URL}/pages/${encodeURIComponent(pageId)}/${path}`, {
-    credentials: "include",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!res.ok) return false;
+// Shared download core (#309): fetch an export URL and, on success, save the blob honoring the
+// server's filename. Returns the HTTP status (0 = network error) so callers can show a DEDICATED
+// message for 413 (archive over the size budget) instead of a generic failure.
+async function fetchToDownload(token: string, url: string): Promise<number> {
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      credentials: "include",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  } catch { return 0; }
+  if (!res.ok) return res.status;
   const blob = await res.blob();
   const cd = res.headers.get("content-disposition") ?? "";
   const m = /filename\*=UTF-8''([^;]+)/.exec(cd);
   const filename = m ? decodeURIComponent(m[1]!) : "export";
-  const url = URL.createObjectURL(blob);
+  const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url;
+  a.href = objectUrl;
   a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
-  return true;
+  URL.revokeObjectURL(objectUrl);
+  return res.status;
+}
+
+// #85 / ADR-059: "html" hits the server render→sanitize path (a single page's published HTML);
+// "md" (default) is the Markdown export (subtree + bundled images).
+export async function downloadPageExport(token: string, pageId: string, format: "md" | "html" = "md"): Promise<boolean> {
+  const path = format === "html" ? "export.html" : "export";
+  const status = await fetchToDownload(token, `${API_URL}/pages/${encodeURIComponent(pageId)}/${path}`);
+  return status >= 200 && status < 300;
+}
+
+// #309: space / tenant Markdown-ZIP exports (view-filtered server-side — every member may use them;
+// they are NOT admin features). Both return the HTTP status for the 413 size-budget message.
+export function downloadSpaceExport(token: string, spaceId: string): Promise<number> {
+  return fetchToDownload(token, `${API_URL}/spaces/${encodeURIComponent(spaceId)}/export`);
+}
+export function downloadTenantExport(token: string): Promise<number> {
+  return fetchToDownload(token, `${API_URL}/export`);
 }
 
 // #207 part 2: print/PDF must render the WHOLE document statically — every macro rendered, no CM

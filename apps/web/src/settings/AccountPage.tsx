@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Navigate, Outlet, Route } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { IdCard, SquarePen, Palette } from "lucide-react";
+import { IdCard, SquarePen, Palette, HardDriveDownload, Loader2 } from "lucide-react";
 import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useSession } from "../session/SessionProvider";
@@ -14,6 +14,7 @@ import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
 import { useAccountSettings, useUpdateAccountSettings, useUploadAvatar, useRemoveAvatar } from "../data/queries";
+import { downloadTenantExport } from "../data/exportApi"; // #309: whole-tenant Markdown-ZIP export
 import { COMMANDS, resolveKey, chordFromEvent, displayChord, validateAssignment, type Keybindings, type CommandDef } from "../app/keybindings";
 import { SettingsShell, type SettingsTab } from "./SettingsShell";
 
@@ -28,6 +29,10 @@ function useAccountTabs(): SettingsTab[] {
     { key: "profile", label: t("accountNav.profile"), to: "/settings/account", end: true, icon: IdCard },
     { key: "editor", label: t("accountNav.editor"), to: "/settings/account/editor", icon: SquarePen },
     { key: "theme", label: t("accountNav.theme"), to: "/settings/account/theme", icon: Palette },
+    // #309: the Data section hosts the tenant-wide export. It lives HERE (personal settings), not in
+    // the tenant /admin console, because the export is view-filtered per member — every member may
+    // take their visible knowledge out (Open formats), so an admin-looking home would misstate it.
+    { key: "data", label: t("accountNav.data"), to: "/settings/account/data", icon: HardDriveDownload },
   ];
 }
 
@@ -349,6 +354,37 @@ function ThemeTab() {
   );
 }
 
+// #309: Data — take your knowledge out. One card: export EVERYTHING this member can view as a
+// Markdown ZIP (spaces as directories, images bundled). The button disables + spins while the
+// server builds the archive; a 413 (over the size budget) gets its dedicated message.
+function DataTab() {
+  const { t } = useTranslation();
+  const { token } = useSession();
+  const [exporting, setExporting] = useState(false);
+  const run = () => {
+    if (exporting) return;
+    setExporting(true);
+    void downloadTenantExport(token).then((status) => {
+      setExporting(false);
+      if (status >= 200 && status < 300) notify.success(t("export.done"));
+      else notify.error(t(status === 413 ? "export.tooLarge" : "toast.actionFailed"));
+    });
+  };
+  return (
+    <div data-testid="account-data">
+      <SettingsPage title={t("accountNav.data")} description={t("account.dataHint")}>
+        <SettingsCard testid="tenant-export-card">
+          <label className="mb-1 block text-sm font-medium">{t("export.tenantTitle")}</label>
+          <p className="mb-2 text-xs text-fg-dim">{t("export.tenantHint")}</p>
+          <Button onClick={run} disabled={exporting} data-testid="tenant-export">
+            {exporting && <Loader2 size={14} className="animate-spin" />} {t("export.tenantButton")}
+          </Button>
+        </SettingsCard>
+      </SettingsPage>
+    </div>
+  );
+}
+
 function AccountLayout() {
   const { t } = useTranslation();
   const { status, logout } = useSession();
@@ -371,6 +407,7 @@ export function AccountRoutes() {
       <Route index element={<ProfileTab />} />
       <Route path="editor" element={<EditorTab />} />
       <Route path="theme" element={<ThemeTab />} />
+      <Route path="data" element={<DataTab />} />
       <Route path="*" element={<Navigate to="/settings/account" replace />} />
     </Route>
   );
