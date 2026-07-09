@@ -115,3 +115,8 @@
   text-align: left;
 }
 .wks-public [data-testid="public-body"] img { max-width: 100%; height: auto; }
+/* #305: match the editor's inline-image convention in the public reader. An image that SHARES its paragraph
+   with text renders as a line-height thumbnail (flows with the text, no forced wrap); a standalone image (its
+   own paragraph → the only child) keeps full width. Mirrors cm-lp-image-inline on the editor surfaces. */
+.wks-public [data-testid="public-body"] p img { max-height: 1.6em; width: auto; vertical-align: text-bottom; }
+.wks-public [data-testid="public-body"] p img:only-child { max-height: none; max-width: 100%; width: auto; vertical-align: bottom; }
