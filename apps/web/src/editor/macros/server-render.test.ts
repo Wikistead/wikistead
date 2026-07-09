@@ -233,3 +233,33 @@ describe("renderMarkdownToHtml — #296 nested directive ranges", () => {
     expect(h).toContain("After the block."); // the sibling AFTER a simple directive still renders
   });
 });
+
+describe("renderMarkdownToHtml — #85 recursive nested-directive bodies", () => {
+  const reg = builtinMacroRegistry();
+
+  it("renders a nested pipe table inside a callout as a real <table>, not flattened raw text", () => {
+    const h = out(":::note\n| A | B |\n| - | - |\n| x | y |\n:::\n", reg);
+    expect(h).toContain("<table>");
+    expect(h).toContain("<td>x</td>");
+    expect(h).not.toContain("| A | B |"); // the #85 bug: the body must NOT stay flattened pipe text
+  });
+
+  it("recurses into a :::columns column body (a list becomes a real <ul>/<li>)", () => {
+    const h = out("::::columns\n:::column\n- one\n- two\n:::\n:::column\ntext\n:::\n::::\n", reg);
+    expect(h).toContain("<ul>");
+    expect(h).toContain("<li>");
+    expect(h).not.toContain("- one"); // not raw
+  });
+
+  it("recurses into tabs bodies (each tab's markdown renders)", () => {
+    const h = out("::::tabs\n:::tab[One]\n**bold in a tab**\n:::\n:::tab[Two]\n| C | D |\n| - | - |\n| 1 | 2 |\n:::\n::::\n", reg);
+    expect(h).toContain("<strong>bold in a tab</strong>");
+    expect(h).toContain("<table>"); // the second tab's table renders at depth
+  });
+
+  it("stays XSS-safe recursively — a nested <script> in a callout body is escaped at depth", () => {
+    const h = out(":::note\n<script>alert(1)</script>\n:::\n", reg);
+    expect(h).not.toContain("<script>alert(1)</script>");
+    expect(h).toContain("&lt;script&gt;"); // the allowlist boundary holds at every nesting depth
+  });
+});

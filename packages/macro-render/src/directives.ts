@@ -47,27 +47,33 @@ export function parseLayoutItems(body: string, name: string): { label?: string; 
   });
 }
 
-// columns → each column's content in order (a plain reader stacks them; nothing dropped).
-export function columnsHtmlRender(body: string): SafeHtml {
+// #85: `renderInner` recursively renders a nested Markdown body to HTML (SafeHtml). When absent (a caller
+// that hasn't wired it) we fall back to the raw content (escaped by html``) — backward compatible.
+type Inner = ((md: string) => SafeHtml) | undefined;
+const inner = (content: string, renderInner: Inner): SafeHtml | string => (renderInner ? renderInner(content) : content);
+
+// columns → each column's content in order (a plain reader stacks them; nothing dropped). #85: the column
+// body is rendered recursively so a nested table / list / directive becomes real HTML, not flattened text.
+export function columnsHtmlRender(body: string, renderInner?: (md: string) => SafeHtml): SafeHtml {
   return html`<div class="columns">${joinSafe(
-    parseLayoutItems(body, "column").map((c) => html`<div class="column">\n\n${c.content}\n\n</div>`),
+    parseLayoutItems(body, "column").map((c) => html`<div class="column">\n\n${inner(c.content, renderInner)}\n\n</div>`),
   )}</div>`;
 }
 
 // tabs → each tab degrades to a VISIBLE heading (label) + body (#90: meaning-preserving — a non-tab
-// reader keeps which content belongs to which tab). Label escaped via html`` (XSS-safe).
-export function tabsHtmlRender(body: string): SafeHtml {
+// reader keeps which content belongs to which tab). Label escaped via html`` (XSS-safe). #85: body recurses.
+export function tabsHtmlRender(body: string, renderInner?: (md: string) => SafeHtml): SafeHtml {
   return html`<div class="tabs">${joinSafe(
     parseLayoutItems(body, "tab").map(
-      (t, i) => html`<section class="tab"><h3 class="tab-label">${t.label || `Tab ${i + 1}`}</h3>\n\n${t.content}\n\n</section>`,
+      (t, i) => html`<section class="tab"><h3 class="tab-label">${t.label || `Tab ${i + 1}`}</h3>\n\n${inner(t.content, renderInner)}\n\n</section>`,
     ),
   )}</div>`;
 }
 
 // details → standard HTML <details> (Markdown-compatible). The [label] summary lives on the fence
-// line (not in body), so the server export path (#85 slice 3) will thread it in; generic for now.
-export function detailsHtmlRender(body: string): SafeHtml {
-  return html`<details><summary>Details</summary>\n\n${body}\n\n</details>`;
+// line (not in body), so the server export path (#85 slice 3) will thread it in; generic for now. #85: recurse.
+export function detailsHtmlRender(body: string, renderInner?: (md: string) => SafeHtml): SafeHtml {
+  return html`<details><summary>Details</summary>\n\n${inner(body, renderInner)}\n\n</details>`;
 }
 
 // Typed callouts (#150 / ADR-049): each admonition type is its own directive (:::note / :::info /
@@ -76,13 +82,13 @@ export function detailsHtmlRender(body: string): SafeHtml {
 export const CALLOUT_TYPES = ["note", "info", "tip", "warning", "danger"] as const;
 export type CalloutType = (typeof CALLOUT_TYPES)[number];
 
-export function calloutHtmlRender(type: string): (body: string) => SafeHtml {
-  return (body) => html`<div class="callout callout-${type}">\n\n${body}\n\n</div>`;
+export function calloutHtmlRender(type: string): (body: string, renderInner?: (md: string) => SafeHtml) => SafeHtml {
+  return (body, renderInner) => html`<div class="callout callout-${type}">\n\n${inner(body, renderInner)}\n\n</div>`; // #85: recurse
 }
 
 // #290 / ADR-114: :::todo — the promoted form of a GFM task list. The static export is the task list wrapped
 // in a container (the progress ring is display-only, per ADR-114, so it is NOT exported). Body is escaped.
-export function todoHtmlRender(body: string): SafeHtml { return html`<div class="todo">\n\n${body}\n\n</div>`; }
+export function todoHtmlRender(body: string, renderInner?: (md: string) => SafeHtml): SafeHtml { return html`<div class="todo">\n\n${inner(body, renderInner)}\n\n</div>`; } // #85: recurse the task list
 
 // :::table body is TRUSTED HTML (ADR: the table macro emits HTML verbatim). unsafeHtml keeps parity
 // with the editor; the server export path (#85 slice 3) runs a sanitize allowlist over the result — the
