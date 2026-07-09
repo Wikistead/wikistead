@@ -23,6 +23,7 @@ import { m1Spike } from "./live-preview/m1-spike";
 import { everforestHighlight } from "./everforest-highlight";
 import { mathField } from "./live-preview/math";
 import { macroEdit, nestedSelectionField, setNestedSelection } from "./live-preview/macro-edit";
+import { headingAnchors } from "./live-preview/heading-anchor"; // #313: hover 🔗 per heading line
 
 // vim Compartment content: the keymap AND a vimEnabled flag (so the decoration builder
 // can be mode-aware — ADR-022 Part 11). Reused by mount + the Editor's vim toggle.
@@ -46,6 +47,7 @@ export const displayModeContent = (m: DisplayMode) =>
 // Map vim za/zo/zc onto CodeMirror fold commands (codemirror-vim omits them) so vim
 // users can fold macro blocks. Idempotent; runs once at module load.
 registerVimFold();
+
 import type { ImageUploader } from "./live-preview/commands";
 import { attachImageDrop } from "./live-preview/image-drop";
 import { cmTheme } from "../styles/cm-theme";
@@ -66,6 +68,12 @@ function headerBandPx(view: EditorView): number {
   const px = raw.endsWith("px") ? parseFloat(raw) : 0;
   return Number.isFinite(px) ? px : 0;
 }
+
+// The band/controls scrollIntoView clearance, shared by BOTH surfaces (#212 bounce 3 / #6): top =
+// the frosted band's real height, bottom = the floating controls strip (72px ≈ the .cm-content
+// 4.5rem padding-bottom — keep in sync). #313: the read-only published view needs it too, else a
+// TOC/anchor jump lands the heading flush under the band.
+const bandScrollMargins = EditorView.scrollMargins.of((view) => ({ top: headerBandPx(view), bottom: 72 }));
 
 // The single editing surface (Group C / Step I): Obsidian-style live preview bound to
 // the canonical Y.Text. Rendered by default; the line/block under the cursor reveals
@@ -112,9 +120,7 @@ export function mountLivePreview(
       // there is no band (var unset). Pairs with `.cm-content { padding-top: var(--wks-band-h) }`.
       // (#306 note: the scrolloff itself must NOT live here — a large scroll margin corrupts CM tooltip
       // placement, thepalette regression. It is the updateListener below; these margins stay small.)
-      EditorView.scrollMargins.of((view) => {
-        return { top: headerBandPx(view), bottom: 72 };
-      }),
+      bandScrollMargins,
       // #306: vim-style `scrolloff` — keep the caret inside the middle ~50% band on cursor MOTION. Done as a
       // selection-change listener (NOT via scrollMargins: a large scroll margin corrupts CM tooltip placement —
       // the slash palette rendered ~10000px off-screen). Only on a pure caret move (no doc change), so typing
@@ -252,6 +258,8 @@ export function mountLivePreview(
       // #84: a left-gutter grip per top-level block; drag it to reorder (one Yjs op).
       // Display-only gutter + drop indicator; editable surface only.
       ...(opts.readOnly ? [] : [blockDrag]),
+      // #313: hover 🔗 on heading lines — copies the heading's anchor URL (display-only widget).
+      headingAnchors,
       // Inline-comment anchor highlights (display-only; fed via setCommentRanges).
       commentHighlightTheme,
       commentHighlights,
@@ -320,12 +328,14 @@ export function mountPublishedView(
       minimalSetup,
       cmTheme,
       EditorView.lineWrapping,
+      bandScrollMargins, // #313: TOC/anchor jumps on the view surface must clear the band too
       markdownExtension(),
       everforestHighlight, // #158-C2: same code highlighting on the read-only published view
       livePreviewTheme,
       livePreview,
       mathField, // #158-C3: KaTeX math ($…$ / $$…$$), reveal-on-cursor atoms
       linkClicks,
+      headingAnchors, // #313: same hover 🔗 anchors on the read-only published view
       checkboxControl.of(opts.onToggleTask ? { mode: "view", onToggle: opts.onToggleTask } : null),
       ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
       ...(opts.renderDiagram ? [diagramRenderer.of(opts.renderDiagram)] : []),

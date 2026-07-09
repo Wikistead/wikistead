@@ -1,0 +1,139 @@
+import { test, expect, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { enterEdit, openScratch, setPublicSurface, sleep } from "../helpers";
+
+// #313: hover-copy anchor links on headings + #<slug> deep links, in a REAL browser with a REAL
+// clipboard (context clipboard permissions). Three surfaces: the member CM surface (widget button),
+// the /p/:id#slug landing (band-aware TOC jump), and the public reader (DOM button + /pub landing).
+// Slugs are GitHub-style and Unicode-preserving (Japanese headings must get distinct anchors).
+
+const repoEnv = readFileSync(fileURLToPath(new URL("../../../.env.e2e.local", import.meta.url)), "utf8");
+const STORE = /OPENFGA_STORE_ID=(.+)/.exec(repoEnv)![1]!.trim();
+const MODEL = /OPENFGA_MODEL_ID=(.+)/.exec(repoEnv)![1]!.trim();
+const FGA = "http://localhost:8090";
+
+async function makePublic(pageId: string) {
+  const res = await fetch(`${FGA}/stores/${STORE}/write`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      writes: { tuple_keys: [{ user: "user:*", relation: "view_base", object: `page:${pageId}` }] },
+      authorization_model_id: MODEL,
+    }),
+  });
+  if (!res.ok) throw new Error(`fga write failed: ${res.status} ${await res.text()}`);
+}
+
+const FILLER = Array.from({ length: 30 }, (_, i) => `filler paragraph ${i}`).join("\n\n");
+const DOC = `# Top Title\n\n${FILLER}\n\n## 対象見出し\n\ntarget body\n\n${FILLER}\n`;
+const SLUG = "対象見出し";
+
+// The CM band clearance: the editor content's padding-top (--wks-band-h) — a landed heading must
+// sit below it (the #304 geometry), i.e. its top ≥ (content box top + bandH) - tolerance.
+async function cmBandPx(page: Page): Promise<number> {
+  return page.evaluate(() => parseFloat(getComputedStyle(document.querySelector("[data-pane=preview] .cm-content")!).paddingTop) || 0);
+}
+
+async function authorAndPublish(page: Page, title: string): Promise<string> {
+  const id = await openScratch(page, title);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(DOC);
+  await sleep(400);
+  await page.getByTestId("publish-page").click();
+  await sleep(800); // publish flush
+  return id;
+}
+
+test("#313 member surface: hovering a heading reveals 🔗; click copies /p/:id#slug (Unicode slug)", async ({ browser }) => {
+  const ctx = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
+  const page = await ctx.newPage();
+  const id = await authorAndPublish(page, "anchor-copy");
+
+  // Back on the read-only view surface: hover the heading line → the anchor button becomes visible.
+  // (The TOP heading — a line deep in the doc may be outside CM's rendered viewport.)
+  const line = page.locator(".cm-line", { hasText: "Top Title" }).first();
+  const btn = line.locator("[data-testid=heading-anchor-copy]");
+  await expect(btn).toHaveCount(1);
+  await expect.poll(async () => btn.evaluate((el) => getComputedStyle(el).opacity)).toBe("0"); // hidden until hover
+  await line.hover();
+  await expect.poll(async () => btn.evaluate((el) => getComputedStyle(el).opacity)).toBe("1"); // revealed on line hover
+
+  await btn.click();
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toBe(`http://dev.localhost:5180/p/${id}#top-title`);
+  // never the transient query (?edit=1 / ?diff=) — an anchor must not force a mode on the receiver
+  expect(copied).not.toContain("?");
+});
+
+test("#313 deep link: /p/:id#slug lands the heading below the band; unknown slug stays at top", async ({ browser }) => {
+  const ctx = await browser.newContext();
+  const author = await ctx.newPage();
+  const id = await authorAndPublish(author, "anchor-landing");
+
+  // (a) a FRESH page-load of the anchor URL scrolls to the heading (the shared-link case)
+  const page = await ctx.newPage();
+  await page.goto(`/p/${id}#${encodeURIComponent(SLUG)}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await expect.poll(() => page.evaluate(() => document.querySelector("[data-pane=preview] .cm-scroller")!.scrollTop), { timeout: 8000 }).toBeGreaterThan(100);
+  const bandH = await cmBandPx(page);
+  const line = page.locator(".cm-line", { hasText: "対象見出し" }).first();
+  const top = (await line.boundingBox())!.y;
+  const boxTop = (await page.locator("[data-pane=preview] .cm-scroller").boundingBox())!.y;
+  expect(top, "heading under the frosted band").toBeGreaterThanOrEqual(boxTop + bandH - 8);
+  expect(top, "heading near the viewport top (landed)").toBeLessThanOrEqual(boxTop + bandH + 120);
+
+  // (b) an unknown slug is NOT an error — the page just stays at the top
+  const page2 = await ctx.newPage();
+  await page2.goto(`/p/${id}#no-such-anchor`);
+  await page2.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(1200);
+  expect(await page2.evaluate(() => document.querySelector("[data-pane=preview] .cm-scroller")!.scrollTop)).toBe(0);
+
+  // (c) a FRAGMENT navigation /p/x → /p/x#slug — no reload, hashchange only) lands too
+  await page2.goto(`/p/${id}#${encodeURIComponent(SLUG)}`);
+  await expect.poll(() => page2.evaluate(() => document.querySelector("[data-pane=preview] .cm-scroller")!.scrollTop), { timeout: 8000 }).toBeGreaterThan(100);
+});
+
+test("#313 TOC click reflects the heading in the URL hash (replaceState, no history spam)", async ({ browser }) => {
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  const id = await authorAndPublish(page, "anchor-toc-hash");
+  await page.setViewportSize({ width: 1360, height: 800 }); // wide → TOC rail
+  await page.goto(`/p/${id}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await page.getByTestId("toc-item").filter({ hasText: "対象見出し" }).first().click();
+  await expect.poll(() => page.evaluate(() => window.location.hash)).toBe(`#${encodeURIComponent(SLUG)}`);
+});
+
+test("#313 public reader: heading 🔗 copies /pub/:id#slug and the anchor URL lands for an anonymous visitor", async ({ browser }) => {
+  const authed = await (await browser.newContext()).newPage();
+  const id = await authorAndPublish(authed, "anchor-public");
+  await makePublic(id);
+  await setPublicSurface(authed, true);
+
+  const anonCtx = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
+  const anon = await anonCtx.newPage();
+
+  // (a) copy from the public reader's DOM heading
+  await anon.goto(`/pub/${id}`);
+  const h2 = anon.getByTestId("public-body").locator("h2", { hasText: "対象見出し" });
+  await expect(h2).toBeVisible();
+  const btn = h2.locator("[data-testid=heading-anchor-copy]");
+  await expect(btn).toHaveCount(1);
+  await h2.hover();
+  await expect.poll(async () => btn.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+  await btn.click();
+  expect(await anon.evaluate(() => navigator.clipboard.readText())).toBe(`http://dev.localhost:5180/pub/${id}#${encodeURIComponent(SLUG)}`);
+
+  // (b) the anchor URL lands the anonymous visitor on the heading (below the public band
+  // scroll-margin-top clearance, #304 geometry)
+  const anon2 = await (await browser.newContext()).newPage();
+  await anon2.goto(`/pub/${id}#${encodeURIComponent(SLUG)}`);
+  await expect(anon2.getByTestId("public-body")).toBeVisible();
+  await expect.poll(async () => (await anon2.getByTestId("public-body").locator("h2", { hasText: "対象見出し" }).boundingBox())!.y, { timeout: 8000 }).toBeLessThan(400);
+  const bandBottom = await anon2.evaluate(() => document.querySelector("[data-testid=public-band]")!.getBoundingClientRect().bottom);
+  const hTop = (await anon2.getByTestId("public-body").locator("h2", { hasText: "対象見出し" }).boundingBox())!.y;
+  expect(hTop, "public heading under the band").toBeGreaterThanOrEqual(bandBottom - 40); // pb-6 fade zone overlaps a little
+});

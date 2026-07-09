@@ -97,6 +97,25 @@
 .wks-public [data-testid="public-body"] pre .cm-lp-code-copy:hover { color: var(--fg); }
 .wks-public [data-testid="public-body"] pre .cm-lp-code-copy.cm-lp-code-copied { color: var(--accent); opacity: 1; }
 
+/* #313: the hover 🔗 on public headings (added by addHeadingAnchorButtons, inline at the heading's
+ * end). Opacity-only reveal — the space is always reserved, so hovering never shifts layout. */
+.wks-public [data-testid="public-body"] :is(h1, h2, h3, h4, h5, h6) .wks-heading-anchor {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: baseline;
+  margin-left: 0.3em;
+  padding: 0 0.2em;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim, #888);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.wks-public [data-testid="public-body"] :is(h1, h2, h3, h4, h5, h6):hover .wks-heading-anchor,
+.wks-public [data-testid="public-body"] .wks-heading-anchor:focus-visible { opacity: 1; }
+.wks-public [data-testid="public-body"] .wks-heading-anchor:hover { color: var(--fg); }
+
 .wks-public [data-testid="public-body"] hr {
   margin: 1.5em 0;
   border: 0;

@@ -19,6 +19,20 @@ describe("slugify (#192 TOC anchors)", () => {
   it("falls back to 'section' for empty/punctuation-only text", () => {
     expect(slugify("!!!", new Set())).toBe("section");
   });
+  // #313: anchors must work for CJK headings — Unicode letters/numbers are kept (like
+  // github-slugger), so Japanese headings get real slugs instead of colliding on "section".
+  it("keeps Unicode (Japanese) heading text", () => {
+    expect(slugify("日本語の見出し", new Set())).toBe("日本語の見出し");
+    expect(slugify("導入 と 背景", new Set())).toBe("導入-と-背景");
+  });
+  it("drops punctuation but keeps mixed CJK/ASCII words", () => {
+    expect(slugify("設計（案）: API v2!", new Set())).toBe("設計案-api-v2");
+  });
+  it("dedupes CJK repeats too", () => {
+    const seen = new Set<string>();
+    expect(slugify("概要", seen)).toBe("概要");
+    expect(slugify("概要", seen)).toBe("概要-2");
+  });
 });
 
 describe("extractHeadings (#192 TOC — from the syntax tree)", () => {

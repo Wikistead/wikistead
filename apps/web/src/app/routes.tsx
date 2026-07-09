@@ -114,6 +114,8 @@ function useDisplayModeShortcut(cycle: () => void, enabled: boolean, chord: stri
 }
 import { Lock } from "lucide-react";
 import { addCodeCopyButtons } from "../editor/live-preview/code-copy";
+import { addHeadingAnchorButtons } from "../editor/live-preview/heading-anchor-dom"; // #313: public heading 🔗
+import { useHeadingHashLanding, replaceHashWith } from "../toc/useHashLanding"; // #313: #<slug> deep links
 import { PageTitle } from "./PageTitle";
 import { PageMeta } from "./PageMeta";
 import { ProgressRing } from "./ProgressRing"; // #290: title-band page-progress ring
@@ -224,6 +226,10 @@ function PageRoute() {
   const tocJumpRef = useRef<((from: number) => void) | null>(null);
   const onHeadings = useCallback((h: Heading[]) => setHeadings(h), []);
   const onActiveHeading = useCallback((f: number | null) => setActiveHeading(f), []);
+  // #313: /p/:id#<slug> deep link — once the doc's headings include the hash slug, land on it via the
+  // same band-aware TOC jump a rail click uses.
+  const tocJump = useCallback((f: number) => tocJumpRef.current?.(f), []);
+  useHeadingHashLanding(headings, tocJump);
   // #290 / ADR-114 (A): the page's live GFM-checkbox progress → a ring in the title band. Editor fires this
   // (display-only, dedup'd, like onHeadings — NOT the dirty-signal path), the title band shows it.
   const [taskProgress, setTaskProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
@@ -521,7 +527,8 @@ function PageRoute() {
               headings={headings}
               activeFrom={activeHeading}
               depth={tocDepth}
-              onJump={(f) => tocJumpRef.current?.(f)}
+              // #313: reflect the jumped-to heading in the URL (hash-only replaceState — shareable, no history spam)
+              onJump={(f) => { tocJumpRef.current?.(f); const h = headings.find((x) => x.from === f); if (h) replaceHashWith(h.slug); }}
               subscribeScroll={subscribeTocScroll}
               isWide={isWide}
               tocOn={tocOn}
@@ -720,6 +727,9 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
   const tocJumpRef = useRef<((from: number) => void) | null>(null);
   const onHeadings = useCallback((h: Heading[]) => setHeadings(h), []);
   const onActiveHeading = useCallback((f: number | null) => setActiveHeading(f), []);
+  // #313: /share/:linkId#<slug> deep link (same device as the member surface).
+  const tocJump = useCallback((f: number) => tocJumpRef.current?.(f), []);
+  useHeadingHashLanding(headings, tocJump);
   const tocScrollListeners = useRef(new Set<() => void>()); // #192 scroll fan-out (see PageRoute)
   const onScrollActivity = useCallback(() => { tocScrollListeners.current.forEach((fn) => fn()); }, []);
   const subscribeTocScroll = useCallback((fn: () => void) => { tocScrollListeners.current.add(fn); return () => { tocScrollListeners.current.delete(fn); }; }, []);
@@ -790,7 +800,7 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
               headings={headings}
               activeFrom={activeHeading}
               depth={tocDepth}
-              onJump={(f) => tocJumpRef.current?.(f)}
+              onJump={(f) => { tocJumpRef.current?.(f); const h = headings.find((x) => x.from === f); if (h) replaceHashWith(h.slug); }}
               subscribeScroll={subscribeTocScroll}
               isWide={isWide}
               tocOn={tocOn}
@@ -951,6 +961,14 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
   // (React runs effects in declaration order — collecting before replaceChildren would see an empty DOM).
   const toc = usePublicToc(bodyEl, state.status === "ok");
 
+  // #313: hover 🔗 per heading + /pub/:id#<slug> deep-link landing. Both need the ids usePublicToc
+  // assigns, so they hang off toc.headings (populated ⇒ ids are on the DOM).
+  useEffect(() => {
+    if (state.status !== "ok" || !bodyEl || toc.headings.length === 0) return;
+    addHeadingAnchorButtons(bodyEl, t("toc.copyAnchor"), () => notify.success(t("toast.copied")));
+  }, [state, bodyEl, toc.headings, t]);
+  useHeadingHashLanding(toc.headings, toc.jump);
+
   // #227②: publish the frosted band's ACTUAL height as --wks-band-h on the outer wrapper (a 2-line
   // title makes the band taller, so a fixed value can't clear it). Mirrors the member bandRef ResizeObserver.
   // The body headings read it via scroll-margin-top (public.css) so a TOC jump lands BELOW the band, and the
@@ -1002,7 +1020,7 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
         headings={toc.headings}
         activeFrom={toc.activeFrom}
         depth={3}
-        onJump={toc.jump}
+        onJump={(f) => { toc.jump(f); const h = toc.headings.find((x) => x.from === f); if (h) replaceHashWith(h.slug); }}
         subscribeScroll={toc.subscribeScroll}
         isWide={isWide}
         tocOn={tocOn}
