@@ -1,6 +1,6 @@
 import { EditorView, minimalSetup } from "codemirror"; // meta-package: history + default/history keymaps + drawSelection (same as the host surface)
 import { EditorState } from "@codemirror/state";
-import { vim } from "@replit/codemirror-vim"; // the SAME vim the outer editor uses (not a second engine)
+import { vim, getCM } from "@replit/codemirror-vim"; // the SAME vim the outer editor uses (not a second engine)
 
 // #243 / ADR-111 C3 (slice 1): the editUI source pane for a text-source fence macro (mermaid / plantuml)
 // upgrades from a bare <textarea> to a small CodeMirror 6 editor — the "rich panel" the ticket asks for
@@ -23,6 +23,9 @@ export interface SourceEditorHandle {
   readonly view: EditorView;
   getValue(): string;
   focus(): void;
+  // #243 C3 slice 2b: true when vim is on AND in INSERT mode — the host's editUI Escape handler defers to
+  // us so the first Escape does vim insert→normal (stays in the panel), and only a NORMAL-mode Escape exits.
+  inVimInsert(): boolean;
   destroy(): void;
 }
 
@@ -70,6 +73,7 @@ export function mountSourceEditor(opts: SourceEditorOptions): SourceEditorHandle
     view,
     getValue: () => view.state.doc.toString(),
     focus: () => view.focus(),
+    inVimInsert: () => { try { return !!getCM(view)?.state?.vim?.insertMode; } catch { return false; } },
     destroy: () => view.destroy(),
   };
 }

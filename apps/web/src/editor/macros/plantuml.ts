@@ -64,7 +64,10 @@ export const plantumlMacro: FenceMacro = {
         onCommit: (v) => save(asMacroSource(v)), // commit to Y.Text on blur (offset-invariant replaceSource)
       });
       const focus = setTimeout(() => editor.focus(), 0);
-      return { destroy() { clearTimeout(focus); editor.destroy(); wrap.remove(); } };
+      return {
+        handlesEscape: () => editor.inVimInsert(), // #243 C3 slice 2b: first Escape = vim insert→normal, not exit
+        destroy() { clearTimeout(focus); editor.destroy(); wrap.remove(); },
+      };
     },
   },
   // Static export degrades to the source (an external-render-enabled viewer can process it later).

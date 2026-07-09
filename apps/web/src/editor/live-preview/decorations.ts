@@ -942,9 +942,15 @@ export class EditableEditUIWidget extends WidgetType {
     wrap.contentEditable = "false"; // atom root (ADR-054): CM keeps the block atomic, no focus reclaim
     this.mountInto(wrap, view);
     // Escape exits (the keyboard way out; the Done button is added per-mount in mountInto). On wrap so it
-    // survives updateDOM's replaceChildren. Capture so it beats a textarea that might also read Escape.
+    // survives updateDOM's replaceChildren. Capture so it beats an input that might also read Escape.
+    // #243 / ADR-111 C3 slice 2b: if the editUI's editor is a vim CM6 pane currently in INSERT mode
+    // (handlesEscape → true), DEFER — let the event reach the nested vim so the first Escape does
+    // insert→normal (stays in the panel); only a NORMAL-mode Escape falls through to exit. Additive
+    // a panel editUI without handlesEscape (callout) always exits, unchanged.
     wrap.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); this.exit(wrap, view); }
+      if (e.key !== "Escape") return;
+      if (wrap.__editUICtrl?.handlesEscape?.()) return; // vim insert → let the nested CM6 handle it
+      e.preventDefault(); e.stopPropagation(); this.exit(wrap, view);
     }, true);
     wrap.__editUIRo = observeBlockResize(view, wrap);
     return wrap;
