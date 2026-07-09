@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
-import { ChevronRight, Copy, FilePen, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Share2, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, FilePen, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Pin, Share2, Trash2 } from "lucide-react";
 import { ProgressRing } from "../app/ProgressRing"; // #290: sidebar :::todo progress ring
 import { cn } from "../lib/utils";
 
@@ -23,6 +23,7 @@ export interface PageTreeNode {
   private: boolean;
   taskDone: number; // #290: :::todo checkbox aggregate (taskTotal>0 → show the ring)
   taskTotal: number;
+  pinned?: boolean; // #284: this page is pinned by the CURRENT member (drives the ★ toggle state)
   children?: PageTreeNode[];
 }
 
@@ -53,6 +54,7 @@ export function PageTree({
   canEdit = false,
   openByDefault = false,
   onRowAction,
+  onTogglePin,
   onMove,
   disableDrop,
 }: {
@@ -62,6 +64,9 @@ export function PageTree({
   canEdit?: boolean;
   openByDefault?: boolean; // read-only callers (public reader) expand the whole tree so it's browsable at a glance
   onRowAction?: (value: string, d: PageTreeNode) => void;
+  // #284: pin/unpin toggle — a member-personal action, so NOT canEdit-gated (a view-only
+  // member may pin). Ref-routed like onRowAction (the NodeRow identity contract, ADR-119).
+  onTogglePin?: (d: PageTreeNode) => void;
   onMove?: (args: { dragIds: string[]; parentId: string | null; index: number }) => void;
   disableDrop?: (args: { parentNode: NodeApi<PageTreeNode> | null; dragNodes: NodeApi<PageTreeNode>[] }) => boolean;
 }) {
@@ -74,6 +79,10 @@ export function PageTree({
   // (memoised on only render-affecting values) keeps tree rows — and any open menu — alive.
   const onRowActionRef = useRef(onRowAction);
   onRowActionRef.current = onRowAction;
+  // #284: same ref contract for the pin toggle — a fresh callback prop captured inside
+  // NodeRow would change its identity and remount every row (the Radix menu-close bug).
+  const onTogglePinRef = useRef(onTogglePin);
+  onTogglePinRef.current = onTogglePin;
 
   const NodeRow = useCallback(({ node, style, dragHandle }: NodeRendererProps<PageTreeNode>) => {
     const d = node.data;
@@ -126,6 +135,29 @@ export function PageTree({
         ) : null}
         {/* #290 / ADR-114: a compact :::todo progress ring — only for pages with a :::todo (taskTotal>0). */}
         {d.taskTotal > 0 && <span className="mx-0.5 flex-none inline-flex items-center self-center" data-testid="tree-todo-ring"><ProgressRing done={d.taskDone} total={d.taskTotal} compact /></span>}
+        {/* #284: pin toggle — hover-revealed like the row menu, but NOT canEdit-gated (pinning is a
+            member-personal view action). A pinned row keeps its ★ visible so the state is readable. */}
+        {onTogglePinRef.current && (
+          <span
+            className={cn(
+              "flex flex-none transition-opacity duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+              d.pinned ? "opacity-100" : "pointer-events-none opacity-0",
+            )}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="flex cursor-pointer rounded-sm p-0.5 text-fg-dim transition-colors duration-[120ms] hover:bg-border hover:text-foreground"
+              title={d.pinned ? t("sidebar.unpin") : t("sidebar.pin")}
+              aria-label={d.pinned ? t("sidebar.unpin") : t("sidebar.pin")}
+              aria-pressed={d.pinned ?? false}
+              data-testid="tree-pin-toggle"
+              onClick={() => onTogglePinRef.current!(d)}
+            >
+              <Pin size={13} className={d.pinned ? "fill-current" : undefined} />
+            </button>
+          </span>
+        )}
         {canEdit && onRowActionRef.current && (
           <span className="flex gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 has-[[aria-expanded=true]]:pointer-events-auto has-[[aria-expanded=true]]:opacity-100" onClick={(e) => e.stopPropagation()}>
             <DropdownMenu modal={false}>

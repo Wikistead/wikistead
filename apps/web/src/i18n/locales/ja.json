@@ -379,6 +379,11 @@
   },
   "sidebar": {
     "searchSpaces": "スペースを検索…",
+    "pinned": "ピン留め",
+    "pin": "ピン留め",
+    "unpin": "ピン留めを解除",
+    "movePinUp": "ピンを上へ",
+    "movePinDown": "ピンを下へ",
     "noSpacesMatch": "一致するスペースがありません。",
     "moreSpacesHint": "他 {{count}} スペース — 検索で絞り込み",
     "showAllSpaces": "すべてのスペースを表示（他 {{count}} 件）",

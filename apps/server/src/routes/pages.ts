@@ -21,6 +21,7 @@ import { assertPageViewable } from '../page-view-gate.js'
 import { revokeResourceShareLinks } from './share-links.js'
 import { getTemplate } from './templates.js'
 import { getSpaceInfo } from './spaces.js'
+import { deletePinsForResources } from './pins.js'
 import { enqueueWebhookOutbox } from './webhooks.js'
 
 // #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames
@@ -1212,6 +1213,9 @@ export async function deletePage(
     for (const id of ids) {
       outboxIds.push({ id: await enqueueOutbox(tx, { tenantId, pageId: id, operation: 'delete' }), pageId: id })
     }
+    // #284 / ADR-119: best-effort pin cleanup (page + descendants). The pin display
+    // gate drops orphans regardless — this is row hygiene, not correctness.
+    await deletePinsForResources(tx, ids)
     await tx`DELETE FROM pages WHERE id = ${args.pageId}` // cascade deletes descendants
   })
   for (const o of outboxIds) processOutboxAsync(driver, o.id, { tenantId, pageId: o.pageId, operation: 'delete' })

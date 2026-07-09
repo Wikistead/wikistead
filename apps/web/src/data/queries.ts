@@ -237,6 +237,49 @@ export function useBacklinks(pageId: string | null, enabled = true) {
   });
 }
 
+// #284 / ADR-119: per-member pins (spaces + pages). The server list is view-confirmed
+// (a deleted / no-longer-viewable resource is silently dropped server-side), so this
+// list is authoritative for what may be rendered — never cache-render a stale title.
+export type PinResourceType = "space" | "page";
+export interface Pin { id: string; resourceType: PinResourceType; resourceId: string; title: string; position: number }
+export function usePins(enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["pins"],
+    queryFn: () => apiFetch<Pin[]>("/pins", token).then((r) => r ?? []),
+    enabled,
+  });
+}
+
+export function useCreatePin() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { resourceType: PinResourceType; resourceId: string }) =>
+      apiFetch<Pin>("/pins", token, { method: "POST", body: JSON.stringify(args) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pins"] }),
+  });
+}
+
+export function useDeletePin() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<null>(`/pins/${id}`, token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pins"] }),
+  });
+}
+
+export function useReorderPins() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { resourceType: PinResourceType; orderedIds: string[] }) =>
+      apiFetch<null>("/pins/reorder", token, { method: "PATCH", body: JSON.stringify(args) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pins"] }),
+  });
+}
+
 export function useShareLinks(resource: ShareResource | null, enabled = true) {
   const { token } = useSession();
   return useQuery({

@@ -41,6 +41,38 @@ describe("#263 visibleSpaces (bounded default + search)", () => {
   });
 });
 
+describe("#284 visibleSpaces with pins (pinned-first, cap-exempt)", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("pinned spaces come FIRST, in pin order, before the current space", () => {
+    const out = visibleSpaces(S, "a", "", ["d", "b"]);
+    expect(out.map((s) => s.id).slice(0, 3)).toEqual(["d", "b", "a"]); // pins in order, then current
+  });
+
+  it("a pinned current space is not duplicated", () => {
+    const out = visibleSpaces(S, "b", "", ["b"]);
+    expect(out.filter((s) => s.id === "b").length).toBe(1);
+    expect(out[0]!.id).toBe("b");
+  });
+
+  it("pins are exempt from the cap: the bounded tail stays full-size alongside pins", () => {
+    const many = Array.from({ length: 30 }, (_, i) => mk(`s${i}`, `S${i}`));
+    const pinned = ["s20", "s21", "s22"];
+    const out = visibleSpaces(many, "s0", "", pinned);
+    expect(out.length).toBe(11); // 3 pins + 8 bounded
+    expect(out.map((s) => s.id).slice(0, 3)).toEqual(pinned); // and none of the pins were folded
+  });
+
+  it("a pinned id whose space is no longer viewable is skipped (no phantom row)", () => {
+    const out = visibleSpaces(S, "a", "", ["zzz", "c"]);
+    expect(out.map((s) => s.id).slice(0, 2)).toEqual(["c", "a"]);
+  });
+
+  it("while searching, the pin ordering is irrelevant (filter spans all spaces)", () => {
+    expect(visibleSpaces(S, "a", "elt", ["b"]).map((s) => s.id)).toEqual(["d"]);
+  });
+});
+
 describe("#263 rejection ①: hiddenSpaceCount (surface the silent truncation)", () => {
   it("empty query: reports how many viewable spaces are NOT shown", () => {
     expect(hiddenSpaceCount(16, 8, "")).toBe(8); // 16 viewable, 8 shown → 8 hidden
