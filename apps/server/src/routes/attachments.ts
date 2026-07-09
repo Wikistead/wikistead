@@ -79,12 +79,20 @@ export async function presignAttachment(
 export async function confirmAttachment(
   db: TenantDb,
   storage: StorageDriver,
+  fga: OpenFgaClient,
   args: { id: string; tenantId: string; userId: string },
 ): Promise<AttachmentSummary & { downloadUrl: string }> {
   const [row] = await db.sql<AttachmentRow[]>`
     SELECT * FROM attachments WHERE id = ${args.id} AND status = 'pending'
   `
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
+
+  // #302(b): confirm was the ONLY write path with no authorization check (it only 404'd a non-pending id).
+  // Require the SAME permission as presign — `edit` on the target page — so the whole write surface is
+  // uniformly gated. A principal without edit gets a 404 (existence-hidden): a pending id is unguessable, but
+  // the write path must not be authz-free. Non-regression: the presigner (who has edit) confirms normally.
+  const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: row.page_id })
+  if (!canEdit) throw Object.assign(new Error('not found'), { statusCode: 404 })
 
   // HeadObject with a short retry: some S3 gateways (e.g. SeaweedFS) are not
   // strictly read-after-write consistent, so the object can be momentarily
@@ -176,10 +184,16 @@ export async function deleteAttachment(
   args: { id: string; userId: string },
 ): Promise<void> {
   const [row] = await db.sql<AttachmentRow[]>`SELECT * FROM attachments WHERE id = ${args.id}`
-  if (!row || row.status === 'deleted') return  // not found or already deleted → idempotent
-
+  // #302(a): the authorization check must PRECEDE any existence-revealing response. Before, `!row || deleted
+  // → 204` returned idempotently BEFORE the manage check, so a non-manager member could distinguish a
+  // confirmed attachment (403) from a deleted/missing one (204) — a delete-state oracle. Now a caller without
+  // manage on the page gets a uniform 404 (existence-hidden) whether the attachment is confirmed, deleted, or
+  // missing; only a manager sees the real semantics (idempotent 204 for an already-deleted row, delete for a
+  // live one). A missing row has no page to check, so it is a uniform 404 too (indistinguishable from hidden).
+  if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: row.page_id })
-  if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  if (!canManage) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  if (row.status === 'deleted') return  // manager, already deleted → idempotent (204 via the endpoint)
 
   // Soft delete first (visible effect is immediate — row disappears from reads).
   await db.sql`UPDATE attachments SET status = 'deleted' WHERE id = ${args.id}`
@@ -227,7 +241,7 @@ export async function attachmentsPlugin(app: FastifyInstance) {
   )
 
   app.post<{ Params: { id: string } }>('/attachments/:id/confirm', async (req) => {
-    return confirmAttachment(req.db, app.storageDriver, { id: req.params.id, tenantId: req.tenant.id, userId: req.user.sub })
+    return confirmAttachment(req.db, app.storageDriver, app.fga, { id: req.params.id, tenantId: req.tenant.id, userId: req.user.sub })
   })
 
   // Members OR a guest (view share-link). The principal is resolved here; the FGA
