@@ -1,41 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
-import { useSearch, useSpaces, useAccountSettings } from "../data/queries";
+import { Search } from "lucide-react";
+import { useAccountSettings } from "../data/queries";
 import { resolveKey, eventMatches } from "../app/keybindings";
-import { useDebouncedValue } from "./useDebouncedValue";
-import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from "../components/ui/command";
+import { SearchModal } from "./SearchModal";
 
-// Tenant page search. The two-stage guard (Meili + FGA) lives entirely in the API;
-// this component only renders the authorized hits it returns — `shouldFilter={false}`
-// means cmdk does NO client-side filtering, so the list is EXACTLY the server's
-// authorized result set (a UI change can neither leak nor re-filter authz). The body
-// snippet is plain text (API-stripped) rendered AS TEXT (never dangerouslySetInnerHTML),
-// and only ever appears for a page the user may view. Cmd/Ctrl-K focuses the input.
+// #285 / ADR-118: the header search is a TRIGGER for the search modal (one search UI — the old inline
+// cmdk dropdown moved into SearchModal, which adds the preview pane + metadata). Cmd/Ctrl-K (the
+// ADR-021 `search.focus` chord) opens the modal; its input carries the search-input testid, so the
+// keyboard flow is: chord → modal opens → type → ↑↓/Ctrl-j/k → Enter navigates → Esc closes.
+// All authz lives server-side (two-stage guard); see SearchModal for the render-side invariants.
 export function SearchBox() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const [input, setInput] = useState("");
-  const debounced = useDebouncedValue(input, 250);
-  const { data: hits, isFetching } = useSearch(debounced);
-  const spaces = useSpaces();
+  const [open, setOpen] = useState(false);
   const focusChord = resolveKey("search.focus", useAccountSettings().data?.keybindings); // ADR-021 (default Mod-k)
-
-  const spaceName = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const s of spaces.data ?? []) m.set(s.id, s.name || "Untitled space");
-    return m;
-  }, [spaces.data]);
-
-  const items = useMemo(
-    () => (hits ?? []).map((h) => ({
-      value: h.id,
-      label: h.title || "Untitled",
-      space: spaceName.get(h.spaceId) ?? "",
-      snippet: h.snippet ?? "",
-    })),
-    [hits, spaceName],
-  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -44,46 +22,25 @@ export function SearchBox() {
       if (e.defaultPrevented) return;
       if (eventMatches(e, focusChord)) {
         e.preventDefault();
-        document.querySelector<HTMLInputElement>("[data-testid=search-input]")?.focus();
+        setOpen(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [focusChord]);
 
-  const open = input.trim().length > 0;
-
   return (
-    <Command shouldFilter={false} className="relative w-full max-w-xs overflow-visible bg-transparent">
-      <CommandInput
-        value={input}
-        onValueChange={setInput}
-        data-testid="search-input"
-        placeholder={t("search.placeholderKbd")}
-      />
-      {open && (
-        <CommandList data-testid="search-results" className="absolute top-full right-0 left-0 z-50 mt-1 rounded-md border bg-popover text-popover-foreground shadow-md">
-          {isFetching && items.length === 0 ? (
-            <div className="p-2 text-sm text-fg-dim">{t("search.searching")}</div>
-          ) : items.length === 0 ? (
-            <CommandEmpty>{t("search.noResults")}</CommandEmpty>
-          ) : (
-            items.map((item) => (
-              <CommandItem
-                key={item.value}
-                value={item.value}
-                data-testid="search-item"
-                onSelect={(v) => { navigate(`/p/${v}`); setInput(""); }}
-                className="flex flex-col items-start gap-0.5"
-              >
-                <span className="text-sm">{item.label}</span>
-                {item.space && <span className="text-xs text-fg-dim">{item.space}</span>}
-                {item.snippet && <span className="text-xs text-fg-dim" data-testid="search-snippet">{item.snippet}</span>}
-              </CommandItem>
-            ))
-          )}
-        </CommandList>
-      )}
-    </Command>
+    <>
+      <button
+        type="button"
+        data-testid="search-trigger"
+        onClick={() => setOpen(true)}
+        className="flex w-full max-w-xs items-center gap-2 rounded-md border border-input bg-transparent px-3 py-1.5 text-sm text-fg-dim hover:bg-panel-2"
+      >
+        <Search size={14} className="shrink-0" />
+        <span className="truncate">{t("search.placeholderKbd")}</span>
+      </button>
+      <SearchModal open={open} onOpenChange={setOpen} />
+    </>
   );
 }

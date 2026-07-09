@@ -240,9 +240,13 @@ test("Ctrl-k navigates the palette when open, opens page search when closed", as
   await resetDoc(page);
   await page.click("[data-pane=preview] .cm-content");
 
-  // palette CLOSED → Ctrl-k focuses page search (the global shortcut still works)
+  // palette CLOSED → Ctrl-k opens the search MODAL with its input focused (#285; the global
+  // shortcut still works). Close it again before returning to the editor — the dialog overlay
+  // would otherwise intercept the click below.
   await page.keyboard.press("Control+k");
   await expect(page.getByTestId("search-input")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("search-input")).toHaveCount(0);
 
   // palette OPEN → Ctrl-k navigates (wraps up from first to last) and does NOT open search.
   // Wrap-up lands on the LAST row, whatever the composition puts there (insert-template since #251).
@@ -253,7 +257,8 @@ test("Ctrl-k navigates the palette when open, opens page search when closed", as
   const palette = page.getByTestId("slash-palette");
   await expect(palette.locator(".lp-palette-row").last()).toHaveAttribute("data-selected", "true");
   await expect(page.getByTestId("slash-item-h1")).not.toHaveAttribute("data-selected", "true");
-  await expect(page.getByTestId("search-input")).not.toBeFocused();
+  // #285: search is a modal — its input only exists while open, so "did not open" = count 0.
+  await expect(page.getByTestId("search-input")).toHaveCount(0);
 });
 
 // Light-2: the palette learns recently-used commands and floats them to the top. A fresh

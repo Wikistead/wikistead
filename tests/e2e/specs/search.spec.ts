@@ -5,8 +5,9 @@ import { STALE_TITLE } from "../fixtures";
 const API = "http://dev.localhost:4010";
 
 async function typeSearch(page: Page, q: string) {
+  // #285: search is a MODAL now — the header trigger (or Ctrl-K) opens it; the input lives inside.
+  if ((await page.getByTestId("search-input").count()) === 0) await page.getByTestId("search-trigger").click();
   const input = page.locator("[data-testid=search-input]");
-  await input.click();
   await input.fill("");
   await input.fill(q);
   await sleep(700); // debounce + query
@@ -66,4 +67,74 @@ test("search: find by title, FGA-excluded title hidden, empty, keyboard", async 
   await page.locator("[data-testid=search-input]").press("Enter");
   await sleep(500);
   expect(page.url()).toMatch(/\/p\/[0-9a-f-]{36}$/);
+});
+
+// #285 / ADR-118: the search MODAL — the selected hit drives a right-hand PREVIEW pane whose data
+// comes from the view-gated routes (never Meili stage-1 data): title + #222 metadata + a plain-text
+// body excerpt, and a draft badge derived from the view-gated `published` boolean.
+test("#285: the search modal shows a preview pane (meta + body excerpt + draft badge)", async ({ page }) => {
+  await openDemo(page);
+  const title = `PREVIEWME-${Date.now().toString(36)}`;
+  const id = await page.evaluate(async ({ api, title }) => {
+    const r = await fetch(`${api}/spaces/demo_space/pages`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    return ((await r.json()) as { id: string }).id;
+  }, { api: API, title });
+  // author + publish so the preview has body text and no draft badge.
+  await page.goto(`/p/${id}?edit=1`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("preview body 285 unique text");
+  await sleep(2800); // collab persist
+  await page.evaluate(async ({ api, id }) => {
+    await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+  }, { api: API, id });
+  await expect
+    .poll(
+      () => page.evaluate(async ({ api, q }) => {
+        const r = await fetch(`${api}/search?q=${encodeURIComponent(q)}`, { headers: { Authorization: "Bearer dev-token" } });
+        return ((await r.json()) as unknown[]).length;
+      }, { api: API, q: title }),
+      { timeout: 20_000, intervals: [500, 1000, 1000] },
+    )
+    .toBeGreaterThan(0);
+
+  // reload: the raw-fetch publish above bypasses the app's query invalidation, so the ["page"] cache
+  // from the edit visit still says published:false — a fresh page load reflects the real state.
+  await page.reload();
+  await page.waitForSelector("[data-testid=search-trigger]");
+  await typeSearch(page, title);
+  await page.waitForSelector("[data-testid=search-item]", { timeout: 5000 });
+  // cmdk highlights the first hit → the preview follows (debounced fetch through view-gated routes).
+  const preview = page.getByTestId("search-preview");
+  await expect(preview).toContainText(title, { timeout: 8000 });
+  await expect(preview.getByTestId("page-meta")).toBeVisible(); // #222 metadata row
+  await expect(preview.getByTestId("search-preview-body")).toContainText("preview body 285 unique text");
+  await expect(preview.getByTestId("search-preview-draft")).toHaveCount(0); // published → no draft badge
+
+  // an UNPUBLISHED page shows the draft badge (view-gated `published` boolean, not manage-gated state).
+  const draftTitle = `DRAFTME-${Date.now().toString(36)}`;
+  await page.evaluate(async ({ api, title }) => {
+    await fetch(`${api}/spaces/demo_space/pages`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+  }, { api: API, title: draftTitle });
+  await expect
+    .poll(
+      () => page.evaluate(async ({ api, q }) => {
+        const r = await fetch(`${api}/search?q=${encodeURIComponent(q)}`, { headers: { Authorization: "Bearer dev-token" } });
+        return ((await r.json()) as unknown[]).length;
+      }, { api: API, q: draftTitle }),
+      { timeout: 20_000, intervals: [500, 1000, 1000] },
+    )
+    .toBeGreaterThan(0);
+  await typeSearch(page, draftTitle);
+  await page.waitForSelector("[data-testid=search-item]", { timeout: 5000 });
+  await expect(preview).toContainText(draftTitle, { timeout: 8000 });
+  await expect(preview.getByTestId("search-preview-draft")).toBeVisible();
 });

@@ -506,6 +506,9 @@ export interface PageMeta {
   updatedAt?: string;
   createdBy?: string | null;
   updatedBy?: string | null;
+  // #285 (condition 1): the SAFE-side publish flag for the search preview's draft badge —
+  // published_at IS NOT NULL from the view-gated getPage (NEVER the manage-gated isPagePublic).
+  published?: boolean;
 }
 
 // ── per-page access (Phase 4) ──────────────────────────────────────────────

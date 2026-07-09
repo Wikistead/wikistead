@@ -304,7 +304,7 @@ export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: 
   if (!access) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const [row] = await db.sql<PageRow[]>`
     SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at, has_unpublished_changes,
-           created_by, updated_by
+           created_by, updated_by, (published_at IS NOT NULL) AS published
     FROM pages WHERE id = ${args.pageId}
   `
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
