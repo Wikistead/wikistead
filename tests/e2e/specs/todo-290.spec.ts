@@ -140,6 +140,27 @@ test("#290 (A): no page ring when the page has no checkboxes", async ({ browser 
   expect(await page.getByTestId("page-task-ring").count()).toBe(0);
 });
 
+// #290 / ADR-114: the SIDEBAR tree shows a compact progress ring on pages that contain a :::todo
+// (only those — the aggregate counts :::todo-block checkboxes, so it's self-gating). Persisted on publish
+// (task_done/task_total columns) so the tree query stays cheap. Real Chromium, full publish → refetch path.
+test("#290: the sidebar shows a :::todo progress ring on a published page (persisted aggregate)", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+  const name = `todo-sidebar-${Date.now()}`;
+  await openScratch(page, name);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::todo[Sprint]\n- [x] a\n- [ ] b\n:::\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click(); // publish → task_done/task_total persisted → tree refetch
+  await sleep(800);
+
+  // the scratch page's tree row now carries a compact todo ring reading 1/2.
+  const row = page.getByTestId("tree-page-name").filter({ hasText: name }).locator("..");
+  const ring = row.getByTestId("tree-todo-ring").locator("[data-testid=page-task-ring]");
+  await expect(ring).toHaveAttribute("data-done", "1", { timeout: 6000 });
+  await expect(ring).toHaveAttribute("data-total", "2");
+});
+
 // Round-trip: :::todo source is preserved (Source display mode shows the raw directive + task list).
 test("#290: :::todo round-trips as plain :::todo + a GFM task list (Open formats)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();

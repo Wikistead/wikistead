@@ -37,6 +37,10 @@ export interface Page {
   // and next to the title. Exposed only to viewers of the page (non-viewers 404), so it
   // leaks nothing. `restrict`-only (deny) pages are NOT private and show no lock.
   private?: boolean;
+  // #290 / ADR-114: the page's :::todo checkbox aggregate (published). taskTotal > 0 ⟺ the page has a
+  // :::todo with tasks → the sidebar shows a progress ring. Display-only.
+  taskDone?: number;
+  taskTotal?: number;
   // #222: title-bar metadata row. createdAt/updatedAt are timestamps; createdBy is the creator's sub,
   // updatedBy the last-publisher's sub (option A). Present only on the single-page GET (getPage), not the
   // tree list. Resolved to name/avatar via AuthorChip; null when unrecorded (pre-migration pages).
