@@ -20,6 +20,7 @@ const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset } from "../macros/md-render";
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
+import { countTasks, renderProgressRing } from "../macros/progress"; // #290: :::todo header progress ring
 import { calloutTypeOption } from "../macros/callout-type-ui";
 import { renderCellInline } from "../macros/table-cell-dom";
 import { openMacroModal } from "./macro-modal";
@@ -184,6 +185,17 @@ class BulletWidget extends WidgetType {
   eq(o: BulletWidget) {
     return o.level === this.level;
   }
+}
+
+// #290 / ADR-114: the :::todo open-line PROGRESS RING (done/total of the block's checkboxes). Display-only,
+// offset-invariant (a side:1 widget on the open line — never shifts offsets, remote carets stay correct). The
+// ring is absolutely positioned to the line's right edge (callout-icons.css) so it doesn't fight the CSS
+// ::before(icon)/::after(label) header. eq keys on done/total so it only rebuilds when the counts change.
+class TodoRingWidget extends WidgetType {
+  constructor(readonly done: number, readonly total: number) { super(); }
+  eq(o: TodoRingWidget) { return o.done === this.done && o.total === this.total; }
+  toDOM() { return renderProgressRing(this.done, this.total) ?? document.createElement("span"); }
+  ignoreEvent() { return true; } // display-only — clicks pass through to the line
 }
 
 // #202 (comment 761): nested ORDERED lists mirror the bullet hierarchy — each nesting level counts
@@ -2031,6 +2043,15 @@ const RENDERERS: BlockRenderer[] = [
           : box;
         ctx.add(openLine, first.from);
         for (let n = first.number + 1; n <= lastLine.number; n++) ctx.add(box, doc.line(n).from);
+        // #290 / ADR-114: a :::todo shows a progress ring in its header, computed from the block's own task
+        // lines (the body between the fences). Display-only side:1 widget on the open line (offset-invariant);
+        // absolutely positioned to the right by CSS. Only when there are tasks (0/0 → no ring).
+        if (macro.name === "todo") {
+          let bodyTxt = "";
+          for (let n = first.number + 1; n < lastLine.number; n++) bodyTxt += doc.line(n).text + "\n";
+          const { done, total } = countTasks(bodyTxt);
+          if (total > 0) ctx.add(Decoration.widget({ widget: new TodoRingWidget(done, total), side: 1 }), first.to);
+        }
         // #174 comment 878 (ADR-087 addendum 2): caret-in raw editing → the SHARED RichUI-entry pill at the
         // top-left (the same affordance as the pipe table, #216). Live + editable only. Click / Ctrl+Enter →
         // enterMacroAt → the callout editUI (type/header/content). macroRawLead adds position:relative to the
