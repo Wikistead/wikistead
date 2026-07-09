@@ -25,6 +25,7 @@ export interface MatchOpts {
   readonly minCjkLen?: number; // min CJK title length (default 2)
   readonly stopWords?: ReadonlySet<string>; // tenant stop list (lower-cased), never linkified
   readonly firstPerPage?: boolean; // link only the FIRST occurrence of each target page (default true)
+  readonly selfPageId?: string; // #224(5): the page being rendered — its OWN title never self-links
 }
 
 // Returns the non-overlapping link ranges, longest-title-first (longest-match-wins so a title that is a
@@ -39,6 +40,7 @@ export function matchTitleLinks(text: string, dict: readonly TitleEntry[], opts:
     .map((e) => ({ ...e, t: e.title.trim() }))
     .filter((e) => {
       if (!e.t) return false;
+      if (opts.selfPageId && e.pageId === opts.selfPageId) return false; // #224(5): no self-link
       if (stop?.has(e.t.toLowerCase())) return false;
       return hasCjk(e.t) ? e.t.length >= minCjkLen : e.t.length >= minLen;
     })

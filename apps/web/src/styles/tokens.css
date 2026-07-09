@@ -134,6 +134,7 @@
      rendered link mark, the cell anchor, and Source-mode t.link/t.url. NOT --hl-meta (that green was the
      "links & headings stuck green" bug). A readable blue on white. */
   --link: #0969da;
+  --link-auto: #2f7d46;  /* #224(5): auto title-link — green, distinct from a manual link, readable on light */
   --selection: color-mix(in srgb, var(--accent) 22%, transparent);
   /* Selected-row fill (sidebar): neutral, NOT an accent wash — the accent is carried
      by a left indicator bar instead (Group C static refinement). */
@@ -176,6 +177,7 @@
   --hl-operator: #e69875;  /* orange */
   --hl-meta: #83c092;      /* aqua */
   --link: #4ea1ff;         /* #223: link token — readable blue on dark */
+  --link-auto: #83c092;    /* #224(5): auto title-link — green on dark */
   --selection: color-mix(in srgb, var(--accent) 30%, transparent);
   --selected: var(--panel-3);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -196,6 +198,7 @@
     --danger: #f0584d;
     --danger-fg: #ffffff;
     --link: #4ea1ff;         /* #223: link token — system-dark */
+    --link-auto: #83c092;    /* #224(5): auto title-link — system-dark */
     --selection: color-mix(in srgb, var(--accent) 30%, transparent);
     --selected: var(--panel-3);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);

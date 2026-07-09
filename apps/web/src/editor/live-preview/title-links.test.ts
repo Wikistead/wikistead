@@ -69,4 +69,15 @@ describe("matchTitleLinks", () => {
   it("ignores empty/whitespace titles", () => {
     expect(matchTitleLinks("anything here", [{ title: "   ", pageId: "p1" }])).toEqual([]);
   });
+
+  // #224(5): a page's OWN title never self-links inside its own body (selfPageId is skipped).
+  it("skips the self page's own title (no self-link)", () => {
+    const dict = [{ title: "Roadmap", pageId: "self" }, { title: "Backlog", pageId: "other" }];
+    const text = "the Roadmap links to the Backlog";
+    // without selfPageId both match…
+    expect(matchTitleLinks(text, dict).map((x) => x.pageId).sort()).toEqual(["other", "self"]);
+    // …with selfPageId="self", only the OTHER page links (the self title is inert).
+    const m = matchTitleLinks(text, dict, { selfPageId: "self" });
+    expect(m.map((x) => x.pageId)).toEqual(["other"]);
+  });
 });
