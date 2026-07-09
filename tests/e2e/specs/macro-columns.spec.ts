@@ -53,18 +53,20 @@ test("#257: columns editUI panel — 2-column seed, edit a column, add a third, 
   await content.fill("left-edited");
   await content.blur();
   await sleep(300);
-  await page.locator("[data-pane=preview] [data-testid=layout-edit-add]").click();
-  await sleep(400);
-  // The add committed → the panel re-mounts from the new source with 3 columns (round-trip).
-  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit-chip]")).toHaveCount(3);
-  // The edited first column survived: re-select it and confirm its content re-parsed from doc.
-  await page.locator("[data-pane=preview] [data-testid=layout-edit-chip]").first().click();
-  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit-content]")).toHaveValue("left-edited");
-
-  // Exit → the block re-renders as the columns widget with all three columns.
+  // #278 §1: the panel is CONTENT-only now — structure (add/remove) moved to inline affordances on the
+  // rendered cells. Exit the panel, then add a column via the trailing on the rendered widget.
   await page.keyboard.press("Escape");
   await sleep(300);
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-columns] .cm-lp-column")).toHaveCount(2);
+  await page.locator("[data-pane=preview] [data-testid=macro-columns]").hover();
+  await sleep(150);
+  await page.locator("[data-pane=preview] [data-testid=layout-add-column]").click({ force: true });
+  await sleep(400);
+  await page.getByText("below").click();
+  await sleep(200); // caret out → the widget re-renders with 3 columns (round-trip)
   await expect(page.locator("[data-pane=preview] [data-testid=macro-columns] .cm-lp-column")).toHaveCount(3);
+  // The edited first column survived the add round-trip.
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-columns] .cm-lp-column").first()).toContainText("left-edited");
 });
 
 test("::::columns inner content is sanitized — a <script> in a column makes no script element", async ({ browser }) => {
