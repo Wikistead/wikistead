@@ -195,9 +195,11 @@ test("the palette scrolls to keep the selected item visible (Ctrl-j/k follow)", 
     return top >= el.scrollTop - 2 && bottom <= el.scrollTop + el.clientHeight + 2;
   };
 
-  // wrap UP from the first item to the LAST (image) — it can start below the fold
+  // wrap UP from the first item to the LAST row — whatever the palette composition puts there
+  // (insert-template since #251; asserting a specific id went stale every time a tail command was
+  // added). It can start below the fold.
   await page.keyboard.press("Control+k");
-  await expect(page.getByTestId("slash-item-image")).toHaveAttribute("data-selected", "true");
+  await expect(palette.locator(".lp-palette-row").last()).toHaveAttribute("data-selected", "true");
   await sleep(80); // let the rAF scroll adjustment run
   expect(await palette.evaluate(inScrollport)).toBe(true);
 
@@ -243,12 +245,14 @@ test("Ctrl-k navigates the palette when open, opens page search when closed", as
   await expect(page.getByTestId("search-input")).toBeFocused();
 
   // palette OPEN → Ctrl-k navigates (wraps up from first to last) and does NOT open search.
-  // With an uploader present, "image" (P) is the last item — wrap-up lands there.
+  // Wrap-up lands on the LAST row, whatever the composition puts there (insert-template since #251).
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.type("/");
   await expect(page.getByTestId("slash-item-h1")).toHaveAttribute("data-selected", "true");
   await page.keyboard.press("Control+k");
-  await expect(page.getByTestId("slash-item-image")).toHaveAttribute("data-selected", "true");
+  const palette = page.getByTestId("slash-palette");
+  await expect(palette.locator(".lp-palette-row").last()).toHaveAttribute("data-selected", "true");
+  await expect(page.getByTestId("slash-item-h1")).not.toHaveAttribute("data-selected", "true");
   await expect(page.getByTestId("search-input")).not.toBeFocused();
 });
 
