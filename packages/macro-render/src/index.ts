@@ -9,7 +9,7 @@ export type { MacroHtmlDescriptor, MacroHtmlRegistry } from "./render.js";
 export {
   parseLayoutItems,
   columnsHtmlRender, tabsHtmlRender, detailsHtmlRender,
-  CALLOUT_TYPES, calloutHtmlRender,
+  CALLOUT_TYPES, calloutHtmlRender, todoHtmlRender,
   tableHtmlRender, transcludeHtmlRender, embedHtmlRender,
   mermaidHtmlRender, plantumlHtmlRender, excalidrawHtmlRender,
   builtinDirectiveDescriptors, builtinFenceDescriptors, builtinMacroRegistry,

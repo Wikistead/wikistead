@@ -80,6 +80,10 @@ export function calloutHtmlRender(type: string): (body: string) => SafeHtml {
   return (body) => html`<div class="callout callout-${type}">\n\n${body}\n\n</div>`;
 }
 
+// #290 / ADR-114: :::todo — the promoted form of a GFM task list. The static export is the task list wrapped
+// in a container (the progress ring is display-only, per ADR-114, so it is NOT exported). Body is escaped.
+export function todoHtmlRender(body: string): SafeHtml { return html`<div class="todo">\n\n${body}\n\n</div>`; }
+
 // :::table body is TRUSTED HTML (ADR: the table macro emits HTML verbatim). unsafeHtml keeps parity
 // with the editor; the server export path (#85 slice 3) runs a sanitize allowlist over the result — the
 // final fortress that neutralises any raw <iframe>/<script> a cell's text might contain.
@@ -114,6 +118,8 @@ export const builtinDirectiveDescriptors: Record<string, MacroHtmlDescriptor> = 
   columns: { exportFidelity: "preserve", htmlRender: columnsHtmlRender },
   tabs: { exportFidelity: "preserve", htmlRender: tabsHtmlRender },
   details: { exportFidelity: "preserve", htmlRender: detailsHtmlRender },
+  todo: { exportFidelity: "preserve", htmlRender: todoHtmlRender }, // #290
+
   table: { exportFidelity: "preserve", htmlRender: tableHtmlRender },
   "embed-page": { exportFidelity: "preserve", htmlRender: transcludeHtmlRender }, // #205: renamed from `transclude`
   "embed-external": { exportFidelity: "degrade", htmlRender: embedHtmlRender }, // #205: renamed from `embed`
