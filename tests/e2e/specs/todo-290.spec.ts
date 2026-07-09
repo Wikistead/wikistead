@@ -22,16 +22,24 @@ test("#290: :::todo renders a container box whose body checkboxes stay interacti
   expect(await content(page)).not.toContain(":::todo"); // the fence markers are hidden
   // the open line shows the [title] via the directive-label header
   await expect(page.locator("[data-pane=preview] .cm-lp-todo.cm-lp-directive-label[data-label='Sprint']")).toHaveCount(1);
+  // the open line shows a PROGRESS RING computed from THIS block's checkboxes: 1 of 3 done.
+  const ring = page.locator("[data-pane=preview] [data-testid=todo-ring]");
+  await expect(ring).toHaveCount(1);
+  await expect(ring).toHaveAttribute("data-done", "1");
+  await expect(ring).toHaveAttribute("data-total", "3");
+  await expect(ring.locator(".cm-lp-todo-ring-label")).toHaveText("1/3");
+
   // the body is a real GFM task list → INTERACTIVE checkboxes (ADR-019), one per task, first one checked
   const boxes = page.getByTestId("task-checkbox");
   await expect(boxes).toHaveCount(3);
   await expect(boxes.nth(0)).toBeChecked();
   await expect(boxes.nth(1)).not.toBeChecked();
 
-  // clicking a box flips the draft (the ADR-019 path works INSIDE :::todo, no macro-specific logic)
+  // clicking a box flips the draft (the ADR-019 path works INSIDE :::todo) AND the ring recomputes to 2/3
   await boxes.nth(1).click();
-  await sleep(150);
+  await sleep(200);
   await expect(boxes.nth(1)).toBeChecked();
+  await expect(page.locator("[data-pane=preview] [data-testid=todo-ring]")).toHaveAttribute("data-done", "2");
 });
 
 // Round-trip: :::todo source is preserved (Source display mode shows the raw directive + task list).
