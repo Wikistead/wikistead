@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "../components/ui/dropdown-menu";
-import { ChevronDown, ChevronRight, Copy, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Plus, Settings, Share2, Trash2 } from "lucide-react";
+import type { NodeApi } from "react-arborist";
+import { ChevronDown, FilePlus, Settings } from "lucide-react";
+import { PageTree, type PageTreeNode } from "./PageTree";
 import { SpaceSwitcher } from "./SpaceSwitcher";
 import {
   useSpaces,
@@ -22,58 +22,16 @@ import { useActiveSpace } from "../app/ActiveSpace";
 import { RenameDialog, ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
 import { DeleteBacklinkWarning } from "../app/DeleteBacklinkWarning";
-import { ProgressRing } from "../app/ProgressRing"; // #290: sidebar :::todo progress ring
 import { ShareDialog } from "../ui/ShareDialog";
 import { TemplatePickerDialog } from "./TemplatePickerDialog";
-import { SpaceIcon } from "../ui/SpaceIcon";
-import { cn } from "../lib/utils";
 
 // One space at a time (Notion/Outline style): the sidebar shows ONLY the active
 // space's page tree; the space itself is chosen in the switcher, not a tree root.
-interface Node {
-  id: string; // "page:<id>"
-  name: string;
-  pageId: string;
-  spaceId: string;
-  published: boolean;
-  unpublished: boolean;
-  private: boolean;
-  taskDone: number; // #290: :::todo checkbox aggregate (taskTotal>0 → show the ring)
-  taskTotal: number;
-  children?: Node[];
-}
-
-function buildPageNodes(pages: Page[], parentId: string | null): Node[] {
+function buildPageNodes(pages: Page[], parentId: string | null): PageTreeNode[] {
   return pages
     .filter((p) => p.parentId === parentId)
     .sort((a, b) => a.position - b.position)
     .map((p) => ({ id: `page:${p.id}`, name: p.title, pageId: p.id, spaceId: p.spaceId, published: p.published ?? false, unpublished: p.hasUnpublishedChanges ?? false, private: p.private ?? false, taskDone: p.taskDone ?? 0, taskTotal: p.taskTotal ?? 0, children: buildPageNodes(pages, p.id) }));
-}
-
-// #193: measure the tree container via a CALLBACK ref, not an effect keyed on a stable
-// ref object. The container is mounted CONDITIONALLY (only once pages load — before that
-// the loading/empty state renders instead), so an effect that runs on first commit finds
-// ref.current === null, returns early, and never re-runs (its dep is the stable ref) — the
-// ResizeObserver is never attached and `size` stays {0,0}. react-arborist needs an explicit
-// pixel width, so a 0 width falls back to a hardcoded 260px that NEVER tracks the real
-// sidebar width: rows stay 260px wide even when the sidebar is dragged to 180px, so the row
-// overflows the aside and the name can't shrink / the badge is clipped (the whole #193 bug).
-// A callback ref (re)attaches the observer whenever the node actually mounts/unmounts, and
-// seeds the size synchronously so the first paint is already correct.
-function useSize() {
-  const [size, setSize] = useState({ width: 0, height: 0 });
-  const roRef = useRef<ResizeObserver | null>(null);
-  const ref = useCallback((el: HTMLElement | null) => {
-    roRef.current?.disconnect();
-    roRef.current = null;
-    if (!el) return;
-    const ro = new ResizeObserver(([e]) => setSize({ width: e.contentRect.width, height: e.contentRect.height }));
-    ro.observe(el);
-    roRef.current = ro;
-    const r = el.getBoundingClientRect(); // seed immediately (RO may not fire synchronously)
-    setSize({ width: r.width, height: r.height });
-  }, []);
-  return { ref, size };
 }
 
 export function Sidebar() {
@@ -131,8 +89,6 @@ export function Sidebar() {
   const [sharing, setSharing] = useState<string | null>(null);
   const [pickingTemplate, setPickingTemplate] = useState(false);
 
-  const { ref: treeBox, size } = useSize();
-
   const newPage = (parentId: string | null) => {
     if (!current) return;
     // A new page is created as a DRAFT and opens straight in the editor (?edit=1)
@@ -163,7 +119,7 @@ export function Sidebar() {
 
   // Page-row actions, consolidated into one "…" menu. Shown only when the active
   // space is editable (view-only ⇒ no edit actions; the server rejects regardless).
-  const onRowAction = (value: string, d: Node) => {
+  const onRowAction = (value: string, d: PageTreeNode) => {
     if (value === "subpage") newPage(d.pageId);
     else if (value === "share") setSharing(d.pageId);
     else if (value === "rename") setRenaming({ pageId: d.pageId, spaceId: d.spaceId, title: d.name });
@@ -176,89 +132,21 @@ export function Sidebar() {
     );
     else if (value === "delete") setDeleting({ id: d.pageId, name: d.name });
   };
-  // Route the row action through a ref so NodeRow's identity does NOT depend on it.
-  // NodeRow is the react-arborist row renderer: if its identity changes on a Sidebar
-  // re-render, react-arborist REMOUNTS every row — which detaches an open row menu's
-  // trigger (Radix then closes the menu mid-click). Keeping NodeRow stable (memoised
-  // on only render-affecting values) keeps tree rows — and any open menu — alive
-  // across background re-renders.
-  const onRowActionRef = useRef(onRowAction);
-  onRowActionRef.current = onRowAction;
 
-  const NodeRow = useCallback(({ node, style, dragHandle }: NodeRendererProps<Node>) => {
-    const d = node.data;
-    const selected = d.pageId === pageId;
-    const hasChildren = (d.children?.length ?? 0) > 0;
-    // #193 (rebuilt as ONE structure): react-arborist positions each row in a wrapper of exactly
-    // rowHeight(32px) × 100%, and passes us `style` = the depth indent (paddingLeft) only + the
-    // dragHandle ref. So the ONE correct layout is
-    // OUTER = h-full w-full → fills RA's 32px×full-width slot EXACTLY (box-border px-1 = a 4px edge
-    // inset inside that width, so the highlight never touches the scrollbar).
-    // INNER = h-full w-full flex row = the highlight AND the click target. Because OUTER is now
-    // h-full, INNER's h-full resolves to the full 32px (the earlier bounce failed because
-    // OUTER had no height, so h-full/stretch collapsed to content height → the vertical gap).
-    // ROW = chevron + icon + name(flex-1 min-w-0 truncate → ellipsis when narrow, full when wide)
-    // + badge/dot/actions(flex-none → never clipped; the name shrinks first).
-    // Click area == highlight == the whole slot; no horizontal overflow; width-resize keeps all of it.
-    const indent = typeof (style as { paddingLeft?: number }).paddingLeft === "number" ? (style as { paddingLeft: number }).paddingLeft : 0;
-    return (
-      <div
-        ref={dragHandle}
-        // #193 bounce: min-w-0 + overflow-hidden so this level of the chain also shrinks/clips (the RA
-        // wrapper's forced min-width is overridden via rowClassName above; this keeps the chain complete
-        // RA-wrapper → OUTER → INNER → ROW → name so the name truncates on width resize).
-        className="group box-border h-full w-full min-w-0 overflow-hidden select-none px-1"
-        data-testid="tree-page"
-        data-selected={selected ? "" : undefined}
-        onClick={() => navigate(`/p/${d.pageId}`)}
-      >
-       <div
-         className={cn(
-           "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded-lg pr-2 transition-colors duration-[120ms]",
-           selected
-             ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium"
-             : "hover:bg-panel-2",
-         )}
-         style={{ paddingLeft: `calc(${indent}px + 0.5rem)` }} // indent shifts only the content; 8px label room
-       >
-        <span className="inline-flex flex-none items-center" onClick={(e) => { e.stopPropagation(); node.toggle(); }}>
-          {hasChildren ? <ChevronRight size={14} className={cn("transition-transform duration-[120ms]", node.isOpen && "rotate-90")} /> : <span className="inline-block w-[14px]" />}
-        </span>
-        <FileText size={14} className="flex-none text-fg-dim" />
-        {/* #219: a native tooltip ONLY when the title is truncated (VSCode/Finder tree behaviour). Checked
-            at hover time via scrollWidth > clientWidth, so it follows a sidebar resize; a fully-visible title
-            gets no title attr (empty string = no tooltip). */}
-        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" data-testid="tree-page-name"
-          onMouseEnter={(e) => { const el = e.currentTarget; el.title = el.scrollWidth > el.clientWidth ? (d.name || t("common.untitled")) : ""; }}>{d.name || t("common.untitled")}</span>
-        {/* #109 Fix B: private (allowlist-only) lock. Shown only to viewers of the page — non-viewers 404. */}
-        {d.private && <Lock size={12} className="mx-0.5 flex-none text-fg-dim" data-testid="tree-private-lock" aria-label={t("sidebar.private")} />}
-        {/* 3-state: Draft (never published) / Unpublished changes / clean (nothing). */}
-        {!d.published ? (
-          <span className="mx-1 flex-none rounded border border-border px-[5px] py-0.5 text-[length:var(--text-xs)] leading-none text-fg-dim" data-testid="tree-draft-badge" title={t("sidebar.draftTitle")}>{t("sidebar.draft")}</span>
-        ) : d.unpublished ? (
-          <span className="mx-1 h-1.5 w-1.5 flex-none rounded-full bg-[var(--accent)]" data-testid="unpublished-dot" title={t("sidebar.unpublished")} aria-label={t("sidebar.unpublished")} />
-        ) : null}
-        {/* #290 / ADR-114: a compact :::todo progress ring in the right badge band — only for pages
-            with a :::todo (taskTotal>0), so it's zero-width elsewhere and never clutters the tree. */}
-        {d.taskTotal > 0 && <span className="mx-0.5 flex-none inline-flex items-center self-center" data-testid="tree-todo-ring"><ProgressRing done={d.taskDone} total={d.taskTotal} compact /></span>}
-        {canEdit && (
-          <span className="flex gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 has-[[aria-expanded=true]]:pointer-events-auto has-[[aria-expanded=true]]:opacity-100" onClick={(e) => e.stopPropagation()}>
-            <DropdownMenu modal={false}>
-              <DropdownMenuTrigger className="flex cursor-pointer rounded-sm p-0.5 text-fg-dim transition-colors duration-[120ms] hover:bg-border hover:text-foreground" aria-label={t("sidebar.pageActions")} data-testid="page-actions"><MoreHorizontal size={14} /></DropdownMenuTrigger>
-              <DropdownMenuContent align="start" data-testid="page-menu">
-                <DropdownMenuItem onSelect={() => onRowActionRef.current("subpage", d)} data-testid="add-subpage"><FilePlus size={13} /> {t("sidebar.addSubpage")}</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onRowActionRef.current("share", d)}><Share2 size={13} /> {t("sidebar.share")}</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onRowActionRef.current("rename", d)}><Pencil size={13} /> {t("sidebar.rename")}</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onRowActionRef.current("duplicate", d)} data-testid="tree-duplicate-page"><Copy size={13} /> {t("page.duplicatePage")}</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onRowActionRef.current("delete", d)} data-danger="" variant="destructive"><Trash2 size={13} /> {t("sidebar.delete")}</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </span>
-        )}
-       </div>
-      </div>
-    );
-  }, [pageId, canEdit, t, navigate]);
+  // DnD guard: block dropping a page onto itself or a descendant (cycle). Root drops and page parents
+  // within the active space are fine. (Member-only — the public tree is read-only, no DnD.)
+  const disableDrop = ({ parentNode, dragNodes }: { parentNode: NodeApi<PageTreeNode> | null; dragNodes: NodeApi<PageTreeNode>[] }) => {
+    const drag = dragNodes[0]?.data;
+    if (!drag) return true;
+    if (parentNode && parentNode.data.pageId) {
+      let cur: Page | undefined = pageById.get(parentNode.data.pageId);
+      while (cur) {
+        if (cur.id === drag.pageId) return true;
+        cur = cur.parentId ? pageById.get(cur.parentId) : undefined;
+      }
+    }
+    return false;
+  };
 
   const headerBtn = "flex cursor-pointer rounded-sm p-1 text-fg-dim transition-colors duration-[120ms] hover:bg-panel-2 hover:text-foreground";
 
@@ -318,47 +206,15 @@ export function Sidebar() {
       ) : pages.length === 0 ? (
         <div className="p-3 text-fg-dim">{t("sidebar.noPages")}</div>
       ) : (
-        <div ref={treeBox} className="min-h-0 min-w-0 flex-1">
-          <Tree<Node>
-            className="!overflow-x-hidden"
-            // #193 bounce: react-arborist forces each row wrapper to `min-width: <scrollable width>`
-            // (row-container.js — its #10 highlight-to-edge for horizontally-scrolled nested rows). That
-            // INLINE min-width is the broken link in the shrink chain: it pins every row to content width,
-            // so a long name never shrinks and `truncate` can't fire (it's clipped without an ellipsis).
-            // We hide horizontal scroll (above), so that min-width is unneeded — override it to 0 with
-            // `!min-w-0` (min-width:0 !important beats the inline style). Now the row = viewport width and
-            // the name's flex-1 min-w-0 truncate engages on width resize.
-            rowClassName="!min-w-0"
-            data={data}
-            idAccessor="id"
-            childrenAccessor="children"
-            openByDefault={false}
-            width={size.width || 260}
-            height={size.height || 400}
-            indent={14}
-            rowHeight={32}
-            selection={pageId ? `page:${pageId}` : undefined}
-            disableMultiSelection
-            disableDrop={({ parentNode, dragNodes }) => {
-              const drag = dragNodes[0]?.data as Node | undefined;
-              if (!drag) return true;
-              // Block dropping a page onto itself or a descendant (cycle). Root drops
-              // (parentNode null) and page parents within the active space are fine.
-              if (parentNode && (parentNode.data as Node).pageId) {
-                let cur: Page | undefined = pageById.get((parentNode.data as Node).pageId);
-                while (cur) {
-                  if (cur.id === drag.pageId) return true;
-                  cur = cur.parentId ? pageById.get(cur.parentId) : undefined;
-                }
-              }
-              return false;
-            }}
-            onMove={onMove}
-            onActivate={(n: NodeApi<Node>) => navigate(`/p/${n.data.pageId}`)}
-          >
-            {NodeRow}
-          </Tree>
-        </div>
+        <PageTree
+          nodes={data}
+          selectedId={pageId ?? null}
+          onOpen={(id) => navigate(`/p/${id}`)}
+          canEdit={canEdit}
+          onRowAction={onRowAction}
+          onMove={onMove}
+          disableDrop={disableDrop}
+        />
       )}
 
       <RenameDialog

@@ -112,7 +112,7 @@ function useDisplayModeShortcut(cycle: () => void, enabled: boolean, chord: stri
     return () => window.removeEventListener("keydown", onKey);
   }, [cycle, enabled, chord]);
 }
-import { List, Lock } from "lucide-react";
+import { Lock } from "lucide-react";
 import { addCodeCopyButtons } from "../editor/live-preview/code-copy";
 import { PageTitle } from "./PageTitle";
 import { PageMeta } from "./PageMeta";
@@ -121,7 +121,7 @@ import { BacklinksPanel } from "./BacklinksPanel";
 import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
 import { CommentsPanel } from "../comments/CommentsPanel";
-import { Toc } from "../toc/Toc";
+import { TocChrome } from "../toc/TocChrome"; // #227: shared TOC rail/overlay/toggle wiring (member + public)
 import { useTocPref } from "../toc/useTocPref";
 import { usePublicToc } from "./public-toc"; // #227: TOC for the public reader (headings from the rendered DOM)
 import type { Heading } from "../editor/headings";
@@ -132,6 +132,7 @@ import { Button } from "../ui/Button";
 import { notify } from "../ui/toast";
 import { useComments } from "../data/comments";
 import { Sidebar } from "../sidebar/Sidebar";
+import { PageTree, type PageTreeNode } from "../sidebar/PageTree"; // #227: reuse the member page tree in the public reader
 import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
@@ -513,16 +514,19 @@ function PageRoute() {
                 #212: the rail shares the RIGHT zone with the comments/history/attachments panels, so it
                 yields (hidden) when one is open — else its pointer-events overlap and swallow clicks on
                 the panel (a right panel and the rail must not both occupy the zone). */}
-            {isWide && tocOn && !commentsOpen && !historyOpen && !attachmentsOpen && !backlinksOpen && (
-              /* #212 bounce 3: clear the absolute header band (offset top by --wks-band-h) so the TOC rail
-                 isn't hidden under it. */
-              <div className="pointer-events-none absolute left-[calc(50%+370px+1rem)] top-[calc(var(--wks-band-h,0px)+0.5rem)] bottom-2 z-[5] w-[210px]">
-                <div className="pointer-events-auto h-full">
-                  <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="rail" />
-                </div>
-              </div>
-            )}
-            {!isWide && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="overlay" subscribeScroll={subscribeTocScroll} />}
+            {/* #227the shared TocChrome (rail on wide / overlay on narrow). The member toggle lives in
+                the controls bar, so no floating toggle here. The rail yields (railEnabled) when a right panel
+                shares its zone, else their pointer-events overlap and swallow clicks on the panel. */}
+            <TocChrome
+              headings={headings}
+              activeFrom={activeHeading}
+              depth={tocDepth}
+              onJump={(f) => tocJumpRef.current?.(f)}
+              subscribeScroll={subscribeTocScroll}
+              isWide={isWide}
+              tocOn={tocOn}
+              railEnabled={!commentsOpen && !historyOpen && !attachmentsOpen && !backlinksOpen}
+            />
           </div>
         </div>
         {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={page?.canComment ?? capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} />}
@@ -780,16 +784,19 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
             <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} />
             <div className="pointer-events-none absolute right-3 top-3 z-10"><PageStatus {...controls} /></div>
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
-            {/* #192: TOC rail in the content's right whitespace (scrollbar stays rightmost); overlay narrower.
-                #212: yields to the comments panel when open (shared right zone — no pointer overlap). */}
-            {isWide && tocOn && !commentsOpen && (
-              <div className="pointer-events-none absolute left-[calc(50%+370px+1rem)] top-2 bottom-2 z-[5] w-[210px]">
-                <div className="pointer-events-auto h-full">
-                  <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="rail" />
-                </div>
-              </div>
-            )}
-            {!isWide && tocOn && <Toc headings={headings} activeFrom={activeHeading} depth={tocDepth} onJump={(f) => tocJumpRef.current?.(f)} variant="overlay" subscribeScroll={subscribeTocScroll} />}
+            {/* #227the shared TocChrome (rail on wide / overlay on narrow); yields to the comments
+                panel when open (shared right zone — no pointer overlap). */}
+            <TocChrome
+              headings={headings}
+              activeFrom={activeHeading}
+              depth={tocDepth}
+              onJump={(f) => tocJumpRef.current?.(f)}
+              subscribeScroll={subscribeTocScroll}
+              isWide={isWide}
+              tocOn={tocOn}
+              railEnabled={!commentsOpen}
+              railTop="0.5rem"
+            />
           </div>
           {commentsOpen && <CommentsPanel pageId={pageId} canComment={canComment} anchorGetterRef={anchorGetterRef} onClose={() => setCommentsOpen(false)} token={token} />}
         </div>
@@ -987,37 +994,22 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
           )}
         </div>
       </div>
-      {/* #227①: TOC on/off toggle — parity with the member Reading view. #227shown at ANY width
-          (the member toggle isn't width-gated); it flips the device-local pref that gates BOTH the wide rail and
-          the narrow overlay below. Was isWide-guarded, so a narrow screen lost the toggle entirely (the bug). */}
-      {toc.headings.length > 0 && (
-        <button
-          type="button"
-          data-testid="public-toc-toggle"
-          aria-pressed={tocOn}
-          aria-label={t("toc.toggle")}
-          title={t("toc.toggle")}
-          onClick={() => setTocOn(!tocOn)}
-          className={`absolute right-3 top-[calc(var(--wks-band-h,5.5rem)+0.5rem)] z-10 rounded p-1.5 ${tocOn ? "bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-[var(--accent)]" : "text-fg-dim hover:bg-panel-2"}`}
-        >
-          <List size={16} />
-        </button>
-      )}
-      {/* #227 ②: the TOC rail in the right whitespace on wide screens (same look as the member Reading rail).
-          On the OUTER (non-scrolling) wrapper + top offset by --wks-band-h so it clears the band and stays put. */}
-      {isWide && tocOn && toc.headings.length > 0 && (
-        <div className="pointer-events-none absolute left-[calc(50%+368px)] top-[calc(var(--wks-band-h,5.5rem)+2.75rem)] bottom-2 z-[5] w-[210px]">
-          <div className="pointer-events-auto h-full">
-            <Toc headings={toc.headings} activeFrom={toc.activeFrom} depth={3} onJump={toc.jump} variant="rail" />
-          </div>
-        </div>
-      )}
-      {/* #227on NARROW screens use the SAME member overlay variant (routes.tsx member ~510) instead of
-          a public-only reimplementation — the overlay fades in while scrolling (driven by usePublicToc's
-          subscribeScroll). This closes the "TOC/toggle vanish on a small screen" gap the user reported. */}
-      {!isWide && tocOn && toc.headings.length > 0 && (
-        <Toc headings={toc.headings} activeFrom={toc.activeFrom} depth={3} onJump={toc.jump} variant="overlay" subscribeScroll={toc.subscribeScroll} />
-      )}
+      {/* #227the SAME shared TocChrome the member views render (rail on wide / overlay on narrow) — no
+          public-only reimplementation. The floating toggle is passed here because the public reader has no
+          controls bar to host one (members' toggle lives in their controls); it flips the same device-local
+          pref. The rail offsets clear the frosted band (--wks-band-h, published above by the bandEl RO). */}
+      <TocChrome
+        headings={toc.headings}
+        activeFrom={toc.activeFrom}
+        depth={3}
+        onJump={toc.jump}
+        subscribeScroll={toc.subscribeScroll}
+        isWide={isWide}
+        tocOn={tocOn}
+        onToggle={() => setTocOn(!tocOn)}
+        railLeft="calc(50% + 368px)"
+        railTop="calc(var(--wks-band-h, 5.5rem) + 2.75rem)"
+      />
     </div>
   );
 }
@@ -1033,29 +1025,23 @@ function PublicPageRoute() {
 // visitor browses a public space exactly like a member, but every fetch is a PUBLIC endpoint
 // /public/spaces/:id/pages + /public/pages/:id), member routes are never touched (no session → no login
 // bounce), and there is NO member chrome (search / user menu / edit / create). A non-public space → 404.
-function PublicSpaceSidebar({ nodes, openId, onOpen }: { nodes: PublicChildNode[]; openId: string | null; onOpen: (id: string) => void }) {
-  return (
-    <nav className="flex h-full flex-col gap-0.5 overflow-auto p-2 text-[length:var(--text-ui)]" data-testid="public-sidebar">
-      {nodes.map((n) => <PublicSpaceNode key={n.id} node={n} depth={0} openId={openId} onOpen={onOpen} />)}
-    </nav>
-  );
+// #227map the public tree (`/public/spaces/:id/pages` — every node is published + public) onto the
+// shared PageTreeNode shape. Published/non-private/ring-less, so the draft/unpublished/private/ring badges all
+// collapse. This is the ONLY public-specific code left; the rendering is the member PageTree component itself.
+function toPublicTreeNodes(nodes: PublicChildNode[]): PageTreeNode[] {
+  return nodes.map((n) => ({
+    id: `page:${n.id}`, name: n.title, pageId: n.id, spaceId: "",
+    published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0,
+    children: toPublicTreeNodes(n.children),
+  }));
 }
-function PublicSpaceNode({ node, depth, openId, onOpen }: { node: PublicChildNode; depth: number; openId: string | null; onOpen: (id: string) => void }) {
+function PublicSpaceSidebar({ nodes, openId, onOpen }: { nodes: PublicChildNode[]; openId: string | null; onOpen: (id: string) => void }) {
+  const treeNodes = useMemo(() => toPublicTreeNodes(nodes), [nodes]);
+  // The SAME frame + tree component the member Sidebar renders (data-testid="sidebar" + PageTree rows), but
+  // read-only: no canEdit → no row menu / DnD / create; no session — every node came from a /public/* fetch.
   return (
-    <div>
-      <button
-        type="button"
-        data-testid="public-tree-page"
-        onClick={() => onOpen(node.id)}
-        // #227 comment 1056: match the member sidebar's selected-row look (accent tint + medium weight) so the
-        // public reader-chrome carries the tenant accent (applied to :root by BrandingApplier) instead of a
-        // flat panel colour — the gap. Theme-token based (light/dark aware).
-        className={`flex w-full min-w-0 items-center gap-1.5 truncate rounded px-1 py-1 text-left ${openId === node.id ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium" : "hover:bg-panel-2"}`}
-        style={{ paddingLeft: `${depth * 12 + 6}px` }}
-      >
-        <span className="truncate">{node.title}</span>
-      </button>
-      {node.children.map((c) => <PublicSpaceNode key={c.id} node={c} depth={depth + 1} openId={openId} onOpen={onOpen} />)}
+    <div className="relative flex h-full min-w-0 flex-col overflow-hidden text-[length:var(--text-ui)]" data-testid="sidebar">
+      <PageTree nodes={treeNodes} selectedId={openId} onOpen={onOpen} openByDefault />
     </div>
   );
 }

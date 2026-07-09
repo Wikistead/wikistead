@@ -52,13 +52,18 @@ test("#227: an anonymous visitor browses a public space via the sidebar reader-c
   // Anonymous context (no cookies/session) → the public reader-chrome.
   const anon = await (await browser.newContext()).newPage();
   await anon.goto("/pub/space/demo_space");
-  await expect(anon.getByTestId("public-sidebar")).toBeVisible({ timeout: 10000 });
-  const row = anon.getByTestId("public-tree-page").filter({ hasText: title }).first();
+  // #227the public reader renders the SAME member components — the "sidebar" frame + PageTree ("tree-page"
+  // rows), not a public-only reimplementation. Assert the shared testids (there is no more public-sidebar/
+  // public-tree-page).
+  await expect(anon.getByTestId("sidebar")).toBeVisible({ timeout: 10000 });
+  await expect(anon.getByTestId("page-tree")).toBeVisible({ timeout: 10000 });
+  const row = anon.getByTestId("tree-page").filter({ hasText: title }).first();
   await expect(row).toBeVisible({ timeout: 10000 });
 
-  // NO member chrome: no user menu / search / new-page for an anonymous public visitor.
+  // NO member chrome: no user menu / search / new-page / row actions for an anonymous public visitor (canEdit=false).
   await expect(anon.getByTestId("user-menu")).toHaveCount(0);
   await expect(anon.getByTestId("new-page")).toHaveCount(0);
+  await expect(anon.getByTestId("page-actions")).toHaveCount(0);
 
   // Clicking a page renders its sanitized body in the content area.
   await row.click();
