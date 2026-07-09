@@ -7,7 +7,7 @@
 // #84 comment 741: this REPLACED a fixed left-gutter grip. The gutter marker sat at the editor's far left
 // (near the sidebar), always on — the reviewer couldn't associate it with a block. A handle that appears
 // on hover, adjacent to the hovered block's left edge, is the expected affordance.
-import { EditorView, Decoration, ViewPlugin, type DecorationSet, type PluginValue } from "@codemirror/view"
+import { EditorView, Decoration, ViewPlugin, type DecorationSet, type PluginValue, type ViewUpdate } from "@codemirror/view"
 import { StateField, StateEffect, RangeSet, type Extension } from "@codemirror/state"
 import { blockRangeAt, computeBlockMove } from "./block-move"
 
@@ -125,6 +125,15 @@ class HoverGrip implements PluginValue {
     view.dom.addEventListener("mouseleave", this.onLeave)
   }
   private hide() { this.grip.style.display = "none"; this.from = -1 }
+  // #333: entering a read-only state (the Reading display mode) DETACHES the grip entirely — a grip
+  // parked in Live/Source otherwise stayed visible on the clean Reading view forever (position()
+  // early-returns under readOnly, so nothing ever hid it). Detach, not just display:none: "no drag
+  // affordance in Reading" is the documented invariant (display-mode e2e pins count === 0), while on
+  // the editable modes the element stays resident (hidden) for the hover-follow. position()
+  // re-appends it when the surface becomes editable again.
+  update(u: ViewUpdate) {
+    if (u.state.readOnly && !u.startState.readOnly && !this.dragging) { this.hide(); this.grip.remove() }
+  }
   // The block's TOP-LEVEL DOM element (direct child of cm-content) — a `.cm-line` for a paragraph or the
   // block wrapper for a replaced widget atom (mermaid/table/callout). Its rect gives the block's visual
   // left edge (the reading-column left, OUTSIDE which the handle must sit) and top, for both kinds.
@@ -162,9 +171,12 @@ class HoverGrip implements PluginValue {
     const b = anchor.getBoundingClientRect()
     const dom = this.view.dom.getBoundingClientRect()
     // Position relative to .cm-editor (the grip's offset parent), just OUTSIDE the block's left edge.
+    // #333: appended lazily on show (and removed on hide), so a Reading/read-only surface has no
+    // grip element at all. Append BEFORE measuring offsetWidth (0 while detached).
+    if (!this.grip.isConnected) this.view.dom.appendChild(this.grip)
+    this.grip.style.display = "block"
     this.grip.style.top = `${Math.round(b.top - dom.top)}px`
     this.grip.style.left = `${Math.round(Math.max(0, b.left - dom.left - this.grip.offsetWidth - GRIP_GAP))}px`
-    this.grip.style.display = "block"
     this.from = block.from
   }
   destroy() {
