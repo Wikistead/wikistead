@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
-import { ChevronRight, Copy, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Share2, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, FilePen, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Share2, Trash2 } from "lucide-react";
 import { ProgressRing } from "../app/ProgressRing"; // #290: sidebar :::todo progress ring
 import { cn } from "../lib/utils";
 
@@ -104,16 +104,24 @@ export function PageTree({
         <span className="inline-flex flex-none items-center" onClick={(e) => { e.stopPropagation(); node.toggle(); }}>
           {hasChildren ? <ChevronRight size={14} className={cn("transition-transform duration-[120ms]", node.isOpen && "rotate-90")} /> : <span className="inline-block w-[14px]" />}
         </span>
-        <FileText size={14} className="flex-none text-fg-dim" />
+        {/* #315: a draft (never-published) page swaps the file icon itself — zero extra row width. The
+            tooltip lives on a wrapping span (a title attribute on an <svg> shows no native tooltip). */}
+        {d.published ? (
+          <FileText size={14} className="flex-none text-fg-dim" />
+        ) : (
+          <span className="inline-flex flex-none items-center" data-testid="tree-draft-icon" title={t("sidebar.draftTitle")}>
+            <FilePen size={14} className="text-fg-dim" aria-label={t("sidebar.draftTitle")} />
+          </span>
+        )}
         {/* #219: a native tooltip ONLY when the title is truncated (checked at hover via scrollWidth). */}
-        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" data-testid="tree-page-name"
+        {/* #315: a draft row also dims its title so "not published yet" reads from the whole row. */}
+        <span className={cn("min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap", !d.published && "text-fg-dim")} data-testid="tree-page-name"
           onMouseEnter={(e) => { const el = e.currentTarget; el.title = el.scrollWidth > el.clientWidth ? (d.name || t("common.untitled")) : ""; }}>{d.name || t("common.untitled")}</span>
         {/* #109 Fix B: private (allowlist-only) lock. Shown only to viewers of the page — non-viewers 404. */}
         {d.private && <Lock size={12} className="mx-0.5 flex-none text-fg-dim" data-testid="tree-private-lock" aria-label={t("sidebar.private")} />}
-        {/* 3-state: Draft (never published) / Unpublished changes / clean (nothing). */}
-        {!d.published ? (
-          <span className="mx-1 flex-none rounded border border-border px-[5px] py-0.5 text-[length:var(--text-xs)] leading-none text-fg-dim" data-testid="tree-draft-badge" title={t("sidebar.draftTitle")}>{t("sidebar.draft")}</span>
-        ) : d.unpublished ? (
+        {/* 3-state: Draft (FilePen icon, above) / Unpublished changes (dot) / clean (nothing). The #315
+            text pill is gone — draft is carried by the file icon swap, so the two states stay distinct. */}
+        {d.published && d.unpublished ? (
           <span className="mx-1 h-1.5 w-1.5 flex-none rounded-full bg-[var(--accent)]" data-testid="unpublished-dot" title={t("sidebar.unpublished")} aria-label={t("sidebar.unpublished")} />
         ) : null}
         {/* #290 / ADR-114: a compact :::todo progress ring — only for pages with a :::todo (taskTotal>0). */}
