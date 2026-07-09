@@ -50,6 +50,7 @@ const templateInsertPicker = Facet.define<TemplateInsertPicker | null, TemplateI
 // picker-less surfaces) the embed-page command falls back to inserting the raw `:::embed-page`
 // template so the id can still be typed by hand.
 import { pageEmbedPicker, embedUrlPrompt, type PageEmbedPicker, type EmbedUrlPrompt } from "./decorations";
+import { escLinkText } from "./paste-linkify"; // #323: the page-link insert escapes the title the same way
 export type { PageEmbedPicker };
 
 // Layer B/C/P commands. Template commands place the caret where you'd type the content
@@ -126,7 +127,11 @@ function commandList(state: EditorState): PaletteCommand[] {
     return c;
   });
   const base = [...COMMANDS, ...macros];
-  const withImage = state.facet(imageUploader) ? [...base, IMAGE_COMMAND] : base;
+  // #323: "Page link" rides the SAME picker seam as embed-page (no parallel picker) and inserts a
+  // standard `[title]/p/id)` link. Present only when the host wired the picker (never for guests /
+  // picker-less surfaces). Sits next to the generic /link (URL template) as its internal sibling.
+  const withPageLink = picker ? [...base, { ...PAGE_LINK_COMMAND, action: (view: EditorView) => openPageLinkPicker(view, picker) }] : base;
+  const withImage = state.facet(imageUploader) ? [...withPageLink, IMAGE_COMMAND] : withPageLink;
   // #251: append "Insert template" only when the host wired the picker seam (uploader-less/guest surfaces
   // never see it). Its action opens the picker and inserts the chosen body at the caret.
   const tplPicker = state.facet(templateInsertPicker);
@@ -134,6 +139,17 @@ function commandList(state: EditorState): PaletteCommand[] {
     ? [...withImage, { ...INSERT_TEMPLATE_COMMAND, action: (view: EditorView) => openTemplateInsert(view, tplPicker) }]
     : withImage;
 }
+
+// #323: "Page link" command (layer P — opens the host page picker; the token is removed by applyAt).
+// Gated by the pageEmbedPicker facet in commandList.
+const PAGE_LINK_COMMAND: PaletteCommand = {
+  id: "page-link",
+  label: () => i18n.t("palette.pageLink"),
+  alias: "page link",
+  keywords: "page link internal wiki ページ リンク 内部 ないぶ",
+  insert: "",
+  caret: 0,
+};
 
 // #251: "Insert template" command (layer P — insert, selection-independent). The token is removed by
 // applyAt (like image/embed), then the action opens the host picker; the chosen body is inserted at the
@@ -169,6 +185,45 @@ function openEmbedPagePicker(view: EditorView, open: PageEmbedPicker): void {
     const insert = `:::embed-page\n${pageId}\n:::`;
     view.dispatch({ changes: { from: at, insert }, selection: EditorSelection.cursor(at + insert.length), scrollIntoView: true });
     view.focus();
+  });
+}
+
+// #323: open the SAME host page picker (no parallel picker) and insert a STANDARD Markdown link
+// `[title]/p/<id>)` — never a wiki-link syntax (Open formats: `[[...]]` is an input trigger only and
+// is never saved). `replace` is the typed `[[` trigger range to consume; it is re-verified against the
+// live doc at pick time (collab may have moved things) and falls back to a plain caret insert. Cancel
+// leaves the doc untouched — a typed `[[` stays as ordinary text (no characters lost). The title is
+// escaped with the SAME escLinkText the paste-linkifier uses, so `]`/`\` in a title round-trips; the
+// raw-id fallback has no title and uses the id as the text.
+function openPageLinkPicker(view: EditorView, open: PageEmbedPicker, replace?: { from: number; to: number }): void {
+  open((pageId, title) => {
+    if (!pageId) { view.focus(); return; }
+    const text = (title ?? "").trim() || pageId;
+    const insert = `[${escLinkText(text)}](/p/${pageId})`;
+    const head = view.state.selection.main.head;
+    const r = replace && replace.to <= view.state.doc.length && view.state.sliceDoc(replace.from, replace.to) === "[["
+      ? replace
+      : { from: head, to: head };
+    view.dispatch({ changes: { from: r.from, to: r.to, insert }, selection: EditorSelection.cursor(r.from + insert.length), scrollIntoView: true });
+    view.focus();
+  });
+}
+
+// #323: typing `[[` opens the page picker (the input trigger). Detection is on the just-typed text
+// (input.type user events only — a paste of `[[...]]` stays plain text), edit surfaces only, and only
+// when the host wired the picker seam. A third `[` (`[[[`) does not re-fire. On cancel the typed `[[`
+// stays put; on pick the trigger text is replaced by the standard link (openPageLinkPicker above).
+export function pageLinkTrigger(): Extension {
+  return EditorView.updateListener.of((u) => {
+    if (!u.docChanged || u.state.readOnly) return;
+    if (!u.transactions.some((tr) => tr.isUserEvent("input.type"))) return;
+    const picker = u.state.facet(pageEmbedPicker);
+    if (!picker) return;
+    const sel = u.state.selection.main;
+    if (!sel.empty || sel.head < 2) return;
+    if (u.state.sliceDoc(sel.head - 2, sel.head) !== "[[") return;
+    if (sel.head >= 3 && u.state.sliceDoc(sel.head - 3, sel.head - 2) === "[") return; // `[[[` — already fired
+    openPageLinkPicker(u.view, picker, { from: sel.head - 2, to: sel.head });
   });
 }
 
@@ -610,6 +665,7 @@ export function slashPalette(opts: { uploadImage?: ImageUploader; container?: HT
   // the floating toolbar's bubble (added after slashPalette) so the bubble can read it.
   const core = [dismissedField, paletteField, decorateField, vimVisualField, vimHintField, paletteKeymap, decorateKeys, backslashDecorate, vimVisualSync];
   const ext = opts.uploadImage ? [...core, imageInsert(opts.uploadImage, opts.container)] : core;
-  const withEmbed = opts.openPageEmbedPicker ? [...ext, pageEmbedPicker.of(opts.openPageEmbedPicker)] : ext;
+  // #323: the `[[` input trigger ships with the picker seam (it no-ops without it — the facet is null).
+  const withEmbed = opts.openPageEmbedPicker ? [...ext, pageEmbedPicker.of(opts.openPageEmbedPicker), pageLinkTrigger()] : ext;
   return opts.openTemplateInsertPicker ? [...withEmbed, templateInsertPicker.of(opts.openTemplateInsertPicker)] : withEmbed;
 }

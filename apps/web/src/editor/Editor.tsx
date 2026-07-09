@@ -250,16 +250,16 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
   // resolve it with the chosen page id (or null on cancel). Candidates are FGA-view-filtered by
   // /search (in PageEmbedPicker) — no existence leak.
   const [embedPickerOpen, setEmbedPickerOpen] = useState(false);
-  const embedPickResolve = useRef<((id: string | null) => void) | null>(null);
+  const embedPickResolve = useRef<((id: string | null, title?: string | null) => void) | null>(null);
   const openPageEmbedPicker = useCallback<PageEmbedPickerFn>((onPick) => {
     embedPickResolve.current = onPick;
     setEmbedPickerOpen(true);
   }, []);
-  const handleEmbedPick = useCallback((id: string | null) => {
+  const handleEmbedPick = useCallback((id: string | null, title?: string | null) => {
     setEmbedPickerOpen(false);
     const r = embedPickResolve.current;
     embedPickResolve.current = null;
-    r?.(id);
+    r?.(id, title ?? null); // #323: the title rides along for the page-link insert (embeds ignore it)
   }, []);
   // #210 bounce: the in-app `:::embed-external` URL modal (replaces window.prompt). Same stash/open/
   // resolve pattern as the page picker; the modal is seeded with the current URL and warns on a

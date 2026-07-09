@@ -599,7 +599,8 @@
     "divider": "Divider",
     "image": "Image",
     "link": "Link",
-    "insertTemplate": "Insert template"
+    "insertTemplate": "Insert template",
+    "pageLink": "Page link"
   },
   "calloutEdit": {
     "title": "Edit callout",
