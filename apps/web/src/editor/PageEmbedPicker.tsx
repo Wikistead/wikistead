@@ -10,7 +10,9 @@ import { useDebouncedValue } from "../search/useDebouncedValue";
 // shouldFilter={false}, so the list is EXACTLY the server's authorized set: a page the user can't
 // view is never offered (no existence leak; no client re-filter can add one). An id can also be typed
 // directly (the raw-id fallback), so embedding stays possible even when a query returns nothing.
-export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (pageId: string | null) => void }) {
+// #323: onPick also reports the picked hit's TITLE (null for cancel / the raw-id fallback) so the
+// page-LINK insert can write `[title](/p/id)` without a second fetch. Embed consumers ignore it.
+export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (pageId: string | null, title?: string | null) => void }) {
   const { t } = useTranslation();
   const [input, setInput] = useState("");
   const debounced = useDebouncedValue(input, 250);
@@ -18,7 +20,7 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
   const spaces = useSpaces();
   const spaceName = (id: string) => (spaces.data ?? []).find((s) => s.id === id)?.name ?? "";
 
-  const close = (id: string | null) => { setInput(""); onPick(id); };
+  const close = (id: string | null, title?: string | null) => { setInput(""); onPick(id, title ?? null); };
   // A raw id (or url tail) typed directly — the escape hatch when search can't reach a page (e.g. a
   // brand-new page not yet indexed). Trimmed; only offered when it looks like a bare token.
   const raw = input.trim();
@@ -39,7 +41,7 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
           <CommandList>
             <CommandEmpty>{t("embedPicker.empty")}</CommandEmpty>
             {(hits ?? []).map((h) => (
-              <CommandItem key={h.id} value={h.id} onSelect={() => close(h.id)} data-testid="embed-picker-item">
+              <CommandItem key={h.id} value={h.id} onSelect={() => close(h.id, h.title || null)} data-testid="embed-picker-item">
                 <div className="flex min-w-0 flex-col">
                   <span className="truncate">{h.title || t("common.untitled")}</span>
                   {/* #205: same-name pages (e.g. many "Untitled") are told apart by their space + a

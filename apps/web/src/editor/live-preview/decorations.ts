@@ -539,7 +539,10 @@ export const embedAllowlist = Facet.define<readonly string[], readonly string[]>
 // leak). onPick receives the chosen page id (or null if cancelled). Homed here (with the other host
 // seams) so BOTH the slash-insert path (palette.ts) and the post-insert "change target" affordance
 // (the MacroWidget edit button, #210) read the same seam and reuse the same authz-gated picker.
-export type PageEmbedPicker = (onPick: (pageId: string | null) => void) => void;
+// #323: the callback ALSO carries the picked page's TITLE (optional — the raw-id fallback has none).
+// The embed consumers ignore it; the page-LINK insert uses it as the link text. Additive → every
+// existing PageEmbedPicker implementation stays type-compatible.
+export type PageEmbedPicker = (onPick: (pageId: string | null, title?: string | null) => void) => void;
 export const pageEmbedPicker = Facet.define<PageEmbedPicker | null, PageEmbedPicker | null>({
   combine: (vals) => vals.find((v) => v != null) ?? null,
 });

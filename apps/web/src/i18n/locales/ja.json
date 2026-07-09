@@ -599,7 +599,8 @@
     "divider": "区切り線",
     "image": "画像",
     "link": "リンク",
-    "insertTemplate": "テンプレートを挿入"
+    "insertTemplate": "テンプレートを挿入",
+    "pageLink": "ページリンク"
   },
   "calloutEdit": {
     "title": "コールアウトを編集",

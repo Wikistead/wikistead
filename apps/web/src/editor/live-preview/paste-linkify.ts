@@ -13,7 +13,8 @@ import { safeHref } from "../macros/md-render";
 const BARE_URL = /^https?:\/\/\S+$/i; // v1: explicit http/https scheme only (www./scheme-less → plain paste)
 
 // Escape the Markdown link syntax so pasted text can't break out of `[...]` / `(...)`.
-const escLinkText = (s: string): string => s.replace(/[[\]\\]/g, "\\$&");
+// Exported for #323 (the page-link insert escapes the picked page TITLE the same way).
+export const escLinkText = (s: string): string => s.replace(/[[\]\\]/g, "\\$&");
 const emitHref = (url: string): string => (/[()\s]/.test(url) ? `<${url}>` : url); // angle-wrap if it has ()/space
 
 // The pasted HTML is a SINGLE link whose visible text is the whole paste → its href + text (else null).
