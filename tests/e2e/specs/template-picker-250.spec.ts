@@ -1,5 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { enterEdit, openScratch, sleep } from "../helpers";
+
+// #267 the REAL standing QA torture-page body (fixtures/torture-page.md — copied from the
+// "QA" template). The synthetic heavy fixture below passed while THIS body
+// still burst the picker's two-pane row out of the dialog, so the geometry tests must use the real thing.
+const TORTURE = readFileSync(fileURLToPath(new URL("../fixtures/torture-page.md", import.meta.url)), "utf8");
 
 // #250 / ADR-110: create a page FROM a template via the sidebar split- ▾ picker. Save a page as a
 // personal template, open the picker, preview it, and create — the new draft opens in edit seeded with the
@@ -135,3 +142,61 @@ test("#267: template preview renders ALL macros (callout/tabs/table), scrolls, a
   expect(pane.ch, "preview pane is taller than the dialog (vertical burst)").toBeLessThanOrEqual(dlgClient.ch);
   expect(pane.sh, "the tall content does not scroll inside the capped pane").toBeGreaterThan(pane.ch + 4);
 });
+
+// #267 (5th bounce): the REAL torture-page body expanded the two-pane row past the dialog while the
+// synthetic fixture above stayed green — the row is a GRID ITEM of DialogContent whose min-width:auto
+// floors it at the content's min-content (~1350px measured), pushing the preview pane out of frame where
+// overflow-hidden clips it ("the preview vanished"). Fixed by min-w-0/w-full/max-w-full ON THE ROW.
+// Geometry asserted with the real body at BOTH the user's viewport (1310×940) and the default-ish 1280.
+for (const vp of [{ width: 1310, height: 940 }, { width: 1280, height: 720 }]) {
+  test(`#267 the real torture-page preview stays inside the dialog at ${vp.width}×${vp.height}`, async ({ browser }) => {
+    const page = await (await browser.newContext({ viewport: vp })).newPage();
+    const src = await openScratch(page, `pick267t-${vp.width}-${Date.now()}`);
+    await enterEdit(page);
+    await page.click("[data-pane=preview] .cm-content");
+    await page.keyboard.insertText(TORTURE);
+    await sleep(600);
+    await page.getByTestId("publish-page").click();
+    await sleep(700);
+
+    await page.goto(`/p/${src}`);
+    await page.waitForSelector("[data-pane=preview] .cm-content");
+    await page.getByTestId("page-overflow-trigger").click();
+    await page.getByTestId("save-template-open").click();
+    await page.getByTestId("template-name").fill(`Torture ${vp.width}`);
+    await page.getByTestId("save-template-submit").click();
+    await sleep(500);
+
+    await page.getByTestId("new-page-from-template").click();
+    await page.waitForSelector("[data-testid=template-picker]");
+    await page.getByTestId("template-picker-item").filter({ hasText: `Torture ${vp.width}` }).first().click();
+    const preview = page.getByTestId("template-picker-preview-body");
+    await expect(preview.locator("h1")).toBeVisible({ timeout: 8000 });
+    await sleep(1200); // async macro renders (mermaid/math) settle before measuring
+
+    // BOTH panes sit inside the dialog box on the x-axis (the bounce: pane x ≈ dialog right edge).
+    const dlg = (await page.getByTestId("template-picker").boundingBox())!;
+    const pane = (await page.getByTestId("template-picker-preview").boundingBox())!;
+    // .first: the torture body renders its own <ul>s inside the preview — the picker list is the first.
+    const list = (await page.locator("[data-testid=template-picker] ul").first().boundingBox())!;
+    expect(pane.x, "preview pane starts inside the dialog").toBeGreaterThanOrEqual(dlg.x - 1);
+    expect(pane.x + pane.width, "preview pane ends inside the dialog").toBeLessThanOrEqual(dlg.x + dlg.width + 1);
+    expect(list.x + list.width, "list pane ends inside the dialog").toBeLessThanOrEqual(dlg.x + dlg.width + 1);
+    expect(pane.width, "preview pane is visibly wide (not crushed/clipped away)").toBeGreaterThan(200);
+    // and the dialog itself stays within the viewport on both axes
+    expect(dlg.x).toBeGreaterThanOrEqual(-1);
+    expect(dlg.x + dlg.width).toBeLessThanOrEqual(vp.width + 1);
+    expect(dlg.y + dlg.height).toBeLessThanOrEqual(vp.height + 1);
+
+    // tall content scrolls INSIDE the pane; wide content (mermaid/table) h-scrolls INSIDE the body
+    const m = await page.getByTestId("template-picker-preview").evaluate((el) => ({ ch: el.clientHeight, sh: el.scrollHeight }));
+    expect(m.sh, "tall torture body scrolls inside the capped pane").toBeGreaterThan(m.ch + 4);
+
+    // the macros still render in that constrained pane: nested tabs mount and no RAW directive
+    // markers leak (the body legitimately contains a `:::` code SPAN, so check the marker forms).
+    await expect(preview.locator("[data-testid=macro-tabs]")).toHaveCount(1);
+    const text = await preview.innerText();
+    expect(text).not.toContain("::::tabs");
+    expect(text).not.toContain(":::tab[");
+  });
+}
