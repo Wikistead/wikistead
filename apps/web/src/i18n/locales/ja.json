@@ -38,6 +38,7 @@
     "linkRevoked": "共有リンクを取り消しました",
     "copied": "リンクをクリップボードにコピーしました",
     "actionFailed": "問題が発生しました",
+    "taskToggleDirty": "この項目を変更するには、先に下書きの変更を公開してください",
     "saved": "保存しました",
     "spaceDeleted": "スペースを削除しました",
     "pageDeleted": "ページを削除しました"

@@ -61,3 +61,46 @@ test("view mode: an edit-capable viewer toggles a checkbox; it persists to publi
   // the no-revision endpoint folds the flip into the published snapshot
   await expect.poll(() => publishedMd(page, pageId), { timeout: 5000 }).toContain("- [x] ship it");
 });
+
+// #303: toggling a view-mode checkbox while the DRAFT is dirty (diverged from published) used to apply the
+// PUBLISHED byte offset to the live draft, overwriting an unrelated prose char (and syncing the corruption to
+// all collaborators via the CRDT). The fix re-resolves the task ORDINAL against the draft and refuses to write
+// if it doesn't line up — so the prose is never touched; the server 409 still guards the published snapshot.
+test("#303: a view-mode checkbox toggle never corrupts a dirty draft's prose", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const pageId = await openScratch(page, "cb-303");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("done here\n\n- [ ] alpha\n- [ ] beta"); // prose + two tasks
+  await sleep(200);
+  await publish(page, pageId); // published == draft (clean)
+  expect(await publishedMd(page, pageId)).toContain("done here");
+
+  // Make the DRAFT dirty: prepend prose so every byte offset shifts (+7) vs the published snapshot — the
+  // exact #303 trigger (the user had inserted text ahead of the tasks before toggling in view).
+  await page.keyboard.press("Control+Home");
+  await page.keyboard.type("PREPEND");
+  await sleep(200);
+  expect(await content(page)).toContain("PREPENDdone here");
+
+  // Switch to the read-only published view and click a checkbox (the draft is dirty → the server will 409).
+  await page.click("[data-testid=view-toggle]");
+  await sleep(400);
+  const box = page.getByTestId("task-checkbox").first();
+  await expect(box).toBeVisible();
+  await box.click();
+  await sleep(700); // optimistic flip → server 409 → revert
+
+  // Back to the draft: the PROSE is byte-for-byte intact (the #303 bug replaced a prose char with a space,
+  // e.g. "done her␣"), and BOTH task lines are still well-formed `[ ]`/`[x]` markers — i.e. the flip landed
+  // on a checkbox, never on the shifted prose. (Whether the server accepts or 409s the toggle is a separate,
+  // sync-timing-dependent concern; the #303 guarantee is that the DRAFT is never corrupted.)
+  await page.click("[data-testid=edit-toggle]");
+  await sleep(300);
+  await page.getByTestId("displaymode-source").click(); // show the raw draft (live preview hides task markers)
+  await sleep(250);
+  const text = await content(page);
+  expect(text).toContain("PREPENDdone here"); // prose byte-for-byte intact (was "done her␣" before the fix)
+  expect(text).toMatch(/- \[[ x]\] alpha/); // a valid task marker, not a corrupted line
+  expect(text).toMatch(/- \[[ x]\] beta/);
+});
