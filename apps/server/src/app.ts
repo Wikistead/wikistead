@@ -18,6 +18,7 @@ import { emit, onDomainEvent } from '@wikistead/events'
 import { publishRevoke } from './collab-revoke.js'
 import { LogicalSearchDriver } from './search/index.js'
 import type { SearchDriver } from './search/index.js'
+import { setDictInvalidatePublisher, DICT_CHANNEL_PREFIX } from './search/outbox.js'
 import { LogicalStorageDriver } from './storage/index.js'
 import type { StorageDriver } from './storage/index.js'
 import IORedis from 'ioredis'
@@ -114,6 +115,14 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
   app.decorate('valkey', valkey)
+
+  // #224 / ADR-104 Finding B: the title-dictionary security-timing invalidation. The trusted outbox
+  // path publishes wks:dict:<tenantId> {pageId} after each successful reindex; the collab server fans
+  // it out to connected clients over the existing WS (stateless message), which drop the title from
+  // their in-memory dictionary in-window. Liveness only — the dictionary endpoint stays the authority.
+  setDictInvalidatePublisher((tenantId, pageId) => {
+    void valkey.publish(`${DICT_CHANNEL_PREFIX}${tenantId}`, JSON.stringify({ pageId })).catch(() => { /* liveness only */ })
+  })
 
   // Active guest disconnect on share-link revoke (#106 / ADR-028). revokeShareLink already
   // deletes the FGA tuple (the authority) and emits share_link.revoked; here we forward that

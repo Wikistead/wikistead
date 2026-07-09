@@ -10,7 +10,7 @@ import { livePreview, reAnchorAfterReveal, livePreviewTheme, linkClicks, blockEn
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { listEditing } from "./live-preview/list-edit";
 import { pasteLinkify } from "./live-preview/paste-linkify";
-import { titleLinkDecorations, titleLinkSource, type TitleLinkSource } from "./live-preview/title-links-deco";
+import { titleLinkDecorations, titleLinkHover, titleLinkSource, type TitleLinkSource } from "./live-preview/title-links-deco";
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette, type PageEmbedPicker, type TemplateInsertPicker } from "./live-preview/palette";
 import { contextMenu } from "./live-preview/context-menu";
@@ -192,6 +192,7 @@ export function mountLivePreview(
       // there, not here) plus a navigate callback that re-confirms `view` at the destination. No source → no
       // dictionary → no links (safe default), so mounting it unconditionally never leaks.
       titleLinkDecorations(),
+      titleLinkHover(), // #224: the excerpt hover card (tooltip layer) — inert without a source/excerpt seam
       ...(opts.titleLinks ? [titleLinkSource.of(opts.titleLinks)] : []),
       // Task checkboxes are interactive on the editable surface: a click flips the
       // `[ ]`/`[x]` char directly in the Y.Text (a normal draft edit). (Read-only →
@@ -320,7 +321,7 @@ export function mountPublishedView(
   // A checkbox click calls it; the host flips the live draft over its collab connection
   // and folds the flip into published_md via the no-revision endpoint. Absent → the
   // checkboxes render DISABLED (display only; the server is the bastion regardless).
-  opts: { resolveImageUrl?: ImageResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; onToggleTask?: (index: number, from: number, checked: boolean) => void } = {},
+  opts: { resolveImageUrl?: ImageResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; onToggleTask?: (index: number, from: number, checked: boolean) => void; titleLinks?: TitleLinkSource } = {},
 ): EditorView {
   const view = new EditorView({
     doc: markdown,
@@ -336,6 +337,10 @@ export function mountPublishedView(
       mathField, // #158-C3: KaTeX math ($…$ / $$…$$), reveal-on-cursor atoms
       linkClicks,
       headingAnchors, // #313: same hover 🔗 anchors on the read-only published view
+      // #224: auto internal links on the read-only view surface too (same inert-without-source rule).
+      titleLinkDecorations(),
+      titleLinkHover(),
+      ...(opts.titleLinks ? [titleLinkSource.of(opts.titleLinks)] : []),
       checkboxControl.of(opts.onToggleTask ? { mode: "view", onToggle: opts.onToggleTask } : null),
       ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
       ...(opts.renderDiagram ? [diagramRenderer.of(opts.renderDiagram)] : []),

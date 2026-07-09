@@ -196,6 +196,41 @@ revokeSub.on("pmessage", (_pattern: string, channel: string, data: string) => {
   }
 });
 
+// ── Title-dictionary invalidation fan-out (#224 / ADR-104 Finding B) ────────
+//
+// The API server publishes wks:dict:<tenantId> after every trusted-path (outbox) reindex —
+// rename / privatise / delete / publish. We forward a STATELESS ping to every client connected
+// to any of that tenant's rooms so it refetches its viewer-scoped title dictionary and stale
+// colored links disappear in-window (the security-timing Done-gate).
+//
+// The forwarded payload deliberately carries NO pageId: this fan-out reaches EVERY connection
+// in the tenant — including guests on unrelated share links — and a pageId would be an
+// existence signal for pages the recipient cannot view. The ping only says "your dictionary
+// may be stale"; each client re-derives its own viewer-scoped set from the authz-gated
+// endpoint. No authorization is derived from this channel (display-cache liveness only; the
+// onAuthenticate gate is untouched).
+//
+// Best-effort like the revoke/restore channels: a missed ping degrades to the client's next
+// refetch, never to a wrong authorization.
+const dictSub = new IORedis(process.env.VALKEY_URL ?? "redis://localhost:6379");
+
+dictSub.psubscribe("wks:dict:*", (err) => {
+  if (err) console.error("[dict:sub] subscribe failed:", err);
+});
+
+dictSub.on("pmessage", (_pattern: string, channel: string, _data: string) => {
+  const tenantId = channel.replace("wks:dict:", "");
+  const roomPrefix = `t:${tenantId}:p:`;
+  server.documents.forEach((document, name) => {
+    if (!name.startsWith(roomPrefix)) return;
+    try {
+      document.broadcastStateless(JSON.stringify({ type: "dict-invalidate" }));
+    } catch (err) {
+      console.error(`[dict:broadcast] failed for ${name}:`, err);
+    }
+  });
+});
+
 // ---- helpers ----
 function hostFromUrl(u?: string) { return u ? new URL(u).hostname : "localhost"; }
 function portFromUrl(u?: string) { return u ? Number(new URL(u).port || 6379) : 6379; }

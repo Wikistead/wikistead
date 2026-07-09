@@ -1284,6 +1284,74 @@ export async function getBacklinks(
   return out
 }
 
+// ── #224 / ADR-104: title dictionary + excerpt (auto internal links) ─────────
+
+export interface TitleDictEntry { id: string; title: string }
+
+// The user-typed "public" principal (same as routes/public.ts): `view_base@user:*` only matches
+// user-type principals (#244 typed-wildcard lesson), so this resolves exactly the PUBLIC page set.
+const DICT_ANON = 'user:anonymous'
+//condition 2: a hard server-side dictionary cap bounds the client's match cost
+// (matchTitleLinks is O(dict × visible text)). Overflow is a UX gap, never a leak (absent = safe).
+const DICT_CAP = 2000
+
+// The viewer-scoped title dictionary (ADR-104 Addendum 3 Finding A, shape (ii) DB + ListObjects).
+// authz model (Addendum 2 point 1): this dictionary IS the primary defence — it must only ever
+// contain titles the caller may view. Two principals
+// - member → FGA ListObjects('view') for user:<sub> — the full authoritative view set — then the
+// tenant-scoped (RLS) title join, then the Addendum-3 belt-and-braces filterAuthorized confirm.
+// - share_link guest → **forced to the PUBLIC set via the anonymous user-typed principal** and
+// published-only rows. The share_link principal itself is NEVER given a reverse lookup — that is
+// thebinding closing the #244 re-entry (a space-shared non-public title must not leak).
+// Existence-hiding needs no 404 here: a non-viewable page is simply absent from the response.
+export async function getTitleDictionary(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { subject: string },
+): Promise<{ entries: TitleDictEntry[]; capped: boolean }> {
+  const isGuest = args.subject.startsWith('share_link:')
+  const principal = isGuest ? DICT_ANON : args.subject
+  const { objects } = await fga.listObjects({ user: principal, relation: 'view', type: 'page' })
+  const ids = (objects ?? []).map((o: string) => o.replace(/^page:/, ''))
+  if (ids.length === 0) return { entries: [], capped: false }
+  // ListObjects spans the shared FGA store; the tenant-scoped handle (RLS) narrows to this tenant.
+  // Guests link only into the published public surface; members may link to viewable drafts too
+  // (their titles already show in the member sidebar — nothing new is revealed).
+  const rows = isGuest
+    ? await db.sql<{ id: string; title: string }[]>`
+        SELECT id, title FROM pages WHERE id = ANY(${ids}) AND published_at IS NOT NULL
+        ORDER BY updated_at DESC LIMIT ${DICT_CAP + 1}`
+    : await db.sql<{ id: string; title: string }[]>`
+        SELECT id, title FROM pages WHERE id = ANY(${ids})
+        ORDER BY updated_at DESC LIMIT ${DICT_CAP + 1}`
+  const capped = rows.length > DICT_CAP
+  const windowRows = capped ? rows.slice(0, DICT_CAP) : rows
+  // Addendum 3: the final confirm on the capped window (belt-and-braces for the ListObjects shape;
+  // a SINGLE filterAuthorized pass — never per-link display-time checks, anti-test 8).
+  const confirmed = await filterAuthorized(fga, principal, 'view', windowRows.map((r) => r.id))
+  return { entries: windowRows.filter((r) => confirmed.has(r.id)), capped }
+}
+
+// The hover-card excerpt (ADR-104 Slice B): a thin, view-gated read following the getPublished
+// pattern — deny and missing are the SAME 404 (#262 existence-hiding; anti-test 5: no wording ever
+// distinguishes them). Published content only: an unpublished draft returns excerpt null (the title
+// alone is already in the viewer's dictionary). The client renders the excerpt as textContent
+// (plain text, no markdown render → no injection surface).
+export async function getExcerpt(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { pageId: string; subject: string; context?: { current_time: string } },
+): Promise<{ title: string; excerpt: string | null }> {
+  const canView = await check(fga, args.subject, 'view', { type: 'page', id: args.pageId }, args.context)
+  if (!canView) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  const [row] = await db.sql<[{ title: string; published_md: string | null }]>`
+    SELECT title, published_md FROM pages WHERE id = ${args.pageId}
+  `
+  if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  const md = (row.published_md ?? '').trim()
+  return { title: row.title, excerpt: md ? md.slice(0, 400) : null }
+}
+
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function pagesPlugin(app: FastifyInstance) {
@@ -1417,6 +1485,23 @@ export async function pagesPlugin(app: FastifyInstance) {
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/backlinks', { config: { guest: 'view' } }, async (req) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
     return getBacklinks(req.db, app.fga, { pageId: req.params.pageId, subject, context })
+  })
+
+  // #224 / ADR-104: the viewer-scoped title dictionary for auto internal links. The :pageId only
+  // anchors the guest token binding (a guest may fetch it for the page/space they were shared);
+  // the dictionary itself is viewer-scoped (member = own view set / guest = public-only — see
+  // getTitleDictionary). Nothing here is per-link display-time authz — the dictionary content IS
+  // the defence (Addendum 2 point 1).
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/title-dictionary', { config: { guest: 'view' } }, async (req) => {
+    const { subject } = principalForPage(req, req.params.pageId)
+    return getTitleDictionary(req.db, app.fga, { subject })
+  })
+
+  // #224 / ADR-104 Slice B: the hover-card excerpt — re-confirms `view` at display time (the
+  // authoritative check), uniform 404 with getPage/getPublished (existence-hiding, anti-test 5).
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/excerpt', { config: { guest: 'view' } }, async (req) => {
+    const { subject, context } = principalForPage(req, req.params.pageId)
+    return getExcerpt(req.db, app.fga, { pageId: req.params.pageId, subject, context })
   })
 
   // External embed resolve (#108 / ADR-071): server-fetch an allowlisted provider URL for a page a

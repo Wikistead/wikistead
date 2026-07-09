@@ -35,6 +35,23 @@ export async function enqueueOutbox(sql: Sql, entry: OutboxEntry): Promise<strin
 
 interface ClaimedRow { id: string; tenant_id: string; page_id: string; operation: 'upsert' | 'delete' }
 
+// #224 / ADR-104 Addendum 3 Finding B: the title-dictionary SECURITY-TIMING invalidation rides this
+// SAME trusted outbox path (never best-effort enqueue): every page mutation that reaches the outbox
+// (privatise / delete / rename / publish — they all enqueue for the search reindex already) also
+// publishes `wks:dict:<tenantId>` after the reindex succeeds, so connected clients drop the title
+// from their in-memory dictionary and the colored link disappears within the window. The publisher
+// is injected from buildApp (the valkey client lives there); tests without valkey → no-op, and the
+// client refetch is the backstop (latency, never correctness — the dictionary endpoint itself stays
+// the authority).
+export const DICT_CHANNEL_PREFIX = 'wks:dict:'
+let dictInvalidatePublisher: ((tenantId: string, pageId: string) => void) | null = null
+export function setDictInvalidatePublisher(fn: ((tenantId: string, pageId: string) => void) | null): void {
+  dictInvalidatePublisher = fn
+}
+function publishDictInvalidate(tenantId: string, pageId: string): void {
+  try { dictInvalidatePublisher?.(tenantId, pageId) } catch { /* publish is liveness only */ }
+}
+
 // Background drain worker. Claims a batch of pending outbox rows and reindexes
 // them. This is what makes COLLAB body edits searchable: the collab server only
 // enqueues an 'upsert' on Y.Doc store; nothing else drains it (processOutboxAsync
@@ -70,6 +87,7 @@ export async function drainOutbox(driver: SearchDriver, opts: { batch?: number }
         await driver.deleteDoc(row.page_id)
       }
       await pool`DELETE FROM search_outbox WHERE id = ${row.id}`
+      publishDictInvalidate(row.tenant_id, row.page_id) // #224: dictionary security-timing signal
       processed++
     } catch {
       // Leave the row: its claim ages past the stale window and it is retried. The
@@ -119,6 +137,7 @@ export function processOutboxAsync(
       }
       // Delete outbox entry only after confirming Meili success.
       await pool`DELETE FROM search_outbox WHERE id = ${outboxId}`
+      publishDictInvalidate(entry.tenantId, entry.pageId) // #224: dictionary security-timing signal
     } catch {
       // Leave entry in outbox. Caller already received API success.
     }
