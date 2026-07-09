@@ -30,8 +30,10 @@ test("#174-1: a nested mermaid fence has a hover ✎ in WYSIWYG", async ({ brows
   expect(errors, errors.join(" | ")).toHaveLength(0);
 });
 
-// Point 3: innermost-wins — while a nested slot's ✎ is revealed on hover, the CONTAINER's own ✎ is
-// suppressed (they used to co-occur).
+// Point 3: innermost-wins — the nested slot's ✎ appears on hover, and the CONTAINER never shows a
+// competing ✎. Originally this was a hover-suppression rule; since #278 §2a retired the layout
+// containers' editUI panel, a columns/tabs container has NO own ✎ at all (slot editing is
+// click-to-edit), so the stronger assertion is that it simply doesn't exist.
 test("#174-3: hovering a nested slot suppresses the container ✎", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "inner-outer-pencil");
@@ -49,9 +51,10 @@ test("#174-3: hovering a nested slot suppresses the container ✎", async ({ bro
   await slot.hover();
   await sleep(150);
   const opacity = (loc: ReturnType<typeof wrap.getByTestId>) => loc.first().evaluate((el) => getComputedStyle(el).opacity);
-  // the nested ✎ is shown, the container ✎ is hidden (opacity 0) while the nested slot is hovered.
+  // the nested ✎ is shown; the container has NO own ✎ (its editUI panel was retired by #278 §2a),
+  // so the inner and outer pencils can never co-occur.
   expect(Number(await opacity(wrap.getByTestId("nested-macro-edit")))).toBeGreaterThan(0);
-  expect(await opacity(wrap.locator("> .cm-lp-macro-btnrow [data-testid=macro-edit]"))).toBe("0");
+  await expect(wrap.locator("> .cm-lp-macro-btnrow [data-testid=macro-edit]")).toHaveCount(0);
 });
 
 // Point 2: switching to tab 2 then clicking a nested macro inside it must KEEP tab 2 active (the re-render
