@@ -1317,9 +1317,14 @@ type SlotHost = HTMLElement & { __slotHandle?: { destroy(): void } };
 // inherits from the page (16px proportional body, not the 13px code face the default source-editor theme
 // uses for code-source macros), and there is NO fixed min-height — the box hugs its content (an empty
 // island is still one text line tall, so it stays clickable). "Editing looks like the render" (north star 1).
+// ③: ZERO horizontal padding — the rendered slot's text has none, so any island padding shifted the
+// text right the moment the island opened ("the look changes when I click"). The .cm-line default gutter
+// (6px) is zeroed for the same reason; the box outline is drawn OUTSIDE layout (see the island CSS) so
+// opening the editor never moves the text.
 const slotIslandTheme = EditorView.theme({
   "&": { fontSize: "inherit", background: "transparent" },
-  ".cm-content": { fontFamily: "inherit", padding: "0.15em 0.4em" },
+  ".cm-content": { fontFamily: "inherit", padding: "0" },
+  ".cm-line": { padding: "0" },
   ".cm-scroller": { fontFamily: "inherit", lineHeight: "inherit" },
   "&.cm-focused": { outline: "none" },
 });
@@ -1369,6 +1374,10 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
       livePreview,
       livePreviewTheme,
       vimEnabled.of(view.state.facet(vimEnabled)), // reveal gating must see the outer editor's vim state
+      // ①: the island FOLLOWS the outer display mode — a WYSIWYG surface must stay syntax-free
+      // inside the island too (#164 invariant: wysiwyg never reveals markers). Reading never reaches
+      // here (the click gate refuses to open the island there); source containers never render widgets.
+      displayMode.of(view.state.facet(displayMode) === "wysiwyg" ? "wysiwyg" : "live"),
       checkboxControl.of({ mode: "edit" }), // task boxes in a slot flip the ISLAND doc (committed on blur)
       imageResolver.of(view.state.facet(imageResolver)),
       diagramRenderer.of(view.state.facet(diagramRenderer)),
@@ -1385,6 +1394,27 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
     },
   });
   host.__slotHandle = handle; // disposed by MacroWidget.destroy(dom) on any unmount path
+  // ②: the island's keys must NEVER reach the outer editor. The island DOM lives INSIDE the outer
+  // contentDOM, so every keydown bubbled into the outer CM — whose vim (normal mode) treated island keys
+  // as ITS OWN motions/edits: an island `o`/`e`/`w` moved the outer selection, which clears slotEditField
+  // (macro-edit.ts: head outside the container → null) and unmounts the island mid-typing; the caret then
+  // landed in the container widget's hidden doc range (the reported "o on the last line → caret vanished"
+  // trace, reproduced in e2e via typing `newline` whose letters are all vim motions). Stop propagation at
+  // the island boundary — bubble phase, so the island's own CM/vim has already handled the key.
+  //
+  // Escape is the ONE deliberate exception, and it is two-stage (the C3 handlesEscape pattern, inline)
+  // the capture listener samples the vim mode BEFORE the island's vim consumes the key (after it, the
+  // mode is already normal); an INSERT-mode Escape is then stopped too (insert→normal stays inside),
+  // while a NORMAL-mode (or non-vim) Escape alone bubbles out to escExit and closes the island.
+  let escWasInsert = false;
+  host.addEventListener("keydown", (e) => { if (e.key === "Escape") escWasInsert = handle.inVimInsert(); }, true);
+  host.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      if (escWasInsert) { escWasInsert = false; e.stopPropagation(); }
+      return; // normal-mode Escape bubbles → escExit closes the island (the intended exit)
+    }
+    e.stopPropagation();
+  });
   cell.replaceWith(host); // for columns: the column cell; for tabs: the active panel
   // Focus AFTER CM attaches this widget DOM to the document — focusing during toDOM (DOM not yet in the tree)
   // is a no-op, which left the island unfocused so a single click opened but couldn't type (reviewer B).
@@ -1692,7 +1722,10 @@ class MacroWidget extends WidgetType {
           x.title = `Remove ${child}`;
           x.setAttribute("data-testid", `layout-remove-${child}`);
           // stopPropagation so removing doesn't also select the atom / switch the tab; preventDefault keeps focus.
-          x.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); removeLayoutItemAt(view, view.posAtDOM(wrap), child, i); });
+          // ①: gate at CLICK time — the widget DOM (and these listeners) can be REUSED across a
+          // display-mode switch, so a listener attached in Live survives into Reading; Reading must not
+          // structure-edit (readOnly covers it — checked live, not at build).
+          x.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (view.state.readOnly) return; removeLayoutItemAt(view, view.posAtDOM(wrap), child, i); });
           if (this.name === "columns") cell.style.position = "relative"; // the × is absolutely placed in the cell
           cell.appendChild(x);
         });
@@ -1702,7 +1735,7 @@ class MacroWidget extends WidgetType {
         add.textContent = "＋";
         add.title = `Add ${child}`;
         add.setAttribute("data-testid", `layout-add-${child}`);
-        add.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); addLayoutItem(view, view.posAtDOM(wrap), child); });
+        add.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (view.state.readOnly) return; addLayoutItem(view, view.posAtDOM(wrap), child); }); // ①: live readOnly gate (DOM reuse across mode switches)
         // columns: the add rides the end of the flex row; tabs: it rides the end of the tab bar.
         (this.name === "columns" ? wrap.querySelector(".cm-lp-columns") : wrap.querySelector(".cm-lp-tabbar"))?.appendChild(add);
         // #278 §2a: clicking a slot's CONTENT enters inline edit for THAT slot (the CM6 island). Ignore clicks
@@ -1712,6 +1745,12 @@ class MacroWidget extends WidgetType {
         wrap.querySelectorAll<HTMLElement>(contentSel).forEach((slot: HTMLElement, i: number) => {
           slot.addEventListener("mousedown", (e) => {
             if ((e.target as HTMLElement).closest(".cm-lp-layout-item-remove, .cm-lp-tab-remove, .cm-lp-layout-item-add, .cm-lp-tab, [data-mac-pos]")) return;
+            // ①: the display-mode gate lives at CLICK time, not build time — the widget DOM (with
+            // this listener) is reused across a display-mode switch, so a listener attached in Live
+            // survives into Reading. Reading is a reading surface (#166/#314: no body editing; the task
+            // checkboxes keep working inside the widget) → never open the island there; readOnly
+            // likewise (Reading sets it, and a truly read-only surface must not edit either).
+            if (view.state.readOnly || view.state.facet(displayMode) === "reading") return;
             e.preventDefault();
             e.stopPropagation();
             // Do NOT view.focus here — the rebuild mounts the island and focuses IT; focusing the outer view
@@ -3291,10 +3330,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-tab-remove:hover": { opacity: "1", color: "var(--fg, inherit)" },
   ".cm-lp-layout-item-add": { flex: "0 0 auto", alignSelf: "flex-start", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.6em", height: "1.6em", border: "1px dashed var(--border, #888)", borderRadius: "4px", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
   ".cm-lp-macro-wrap:hover .cm-lp-layout-item-add, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-layout-item-add": { opacity: "1" },
-  // #278 §2a (rev4): the inline CM6 slot-edit island — a bordered box that replaces the slot's rendered
-  // content while its body is edited IN a live-preview mini-editor (accent border marks the active slot;
-  // the box hugs its content — no fixed height, ①).
-  ".cm-lp-slot-edit-island": { flex: "1 1 0", minWidth: "0", border: "1px solid var(--accent, #4ea1ff)", borderRadius: "4px", background: "color-mix(in srgb, var(--accent, #4ea1ff) 4%, var(--panel, #fff))" },
+  // #278 §2a (rev4): the inline CM6 slot-edit island — an accent-ringed box that replaces the slot's
+  // rendered content while its body is edited IN a live-preview mini-editor (the box hugs its content
+  // no fixed height, ①). ③: the ring is an OUTLINE (outside layout), not a border — a border
+  // added 1px to the text's x/y so opening the island nudged the content; with an outline + zero editor
+  // padding the text keeps its exact rendered position.
+  ".cm-lp-slot-edit-island": { flex: "1 1 0", minWidth: "0", outline: "1px solid var(--accent, #4ea1ff)", outlineOffset: "2px", borderRadius: "4px", background: "color-mix(in srgb, var(--accent, #4ea1ff) 4%, var(--panel, #fff))" },
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
   ".cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap:hover .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-align": { opacity: "1" },
