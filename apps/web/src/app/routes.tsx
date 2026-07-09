@@ -494,7 +494,6 @@ function PageRoute() {
                 {page?.private && <Lock size={16} className="mt-1 flex-none self-start text-fg-dim" data-testid="title-private-lock" aria-label={t("sidebar.private")} />}
                 <div className="min-w-0 flex-1">
                   <PageTitle
-                    editing={editing}
                     title={page?.title ?? ""}
                     onRename={canEdit && spaceId ? (title) => renamePage.mutate({ pageId: pageId!, spaceId, title }, {
                       onSuccess: () => notify.success(t("toast.saved")),

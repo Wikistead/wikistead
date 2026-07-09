@@ -16,16 +16,15 @@ const wrap = "box-border w-full min-w-0";
 // No `display` here: view mode adds line-clamp-2 (which needs display:-webkit-box), edit/full mode adds
 // `block`. A `block` in this base would override line-clamp's display and defeat the clamp (#212/780).
 const title = "m-0 w-full text-[30px] font-bold leading-tight tracking-[-0.02em] text-foreground break-words [overflow-wrap:anywhere] [font-family:var(--font-body)]";
-// #212 comment 780 (2): view mode clamps the title to at most TWO lines with an ellipsis — 1–2 lines show
-// as-is, 3+ collapse to 2 with an ellipsis. The band height stays bounded (max two rows). The full title
-// shows on hover (the `title` attr tooltip) and in edit mode (the textarea wraps in full).
+// #212 comment 780 (2) / #312: the STATIC title (button/h1) clamps to at most TWO lines with an
+// ellipsis on EVERY surface — view AND page-edit mode (the old `pageEditing ? block` branch let a
+// long title grow the band to 4 rows in edit mode; "you must see every line to edit" only holds for
+// the rename TEXTAREA, which still wraps in full). The full title shows on hover (`title` attr) and
+// in the click-to-rename textarea. The band height stays bounded (max two rows).
 const clamp = "line-clamp-2";
 
-// `pageEditing` = the PAGE edit mode (not the rename input): view mode clamps a long
-// title to 2 lines; edit mode shows it in full, WRAPPING within the column (you must see
-// every line to edit it — no ellipsis, no right overflow). The rename field is a textarea
-// (not an input) so editing a long title wraps too.
-export function PageTitle({ title: value, onRename, editing: pageEditing = false }: { title: string; onRename?: (title: string) => void; editing?: boolean }) {
+// The rename field is a textarea (not an input) so editing a long title wraps too.
+export function PageTitle({ title: value, onRename }: { title: string; onRename?: (title: string) => void }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -61,12 +60,12 @@ export function PageTitle({ title: value, onRename, editing: pageEditing = false
           onBlur={commit}
         />
       ) : onRename ? (
-        <button type="button" className={`${title} cursor-text text-left ${pageEditing ? "block" : clamp}`} data-testid="page-title" title={value || t("dialogs.renamePageTitle")}
+        <button type="button" className={`${title} cursor-text text-left ${clamp}`} data-testid="page-title" title={value || t("dialogs.renamePageTitle")}
           onClick={() => { setDraft(value); setEditing(true); }}>
           {value || t("common.untitled")}
         </button>
       ) : (
-        <h1 className={`${title} ${pageEditing ? "block" : clamp}`} data-testid="page-title" title={value}>{value || t("common.untitled")}</h1>
+        <h1 className={`${title} ${clamp}`} data-testid="page-title" title={value}>{value || t("common.untitled")}</h1>
       )}
     </div>
   );
