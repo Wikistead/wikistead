@@ -2758,7 +2758,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-content[contenteditable=false] .cm-lp-link[data-href]": { cursor: "pointer" },
   // #224 / ADR-104: auto internal links — a subtler affordance than explicit links (dotted underline) so a
   // title match reads as "there's a page here" without competing with authored [text](url) links.
-  ".cm-lp-title-link": { color: "#83c092", textDecoration: "underline dotted", cursor: "pointer" },
+  ".cm-lp-title-link": { color: "var(--link-auto, #83c092)", textDecoration: "underline dotted", cursor: "pointer" }, // #224(5): tokenized (light/dark)
   // #190: headings follow the PROSE font (--font-body) too, so the user's font choice / locale default
   // applies to titles, not just body. .cm-content already sets --font-body (cm-theme.ts) and headings
   // inherit it, but set it EXPLICITLY here so no inherited/default family can strand headings on a
