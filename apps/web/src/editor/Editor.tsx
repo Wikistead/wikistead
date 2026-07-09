@@ -151,6 +151,10 @@ function wireToc(
       const pos = Math.min(from, view.state.doc.length);
       view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "start" }) });
       if (!view.state.readOnly) view.focus();
+      // #304 (3): report the jumped-to heading as active IMMEDIATELY — don't wait for the scroll event's
+      // recompute (which would otherwise, for a frame, keep the previous section highlighted). The scroll
+      // recompute converges to the same result via the band-aware sample below.
+      opts.onActiveHeading?.(from);
     };
     cleanups.push(() => { ref.current = null; });
   }
@@ -170,7 +174,12 @@ function wireToc(
       // top heading while I'm deep in a section" bug).
       const rect = view.scrollDOM.getBoundingClientRect();
       const hs = extractHeadings(view.state);
-      const topPos = view.posAtCoords({ x: rect.left + rect.width / 2, y: rect.top + 48 });
+      // #304 (1): sample at the frosted title band's REAL height, not a fixed 48px. A 2-line title makes the
+      // band taller than 48px, and tocJump lands a heading just BELOW the band; a fixed-48 sample point then
+      // sits ABOVE the landed heading, so the PREVIOUS heading matched (h.from <= topPos) — the clicked item
+      // never lit. The band height is the content's padding-top (--wks-band-h); 0 on bandless routes.
+      const bandH = parseFloat(getComputedStyle(view.contentDOM).paddingTop) || 0;
+      const topPos = view.posAtCoords({ x: rect.left + rect.width / 2, y: rect.top + bandH + 8 });
       let active: number | null = null;
       if (topPos != null) {
         for (const h of hs) {
@@ -178,6 +187,10 @@ function wireToc(
           else break; // headings are in doc order
         }
       }
+      // #304 (2): at the very bottom, a final section shorter than the viewport can never reach the sample
+      // line, so its heading would never activate. Clamp: when scrolled to the end, the LAST heading is active.
+      const sc = view.scrollDOM;
+      if (hs.length && sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2) active = hs[hs.length - 1].from;
       report(active);
     };
     const onScroll = () => {

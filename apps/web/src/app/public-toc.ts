@@ -50,21 +50,33 @@ export function usePublicToc(bodyEl: HTMLElement | null, ready: boolean): {
     });
     setHeadings(hs);
 
-    // The ACTIVE heading is the last one whose top has scrolled above a small threshold below the viewport
-    // top (so the section you're reading is highlighted). Recomputed on scroll + resize.
+    const sc = scrollParent(bodyEl);
+    // #304 (2): scroll metrics of whichever ancestor scrolls (element or the window), for the bottom clamp.
+    const metrics = () => (sc === window
+      ? { top: window.scrollY, ch: window.innerHeight, sh: document.documentElement.scrollHeight }
+      : { top: (sc as HTMLElement).scrollTop, ch: (sc as HTMLElement).clientHeight, sh: (sc as HTMLElement).scrollHeight });
+    // The ACTIVE heading is the last one whose top has scrolled above the frosted title band (so the section
+    // you're reading is highlighted). Recomputed on scroll + resize.
     const recompute = () => {
+      // #304 (1): threshold = the band's REAL height (--wks-band-h, published on the outer wrapper and
+      // inherited here), not a fixed 120px — matches the heading scroll-margin so a jumped-to heading lights.
+      const bandH = parseFloat(getComputedStyle(bodyEl).getPropertyValue("--wks-band-h")) || 0;
+      const thr = bandH + 8;
       let active: number | null = els.length ? 0 : null;
       for (const el of els) {
-        if (el.getBoundingClientRect().top <= 120) active = Number(el.dataset.tocFrom);
+        if (el.getBoundingClientRect().top <= thr) active = Number(el.dataset.tocFrom);
         else break;
       }
+      // #304 (2): at the very bottom, a final section shorter than the viewport never reaches the threshold,
+      // so clamp the last heading active when scrolled to the end.
+      const m = metrics();
+      if (els.length && m.top + m.ch >= m.sh - 2) active = Number(els[els.length - 1].dataset.tocFrom);
       setActiveFrom(active);
     };
     recompute();
     // #227 on scroll, recompute the active heading AND notify overlay subscribers (member parity —
     // the narrow overlay fades in while scrolling). resize only needs the recompute.
     const onScroll = () => { recompute(); subsRef.current.forEach((fn) => fn()); };
-    const sc = scrollParent(bodyEl);
     sc.addEventListener("scroll", onScroll, { passive: true } as AddEventListenerOptions);
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", recompute);
@@ -77,6 +89,7 @@ export function usePublicToc(bodyEl: HTMLElement | null, ready: boolean): {
 
   const jump = (from: number) => {
     elsRef.current[from]?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setActiveFrom(from); // #304 (3): light the jumped-to heading immediately (scroll recompute converges to it)
   };
   return { headings, activeFrom, jump, subscribeScroll };
 }
