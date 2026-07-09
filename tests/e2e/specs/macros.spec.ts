@@ -54,16 +54,13 @@ test("an empty macro renders a visible 'Empty …' placeholder (not blank space)
   await openScratch(page, "emptymacro");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
-  // Insert a CLEAN empty mermaid fence via the slash palette (typing ``` fences directly
-  // is unreliable — the editor auto-closes them). The inserted ```mermaid\n\n``` has an
-  // empty body → mermaid's liveRender draws nothing → the common placeholder fires.
-  await page.keyboard.type("/mermaid");
-  await expect(page.getByTestId("slash-palette")).toBeVisible();
-  await page.keyboard.press("Enter");
+  // A CLEAN empty mermaid fence with a line AFTER it. insertText is paste-like (bypasses the editor's
+  // per-char auto-close that mangles typed fences). The empty body → mermaid's liveRender draws nothing
+  // → the common placeholder fires. #243 (ADR-111 C1): mermaid reveals its raw source while the caret is
+  // INSIDE, so we click the "after" line to move the caret OUT → the empty fence renders the placeholder.
+  await page.keyboard.insertText("```mermaid\n\n```\nafter\n");
   await sleep(300);
-  // #271: inserting a fence macro from the palette REVEALS its raw source (so you can type), so it isn't
-  // the rendered placeholder yet. Escape exits raw → the empty fence renders as the placeholder.
-  await page.keyboard.press("Escape");
+  await page.getByText("after", { exact: true }).click();
   await sleep(300);
   const ph = page.locator("[data-pane=preview] [data-testid=macro-empty]");
   await expect(ph).toBeVisible();

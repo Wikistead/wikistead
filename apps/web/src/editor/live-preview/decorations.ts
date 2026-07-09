@@ -887,8 +887,8 @@ interface EditUIDom extends HTMLDivElement { __editUICtrl?: EditUIController; __
 // editUI (no first-party macro does yet), so it adds no behaviour to shipped macros. Exported as the
 // framework primitive the render-path wiring + first macro migration (next slice) will instantiate.
 export class EditableEditUIWidget extends WidgetType {
-  constructor(readonly from: number, readonly to: number, readonly source: string, readonly editUI: EditUI, readonly wrapSource: (body: string) => string, readonly theme: MacroTheme, readonly tier?: MacroTier) { super(); }
-  eq(o: EditableEditUIWidget) { return o.from === this.from && o.to === this.to && o.source === this.source && o.editUI === this.editUI && o.theme === this.theme; }
+  constructor(readonly from: number, readonly to: number, readonly source: string, readonly editUI: EditUI, readonly wrapSource: (body: string) => string, readonly theme: MacroTheme, readonly tier?: MacroTier, readonly caretOutOnExit = false) { super(); }
+  eq(o: EditableEditUIWidget) { return o.from === this.from && o.to === this.to && o.source === this.source && o.editUI === this.editUI && o.theme === this.theme && o.caretOutOnExit === this.caretOutOnExit; }
   private mountInto(dom: EditUIDom, view: EditorView) {
     dom.__editUICtrl?.destroy();
     dom.replaceChildren();
@@ -914,8 +914,23 @@ export class EditableEditUIWidget extends WidgetType {
   // re-renders. Offset-invariant (only the edit-active effect; the save is the editUI's own).
   private exit(dom: EditUIDom, view: EditorView) {
     const focused = dom.contains(document.activeElement) ? (document.activeElement as HTMLElement) : null;
-    focused?.blur();
-    view.dispatch({ effects: setMacroRenderActive.of(null) });
+    focused?.blur(); // commit-on-blur → the editUI's change fires save(), which dispatches the doc change
+    // #243 / ADR-111 C1 (arbitration (a)): a fence diagram macro (mermaid/plantuml) now reveals its
+    // RAW source on caret-in (the callout reveal class). So clearing render-active with the caret still on
+    // the block would immediately re-reveal the source — "edit → Done → see the diagram" would show source,
+    // not the rendered diagram (#239 regression). Place the caret on the line AFTER the block so the atom
+    // renders. Scoped via caretOutOnExit so the callout editUI exit stays byte-identical. `save` above has
+    // already set render-active to the NEW (post-edit) range, so read its `to` for the true block end.
+    if (this.caretOutOnExit) {
+      const doc = view.state.doc;
+      const active = view.state.field(macroRenderActiveField, false);
+      const end = Math.min(active ? active.to : this.to, doc.length);
+      const endLine = doc.lineAt(end);
+      const after = endLine.number < doc.lines ? doc.line(endLine.number + 1).from : endLine.to;
+      view.dispatch({ selection: EditorSelection.cursor(after), effects: setMacroRenderActive.of(null) });
+    } else {
+      view.dispatch({ effects: setMacroRenderActive.of(null) });
+    }
     view.focus();
   }
   toDOM(view: EditorView) {
@@ -1364,6 +1379,12 @@ class MacroWidget extends WidgetType {
       const isLayout = this.name === "columns" || this.name === "tabs";
       wrap.addEventListener("mousedown", (e) => {
         e.preventDefault();
+        // #255 / #243: a RIGHT-click (or middle) opens the context menu (diagram alignment etc.) and must
+        // NOT move the caret into the macro. With the #243 caret-in reveal, dropping the caret into a
+        // mermaid/plantuml fence would reveal its raw source and REMOVE the rendered widget before the
+        // context menu can act on it. Leave the caret put on any non-left button so the menu opens on the
+        // still-rendered widget (preventDefault above already stops CM's own caret placement).
+        if (e.button !== 0) return;
         // #215 / ADR-100 (Consumer 1): a click on a NESTED macro selects THAT macro (ring), not the
         // container. resolveNestedAnchor(e.target) → innermost tagged subtree; the caret stays on the
         // container atom (posAtDOM(wrap)) since the interior isn't caret-addressable, and the display-only
@@ -1828,15 +1849,27 @@ const RENDERERS: BlockRenderer[] = [
         // reveals — entering opens its modal. Otherwise the atom renders.
         const active = ctx.state.field(macroRenderActiveField, false);
         // #174 / ADR-087: a fence macro with the unified inline editUI, render-active → mount its own
-        // editor (EditableEditUIWidget). mermaid + plantuml declare editUI: inline (#239) — the ✎ button
-        // enters here; the host wires the Escape/Done exit so the editUI is not a one-way trap.
-        // #174 addendum: `active.raw` (Ctrl+Enter) opts OUT of the editUI — it reveals the raw source
-        // (falls through to the reveal-on-cursor branch below). The ✎ button enters with raw=false → editUI.
-        if (macro.editUI?.present === "inline" && active && !active.raw && active.from <= from && active.to >= to && !ctx.state.readOnly) {
-          ctx.addAtomic(Decoration.replace({ widget: new EditableEditUIWidget(from, to, fenceBody(doc, node.from, node.to), macro.editUI, (b) => "```" + lang + "\n" + b + "\n```", ctx.macroTheme, macro.tier), block: true }), from, to);
+        // editor (EditableEditUIWidget). mermaid + plantuml declare editUI: inline (#239).
+        // #243 / ADR-111 C4: an EXPLICIT enter (Ctrl+Enter via enterMacroCommand OR the ✎ button — both set
+        // macroRenderActive) opens the rich editUI, unified across modes exactly like a callout's Ctrl+Enter/✎.
+        // The old `!active.raw` guard (which made Ctrl+Enter reveal RAW instead) is dropped — raw is now reached
+        // by the bare caret-in reveal below (C1), not an explicit command. So both entry keys land here.
+        if (macro.editUI?.present === "inline" && active && active.from <= from && active.to >= to && !ctx.state.readOnly) {
+          ctx.addAtomic(Decoration.replace({ widget: new EditableEditUIWidget(from, to, fenceBody(doc, node.from, node.to), macro.editUI, (b) => "```" + lang + "\n" + b + "\n```", ctx.macroTheme, macro.tier, true), block: true }), from, to);
           return;
         }
         if (active && !macro.richEditUI && active.from <= from && active.to >= to) return; // entered → source
+        // #243 / ADR-111 C1: a TEXT fence diagram macro (mermaid / plantuml — editUI present "inline") joins
+        // the callout reveal class. A caret INSIDE reveals the raw source (editable — vim / slash-completion)
+        // instead of the rendered atom, PLUS the shared RichUI-entry pill (✎ / Ctrl+↵ → the editUI). Live +
+        // editable only: rangeRevealed is false in WYSIWYG / Reading (C2 keeps the atom) and Source already
+        // returned above. Excalidraw (editUI present "modal") is excluded → it stays an atom (modal on enter).
+        // The bare caret reveals raw; the pill / Ctrl+Enter (active.raw, handled above) reach source / editUI.
+        if (macro.editUI?.present === "inline" && !ctx.state.readOnly && rangeRevealed(ctx.state, from, to)) {
+          ctx.add(macroRawLead, from);
+          ctx.add(Decoration.widget({ widget: new MacroRawRichuiPill(from, enterMacroAt, "fence-richui-enter"), side: -1 }), from);
+          return; // raw source shows (no widget) — the fence lines stay editable markdown
+        }
         // #255: the diagram fence's `align=` attribute (default center) drives the widget's alignment.
         const fenceAlign = DIAGRAM_MACROS.has(lang!) ? (parseFenceLine(doc.lineAt(node.from).text)?.align ?? "center") : "center";
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget(macro, fenceBody(doc, node.from, node.to), macro.foldable ?? true, lang!, atomSelected(ctx.state, from, to), ctx.macroTheme, 0, 0, 0, null, null, fenceAlign), block: true }), from, to);

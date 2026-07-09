@@ -4,11 +4,13 @@ import { openScratch, enterEdit, sleep } from "../helpers";
 const vimInsert = (p: import("@playwright/test").Page) => p.evaluate(() => (window as any).__lpVimInsert as boolean);
 const headLine = (p: import("@playwright/test").Page) => p.evaluate(() => (window as any).__lpHeadLine as number);
 
-// #283: editing a mermaid's raw source in vim, ONE Esc used to render the block but leave vim stuck in
-// INSERT mode — escExit swallowed the Esc so codemirror-vim never saw it (a second Esc was needed). Now one
-// Esc exits raw AND returns vim to normal, and the caret lands on the atom's line (not a hidden body line).
-// Real Chromium + vim.
-test("#283: one Esc exits mermaid raw edit AND returns vim to normal (caret not trapped)", async ({ browser }) => {
+// #283: editing a mermaid's raw source in vim, ONE Esc used to leave vim stuck in INSERT mode — escExit
+// swallowed the Esc so codemirror-vim never saw it (a second Esc was needed).
+// #243 (ADR-111 C1/C4): mermaid raw is now the CARET-IN reveal (a click / vim landing), so there is NO
+// `active` render-edit session — escExit is not involved and vim receives the Esc natively. This guards that
+// one Esc returns vim to NORMAL from the revealed mermaid source (the caret stays put, callout-style — you
+// leave the reveal by moving the caret out). Real Chromium + vim.
+test("#283: one Esc returns vim to normal while editing revealed mermaid source (not trapped in insert)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "macro-raw-esc");
   await enterEdit(page);
@@ -19,10 +21,8 @@ test("#283: one Esc exits mermaid raw edit AND returns vim to normal (caret not 
   await page.getByText("bot").click(); // caret off the block → it renders as the atom
   await sleep(300);
 
-  // caret onto the atom, Ctrl+Enter → reveal raw source (vim lands in NORMAL per ADR-024)
+  // #243 C1: a click lands the caret INSIDE the diagram → the raw source reveals (vim lands in NORMAL).
   await page.getByTestId("macro-mermaid").first().click();
-  await sleep(150);
-  await page.keyboard.press("Control+Enter");
   await sleep(250);
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("```mermaid"); // raw shown
 
@@ -33,12 +33,10 @@ test("#283: one Esc exits mermaid raw edit AND returns vim to normal (caret not 
   await page.keyboard.press("Escape");
   await sleep(300);
 
-  // (a) the block re-rendered as the atom (raw source hidden)
-  await expect(page.getByTestId("macro-mermaid").first()).toBeVisible();
-  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("```mermaid");
-  // (b) vim is back in NORMAL after a SINGLE Esc
+  // (a) vim is back in NORMAL after a SINGLE Esc (the #283 core — no swallowed Esc, no stuck insert)
   expect(await vimInsert(page), "one Esc returned vim to normal").toBe(false);
-  // (c) the caret is on the atom's opening line, not a hidden body line
+  // (b) the caret is on a real, landable line (not trapped mid-atom); it stays inside the revealed fence
+  //     (callout-style — the diagram re-renders when the caret leaves, exercised elsewhere)
   const line = await headLine(page);
-  expect(line).toBe(2); // "top" is line 1, the ```mermaid atom opens on line 2
+  expect(line).toBeGreaterThanOrEqual(2); // 1 top · 2-5 ```mermaid…``` · 6 bot
 });

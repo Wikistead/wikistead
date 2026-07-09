@@ -8,6 +8,11 @@ import { enterEdit, openScratch, sleep } from "../helpers";
 // the WHOLE macro. We build a TALL non-empty mermaid via insertText (paste-like — bypasses
 // the editor's per-char auto-close/auto-pair that mangles typed fences).
 // Doc lines: 1 top · 2-6 ```mermaid (3 body lines) · 7 mid · 8 bot · 9 (trailing).
+// #243 / ADR-111 C1: mermaid/plantuml joined the CALLOUT reveal class — a caret INSIDE now reveals
+// their raw source (they are no longer single-stop atoms; see title-links… no: see mermaid-reveal-243
+// .spec). The single-stop ATOM invariant here is proven on a STILL-atom macro instead: :::table (a
+// directive atom that stays rendered on caret-landing — entered only via Ctrl+Enter) via insertTallTable
+// below. mermaid stays for the "motion BELOW a tall RENDERED widget" tests (the caret never lands on it).
 async function insertTallMermaid(page: any) {
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.insertText("top\n```mermaid\ngraph TD\nA-->B\nA-->C\n```\nmid\nbot\n");
@@ -34,7 +39,7 @@ test("vim j/k step over a TALL macro atom as ONE stop; gg/G not hijacked", async
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "atom-motion");
   await enterEdit(page);
-  await insertTallMermaid(page);
+  await insertTallTable(page); // #243: a still-atom (:::table) — mermaid now reveals on caret-in
   await vimOn(page);
 
   await page.keyboard.press("g"); await page.keyboard.press("g"); await sleep(110);
@@ -57,7 +62,7 @@ test("the atom is highlighted only when the caret is on it", async ({ browser })
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "atom-hl");
   await enterEdit(page);
-  await insertTallMermaid(page);
+  await insertTallTable(page); // #243: a still-atom (:::table); mermaid reveals on caret-in now
   await vimOn(page);
   await page.keyboard.press("g"); await page.keyboard.press("g"); await sleep(110);
   expect(await page.locator("[data-pane=preview] .cm-lp-atom-sel").count()).toBe(0); // on top
@@ -65,35 +70,40 @@ test("the atom is highlighted only when the caret is on it", async ({ browser })
   expect(await page.locator("[data-pane=preview] .cm-lp-atom-sel").count()).toBe(1); // on atom
 });
 
-test("Ctrl+Enter enters the atom (reveals the macro source)", async ({ browser }) => {
+test("Ctrl+Enter enters a still-atom (:::table opens its editor)", async ({ browser }) => {
+  // #243: mermaid/plantuml Ctrl+Enter → RAW source is now in mermaid-reveal-243.spec (they reveal on
+  // caret-in). Here the ATOM-entry invariant is proven on :::table: it stays a single-stop atom on the
+  // caret landing (blocks=1), and Ctrl+Enter opens its in-place editor (the atom drops out of `blocks`).
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "atom-enter");
   await enterEdit(page);
-  await insertTallMermaid(page);
+  await insertTallTable(page);
   await vimOn(page);
   await page.keyboard.press("g"); await page.keyboard.press("g"); await page.keyboard.press("j"); await sleep(110);
-  expect((await blocks(page)).length).toBe(1); // rendered atom
-  await page.keyboard.press("Control+Enter"); await sleep(200);
-  // entered → raw source revealed (the fence drops out of the atom blocks)
-  expect((await blocks(page)).length).toBe(0);
-  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("```mermaid");
+  expect((await blocks(page)).length).toBe(1); // landed ON the atom, still rendered (single stop — no caret-in reveal)
+  await page.keyboard.press("Control+Enter"); await sleep(250);
+  // entered → the in-place table editor owns the block (the rendered atom is gone, the editor is mounted)
+  expect(await page.locator("[data-pane=preview] [data-testid=macro-table]").count()).toBe(0);
+  await expect(page.getByTestId("table-edit")).toBeVisible();
 });
 
-// ADR-024: entering a source macro lands in the vim NORMAL world — Ctrl+Enter must NOT
-// force insert mode (a vim user moves with hjkl; `i` first enters insert). A stale-HMR
-// device report claimed forced-insert; this locks in the verified contract so a real
-// regression (something dispatching insert on entry) fails here.
+// ADR-024 / #243 (ADR-111 C1): landing the caret in a source macro reveals its raw source and stays in the
+// vim NORMAL world — the reveal must NOT force insert mode (a vim user moves with hjkl; `i` first enters
+// insert). #243 made the source reveal the CARET-IN path (a vim j landing on the mermaid reveals it — Ctrl+
+// Enter now opens the editUI, C4), so this exercises the landing, not Ctrl+Enter. A stale-HMR device report
+// claimed forced-insert; this locks in the verified contract so a real regression (something dispatching
+// insert on entry) fails here.
 const vimInsert = (page: any) => page.evaluate(() => (window as any).__lpVimInsert);
-test("Ctrl+Enter into a source macro stays in vim NORMAL (no forced insert)", async ({ browser }) => {
+test("landing the caret in a revealed source macro stays in vim NORMAL (no forced insert)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "atom-enter-normal");
   await enterEdit(page);
   await insertTallMermaid(page);
   await vimOn(page);
-  await page.keyboard.press("g"); await page.keyboard.press("g"); await page.keyboard.press("j"); await sleep(110);
-  await page.keyboard.press("Control+Enter"); await sleep(200);
-  expect(await vimInsert(page)).toBe(false); // entered → NORMAL, not insert
-  // j is normal-mode motion (caret moves) — proof keys reach vim as commands, not typing.
+  await page.keyboard.press("g"); await page.keyboard.press("g"); await page.keyboard.press("j"); await sleep(150);
+  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("```mermaid"); // #243 C1: landed on it → raw revealed
+  expect(await vimInsert(page)).toBe(false); // revealed → NORMAL, not insert
+  // j is normal-mode motion (caret moves through the revealed source) — proof keys reach vim as commands.
   const head0 = await headLine(page);
   await page.keyboard.press("j"); await sleep(80);
   expect(await headLine(page)).not.toBe(head0); // moved
@@ -102,49 +112,12 @@ test("Ctrl+Enter into a source macro stays in vim NORMAL (no forced insert)", as
   expect(await vimInsert(page)).toBe(true);
 });
 
-test("dd on a TALL macro atom deletes the whole macro verbatim", async ({ browser }) => {
-  const page = await (await browser.newContext()).newPage();
-  await openScratch(page, "atom-dd");
-  await enterEdit(page);
-  await insertTallMermaid(page);
-  await vimOn(page);
-  await page.keyboard.press("g"); await page.keyboard.press("g"); await page.keyboard.press("j"); await sleep(110); // land on atom
-  await page.keyboard.press("d"); await page.keyboard.press("d"); await sleep(200);
-  expect((await blocks(page)).length).toBe(0); // macro gone
-  const text = (await page.locator("[data-pane=preview] .cm-content").innerText()).replace(/\n+/g, "|").replace(/\|$/, "");
-  expect(text).toBe("top|mid|bot"); // whole fence removed verbatim; surrounding lines intact
-});
-
-// ADR-024 1b (Mode A): after dd the unnamed register holds the WHOLE macro, so p pastes
-// the whole macro back (not just its first line).
-test("dd then p pastes the whole macro back", async ({ browser }) => {
-  const page = await (await browser.newContext()).newPage();
-  await openScratch(page, "atom-ddp");
-  await enterEdit(page);
-  await insertTallMermaid(page);
-  await vimOn(page);
-  await page.keyboard.press("g"); await page.keyboard.press("g"); await page.keyboard.press("j"); await sleep(110);
-  await page.keyboard.press("d"); await page.keyboard.press("d"); await sleep(150);
-  expect((await blocks(page)).length).toBe(0); // macro gone
-  await page.keyboard.press("p"); await sleep(200);
-  expect((await blocks(page)).length).toBe(1); // whole macro pasted back (register held the whole macro)
-});
-
-// #91: yy on a macro atom yanks the WHOLE macro (the read counterpart of dd). yy changes no
-// doc, so we move past the atom and paste: p brings the whole macro back as a 2nd atom.
-test("yy on a TALL macro atom yanks the whole macro; p pastes it back whole", async ({ browser }) => {
-  const page = await (await browser.newContext()).newPage();
-  await openScratch(page, "atom-yy");
-  await enterEdit(page);
-  await insertTallMermaid(page);
-  await vimOn(page);
-  await page.keyboard.press("g"); await page.keyboard.press("g"); await page.keyboard.press("j"); await sleep(110); // land on atom
-  await page.keyboard.press("y"); await page.keyboard.press("y"); await sleep(150);
-  expect((await blocks(page)).length).toBe(1); // yy doesn't change the doc — the macro is still there
-  await page.keyboard.press("G"); await sleep(110); // move below the macro so p doesn't land mid-fence
-  await page.keyboard.press("p"); await sleep(200);
-  expect((await blocks(page)).length).toBe(2); // the WHOLE macro pasted as a second atom
-});
+// #243 / ADR-111 C1: the dd/yy "whole-atom" tests previously used a ```mermaid fence. mermaid/plantuml
+// now REVEAL on caret-in (dd on a revealed diagram deletes ONE line, like a callout), so they are no
+// longer whole-atom dd/yy targets. The dd/yy atom-intercept is macro-agnostic (it operates on the
+// `blocks` ranges) and stays fully covered by the :::table directive-atom tests below (dd + p restore,
+// yy + p restore, both with cell-content regressions) — the trickier range-resolution path. Excalidraw
+// (the remaining fence atom) uses the identical intercept, so no fence-specific dd/yy test is added.
 
 // #91 (review fix): the dd/yy atom handling must work for a `:::table` DIRECTIVE atom,
 // not only a ```fence``` macro — the owner reported yy on `:::table` copying just the `:::`
@@ -412,7 +385,11 @@ test("#183 symptom C: vim j/k move one line at a time, symmetric, over a math at
 // SYMMETRIC — the caret makes exactly ONE stop on the atom in each direction and steps past the far edge,
 // and k retraces j's stops in reverse. (A persisting device asymmetry with this green is the known
 // stale-Vite-HMR gotcha — hard-reload first.)
-for (const lang of ["mermaid", "plantuml"] as const) {
+// #243 / ADR-111 C1: this was parameterised over empty ```mermaid / ```plantuml, which now REVEAL on
+// caret-in (not single-stop atoms). The empty-fence-atom symmetry invariant is retargeted to an empty
+// ```excalidraw — a fence atom that stays rendered on caret-landing (its editor is a MODAL, no caret-in
+// reveal), rendered SYNCHRONOUSLY (no elements → placeholder), so it's a reliable 2-line atom.
+for (const lang of ["excalidraw"] as const) {
   test(`#221: empty \`\`\`${lang} atom — vim j/k are vertically symmetric (one stop each way)`, async ({ browser }) => {
     const page = await (await browser.newContext()).newPage();
     await openScratch(page, `empty-${lang}`);
@@ -455,64 +432,27 @@ async function measureUpDownSymmetry(page: any, inAtom: (l: number | undefined) 
 }
 const inRange = (a: { fromLine: number; toLine: number }) => (l: number | undefined) => l !== undefined && l >= a.fromLine && l <= a.toLine;
 
-test("#221 (rendered): vim k UP over a tall RENDERED mermaid is symmetric with j DOWN (one stop, no extra k)", async ({ browser }) => {
+// #243 / ADR-111 C1: this measured k-UP-vs-j-DOWN symmetry while CROSSING a tall RENDERED atom. mermaid
+// now reveals on caret-in (you can't cross it — landing enters it), so the crossing-symmetry invariant is
+// retargeted to a tall RENDERED :::table (a still-atom: entered only via Ctrl+Enter, no caret-in reveal).
+// The async-mounted-geometry drift for motion BELOW a tall rendered widget stays covered by the mermaid
+// "motion below" tests above; the stacked-crossing variant is dropped (its cumulative-drift-below concern
+// is covered by "motion below TWO stacked tall macros"). :::table renders synchronously and tall (12 rows).
+test("#221 (rendered): vim k UP over a tall RENDERED :::table is symmetric with j DOWN (one stop, no extra k)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "vim221-render");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.insertText("top\n```mermaid\nflowchart TD\n  A --> B\n  B --> C\n  C --> D\n```\nB0\nB1\nB2\n");
-  await sleep(2500); // SVG mounts → the widget becomes tall (~380px)
-  const svgH = await page.evaluate(() => { const m = document.querySelector("[data-pane=preview] [data-testid=macro-mermaid]") as HTMLElement; return m ? Math.round(m.getBoundingClientRect().height) : 0; });
-  expect(svgH).toBeGreaterThan(120); // genuinely tall & rendered (not a fold placeholder)
+  let rows = "";
+  for (let i = 0; i < 12; i++) rows += `<tr><td>r${i}</td><td>v${i}</td></tr>\n`;
+  await page.keyboard.insertText("top\n:::table\n<table>\n" + rows + "</table>\n:::\nB0\nB1\nB2\n");
+  await sleep(600);
+  const tH = await page.evaluate(() => { const m = document.querySelector("[data-pane=preview] [data-testid=macro-table]") as HTMLElement; return m ? Math.round(m.getBoundingClientRect().height) : 0; });
+  expect(tH).toBeGreaterThan(120); // genuinely tall & rendered
   const [atom] = await blocks(page);
   await vimOn(page);
   const { down, up } = await measureUpDownSymmetry(page, inRange(atom));
   expect(down.filter(inRange(atom)), `down ${down.join(",")}`).toHaveLength(1); // one stop on the atom descending
   expect(up.filter(inRange(atom)), `up ${up.join(",")}`).toHaveLength(1);       // one stop ascending (no double / extra press)
   expect(up.length, `down ${down.join(",")} vs up ${up.join(",")}`).toBe(down.length); // #221: no upward-only extra k
-});
-
-test("#221 (rendered): vim k UP over TWO stacked tall RENDERED mermaids is symmetric with j DOWN", async ({ browser }) => {
-  const page = await (await browser.newContext()).newPage();
-  await openScratch(page, "vim221-stacked");
-  await enterEdit(page);
-  await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.insertText("top\n```mermaid\nflowchart TD\n  A --> B\n  B --> C\n```\n```mermaid\nflowchart TD\n  D --> E\n  E --> F\n```\nB0\nB1\nB2\n");
-  await sleep(3000); // both SVGs mount
-  expect(await page.locator("[data-pane=preview] [data-testid=macro-mermaid] svg").count()).toBe(2);
-  const bl = await blocks(page); // two atoms
-  expect(bl.length).toBe(2);
-  const inAnyAtom = (l: number | undefined) => bl.some((a: { fromLine: number; toLine: number }) => inRange(a)(l));
-  await vimOn(page);
-  const { down, up } = await measureUpDownSymmetry(page, inAnyAtom);
-  // exactly one stop on EACH atom in each direction (2 total), no double-stop or extra upward press.
-  expect(down.filter(inAnyAtom), `down ${down.join(",")}`).toHaveLength(2);
-  expect(up.filter(inAnyAtom), `up ${up.join(",")}`).toHaveLength(2);
-  expect(up.length, `down ${down.join(",")} vs up ${up.join(",")}`).toBe(down.length); // #221: symmetric press count
-});
-
-// #221 comment 845: landing / passing the caret ON a rendered mermaid must NOT re-render it. Recreating the
-// widget on the selection toggle re-runs liveRender → the SVG re-mounts → the "source flickers / height
-// wobbles" the reviewer saw while k crossed the atom. updateDOM reuses the DOM on a selection-only change.
-// Tag the SVG, land the caret ON the atom, and assert the SAME node survives (and the atom is selected, and
-// the raw source never revealed) — a recreated widget would lose the JS marker.
-test("#221: landing the caret ON a rendered mermaid reuses it (no re-render / flicker)", async ({ browser }) => {
-  const page = await (await browser.newContext()).newPage();
-  await openScratch(page, "vim221-noflicker");
-  await enterEdit(page);
-  await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.insertText("top\n```mermaid\nflowchart TD\n  A --> B\n  B --> C\n```\nbot\n");
-  await sleep(2500); // SVG mounts
-  await page.evaluate(() => { const s = document.querySelector("[data-pane=preview] [data-testid=macro-mermaid] svg") as HTMLElement & { __mark?: string } | null; if (s) s.__mark = "KEEP"; });
-  await page.getByTestId("vim-toggle").click();
-  await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.press("Escape");
-  await page.keyboard.press("g"); await page.keyboard.press("g"); await sleep(120); // line 1 (top)
-  await page.keyboard.press("j"); await sleep(200); // lands ON the atom → selected (was the flicker trigger)
-  expect(await page.locator("[data-pane=preview] .cm-lp-atom-sel").count()).toBe(1); // the atom IS selected
-  // the SAME svg node survived → the widget was REUSED (updateDOM), not rebuilt → no SVG re-mount / flicker.
-  const reused = await page.evaluate(() => (document.querySelector("[data-pane=preview] [data-testid=macro-mermaid] svg") as (HTMLElement & { __mark?: string }) | null)?.__mark === "KEEP");
-  expect(reused).toBe(true);
-  // and the raw ```mermaid source did NOT reveal on the caret landing (atom stays rendered).
-  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("```mermaid");
 });
