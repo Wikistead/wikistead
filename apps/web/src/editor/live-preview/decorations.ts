@@ -165,10 +165,54 @@ class FenceHeaderWidget extends WidgetType {
 // the widget's size and ask CM to re-measure on any change, so geometry always tracks the
 // real height — for ANY block widget, however its height changes. Disconnect in destroy.
 export function observeBlockResize(view: EditorView, dom: HTMLElement): ResizeObserver {
-  const ro = new ResizeObserver(() => view.requestMeasure());
+  const ro = new ResizeObserver(() => {
+    view.requestMeasure();
+    consumeReAnchor(view); // #243: a block's async height settle re-anchors a caret pushed off-screen.
+  });
   ro.observe(dom);
   return ro;
 }
+
+// #243: when the caret LEAVES a revealed mermaid/plantuml block (e.g. `j` past its last line), the
+// block re-mounts as an atom and its diagram renders ASYNC — the SVG lands taller than the raw source it
+// replaced. The shared ResizeObserver → requestMeasure keeps CM's heightMap correct, but nobody re-anchors the
+// SELECTION: the taller widget sits directly above the caret line, so that line is pushed DOWN, off the bottom
+// of the viewport. On the reveal→atom transition we open a short SETTLE WINDOW (see `reAnchorAfterReveal`);
+// while it is open, every block-resize keeps the CURRENT caret comfortably in view. It is a window, not a
+// one-shot, because the FIRST resize is the widget's mount (still short — the SVG hasn't loaded), and the
+// height that pushes the caret out only lands on a LATER resize. A visibility pre-check makes it a NO-OP once
+// the caret is already in view, so an arbitrary async height change outside the window never yanks the viewport.
+let reAnchorUntil = 0;
+const RE_ANCHOR_MARGIN = 48;
+function consumeReAnchor(view: EditorView): void {
+  // Date.now is host app code (the workflow-script clock ban does not apply); the window is a wall-clock
+  // deadline so a slow diagram settle is still caught but an unrelated later resize is not.
+  if (reAnchorUntil === 0 || Date.now() > reAnchorUntil) { reAnchorUntil = 0; return; }
+  const head = Math.min(view.state.selection.main.head, view.state.doc.length);
+  const coords = view.coordsAtPos(head);
+  if (!coords) return;
+  const box = view.scrollDOM.getBoundingClientRect();
+  if (coords.top >= box.top + RE_ANCHOR_MARGIN && coords.bottom <= box.bottom - RE_ANCHOR_MARGIN) return; // already visible → no-op
+  view.dispatch({ effects: EditorView.scrollIntoView(head, { y: "nearest", yMargin: RE_ANCHOR_MARGIN }) });
+}
+
+// Detect the reveal→atom transition (a caret move that un-reveals a macro): a block present in `blocks` NOW
+// but not a moment ago just switched from raw-source back to a rendered atom widget. Open the settle window so
+// the widget's async height growth (above) can pull the caret back on-screen. Guarded to caret-only moves (no
+// doc change) so block ranges compare stably by offset.
+const RE_ANCHOR_WINDOW_MS = 1200;
+export const reAnchorAfterReveal = ViewPlugin.fromClass(
+  class {
+    update(update: ViewUpdate) {
+      if (!update.selectionSet || update.docChanged) return;
+      const before = update.startState.field(livePreview, false)?.blocks ?? [];
+      const after = update.state.field(livePreview, false)?.blocks ?? [];
+      if (after.length === 0) return;
+      const wasBlock = (b: { from: number; to: number }) => before.some((p) => p.from === b.from && p.to === b.to);
+      if (after.some((b) => !wasBlock(b))) reAnchorUntil = Date.now() + RE_ANCHOR_WINDOW_MS;
+    }
+  },
+);
 
 // #202: nested bullet lists get a hierarchy glyph per level (Notion/editors convention) so nesting
 // reads at a glance: level 0 = •, 1 = ◦, 2 = ▪, then cycle. Level = indentation / 2 (the markdown

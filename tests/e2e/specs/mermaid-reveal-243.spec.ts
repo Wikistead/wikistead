@@ -174,6 +174,47 @@ test("#243 C3: in the vim editUI the first Escape does insert→normal (stays), 
   expect(await src.count()).toBe(0);
 });
 
+// #243(review rejection): leaving a revealed diagram DOWNWARD re-mounts it as an atom whose SVG
+// renders ASYNC — it settles TALLER than the raw source it replaced. CM's heightMap tracks the growth (shared
+// ResizeObserver → requestMeasure) but nothing re-anchored the SELECTION, so the caret line (directly below the
+// now-taller widget) was pushed OFF the bottom of the viewport. `reAnchorAfterReveal` arms a one-shot scroll on
+// the reveal→atom transition; the async settle consumes it and pulls the caret back on-screen. This is a real
+// geometry assertion: without the fix the caret's client rect ends up below the viewport bottom.
+test("#243leaving a tall diagram downward keeps the caret on-screen after the async re-render settles", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 900, height: 440 } })).newPage();
+  await openScratch(page, "reveal-reanchor");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  // A TALL vertical mermaid: 16 stacked nodes → the rendered SVG is far taller than its ~19-line raw source.
+  // `BELOWLINE` is the line the caret leaves onto; the trailing text keeps it from being the very last line.
+  const chain = Array.from({ length: 16 }, (_, i) => `  N${i} --> N${i + 1}`).join("\n");
+  await page.keyboard.insertText(`top\n\`\`\`mermaid\nflowchart TD\n${chain}\n\`\`\`\nBELOWLINE\ntail\n`);
+  await sleep(1500); // the SVG mounts → the widget is tall while rendered
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-mermaid]")).toBeVisible();
+
+  // Reveal the raw source (short) by clicking the diagram, then leave DOWNWARD in one motion (Ctrl+End →
+  // doc end, below the fence). The moment the caret crosses out, the block re-mounts as the tall atom; its
+  // SVG settles a beat LATER and would push the caret line off the bottom without the re-anchor.
+  await page.locator("[data-pane=preview] [data-testid=macro-mermaid]").click();
+  await sleep(300);
+  expect(await page.locator("[data-pane=preview] [data-testid=macro-mermaid]").count()).toBe(0); // revealed (raw)
+  await page.keyboard.press("Control+End"); // exit downward past the fence
+  await sleep(1500); // async mermaid render + height settle + the re-anchor within the settle window
+
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-mermaid]")).toBeVisible(); // re-rendered (atom)
+  const vh = page.viewportSize()!.height;
+  const rect = await page.evaluate(() => {
+    const c = document.querySelector("[data-pane=preview] .cm-cursor-primary") as HTMLElement | null;
+    if (!c) return null;
+    const r = c.getBoundingClientRect();
+    return { top: r.top, bottom: r.bottom };
+  });
+  expect(rect, "no primary cursor rect").not.toBeNull();
+  // the caret must sit WITHIN the viewport after the settle (pre-fix it was pushed hundreds of px below vh).
+  expect(rect!.bottom, `caret bottom ${rect!.bottom} > viewport ${vh} (pushed off-screen)`).toBeLessThanOrEqual(vh);
+  expect(rect!.top, `caret top ${rect!.top} < 0 (above viewport)`).toBeGreaterThanOrEqual(0);
+});
+
 test("#243: plantuml also reveals its raw source on caret-in (parity with mermaid)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "reveal-plantuml");
