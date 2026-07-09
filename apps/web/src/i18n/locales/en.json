@@ -38,6 +38,7 @@
     "linkRevoked": "Share link revoked",
     "copied": "Link copied to clipboard",
     "actionFailed": "Something went wrong",
+    "taskToggleDirty": "Publish your draft changes first to tick this box",
     "saved": "Saved",
     "spaceDeleted": "Space deleted",
     "pageDeleted": "Page deleted"

@@ -6,7 +6,7 @@ import { taskProgressExtension, type TaskProgress } from "./task-progress"; // #
 import { connect, connectEphemeral } from "./collab";
 import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayModeContent } from "./editor-livepreview";
 import type { DisplayMode, MacroTheme } from "./live-preview/decorations";
-import { redrawMacros } from "./live-preview/decorations";
+import { redrawMacros, taskStatePosAt } from "./live-preview/decorations";
 import { useTheme } from "../app/ThemeProvider";
 import { makeMacroPresence } from "./macro-presence";
 import { makeImageResolver } from "./image-resolver";
@@ -322,12 +322,26 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       // opened it), then persists via the no-revision endpoint; a rejection (409
       // dirty/mixed, 403) reverts our single flip so the draft is left untouched.
       const onToggleTaskInView = canEdit && onToggleTask
-        ? (index: number, from: number, checked: boolean) => {
+        ? (index: number, _from: number, checked: boolean) => {
             const c = collabRef.current;
             if (!c) return;
-            const set = (ch: string) => { c.ytext.delete(from + 1, 1); c.ytext.insert(from + 1, ch); };
-            set(checked ? " " : "x"); // optimistic draft flip
-            onToggleTask(index).catch(() => set(checked ? "x" : " ")); // revert on failure
+            // #303: the checkbox reports `_from` computed on the PUBLISHED snapshot — NEVER apply it to the
+            // live draft (when the draft has diverged, `_from+1` lands on unrelated prose and the optimistic
+            // flip + failure-revert overwrite real text; the corruption then syncs to every collaborator via
+            // the CRDT). Instead re-resolve the SAME ordinal against the DRAFT (skeletons match ⇒ same index,
+            // ADR-019), verify the bracket holds the expected pre-state, and only then flip. If the draft has
+            // diverged so the ordinal/pre-state don't line up, write NOTHING — corruption is now structurally
+            // impossible; the server 409 (dirty) still guards the published snapshot.
+            const expect = checked ? "x" : " "; // the CURRENT (pre-toggle) bracket char
+            const next = checked ? " " : "x";
+            const flipAt = (pos: number, ch: string) => { c.ytext.delete(pos, 1); c.ytext.insert(pos, ch); };
+            const pos = taskStatePosAt(c.ytext.toString(), index);
+            if (pos < 0 || c.ytext.toString()[pos] !== expect) return; // draft diverged → do not touch it
+            flipAt(pos, next); // optimistic draft flip, re-located in the DRAFT
+            onToggleTask(index).catch(() => {
+              const p = taskStatePosAt(c.ytext.toString(), index); // re-resolve for the revert too (offsets moved)
+              if (p >= 0 && c.ytext.toString()[p] === next) flipAt(p, expect);
+            });
           }
         : undefined;
       const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, renderDiagram, resolveTransclude, embedProviders, onToggleTask: onToggleTaskInView });

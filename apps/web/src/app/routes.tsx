@@ -354,7 +354,10 @@ function PageRoute() {
   const onToggleTask = useCallback(
     (index: number) =>
       toggleTask.mutateAsync(index).then(() => undefined).catch((e) => {
-        notify.error(t("toast.actionFailed"));
+        // #303: a 409 is the EXPECTED outcome when the draft has unpublished changes — the checkbox can't
+        // fold into published without mixing in that draft. Show a dedicated message, not the generic error.
+        const dirty = e instanceof ApiError && e.status === 409;
+        notify.error(t(dirty ? "toast.taskToggleDirty" : "toast.actionFailed"));
         throw e; // let the editor revert the optimistic flip
       }),
     [toggleTask, t],

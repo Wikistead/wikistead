@@ -308,6 +308,20 @@ function taskIndexAt(docText: string, markerFrom: number): number {
   return i;
 }
 
+// #303: the REVERSE of taskIndexAt — given a task ordinal, return the offset of that task's STATE char
+// (the ` `/`x` inside `[ ]`) IN `docText`, or -1 if there is no index-th task. The view-surface checkbox
+// reports an ordinal computed on the PUBLISHED snapshot; the host must re-resolve it against the LIVE DRAFT
+// (which may have diverged) before flipping — applying the published offset to a dirty draft corrupted the
+// prose (the #303 bug). Uses the same TASK_RE, so the ordinal lines up 1:1 when skeletons match (ADR-019).
+export function taskStatePosAt(docText: string, index: number): number {
+  let i = 0;
+  for (const m of docText.matchAll(TASK_RE)) {
+    if (i === index) return m.index + m[1].length + 1; // "[" is at m.index+m[1].length; the state char is +1
+    i++;
+  }
+  return -1;
+}
+
 class CheckboxWidget extends WidgetType {
   // #300: `disabled` is part of the widget identity so a display-mode change (which rebuilds decorations)
   // actually re-renders the box — otherwise eq would reuse the old DOM and the inert/enabled state stales.
