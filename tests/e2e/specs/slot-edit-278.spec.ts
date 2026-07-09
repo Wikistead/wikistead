@@ -108,9 +108,10 @@ test("#278 §2b: a slash palette works inside the slot island", async ({ browser
   expect(s).toContain("> ");  // the palette inserted a blockquote into the slot body
 });
 
-// #278 §2c: the slot island shows a LIVE PREVIEW below the source — a nested directive/macro renders via the
-// shared renderMarkdownToDom as you type (no doc write until blur).
-test("#278 §2c: the slot island live-previews nested markdown as you type", async ({ browser }) => {
+// #278 rev4 (②③): the island IS a live-preview surface — markdown renders IN the editing surface
+// as you type (only the caret's surroundings reveal syntax, the main-editor experience). The earlier
+// source-pane + separate preview stack is gone: exactly ONE rendition of the slot content while editing.
+test("#278 rev4: the slot island live-renders markdown IN the editing surface (no separate preview pane)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "slot-preview"); await enterEdit(page);
   await columnsDoc(page);
@@ -118,16 +119,59 @@ test("#278 §2c: the slot island live-previews nested markdown as you type", asy
   await sleep(300);
   const island = page.locator("[data-pane=preview] [data-testid=slot-edit-island]");
   await expect(island).toBeVisible();
-  // the preview seeds with the current body ("AAA").
-  const preview = page.locator("[data-pane=preview] [data-testid=slot-edit-preview]");
-  await expect(preview).toContainText("AAA");
+  // rev4: the two-pane stack is retired — no separate preview element exists any more.
+  await expect(page.locator("[data-testid=slot-edit-preview]")).toHaveCount(0);
+  //①: the island hugs its content — a one-line body must not open a large empty box.
+  const box = await island.boundingBox();
+  expect(box!.height, `island height ${box!.height}px for a one-line body`).toBeLessThan(70);
 
-  // type a nested callout in the island → the preview renders it live (a callout panel), no doc write yet.
+  // type bold on its own line, then move the caret off it → the island's own live preview renders it
+  // (a .cm-lp-strong mark with the ** markers hidden), inside the editor itself.
   await page.keyboard.press("Control+End");
-  await page.keyboard.type("\n\n**bold live**");
+  await page.keyboard.type("\n\n**bold live**\nplain");
   await sleep(300);
-  await expect(preview.locator("strong")).toContainText("bold live"); // rendered via renderMarkdownToDom
-  // the host doc is NOT written until blur (source mode would still show the old body).
+  await expect(island.locator(".cm-lp-strong")).toContainText("bold live");
+  // the host doc is NOT written until blur (commit-on-blur unchanged) — the outer source still lacks it.
+});
+
+// #278 rev4: entering the island must not change the text's look — same typography as the
+// rendered surface (16px proportional body), NOT the 13px code face (that stays for code-source macros).
+test("#278 rev4: the island's typography matches the rendered surface (no code-face snap)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "slot-typo"); await enterEdit(page);
+  await columnsDoc(page);
+  const outer = await page.evaluate(() => {
+    const el = document.querySelector("[data-pane=preview] .cm-content") as HTMLElement;
+    const cs = getComputedStyle(el);
+    return { fontSize: cs.fontSize, fontFamily: cs.fontFamily };
+  });
+  await page.locator("[data-pane=preview] .cm-lp-column").first().click();
+  await sleep(300);
+  const inner = await page.evaluate(() => {
+    const el = document.querySelector("[data-testid=slot-edit-src]") as HTMLElement;
+    const cs = getComputedStyle(el);
+    return { fontSize: cs.fontSize, fontFamily: cs.fontFamily };
+  });
+  expect(inner.fontSize, `island ${inner.fontSize} vs surface ${outer.fontSize}`).toBe(outer.fontSize);
+  expect(inner.fontFamily, `island ${inner.fontFamily} vs surface ${outer.fontFamily}`).toBe(outer.fontFamily);
+});
+
+// #278 rev4 (④): an EMPTY tab's active panel must keep a clickable hit area — without it the panel
+// is 0px tall and the slot can never be opened. (The empty-COLUMN case is covered by the round-trip test.)
+test("#278 rev4: an EMPTY tab panel stays clickable and opens the island", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "slot-empty-tab"); await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("top\n\n::::tabs\n:::tab[One]\n:::\n::::\n\nbot\n");
+  await sleep(700);
+  await page.getByText("bot").click(); await sleep(200);
+  const panel = page.locator("[data-pane=preview] .cm-lp-tabpanel-active");
+  await expect(panel).toBeVisible();
+  const box = await panel.boundingBox();
+  expect(box!.height, "an empty active panel keeps a clickable hit area").toBeGreaterThan(10);
+  await panel.click();
+  await sleep(300);
+  await expect(page.locator("[data-pane=preview] [data-testid=slot-edit-src]")).toBeVisible();
 });
 
 test("#278 §2a: Escape exits the slot island without committing a stray edit", async ({ browser }) => {

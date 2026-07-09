@@ -39,6 +39,11 @@ export interface SourceEditorOptions {
   // Passed in so this macro-side helper stays sandbox-clean (@codemirror only — it never imports host editor
   // internals like the palette itself); the caller (decorations.ts, host side) owns that wiring.
   extraExtensions?: Extension[];
+  // #278 rev4: caller-swappable look. The DEFAULT is the code face below — correct for macros whose
+  // source IS code (mermaid / plantuml). A caller editing MARKDOWN CONTENT (the layout slot island) passes its
+  // own theme so the editing surface keeps the rendered surface's typography ("editing looks like the render",
+  // north star 1) instead of snapping to a small monospace box.
+  theme?: Extension;
   onInput: (value: string) => void; // fires on every doc change — drives the local live preview (no doc write)
   onCommit: (value: string) => void; // fires on blur — the single Y.Text write via the macro's save()
 }
@@ -63,7 +68,8 @@ export function mountSourceEditor(opts: SourceEditorOptions): SourceEditorHandle
         ...(opts.extraExtensions ?? []), // #278 §2b: host-supplied (slash palette) — before minimalSetup so its keymap wins
         minimalSetup, // history + default/history keymaps + drawSelection (the host surface uses this too)
         EditorView.lineWrapping,
-        baseTheme,
+        opts.theme ?? baseTheme, // #278 rev4: content-editing callers restyle; source-code macros keep the code face
+
         EditorView.editorAttributes.of({ class: opts.dark ? "cm-dark" : "" }),
         EditorView.updateListener.of((u) => { if (u.docChanged) opts.onInput(u.state.doc.toString()); }),
         // Commit-on-blur → the single offset-invariant Y.Text write (never per-keystroke; see header).

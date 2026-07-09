@@ -27,6 +27,7 @@ import { openMacroModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost, nestedSelectionField, setNestedSelection, nestedEditActiveField, setNestedEditActive, slotEditField, setSlotEditActive, type NestedSelection, type SlotEdit } from "./macro-edit";
 import { mountSourceEditor } from "../macros/source-editor";
 import { slashPalette } from "./palette"; // #278 §2b: the slash palette, mounted on the inline slot island (host-side wiring)
+import { markdownExtension } from "../markdown-config"; // #278 rev4: the slot island runs the full live-preview pipeline
 import { tableInlineEditor } from "./table-edit";
 import { tableTier } from "../macros/table";
 import type { InlineController } from "../macros/registry";
@@ -1302,7 +1303,24 @@ function findNestedSlot(root: HTMLElement, anchor: number): HTMLElement | null {
 // mousedown is stopped so the outer container atom doesn't swallow the caret (#265). Returns true if mounted.
 // The island EditorView is stashed on the host DOM so the widget's destroy(dom) can dispose it on EVERY unmount
 // path (commit, Escape, caret-leave, rebuild) — not only the blur→onCommit path (the reviewer's leak finding).
+//
+// #278 rev4 (②③): the island IS a live-preview surface — the same livePreview field + theme as the
+// host surface, mounted on the island's OWN state. The slot renders in place while only the caret's
+// surroundings reveal syntax (the main-editor experience), instead of the earlier source-pane + separate
+// preview stack (two renditions of the same content = the bounce). This changes DISPLAY
+// only: the island still holds its own plain document and still commits on blur exactly as above.
 type SlotHost = HTMLElement & { __slotHandle?: { destroy(): void } };
+
+// #278 rev4 (① +): the island's typography = the RENDERED surface's typography. Everything
+// inherits from the page (16px proportional body, not the 13px code face the default source-editor theme
+// uses for code-source macros), and there is NO fixed min-height — the box hugs its content (an empty
+// island is still one text line tall, so it stays clickable). "Editing looks like the render" (north star 1).
+const slotIslandTheme = EditorView.theme({
+  "&": { fontSize: "inherit", background: "transparent" },
+  ".cm-content": { fontFamily: "inherit", padding: "0.15em 0.4em" },
+  ".cm-scroller": { fontFamily: "inherit", lineHeight: "inherit" },
+  "&.cm-focused": { outline: "none" },
+});
 function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { from: number; to: number }, index: number, childName: "column" | "tab", dark: boolean): boolean {
   const doc = view.state.doc;
   const items = resolveDirectiveRanges(doc.toString()).filter((r) => r.name === childName && r.from >= container.from && r.to <= container.to);
@@ -1328,27 +1346,35 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
   host.className = "cm-lp-slot-edit-island";
   host.setAttribute("data-testid", "slot-edit-island");
   host.addEventListener("mousedown", (e) => e.stopPropagation()); // #265: the outer atom must not steal the caret
-  const srcPane = document.createElement("div");
-  srcPane.className = "cm-lp-slot-edit-src-pane";
-  // #278 §2c: a live preview of the slot body BELOW the source — nested directives/macros render via the SAME
-  // shared renderMarkdownToDom (no 2nd renderer), updating on every keystroke (display-only, no doc write).
-  const preview = document.createElement("div");
-  preview.className = "cm-lp-slot-edit-preview cm-lp-md-preview";
-  preview.setAttribute("data-testid", "slot-edit-preview");
-  const renderPreview = (md: string) => { try { preview.replaceChildren(renderMarkdownToDom(md)); } catch { preview.textContent = ""; } };
-  host.append(srcPane, preview);
   let committed = false;
   const handle = mountSourceEditor({
-    parent: srcPane,
+    parent: host,
     doc: bodyText,
     dark,
     testid: "slot-edit-src",
     vim: view.state.facet(vimEnabled),
-    // #278 §2b: a slash palette inside the island — inserts markdown snippets into the island's OWN doc (no
-    // host action providers passed, so /image·/embed·/template gracefully no-op; headings·lists·todo·quote·
-    // code·divider·link work locally). Commit-on-blur still carries the result into the one Y.Text.
-    extraExtensions: [slashPalette()],
-    onInput: (v) => renderPreview(v), // #278 §2c: live preview only — NO doc write (that would re-mount the island)
+    // #278 §2b + rev4 (②③): the island's own state carries (a) the slash palette — inserts markdown
+    // snippets into the island's OWN doc (no host action providers passed, so /image·/embed·/template
+    // gracefully no-op; headings·lists·todo·quote·code·divider·link work locally) — and (b) the SAME
+    // live-preview pipeline as the host surface (language + livePreview field + its theme), so the slot
+    // renders in place and only the caret's surroundings reveal syntax — no separate preview pane (§2c
+    // retired). Host wiring (resolvers / allowlist / vim gating) is MIRRORED from the outer view so slot
+    // content renders exactly like the page. All of this is HOST-side wiring reaching the macro-side
+    // helper as opaque extensions — the ADR-023 sandbox boundary is unchanged (the §2b pattern).
+    extraExtensions: [
+      slashPalette(),
+      markdownExtension(),
+      livePreview,
+      livePreviewTheme,
+      vimEnabled.of(view.state.facet(vimEnabled)), // reveal gating must see the outer editor's vim state
+      checkboxControl.of({ mode: "edit" }), // task boxes in a slot flip the ISLAND doc (committed on blur)
+      imageResolver.of(view.state.facet(imageResolver)),
+      diagramRenderer.of(view.state.facet(diagramRenderer)),
+      transcludeResolver.of(view.state.facet(transcludeResolver)),
+      embedAllowlist.of(view.state.facet(embedAllowlist)),
+    ],
+    theme: slotIslandTheme, // rev4: body typography, not the code face — see slotIslandTheme
+    onInput: () => {}, // rev4: the island renders itself (livePreview) — still NO doc write until blur
     onCommit: (value) => {
       if (committed) return; // blur can fire alongside the field-clear re-render; write exactly once
       committed = true;
@@ -1357,7 +1383,6 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
     },
   });
   host.__slotHandle = handle; // disposed by MacroWidget.destroy(dom) on any unmount path
-  renderPreview(bodyText); // #278 §2c: seed the live preview with the current body
   cell.replaceWith(host); // for columns: the column cell; for tabs: the active panel
   // Focus AFTER CM attaches this widget DOM to the document — focusing during toDOM (DOM not yet in the tree)
   // is a no-op, which left the island unfocused so a single click opened but couldn't type (reviewer B).
@@ -3255,13 +3280,10 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-tab-remove:hover": { opacity: "1", color: "var(--fg, inherit)" },
   ".cm-lp-layout-item-add": { flex: "0 0 auto", alignSelf: "flex-start", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.6em", height: "1.6em", border: "1px dashed var(--border, #888)", borderRadius: "4px", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
   ".cm-lp-macro-wrap:hover .cm-lp-layout-item-add, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-layout-item-add": { opacity: "1" },
-  // #278 §2a: the inline CM6 slot-edit island — a bordered box that replaces the slot's rendered content while
-  // its body is edited with the full editor (accent border marks the active slot).
+  // #278 §2a (rev4): the inline CM6 slot-edit island — a bordered box that replaces the slot's rendered
+  // content while its body is edited IN a live-preview mini-editor (accent border marks the active slot;
+  // the box hugs its content — no fixed height,①).
   ".cm-lp-slot-edit-island": { flex: "1 1 0", minWidth: "0", border: "1px solid var(--accent, #4ea1ff)", borderRadius: "4px", background: "color-mix(in srgb, var(--accent, #4ea1ff) 4%, var(--panel, #fff))" },
-  // #278 §2c: the slot island's source pane over a live preview, split by a hairline.
-  ".cm-lp-slot-edit-preview": { borderTop: "1px solid color-mix(in srgb, var(--accent, #4ea1ff) 30%, transparent)", padding: "0.3em 0.5em", fontSize: "0.9em" },
-  ".cm-lp-slot-edit-preview > :first-child": { marginTop: "0" },
-  ".cm-lp-slot-edit-preview > :last-child": { marginBottom: "0" },
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
   ".cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap:hover .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-align": { opacity: "1" },
@@ -3311,24 +3333,12 @@ export const livePreviewTheme = EditorView.baseTheme({
     fontSize: "0.95em",
   },
   // #90 columns: the A′ widget lays its inner column DOM out as an even flex row.
-  // #257: the STRUCTURED layout editUI panel — an item bar (tab/column chips + add), an edit area (label +
-  // content textarea + remove/reorder for the active item), and a live preview. Panel edit, not reveal.
-  ".cm-lp-layout-edit-structured": { display: "flex", flexDirection: "column", gap: "0.5em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.6em", background: "var(--panel, transparent)" },
-  ".cm-lp-layout-edit-bar": { display: "flex", flexWrap: "wrap", gap: "0.25em", alignItems: "center", borderBottom: "1px solid var(--border, #888)", paddingBottom: "0.4em" },
-  ".cm-lp-layout-edit-chip": { border: "1px solid transparent", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", padding: "0.25em 0.6em", borderRadius: "4px", fontSize: "0.9em" },
-  ".cm-lp-layout-edit-chip:hover": { color: "var(--fg, inherit)", background: "var(--panel-2, rgba(128,128,128,0.12))" },
-  ".cm-lp-layout-edit-chip-active": { color: "var(--fg, inherit)", background: "var(--panel-2, rgba(128,128,128,0.18))", borderColor: "var(--border, #888)", fontWeight: "600" },
-  ".cm-lp-layout-edit-add": { border: "1px dashed var(--border, #888)", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", padding: "0.15em 0.55em", borderRadius: "4px", lineHeight: "1" },
-  ".cm-lp-layout-edit-add:hover": { color: "var(--fg, inherit)", borderColor: "var(--accent, #4ea1ff)" },
-  ".cm-lp-layout-edit-area": { display: "flex", flexWrap: "wrap", gap: "0.4em", alignItems: "flex-start" },
-  ".cm-lp-layout-edit-label": { flex: "1 1 100%", boxSizing: "border-box", padding: "0.3em 0.5em", border: "1px solid var(--border, #888)", borderRadius: "4px", background: "var(--bg, transparent)", color: "var(--fg, inherit)", fontSize: "0.9em" },
-  ".cm-lp-layout-edit-content": { flex: "1 1 100%", boxSizing: "border-box", minHeight: "5em", resize: "vertical", padding: "0.4em 0.5em", border: "1px solid var(--border, #888)", borderRadius: "4px", background: "var(--bg, transparent)", color: "var(--fg, inherit)", fontFamily: "var(--font-code, monospace)", fontSize: "0.9em" },
-  ".cm-lp-layout-edit-remove, .cm-lp-layout-edit-move": { border: "1px solid var(--border, #888)", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", padding: "0.2em 0.55em", borderRadius: "4px", fontSize: "0.85em" },
-  ".cm-lp-layout-edit-remove:hover": { color: "var(--danger, #e5534b)", borderColor: "var(--danger, #e5534b)" },
-  ".cm-lp-layout-edit-move:hover": { color: "var(--fg, inherit)", borderColor: "var(--accent, #4ea1ff)" },
-  ".cm-lp-layout-edit-preview": { borderTop: "1px solid var(--border, #888)", paddingTop: "0.5em" },
+  // (#257's structured layout-edit panel CSS removed — the panel itself was retired by #278 §2a and the
+  // rules were dead: nothing emits .cm-lp-layout-edit-* any more.)
   ".cm-lp-columns": { display: "flex", gap: "1.2em", alignItems: "flex-start" },
-  ".cm-lp-column": { flex: "1 1 0", minWidth: "0", minHeight: "1.4em" }, // #278 §2a: an empty column stays clickable (to open its inline editor)
+  // #278 §2a / rev4 (④): an EMPTY column must stay comfortably clickable (click = open its inline
+  // editor) — a full text line of hit area, not a sliver.
+  ".cm-lp-column": { flex: "1 1 0", minWidth: "0", minHeight: "1.6em" },
   ".cm-lp-column > :first-child": { marginTop: "0" },
   // #90 tabs: a tab bar + only the active panel shown (display-only switch).
   ".cm-lp-tabbar": { display: "flex", gap: "0.25em", borderBottom: "1px solid var(--border, #888)", marginBottom: "0.6em" },
@@ -3336,7 +3346,9 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-tab:hover": { color: "var(--fg, inherit)" },
   ".cm-lp-tab-active": { color: "var(--fg, inherit)", borderBottomColor: "var(--accent, #4ea1ff)", fontWeight: "600" },
   ".cm-lp-tabpanel": { display: "none" },
-  ".cm-lp-tabpanel-active": { display: "block" },
+  // #278 rev4 (④): the ACTIVE panel of an empty tab needs the same clickable hit area as an empty
+  // column — without it an empty panel is 0px tall and the slot can never be opened.
+  ".cm-lp-tabpanel-active": { display: "block", minHeight: "1.6em" },
   ".cm-lp-tabpanel > :first-child": { marginTop: "0" },
   // #196 innermost-wins reveal: while a NESTED child of columns/tabs is being edited, the container
   // descends to raw lines rather than its flex/tab widget — so the caret can sit inside the child. A
