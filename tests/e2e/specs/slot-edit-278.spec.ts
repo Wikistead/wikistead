@@ -81,6 +81,33 @@ test("#278 §2a: editing an EMPTY slot keeps the fence intact (no `hello:::` rou
   expect((s.match(/^:::$/gm) || []).length).toBe(2); // both close fences intact
 });
 
+// #278 §2b: the inline slot island carries a slash palette — typing "/" inside it inserts markdown into the
+// island's OWN doc (committed to the slot body on blur), not the host doc.
+test("#278 §2b: a slash palette works inside the slot island", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "slot-slash"); await enterEdit(page);
+  await columnsDoc(page);
+  await page.locator("[data-pane=preview] .cm-lp-column").first().click();
+  await sleep(300);
+  await expect(page.locator("[data-pane=preview] [data-testid=slot-edit-src]")).toBeVisible();
+
+  // on a fresh line inside the island, open the palette and insert a blockquote.
+  await page.keyboard.press("Control+End");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("/quote");
+  await expect(page.locator("[data-testid=slash-palette]")).toBeVisible();
+  await page.locator("[data-testid=slash-item-quote]").click();
+  await sleep(200);
+  await page.getByText("bot").click(); // blur → commit-on-blur
+  await sleep(400);
+
+  await page.getByTestId("displaymode-source").click();
+  await sleep(250);
+  const s = await content(page);
+  expect(s).toContain("AAA"); // original body kept
+  expect(s).toContain("> ");  // the palette inserted a blockquote into the slot body
+});
+
 test("#278 §2a: Escape exits the slot island without committing a stray edit", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "slot-edit-esc"); await enterEdit(page);

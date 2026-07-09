@@ -1,5 +1,5 @@
 import { EditorView, minimalSetup } from "codemirror"; // meta-package: history + default/history keymaps + drawSelection (same as the host surface)
-import { EditorState } from "@codemirror/state";
+import { EditorState, type Extension } from "@codemirror/state";
 import { vim, getCM } from "@replit/codemirror-vim"; // the SAME vim the outer editor uses (not a second engine)
 
 // #243 / ADR-111 C3 (slice 1): the editUI source pane for a text-source fence macro (mermaid / plantuml)
@@ -35,6 +35,10 @@ export interface SourceEditorOptions {
   dark: boolean;
   testid: string;
   vim?: boolean; // #243 C3 slice 2: mirror the outer editor's vim ON/OFF (same @replit engine, own view-state)
+  // #278 §2b: opaque HOST-supplied extensions (e.g. the slash palette) mounted on THIS island's own EditorState.
+  // Passed in so this macro-side helper stays sandbox-clean (@codemirror only — it never imports host editor
+  // internals like the palette itself); the caller (decorations.ts, host side) owns that wiring.
+  extraExtensions?: Extension[];
   onInput: (value: string) => void; // fires on every doc change — drives the local live preview (no doc write)
   onCommit: (value: string) => void; // fires on blur — the single Y.Text write via the macro's save()
 }
@@ -56,6 +60,7 @@ export function mountSourceEditor(opts: SourceEditorOptions): SourceEditorHandle
         // #243 C3 slice 2: vim FIRST so its keymap takes precedence (mirrors the outer editor's ordering).
         // Same @replit/codemirror-vim the host uses — a per-view vim state, NOT a second/different engine.
         ...(opts.vim ? [vim()] : []),
+        ...(opts.extraExtensions ?? []), // #278 §2b: host-supplied (slash palette) — before minimalSetup so its keymap wins
         minimalSetup, // history + default/history keymaps + drawSelection (the host surface uses this too)
         EditorView.lineWrapping,
         baseTheme,
