@@ -240,7 +240,7 @@ export function Sidebar() {
         ) : null}
         {/* #290 / ADR-114: a compact :::todo progress ring in the right badge band — only for pages
             with a :::todo (taskTotal>0), so it's zero-width elsewhere and never clutters the tree. */}
-        {d.taskTotal > 0 && <span className="mx-0.5 flex-none" data-testid="tree-todo-ring"><ProgressRing done={d.taskDone} total={d.taskTotal} compact /></span>}
+        {d.taskTotal > 0 && <span className="mx-0.5 flex-none inline-flex items-center self-center" data-testid="tree-todo-ring"><ProgressRing done={d.taskDone} total={d.taskTotal} compact /></span>}
         {canEdit && (
           <span className="flex gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 has-[[aria-expanded=true]]:pointer-events-auto has-[[aria-expanded=true]]:opacity-100" onClick={(e) => e.stopPropagation()}>
             <DropdownMenu modal={false}>

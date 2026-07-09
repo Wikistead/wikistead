@@ -585,6 +585,7 @@
     "bulletList": "箇条書き",
     "numberedList": "番号付きリスト",
     "todoList": "ToDo リスト",
+    "todoRing": "ToDo（進捗リング付き）",
     "quote": "引用",
     "codeBlock": "コードブロック",
     "table": "テーブル",
