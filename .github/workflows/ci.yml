@@ -18,6 +18,26 @@ jobs:
       - run: pnpm lint:no-css-modules  # shadcn/Tailwind migration: no new CSS Modules
       - run: pnpm docs:check           # ADR-080 doc↔code linkage: generated docs not stale
       - run: pnpm lint:doc-links       # ADR-080: warn if a code region changed without its docs page
+  test:
+    # #293 / #268: the unit + integration test suite. The server suite runs against the ISOLATED
+    # server-test middleware (docker-compose.server-test.yml) brought up, migrated, and seeded by
+    # `pnpm setup:server-test` — the SAME flow used locally (compose up --wait -> migrate -> fga
+    # bootstrap/seed -> db seed). Kept a SEPARATE job from `build` because it needs Postgres / OpenFGA
+    # / Valkey / Meilisearch / SeaweedFS (compose starts them; ubuntu-latest ships docker + compose v2).
+    # `pnpm test` = `turbo run test` = every package's unit tests + the server integration suite; the
+    # Playwright e2e package has no `test` script so it is not run here (it needs its own stack + browsers).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm setup:server-test     # compose up --wait + migrate + fga bootstrap/seed + db seed (#268)
+      - run: pnpm test                  # unit (web / macro-render / …) + server integration (real PG + OpenFGA)
+      - if: always()
+        run: pnpm teardown:server-test || true
   license-check:
     # Enforces the permissive-only dependency allowlist (ADR-011 dual-licensing
     # precondition). Uses scripts/check-licenses.mjs, a pnpm-aware scanner
