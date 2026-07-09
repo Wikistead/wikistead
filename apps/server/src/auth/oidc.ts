@@ -95,13 +95,16 @@ export interface LoginRedirect {
 // codeVerifier, ...} (consume-once) before redirecting. NOTE: a production IdP must
 // have these redirect_uris registered (wildcard subdomain or a central callback) —
 // an ops concern (P7).
-export async function buildLogin(cfg: TenantOidcConfig, redirectUri: string): Promise<LoginRedirect> {
+export async function buildLogin(cfg: TenantOidcConfig, redirectUri: string, extraParams?: Record<string, string>): Promise<LoginRedirect> {
   const config = await discover(cfg)
   const codeVerifier = oidc.randomPKCECodeVerifier()
   const codeChallenge = await oidc.calculatePKCECodeChallenge(codeVerifier)
   const state = oidc.randomState()
   const nonce = oidc.randomNonce()
   const url = oidc.buildAuthorizationUrl(config, {
+    // #281 / ADR-121 §2: vendor extras FIRST so they can never override the security
+    // params below (state/nonce/PKCE always win). Used for the social source hint.
+    ...(extraParams ?? {}),
     redirect_uri: redirectUri,
     scope: cfg.scopes,
     state,
@@ -112,9 +115,38 @@ export async function buildLogin(cfg: TenantOidcConfig, redirectUri: string): Pr
   return { url, state, nonce, codeVerifier }
 }
 
+// #281 / ADR-121 §2: the Cloud social-login button config, from env. CSV of provider slugs
+// (e.g. "google,github,microsoft") — empty/unset (and always on CE, which has no platform
+// issuer) means NO social buttons. The hint param name is deployment-configurable because
+// the broker (Authentik) decides what it consumes; the value is the provider slug.
+export interface SocialLoginConfig { providers: string[]; hintParam: string }
+const SOCIAL_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/
+export function loadSocialLogin(): SocialLoginConfig {
+  if (!process.env.PLATFORM_OIDC_ISSUER) return { providers: [], hintParam: 'source' } // CE: no platform IdP → no social
+  const providers = (process.env.PLATFORM_SOCIAL_PROVIDERS ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => SOCIAL_SLUG.test(s))
+  return { providers, hintParam: process.env.PLATFORM_SOCIAL_HINT_PARAM ?? 'source' }
+}
+
+// #281 / ADR-121 §3.5: coerce the UNTRUSTED `email_verified` claim to a strict tri-state.
+// Only boolean true / string "true" count as verified (some IdPs stringify booleans);
+// false / "false" is explicitly unverified; anything else (missing, junk) is null =
+// UNKNOWN — and the domain auto-enroll branch requires exactly `true`, so unknown
+// fails safe to the invite path (user ruling: never block login, only the auto-enroll).
+export function coerceEmailVerified(raw: unknown): boolean | null {
+  if (raw === true || raw === 'true') return true
+  if (raw === false || raw === 'false') return false
+  return null
+}
+
 export interface IdpClaims {
   sub: string
   email: string | null
+  // #281 / ADR-121 §3.5: whether the IdP asserts the email is verified (tri-state; see
+  // coerceEmailVerified). Load-bearing for domain auto-enroll — never discard it.
+  emailVerified: boolean | null
   name: string | null
   // `picture` is the standard OIDC profile-image URL claim. Peer-visible identity
   // (avatar / collab cursor) — never email. NULL when the IdP omits it.
@@ -144,6 +176,7 @@ export async function exchangeCode(
   return {
     sub,
     email: typeof claims.email === 'string' ? claims.email : null,
+    emailVerified: coerceEmailVerified((claims as Record<string, unknown>).email_verified),
     name: typeof claims.name === 'string' ? claims.name : null,
     picture: typeof claims.picture === 'string' ? claims.picture : null,
     // #102: read the configured groups claim (default 'groups'); coerce/bound the untrusted value.

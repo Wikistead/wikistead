@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { WikisteadMark } from "./BrandLockup";
 import { ThemeToggle } from "./ThemeToggle";
@@ -11,6 +12,23 @@ import { Button } from "../ui/Button";
 // (preserving where the user wanted to go). The auth callback redirects failures to /login?error=<kind>;
 // this screen surfaces that so a denied/seat-full sign-in isn't silent. `access` stays VAGUE (no IdP-subject
 // enumeration — matches the server's existence-hiding).
+// #281 / ADR-121 §2: which social buttons to render — the PUBLIC login-options endpoint
+// (slugs only; empty on CE / tenant-OIDC tenants, so the buttons simply don't render).
+const SOCIAL_LABELS: Record<string, string> = { google: "Google", github: "GitHub", microsoft: "Microsoft" };
+function useLoginOptions(): string[] {
+  const q = useQuery({
+    queryKey: ["login-options"],
+    queryFn: () =>
+      fetch(assetUrl("/auth/login-options"))
+        .then((r) => (r.ok ? (r.json() as Promise<{ social?: string[] }>) : null))
+        .then((r) => r?.social ?? [])
+        .catch(() => []),
+    staleTime: 60_000,
+  });
+  // Render only KNOWN providers (branding assets exist for these); unknown slugs are ignored.
+  return (q.data ?? []).filter((s) => s in SOCIAL_LABELS);
+}
+
 function useAuthError(): string | null {
   const { t } = useTranslation();
   const kind = new URLSearchParams(window.location.search).get("error");
@@ -25,6 +43,7 @@ export function LoginScreen() {
   const branding = useBranding();
   const returnTo = window.location.pathname === "/login" ? "/" : window.location.pathname + window.location.search;
   const error = useAuthError();
+  const social = useLoginOptions();
   const logoUrl = branding.data?.logoUrl;
   const name = branding.data?.displayName;
 
@@ -62,6 +81,26 @@ export function LoginScreen() {
           >
             {t("auth.signIn")}
           </Button>
+          {/* #281 / ADR-121: Cloud social sign-in — deep-links the platform flow with the provider
+              pre-selected (?provider=<slug>; the server allowlists it). Absent on CE / tenant OIDC. */}
+          {social.length > 0 && (
+            <div className="mt-4 border-t border-border pt-4" data-testid="login-social">
+              <p className="mb-2 text-xs text-fg-dim">{t("auth.socialHint")}</p>
+              <div className="flex flex-col gap-2">
+                {social.map((slug) => (
+                  <Button
+                    key={slug}
+                    variant="default"
+                    className="w-full"
+                    data-testid={`login-social-${slug}`}
+                    onClick={() => { window.location.href = `/auth/login?provider=${encodeURIComponent(slug)}&returnTo=${encodeURIComponent(returnTo)}`; }}
+                  >
+                    {t("auth.continueWith", { provider: SOCIAL_LABELS[slug] })}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </main>
     </div>

@@ -35,6 +35,14 @@ export interface EnrollInput {
   policy: EnrollPolicy;
   /** JWT email claim (untrusted). Only used by the `domain` policy, and only against verified domains. */
   email?: string | null;
+  /**
+   * #281 / ADR-121 §3.5: the IdP's `email_verified` assertion, coerced tri-state (coerceEmailVerified).
+   * The `domain` policy requires EXACTLY `true` — an unverified or unknown email never domain-enrolls,
+   * regardless of what the broker (Authentik source) passed through. Server-side fortress: without this,
+   * a GitHub-style UNVERIFIED `alice@victim.example` (victim's domain DNS-verified) would auto-enroll
+   * into the victim tenant on a single upstream mis-config (takeover-into-tenant).
+   */
+  emailVerified?: boolean | null;
   /** Groups claim ALREADY normalised via coerceGroups (#102/#111). Never the raw claim. */
   groups: readonly string[];
   /** Domains the tenant PROVED ownership of (DNS TXT, #123/ADR-065). An un-verified domain is absent here. */
@@ -52,6 +60,10 @@ export function enrollEligible(input: EnrollInput): boolean {
     case "invite_only":
       return false; // only an invite accept enrols (current behaviour)
     case "domain": {
+      // #281 / ADR-121 §3.5: the email itself must be IdP-VERIFIED (exactly true; unknown/missing
+      // fails safe → the caller falls through to the invite path). Checked FIRST so an unverified
+      // spoofed address never even reaches the domain match.
+      if (input.emailVerified !== true) return false;
       const domain = emailDomain(input.email);
       // CRITICAL: match against VERIFIED domains only. `verifiedDomains` excludes un-proven entries, so a
       // spoofed victim.com (not proven by this tenant) is never present → not admitted.

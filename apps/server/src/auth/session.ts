@@ -136,7 +136,7 @@ export async function destroyMemberSessions(valkey: IORedis, tenantId: string, s
 export async function establishMemberSession(
   deps: { db: TenantDb; fga: OpenFgaClient; valkey: IORedis },
   tenant: { id: string; plan: string },
-  claims: { sub: string; email?: string | null; name?: string | null; picture?: string | null; groups?: string[] },
+  claims: { sub: string; email?: string | null; emailVerified?: boolean | null; name?: string | null; picture?: string | null; groups?: string[] },
 ): Promise<string> {
   // tenant#member is the authority (raw relation on a tenant object — not a page/
   // space Capability — so call FGA directly). Membership = the right to enter.
@@ -152,6 +152,10 @@ export async function establishMemberSession(
     const eligible = enrollEligible({
       policy: cfg.policy,
       email: claims.email,
+      // #281 / ADR-121 §3.5: the domain policy requires the IdP's verified assertion (exactly true).
+      // A caller that doesn't supply it (e.g. an IdP/protocol without the claim) falls safe to
+      // invite — an operational regression for such domain-enroll tenants, accepted by review.
+      emailVerified: claims.emailVerified ?? null,
       groups: coerceGroups(claims.groups, claims.sub), // re-normalise defensively (idempotent)
       verifiedDomains: cfg.verifiedDomains,
       allowedGroups: cfg.allowedGroups,
