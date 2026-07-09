@@ -1090,14 +1090,17 @@ function addLayoutItem(view: EditorView, pos: number, childName: "column" | "tab
   const closeLine = view.state.doc.lineAt(Math.min(d.to, view.state.doc.length)); // the closing container fence line
   view.dispatch({ changes: { from: closeLine.from, insert: `${colons}${childName}${label}\n\n${colons}\n` }, userEvent: "input.insert", scrollIntoView: true });
 }
-function removeLastLayoutItem(view: EditorView, pos: number, childName: "column" | "tab"): void {
+// #278 §1: remove the i-th column/tab (was #213's remove-LAST only). One offset-invariant Y.Text delete of
+// that child's fence range; never removes the last remaining item (a degenerate empty container).
+function removeLayoutItemAt(view: EditorView, pos: number, childName: "column" | "tab", index: number): void {
   const d = directiveMacroAt(view.state, pos);
   if (!d) return;
   const items = resolveDirectiveRanges(view.state.doc.toString()).filter((r) => r.name === childName && r.from >= d.from && r.to <= d.to);
   if (items.length <= 1) return; // never remove the last remaining item (an empty container is degenerate)
-  const last = items[items.length - 1]!;
-  const fromLine = view.state.doc.lineAt(last.from);
-  const toLine = view.state.doc.lineAt(Math.min(last.to, view.state.doc.length));
+  const it = items[index];
+  if (!it) return;
+  const fromLine = view.state.doc.lineAt(it.from);
+  const toLine = view.state.doc.lineAt(Math.min(it.to, view.state.doc.length));
   view.dispatch({ changes: { from: fromLine.from, to: Math.min(toLine.to + 1, view.state.doc.length) }, userEvent: "delete" });
 }
 
@@ -1557,28 +1560,38 @@ class MacroWidget extends WidgetType {
         // #255 the 3-button segmented align control (writes the diagram fence's `align=` attribute).
         btnRow.appendChild(makeAlignSegment(this.align, (a) => setDiagramAlign(view, view.posAtDOM(wrap), a)));
       }
-      // #213: columns/tabs get structural add/remove — a `+` appends a child :::column/:::tab and a `−`
-      // removes the last one (real Y.Text edits via addLayoutItem/removeLastLayoutItem). Shown on hover/
-      // selection (a hover row at the bottom-right, off the widget content). This is the structural-edit
-      // affordance the ADR-087 editUI framework generalises; here it's wired directly for the two layout
-      // containers whose child count is otherwise only editable by hand-typing the raw fences.
-      if (this.name === "columns" || this.name === "tabs") {
+      // #278 §1: columns/tabs structure ops are now PER-ITEM inline affordances on the rendered cells (retiring
+      // the #213 bottom-right +/− bar and the #257 panel's +/− buttons): each column/tab shows a hover `×`
+      // (remove THAT item — not just the last) and a trailing `` adds one. Editor surface only (added here, in
+      // the widget's !readOnly path — never in the read-only view / the panel preview, which use liveRender
+      // directly). Real Y.Text edits (removeLayoutItemAt / addLayoutItem); reorder-by-drag is a fast follow.
+      if ((this.name === "columns" || this.name === "tabs") && !view.state.readOnly && !nestedActive) {
         const child = this.name === "columns" ? "column" : "tab";
-        const row = document.createElement("div");
-        row.className = "cm-lp-macro-layoutbar";
-        const mk = (glyph: string, label: string, fn: () => void, testid: string) => {
-          const b = document.createElement("button");
-          b.type = "button";
-          b.className = "cm-lp-macro-layoutbtn";
-          b.textContent = glyph;
-          b.title = label;
-          b.setAttribute("data-testid", testid);
-          b.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); fn(); });
-          return b;
-        };
-        row.appendChild(mk("＋", `Add ${child}`, () => addLayoutItem(view, view.posAtDOM(wrap), child), `layout-add-${child}`));
-        row.appendChild(mk("－", `Remove ${child}`, () => removeLastLayoutItem(view, view.posAtDOM(wrap), child), `layout-remove-${child}`));
-        wrap.appendChild(row);
+        const cells = wrap.querySelectorAll<HTMLElement>(this.name === "columns" ? ".cm-lp-column" : ".cm-lp-tab");
+        cells.forEach((cell: HTMLElement, i: number) => {
+          // A span (not a button): the tab `×` nests inside a <button> tab, and a button-in-button is invalid.
+          // The `×` glyph comes from CSS ::before, NOT textContent, so it does NOT pollute the tab/column text
+          // (e.g. a tab's label stays "T1", not "T1×").
+          const x = document.createElement("span");
+          x.setAttribute("role", "button");
+          x.className = this.name === "columns" ? "cm-lp-layout-item-remove" : "cm-lp-tab-remove";
+          x.setAttribute("aria-label", `Remove ${child}`);
+          x.title = `Remove ${child}`;
+          x.setAttribute("data-testid", `layout-remove-${child}`);
+          // stopPropagation so removing doesn't also select the atom / switch the tab; preventDefault keeps focus.
+          x.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); removeLayoutItemAt(view, view.posAtDOM(wrap), child, i); });
+          if (this.name === "columns") cell.style.position = "relative"; // the × is absolutely placed in the cell
+          cell.appendChild(x);
+        });
+        const add = document.createElement("button");
+        add.type = "button";
+        add.className = "cm-lp-layout-item-add";
+        add.textContent = "＋";
+        add.title = `Add ${child}`;
+        add.setAttribute("data-testid", `layout-add-${child}`);
+        add.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); addLayoutItem(view, view.posAtDOM(wrap), child); });
+        // columns: the add rides the end of the flex row; tabs: it rides the end of the tab bar.
+        (this.name === "columns" ? wrap.querySelector(".cm-lp-columns") : wrap.querySelector(".cm-lp-tabbar"))?.appendChild(add);
       }
       // #210 / ADR-087: embed macros have no rich UI, but their TARGET (page id / URL) must be
       // changeable after insertion — otherwise a mis-picked embed strands the user in raw editing.
@@ -3115,11 +3128,17 @@ export const livePreviewTheme = EditorView.baseTheme({
   // callout-icons.css (GLOBAL) — the menu is mounted on document.body, outside .cm-editor, where these
   // baseTheme rules never applied; and keeping a baseTheme copy would OVERRIDE the global chip look for
   // the editUI panel's in-editor chips (higher editor-scoped specificity). One source: the global sheet.
-  // #213: columns/tabs structural add/remove bar — bottom-right, shown on hover/selection (same gating
-  // as the edit button). Sits below the content so it doesn't overlap the child bodies.
-  ".cm-lp-macro-layoutbar": { position: "absolute", bottom: "-0.6em", right: "0", display: "inline-flex", gap: "0.25em", opacity: "0", transition: "opacity 120ms", zIndex: "3", pointerEvents: "auto" },
-  ".cm-lp-macro-layoutbtn": { display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.5em", height: "1.5em", border: "1px solid var(--border, #888)", borderRadius: "4px", background: "var(--panel, #fff)", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.85em", lineHeight: "1", padding: "0" },
-  ".cm-lp-macro-wrap:hover .cm-lp-macro-layoutbar, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-layoutbar": { opacity: "1" },
+  // #278 §1: PER-ITEM structure affordances on columns/tabs (retired the #213 bottom bar). A column's `×`
+  // sits top-right IN the cell (hover-revealed); a tab's `×` rides the tab button; a trailing `` adds one.
+  // The `×` glyph is a ::before so it never enters textContent (keeps tab labels / column text clean).
+  ".cm-lp-layout-item-remove::before, .cm-lp-tab-remove::before": { content: '"×"' },
+  ".cm-lp-layout-item-remove": { position: "absolute", top: "2px", right: "2px", zIndex: "3", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.4em", height: "1.4em", border: "1px solid var(--border, #888)", borderRadius: "4px", background: "var(--panel, #fff)", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.85em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
+  ".cm-lp-column:hover .cm-lp-layout-item-remove": { opacity: "1" },
+  ".cm-lp-tab-remove": { marginLeft: "0.4em", border: "none", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
+  ".cm-lp-tab:hover .cm-lp-tab-remove, .cm-lp-tabbar:hover .cm-lp-tab-remove": { opacity: "0.7" },
+  ".cm-lp-tab-remove:hover": { opacity: "1", color: "var(--fg, inherit)" },
+  ".cm-lp-layout-item-add": { flex: "0 0 auto", alignSelf: "flex-start", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.6em", height: "1.6em", border: "1px dashed var(--border, #888)", borderRadius: "4px", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
+  ".cm-lp-macro-wrap:hover .cm-lp-layout-item-add, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-layout-item-add": { opacity: "1" },
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
   ".cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap:hover .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-align": { opacity: "1" },

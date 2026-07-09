@@ -63,18 +63,21 @@ test("#257: tabs editUI panel — switch tabs, edit content, add a tab, round-tr
   await content.fill("beta-edited");
   await content.blur();
   await sleep(300);
-  await page.locator("[data-pane=preview] [data-testid=layout-edit-add]").click();
-  await sleep(400);
-  // The add committed to the doc → the panel re-mounts from the new source with 3 tabs (round-trip).
-  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit-chip]")).toHaveCount(3);
-  // The edited second tab survived the round-trip: re-select it and confirm its content re-parsed from doc.
-  await page.locator("[data-pane=preview] [data-testid=layout-edit-chip]", { hasText: "Two" }).click();
-  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit-content]")).toHaveValue("beta-edited");
-
-  // Exit → the block re-renders as the tabs widget with all three tabs (rendered, not raw).
+  // #278 §1: the panel is CONTENT-only now — structure (add/remove) moved to inline affordances on the
+  // rendered widget. Exit the panel, then add a tab via the trailing on the rendered tab bar.
   await page.keyboard.press("Escape");
   await sleep(300);
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-tabs] .cm-lp-tab")).toHaveCount(2);
+  await page.locator("[data-pane=preview] [data-testid=macro-tabs]").hover();
+  await sleep(150);
+  await page.locator("[data-pane=preview] [data-testid=layout-add-tab]").click({ force: true });
+  await sleep(400);
+  await page.getByText("below").click();
+  await sleep(200); // caret out → the widget re-renders with 3 tabs (round-trip)
   await expect(page.locator("[data-pane=preview] [data-testid=macro-tabs] .cm-lp-tab")).toHaveCount(3);
+  // The edited second tab survived the add round-trip: switch to it and confirm.
+  await page.locator("[data-pane=preview] [data-testid=macro-tabs] .cm-lp-tab", { hasText: "Two" }).click();
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-tabs] .cm-lp-tabpanel-active")).toContainText("beta-edited");
 });
 
 // XSS boundary (parity with ::::columns): a tab panel's inner Markdown is rendered via the S0

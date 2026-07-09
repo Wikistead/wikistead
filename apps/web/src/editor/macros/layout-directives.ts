@@ -98,18 +98,9 @@ function layoutEditUI(kind: "tabs" | "columns", childName: "tab" | "column", liv
           chip.addEventListener("click", () => { active = i; renderBar(); renderEditArea(); });
           bar.appendChild(chip);
         });
-        const add = document.createElement("button");
-        add.type = "button";
-        add.className = "cm-lp-layout-edit-add";
-        add.setAttribute("data-testid", "layout-edit-add");
-        add.textContent = "+";
-        add.title = kind === "tabs" ? i18n.t("layoutEdit.addTab") : i18n.t("layoutEdit.addColumn");
-        add.addEventListener("click", () => {
-          items.push({ content: "", ...(kind === "tabs" ? { label: i18n.t("layoutEdit.tabN", { n: items.length + 1 }) } : {}) });
-          active = items.length - 1;
-          renderBar(); renderEditArea(); commit();
-        });
-        bar.appendChild(add);
+        // #278 §1: the panel's structure buttons (+ add / − remove / ◀▶ reorder) are RETIRED — structure
+        // ops now live as per-item inline `×`/`` affordances on the rendered container cells (decorations.ts).
+        // The panel is content-only (switch item via chips, edit its text/label) until §2 replaces it entirely.
       }
 
       function renderEditArea() {
@@ -136,40 +127,8 @@ function layoutEditUI(kind: "tabs" | "columns", childName: "tab" | "column", liv
         ta.addEventListener("input", () => { it.content = ta.value; renderPreview(); }); // live preview, no doc write
         ta.addEventListener("change", commit); // commit on blur
         editArea.appendChild(ta);
-        // remove the active item (never the last one).
-        if (items.length > 1) {
-          const del = document.createElement("button");
-          del.type = "button";
-          del.className = "cm-lp-layout-edit-remove";
-          del.setAttribute("data-testid", "layout-edit-remove");
-          del.textContent = kind === "tabs" ? i18n.t("layoutEdit.removeTab") : i18n.t("layoutEdit.removeColumn");
-          del.addEventListener("click", () => {
-            items.splice(active, 1);
-            active = Math.max(0, Math.min(active, items.length - 1));
-            renderBar(); renderEditArea(); commit();
-          });
-          editArea.appendChild(del);
-        }
-        // tabs: reorder the active tab left / right.
-        if (kind === "tabs" && items.length > 1) {
-          const move = (dir: -1 | 1) => {
-            const j = active + dir;
-            if (j < 0 || j >= items.length) return;
-            [items[active], items[j]] = [items[j]!, items[active]!];
-            active = j; renderBar(); renderEditArea(); commit();
-          };
-          const left = document.createElement("button");
-          left.type = "button"; left.className = "cm-lp-layout-edit-move"; left.textContent = "◀";
-          left.setAttribute("data-testid", "layout-edit-move-left");
-          left.title = i18n.t("layoutEdit.moveLeft");
-          left.addEventListener("click", () => move(-1));
-          const right = document.createElement("button");
-          right.type = "button"; right.className = "cm-lp-layout-edit-move"; right.textContent = "▶";
-          right.setAttribute("data-testid", "layout-edit-move-right");
-          right.title = i18n.t("layoutEdit.moveRight");
-          right.addEventListener("click", () => move(1));
-          editArea.append(left, right);
-        }
+        // #278 §1: remove / reorder buttons RETIRED here — structure ops are the per-item inline
+        // affordances on the rendered cells now (decorations.ts). The panel edits CONTENT only.
         const focus = setTimeout(() => ta.focus(), 0);
         ta.addEventListener("blur", () => clearTimeout(focus), { once: true });
       }
