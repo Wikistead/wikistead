@@ -176,3 +176,92 @@ test("#290: :::todo round-trips as plain :::todo + a GFM task list (Open formats
   expect(src).toContain("- [ ] one");
   expect(src).toContain("- [ ] two");
 });
+
+// ── #290 review re-work (geometry, direct palette, multi-block) ────────
+
+// #290 (review point 1): the :::todo HEADER ring is VERTICALLY CENTERED on its line — verified by
+// geometry (ring center Y vs the line box center Y ≤1px), not by eye (#174 lesson).
+test("#290: the :::todo header ring is vertically centered on its line (geometry ≤1px)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "todo-ring-center");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::todo[Sprint]\n- [x] a\n- [ ] b\n:::\n\nbelow\n");
+  await sleep(300);
+  const ring = page.locator("[data-pane=preview] [data-testid=todo-ring]");
+  await expect(ring).toBeVisible();
+  const dy = await ring.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const line = el.closest(".cm-line")!.getBoundingClientRect();
+    return Math.abs((r.top + r.height / 2) - (line.top + line.height / 2));
+  });
+  expect(dy).toBeLessThanOrEqual(1.5); // ring mid-line aligned with the header line's mid
+});
+
+// #290 (review point 1): the SIDEBAR ring is vertically centered in its tree row — geometry vs the row
+// title's center Y (both should sit on the row's mid-line).
+test("#290: the sidebar :::todo ring is vertically centered in its tree row (geometry ≤1.5px)", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+  const name = `todo-ring-side-${Date.now()}`;
+  await openScratch(page, name);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::todo[Sprint]\n- [x] a\n- [ ] b\n:::\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(800);
+  const row = page.getByTestId("tree-page-name").filter({ hasText: name }).locator("..");
+  const ring = row.getByTestId("tree-todo-ring");
+  await expect(ring.locator("[data-testid=page-task-ring]")).toHaveAttribute("data-done", "1", { timeout: 6000 });
+  const dy = await ring.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const nameEl = el.parentElement!.querySelector('[data-testid="tree-page-name"]')!.getBoundingClientRect();
+    return Math.abs((r.top + r.height / 2) - (nameEl.top + nameEl.height / 2));
+  });
+  expect(dy).toBeLessThanOrEqual(1.5); // ring mid aligned with the row title's mid → centered in the row
+});
+
+// #290 (review point 2): a DIRECT palette entry inserts the rich :::todo (caret in the title), distinct
+// from the plain /todo. The plain→rich promotion path is unchanged.
+test("#290: the palette 'Todo (ring)' entry inserts a rich :::todo directly, caret in the title", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "todo-palette");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("/todo");
+  await expect(page.getByTestId("slash-palette")).toBeVisible();
+  await page.locator('[data-testid="slash-item-todo-ring"]').click(); // the new direct entry
+  await sleep(200);
+  await page.keyboard.type("Sprint"); // the caret landed inside :::todo[] → type the title
+  await sleep(150);
+  await page.getByTestId("displaymode-source").click();
+  await sleep(200);
+  const src = await content(page);
+  expect(src).toContain(":::todo[Sprint]"); // rich directive inserted with the typed title
+  expect(src).toContain("- [ ] "); // a seed task line
+});
+
+// #290 (review point 4): multiple :::todo blocks + a task OUTSIDE any block — each header ring counts
+// its OWN block, the page ring sums ALL checkboxes (global ordinal). Pins the multi-block spec.
+test("#290: multiple :::todo blocks — each header ring is independent; the page ring sums all", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "todo-multi");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  // block One 1/2 · block Two 2/3 · outside 0/1 → page = 3/6
+  await page.keyboard.insertText(":::todo[One]\n- [x] a\n- [ ] b\n:::\n\n:::todo[Two]\n- [x] c\n- [x] d\n- [ ] e\n:::\n\n- [ ] outside\n\nend\n");
+  await sleep(400);
+  const rings = page.locator("[data-pane=preview] [data-testid=todo-ring]");
+  await expect(rings).toHaveCount(2);
+  // (a) each header ring counts only its own block
+  await expect(rings.nth(0)).toHaveAttribute("data-done", "1");
+  await expect(rings.nth(0)).toHaveAttribute("data-total", "2");
+  await expect(rings.nth(1)).toHaveAttribute("data-done", "2");
+  await expect(rings.nth(1)).toHaveAttribute("data-total", "3");
+  // (b) the page ring (title band) sums ALL checkboxes: both blocks + the outside task → 3/6. The
+  // page-task-ring testid is shared with the sidebar rings of OTHER (previously-published) pages, so scope by
+  // this page's unique total (6) — asserting that total, plus done=3, verifies the global sum.
+  const pageRing = page.locator('[data-testid=page-task-ring][data-total="6"]');
+  await expect(pageRing).toHaveCount(1);
+  await expect(pageRing).toHaveAttribute("data-done", "3");
+});

@@ -585,6 +585,7 @@
     "bulletList": "Bullet list",
     "numberedList": "Numbered list",
     "todoList": "To-do list",
+    "todoRing": "To-do (with progress ring)",
     "quote": "Quote",
     "codeBlock": "Code block",
     "table": "Table",

@@ -62,8 +62,13 @@ const COMMANDS: PaletteCommand[] = [
   { id: "ul", label: () => i18n.t("palette.bulletList"), alias: "list", keywords: "bullet unordered dash", insert: "- ", caret: 2 },
   { id: "ol", label: () => i18n.t("palette.numberedList"), alias: "1. list", keywords: "numbered ordered", insert: "1. ", caret: 3 },
   // #290 / ADR-114: /todo inserts a PLAIN GFM task list (standard Markdown, no directive). The
-  // rich :::todo form (title + progress ring) is reached later by PROMOTING the block (table precedent).
+  // rich :::todo form (title + progress ring) is reached by PROMOTING the block (table precedent) OR, per the
+  // review request, DIRECTLY via its own palette entry below (the promotion path stays unchanged).
   { id: "todo", label: () => i18n.t("palette.todoList"), alias: "todo", keywords: "task checklist checkbox todo done タスク チェック 進捗 やること", insert: "- [ ] ", caret: 6 },
+  // #290 (review): the rich :::todo directly — a titled block with a progress ring. Caret lands inside
+  // the `[]` title (offset 8 = after ":::todo["). Distinct from /todo so both the plain and rich forms are
+  // reachable from the palette; the plain→rich promotion (Ctrl+Enter) is unaffected.
+  { id: "todo-ring", label: () => i18n.t("palette.todoRing"), alias: "todo ring", keywords: "todo ring progress タスク 進捗 リング 見出し付き", insert: ":::todo[]\n- [ ] \n:::", caret: 8 },
   { id: "quote", label: () => i18n.t("palette.quote"), alias: "quote", keywords: "blockquote citation", insert: "> ", caret: 2 },
   { id: "code", label: () => i18n.t("palette.codeBlock"), alias: "code", keywords: "code block fenced pre", insert: "```\n\n```", caret: 4 },
   { id: "table", label: () => i18n.t("palette.table"), alias: "table", keywords: "grid", insert: "| Column | Column |\n| --- | --- |\n| Cell | Cell |", caret: [2, 8] },
