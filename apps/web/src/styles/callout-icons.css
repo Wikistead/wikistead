@@ -54,6 +54,8 @@
 .cm-lp-todo-demote{position:absolute;right:3.6em;top:0.05em;border:none;background:transparent;color:var(--fg-dim,#888);cursor:pointer;font-size:0.85em;line-height:1;padding:0.15em 0.3em;border-radius:4px;opacity:0;transition:opacity 120ms ease}
 .cm-lp-todo:hover .cm-lp-todo-demote{opacity:1}
 .cm-lp-todo-demote:hover{background:color-mix(in srgb,var(--fg-dim,#888) 18%,transparent);color:var(--fg,#222)}
+/* #290 (increment A): the title-band page-progress ring flows inline (not absolute like the macro header). */
+.wks-page-ring{display:inline-flex;align-items:center;gap:0.3em;font-size:0.8em;color:var(--fg-dim,#888);vertical-align:middle}
 /* #185: the nested renderMarkdownToDom output (inside columns / tabs / transclude / a callout panel
    body) must have the SAME vertical rhythm as top-level blocks. Without this, paragraphs and dispatched
    macros (mermaid / nested callouts / tables) rendered flush against each other — the paragraph/blank-
