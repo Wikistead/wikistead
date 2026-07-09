@@ -84,6 +84,13 @@
 .cm-lp-md-preview svg{max-width:100%;height:auto}
 .cm-lp-md-preview img{max-width:100%;height:auto}
 .cm-lp-md-preview table{display:block;max-width:100%;overflow-x:auto}
+/* #305the inline-image convention for every rendered-markdown container (column/tab bodies,
+   callout panels, transcludes, previews) — the SAME rule as the editor's cm-lp-image-inline and the
+   public reader. The Tailwind preflight sets img{display:block}, so an image sharing its paragraph
+   with text must be forced back inline (thumbnail); a standalone image (its own paragraph = only
+   child) stays a block at full width. */
+:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) p img{display:inline-block;max-height:1.6em;width:auto;vertical-align:text-bottom}
+:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) p img:only-child{display:block;max-height:none;max-width:100%;width:auto;vertical-align:bottom}
 .cm-lp-column>*+*,.cm-lp-tabpanel>*+*,.cm-lp-embed-page>*+*,.cm-lp-callout-panel-body>*+*,.cm-lp-md-preview>*+*{margin-top:var(--lp-block-gap)}
 .cm-lp-column>*:first-child,.cm-lp-tabpanel>*:first-child,.cm-lp-embed-page>*:first-child,.cm-lp-md-preview>*:first-child{margin-top:0}
 

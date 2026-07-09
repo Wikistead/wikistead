@@ -3144,7 +3144,9 @@ export const livePreviewTheme = EditorView.baseTheme({
   // surrounding text onto new visual rows — the "a newline got inserted" report). Click/enter still reaches
   // the raw source; place the image on its OWN line for the full-size standalone atom (#255, unaffected — it
   // uses cm-lp-image WITHOUT this modifier, inside cm-lp-image-wrap).
-  ".cm-lp-image-inline": { maxHeight: "1.6em", width: "auto", verticalAlign: "text-bottom" },
+  //display must be OVERRIDDEN here — the Tailwind Preflight sets `img { display: block }` on every
+  // img, so without inline-block the thumbnail still broke the line (sized right, but block = own row).
+  ".cm-lp-image-inline": { display: "inline-block", maxHeight: "1.6em", width: "auto", verticalAlign: "text-bottom" },
   // #255 comment 1036: a standalone-image line centres its (inline) <img>. Display-only — the line deco is
   // dropped when the line reveals raw for editing, so it never shifts offsets or affects motion.
   ".cm-lp-img-center": { textAlign: "center" },
