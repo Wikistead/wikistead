@@ -12,8 +12,10 @@ import { extractHeadings } from "../headings";
 // display-only and offset-invariant, revealed by CSS on line hover with zero per-mousemove dispatches.
 // The copied URL is origin+pathname only (never ?edit=1 / ?diff= — an anchor must not force a mode).
 
-// Lucide link glyph (trusted constant — shared with the public-reader DOM variant).
-export const HEADING_LINK_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
+// Lucide link glyph (trusted constant — shared with the public-reader DOM variant). Sized in em
+//: the icon follows the HEADING's font size (h1 gets a big icon, h6 a small one) instead of
+// a fixed 14px. Requires the host button to inherit the heading's font-size (both surfaces do).
+export const HEADING_LINK_ICON = '<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
 
 export function headingAnchorUrl(slug: string): string {
   return `${window.location.origin}${window.location.pathname}#${encodeURIComponent(slug)}`;
@@ -66,6 +68,11 @@ const headingAnchorTheme = EditorView.baseTheme({
     marginLeft: "0.3em",
     verticalAlign: "baseline",
     transition: "opacity 120ms",
+    // a <button> does NOT inherit font by default (UA font: menu), so the 1em icon would
+    // resolve against ~13px regardless of the heading. Inherit the heading line's font-size so the
+    // icon scales with h1…h6.
+    fontSize: "inherit",
+    lineHeight: "1",
   },
   ".cm-line:hover .cm-lp-heading-anchor, .cm-lp-heading-anchor:focus-visible": { opacity: "1" },
   ".cm-lp-heading-anchor:hover": { color: "var(--fg)" },

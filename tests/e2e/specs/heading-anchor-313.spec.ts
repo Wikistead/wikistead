@@ -67,6 +67,29 @@ test("#313 member surface: hovering a heading reveals 🔗; click copies /p/:id#
   expect(copied).not.toContain("?");
 });
 
+// (review bounce): the 🔗 follows the HEADING's font size — an h1's icon is visibly larger
+// than an h3's (was a fixed 14px at every level). Pinned via the icon svg's rendered height per level.
+test("#313 the anchor icon scales with the heading level (h1 icon > h3 icon)", async ({ browser }) => {
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  await openScratch(page, "anchor-icon-size");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("# Big Heading\n\nprose\n\n### Small Heading\n\nprose\n");
+  await sleep(400);
+
+  const iconHeight = async (text: string) => {
+    const line = page.locator(".cm-line", { hasText: text }).first();
+    const svg = line.locator("[data-testid=heading-anchor-copy] svg");
+    await expect(svg).toHaveCount(1);
+    return (await svg.boundingBox())!.height;
+  };
+  const h1 = await iconHeight("Big Heading");
+  const h3 = await iconHeight("Small Heading");
+  expect(h1, `h1 icon ${h1}px should be larger than a fixed 14px`).toBeGreaterThan(20);
+  expect(h1, `h1 icon ${h1}px vs h3 icon ${h3}px`).toBeGreaterThan(h3 * 1.2);
+});
+
 test("#313 deep link: /p/:id#slug lands the heading below the band; unknown slug stays at top", async ({ browser }) => {
   const ctx = await browser.newContext();
   const author = await ctx.newPage();
