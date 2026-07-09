@@ -4,8 +4,8 @@ import type { TenantDb } from '../db/index.js'
 import type { StorageDriver } from '../storage/index.js'
 // Account settings option sets live in the pure settings-catalog leaf (#139 doc↔code linkage):
 // the SINGLE source for both this route's validation and the generated settings reference.
-import { KEYMAP_MODES, DISPLAY_MODE_PREFS, REMAPPABLE_COMMANDS, RESERVED_KEYS, type KeymapMode, type DisplayModePref } from '../settings-catalog.js'
-export type { KeymapMode, DisplayModePref }
+import { KEYMAP_MODES, DISPLAY_MODE_PREFS, REMAPPABLE_COMMANDS, RESERVED_KEYS, validateEditorChrome, type KeymapMode, type DisplayModePref, type EditorChromeVisibility } from '../settings-catalog.js'
+export type { KeymapMode, DisplayModePref, EditorChromeVisibility }
 
 // ADR-020 — personal account settings. SELF-SCOPE: every read/write is keyed to the
 // authenticated member's own row (WHERE sub = req.user.sub) + tenant RLS. This is
@@ -49,15 +49,20 @@ export interface AccountSettings {
   editorDisplayMode: DisplayModePref  // startup display mode (ADR-056 / #164)
   keybindings: Record<string, string> // commandId → chord override (ADR-021); {} = defaults
   hasAvatar: boolean                  // an uploaded avatar exists (else OIDC/initials)
+  // #289 / ADR-115: chrome visibility (null = never enrolled → all shown) + the first-run gate
+  // (null = the two-question flow has not been seen → the client fires it once).
+  editorChrome: EditorChromeVisibility | null
+  onboardingCompletedAt: string | null
 }
 
 export async function getAccountSettings(db: TenantDb, args: { subject: string }): Promise<AccountSettings> {
-  const [m] = await db.sql<[{ display_name: string | null; display_name_override: string | null; avatar_image_key: string | null; editor_keymap: string | null; editor_display_mode: string | null; keybindings: unknown }?]>`
-    SELECT display_name, display_name_override, avatar_image_key, editor_keymap, editor_display_mode, keybindings
+  const [m] = await db.sql<[{ display_name: string | null; display_name_override: string | null; avatar_image_key: string | null; editor_keymap: string | null; editor_display_mode: string | null; keybindings: unknown; editor_chrome: unknown; onboarding_completed_at: Date | string | null }?]>`
+    SELECT display_name, display_name_override, avatar_image_key, editor_keymap, editor_display_mode, keybindings, editor_chrome, onboarding_completed_at
     FROM members WHERE sub = ${args.subject} LIMIT 1`
   if (!m) throw Object.assign(new Error('no member row'), { statusCode: 404 })
   // JSONB comes back as a raw JSON string from this pg driver — parse it (null → {}).
   const kb = m.keybindings == null ? {} : typeof m.keybindings === 'string' ? JSON.parse(m.keybindings) : m.keybindings
+  const chromeRaw = m.editor_chrome == null ? null : typeof m.editor_chrome === 'string' ? JSON.parse(m.editor_chrome) : m.editor_chrome
   return {
     displayName: m.display_name_override ?? m.display_name ?? null,
     oidcDisplayName: m.display_name ?? null,
@@ -66,6 +71,8 @@ export async function getAccountSettings(db: TenantDb, args: { subject: string }
     editorDisplayMode: (DISPLAY_MODE_PREFS as string[]).includes(m.editor_display_mode ?? '') ? (m.editor_display_mode as DisplayModePref) : 'local',
     keybindings: kb as Record<string, string>,
     hasAvatar: !!m.avatar_image_key,
+    editorChrome: chromeRaw as EditorChromeVisibility | null,
+    onboardingCompletedAt: m.onboarding_completed_at == null ? null : new Date(m.onboarding_completed_at).toISOString(),
   }
 }
 
@@ -74,7 +81,7 @@ export async function getAccountSettings(db: TenantDb, args: { subject: string }
 // only display_name, so the override set here survives re-login (ADR-020 D2).
 export async function updateAccountSettings(
   db: TenantDb,
-  args: { subject: string; displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string> },
+  args: { subject: string; displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean },
 ): Promise<AccountSettings> {
   if (args.editorKeymap !== undefined && !(KEYMAP_MODES as string[]).includes(args.editorKeymap)) {
     throw Object.assign(new Error('invalid keymap'), { statusCode: 400 })
@@ -83,6 +90,13 @@ export async function updateAccountSettings(
     throw Object.assign(new Error('invalid display mode'), { statusCode: 400 })
   }
   if (args.keybindings !== undefined) validateKeybindings(args.keybindings)
+  // #289: chrome visibility — strict shape (or explicit null = reset to defaults/all-shown).
+  const chrome = args.editorChrome === undefined ? undefined : args.editorChrome === null ? null : validateEditorChrome(args.editorChrome)
+  // #289: the onboarding marker is one-way (a client can mark seen, never un-see — re-running the
+  // questions goes through the settings redo entry, which does not need the flag cleared).
+  if (args.onboardingCompleted !== undefined && args.onboardingCompleted !== true) {
+    throw Object.assign(new Error('invalid onboardingCompleted'), { statusCode: 400 })
+  }
   if (args.displayNameOverride !== undefined) {
     const v = args.displayNameOverride?.trim() ? args.displayNameOverride.trim() : null
     await db.sql`UPDATE members SET display_name_override = ${v}, updated_at = now() WHERE sub = ${args.subject}`
@@ -95,6 +109,12 @@ export async function updateAccountSettings(
   }
   if (args.keybindings !== undefined) {
     await db.sql`UPDATE members SET keybindings = ${JSON.stringify(args.keybindings)}::jsonb, updated_at = now() WHERE sub = ${args.subject}`
+  }
+  if (chrome !== undefined) {
+    await db.sql`UPDATE members SET editor_chrome = ${chrome === null ? null : JSON.stringify(chrome)}::jsonb, updated_at = now() WHERE sub = ${args.subject}`
+  }
+  if (args.onboardingCompleted === true) {
+    await db.sql`UPDATE members SET onboarding_completed_at = COALESCE(onboarding_completed_at, now()), updated_at = now() WHERE sub = ${args.subject}`
   }
   return getAccountSettings(db, { subject: args.subject })
 }
@@ -130,8 +150,8 @@ export async function accountPlugin(app: FastifyInstance) {
   // All member-gated (the default guard requires req.user; guests/unauth are rejected).
   app.get('/me/settings', async (req) => getAccountSettings(req.db, { subject: req.user.sub }))
 
-  app.patch<{ Body: { displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string> } }>('/me/settings', async (req) =>
-    updateAccountSettings(req.db, { subject: req.user.sub, displayNameOverride: req.body?.displayNameOverride, editorKeymap: req.body?.editorKeymap, editorDisplayMode: req.body?.editorDisplayMode, keybindings: req.body?.keybindings }),
+  app.patch<{ Body: { displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean } }>('/me/settings', async (req) =>
+    updateAccountSettings(req.db, { subject: req.user.sub, displayNameOverride: req.body?.displayNameOverride, editorKeymap: req.body?.editorKeymap, editorDisplayMode: req.body?.editorDisplayMode, keybindings: req.body?.keybindings, editorChrome: req.body?.editorChrome, onboardingCompleted: req.body?.onboardingCompleted }),
   )
 
   app.put<{ Body: { data?: string } }>('/me/avatar', { bodyLimit: AVATAR_BODY_LIMIT }, async (req, reply) => {

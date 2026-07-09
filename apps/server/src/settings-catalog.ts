@@ -5,8 +5,31 @@
 export type KeymapMode = 'default' | 'vim' | 'local'
 export const KEYMAP_MODES: KeymapMode[] = ['default', 'vim', 'local']
 
-export type DisplayModePref = 'live' | 'source' | 'local'
-export const DISPLAY_MODE_PREFS: DisplayModePref[] = ['live', 'source', 'local']
+// #289 / ADR-115: 'wysiwyg' joined the STARTUP set (the wysiwyg persona boots there; #168 shipped
+// the mode). 'reading' stays deliberately non-startup — it is a mid-session display state.
+export type DisplayModePref = 'live' | 'source' | 'wysiwyg' | 'local'
+export const DISPLAY_MODE_PREFS: DisplayModePref[] = ['live', 'source', 'wysiwyg', 'local']
+
+// #289 / ADR-115: the per-user editor CHROME VISIBILITY object (JSONB `members.editor_chrome`).
+// Visibility ONLY — the startup mode stays in editor_display_mode (single source of truth, #2).
+// null = never enrolled → all chrome shown. Validated strictly (unknown keys / non-booleans 400).
+export interface EditorChromeVisibility {
+  vimToggleVisible: boolean
+  modesVisible: { live: boolean; source: boolean; reading: boolean; wysiwyg: boolean }
+}
+export const CHROME_MODES = ['live', 'source', 'reading', 'wysiwyg'] as const
+export function validateEditorChrome(v: unknown): EditorChromeVisibility {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) throw Object.assign(new Error('invalid editorChrome'), { statusCode: 400 })
+  const o = v as Record<string, unknown>
+  if (Object.keys(o).sort().join(',') !== 'modesVisible,vimToggleVisible') throw Object.assign(new Error('invalid editorChrome keys'), { statusCode: 400 })
+  if (typeof o.vimToggleVisible !== 'boolean') throw Object.assign(new Error('invalid vimToggleVisible'), { statusCode: 400 })
+  const mv = o.modesVisible
+  if (typeof mv !== 'object' || mv === null || Array.isArray(mv)) throw Object.assign(new Error('invalid modesVisible'), { statusCode: 400 })
+  const mo = mv as Record<string, unknown>
+  if (Object.keys(mo).sort().join(',') !== [...CHROME_MODES].sort().join(',')) throw Object.assign(new Error('invalid modesVisible keys'), { statusCode: 400 })
+  for (const k of CHROME_MODES) if (typeof mo[k] !== 'boolean') throw Object.assign(new Error(`invalid modesVisible.${k}`), { statusCode: 400 })
+  return { vimToggleVisible: o.vimToggleVisible, modesVisible: { live: mo.live as boolean, source: mo.source as boolean, reading: mo.reading as boolean, wysiwyg: mo.wysiwyg as boolean } }
+}
 
 // Remappable chord commands (ADR-021) — ONLY these may be rebound; structural/contextual keys
 // (`/` `\` Enter/Esc/Tab, mnemonics, ex-commands) and vim's own keymap are fixed.
@@ -22,6 +45,7 @@ const KEYMAP_DESC: Record<KeymapMode, string> = {
 const DISPLAY_DESC: Record<DisplayModePref, string> = {
   live: 'Always start in Live preview.',
   source: 'Always start in Source mode.',
+  wysiwyg: 'Always start in WYSIWYG (hidden-syntax) mode.',
   local: "Follow this device's last choice (the default).",
 }
 

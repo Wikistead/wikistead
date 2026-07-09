@@ -7,7 +7,9 @@
     "loading": "読み込み中…",
     "untitled": "無題",
     "on": "ON",
-    "off": "OFF"
+    "off": "OFF",
+    "yes": "はい",
+    "no": "いいえ"
   },
   "embedPicker": {
     "title": "ページを埋め込む",
@@ -127,7 +129,14 @@
     "accent": "アクセントカラー",
     "accentHint": "あなた個人のアクセント色。あなたにだけワークスペースのアクセントを上書きします。",
     "accentInherit": "デフォルト（ワークスペースに合わせる）",
-    "dataHint": "オープンなフォーマットで知識を持ち出せます。"
+    "dataHint": "オープンなフォーマットで知識を持ち出せます。",
+    "chrome": "エディタの表示コントロール",
+    "chromeHint": "表示するエディタコントロールを選べます。非表示にしても機能自体は無効になりません。",
+    "chromeVimShown": "Vim ボタン：表示",
+    "chromeVimHidden": "Vim ボタン：非表示",
+    "chromeModesHint": "モード切替に出す項目（最低 1 つは表示・非表示のモードは巡回ショートカットからも除外されます）。",
+    "chromeRedo": "最初の質問をやり直す",
+    "displayMode_wysiwyg": "常に WYSIWYG で開始"
   },
   "settings": {
     "back": "アプリに戻る",
@@ -761,5 +770,23 @@
     "tenantButton": "Markdown ZIP で全体をエクスポート",
     "done": "エクスポートをダウンロードしました",
     "tooLarge": "エクスポートがサイズ上限を超えています。スペース単位でエクスポートしてください。"
+  },
+  "onboarding": {
+    "title": "エディタの初期設定",
+    "q1": "vim キーバインドで操作しますか？",
+    "q2": "markdown 記法を使いますか？",
+    "unsureNo": "わからなければ「いいえ」を選んでください。",
+    "later": "あとで（設定からいつでも実行できます）",
+    "doneTitle": "あなたに最適化しました！",
+    "doneBody": "変更した内容：",
+    "doneHint": "設定 → アカウント → エディタ でいつでも細かく調整できます。",
+    "changedVimOn": "vim キーバインドを ON にしました（Vim ボタンを表示）",
+    "changedHidVim": "Vim ボタンを非表示にしました（設定で戻せます）",
+    "changedStartLive": "初期モードを Live プレビューにしました",
+    "changedStartWysiwyg": "初期モードを WYSIWYG にしました",
+    "changedHidWysiwyg": "モード切替から WYSIWYG を非表示にしました",
+    "changedHidMarkdownModes": "モード切替から Live / Source を非表示にしました",
+    "bannerText": "新機能：書き方に合わせてエディタを最適化できます。",
+    "bannerCta": "設定する"
   }
 }

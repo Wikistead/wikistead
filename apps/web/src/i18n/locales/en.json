@@ -7,7 +7,9 @@
     "loading": "Loading…",
     "untitled": "Untitled",
     "on": "ON",
-    "off": "OFF"
+    "off": "OFF",
+    "yes": "Yes",
+    "no": "No"
   },
   "embedPicker": {
     "title": "Embed a page",
@@ -127,7 +129,14 @@
     "accent": "Accent colour",
     "accentHint": "Your personal accent colour. Overrides the workspace accent for you only.",
     "accentInherit": "Default (match workspace)",
-    "dataHint": "Take your knowledge out in open formats."
+    "dataHint": "Take your knowledge out in open formats.",
+    "chrome": "Editor controls",
+    "chromeHint": "Choose which editor controls are visible. Hiding a control never disables the feature.",
+    "chromeVimShown": "Vim button: shown",
+    "chromeVimHidden": "Vim button: hidden",
+    "chromeModesHint": "Modes offered by the display-mode switch (at least one stays on; hidden modes are skipped by the cycle shortcut).",
+    "chromeRedo": "Redo the setup questions",
+    "displayMode_wysiwyg": "Always start in WYSIWYG"
   },
   "settings": {
     "back": "Back to app",
@@ -762,5 +771,23 @@
     "tenantButton": "Export all as Markdown ZIP",
     "done": "Export downloaded",
     "tooLarge": "The export exceeds the size limit. Try exporting spaces individually."
+  },
+  "onboarding": {
+    "title": "Set up your editor",
+    "q1": "Do you use vim keybindings?",
+    "q2": "Do you use markdown syntax?",
+    "unsureNo": "If unsure, say no.",
+    "later": "Skip for now (you can set this up later in Settings)",
+    "doneTitle": "We've optimized it for you!",
+    "doneBody": "Here's what changed:",
+    "doneHint": "You can fine-tune all of this any time in Settings → Account → Editor.",
+    "changedVimOn": "Turned vim keybindings on (the Vim button is shown)",
+    "changedHidVim": "Hid the Vim button (re-enable it in Settings)",
+    "changedStartLive": "Set your startup mode to Live preview",
+    "changedStartWysiwyg": "Set your startup mode to WYSIWYG",
+    "changedHidWysiwyg": "Hid the WYSIWYG mode from the switch",
+    "changedHidMarkdownModes": "Hid the Live and Source modes from the switch",
+    "bannerText": "New: tailor the editor to how you write.",
+    "bannerCta": "Set it up"
   }
 }

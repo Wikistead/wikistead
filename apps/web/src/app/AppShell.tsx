@@ -6,6 +6,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { LanguageToggle } from "./LanguageToggle";
 import { UserMenu } from "./UserMenu";
 import { WikisteadMark } from "./BrandLockup";
+import { FirstRunOnboarding } from "./EditorOnboarding";
 import { useBranding } from "../data/queries";
 import { assetUrl } from "../data/apiClient";
 
@@ -88,6 +89,10 @@ export function AppShell({
           sidebar) it would be an empty bordered panel column. */}
       {sidebar && <aside className="box-border min-w-0 overflow-hidden border-r border-border bg-panel [grid-area:sidebar]">{sidebar}</aside>}
       <main className="min-h-0 min-w-0 overflow-hidden [grid-area:main]">{children}</main>
+      {/* #289 / ADR-115: the first-run persona enrollment + existing-user banner. Guest safety is
+          the DATA gate inside (member account settings only — a guest session loads none), not this
+          shared shell mount. */}
+      <FirstRunOnboarding />
     </div>
   );
 }

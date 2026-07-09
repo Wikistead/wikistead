@@ -84,21 +84,47 @@ function useDisplayMode(): [DisplayMode, () => void, (m: DisplayMode) => void] {
   const cycle = useCallback(() => setMode((m) => { const next = nextMode(m); writeLocalMode(next); return next; }), []);
   return [mode, cycle, set];
 }
-// Member (#164-3): the cross-device STARTUP pref is a MODE on Account → Editor — 'live'/'source'
-// (the mode wins at startup) or 'local' (follow this device's last toggle, via localStorage). The
-// toolbar toggle is always a device-local session switch. Mirrors useEditorKeymap.
-function useMemberDisplayMode(): [DisplayMode, () => void, (m: DisplayMode) => void] {
+// #289 / ADR-115: the member's editor CHROME visibility — which display modes the switch/cycle
+// offer and whether the vim toggle button shows. null editorChrome (never enrolled) = all shown.
+// Display-only personal preference; guests (no member settings) always get the full chrome.
+function useEditorChrome(): { showVimToggle: boolean; visibleModes: DisplayMode[] } {
+  const settings = useAccountSettings();
+  const chrome = settings.data?.editorChrome ?? null;
+  return useMemo(() => {
+    const mv = chrome?.modesVisible;
+    const visible = mv ? CYCLE.filter((m) => mv[m]) : CYCLE;
+    // Never let a broken/all-false object strand the user with zero modes (fail open to all).
+    return { showVimToggle: chrome?.vimToggleVisible ?? true, visibleModes: visible.length > 0 ? visible : CYCLE };
+  }, [chrome]);
+}
+// Member (#164-3): the cross-device STARTUP pref is a MODE on Account → Editor — 'live'/'source'/
+// 'wysiwyg' (#289 widened the startup catalog) or 'local' (follow this device's last toggle, via
+// localStorage). The toolbar toggle is always a device-local session switch. #289: the boot mode is
+// clamped to the VISIBLE set, and the Ctrl+Alt+E cycle SKIPS hidden modes (ADR-115 §3 — "disable a
+// hidden mode's shortcut" = exclude it from the cycle array).
+function useMemberDisplayMode(visibleModes: DisplayMode[]): [DisplayMode, () => void, (m: DisplayMode) => void] {
   const settings = useAccountSettings();
   const [mode, setMode] = useState<DisplayMode>(readLocalMode);
-  const pref = settings.data?.editorDisplayMode; // 'live' | 'source' | 'local' | undefined (loading)
+  const pref = settings.data?.editorDisplayMode; // 'live' | 'source' | 'wysiwyg' | 'local' | undefined (loading)
+  const visKey = visibleModes.join(",");
   useEffect(() => {
     if (!pref) return;
-    if (pref === "live") setMode("live");
-    else if (pref === "source") setMode("source");
-    else setMode(readLocalMode()); // 'local'
-  }, [pref]);
+    const boot = pref === "live" || pref === "source" || pref === "wysiwyg" ? pref : readLocalMode(); // 'local'
+    setMode(visibleModes.includes(boot) ? boot : visibleModes[0] ?? "live");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pref, visKey]);
   const set = useCallback((next: DisplayMode) => { writeLocalMode(next); setMode(next); }, []);
-  const cycle = useCallback(() => setMode((m) => { const next = nextMode(m); writeLocalMode(next); return next; }), []);
+  const cycle = useCallback(() => setMode((m) => {
+    // walk the canonical CYCLE order but land only on VISIBLE modes (hidden ones are skipped)
+    let next = m;
+    for (let i = 0; i < CYCLE.length; i++) {
+      next = nextMode(next);
+      if (visibleModes.includes(next)) break;
+    }
+    writeLocalMode(next);
+    return next;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [visKey]);
   return [mode, cycle, set];
 }
 // editor.cycleDisplayMode (ADR-021 #21): window-level, event.code-matched, edit-only — mirrors
@@ -335,7 +361,8 @@ function PageRoute() {
   const [vim, toggleVim] = useEditorKeymap(); // member: startup-mode pref + device-local toggle
   const keybindings = useAccountSettings().data?.keybindings; // ADR-021 overrides ({} default)
   useVimToggleShortcut(toggleVim, editing, resolveKey("editor.toggleVim", keybindings)); // (#2)
-  const [displayMode, cycleDisplayMode, setDisplayMode] = useMemberDisplayMode(); // ADR-056 / #164 (startup pref + device-local)
+  const { showVimToggle, visibleModes } = useEditorChrome(); // #289 / ADR-115: per-user chrome visibility
+  const [displayMode, cycleDisplayMode, setDisplayMode] = useMemberDisplayMode(visibleModes); // ADR-056 / #164 (startup pref + device-local)
   useDisplayModeShortcut(cycleDisplayMode, editing, resolveKey("editor.cycleDisplayMode", keybindings));
   const isDesktop = useMediaQuery("(min-width: 768px)"); // 3 floating groups vs one ⋯
   const isWide = useMediaQuery("(min-width: 1200px)"); // #192: enough right whitespace for the TOC rail
@@ -418,6 +445,10 @@ function PageRoute() {
     displayMode,
     onCycleDisplayMode: cycleDisplayMode,
     onSetDisplayMode: setDisplayMode,
+    // #289 / ADR-115: per-user chrome visibility (display-only; Ctrl+Alt+V still toggles vim even
+    // with the button hidden — the keymap setting is the recovery point, never a dead-end).
+    showVimToggle,
+    visibleModes,
     // Share + Delete are manage-only (FGA): undefined when the user can't manage, so the
     // ⋯ items / Share button don't render. The server re-checks and 403s regardless
     // (two-layer authz — UI suppression + server enforcement). #4.

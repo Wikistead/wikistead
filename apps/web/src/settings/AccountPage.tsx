@@ -15,6 +15,7 @@ import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
 import { useAccountSettings, useUpdateAccountSettings, useUploadAvatar, useRemoveAvatar } from "../data/queries";
 import { downloadTenantExport } from "../data/exportApi"; // #309: whole-tenant Markdown-ZIP export
+import { EditorOnboardingDialog } from "../app/EditorOnboarding"; // #289: "redo the setup questions"
 import { COMMANDS, resolveKey, chordFromEvent, displayChord, validateAssignment, type Keybindings, type CommandDef } from "../app/keybindings";
 import { SettingsShell, type SettingsTab } from "./SettingsShell";
 
@@ -206,6 +207,18 @@ function EditorTab() {
   const choose = (m: "local" | "vim" | "default") => update.mutate({ editorKeymap: m });
   const saveKb = (id: string, chord: string) => update.mutate({ keybindings: { ...kb, [id]: chord } });
   const resetKb = (id: string) => { const next = { ...kb }; delete next[id]; update.mutate({ keybindings: next }); };
+  // #289 / ADR-115: chrome visibility (vim button + per-mode). null (never enrolled) = all shown.
+  // The last visible mode can't be hidden (never strand the user with an empty switch).
+  const chrome = settings.data?.editorChrome ?? null;
+  const modesVisible = chrome?.modesVisible ?? { live: true, source: true, reading: true, wysiwyg: true };
+  const vimToggleVisible = chrome?.vimToggleVisible ?? true;
+  const writeChrome = (next: { vimToggleVisible: boolean; modesVisible: typeof modesVisible }) => update.mutate({ editorChrome: next });
+  const toggleMode = (m: keyof typeof modesVisible) => {
+    const next = { ...modesVisible, [m]: !modesVisible[m] };
+    if (!Object.values(next).some(Boolean)) return; // keep at least one mode
+    writeChrome({ vimToggleVisible, modesVisible: next });
+  };
+  const [redoOpen, setRedoOpen] = useState(false); // "redo the setup questions" (ADR-115 §5)
   return (
     <div data-testid="account-editor">
     <SettingsPage title={t("accountNav.editor")} description={t("account.editorHint")}>
@@ -229,11 +242,12 @@ function EditorTab() {
       </SettingsCard>
 
       <SettingsCard>
-        {/* ADR-056 / #164: startup display mode (live/source/local), orthogonal to the keymap. */}
+        {/* ADR-056 / #164: startup display mode, orthogonal to the keymap. #289 added wysiwyg to
+            the startup set (reading stays a mid-session state, not a startup value). */}
         <label className="mb-1 block text-sm font-medium">{t("account.displayMode")}</label>
         <p className="mb-2 text-xs text-fg-dim">{t("account.displayModeHint")}</p>
         <div className="flex flex-col gap-2">
-          {(["local", "live", "source"] as const).map((m) => (
+          {(["local", "live", "source", "wysiwyg"] as const).map((m) => (
             <Button
               key={m}
               variant={dmode === m ? "primary" : "default"}
@@ -246,6 +260,45 @@ function EditorTab() {
             </Button>
           ))}
         </div>
+      </SettingsCard>
+
+      <SettingsCard testid="account-chrome">
+        {/* #289 / ADR-115: editor chrome visibility — which controls show. Display-only; hiding the
+            vim button never disables vim (Ctrl+Alt+V + the keymap setting above stay the recovery). */}
+        <label className="mb-1 block text-sm font-medium">{t("account.chrome")}</label>
+        <p className="mb-2 text-xs text-fg-dim">{t("account.chromeHint")}</p>
+        <div className="mb-3 flex flex-col gap-2">
+          <Button
+            variant={vimToggleVisible ? "primary" : "default"}
+            onClick={() => writeChrome({ vimToggleVisible: !vimToggleVisible, modesVisible })}
+            data-testid="account-chrome-vim"
+            aria-pressed={vimToggleVisible}
+            className="justify-start"
+          >
+            {t(vimToggleVisible ? "account.chromeVimShown" : "account.chromeVimHidden")}
+          </Button>
+        </div>
+        <p className="mb-2 text-xs text-fg-dim">{t("account.chromeModesHint")}</p>
+        <div className="flex flex-col gap-2">
+          {(["live", "source", "reading", "wysiwyg"] as const).map((m) => (
+            <Button
+              key={m}
+              variant={modesVisible[m] ? "primary" : "default"}
+              onClick={() => toggleMode(m)}
+              data-testid={`account-chrome-mode-${m}`}
+              aria-pressed={modesVisible[m]}
+              className="justify-start"
+            >
+              {t(`page.mode${m === "live" ? "Live" : m === "source" ? "Source" : m === "reading" ? "Reading" : "Wysiwyg"}`)}
+            </Button>
+          ))}
+        </div>
+        <div className="mt-3">
+          <Button variant="ghost" data-testid="account-chrome-redo" onClick={() => setRedoOpen(true)}>
+            {t("account.chromeRedo")}
+          </Button>
+        </div>
+        <EditorOnboardingDialog open={redoOpen} onClose={() => setRedoOpen(false)} />
       </SettingsCard>
 
       <SettingsCard>

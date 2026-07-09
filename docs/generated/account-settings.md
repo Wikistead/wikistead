@@ -21,6 +21,7 @@
 |---|---|
 | `live` | Always start in Live preview. |
 | `source` | Always start in Source mode. |
+| `wysiwyg` | Always start in WYSIWYG (hidden-syntax) mode. |
 | `local` | Follow this device's last choice (the default). |
 
 ## Custom key bindings
