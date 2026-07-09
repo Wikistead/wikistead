@@ -32,7 +32,7 @@ test("#243: mermaid caret-in reveals raw; Ctrl+Enter AND the ✎ button open the
   await page.keyboard.press("Control+Enter");
   await sleep(300);
   await expect(page.getByTestId("mermaid-edit-src")).toHaveCount(1);
-  expect(await page.getByTestId("mermaid-edit-src").inputValue()).toContain("graph TD");
+  expect(await page.getByTestId("mermaid-edit-src").textContent()).toContain("graph TD"); // #243 C3: CM6 content, not a textarea
 
   // Exit the editUI (Done) → the atom re-renders; then the ✎ button opens the SAME editUI (C4 parity).
   await page.getByTestId("editui-done").click({ force: true });
@@ -43,7 +43,7 @@ test("#243: mermaid caret-in reveals raw; Ctrl+Enter AND the ✎ button open the
   await page.getByTestId("macro-edit").first().click({ force: true });
   await sleep(300);
   await expect(page.getByTestId("mermaid-edit-src")).toHaveCount(1); // the editUI source textarea
-  expect(await page.getByTestId("mermaid-edit-src").inputValue()).toContain("graph TD");
+  expect(await page.getByTestId("mermaid-edit-src").textContent()).toContain("graph TD"); // #243 C3: CM6 content, not a textarea
 });
 
 // #243: plantuml gets the SAME callout-class routing (caret-in raw; Ctrl+Enter / ✎ → editUI).
@@ -72,7 +72,7 @@ test("#243: plantuml caret-in reveals raw; Ctrl+Enter AND the ✎ button open th
   await page.keyboard.press("Control+Enter");
   await sleep(300);
   await expect(page.getByTestId("plantuml-edit-src")).toHaveCount(1);
-  expect(await page.getByTestId("plantuml-edit-src").inputValue()).toContain("@startuml");
+  expect(await page.getByTestId("plantuml-edit-src").textContent()).toContain("@startuml"); // #243 C3: CM6 content, not a textarea
 
   // Exit (Done) → atom; the ✎ button opens the SAME editUI.
   await page.getByTestId("editui-done").click({ force: true });
@@ -82,5 +82,5 @@ test("#243: plantuml caret-in reveals raw; Ctrl+Enter AND the ✎ button open th
   await page.getByTestId("macro-edit").first().click({ force: true });
   await sleep(250);
   await expect(page.getByTestId("plantuml-edit-src")).toHaveCount(1);
-  expect(await page.getByTestId("plantuml-edit-src").inputValue()).toContain("@startuml");
+  expect(await page.getByTestId("plantuml-edit-src").textContent()).toContain("@startuml"); // #243 C3: CM6 content, not a textarea
 });

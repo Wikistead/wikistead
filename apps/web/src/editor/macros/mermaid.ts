@@ -1,5 +1,6 @@
 import { asMacroSource, type FenceMacro, type MacroContext } from "./registry";
 import { mermaidHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
+import { mountSourceEditor } from "./source-editor"; // #243 / ADR-111 C3: CM6 mini-editor source pane
 
 // The first macro: ```mermaid renders a diagram. It proves the registry pipeline
 // (register -> liveRender -> fold -> Markdown round-trip) on the code-fence path,
@@ -117,11 +118,11 @@ export const mermaidMacro: FenceMacro = {
     mount(container, source, ctx, save) {
       const wrap = document.createElement("div");
       wrap.className = "cm-lp-mermaid-edit";
-      const ta = document.createElement("textarea");
-      ta.className = "cm-lp-mermaid-edit-src";
-      ta.value = source;
-      ta.spellcheck = false;
-      ta.setAttribute("data-testid", "mermaid-edit-src");
+      // #243 / ADR-111 C3 (slice 1): the source pane is a CM6 mini-editor (undo/redo, wrapping, code face)
+      // instead of a bare textarea. It commits to the single Y.Text via `save` on BLUR only (never a live
+      // binding). vim is C3 slice 2 (needs the host CM6 seam to reuse the outer vim). See source-editor.ts.
+      const src = document.createElement("div");
+      src.className = "cm-lp-mermaid-edit-src";
       const preview = document.createElement("div");
       preview.className = "cm-lp-mermaid cm-lp-mermaid-edit-preview";
       preview.setAttribute("data-testid", "mermaid-edit-preview");
@@ -153,13 +154,19 @@ export const mermaidMacro: FenceMacro = {
         if (debounce != null) clearTimeout(debounce);
         debounce = setTimeout(() => applyRender(code), 150);
       };
-      ta.addEventListener("input", () => renderPreview(ta.value)); // local live preview, no doc write
-      ta.addEventListener("change", () => save(asMacroSource(ta.value))); // commit to Y.Text on blur
-      applyRender(source); // initial render is immediate (no debounce) so the preview shows on mount
-      wrap.append(ta, preview);
+      wrap.append(src, preview);
       container.appendChild(wrap);
-      const focus = setTimeout(() => ta.focus(), 0);
-      return { destroy() { clearTimeout(focus); if (debounce != null) clearTimeout(debounce); gen++; wrap.remove(); } };
+      const editor = mountSourceEditor({
+        parent: src,
+        doc: source,
+        dark: ctx.theme === "dark",
+        testid: "mermaid-edit-src",
+        onInput: (v) => renderPreview(v), // local live preview, no doc write
+        onCommit: (v) => save(asMacroSource(v)), // commit to Y.Text on blur (offset-invariant replaceSource)
+      });
+      applyRender(source); // initial render is immediate (no debounce) so the preview shows on mount
+      const focus = setTimeout(() => editor.focus(), 0);
+      return { destroy() { clearTimeout(focus); if (debounce != null) clearTimeout(debounce); gen++; editor.destroy(); wrap.remove(); } };
     },
   },
   // M3 wires HTML export server-side. mermaid renders in the browser, so the static

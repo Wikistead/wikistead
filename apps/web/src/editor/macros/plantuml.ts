@@ -1,5 +1,6 @@
 import { asMacroSource, type FenceMacro } from "./registry";
 import { plantumlHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
+import { mountSourceEditor } from "./source-editor"; // #243 / ADR-111 C3: CM6 mini-editor source pane
 
 // ```plantuml — PlantUML is GPL and needs a JRE, so it is NEVER bundled (ADR-011/ADR-074). The
 // DEFAULT render is DEGRADE-TO-SOURCE: the fence shows its source verbatim (a code block), always
@@ -34,14 +35,12 @@ export const plantumlMacro: FenceMacro = {
   // on `change` (blur), NOT per keystroke — a per-keystroke Y.Text write re-mounts the widget mid-typing.
   editUI: {
     present: "inline",
-    mount(container, source, _ctx, save) {
+    mount(container, source, ctx, save) {
       const wrap = document.createElement("div");
       wrap.className = "cm-lp-plantuml-edit";
-      const ta = document.createElement("textarea");
-      ta.className = "cm-lp-plantuml-edit-src";
-      ta.value = source;
-      ta.spellcheck = false;
-      ta.setAttribute("data-testid", "plantuml-edit-src");
+      // #243 / ADR-111 C3 (slice 1): CM6 mini-editor source pane (see source-editor.ts); commit on blur only.
+      const src = document.createElement("div");
+      src.className = "cm-lp-plantuml-edit-src";
       const preview = document.createElement("div");
       preview.className = "cm-lp-plantuml cm-lp-plantuml-edit-preview";
       preview.setAttribute("data-testid", "plantuml-edit-preview");
@@ -52,13 +51,19 @@ export const plantumlMacro: FenceMacro = {
         pre.appendChild(el);
         preview.replaceChildren(pre);
       };
-      ta.addEventListener("input", () => renderPreview(ta.value)); // local preview only, no doc write
-      ta.addEventListener("change", () => save(asMacroSource(ta.value))); // commit to Y.Text on blur
       renderPreview(source);
-      wrap.append(ta, preview);
+      wrap.append(src, preview);
       container.appendChild(wrap);
-      const focus = setTimeout(() => ta.focus(), 0);
-      return { destroy() { clearTimeout(focus); wrap.remove(); } };
+      const editor = mountSourceEditor({
+        parent: src,
+        doc: source,
+        dark: ctx.theme === "dark",
+        testid: "plantuml-edit-src",
+        onInput: (v) => renderPreview(v), // local preview only, no doc write
+        onCommit: (v) => save(asMacroSource(v)), // commit to Y.Text on blur (offset-invariant replaceSource)
+      });
+      const focus = setTimeout(() => editor.focus(), 0);
+      return { destroy() { clearTimeout(focus); editor.destroy(); wrap.remove(); } };
     },
   },
   // Static export degrades to the source (an external-render-enabled viewer can process it later).

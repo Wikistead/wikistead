@@ -1,0 +1,70 @@
+import { EditorView, minimalSetup } from "codemirror"; // meta-package: history + default/history keymaps + drawSelection (same as the host surface)
+import { EditorState } from "@codemirror/state";
+
+// #243 / ADR-111 C3 (slice 1): the editUI source pane for a text-source fence macro (mermaid / plantuml)
+// upgrades from a bare <textarea> to a small CodeMirror 6 editor — the "rich panel" the ticket asks for
+// (undo/redo, a real caret, wrapping, a code face). It is a MACRO-side helper: it uses the @codemirror
+// LIBRARY only (the same libraries fence.ts / fold.ts already import), never the host editor's internals,
+// so the ADR-023 sandbox boundary ({theme} + save host-API) is unchanged.
+//
+// Single Y.Text safety (ADR-111 C3 condition 1): this mini-editor holds its OWN document; it commits to the
+// host's canonical Y.Text ONLY through the macro's `save` callback (an offset-invariant replaceSource — see
+// editUISaveChange). There is NO live binding of this EditorView to a Y.Text sub-range (that would be a second
+// CRDT / echo loop, which the single-Y.Text invariant forbids). Commit granularity is on BLUR, not per
+// keystroke — a per-keystroke commit re-runs the host doc and would re-mount this widget mid-typing.
+//
+// vim is intentionally NOT wired here: ADR-111 C3 condition 4 requires the panel to REUSE the outer editor's
+// vim (not stand up a SECOND vim engine) and must not widen the {theme} host-API — that needs a host-side CM6
+// editUI seam, tracked as C3 slice 2. Escape is left to bubble to the EditableEditUIWidget's capture handler
+// (decorations.ts) which owns the #239 exit, so this editor adds no Escape handling.
+
+export interface SourceEditorHandle {
+  readonly view: EditorView;
+  getValue(): string;
+  focus(): void;
+  destroy(): void;
+}
+
+export interface SourceEditorOptions {
+  parent: HTMLElement;
+  doc: string;
+  dark: boolean;
+  testid: string;
+  onInput: (value: string) => void; // fires on every doc change — drives the local live preview (no doc write)
+  onCommit: (value: string) => void; // fires on blur — the single Y.Text write via the macro's save()
+}
+
+// A minimal editor theme — code face, no gutter, transparent background so it sits inside the panel chrome.
+const baseTheme = EditorView.theme({
+  "&": { fontSize: "13px", background: "transparent" },
+  ".cm-content": { fontFamily: "var(--font-code)", padding: "6px 8px", minHeight: "4.5em" }, // usable even when empty
+  ".cm-scroller": { fontFamily: "var(--font-code)", lineHeight: "1.5" },
+  "&.cm-focused": { outline: "none" },
+});
+
+export function mountSourceEditor(opts: SourceEditorOptions): SourceEditorHandle {
+  const view = new EditorView({
+    parent: opts.parent,
+    state: EditorState.create({
+      doc: opts.doc,
+      extensions: [
+        minimalSetup, // history + default/history keymaps + drawSelection (the host surface uses this too)
+        EditorView.lineWrapping,
+        baseTheme,
+        EditorView.editorAttributes.of({ class: opts.dark ? "cm-dark" : "" }),
+        EditorView.updateListener.of((u) => { if (u.docChanged) opts.onInput(u.state.doc.toString()); }),
+        // Commit-on-blur → the single offset-invariant Y.Text write (never per-keystroke; see header).
+        EditorView.domEventHandlers({ blur: (_e, v) => { opts.onCommit(v.state.doc.toString()); return false; } }),
+      ],
+    }),
+  });
+  // The testid lands on the editable surface so specs can click / type / read it like the old textarea.
+  view.contentDOM.setAttribute("data-testid", opts.testid);
+  view.contentDOM.setAttribute("spellcheck", "false");
+  return {
+    view,
+    getValue: () => view.state.doc.toString(),
+    focus: () => view.focus(),
+    destroy: () => view.destroy(),
+  };
+}
