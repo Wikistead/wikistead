@@ -19,12 +19,13 @@ export function countTasks(md: string): { done: number; total: number } {
 }
 
 // A display-only SVG progress ring + a `done/total` label. Returns null when there are no tasks
-// (0/0 → NO ring, per ADR-114). Tokenized: the arc rides --accent, the track a dim stroke (callout-icons.css).
-// Trusted — no user input in the SVG.
-export function renderProgressRing(done: number, total: number, animateComplete = false): HTMLElement | null {
+// (0/0 → NO ring, per ADR-114). Tokenized (callout-icons.css,): grey track, ORANGE progress arc
+// (--callout-warning), and the arc turns GREEN (--callout-tip) at 100% — colour IS the completion cue
+// (thecentre-checkmark is gone, user re-ruling). Trusted — no user input in the SVG.
+export function renderProgressRing(done: number, total: number): HTMLElement | null {
   if (total <= 0) return null;
   const frac = Math.max(0, Math.min(1, done / total));
-  const complete = done >= total; // #290(1): a full ring shows a ✓ in its centre
+  const complete = done >= total;
   const size = 15;
   const stroke = 2.5;
   const r = (size - stroke) / 2;
@@ -52,21 +53,11 @@ export function renderProgressRing(done: number, total: number, animateComplete 
     return c;
   };
   const track = mk("cm-lp-todo-ring-track");
-  const arc = mk("cm-lp-todo-ring-arc");
+  const arc = mk(`cm-lp-todo-ring-arc${complete ? " cm-lp-todo-ring-complete" : ""}`);
   arc.setAttribute("stroke-dasharray", String(circ));
   arc.setAttribute("stroke-dashoffset", String(circ * (1 - frac))); // fill CW from the top
   arc.setAttribute("transform", `rotate(-90 ${size / 2} ${size / 2})`);
   svg.append(track, arc);
-
-  // #290(1): at 100% a checkmark appears in the ring centre; it draws in only on the actual completion
-  // transition (animateComplete), staying static on a plain re-render / reveal re-mount.
-  if (complete) {
-    const check = document.createElementNS(NS, "path");
-    const c = size / 2;
-    check.setAttribute("d", `M${c - 2.8} ${c} L${c - 0.6} ${c + 2.2} L${c + 3} ${c - 2.4}`);
-    check.setAttribute("class", `cm-lp-todo-ring-check${animateComplete ? " cm-lp-todo-ring-check-in" : ""}`);
-    svg.append(check);
-  }
 
   const label = document.createElement("span");
   label.className = "cm-lp-todo-ring-label";

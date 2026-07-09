@@ -291,12 +291,12 @@ test("#290(3): the title-band page ring is vertically centered on the meta row (
   expect(dy!).toBeLessThanOrEqual(1.5);
 });
 
-//(1): a full (100%) ring shows a checkmark ✓ in its centre; below 100% there is none. (The draw-in
-// animation on the completion transition is prefers-reduced-motion-gated device polish; here we assert the
-// checkmark's PRESENCE at 100% and ABSENCE below, which is deterministic.)
-test("#290(1): the progress ring shows a checkmark when it reaches 100%", async ({ browser }) => {
+//(1)(2): completion is expressed by COLOUR — the arc is orange (--callout-warning) below 100% and
+// turns green (--callout-tip) at 100% via the cm-lp-todo-ring-complete class. No centre checkmark, no pop
+// (both removed by user re-ruling); a toggle is an immediate state change only.
+test("#290the ring arc is orange below 100% and turns green (complete class) at 100%", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
-  await openScratch(page, "ring-checkmark");
+  await openScratch(page, "ring-complete-color");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.insertText(":::todo[Done soon]\n- [x] a\n- [ ] b\n:::\n\nbelow\n");
@@ -305,44 +305,111 @@ test("#290(1): the progress ring shows a checkmark when it reaches 100%", async 
   const ring = page.locator("[data-pane=preview] [data-testid=todo-ring]");
   await expect(ring).toHaveAttribute("data-total", "2");
   await expect(ring).toHaveAttribute("data-done", "1");
-  expect(await ring.locator(".cm-lp-todo-ring-check").count(), "no checkmark below 100%").toBe(0);
+  const arc = ring.locator(".cm-lp-todo-ring-arc");
+  await expect(arc).not.toHaveClass(/cm-lp-todo-ring-complete/);
+  // below 100%: the arc stroke = the warning (orange) token, and differs from the tip (green) token
+  const strokes = await arc.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    const root = getComputedStyle(document.documentElement);
+    return { arc: cs.stroke, warning: root.getPropertyValue("--callout-warning").trim(), tip: root.getPropertyValue("--callout-tip").trim() };
+  });
+  expect(strokes.warning).not.toBe("");
+  expect(strokes.tip).not.toBe("");
+  expect(strokes.warning).not.toBe(strokes.tip);
 
-  // tick the last box → 2/2 → the checkmark appears in the ring.
+  // no checkmark element exists at any completion level (removed), and no pop animation is defined
+  expect(await ring.locator(".cm-lp-todo-ring-check").count()).toBe(0);
+
+  // tick the last box → 2/2 → the arc gets the complete (green) class; still no checkmark.
   await page.getByTestId("task-checkbox").nth(1).click();
   await sleep(300);
   await expect(page.locator("[data-pane=preview] [data-testid=todo-ring]")).toHaveAttribute("data-done", "2");
-  await expect(page.locator("[data-pane=preview] [data-testid=todo-ring] .cm-lp-todo-ring-check")).toHaveCount(1);
+  const fullArc = page.locator("[data-pane=preview] [data-testid=todo-ring] .cm-lp-todo-ring-arc");
+  await expect(fullArc).toHaveClass(/cm-lp-todo-ring-complete/);
+  expect(await page.locator("[data-pane=preview] [data-testid=todo-ring] .cm-lp-todo-ring-check").count()).toBe(0);
+  // the green class actually changes the painted stroke (not just a class flip)
+  const painted = await fullArc.evaluate((el) => getComputedStyle(el).stroke);
+  expect(painted).not.toBe(strokes.arc);
+  // and the title-band React ring gets the same complete class at page 100% (this page is 2/2). The
+  // data attributes disambiguate it from other pages' sidebar rings, which share the testid.
+  await expect(page.locator("[data-testid=page-task-ring][data-done='2'][data-total='2'] .cm-lp-todo-ring-arc").first()).toHaveClass(/cm-lp-todo-ring-complete/);
 });
 
-//(2): the check-ON pop must fire on a real TOGGLE, never on a reveal re-mount (the old `:checked` CSS
-// animation replayed every time the caret entered/left the line). Count `wks-cb-pop` animationstart events:
-// a reveal cycle over a CHECKED box must not fire it; a genuine check-ON must.
-test("#290(2): the checkbox pop fires on toggle, not on reveal", async ({ browser }) => {
+//(5): the checkbox pop animation is fully removed — no wks-cb-pop animation ever fires, on reveal OR
+// on a real toggle.
+test("#290(5): no checkbox animation fires on toggle or reveal", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
-  await openScratch(page, "cb-pop");
+  await openScratch(page, "cb-no-pop");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.insertText("- [x] alpha\n\nbeta\n"); // caret on "beta" → line 1 (checked) rendered, not revealed
+  await page.keyboard.insertText("- [x] alpha\n\nbeta\n");
   await sleep(300);
   await page.evaluate(() => {
-    (window as unknown as { __cbPops: number }).__cbPops = 0;
+    (window as unknown as { __cbAnims: number }).__cbAnims = 0;
     document.querySelector("[data-pane=preview] .cm-content")!.addEventListener("animationstart", (e) => {
-      if ((e as AnimationEvent).animationName === "wks-cb-pop") (window as unknown as { __cbPops: number }).__cbPops++;
+      const t = e.target as HTMLElement;
+      if (t?.classList?.contains("cm-lp-checkbox")) (window as unknown as { __cbAnims: number }).__cbAnims++;
     }, true);
   });
-
-  // reveal cycle: caret INTO the checked task line (reveals raw → box drops) then OUT (box re-mounts checked).
+  // reveal cycle + a real OFF→ON toggle: neither fires any checkbox animation.
   await page.getByText("alpha").click();
   await sleep(150);
   await page.getByText("beta", { exact: true }).click();
-  await sleep(250);
-  expect(await page.evaluate(() => (window as unknown as { __cbPops: number }).__cbPops), "reveal must NOT pop").toBe(0);
-
-  // a genuine toggle-ON pops exactly once: turn the box OFF (no pop), then ON (pop).
-  const box = page.getByTestId("task-checkbox").first();
-  await box.click(); // checked → unchecked (OFF, no pop)
   await sleep(200);
-  await page.getByTestId("task-checkbox").first().click(); // unchecked → checked (ON → pop)
+  await page.getByTestId("task-checkbox").first().click(); // ON → OFF
+  await sleep(150);
+  await page.getByTestId("task-checkbox").first().click(); // OFF → ON
   await sleep(250);
-  expect(await page.evaluate(() => (window as unknown as { __cbPops: number }).__cbPops), "a real toggle-ON pops once").toBe(1);
+  expect(await page.evaluate(() => (window as unknown as { __cbAnims: number }).__cbAnims)).toBe(0);
+});
+
+//(3)(4): the :::todo block matches the callout-panel look — the list-checks icon sits in the left
+// gutter vertically CENTRED against the whole block, and the box corners share the callout panel's radius.
+test("#290(3)(4): todo icon centres on the block; box radius equals the callout panel's", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "todo-icon-geom");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  // 4 task lines + an :::info callout to compare radii against; caret parked on "below".
+  await page.keyboard.insertText(":::todo[Sprint]\n- [ ] a\n- [ ] b\n- [ ] c\n- [ ] d\n:::\n\n:::info[Ref]\nbody text\n:::\n\nbelow\n");
+  await sleep(500);
+
+  // (3) icon centre Y ≈ block centre Y (the widget measures the block and positions itself).
+  await sleep(200); // one rAF measure cycle
+  const geom = await page.evaluate(() => {
+    const lines = Array.from(document.querySelectorAll("[data-pane=preview] .cm-line.cm-lp-todo"));
+    if (lines.length === 0) return null;
+    const boxes = lines.map((l) => l.getBoundingClientRect());
+    const blockTop = Math.min(...boxes.map((b) => b.top));
+    const blockBottom = Math.max(...boxes.map((b) => b.bottom));
+    const icon = document.querySelector("[data-pane=preview] [data-testid=todo-block-icon]");
+    if (!icon) return { missingIcon: true } as const;
+    const r = icon.getBoundingClientRect();
+    return { blockCenter: (blockTop + blockBottom) / 2, iconCenter: r.top + r.height / 2, w: r.width };
+  });
+  expect(geom, "todo block lines not found").not.toBeNull();
+  expect((geom as { missingIcon?: boolean }).missingIcon, "block icon missing").toBeFalsy();
+  const g = geom as { blockCenter: number; iconCenter: number; w: number };
+  expect(g.w, "icon has zero size").toBeGreaterThan(8);
+  expect(Math.abs(g.iconCenter - g.blockCenter), `icon centre ${g.iconCenter} vs block centre ${g.blockCenter}`).toBeLessThanOrEqual(2);
+
+  // the open line's own icon is suppressed (the icon lives in the gutter now, not the header)
+  const headerIconDisplay = await page.evaluate(() => {
+    const open = document.querySelector("[data-pane=preview] .cm-line.cm-lp-todo.cm-lp-directive-label");
+    return open ? getComputedStyle(open, "::before").display : null;
+  });
+  expect(headerIconDisplay).toBe("none");
+
+  // (4) the todo box's top corner radius equals the callout PANEL's radius (same visual language).
+  const radii = await page.evaluate(() => {
+    const first = document.querySelector("[data-pane=preview] .cm-line.cm-lp-todo-first");
+    const panel = document.querySelector("[data-pane=preview] [data-testid=callout-panel]");
+    return {
+      todo: first ? getComputedStyle(first).borderTopLeftRadius : null,
+      panel: panel ? getComputedStyle(panel).borderRadius : null,
+    };
+  });
+  expect(radii.todo, "todo first-line radius missing").not.toBeNull();
+  expect(radii.panel, "callout panel not rendered").not.toBeNull();
+  expect(radii.todo).toBe(radii.panel);
 });
