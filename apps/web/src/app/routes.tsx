@@ -712,6 +712,7 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
   // picture) so multiple guests on a doc are still visually distinguishable (#8).
   const [guest] = useState(() => ({ name: t("collab.guest"), color: colorFromString(`guest-${Math.random()}`), picture: null }));
   const [publishedMd, setPublishedMd] = useState<string | null>(null);
+  const [pageTitle, setPageTitle] = useState(""); // #318: shown in the guest title band (read-only)
   const [publishing, setPublishing] = useState(false);
   // #100: guest commenting — canComment (comment_open on the page) decides the composer; comments are
   // page-level for a guest (no inline anchoring — the guest editor isn't wired for anchors). The
@@ -742,11 +743,25 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
   const isWide = useMediaQuery("(min-width: 1200px)"); // #192: right whitespace for the TOC rail
 
   const reloadPublished = useCallback(() => {
-    apiFetch<{ publishedMd: string | null; canComment?: boolean }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
-      .then((r) => { setPublishedMd(r?.publishedMd ?? null); setCanComment(!!r?.canComment); })
+    apiFetch<{ title?: string; publishedMd: string | null; canComment?: boolean }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
+      .then((r) => { setPublishedMd(r?.publishedMd ?? null); setPageTitle(r?.title ?? ""); setCanComment(!!r?.canComment); })
       .catch(() => { /* denied/expired → empty view */ });
   }, [pageId, token]);
   useEffect(() => { reloadPublished(); }, [reloadPublished]);
+
+  // #318: publish the guest band's ACTUAL height as --wks-band-h on the editor's positioning parent
+  // the same ResizeObserver contract as the member surface (#212 bounce 3), so the CM top padding, the
+  // TOC overlay offsets and the anchor/TOC jump clearance (#304/#313 headerBandPx) all follow it.
+  const bandRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const parent = el.parentElement;
+    if (!parent) return;
+    const set = () => parent.style.setProperty("--wks-band-h", `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => { ro.disconnect(); parent.style.removeProperty("--wks-band-h"); };
+  }, []);
 
   // #317: view-mode task-checkbox toggle for an EDIT-capability guest (ADR-019) — the server route
   // already accepts guest:'edit'; only this client wiring was missing. Same contract as the member
@@ -808,8 +823,21 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
         )}
         <div className="relative flex min-h-0" style={{ flex: 1 }}>
           <div className="relative min-w-0 flex-1">
+            {/* #318: the guest surface gets the SAME frosted title band as the member page (#212) / public
+                reader (#227). PageTitle without onRename = a read-only h1 (no rename affordance leaks to a
+                guest, even with edit capability — rename stays member-only server-side). The band height is
+                published as --wks-band-h (bandRef) so the editor's first line + TOC/anchor jumps clear it. */}
+            <div ref={bandRef} className="pointer-events-none absolute inset-x-0 top-0 z-20 pb-6">
+              <div aria-hidden="true" className="absolute inset-y-0 left-0 right-2.5 bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_90%,transparent)] via-[color-mix(in_srgb,var(--bg)_42%,transparent)] to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_50%,transparent)]" />
+              <div className="pointer-events-auto relative mx-auto flex w-full max-w-[740px] items-center gap-3 px-6 pt-6">
+                <div className="min-w-0 flex-1" data-testid="guest-title-band">
+                  <PageTitle title={pageTitle} />
+                </div>
+                {/* Desktop: the status chip rides the band row (member parity); mobile keeps the ⋯ controls. */}
+                {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}
+              </div>
+            </div>
             <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onToggleTask={canEdit ? onToggleTask : undefined} />
-            <div className="pointer-events-none absolute right-3 top-3 z-10"><PageStatus {...controls} /></div>
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #227the shared TocChrome (rail on wide / overlay on narrow); yields to the comments
                 panel when open (shared right zone — no pointer overlap). */}
