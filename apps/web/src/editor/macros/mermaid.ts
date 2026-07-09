@@ -115,7 +115,7 @@ export const mermaidMacro: FenceMacro = {
   // the local preview; the Y.Text write lands on blur (still merges via Y.Text). ADR-087 inline contract.
   editUI: {
     present: "inline",
-    mount(container, source, ctx, save) {
+    mount(container, source, ctx, save, editEnv) {
       const wrap = document.createElement("div");
       wrap.className = "cm-lp-mermaid-edit";
       // #243 / ADR-111 C3 (slice 1): the source pane is a CM6 mini-editor (undo/redo, wrapping, code face)
@@ -160,6 +160,7 @@ export const mermaidMacro: FenceMacro = {
         parent: src,
         doc: source,
         dark: ctx.theme === "dark",
+        vim: editEnv?.vim, // #243 C3 slice 2: follow the outer editor's vim setting
         testid: "mermaid-edit-src",
         onInput: (v) => renderPreview(v), // local live preview, no doc write
         onCommit: (v) => save(asMacroSource(v)), // commit to Y.Text on blur (offset-invariant replaceSource)

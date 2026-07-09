@@ -117,8 +117,13 @@ export interface EditUI {
   // WHOLE block source incl. the `:::name[label]` / ```lang fences — needed when the editor changes the
   // fence itself (a callout's TYPE = its directive name, a `[label]`), so the macro reconstructs it.
   readonly sourceScope?: "body" | "block";
-  mount(container: HTMLElement, source: MacroSource, ctx: MacroContext, save: (newSource: MacroSource) => void): EditUIController;
+  // #243 / ADR-111 C3 (slice 2): `editEnv` carries mount-time host EDIT services — kept a SEPARATE param
+  // (like the modal editor's hostCollab), NOT folded into MacroContext, so the render trust boundary stays
+  // {theme} only (ADR-023). `vim` mirrors the OUTER editor's vim ON/OFF so a CM6 source pane can enable vim
+  // (the same @replit/codemirror-vim the host uses — not a second engine); absent ⇒ vim off.
+  mount(container: HTMLElement, source: MacroSource, ctx: MacroContext, save: (newSource: MacroSource) => void, editEnv?: EditEnv): EditUIController;
 }
+export interface EditEnv { readonly vim?: boolean }
 
 // ADR-025 step 3: a macro's source can often be written at more than one "level" — a
 // standard, portable form (CommonMark / GFM) or a richer non-standard one (a ::: directive
