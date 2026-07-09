@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { Compartment, StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { headingsExtension, extractHeadings, type Heading } from "./headings";
+import { taskProgressExtension, type TaskProgress } from "./task-progress"; // #290: page task-progress ring
 import { connect, connectEphemeral } from "./collab";
 import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayModeContent } from "./editor-livepreview";
 import type { DisplayMode, MacroTheme } from "./live-preview/decorations";
@@ -92,6 +93,7 @@ export interface EditorProps {
   onActiveHeading?: (from: number | null) => void;
   onScrollActivity?: () => void; // #192: fires on each editor scroll (drives the narrow TOC overlay)
   tocJumpRef?: MutableRefObject<((from: number) => void) | null>;
+  onTaskProgress?: (p: TaskProgress) => void; // #290: the page's GFM-checkbox progress (title-band ring)
   // External "unpublished changes" store written here (edit mode) and read only by
   // the publish control — NOT React state, so writing it never re-renders the editor
   // or its host (keeps it off the presence path). The canonical Y.Text IS the
@@ -138,10 +140,11 @@ function tint(color: string): string {
 // the mount functions don't need to know about the TOC.
 function wireToc(
   view: EditorView,
-  opts: { onHeadings?: (h: Heading[]) => void; onActiveHeading?: (from: number | null) => void; onScrollActivity?: () => void; tocJumpRef?: MutableRefObject<((from: number) => void) | null> },
+  opts: { onHeadings?: (h: Heading[]) => void; onActiveHeading?: (from: number | null) => void; onScrollActivity?: () => void; tocJumpRef?: MutableRefObject<((from: number) => void) | null>; onTaskProgress?: (p: TaskProgress) => void },
 ): () => void {
   const cleanups: (() => void)[] = [];
   if (opts.onHeadings) view.dispatch({ effects: StateEffect.appendConfig.of(headingsExtension(opts.onHeadings)) });
+  if (opts.onTaskProgress) view.dispatch({ effects: StateEffect.appendConfig.of(taskProgressExtension(opts.onTaskProgress)) }); // #290
   if (opts.tocJumpRef) {
     const ref = opts.tocJumpRef;
     ref.current = (from: number) => {
@@ -188,7 +191,7 @@ function wireToc(
   return () => cleanups.forEach((c) => c());
 }
 
-export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, onHeadings, onActiveHeading, onScrollActivity, tocJumpRef, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
+export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, onHeadings, onActiveHeading, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme(); // #200: re-render macro widgets (Excalidraw etc.) on a light/dark switch
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
@@ -331,7 +334,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       views.push(v);
       previewViewRef.current = v;
       if (anchorGetterRef) anchorGetterRef.current = null;
-      const tocCleanup = wireToc(v, { onHeadings, onActiveHeading, onScrollActivity, tocJumpRef }); // #192 TOC (reading/view surface)
+      const tocCleanup = wireToc(v, { onHeadings, onActiveHeading, onScrollActivity, tocJumpRef, onTaskProgress }); // #192 TOC (reading/view surface)
       return () => {
         tocCleanup();
         views.forEach((x) => x.destroy());
@@ -385,7 +388,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       };
     }
     pushHighlights(previewView);
-    const tocCleanup = wireToc(previewView, { onHeadings, onActiveHeading, onScrollActivity, tocJumpRef }); // #192 TOC (edit surface)
+    const tocCleanup = wireToc(previewView, { onHeadings, onActiveHeading, onScrollActivity, tocJumpRef, onTaskProgress }); // #192 TOC (edit surface)
 
     return () => {
       tocCleanup();

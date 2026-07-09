@@ -116,6 +116,7 @@ import { List, Lock } from "lucide-react";
 import { addCodeCopyButtons } from "../editor/live-preview/code-copy";
 import { PageTitle } from "./PageTitle";
 import { PageMeta } from "./PageMeta";
+import { ProgressRing } from "./ProgressRing"; // #290: title-band page-progress ring
 import { BacklinksPanel } from "./BacklinksPanel";
 import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
@@ -222,6 +223,10 @@ function PageRoute() {
   const tocJumpRef = useRef<((from: number) => void) | null>(null);
   const onHeadings = useCallback((h: Heading[]) => setHeadings(h), []);
   const onActiveHeading = useCallback((f: number | null) => setActiveHeading(f), []);
+  // #290 / ADR-114 (A): the page's live GFM-checkbox progress → a ring in the title band. Editor fires this
+  // (display-only, dedup'd, like onHeadings — NOT the dirty-signal path), the title band shows it.
+  const [taskProgress, setTaskProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+  const onTaskProgress = useCallback((p: { done: number; total: number }) => setTaskProgress(p), []);
   // #192: scroll-activity fan-out — the editor fires onScrollActivity on each scroll; the narrow-screen
   // TOC overlay subscribes to show itself while scrolling. A ref'd Set (not state) so scrolling never
   // re-renders the route; the callbacks are stable so <Editor>'s memo holds.
@@ -483,13 +488,17 @@ function PageRoute() {
                       onError: () => notify.error(t("toast.actionFailed")),
                     }) : undefined}
                   />
-                  {/* #222: creator / last-publisher / updated-time, directly under the title. */}
-                  <PageMeta createdBy={page?.createdBy} updatedBy={page?.updatedBy} updatedAt={page?.updatedAt} />
+                  {/* #222: creator / last-publisher / updated-time, directly under the title.
+                      #290 (A): a page-progress ring rides the meta row when the page has any checkboxes. */}
+                  <div className="flex items-center gap-2">
+                    <PageMeta createdBy={page?.createdBy} updatedBy={page?.updatedBy} updatedAt={page?.updatedAt} />
+                    <ProgressRing done={taskProgress.done} total={taskProgress.total} />
+                  </div>
                 </div>
                 {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}
               </div>
             </div>
-            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #192: the TOC rail lives in the content's RIGHT WHITESPACE, inside the editor area, so the
                 scrollbar (the editor's, at the far right) is to the RIGHT of the rail — not between them.

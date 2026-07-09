@@ -104,6 +104,42 @@ test("#290: the header ✕ demotes a :::todo back to a plain task list", async (
   expect(src).toContain("- [ ] beta");
 });
 
+// #290 / ADR-114 (increment A): the TITLE BAND shows a page-progress ring aggregating ALL the page's GFM
+// checkboxes (inside or outside a :::todo). Live-computed from the doc (the onHeadings-style seam, dedup'd —
+// not the dirty-signal path), so it updates as the page changes. Shown only when the page has checkboxes.
+test("#290 (A): the title band shows a live page-progress ring from the page's checkboxes", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "page-ring");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("- [x] done one\n- [ ] todo two\n- [ ] todo three\n");
+  await sleep(400);
+
+  // 1 of 3 done → the title-band ring reads 1/3.
+  const ring = page.getByTestId("page-task-ring");
+  await expect(ring).toHaveCount(1);
+  await expect(ring).toHaveAttribute("data-total", "3");
+  await expect(ring).toHaveAttribute("data-done", "1");
+  await expect(ring.locator(".cm-lp-todo-ring-label")).toHaveText("1/3");
+
+  // add another DONE task → the ring updates live to 2/4 (no reload).
+  await page.keyboard.insertText("- [x] done four\n");
+  await sleep(300);
+  await expect(page.getByTestId("page-task-ring")).toHaveAttribute("data-total", "4");
+  await expect(page.getByTestId("page-task-ring")).toHaveAttribute("data-done", "2");
+});
+
+// #290 (A): a page with NO checkboxes shows NO page ring (0/0 → nothing, per ADR-114).
+test("#290 (A): no page ring when the page has no checkboxes", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "page-ring-none");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("# Just a heading\n\nsome prose, no tasks\n");
+  await sleep(400);
+  expect(await page.getByTestId("page-task-ring").count()).toBe(0);
+});
+
 // Round-trip: :::todo source is preserved (Source display mode shows the raw directive + task list).
 test("#290: :::todo round-trips as plain :::todo + a GFM task list (Open formats)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
