@@ -108,6 +108,28 @@ test("#278 §2b: a slash palette works inside the slot island", async ({ browser
   expect(s).toContain("> ");  // the palette inserted a blockquote into the slot body
 });
 
+// #278 §2c: the slot island shows a LIVE PREVIEW below the source — a nested directive/macro renders via the
+// shared renderMarkdownToDom as you type (no doc write until blur).
+test("#278 §2c: the slot island live-previews nested markdown as you type", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "slot-preview"); await enterEdit(page);
+  await columnsDoc(page);
+  await page.locator("[data-pane=preview] .cm-lp-column").first().click();
+  await sleep(300);
+  const island = page.locator("[data-pane=preview] [data-testid=slot-edit-island]");
+  await expect(island).toBeVisible();
+  // the preview seeds with the current body ("AAA").
+  const preview = page.locator("[data-pane=preview] [data-testid=slot-edit-preview]");
+  await expect(preview).toContainText("AAA");
+
+  // type a nested callout in the island → the preview renders it live (a callout panel), no doc write yet.
+  await page.keyboard.press("Control+End");
+  await page.keyboard.type("\n\n**bold live**");
+  await sleep(300);
+  await expect(preview.locator("strong")).toContainText("bold live"); // rendered via renderMarkdownToDom
+  // the host doc is NOT written until blur (source mode would still show the old body).
+});
+
 test("#278 §2a: Escape exits the slot island without committing a stray edit", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "slot-edit-esc"); await enterEdit(page);
