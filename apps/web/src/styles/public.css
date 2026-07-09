@@ -111,6 +111,10 @@
   cursor: pointer;
   opacity: 0;
   transition: opacity 120ms ease, color 120ms ease;
+  /*the icon is 1em — inherit the heading's font-size (a button does not by default) so it
+     scales with h1…h6 instead of staying a fixed 14px. */
+  font-size: inherit;
+  line-height: 1;
 }
 .wks-public [data-testid="public-body"] :is(h1, h2, h3, h4, h5, h6):hover .wks-heading-anchor,
 .wks-public [data-testid="public-body"] .wks-heading-anchor:focus-visible { opacity: 1; }
