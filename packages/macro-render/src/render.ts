@@ -17,7 +17,11 @@ import { SafeHtml, html, joinSafe, unsafeHtml } from "./safe-html.js";
 
 export interface MacroHtmlDescriptor {
   readonly exportFidelity: "preserve" | "degrade";
-  htmlRender(body: string): SafeHtml;
+  // #85: `renderInner` recursively renders a nested Markdown body to sanitized HTML (SafeHtml). Container
+  // directives (columns / tabs / details / callout) call it so a `:::tab` body's table / list / nested
+  // directive renders as real HTML instead of flattened raw text. Optional — leaf macros (table = trusted
+  // HTML, mermaid = <pre>, embed = URL) ignore it and stay byte-for-byte as before.
+  htmlRender(body: string, renderInner?: (md: string) => SafeHtml): SafeHtml;
 }
 
 export interface MacroHtmlRegistry {
@@ -203,7 +207,10 @@ function renderBlock(node: SNode, src: string, macros: MacroHtmlRegistry): SafeH
       const parsed = parseDirectiveOpen(nl === -1 ? full : full.slice(0, nl));
       const macro = parsed ? macros.directive(parsed.name) : undefined;
       if (macro) {
-        try { return withFidelity(parsed!.name, macro.exportFidelity, macro.htmlRender(directiveBody(full))); }
+        // #85: hand the macro a recursive renderer so a container directive's nested Markdown body renders as
+        // real HTML (SafeHtml, so XSS-safe by construction — the same allowlist boundary at every depth).
+        const renderInner = (md: string): SafeHtml => renderMarkdownToHtml(md, macros);
+        try { return withFidelity(parsed!.name, macro.exportFidelity, macro.htmlRender(directiveBody(full), renderInner)); }
         catch { /* fall through to the generic box */ }
       }
       return html`<div class="wks-directive">${renderBlocks(node, src, macros)}</div>`;
