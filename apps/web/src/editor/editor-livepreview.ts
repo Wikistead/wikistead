@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
+import { livePreview, reAnchorAfterReveal, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { listEditing } from "./live-preview/list-edit";
 import { pasteLinkify } from "./live-preview/paste-linkify";
@@ -110,6 +110,10 @@ export function mountLivePreview(
       everforestHighlight,
       livePreviewTheme,
       livePreview,
+      // #243: re-anchor the caret after a revealed diagram re-mounts as an atom and settles taller
+      // (async SVG), so leaving a mermaid/plantuml block by `j` never pushes the caret off-screen. Editable
+      // surface only — the read-only view never reveals macros (no caret-in), so the transition can't occur.
+      reAnchorAfterReveal,
       mathField, // #158-C3: KaTeX math ($…$ / $$…$$), reveal-on-cursor atoms
       // Macro blocks (ADR-022): code-fence macros (```mermaid) render via the registry;
       // folding collapses a block to its summary line (vim za/zo). Editable surface only
