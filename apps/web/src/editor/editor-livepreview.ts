@@ -58,6 +58,15 @@ import { macroPresenceOverlay } from "./macro-presence-overlay";
 // reload so the running editor always reflects the latest code. Dev-only (stripped prod).
 if (import.meta.hot) import.meta.hot.accept(() => window.location.reload());
 
+// The header band is an absolute frosted overlay over the editor's TOP (#212); its height is published
+// as --wks-band-h (routes.tsx bandRef, inherited onto the CM DOM). 0 when there is no band (var unset).
+// Read by the scrollMargins provider AND the #306 scrolloff (which must subtract it) — keep them in sync.
+function headerBandPx(view: EditorView): number {
+  const raw = getComputedStyle(view.dom).getPropertyValue("--wks-band-h").trim();
+  const px = raw.endsWith("px") ? parseFloat(raw) : 0;
+  return Number.isFinite(px) ? px : 0;
+}
+
 // The single editing surface (Group C / Step I): Obsidian-style live preview bound to
 // the canonical Y.Text. Rendered by default; the line/block under the cursor reveals
 // raw markdown (reveal-on-cursor in decorations.ts) so it's editable in place. vim is
@@ -101,25 +110,22 @@ export function mountLivePreview(
       // the viewport top — UNDER the band. A top scroll-margin equal to the band height (--wks-band-h,
       // published by routes.tsx bandRef; inherited onto the CM DOM) keeps the caret below the band. 0 when
       // there is no band (var unset). Pairs with `.cm-content { padding-top: var(--wks-band-h) }`.
-      // #306: vim-style `scrolloff` — a large scroll margin (~25% of the viewport on each side) keeps the
-      // caret inside the middle ~50% band on ANY cursor motion (j/k, G/gg, search jump), scrolling
-      // typewriter-style once it reaches a band edge. It composes with the two existing clearances by taking
-      // the MAX: the 25% band is normally larger than both the header band (--wks-band-h) and the bottom
-      // control strip (72px), so those intents (caret never hidden under the band / behind the controls) are
-      // subsumed; near the document ends scrollIntoView simply moves as far as it can (natural, like vim). Not
-      // gated on vim — plain keyboard navigation benefits equally and it avoids a mode branch.
+      // (#306 note: the scrolloff itself must NOT live here — a large scroll margin corrupts CM tooltip
+      // placement, thepalette regression. It is the updateListener below; these margins stay small.)
       EditorView.scrollMargins.of((view) => {
-        const raw = getComputedStyle(view.dom).getPropertyValue("--wks-band-h").trim();
-        const top = raw.endsWith("px") ? parseFloat(raw) : 0;
-        return { top: Number.isFinite(top) ? top : 0, bottom: 72 };
+        return { top: headerBandPx(view), bottom: 72 };
       }),
       // #306: vim-style `scrolloff` — keep the caret inside the middle ~50% band on cursor MOTION. Done as a
       // selection-change listener (NOT via scrollMargins: a large scroll margin corrupts CM tooltip placement —
       // the slash palette rendered ~10000px off-screen). Only on a pure caret move (no doc change), so typing
-      // — including opening the "/" palette — is untouched. When the caret leaves the band, re-center it
-      // (typewriter follow); within the band, do nothing (no jitter). Near the ends it scrolls as far as it can.
+      // — including opening the "/" palette — is untouched. When the caret leaves the band, scroll the MINIMUM
+      // needed to keep it at the band edge (y:"nearest" + yMargin —re-centering "yanked" the view to
+      // the middle on every band exit; real scrolloff pins the caret at the ≈75%/25% line and scrolls one line
+      // per keypress). Within the band, do nothing (no jitter). Near the ends it scrolls as far as it can.
+      // Mouse clicks are excluded (select.pointer): clicking must never move the view (spec).
       EditorView.updateListener.of((u) => {
         if (!u.selectionSet || u.docChanged) return;
+        if (u.transactions.some((tr) => tr.isUserEvent("select.pointer"))) return;
         const view = u.view;
         requestAnimationFrame(() => {
           const head = view.state.selection.main.head;
@@ -127,9 +133,15 @@ export function mountLivePreview(
           if (!coords) return;
           const box = view.scrollDOM.getBoundingClientRect();
           const band = box.height * 0.25;
-          if (coords.top < box.top + band || coords.bottom > box.bottom - band) {
-            view.dispatch({ effects: EditorView.scrollIntoView(Math.min(head, view.state.doc.length), { y: "center" }) });
-          }
+          const above = coords.top < box.top + band;
+          const below = coords.bottom > box.bottom - band;
+          if (!above && !below) return;
+          // CM applies the scrollMargins facet ON TOP of yMargin, so subtract the crossed side's scroll
+          // margin — otherwise the rest line sits margin-px INSIDE the band while the trigger line is the
+          // band edge, and the caret see-saws between the two (a visible multi-line jump, not a 1-line
+          // follow). With them aligned, each keypress past the edge scrolls exactly its own distance.
+          const yMargin = Math.max(0, band - (above ? headerBandPx(view) : 72));
+          view.dispatch({ effects: EditorView.scrollIntoView(Math.min(head, view.state.doc.length), { y: "nearest", yMargin }) });
         });
       }),
       // GFM base (tables) + fenced-code highlighting. The doc stays plain markdown.
