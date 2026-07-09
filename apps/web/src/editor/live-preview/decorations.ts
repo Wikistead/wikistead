@@ -612,7 +612,7 @@ class ImageWidget extends WidgetType {
   }
   toDOM(view: EditorView) {
     const img = document.createElement("img");
-    img.className = "cm-lp-image";
+    img.className = "cm-lp-image cm-lp-image-inline"; // #305: inline (text on the line) → line-height thumbnail
     img.alt = this.alt;
     const resolve = view.state.facet(imageResolver);
     const load = (refresh: boolean) => {
@@ -2954,6 +2954,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   // header is always readable in any theme — no accent tint that could clash with the header text.
   ".cm-lp-table th": { background: "var(--panel-2, #f0f1f3)", color: "var(--fg)", fontWeight: "700" },
   ".cm-lp-image": { maxWidth: "100%", height: "auto", borderRadius: "4px", verticalAlign: "bottom" },
+  // #305: a TRULY inline image (text shares its line) renders as a line-height thumbnail so it flows WITH the
+  // text instead of forcing a wrap (a large natural size used to occupy the whole line width, pushing the
+  // surrounding text onto new visual rows — the "a newline got inserted" report). Click/enter still reaches
+  // the raw source; place the image on its OWN line for the full-size standalone atom (#255, unaffected — it
+  // uses cm-lp-image WITHOUT this modifier, inside cm-lp-image-wrap).
+  ".cm-lp-image-inline": { maxHeight: "1.6em", width: "auto", verticalAlign: "text-bottom" },
   // #255 comment 1036: a standalone-image line centres its (inline) <img>. Display-only — the line deco is
   // dropped when the line reveals raw for editing, so it never shifts offsets or affects motion.
   ".cm-lp-img-center": { textAlign: "center" },
