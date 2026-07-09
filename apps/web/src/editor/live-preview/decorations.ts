@@ -635,22 +635,8 @@ class StandaloneImageWidget extends WidgetType {
       reveal.setAttribute("data-testid", "macro-edit");
       reveal.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(wrap), true); });
       btnRow.appendChild(reveal);
-      // align toggle — same ALIGN_ICON + cycle as diagrams, writing the `?align=` query.
-      const alignBtn = document.createElement("button");
-      alignBtn.type = "button";
-      alignBtn.className = "cm-lp-macro-align";
-      alignBtn.title = `Align: ${this.align}`;
-      alignBtn.innerHTML = ALIGN_ICON[this.align];
-      alignBtn.setAttribute("data-testid", "macro-align");
-      alignBtn.setAttribute("data-align", this.align);
-      alignBtn.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const cur = (alignBtn.getAttribute("data-align") as FenceAlign) || "center"; // #255 read live align
-        const next: FenceAlign = cur === "center" ? "left" : cur === "left" ? "right" : "center";
-        setImageAlign(view, view.posAtDOM(wrap), next);
-      });
-      btnRow.appendChild(alignBtn);
+      // #255 a 3-button segmented align control (writes the standalone image's `?align=` query).
+      btnRow.appendChild(makeAlignSegment(this.align, (a) => setImageAlign(view, view.posAtDOM(wrap), a)));
       wrap.appendChild(btnRow);
     }
     this.ro = observeBlockResize(view, img);
@@ -666,8 +652,8 @@ class StandaloneImageWidget extends WidgetType {
     dom.classList.toggle("cm-lp-atom-sel", this.selected);
     // #255 apply an align-only change in place (keep the loaded <img>) instead of rebuilding.
     for (const a of ["left", "center", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, a === this.align);
-    const alignBtn = dom.querySelector<HTMLButtonElement>(".cm-lp-macro-align");
-    if (alignBtn) { alignBtn.innerHTML = ALIGN_ICON[this.align]; alignBtn.title = `Align: ${this.align}`; alignBtn.setAttribute("data-align", this.align); }
+    const seg = dom.querySelector<HTMLElement>(".cm-lp-align-seg"); // #255 update the segment's active side
+    if (seg) updateAlignSegment(seg, this.align);
     return true;
   }
   destroy(dom: HTMLElement) { (dom as SiDom).__siRo?.disconnect(); }
@@ -1032,6 +1018,40 @@ const ALIGN_ICON: Record<FenceAlign, string> = {
   center: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6h12M3 12h18M6 18h12"/></svg>',
   right: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 6h13M3 12h18M8 18h13"/></svg>',
 };
+
+// #255 a 3-button SEGMENTED align control (left | center | right) replacing the single cycling button.
+// Each side is a distinct button; the active one is highlighted. mousedown picks that side directly (no
+// cycle). Shared by the standalone-image widget and the diagram macro widget. `data-testid=macro-align` stays
+// on the group so the existing hover/geometry tests keep resolving it. pick writes the `?align=` / `align=`.
+function makeAlignSegment(current: FenceAlign, pick: (a: FenceAlign) => void): HTMLElement {
+  const seg = document.createElement("div");
+  seg.className = "cm-lp-macro-align cm-lp-align-seg";
+  seg.setAttribute("data-testid", "macro-align");
+  seg.setAttribute("data-align", current); // #255 the live current align (read by handlers/tests)
+  for (const a of ["left", "center", "right"] as const) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "cm-lp-align-seg-btn";
+    b.innerHTML = ALIGN_ICON[a];
+    b.title = `Align ${a}`;
+    b.setAttribute("data-testid", `macro-align-${a}`);
+    b.setAttribute("data-align", a);
+    b.setAttribute("aria-pressed", String(a === current));
+    b.classList.toggle("cm-lp-align-seg-on", a === current);
+    b.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); pick(a); });
+    seg.appendChild(b);
+  }
+  return seg;
+}
+// Update the segment's active side in place (updateDOM path — no rebuild, keeps the loaded img/SVG).
+function updateAlignSegment(seg: HTMLElement, current: FenceAlign): void {
+  seg.setAttribute("data-align", current);
+  for (const b of Array.from(seg.querySelectorAll<HTMLButtonElement>(".cm-lp-align-seg-btn"))) {
+    const on = b.getAttribute("data-align") === current;
+    b.setAttribute("aria-pressed", String(on));
+    b.classList.toggle("cm-lp-align-seg-on", on);
+  }
+}
 
 // #215 / ADR-100: nested-macro parity. Four consumers (select / edit / render / delete) key off ONE
 // question — "what is the innermost macro at this interaction point?" — so a click selects exactly what
@@ -1415,21 +1435,8 @@ class MacroWidget extends WidgetType {
       // hover/selection gating as ✎ (CSS). Suppressed while a nested macro is selected (no diagram nests
       // in a layout child in v1, but keep the single-pencil rule). Right-click also offers align (below).
       if (DIAGRAM_MACROS.has(this.name) && !nestedActive) {
-        const alignBtn = document.createElement("button");
-        alignBtn.type = "button";
-        alignBtn.className = "cm-lp-macro-align";
-        alignBtn.title = `Align: ${this.align}`;
-        alignBtn.innerHTML = ALIGN_ICON[this.align];
-        alignBtn.setAttribute("data-testid", "macro-align");
-        alignBtn.setAttribute("data-align", this.align);
-        alignBtn.addEventListener("mousedown", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const cur = (alignBtn.getAttribute("data-align") as FenceAlign) || "center"; // #255 read live align
-          const next: FenceAlign = cur === "center" ? "left" : cur === "left" ? "right" : "center";
-          setDiagramAlign(view, view.posAtDOM(wrap), next);
-        });
-        btnRow.appendChild(alignBtn);
+        // #255 the 3-button segmented align control (writes the diagram fence's `align=` attribute).
+        btnRow.appendChild(makeAlignSegment(this.align, (a) => setDiagramAlign(view, view.posAtDOM(wrap), a)));
       }
       // #213: columns/tabs get structural add/remove — a `+` appends a child :::column/:::tab and a `−`
       // removes the last one (real Y.Text edits via addLayoutItem/removeLastLayoutItem). Shown on hover/
@@ -1510,8 +1517,8 @@ class MacroWidget extends WidgetType {
     // re-render mermaid / re-resolve the diagram async, collapsing its height → the doc shrinks → CM jumps.
     if (DIAGRAM_MACROS.has(this.name)) {
       for (const a of ["left", "center", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, a === this.align);
-      const ab = dom.querySelector<HTMLButtonElement>(".cm-lp-macro-align");
-      if (ab) { ab.innerHTML = ALIGN_ICON[this.align]; ab.title = `Align: ${this.align}`; ab.setAttribute("data-align", this.align); }
+      const seg = dom.querySelector<HTMLElement>(".cm-lp-align-seg"); // #255 update the segment's active side
+      if (seg) updateAlignSegment(seg, this.align);
       if (prev) prev.align = this.align;
     }
     return true;
@@ -2940,6 +2947,13 @@ export const livePreviewTheme = EditorView.baseTheme({
   // positioned element; its buttons flow statically inside it.
   ".cm-lp-macro-btnrow": { position: "absolute", top: "-1.55em", left: "0", display: "inline-flex", alignItems: "center", gap: "4px", zIndex: "3" },
   ".cm-lp-macro-btnrow > .cm-lp-macro-edit, .cm-lp-macro-btnrow > .cm-lp-macro-align": { position: "static", top: "auto", left: "auto" },
+  // #255 the 3-button segmented align control. The group is a rounded pill of 3 buttons sharing a
+  // border; the active side gets an accent tint. Reuses the macro-align hover-reveal (it carries that class).
+  ".cm-lp-align-seg": { display: "inline-flex", border: "1px solid var(--border, #888)", borderRadius: "5px", overflow: "hidden", background: "var(--panel, var(--bg, #fff))", padding: "0" },
+  ".cm-lp-align-seg-btn": { display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRight: "1px solid var(--border, #8884)", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", padding: "2px 5px", lineHeight: "1" },
+  ".cm-lp-align-seg-btn:last-child": { borderRight: "none" },
+  ".cm-lp-align-seg-btn:hover": { background: "color-mix(in srgb, var(--fg-dim, #888) 14%, transparent)", color: "var(--fg, #222)" },
+  ".cm-lp-align-seg-on": { background: "color-mix(in srgb, var(--accent, #4ea1ff) 20%, transparent)", color: "var(--accent, #4ea1ff)" },
   ".cm-lp-macro-retarget": { left: "0" }, // embeds: a separate top-left control (no edit/align co-occur)
   // #216 comment 836: the pipe-table wrap positions the hover-revealed RichUI-entry button at the table's
   // top-left. fit-content keeps the wrap the table's width so the button aligns to the table's left edge

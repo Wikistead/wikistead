@@ -56,3 +56,32 @@ test("#255: the ✎ and align buttons flow in one row and never overlap", async 
   const a = (await align.boundingBox())!;
   expect(a.x).toBeGreaterThanOrEqual(e.x + e.width - 1); // align.left ≥ edit.right → disjoint
 });
+
+// #255 the align control is a 3-button SEGMENT (left | center | right), not a single cycling button.
+// The active side is highlighted; clicking a side picks it DIRECTLY (no cycle).
+test("#255 the align control is a 3-segment control; the active side is highlighted, a click picks it", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "align-seg");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("```mermaid\ngraph TD; A-->B\n```\n\nbelow\n");
+  await sleep(700);
+  await page.getByText("below").click();
+  await sleep(300);
+  const wrap = page.locator("[data-pane=preview] .cm-lp-macro-wrap").first();
+  await wrap.hover();
+
+  // three distinct side buttons; CENTER is active by default (the diagram default, #255).
+  await expect(wrap.getByTestId("macro-align-left")).toBeVisible();
+  await expect(wrap.getByTestId("macro-align-center")).toBeVisible();
+  await expect(wrap.getByTestId("macro-align-right")).toBeVisible();
+  await expect(wrap.getByTestId("macro-align-center")).toHaveAttribute("aria-pressed", "true");
+  await expect(wrap.getByTestId("macro-align-right")).toHaveAttribute("aria-pressed", "false");
+
+  // clicking RIGHT picks it directly (not a cycle): the wrap aligns right and the right side lights up.
+  await wrap.getByTestId("macro-align-right").click({ force: true });
+  await sleep(200);
+  await expect(wrap).toHaveClass(/cm-lp-align-right/);
+  await expect(wrap.getByTestId("macro-align-right")).toHaveAttribute("aria-pressed", "true");
+  await expect(wrap.getByTestId("macro-align-center")).toHaveAttribute("aria-pressed", "false");
+});

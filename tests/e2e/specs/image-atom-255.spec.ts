@@ -34,8 +34,9 @@ test("#255: a standalone image is an atom — click selects (no reveal), hover s
   const ab = (await align.boundingBox())!;
   expect(ab.x, "align is fully right of the ✎ (no overlap)").toBeGreaterThanOrEqual(eb.x + eb.width - 1);
 
-  // (3) the align toggle cycles center → left → right (display-only wrap class + source `?align=`).
-  await align.click({ force: true });
+  // (3) #255 the segmented control picks a side directly (left button → align-left); display-only
+  // wrap class + source `?align=`.
+  await wrap.getByTestId("macro-align-left").click({ force: true });
   await sleep(200);
   await expect(page.locator("[data-pane=preview] .cm-lp-image-wrap")).toHaveClass(/cm-lp-align-left/);
   // reveal to confirm the source persisted the alignment on the opaque URL.
