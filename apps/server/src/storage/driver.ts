@@ -23,13 +23,22 @@ export interface StorageDriver {
   // Generate a presigned GET URL for direct client download.
   // Returns JSON { downloadUrl } — NOT a 302 redirect, to avoid URL leaking
   // into browser history, Referer headers, and access logs.
-  presignGet(key: string, opts: { ttlSeconds: number }): Promise<string>
+  // #273 / ADR-120: `disposition` signs a ResponseContentDisposition override into the
+  // URL (one of the few signable response overrides) so a direct presigned download is
+  // served as `attachment` — the browser downloads instead of navigating/rendering.
+  // NOTE: `X-Content-Type-Options: nosniff` is NOT signable — that is exactly why
+  // inline-viewable bytes go through the Fastify proxy route, never a presigned URL.
+  presignGet(key: string, opts: { ttlSeconds: number; disposition?: { type: 'attachment' | 'inline'; filename: string } }): Promise<string>
   // Delete an object. No-op (does not throw) if the object does not exist.
   deleteObject(key: string): Promise<void>
   // Return the actual size of an uploaded object from S3 metadata.
   // Used at confirm time to set size_bytes without trusting the client.
   // Throws if the object does not exist (client has not uploaded yet).
   headObject(key: string): Promise<{ sizeBytes: number }>
+  // #273 / ADR-120: read only the object's LEADING bytes (S3 Range GET) — the magic-byte
+  // sniff input at confirm time. Bounded so classifying a huge upload never streams it.
+  // Same auth caveat as getObject: the caller owns the authorization boundary.
+  getObjectHead(key: string, maxBytes: number): Promise<Uint8Array>
   // Read the raw object bytes. INTERNAL, AUTH-BYPASSING: unlike presignGet (which is
   // requested only after an FGA `view` check), this is a direct store read with NO
   // authorization gate — the CALLER must have already authorized access to the
@@ -87,10 +96,16 @@ export class LogicalStorageDriver implements StorageDriver {
     await this.s3.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: bytes, ContentType: contentType }))
   }
 
-  async presignGet(key: string, opts: { ttlSeconds: number }): Promise<string> {
+  async presignGet(key: string, opts: { ttlSeconds: number; disposition?: { type: 'attachment' | 'inline'; filename: string } }): Promise<string> {
     return getSignedUrl(
       this.s3,
-      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ...(opts.disposition
+          ? { ResponseContentDisposition: `${opts.disposition.type}; filename*=UTF-8''${encodeURIComponent(opts.disposition.filename)}` }
+          : {}),
+      }),
       { expiresIn: opts.ttlSeconds },
     )
   }
@@ -103,6 +118,11 @@ export class LogicalStorageDriver implements StorageDriver {
   async headObject(key: string): Promise<{ sizeBytes: number }> {
     const result = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }))
     return { sizeBytes: result.ContentLength ?? 0 }
+  }
+
+  async getObjectHead(key: string, maxBytes: number): Promise<Uint8Array> {
+    const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key, Range: `bytes=0-${Math.max(0, maxBytes - 1)}` }))
+    return result.Body!.transformToByteArray()
   }
 
   // Auth-bypassing raw read — see the interface note. Callers own authorization.

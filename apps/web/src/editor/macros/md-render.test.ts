@@ -26,6 +26,21 @@ describe("renderMarkdownToDom — GFM table (#174 point 4)", () => {
   });
 });
 
+describe("renderMarkdownToDom — wks-attachment intercept (#273 / ADR-120 condition ①, client impl)", () => {
+  it("a [name](wks-attachment:id) link renders as a non-anchor chip, never a raw custom-scheme <a>", () => {
+    const d = root("see [report.pdf](wks-attachment:abc-123) here");
+    const chip = d.querySelector('[data-testid="attachment-ref"]');
+    expect(chip).not.toBeNull();
+    expect(chip?.textContent).toContain("report.pdf");
+    expect(d.querySelector('a[href^="wks-attachment"]')).toBeNull(); // no raw custom-scheme anchor
+  });
+  it("a normal https link still renders as an anchor (the intercept is scheme-scoped)", () => {
+    const d = root("[site](https://example.com)");
+    const a = d.querySelector("a");
+    expect(a?.getAttribute("href")).toBe("https://example.com");
+  });
+});
+
 describe("renderMarkdownToDom (#90 S0)", () => {
   it("renders common Markdown to elements", () => {
     const d = root("# Title\n\npara **bold** _i_ `c`\n\n- a\n- b\n");

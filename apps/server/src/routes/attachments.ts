@@ -18,10 +18,32 @@ interface AttachmentRow {
   id: string; tenant_id: string; page_id: string
   filename: string; content_type: string; size_bytes: number | null
   s3_key: string; status: string; created_at: Date; confirmed_at: Date | null
+  inline_kind: InlineKind
 }
 export interface AttachmentSummary {
   id: string; filename: string; contentType: string
   sizeBytes: number | null; createdAt: Date
+}
+
+// #273 / ADR-120: the server-sniffed inline classification. Derived ONLY from the
+// object's leading bytes at confirm — the client-declared content_type is untrusted
+// (client-set at presign; S3's ContentType is the client's PUT value). Only passive
+// kinds may render inline; anything unrecognised is 'none' → download card. HTML /
+// SVG / XML deliberately sniff to 'none' (inline active content = stored XSS).
+export type InlineKind = 'pdf' | 'image' | 'none'
+const SNIFF_BYTES = 512
+// Even an allowlisted kind falls back to the download card above this size (review
+// condition: never inline-stream an arbitrarily large object through the app).
+export const INLINE_MAX_BYTES = 25 * 1024 * 1024
+
+export function sniffInlineKind(bytes: Uint8Array): InlineKind {
+  const startsWith = (sig: number[], at = 0) => sig.every((b, i) => bytes[at + i] === b)
+  if (startsWith([0x25, 0x50, 0x44, 0x46, 0x2d])) return 'pdf' // %PDF- (strict head match — fail closed)
+  if (startsWith([0x89, 0x50, 0x4e, 0x47])) return 'image' // PNG
+  if (startsWith([0xff, 0xd8, 0xff])) return 'image' // JPEG
+  if (startsWith([0x47, 0x49, 0x46, 0x38])) return 'image' // GIF8
+  if (startsWith([0x52, 0x49, 0x46, 0x46]) && startsWith([0x57, 0x45, 0x42, 0x50], 8)) return 'image' // RIFF….WEBP
+  return 'none'
 }
 
 // ── Service functions ─────────────────────────────────────────────────────
@@ -111,12 +133,20 @@ export async function confirmAttachment(
     throw Object.assign(new Error('upload not found in storage; upload to the presigned URL first'), { statusCode: 400 })
   }
 
+  // #273 / ADR-120: derive the inline classification from the object's LEADING BYTES —
+  // never from the client-declared content_type. A sniff failure fails closed ('none' →
+  // download card); it never blocks the confirm (classification is display-only safety).
+  let inlineKind: InlineKind = 'none'
+  try {
+    inlineKind = sniffInlineKind(await storage.getObjectHead(row.s3_key, SNIFF_BYTES))
+  } catch { /* unreadable head → 'none' (fail closed) */ }
+
   await db.sql`
     UPDATE attachments
-    SET status = 'confirmed', size_bytes = ${sizeBytes}, confirmed_at = now()
+    SET status = 'confirmed', size_bytes = ${sizeBytes}, confirmed_at = now(), inline_kind = ${inlineKind}
     WHERE id = ${args.id}
   `
-  const downloadUrl = await storage.presignGet(row.s3_key, { ttlSeconds: GET_TTL })
+  const downloadUrl = await storage.presignGet(row.s3_key, { ttlSeconds: GET_TTL, disposition: { type: 'attachment', filename: row.filename } })
   emit({ type: 'attachment.confirmed', tenantId: args.tenantId, attachmentId: row.id, pageId: row.page_id, actorId: args.userId })
   return { id: row.id, filename: row.filename, contentType: row.content_type, sizeBytes, createdAt: row.created_at, downloadUrl }
 }
@@ -140,7 +170,7 @@ export async function downloadAttachment(
   storage: StorageDriver,
   fga: OpenFgaClient,
   args: { id: string; subject: string; context?: { current_time: string } },
-): Promise<{ downloadUrl: string; filename: string; expiresAt: string }> {
+): Promise<{ downloadUrl: string; filename: string; expiresAt: string; sizeBytes: number | null; inlineKind: InlineKind }> {
   const [row] = await db.sql<AttachmentRow[]>`SELECT * FROM attachments WHERE id = ${args.id}`
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 }) // no row → 404 (and no page_id to gate on)
   // #297: the view gate runs BEFORE the status checks. Otherwise a soft-DELETED attachment returned 410 Gone
@@ -151,8 +181,42 @@ export async function downloadAttachment(
   if (row.status === 'pending') throw Object.assign(new Error('not found'), { statusCode: 404 })
   if (row.status === 'deleted') throw Object.assign(new Error('gone'), { statusCode: 410 })
 
-  const downloadUrl = await storage.presignGet(row.s3_key, { ttlSeconds: GET_TTL })
-  return { downloadUrl, filename: row.filename, expiresAt: new Date(Date.now() + GET_TTL * 1000).toISOString() }
+  // #273 review condition ③ (retroactive): the direct presigned GET is served with
+  // `Content-Disposition: attachment` via the signable override — the browser downloads it,
+  // never navigates to storage-served bytes. sizeBytes/inlineKind let the client pick the
+  // affordance (download card vs inline viewer); inline BYTES go through the proxy route.
+  const downloadUrl = await storage.presignGet(row.s3_key, { ttlSeconds: GET_TTL, disposition: { type: 'attachment', filename: row.filename } })
+  return {
+    downloadUrl, filename: row.filename, expiresAt: new Date(Date.now() + GET_TTL * 1000).toISOString(),
+    // size_bytes is BIGINT → the driver returns a string; normalise so clients get a number.
+    sizeBytes: row.size_bytes == null ? null : Number(row.size_bytes), inlineKind: row.inline_kind ?? 'none',
+  }
+}
+
+// #273 / ADR-120: stream an INLINE-viewable attachment through the app so Fastify controls
+// the response headers — the authoritative Content-Type comes from the SNIFFED kind (never
+// the client-declared type), plus `Content-Disposition: inline`, `X-Content-Type-Options:
+// nosniff` and a restrictive CSP. A presigned URL cannot carry nosniff (not a signable
+// override), which is exactly why inline bytes are proxied. Same #297 gate order as
+// download: view-gate FIRST, then status — a non-viewer gets a uniform 404 always.
+// v1 inline kinds: 'pdf' only (images have their own <img> path). A confirmed attachment
+// that is not inline-viewable → 415; over the size cap → 413 (client falls back to the card).
+const INLINE_CONTENT_TYPE: Record<Exclude<InlineKind, 'none'>, string> = { pdf: 'application/pdf', image: 'application/octet-stream' }
+export async function inlineAttachment(
+  db: TenantDb,
+  storage: StorageDriver,
+  fga: OpenFgaClient,
+  args: { id: string; subject: string; context?: { current_time: string } },
+): Promise<{ bytes: Uint8Array; contentType: string; filename: string }> {
+  const [row] = await db.sql<AttachmentRow[]>`SELECT * FROM attachments WHERE id = ${args.id}`
+  if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  await assertPageViewable(fga, args.subject, row.page_id, args.context)
+  if (row.status === 'pending') throw Object.assign(new Error('not found'), { statusCode: 404 })
+  if (row.status === 'deleted') throw Object.assign(new Error('gone'), { statusCode: 410 })
+  if (row.inline_kind !== 'pdf') throw Object.assign(new Error('not inline-viewable'), { statusCode: 415 })
+  if (Number(row.size_bytes ?? 0) > INLINE_MAX_BYTES) throw Object.assign(new Error('too large to view inline'), { statusCode: 413 })
+  const bytes = await storage.getObject(row.s3_key)
+  return { bytes, contentType: INLINE_CONTENT_TYPE[row.inline_kind], filename: row.filename }
 }
 
 // List confirmed attachments for a page. pending and deleted are excluded.
@@ -252,6 +316,22 @@ export async function attachmentsPlugin(app: FastifyInstance) {
       : { subject: `share_link:${req.guest!.shareLinkId}`, context: { current_time: new Date().toISOString() } }
     const result = await downloadAttachment(req.db, app.storageDriver, app.fga, { id: req.params.id, ...principal })
     return reply.send(result)
+  })
+
+  // #273 / ADR-120: the inline proxy. Members OR guests (view link) — the same principal
+  // resolution + FGA view gate as download. The response headers are the XSS boundary:
+  // sniffed Content-Type + inline disposition + nosniff + a no-execute CSP.
+  app.get<{ Params: { id: string } }>('/attachments/:id/inline', { config: { guest: 'view' } }, async (req, reply) => {
+    const principal = req.user
+      ? { subject: `user:${req.user.sub}` }
+      : { subject: `share_link:${req.guest!.shareLinkId}`, context: { current_time: new Date().toISOString() } }
+    const { bytes, contentType, filename } = await inlineAttachment(req.db, app.storageDriver, app.fga, { id: req.params.id, ...principal })
+    reply.header('Content-Type', contentType)
+    reply.header('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(filename)}`)
+    reply.header('X-Content-Type-Options', 'nosniff')
+    reply.header('Content-Security-Policy', "default-src 'none'; object-src 'none'; script-src 'none'")
+    reply.header('Cache-Control', 'private, no-store')
+    return reply.send(Buffer.from(bytes))
   })
 
   app.delete<{ Params: { id: string } }>('/attachments/:id', async (req, reply) => {

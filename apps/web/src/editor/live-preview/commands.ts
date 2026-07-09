@@ -181,6 +181,14 @@ export function insertImage(view: EditorView, alt: string, ref: string): void {
   view.focus();
 }
 
+// #273 / ADR-120: insert a FILE attachment reference — [name](wks-attachment:<id>), the image
+// form minus the `!`. A standard Markdown link (Open formats: no custom syntax, no degrade);
+// the display layer renders the chip / download card / inline viewer from the stable id.
+export function insertAttachment(view: EditorView, name: string, ref: string): void {
+  view.dispatch(view.state.replaceSelection(`[${name}](${ref})`));
+  view.focus();
+}
+
 // over. With a selection, the selected text becomes the link label.
 export function insertLink(view: EditorView): void {
   const { state } = view;

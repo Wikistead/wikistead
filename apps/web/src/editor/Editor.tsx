@@ -10,6 +10,7 @@ import { redrawMacros, taskStatePosAt } from "./live-preview/decorations";
 import { useTheme } from "../app/ThemeProvider";
 import { makeMacroPresence } from "./macro-presence";
 import { makeImageResolver } from "./image-resolver";
+import { makeAttachmentResolver } from "./attachment-resolver";
 import { makeDiagramRenderer } from "./diagram-renderer";
 import { makeTranscludeResolver } from "./transclude-resolver";
 import { PageEmbedPicker } from "./PageEmbedPicker";
@@ -239,6 +240,8 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
   const surfaceKey: SurfaceKey = canEdit && editing ? "edit" : "view";
 
   const resolveImageUrl = useMemo(() => makeImageResolver(apiToken), [apiToken]);
+  // #273: file-attachment links (chip / download card / sandboxed PDF viewer) — same auth token.
+  const resolveAttachment = useMemo(() => makeAttachmentResolver(apiToken), [apiToken]);
   // #140: host-mediated diagram render (plantuml). Only when we have a pageId (the render endpoint is
   // page-scoped + page-view gated); otherwise undefined → the macro degrades to its source fence.
   const renderDiagram = useMemo(() => (pageId ? makeDiagramRenderer(apiToken, pageId) : undefined), [apiToken, pageId]);
@@ -403,7 +406,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
             });
           }
         : undefined;
-      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, renderDiagram, resolveTransclude, embedProviders, onToggleTask: onToggleTaskInView, titleLinks });
+      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, onToggleTask: onToggleTaskInView, titleLinks });
       views.push(v);
       previewViewRef.current = v;
       if (anchorGetterRef) anchorGetterRef.current = null;
@@ -422,6 +425,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     const previewView = mountLivePreview(previewHost, c.ytext, c.provider, {
       readOnly: false,
       resolveImageUrl,
+      resolveAttachment,
       renderDiagram,
       resolveTransclude,
       embedProviders,
@@ -473,7 +477,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     };
     // vim excluded (Compartment reconfigure, not a remount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, renderDiagram, resolveTransclude, embedProviders, openPageEmbedPicker, openEmbedUrlPrompt, openTemplateInsertPicker, onUploadImage, titleLinks]);
+  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, openPageEmbedPicker, openEmbedUrlPrompt, openTemplateInsertPicker, onUploadImage, titleLinks]);
 
   // vim on/off: reconfigure the Compartment IN PLACE (no remount → collab/presence
   // untouched). Only meaningful on the edit surface.
