@@ -335,6 +335,8 @@
     "signInTitle": "wikistead にサインイン",
     "signInBody": "組織の ID プロバイダーで続行します。",
     "signIn": "サインイン",
+    "socialHint": "または次の方法で続行",
+    "continueWith": "{{provider}} で続行",
     "errorAccess": "サインインを完了できませんでした。もう一度お試しいただくか、ワークスペース管理者にお問い合わせください。",
     "errorSeatFull": "このワークスペースはメンバー上限に達しています。管理者に席の解放またはアップグレードを依頼してください。",
     "joinTitle": "wikistead ワークスペースを作成",

@@ -20,7 +20,7 @@ describe('enrollEligible — policy semantics (#101/ADR-034)', () => {
 
 describe('enrollEligible — domain trust boundary (hole #1: proven ownership)', () => {
   it('enrols when the email domain is VERIFIED', () => {
-    expect(enrollEligible(base({ policy: 'domain', email: 'alice@corp.test', verifiedDomains: ['corp.test'] }))).toBe(true)
+    expect(enrollEligible(base({ policy: 'domain', email: 'alice@corp.test', emailVerified: true, verifiedDomains: ['corp.test'] }))).toBe(true)
   })
 
   it('does NOT enrol an UN-verified domain even if it is the login domain', () => {
@@ -34,10 +34,29 @@ describe('enrollEligible — domain trust boundary (hole #1: proven ownership)',
   })
 
   it('is case-insensitive and rejects malformed / multi-@ emails', () => {
-    expect(enrollEligible(base({ policy: 'domain', email: 'A@Corp.TEST', verifiedDomains: ['corp.test'] }))).toBe(true)
+    expect(enrollEligible(base({ policy: 'domain', email: 'A@Corp.TEST', emailVerified: true, verifiedDomains: ['corp.test'] }))).toBe(true)
     expect(enrollEligible(base({ policy: 'domain', email: 'weird@a@corp.test', verifiedDomains: ['corp.test'] }))).toBe(false)
     expect(enrollEligible(base({ policy: 'domain', email: 'nodomain', verifiedDomains: ['corp.test'] }))).toBe(false)
     expect(enrollEligible(base({ policy: 'domain', email: undefined, verifiedDomains: ['corp.test'] }))).toBe(false)
+  })
+})
+
+describe('enrollEligible — domain trust boundary (hole #3, #281/ADR-121 §3.5: IdP-verified email only)', () => {
+  it('an UNVERIFIED email never domain-enrols, even on a fully verified domain (takeover-into-tenant closed)', () => {
+    // The GitHub-style brokered case: alice@corp.test is asserted but NOT verified by the IdP, while
+    // corp.test IS the victim tenant's DNS-verified domain. The server must reject regardless of what
+    // the broker (Authentik source) passed through — the server is the fortress, not the source config.
+    expect(enrollEligible(base({ policy: 'domain', email: 'alice@corp.test', emailVerified: false, verifiedDomains: ['corp.test'] }))).toBe(false)
+  })
+
+  it('a MISSING/unknown email_verified claim fails safe (invite path), never admits', () => {
+    expect(enrollEligible(base({ policy: 'domain', email: 'alice@corp.test', emailVerified: null, verifiedDomains: ['corp.test'] }))).toBe(false)
+    expect(enrollEligible(base({ policy: 'domain', email: 'alice@corp.test', verifiedDomains: ['corp.test'] }))).toBe(false) // omitted entirely
+  })
+
+  it('email_verified does not leak into other policies (open still admits, groups unaffected)', () => {
+    expect(enrollEligible(base({ policy: 'open', emailVerified: false }))).toBe(true)
+    expect(enrollEligible(base({ policy: 'groups', emailVerified: false, groups: ['eng'], allowedGroups: ['eng'] }))).toBe(true)
   })
 })
 

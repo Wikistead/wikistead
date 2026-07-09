@@ -5,7 +5,7 @@ import type { TenantDb } from '../db/index.js'
 import type { Tenant } from '@wikistead/types'
 import { mintMemberCollabToken } from '@wikistead/auth'
 import { SESSION_COOKIE, destroySession, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
-import { buildLogin, exchangeCode, loadPlatformOidc, type TenantOidcConfig } from '../auth/oidc.js'
+import { buildLogin, exchangeCode, loadPlatformOidc, loadSocialLogin, type TenantOidcConfig } from '../auth/oidc.js'
 import { saveState, consumeState } from '../auth/oidc-state.js'
 import { safeReturnTo } from '../auth/return-to.js'
 import { decryptSecret } from '../auth/secret-crypto.js'
@@ -51,7 +51,7 @@ async function resolveLoginConfig(db: TenantDb): Promise<{ cfg: TenantOidcConfig
 // existing session and run through the normal hook.
 export async function authPlugin(app: FastifyInstance) {
   // Start the OIDC flow: redirect to the tenant's IdP with state/nonce/PKCE.
-  app.get<{ Querystring: { returnTo?: string; invite?: string } }>('/auth/login', async (req, reply) => {
+  app.get<{ Querystring: { returnTo?: string; invite?: string; provider?: string } }>('/auth/login', async (req, reply) => {
     const tenant = await resolveTenant(req.headers.host)
     if (!tenant) return reply.code(404).send({ error: 'not found' })
     const db = await acquireTenantDb(tenant)
@@ -59,13 +59,36 @@ export async function authPlugin(app: FastifyInstance) {
       const resolved = await resolveLoginConfig(db)
       if (!resolved) return reply.code(404).send({ error: 'login not configured' })
       const redirectUri = `${req.protocol}://${req.headers.host}/auth/callback`
-      const { url, state, nonce, codeVerifier } = await buildLogin(resolved.cfg, redirectUri)
+      // #281 / ADR-121 §2: a social button passes ?provider=<slug>. Only ALLOWLISTED slugs
+      // (PLATFORM_SOCIAL_PROVIDERS) become the broker's source-hint param, and only on the
+      // PLATFORM issuer path (a tenant's own IdP gets no social hint). Unknown/absent → no
+      // extra param (the broker shows its own picker) — never an error, never user-echoed.
+      const social = loadSocialLogin()
+      const provider = !resolved.viaTenantOidc && req.query?.provider && social.providers.includes(req.query.provider) ? req.query.provider : undefined
+      const { url, state, nonce, codeVerifier } = await buildLogin(resolved.cfg, redirectUri, provider ? { [social.hintParam]: provider } : undefined)
       const returnTo = safeReturnTo(req.query?.returnTo)
       // An invite link starts login with ?invite=<token>; carry it (opaque) through
       // the round-trip so the callback can accept the invite after identity is proven.
       const inviteToken = req.query?.invite || undefined
       await saveState(app.valkey, state, { nonce, codeVerifier, tenantId: tenant.id, returnTo, viaTenantOidc: resolved.viaTenantOidc, inviteToken })
       return reply.redirect(url)
+    } finally {
+      await db.release()
+    }
+  })
+
+  // #281 / ADR-121 §2: what the sign-in screen should offer. PUBLIC (it renders before any
+  // session; the /auth/login prefix is hook-skipped). Social buttons appear only when the
+  // tenant logs in via the PLATFORM issuer (Cloud) AND providers are configured — a tenant
+  // with its own OIDC (and all of CE) gets none. Slugs only; no secrets, no issuer URLs.
+  app.get('/auth/login-options', async (req, reply) => {
+    const tenant = await resolveTenant(req.headers.host)
+    if (!tenant) return reply.code(404).send({ error: 'not found' })
+    const db = await acquireTenantDb(tenant)
+    try {
+      const resolved = await resolveLoginConfig(db)
+      const social = resolved && !resolved.viaTenantOidc ? loadSocialLogin().providers : []
+      return reply.send({ social })
     } finally {
       await db.release()
     }
