@@ -1,8 +1,5 @@
-import type { DirectiveMacro, EditUI } from "./registry";
-import { asMacroSource } from "./registry";
+import type { DirectiveMacro } from "./registry";
 import { renderMarkdownToDom, takePendingBaseOffset } from "./md-render";
-import { parseDirectiveOpen } from "@wikistead/macro-render";
-import i18n from "../../i18n";
 // #85 slice 2: the DOM-free export half (parseLayoutItems + the htmlRenders) is the single source of
 // truth in @wikistead/macro-render, shared with the server export renderer. This file adds only the
 // DOM liveRender + editor metadata on top.
@@ -21,39 +18,10 @@ export { parseLayoutItems }; // re-export: existing editor imports (tabs/columns
 // the #196/754 breakage). So the container stays a flex widget ALWAYS (layout never breaks) and its raw
 // source is edited in a split panel (source textarea + live preview), reached via the single edit button.
 
-// #257: the STRUCTURED inline editUI for a layout container. Instead of a raw textarea of `:::tab` /
-// `:::column` markers, the panel decomposes the container into its items and edits each ITEM's content
-// (markers hidden): tabs get a clickable tab bar + a per-tab label field; columns get "Column N" chips.
-// Add / remove / (tabs) reorder are in-panel (#213 structural editing folded in). On any change the panel
-// REASSEMBLES the whole container body and commits it in ONE save — a single offset-invariant Y.Text edit,
-// same granularity as before. editUI `source`/`save` operate on the INNER body (the host re-wraps the
-// outer `::::name` fence — editUISaveChange's wrapSource), so this never emits the outer fence and the
-// child colon count is preserved from the source (outer≥inner convention, #185/#213). #196 comment 786
-// stays: layout is edited in a panel, never reveal-on-cursor (the flex frame never collapses).
-
-interface LayoutItem { label?: string; content: string }
-
-// The child fence colon count, read from the source's items (defaults to 3 = a standard `::::`-outer
-// container). Preserved on reassembly so a nested container's higher colon count round-trips.
-function childColonsOf(source: string, childName: string): number {
-  for (const line of source.split("\n")) {
-    const o = parseDirectiveOpen(line);
-    if (o?.name === childName) return o.colons;
-  }
-  return 3;
-}
-
-// Reassemble the container's INNER body from its items (no outer fence — the host re-wraps it).
-function serializeItems(colons: number, childName: string, items: LayoutItem[]): string {
-  const fence = ":".repeat(colons);
-  return items
-    .map((it) => {
-      const label = it.label ? `[${it.label}]` : "";
-      const content = it.content.replace(/^\n+|\n+$/g, "");
-      return `${fence}${childName}${label}\n${content}\n${fence}`;
-    })
-    .join("\n");
-}
+// #278 §2a: the #257 STRUCTURED editUI panel is RETIRED. A container's content is now edited by an inline CM6
+// island in the clicked slot (decorations.ts mountSlotEditIsland) and its structure by the per-item inline ×/
+// (§1) — so this file no longer exposes an editUI; the container stays a flex-widget ATOM (layout never breaks,
+// #196), the caret never reveals raw, and single Y.Text is preserved by the island's commit-on-blur range edit.
 
 export function columnsLiveRender(body: string): HTMLElement {
   const base = takePendingBaseOffset(); // #215 / ADR-100: absolute base of `body` (null = untagged render)
