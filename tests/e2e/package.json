@@ -9,6 +9,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0",
+    "fflate": "0.8.3",
     "jose": "^5.10.0",
     "postgres": "^3.4.9"
   }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronsUpDown, Pencil, Plus } from "lucide-react";
+import { ChevronsUpDown, FolderDown, Loader2, Pencil, Plus } from "lucide-react";
 import { Command, CommandInput, CommandList, CommandItem, CommandGroup, CommandSeparator } from "../components/ui/command";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import type { Space } from "../data/queries";
@@ -13,7 +13,7 @@ import { visibleSpaces, recordRecentSpace, hiddenSpaceCount, allSpacesSorted } f
 // cmdk gives ↑↓/Enter.
 
 export function SpaceSwitcher({
-  spaces, currentId, currentSpace, canManage, onSelect, onRename, onNewSpace,
+  spaces, currentId, currentSpace, canManage, onSelect, onRename, onNewSpace, onExportSpace, exportingSpace = false,
 }: {
   spaces: Space[];
   currentId: string | undefined;
@@ -22,6 +22,11 @@ export function SpaceSwitcher({
   onSelect: (id: string) => void;
   onRename: () => void;
   onNewSpace: () => void;
+  // #309: download the current space as a Markdown ZIP. NOT canManage-gated — the server export is
+  // view-filtered, so every member may use it (Open formats / no lock-in). exportingSpace keeps the
+  // item disabled + spinning while the archive is being generated (it can take a while).
+  onExportSpace?: () => void;
+  exportingSpace?: boolean;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -101,6 +106,14 @@ export function SpaceSwitcher({
                 {currentSpace && canManage && (
                   <CommandItem value="__rename" onSelect={() => { onRename(); setOpen(false); }} data-testid="space-rename">
                     <Pencil size={13} /> {t("sidebar.renameSpace")}
+                  </CommandItem>
+                )}
+                {/* #309: export the current space (Markdown ZIP). The menu STAYS OPEN with the item
+                    disabled + spinning while the archive is generated, so the in-flight state is visible;
+                    the caller closes nothing — the user sees the browser download start. */}
+                {currentSpace && onExportSpace && (
+                  <CommandItem value="__export" disabled={exportingSpace} onSelect={() => { if (!exportingSpace) onExportSpace(); }} data-testid="space-export">
+                    {exportingSpace ? <Loader2 size={13} className="animate-spin" /> : <FolderDown size={13} />} {t("export.spaceItem")}
                   </CommandItem>
                 )}
                 <CommandItem value="__new" onSelect={() => { onNewSpace(); setOpen(false); }} data-testid="space-new">

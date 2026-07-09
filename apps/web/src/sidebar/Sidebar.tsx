@@ -24,6 +24,7 @@ import { notify } from "../ui/toast";
 import { DeleteBacklinkWarning } from "../app/DeleteBacklinkWarning";
 import { ShareDialog } from "../ui/ShareDialog";
 import { TemplatePickerDialog } from "./TemplatePickerDialog";
+import { downloadSpaceExport } from "../data/exportApi"; // #309: space Markdown-ZIP export
 
 // One space at a time (Notion/Outline style): the sidebar shows ONLY the active
 // space's page tree; the space itself is chosen in the switcher, not a tree root.
@@ -88,6 +89,20 @@ export function Sidebar() {
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const [sharing, setSharing] = useState<string | null>(null);
   const [pickingTemplate, setPickingTemplate] = useState(false);
+  // #309: space Markdown-ZIP export — available to EVERY member (the server archive is view-filtered;
+  // this is an Open-formats exit, not a management action). Generating a big space takes a while, so
+  // the switcher item stays disabled + spinning until the download starts; 413 (over the server's
+  // size budget) gets its dedicated message rather than the generic failure toast.
+  const [exportingSpace, setExportingSpace] = useState(false);
+  const exportSpace = useCallback(() => {
+    if (!current || exportingSpace) return;
+    setExportingSpace(true);
+    void downloadSpaceExport(token, current).then((status) => {
+      setExportingSpace(false);
+      if (status >= 200 && status < 300) notify.success(t("export.done"));
+      else notify.error(t(status === 413 ? "export.tooLarge" : "toast.actionFailed"));
+    });
+  }, [current, exportingSpace, token, t]);
 
   const newPage = (parentId: string | null) => {
     if (!current) return;
@@ -185,6 +200,8 @@ export function Sidebar() {
           onSelect={setActiveSpaceId}
           onRename={() => { if (currentSpace) setRenamingSpace({ id: currentSpace.id, name: currentSpace.name }); }}
           onNewSpace={() => setCreatingSpace(true)}
+          onExportSpace={exportSpace}
+          exportingSpace={exportingSpace}
         />
         {current && (canEdit || canManage) && (
           <div className="flex flex-none gap-0.5">

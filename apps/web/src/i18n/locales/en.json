@@ -69,7 +69,8 @@
     "title": "Account",
     "profile": "Profile",
     "editor": "Editor",
-    "theme": "Theme"
+    "theme": "Theme",
+    "data": "Data"
   },
   "account": {
     "profileHint": "Your identity across the workspace — how collaborators see you.",
@@ -125,7 +126,8 @@
     "appearanceHint": "Light, dark, or follow your system.",
     "accent": "Accent colour",
     "accentHint": "Your personal accent colour. Overrides the workspace accent for you only.",
-    "accentInherit": "Default (match workspace)"
+    "accentInherit": "Default (match workspace)",
+    "dataHint": "Take your knowledge out in open formats."
   },
   "settings": {
     "back": "Back to app",
@@ -739,5 +741,13 @@
     "disabled": "Disabled",
     "empty": "No webhooks yet.",
     "createFailed": "Something went wrong"
+  },
+  "export": {
+    "spaceItem": "Export space",
+    "tenantTitle": "Export everything",
+    "tenantHint": "Download every space and page you can view as a Markdown ZIP (images included). Large tenants can take a moment.",
+    "tenantButton": "Export all as Markdown ZIP",
+    "done": "Export downloaded",
+    "tooLarge": "The export exceeds the size limit. Try exporting spaces individually."
   }
 }
