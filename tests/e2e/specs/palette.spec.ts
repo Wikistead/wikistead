@@ -92,6 +92,33 @@ test("divider inserts a thematic break, not a setext heading", async ({ page }) 
   expect(await page.locator("[data-pane=preview] .cm-lp-hr").count()).toBeGreaterThan(0);
 });
 
+// #290 / ADR-114: /todo inserts a PLAIN GFM task list (standard Markdown, NOT a :::todo directive).
+// The rich :::todo form (title + progress ring) is a later PROMOTION; the palette entry is plain source.
+test("#290: /todo inserts a plain GFM task item (not a directive) that renders as a checkbox", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "palette-todo");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+
+  await page.keyboard.type("/todo");
+  await expect(page.getByTestId("slash-item-todo")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("slash-palette")).toHaveCount(0);
+  // caret lands after "- [ ] " so typed text becomes the task label. On the revealed line the "- " renders
+  // as a bullet glyph (•) — proof it's a plain LIST item, not a directive — and "[ ] alpha" stays as text.
+  await page.keyboard.type("alpha");
+  const revealed = await content(page);
+  expect(revealed).toContain("[ ] alpha");
+  expect(revealed).not.toContain(":::todo"); // plain source, not the rich directive
+
+  // move the caret off the line → the task item renders as a real checkbox (the ADR-019 path)
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("beta"); // caret now on line 2 → line 1 not revealed
+  await sleep(150);
+  await expect(page.getByTestId("task-checkbox")).toBeVisible();
+  await expect(page.getByTestId("task-checkbox")).not.toBeChecked();
+});
+
 test("selection + / opens the decorate palette; a mnemonic applies (ADR-018 #4/#2)", async ({ page }) => {
   // `/` is insert-primary but ALSO offers decoration on a selection (duplication is
   // intentional). With a selection, `/` opens the decorate palette (the `/` is

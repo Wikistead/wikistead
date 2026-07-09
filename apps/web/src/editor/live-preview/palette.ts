@@ -44,7 +44,7 @@ const imageUploader = Facet.define<(() => void) | null, (() => void) | null>({
 // #251 / ADR-110: the host seam for the "/"-palette "Insert template" command. The host opens its
 // template picker (the same list/preview asset as the sidebar #250 picker) and calls back with the chosen
 // template's body markdown (or null on cancel). Its presence GATES the command's visibility (guests /
-// picker-less surfaces never see it). The insert is a single offset-invariant Y.Text edit at the caret —
+// picker-less surfaces never see it). The insert is a single offset-invariant Y.Text edit at the caret
 // never a replace of the page, and the title is untouched.
 export type TemplateInsertPicker = (onInsert: (body: string | null) => void) => void;
 const templateInsertPicker = Facet.define<TemplateInsertPicker | null, TemplateInsertPicker | null>({
@@ -67,6 +67,9 @@ const COMMANDS: PaletteCommand[] = [
   { id: "h3", label: () => i18n.t("palette.h3"), alias: "h3", keywords: "heading ###", insert: "### ", caret: 4 },
   { id: "ul", label: () => i18n.t("palette.bulletList"), alias: "list", keywords: "bullet unordered dash", insert: "- ", caret: 2 },
   { id: "ol", label: () => i18n.t("palette.numberedList"), alias: "1. list", keywords: "numbered ordered", insert: "1. ", caret: 3 },
+  // #290 / ADR-114: /todo inserts a PLAIN GFM task list (standard Markdown, no directive). The
+  // rich :::todo form (title + progress ring) is reached later by PROMOTING the block (table precedent).
+  { id: "todo", label: () => i18n.t("palette.todoList"), alias: "todo", keywords: "task checklist checkbox todo done タスク チェック 進捗 やること", insert: "- [ ] ", caret: 6 },
   { id: "quote", label: () => i18n.t("palette.quote"), alias: "quote", keywords: "blockquote citation", insert: "> ", caret: 2 },
   { id: "code", label: () => i18n.t("palette.codeBlock"), alias: "code", keywords: "code block fenced pre", insert: "```\n\n```", caret: 4 },
   { id: "table", label: () => i18n.t("palette.table"), alias: "table", keywords: "grid", insert: "| Column | Column |\n| --- | --- |\n| Cell | Cell |", caret: [2, 8] },

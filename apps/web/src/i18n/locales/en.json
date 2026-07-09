@@ -583,6 +583,7 @@
     "h3": "Heading 3",
     "bulletList": "Bullet list",
     "numberedList": "Numbered list",
+    "todoList": "To-do list",
     "quote": "Quote",
     "codeBlock": "Code block",
     "table": "Table",
