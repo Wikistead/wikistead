@@ -1328,9 +1328,18 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
   host.className = "cm-lp-slot-edit-island";
   host.setAttribute("data-testid", "slot-edit-island");
   host.addEventListener("mousedown", (e) => e.stopPropagation()); // #265: the outer atom must not steal the caret
+  const srcPane = document.createElement("div");
+  srcPane.className = "cm-lp-slot-edit-src-pane";
+  // #278 §2c: a live preview of the slot body BELOW the source — nested directives/macros render via the SAME
+  // shared renderMarkdownToDom (no 2nd renderer), updating on every keystroke (display-only, no doc write).
+  const preview = document.createElement("div");
+  preview.className = "cm-lp-slot-edit-preview cm-lp-md-preview";
+  preview.setAttribute("data-testid", "slot-edit-preview");
+  const renderPreview = (md: string) => { try { preview.replaceChildren(renderMarkdownToDom(md)); } catch { preview.textContent = ""; } };
+  host.append(srcPane, preview);
   let committed = false;
   const handle = mountSourceEditor({
-    parent: host,
+    parent: srcPane,
     doc: bodyText,
     dark,
     testid: "slot-edit-src",
@@ -1339,7 +1348,7 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
     // host action providers passed, so /image·/embed·/template gracefully no-op; headings·lists·todo·quote·
     // code·divider·link work locally). Commit-on-blur still carries the result into the one Y.Text.
     extraExtensions: [slashPalette()],
-    onInput: () => {}, // no per-keystroke doc write (that would re-run the host doc + re-mount this island)
+    onInput: (v) => renderPreview(v), // #278 §2c: live preview only — NO doc write (that would re-mount the island)
     onCommit: (value) => {
       if (committed) return; // blur can fire alongside the field-clear re-render; write exactly once
       committed = true;
@@ -1348,6 +1357,7 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
     },
   });
   host.__slotHandle = handle; // disposed by MacroWidget.destroy(dom) on any unmount path
+  renderPreview(bodyText); // #278 §2c: seed the live preview with the current body
   cell.replaceWith(host); // for columns: the column cell; for tabs: the active panel
   // Focus AFTER CM attaches this widget DOM to the document — focusing during toDOM (DOM not yet in the tree)
   // is a no-op, which left the island unfocused so a single click opened but couldn't type (reviewer B).
@@ -3246,6 +3256,10 @@ export const livePreviewTheme = EditorView.baseTheme({
   // #278 §2a: the inline CM6 slot-edit island — a bordered box that replaces the slot's rendered content while
   // its body is edited with the full editor (accent border marks the active slot).
   ".cm-lp-slot-edit-island": { flex: "1 1 0", minWidth: "0", border: "1px solid var(--accent, #4ea1ff)", borderRadius: "4px", background: "color-mix(in srgb, var(--accent, #4ea1ff) 4%, var(--panel, #fff))" },
+  // #278 §2c: the slot island's source pane over a live preview, split by a hairline.
+  ".cm-lp-slot-edit-preview": { borderTop: "1px solid color-mix(in srgb, var(--accent, #4ea1ff) 30%, transparent)", padding: "0.3em 0.5em", fontSize: "0.9em" },
+  ".cm-lp-slot-edit-preview > :first-child": { marginTop: "0" },
+  ".cm-lp-slot-edit-preview > :last-child": { marginBottom: "0" },
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
   ".cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap:hover .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-align": { opacity: "1" },
