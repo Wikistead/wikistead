@@ -265,3 +265,84 @@ test("#290: multiple :::todo blocks — each header ring is independent; the pag
   await expect(pageRing).toHaveCount(1);
   await expect(pageRing).toHaveAttribute("data-done", "3");
 });
+
+// ── #290 review re-work (page-ring center, 100% checkmark, pop-on-toggle-only) ──
+
+// (3): the TITLE-BAND page ring was still off-centre (only fixed the header + sidebar rings). It
+// must sit on the meta row's mid-line — geometry vs the row box center Y (the svg baseline sink is the cause;
+// display:block fixes it). On a fresh scratch page the only page-task-ring is the band one (no sidebar rings).
+test("#290 (3): the title-band page ring is vertically centered on the meta row (geometry ≤1.5px)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "page-ring-center");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("- [x] done one\n- [ ] todo two\n");
+  await sleep(400);
+  // page-task-ring is shared with the sidebar tree rings of OTHER published pages; the BAND ring is the one
+  // NOT inside a tree-todo-ring. Measure its center vs its meta row (the "flex items-center gap-2" wrapper).
+  const dy = await page.evaluate(() => {
+    const band = Array.from(document.querySelectorAll("[data-testid=page-task-ring]")).find((e) => !e.closest("[data-testid=tree-todo-ring]"));
+    if (!band) return null;
+    const r = band.getBoundingClientRect();
+    const row = band.parentElement!.getBoundingClientRect();
+    return Math.abs((r.top + r.height / 2) - (row.top + row.height / 2));
+  });
+  expect(dy, "no band page-ring found").not.toBeNull();
+  expect(dy!).toBeLessThanOrEqual(1.5);
+});
+
+// (1): a full (100%) ring shows a checkmark ✓ in its centre; below 100% there is none. (The draw-in
+// animation on the completion transition is prefers-reduced-motion-gated device polish; here we assert the
+// checkmark's PRESENCE at 100% and ABSENCE below, which is deterministic.)
+test("#290 (1): the progress ring shows a checkmark when it reaches 100%", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "ring-checkmark");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::todo[Done soon]\n- [x] a\n- [ ] b\n:::\n\nbelow\n");
+  await sleep(400);
+
+  const ring = page.locator("[data-pane=preview] [data-testid=todo-ring]");
+  await expect(ring).toHaveAttribute("data-total", "2");
+  await expect(ring).toHaveAttribute("data-done", "1");
+  expect(await ring.locator(".cm-lp-todo-ring-check").count(), "no checkmark below 100%").toBe(0);
+
+  // tick the last box → 2/2 → the checkmark appears in the ring.
+  await page.getByTestId("task-checkbox").nth(1).click();
+  await sleep(300);
+  await expect(page.locator("[data-pane=preview] [data-testid=todo-ring]")).toHaveAttribute("data-done", "2");
+  await expect(page.locator("[data-pane=preview] [data-testid=todo-ring] .cm-lp-todo-ring-check")).toHaveCount(1);
+});
+
+// (2): the check-ON pop must fire on a real TOGGLE, never on a reveal re-mount (the old `:checked` CSS
+// animation replayed every time the caret entered/left the line). Count `wks-cb-pop` animationstart events:
+// a reveal cycle over a CHECKED box must not fire it; a genuine check-ON must.
+test("#290 (2): the checkbox pop fires on toggle, not on reveal", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "cb-pop");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("- [x] alpha\n\nbeta\n"); // caret on "beta" → line 1 (checked) rendered, not revealed
+  await sleep(300);
+  await page.evaluate(() => {
+    (window as unknown as { __cbPops: number }).__cbPops = 0;
+    document.querySelector("[data-pane=preview] .cm-content")!.addEventListener("animationstart", (e) => {
+      if ((e as AnimationEvent).animationName === "wks-cb-pop") (window as unknown as { __cbPops: number }).__cbPops++;
+    }, true);
+  });
+
+  // reveal cycle: caret INTO the checked task line (reveals raw → box drops) then OUT (box re-mounts checked).
+  await page.getByText("alpha").click();
+  await sleep(150);
+  await page.getByText("beta", { exact: true }).click();
+  await sleep(250);
+  expect(await page.evaluate(() => (window as unknown as { __cbPops: number }).__cbPops), "reveal must NOT pop").toBe(0);
+
+  // a genuine toggle-ON pops exactly once: turn the box OFF (no pop), then ON (pop).
+  const box = page.getByTestId("task-checkbox").first();
+  await box.click(); // checked → unchecked (OFF, no pop)
+  await sleep(200);
+  await page.getByTestId("task-checkbox").first().click(); // unchecked → checked (ON → pop)
+  await sleep(250);
+  expect(await page.evaluate(() => (window as unknown as { __cbPops: number }).__cbPops), "a real toggle-ON pops once").toBe(1);
+});

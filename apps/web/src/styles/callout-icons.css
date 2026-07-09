@@ -54,14 +54,22 @@
 .cm-lp-todo-demote{position:absolute;right:3.6em;top:50%;transform:translateY(-50%);border:none;background:transparent;color:var(--fg-dim,#888);cursor:pointer;font-size:0.85em;line-height:1;padding:0.15em 0.3em;border-radius:4px;opacity:0;transition:opacity 120ms ease}
 .cm-lp-todo:hover .cm-lp-todo-demote{opacity:1}
 .cm-lp-todo-demote:hover{background:color-mix(in srgb,var(--fg-dim,#888) 18%,transparent);color:var(--fg,#222)}
-/* #290: a micro "pop" when a task checkbox is ticked ON. CheckboxWidget.eq recreates the box only when its
-   checked state CHANGES, so this replays on the toggle — not on unrelated re-renders. Interactive surfaces
-   only (disabled/reading boxes never pop). Motion tokens; the global prefers-reduced-motion rule (tokens.css)
-   neutralises it. */
+/* #290: a micro "pop" when a task checkbox is ticked ON. #290 (2): triggered by a one-shot class the
+   TOGGLE handler adds — NOT the `:checked` selector, which replayed every time the box re-mounted on a
+   reveal/unreveal under the caret (the reported "pops every time it reveals" bug). Motion tokens; the global
+   prefers-reduced-motion rule (tokens.css) neutralises it. */
 @keyframes wks-cb-pop{0%{transform:scale(1)}45%{transform:scale(1.3)}100%{transform:scale(1)}}
-.cm-lp-checkbox:not(:disabled):checked{animation:wks-cb-pop var(--dur-base,180ms) var(--ease-out,ease)}
-/* #290 (increment A): the title-band page-progress ring flows inline (not absolute like the macro header). */
+.cm-lp-checkbox.wks-cb-just-toggled{animation:wks-cb-pop var(--dur-base,180ms) var(--ease-out,ease)}
+/* #290 (1): the checkmark shown in a 100% ring. Hidden by default (only appended at done===total); it
+   draws in via stroke-dashoffset when the completion TRANSITION class is present (armed toggle), else static. */
+.cm-lp-todo-ring-check{fill:none;stroke:var(--accent,#4ea1ff);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+@keyframes wks-ring-check-in{from{stroke-dashoffset:12}to{stroke-dashoffset:0}}
+.cm-lp-todo-ring-check-in{stroke-dasharray:12;animation:wks-ring-check-in var(--dur-base,180ms) var(--ease-out,ease)}
+/* #290 (increment A): the title-band page-progress ring flows inline (not absolute like the macro header).
+   #290 (3): `display:block` on the svg removes the inline-baseline sink so the ring centres on the meta
+   row / sidebar row instead of floating above the text baseline. */
 .wks-page-ring{display:inline-flex;align-items:center;gap:0.3em;font-size:0.8em;color:var(--fg-dim,#888);vertical-align:middle}
+.wks-page-ring svg{display:block}
 /* #185: the nested renderMarkdownToDom output (inside columns / tabs / transclude / a callout panel
    body) must have the SAME vertical rhythm as top-level blocks. Without this, paragraphs and dispatched
    macros (mermaid / nested callouts / tables) rendered flush against each other — the paragraph/blank-

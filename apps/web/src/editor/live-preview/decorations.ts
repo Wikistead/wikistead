@@ -238,7 +238,10 @@ class BulletWidget extends WidgetType {
 class TodoRingWidget extends WidgetType {
   constructor(readonly done: number, readonly total: number) { super(); }
   eq(o: TodoRingWidget) { return o.done === this.done && o.total === this.total; }
-  toDOM() { return renderProgressRing(this.done, this.total) ?? document.createElement("span"); }
+  // #290 (1): animate the checkmark ONLY when this ring reaches 100% inside the just-completed window
+  // (a real check-ON), not on a reveal re-mount of an already-full ring. eq keys on done/total, so this
+  // widget rebuilds exactly when the count changes — the arm gate then distinguishes toggle from reveal.
+  toDOM() { return renderProgressRing(this.done, this.total, this.done >= this.total && ringCompleteArmed()) ?? document.createElement("span"); }
   ignoreEvent() { return true; } // display-only — clicks pass through to the line
 }
 
@@ -366,6 +369,25 @@ export function taskStatePosAt(docText: string, index: number): number {
   return -1;
 }
 
+// #290 (2): the check-ON "pop" must fire ONLY on a real toggle, never when the widget re-mounts because
+// the line revealed/unrevealed under the caret (the old `.cm-lp-checkbox:checked` CSS animation replayed on
+// every reveal — annoying). A toggle-ON arms this with the box's offset; the very next widget that mounts
+// CHECKED at that offset (the doc-flip re-render) consumes it and plays the pop. A reveal re-mount never arms
+// it, so it stays silent. (Date.now is host app code — the workflow-script clock ban doesn't apply here.)
+let pendingCheckPop: number | null = null;
+// #290 (1): a task completing (a check-ON that may take a :::todo block / the page to 100%) opens a short
+// window in which a ring reaching done===total plays its checkmark-appear animation. A reveal re-mount of an
+// already-100% ring outside the window stays static, so it never replays.
+let ringCompleteArmedUntil = 0;
+function armTaskComplete() { ringCompleteArmedUntil = Date.now() + 800; }
+export function ringCompleteArmed(): boolean { return Date.now() < ringCompleteArmedUntil; }
+// Play the one-shot check-ON pop on a checkbox <input> and self-remove the class when it ends (a bare class,
+// NOT the `:checked` selector, so only a real toggle triggers it).
+function popCheckbox(box: HTMLElement) {
+  box.classList.add("wks-cb-just-toggled");
+  box.addEventListener("animationend", () => box.classList.remove("wks-cb-just-toggled"), { once: true });
+}
+
 class CheckboxWidget extends WidgetType {
   // #300: `disabled` is part of the widget identity so a display-mode change (which rebuilds decorations)
   // actually re-renders the box — otherwise eq would reuse the old DOM and the inert/enabled state stales.
@@ -383,20 +405,29 @@ class CheckboxWidget extends WidgetType {
     box.setAttribute("data-testid", "task-checkbox");
     const ctl = view.state.facet(checkboxControl);
     box.disabled = this.disabled; // computed at build (#300): !ctl || Reading display mode — NOT view.readOnly
+    // #290 (2): this widget mounted CHECKED at an offset a toggle-ON just armed → it IS the doc-flip
+    // re-render (not a reveal re-mount), so play the pop once. Cleared so a later reveal re-mount stays silent.
+    if (this.checked && pendingCheckPop === this.from) {
+      pendingCheckPop = null;
+      popCheckbox(box);
+    }
     if (ctl && !this.disabled) {
       // mousedown + preventDefault: keep editor focus/selection and drive the toggle
       // ourselves (so the rendered state always follows the document, never the native
       // input). The doc/host update re-renders the widget with the new checked state.
       box.addEventListener("mousedown", (e) => {
         e.preventDefault();
+        const turningOn = !this.checked; // #290 pop + ring-complete window only on check-ON
+        if (turningOn) { armTaskComplete(); pendingCheckPop = this.from; }
         if (ctl.mode === "edit") {
-          // editable surface: flipping the doc re-renders the widget immediately.
+          // editable surface: flipping the doc re-renders the widget immediately (the new CHECKED widget
+          // consumes pendingCheckPop above and pops).
           view.dispatch({ changes: { from: this.from + 1, to: this.from + 2, insert: this.checked ? " " : "x" } });
         } else {
-          // read-only published surface: the doc here is NOT the draft, so it won't
-          // re-render until the host refetches the published snapshot — show the new
-          // state at once for responsiveness (the refetch makes it authoritative).
+          // read-only published surface: the doc here is NOT the draft, so it won't re-render until the host
+          // refetches — flip the SAME box for responsiveness, and pop it directly (no re-render to consume the arm).
           box.checked = !this.checked;
+          if (turningOn) { pendingCheckPop = null; popCheckbox(box); }
           const index = taskIndexAt(view.state.doc.toString(), this.from);
           ctl.onToggle(index, this.from, this.checked);
         }
