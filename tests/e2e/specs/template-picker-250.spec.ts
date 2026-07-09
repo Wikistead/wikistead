@@ -54,8 +54,14 @@ test("#267: template preview renders ALL macros (callout/tabs/table), scrolls, a
   // A callout with **bold** body, a NESTED :::tabs (2 tabs — the early-close case), a MALICIOUS :::table
   // (renders as a real table but the onerror cell is inert), a top-level <script>, and a long scroll tail.
   const long = Array.from({ length: 40 }, (_, i) => `Paragraph line ${i} lorem ipsum dolor sit amet.`).join("\n\n");
+  // #267 bounce: a HEAVY body — a WIDE 12-column pipe table + a display-math block + a second mermaid
+  // on top of the tall prose — is what burst the preview pane out of the dialog (right + no vertical scroll).
+  const wideCols = Array.from({ length: 12 }, (_, i) => `Col ${i}`).join(" | ");
+  const wideSep = Array.from({ length: 12 }, () => "---").join(" | ");
+  const wideRow = Array.from({ length: 12 }, (_, i) => `v${i}`).join(" | ");
+  const wide = `| ${wideCols} |\n| ${wideSep} |\n| ${wideRow} |`;
   await page.keyboard.insertText(
-    `# Macro template\n\n:::note\nHello **bold** callout\n:::\n\n\`\`\`mermaid\nflowchart TD\n  A --> B\n\`\`\`\n\n::::tabs\n:::tab[One]\nAlpha\n:::\n:::tab[Two]\nBravo\n:::\n::::\n\n:::table\n<table><tr><td><img src=x onerror="window.__xss267=1"></td></tr></table>\n:::\n\n<script>window.__xss267=1</script>\n\n${long}\n`,
+    `# Macro template\n\n:::note\nHello **bold** callout\n:::\n\n\`\`\`mermaid\nflowchart TD\n  A --> B\n\`\`\`\n\n::::tabs\n:::tab[One]\nAlpha\n:::\n:::tab[Two]\nBravo\n:::\n::::\n\n:::table\n<table><tr><td><img src=x onerror="window.__xss267=1"></td></tr></table>\n:::\n\n${wide}\n\n$$a^2 + b^2 = c^2$$\n\n\`\`\`mermaid\nflowchart LR\n  X --> Y --> Z\n\`\`\`\n\n<script>window.__xss267=1</script>\n\n${long}\n`,
   );
   await sleep(500);
   await page.getByTestId("publish-page").click();
@@ -119,4 +125,13 @@ test("#267: template preview renders ALL macros (callout/tabs/table), scrolls, a
   const dlg = (await page.getByTestId("template-picker").boundingBox())!;
   expect(dlg.y).toBeGreaterThanOrEqual(-1);
   expect(dlg.y + dlg.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
+
+  // #267 bounce: the preview pane's VISIBLE box must stay within the dialog on BOTH axes — the heavy
+  // body (wide table + math + 2 mermaids + tall prose) used to burst it right and grow it to ~4000px tall.
+  // (boundingBox reports the un-clipped layout size, so measure the client box the user actually sees.)
+  const pane = await previewPane.evaluate((el) => ({ cw: el.clientWidth, ch: el.clientHeight, sw: el.scrollWidth, sh: el.scrollHeight }));
+  const dlgClient = await page.getByTestId("template-picker").evaluate((el) => ({ cw: el.clientWidth, ch: el.clientHeight }));
+  expect(pane.cw, "preview pane is wider than the dialog (horizontal burst)").toBeLessThanOrEqual(dlgClient.cw);
+  expect(pane.ch, "preview pane is taller than the dialog (vertical burst)").toBeLessThanOrEqual(dlgClient.ch);
+  expect(pane.sh, "the tall content does not scroll inside the capped pane").toBeGreaterThan(pane.ch + 4);
 });

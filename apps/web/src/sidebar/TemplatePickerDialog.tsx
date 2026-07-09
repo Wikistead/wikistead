@@ -56,7 +56,7 @@ export function TemplatePickerDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent data-testid="template-picker" className="sm:max-w-[720px]">
+      <DialogContent data-testid="template-picker" className="sm:max-w-[720px] max-h-[85vh] overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><FileStack size={16} /> {t("templatePicker.title")}</DialogTitle>
         </DialogHeader>
@@ -65,9 +65,9 @@ export function TemplatePickerDialog({
         ) : empty ? (
           <p className="py-8 text-center text-fg-dim" data-testid="template-picker-empty">{t("templatePicker.empty")}</p>
         ) : (
-          <div className="flex max-h-[60vh] min-h-[18rem] gap-3">
+          <div className="flex min-h-0 max-h-[60vh] h-[60vh] gap-3">
             {/* Left: the grouped list. */}
-            <ul className="w-1/2 min-w-0 overflow-auto border-r border-border pr-2">
+            <ul className="w-1/2 min-w-0 min-h-0 overflow-auto border-r border-border pr-2">
               {groups.map((g) => (
                 <li key={g.key} className="mb-2">
                   <div className="px-1 py-1 text-[length:var(--text-xs)] font-medium uppercase tracking-wide text-fg-dim">

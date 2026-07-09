@@ -68,6 +68,14 @@
    line structure was preserved in the DOM but visually crammed. The inter-block gap uses --lp-block-gap
    (= 1lh = one blank line), the SAME measure that separates top-level blocks, so nested and top-level
    spacing are identical by construction (was a 0.7em magic number that read tighter than top-level). */
+/* #267: the rendered-markdown preview (template picker AND the public reader — same class) must never burst
+   its container horizontally. Fixed-width children (a mermaid SVG, a wide pipe table) are the offenders:
+   clamp the SVG to the width and let a wide table scroll on its OWN, so the surrounding prose does not shift.
+   The container gets overflow-x:auto as a last-resort catch. (The vertical cap is the picker's flex chain.) */
+.cm-lp-md-preview{max-width:100%;overflow-x:auto}
+.cm-lp-md-preview svg{max-width:100%;height:auto}
+.cm-lp-md-preview img{max-width:100%;height:auto}
+.cm-lp-md-preview table{display:block;max-width:100%;overflow-x:auto}
 .cm-lp-column>*+*,.cm-lp-tabpanel>*+*,.cm-lp-embed-page>*+*,.cm-lp-callout-panel-body>*+*,.cm-lp-md-preview>*+*{margin-top:var(--lp-block-gap)}
 .cm-lp-column>*:first-child,.cm-lp-tabpanel>*:first-child,.cm-lp-embed-page>*:first-child,.cm-lp-md-preview>*:first-child{margin-top:0}
 
