@@ -102,9 +102,9 @@ test("#227 review: the public page has the member title band and a working TOC",
 
   // #227 ①: a TOC on/off toggle hides/shows the rail (device-local pref, parity with the member view).
   await expect(anon.getByTestId("toc")).toBeVisible(); // on by default (useTocPref default ON)
-  await anon.getByTestId("public-toc-toggle").click();
+  await anon.getByTestId("toc-toggle").click();
   await expect(anon.getByTestId("toc")).toHaveCount(0); // hidden
-  await anon.getByTestId("public-toc-toggle").click();
+  await anon.getByTestId("toc-toggle").click();
   await expect(anon.getByTestId("toc")).toBeVisible(); // shown again
 });
 
@@ -130,7 +130,7 @@ test("#227 the public TOC works on a narrow screen (toggle + scroll overlay, mem
   await expect(anon.getByTestId("public-title")).toBeVisible();
 
   // ① the toggle is present on a narrow screen (was isWide-gated → absent, the reported bug).
-  const toggle = anon.getByTestId("public-toc-toggle");
+  const toggle = anon.getByTestId("toc-toggle");
   await expect(toggle).toBeVisible();
 
   // ② the overlay TOC exists (tocOn default) and fades IN while scrolling (member overlay behaviour).
