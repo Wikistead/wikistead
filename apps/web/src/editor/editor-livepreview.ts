@@ -108,9 +108,27 @@ export function mountLivePreview(
       // gated on vim — plain keyboard navigation benefits equally and it avoids a mode branch.
       EditorView.scrollMargins.of((view) => {
         const raw = getComputedStyle(view.dom).getPropertyValue("--wks-band-h").trim();
-        const bandH = raw.endsWith("px") && Number.isFinite(parseFloat(raw)) ? parseFloat(raw) : 0;
-        const off = view.scrollDOM.clientHeight * 0.25; // the scrolloff band (0 before first layout → the maxes below still hold)
-        return { top: Math.max(bandH, off), bottom: Math.max(72, off) };
+        const top = raw.endsWith("px") ? parseFloat(raw) : 0;
+        return { top: Number.isFinite(top) ? top : 0, bottom: 72 };
+      }),
+      // #306: vim-style `scrolloff` — keep the caret inside the middle ~50% band on cursor MOTION. Done as a
+      // selection-change listener (NOT via scrollMargins: a large scroll margin corrupts CM tooltip placement —
+      // the slash palette rendered ~10000px off-screen). Only on a pure caret move (no doc change), so typing
+      // — including opening the "/" palette — is untouched. When the caret leaves the band, re-center it
+      // (typewriter follow); within the band, do nothing (no jitter). Near the ends it scrolls as far as it can.
+      EditorView.updateListener.of((u) => {
+        if (!u.selectionSet || u.docChanged) return;
+        const view = u.view;
+        requestAnimationFrame(() => {
+          const head = view.state.selection.main.head;
+          const coords = view.coordsAtPos(head);
+          if (!coords) return;
+          const box = view.scrollDOM.getBoundingClientRect();
+          const band = box.height * 0.25;
+          if (coords.top < box.top + band || coords.bottom > box.bottom - band) {
+            view.dispatch({ effects: EditorView.scrollIntoView(Math.min(head, view.state.doc.length), { y: "center" }) });
+          }
+        });
       }),
       // GFM base (tables) + fenced-code highlighting. The doc stays plain markdown.
       markdownExtension(),
