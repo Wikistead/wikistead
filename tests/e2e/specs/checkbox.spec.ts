@@ -12,6 +12,14 @@ const publish = (p: Page, pageId: string) =>
   p.evaluate(async ({ api, id }) => {
     await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
   }, { api: API, id: pageId });
+// #303: the persisted "the stored ydoc (draft) diverges from published" flag — the SAME dirty signal the
+// server's task-toggle 409 uses. Polling it lets a test wait until the draft edit has synced server-side, so
+// the toggle deterministically 409s.
+const isDirty = (p: Page, pageId: string) =>
+  p.evaluate(async ({ api, id }) => {
+    const r = await fetch(`${api}/pages/${id}/published`, { headers: { Authorization: "Bearer dev-token" } });
+    return ((await r.json()) as { hasUnpublishedChanges: boolean }).hasUnpublishedChanges;
+  }, { api: API, id: pageId });
 
 // ADR-019: GFM task items render as real checkboxes. On the EDITABLE surface a click
 // flips the `[ ]`/`[x]` char directly in the draft (a normal Y.Text edit).
@@ -103,4 +111,30 @@ test("#303: a view-mode checkbox toggle never corrupts a dirty draft's prose", a
   expect(text).toContain("PREPENDdone here"); // prose byte-for-byte intact (was "done her␣" before the fix)
   expect(text).toMatch(/- \[[ x]\] alpha/); // a valid task marker, not a corrupted line
   expect(text).toMatch(/- \[[ x]\] beta/);
+});
+
+// #303 (review point 3): a genuine dirty-409 must show the DEDICATED "publish first" toast, not the
+// generic "something went wrong". The defect was `e instanceof ApiError` returning false under Vite's module
+// duplication → the generic message; the fix reads `.status` structurally. Assert the toast TEXT (a synthetic
+// pass that never checked the string missed this).
+test("#303: a dirty-draft view toggle shows the dedicated 'publish first' toast (not the generic error)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const pageId = await openScratch(page, "cb-303-toast");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("done here\n\n- [ ] alpha\n- [ ] beta");
+  await sleep(200);
+  await publish(page, pageId);
+  // Dirty the draft, then WAIT until the server sees it (the stored ydoc diverges) so the toggle 409s.
+  await page.keyboard.press("Control+Home");
+  await page.keyboard.type("PREPEND");
+  await expect.poll(() => isDirty(page, pageId), { timeout: 8000 }).toBe(true);
+
+  await page.click("[data-testid=view-toggle]");
+  await sleep(400);
+  await page.getByTestId("task-checkbox").first().click();
+
+  // the DEDICATED dirty message (en OR ja), NOT the generic failure toast.
+  await expect(page.getByText(/Publish your draft changes first|先に下書きの変更を公開/)).toBeVisible({ timeout: 5000 });
+  expect(await page.getByText(/Something went wrong|問題が発生しました/).count()).toBe(0);
 });

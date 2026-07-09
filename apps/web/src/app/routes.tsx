@@ -135,7 +135,7 @@ import { Sidebar } from "../sidebar/Sidebar";
 import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
-import { fetchGuestToken, apiFetch, ApiError, assetUrl, type GuestToken } from "../data/apiClient";
+import { fetchGuestToken, apiFetch, assetUrl, type GuestToken } from "../data/apiClient";
 import { renderMarkdownToDom } from "../editor/macros/md-render"; // #227: public render via the shared sanitized renderer
 import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useCreatePage, useEntitlements, type Page } from "../data/queries";
 import { GuestSidebar } from "./GuestSidebar";
@@ -356,7 +356,10 @@ function PageRoute() {
       toggleTask.mutateAsync(index).then(() => undefined).catch((e) => {
         // #303: a 409 is the EXPECTED outcome when the draft has unpublished changes — the checkbox can't
         // fold into published without mixing in that draft. Show a dedicated message, not the generic error.
-        const dirty = e instanceof ApiError && e.status === 409;
+        // Read `.status` STRUCTURALLY, not via `instanceof ApiError`: under Vite dev the apiClient module can
+        // be duplicated across graphs so the class identity mismatches and instanceof is false at runtime
+        // (#303 review defect — the dedicated toast never showed).
+        const dirty = (e as { status?: number } | null)?.status === 409;
         notify.error(t(dirty ? "toast.taskToggleDirty" : "toast.actionFailed"));
         throw e; // let the editor revert the optimistic flip
       }),
