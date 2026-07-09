@@ -42,7 +42,6 @@
     "@fastify/cookie": "^11",
     "@fastify/cors": "^10.0.0",
     "@fastify/formbody": "^8.0.2",
-    "@node-saml/node-saml": "^5.1.0",
     "@openfga/sdk": "^0.7.0",
     "@wikistead/auth": "workspace:*",
     "@wikistead/authz": "workspace:*",
@@ -71,7 +70,6 @@
     "jose": "^5.9.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
-    "vitest": "^2.0.0",
-    "xml-crypto": "^6.1.2"
+    "vitest": "^2.0.0"
   }
 }

@@ -78,9 +78,6 @@ importers:
       '@fastify/formbody':
         specifier: ^8.0.2
         version: 8.0.2
-      '@node-saml/node-saml':
-        specifier: ^5.1.0
-        version: 5.1.0
       '@openfga/sdk':
         specifier: ^0.7.0
         version: 0.7.0
@@ -163,9 +160,6 @@ importers:
       vitest:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@22.19.21)(happy-dom@20.10.6)(jsdom@29.1.1)(lightningcss@1.32.0)(sass@1.51.0)
-      xml-crypto:
-        specifier: ^6.1.2
-        version: 6.1.2
 
   apps/web:
     dependencies:
@@ -394,6 +388,12 @@ importers:
 
   packages/ee-server:
     dependencies:
+      '@fastify/cookie':
+        specifier: ^11
+        version: 11.0.2
+      '@node-saml/node-saml':
+        specifier: ^5.1.0
+        version: 5.1.0
       '@openfga/sdk':
         specifier: ^0.7.0
         version: 0.7.0
@@ -421,6 +421,9 @@ importers:
       fastify:
         specifier: ^5.0.0
         version: 5.8.5
+      ioredis:
+        specifier: ^5.3.0
+        version: 5.11.1
     devDependencies:
       postgres:
         specifier: ^3.4.0
@@ -434,6 +437,9 @@ importers:
       vitest:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@22.19.21)(happy-dom@20.10.6)(jsdom@29.1.1)(lightningcss@1.32.0)(sass@1.51.0)
+      xml-crypto:
+        specifier: ^6.1.2
+        version: 6.1.2
 
   packages/entitlements:
     devDependencies:
