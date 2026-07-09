@@ -29,6 +29,9 @@ export type DomainEvent =
   | { type: 'space.access_granted'; tenantId: string; spaceId: string; grantee: string; relation: string; actorId: string }
   | { type: 'space.access_revoked'; tenantId: string; spaceId: string; grantee: string; relation: string; actorId: string }
   | { type: 'space.branding_updated'; tenantId: string; spaceId: string; actorId: string }
+  // #277 / ADR-116: space-level anonymous public toggle (space#viewer@user:* grant/revoke; noindex forced on).
+  | { type: 'space.made_public'; tenantId: string; spaceId: string; actorId: string }
+  | { type: 'space.made_non_public'; tenantId: string; spaceId: string; actorId: string }
   | { type: 'tenant.branding_updated'; tenantId: string; actorId: string }
   // A tenant admin changed the external-embed host allowlist (#108 / ADR-071). Config that widens the
   // client-direct iframe surface, so the change is recorded (count = number of allowlisted hosts).

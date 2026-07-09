@@ -622,6 +622,31 @@ export function useSetPublic(pageId: string) {
     },
   });
 }
+// #277 / ADR-116 — space-level anonymous PUBLIC toggle (the space:S#viewer@user:* wildcard).
+// Manage-gated server-side; POST also requires the tenant parent switch (403 while OFF).
+export function useSpacePublic(spaceId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["space-public", spaceId],
+    queryFn: () =>
+      apiFetch<{ public: boolean }>(`/spaces/${encodeURIComponent(spaceId)}/public-access`, token).then((r) => r?.public ?? false),
+    enabled: enabled && spaceId.length > 0,
+  });
+}
+export function useSetSpacePublic(spaceId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (makePublic: boolean) =>
+      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/public-access`, token, { method: makePublic ? "POST" : "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["space-public", spaceId] });
+      // A space toggle changes every contained page's effective public reach (#253's via-space hint).
+      qc.invalidateQueries({ queryKey: ["page-public"] });
+    },
+  });
+}
+
 // #253 / ADR-113 — the tenant PARENT SWITCH (admin-only): the master gate for the whole anonymous public
 // surface. Drives whether the per-page public toggle is even offered.
 export function usePublicSurface(enabled = true) {
