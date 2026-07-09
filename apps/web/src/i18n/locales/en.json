@@ -20,6 +20,7 @@
     "degradeWarning": "This host isn't on the tenant's embed allowlist, so it will show as a link, not an embed. An admin can add it under Admin → Embeds."
   },
   "toc": {
+    "copyAnchor": "Copy link to heading",
     "title": "On this page",
     "empty": "No headings yet",
     "toggle": "Table of contents"

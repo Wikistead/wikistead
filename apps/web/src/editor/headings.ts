@@ -14,13 +14,15 @@ export interface Heading {
   slug: string; // stable, unique id (GitHub-style, deduped)
 }
 
-// GitHub-style slug: lowercase, spaces→'-', drop non-word/space/hyphen, collapse hyphens. Dedup with a
+// GitHub-style slug: lowercase, spaces→'-', drop punctuation, collapse hyphens. Dedup with a
 // `-2`, `-3`… suffix via the shared `seen` set (so repeated headings get distinct anchors). Pure.
+// #313: Unicode letters/numbers are KEPT (\p{L}\p{N}, like github-slugger) — the previous ASCII
+// `\w` collapsed every CJK heading to the "section" fallback, so Japanese anchors all collided.
 export function slugify(text: string, seen: Set<string>): string {
   const base = text
     .trim()
     .toLowerCase()
-    .replace(/[^\w\s-]/g, "")
+    .replace(/[^\p{L}\p{N}\s_-]/gu, "")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "") || "section";
