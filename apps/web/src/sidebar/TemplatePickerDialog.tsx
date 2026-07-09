@@ -65,7 +65,12 @@ export function TemplatePickerDialog({
         ) : empty ? (
           <p className="py-8 text-center text-fg-dim" data-testid="template-picker-empty">{t("templatePicker.empty")}</p>
         ) : (
-          <div className="flex min-h-0 max-h-[60vh] h-[60vh] gap-3">
+          // #267this row is a GRID ITEM of DialogContent (shadcn grid). A grid item's default
+          // min-width is AUTO = its content's min-content — so heavy preview content (wide mermaid/table,
+          // min-content ~1100px+) floored the row wider than the 720px dialog and pushed the right pane
+          // out of frame (measured: row 1351px vs dialog 720px, min-width:auto). min-w-0 removes that
+          // floor; w-full/max-w-full pin the row to the dialog's inner width structurally.
+          <div className="flex min-h-0 max-h-[60vh] h-[60vh] w-full max-w-full min-w-0 gap-3">
             {/* Left: the grouped list. */}
             <ul className="w-1/2 min-w-0 min-h-0 overflow-auto border-r border-border pr-2">
               {groups.map((g) => (
