@@ -225,3 +225,52 @@ test("#253: the tenant parent switch OFF hides an otherwise-public page (404), O
   await anon3.goto(`/pub/${id}`);
   await expect(anon3.getByTestId("public-title")).toBeVisible();
 });
+
+// #227/rework: the standalone public page /pub/:id). ① the TOC toggle is the MEMBER
+// PageStatus ToggleButton riding the band row (the public-only floating button is gone); ② page-level
+// publish shows ONLY the page — no bottom child tree even when public children exist; ③ the band is
+// sticky on the standalone route too (it had no bounded-height ancestor, so sticky never engaged).
+test("#227/standalone /pub/:id — member toggle in the band, NO child tree, sticky band", async ({ browser }) => {
+  const API = "http://dev.localhost:4010";
+  const authed = await (await browser.newContext()).newPage();
+  const id = await openScratch(authed, "pub-standalone");
+  await enterEdit(authed);
+  await authed.click("[data-pane=preview] .cm-content");
+  const filler = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n\n");
+  await authed.keyboard.insertText(`# Solo Title\n\n## One Section\n\n${filler}\n`);
+  await sleep(400);
+  await authed.getByTestId("publish-page").click();
+  await sleep(800);
+  await makePublic(id);
+  // a PUBLIC, published child page under it — its existence must NOT render a bottom tree (②).
+  const childId = await authed.evaluate(async ({ api, id }) => {
+    const page = await (await fetch(`${api}/pages/${id}`, { headers: { Authorization: "Bearer dev-token" } })).json();
+    const r = await fetch(`${api}/spaces/${page.spaceId}/pages`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ title: "Solo Child", parentId: id }),
+    });
+    return ((await r.json()) as { id: string }).id;
+  }, { api: API, id });
+  await authed.evaluate(async ({ api, id }) => {
+    await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+  }, { api: API, id: childId });
+  await makePublic(childId);
+  await setPublicSurface(authed, true);
+
+  const anon = await (await browser.newContext({ viewport: { width: 1360, height: 800 } })).newPage();
+  await anon.goto(`/pub/${id}`);
+  await expect(anon.getByTestId("public-title")).toBeVisible();
+  // ① member parity: the toggle is INSIDE the band's PageStatus — and no second (floating) toggle exists.
+  await expect(anon.locator("[data-testid=page-status] [data-testid=toc-toggle]")).toHaveCount(1);
+  await expect(anon.getByTestId("toc-toggle")).toHaveCount(1);
+  // ② no bottom child tree on the standalone page (page-level publish shows ONLY the page).
+  await expect(anon.getByTestId("public-children")).toHaveCount(0);
+  await expect(anon.locator(`[data-testid=public-child-${childId}]`)).toHaveCount(0);
+  // ③ sticky: scrolling the content keeps the band pinned at the viewport top (①).
+  const yBefore = (await anon.getByTestId("public-band").boundingBox())!.y;
+  await anon.locator(".wks-public > div").first().evaluate((el) => { el.scrollTop = 800; });
+  await sleep(200);
+  const yAfter = (await anon.getByTestId("public-band").boundingBox())!.y;
+  expect(Math.abs(yAfter - yBefore), `band y ${yBefore} → ${yAfter} must stay pinned`).toBeLessThanOrEqual(2);
+});

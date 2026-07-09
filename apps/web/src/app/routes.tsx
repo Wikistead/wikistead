@@ -979,24 +979,13 @@ function InviteRoute() {
 // uses (renderMarkdownToDom — raw HTML degrades to escaped text, hrefs are scheme-checked); the API
 // 404s for anything non-public (existence hidden), which renders as the not-found screen.
 interface PublicChildNode { id: string; title: string; children: PublicChildNode[] }
-function PublicTree({ nodes }: { nodes: PublicChildNode[] }) {
-  if (!nodes.length) return null;
-  return (
-    <ul style={{ listStyle: "none", paddingLeft: 16, margin: "4px 0" }}>
-      {nodes.map((n) => (
-        <li key={n.id}>
-          <RouterLink className="wks-public-child" data-testid={`public-child-${n.id}`} to={`/pub/${encodeURIComponent(n.id)}`}>{n.title}</RouterLink>
-          <PublicTree nodes={n.children} />
-        </li>
-      ))}
-    </ul>
-  );
-}
+// (#227②: the old PublicTree bottom-nav for /pub/:id was removed — a standalone public page
+// shows ONLY its page; space-level publish provides the tree via the sidebar shell.)
 
-// The rendered body of a single public page (no chrome). `showChildren` appends the page's own public
-// child tree as nav links (used by the standalone /pub/:id view; the space reader-chrome hides it because
-// the sidebar already provides navigation). Reused by PublicPageRoute and PublicSpaceRoute (#227).
-function PublicPageContent({ pageId, showChildren }: { pageId: string; showChildren: boolean }) {
+// The rendered body of a single public page (no chrome). Reused by PublicPageRoute and PublicSpaceRoute
+// (#227).②: a standalone /pub/:id shows ONLY its page (the old bottom child-tree nav is gone
+// page-level publish = just the page; SPACE-level publish is the sidebar shell with the tree).
+function PublicPageContent({ pageId }: { pageId: string }) {
   const { t } = useTranslation();
   const [state, setState] = useState<{ status: "loading" | "notfound" | "ok"; page?: { id: string; title: string; content: string; noindex: boolean; children: PublicChildNode[] } }>({ status: "loading" });
   const [bodyEl, setBodyEl] = useState<HTMLDivElement | null>(null); // callback ref → reactive for the TOC hook
@@ -1072,26 +1061,29 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
       <div className="h-full overflow-y-auto">
         {/* #227 ① : the member frosted title BAND, reused read-only. Sticky so it frosts the content scrolling
             under it. PageTitle with no onRename renders a plain read-only <h1> — no edit affordances leak. The
-            band's height is published as --wks-band-h (bandEl ResizeObserver) so the rail + heading offsets clear it. */}
+            band's height is published as --wks-band-h (bandEl ResizeObserver) so the rail + heading offsets
+            clear it.①/④: the row is the MEMBER band row (740px column, px-6/pt-6, title flexing
+            with the status area at its right), and the TOC toggle is the member `PageStatus` ToggleButton —
+            not a public-only floating button. */}
         <div ref={setBandEl} data-testid="public-band" className="sticky top-0 z-20 pb-6">
           <div aria-hidden="true" className="absolute inset-x-0 inset-y-0 bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_90%,transparent)] via-[color-mix(in_srgb,var(--bg)_42%,transparent)] to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_55%,transparent)]" />
-          <div className="relative mx-auto w-full max-w-[46rem] px-5 pt-8" data-testid="public-title">
-            <PageTitle title={page.title} />
+          <div className="relative mx-auto flex w-full max-w-[740px] items-center gap-3 px-6 pt-6" data-testid="public-title">
+            <div className="min-w-0 flex-1">
+              <PageTitle title={page.title} />
+            </div>
+            {/* read-only viewer: only the TOC toggle renders (no publish state, no edit affordances). */}
+            <div className="shrink-0">
+              <PageStatus canEdit={false} editing={false} onEdit={() => {}} onDone={() => {}} tocOpen={tocOn} onToggleToc={() => setTocOn(!tocOn)} />
+            </div>
           </div>
         </div>
-        <div className="mx-auto w-full max-w-[46rem] px-5 pb-16">
+        <div className="mx-auto w-full max-w-[740px] px-6 pb-16">
           <div ref={setBodyEl} data-testid="public-body" />
-          {showChildren && page.children.length > 0 && (
-            <nav data-testid="public-children" style={{ marginTop: 32, borderTop: "1px solid var(--border, #ddd)", paddingTop: 12 }}>
-              <PublicTree nodes={page.children} />
-            </nav>
-          )}
         </div>
       </div>
       {/* #227the SAME shared TocChrome the member views render (rail on wide / overlay on narrow) — no
-          public-only reimplementation. The floating toggle is passed here because the public reader has no
-          controls bar to host one (members' toggle lives in their controls); it flips the same device-local
-          pref. The rail offsets clear the frosted band (--wks-band-h, published above by the bandEl RO). */}
+          public-only reimplementation. The toggle lives in the band's PageStatus (member parity,①).
+          The rail offsets clear the frosted band (--wks-band-h, published above by the bandEl RO). */}
       <TocChrome
         headings={toc.headings}
         activeFrom={toc.activeFrom}
@@ -1100,7 +1092,6 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
         subscribeScroll={toc.subscribeScroll}
         isWide={isWide}
         tocOn={tocOn}
-        onToggle={() => setTocOn(!tocOn)}
         railLeft="calc(50% + 368px)"
         railTop="calc(var(--wks-band-h, 5.5rem) + 2.75rem)"
       />
@@ -1111,7 +1102,14 @@ function PublicPageContent({ pageId, showChildren }: { pageId: string; showChild
 function PublicPageRoute() {
   const { pageId } = useParams<{ pageId: string }>();
   if (!pageId) return <div data-testid="public-not-found" style={{ padding: 24 }} />;
-  return <PublicPageContent pageId={pageId} showChildren />;
+  //①: the standalone route has no AppShell to bound the height, so without a viewport-height
+  // wrapper the WINDOW scrolls (not the inner scroller) and the band's sticky never engages. h-dvh
+  // gives PublicPageContent the same bounded-height context the space shell provides.
+  return (
+    <div className="h-dvh">
+      <PublicPageContent pageId={pageId} />
+    </div>
+  );
 }
 
 // #227 / ADR-030 (comment 966, option b): the anonymous read-only PUBLIC reader-chrome for a public space.
@@ -1165,7 +1163,7 @@ function PublicSpaceRoute() {
   return (
     <AppShell sidebar={<PublicSpaceSidebar nodes={tree ?? []} openId={openId} onOpen={setOpenId} />}>
       {openId ? (
-        <PublicPageContent key={openId} pageId={openId} showChildren={false} />
+        <PublicPageContent key={openId} pageId={openId} />
       ) : (
         <div className="flex h-full items-center justify-center p-8 text-fg-dim" data-testid="public-space-empty">
           {tree == null ? "" : t("share.spacePickPrompt")}
