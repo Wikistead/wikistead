@@ -24,7 +24,8 @@ import { countTasks, renderProgressRing } from "../macros/progress"; // #290: ::
 import { calloutTypeOption } from "../macros/callout-type-ui";
 import { renderCellInline } from "../macros/table-cell-dom";
 import { openMacroModal } from "./macro-modal";
-import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost, nestedSelectionField, setNestedSelection, nestedEditActiveField, setNestedEditActive, type NestedSelection } from "./macro-edit";
+import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost, nestedSelectionField, setNestedSelection, nestedEditActiveField, setNestedEditActive, slotEditField, setSlotEditActive, type NestedSelection, type SlotEdit } from "./macro-edit";
+import { mountSourceEditor } from "../macros/source-editor";
 import { tableInlineEditor } from "./table-edit";
 import { tableTier } from "../macros/table";
 import type { InlineController } from "../macros/registry";
@@ -1292,6 +1293,51 @@ function findNestedSlot(root: HTMLElement, anchor: number): HTMLElement | null {
   return root.querySelector(`[data-mac-pos="${anchor}"]`);
 }
 
+// #278 §2a / ADR-122 (A): mount an inline CM6 island (the ADR-111 C3 source-editor primitive) INTO a layout
+// SLOT cell, editing that column/tab's BODY (the lines between its fences) with the full editor (vim, undo,
+// wrapping). Single Y.Text is preserved: the island holds its OWN document and commits via ONE offset-invariant
+// Y.Text replace of the body range on BLUR — no second CRDT, no Y.Text sub-range live-binding (ADR-025 /
+// ADR-017). vim follows the outer editor (vimEnabled facet). Escape bubbles to escExit which clears the field;
+// mousedown is stopped so the outer container atom doesn't swallow the caret (#265). Returns true if mounted.
+function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { from: number; to: number }, index: number, childName: "column" | "tab", dark: boolean): boolean {
+  const doc = view.state.doc;
+  const items = resolveDirectiveRanges(doc.toString()).filter((r) => r.name === childName && r.from >= container.from && r.to <= container.to);
+  const it = items[index];
+  if (!it) return false;
+  // Body = the lines between the child's open fence and its closing fence (empty slot → a zero-width point
+  // just after the open fence). Captured once at mount; commit-on-blur is the first write, so it stays valid.
+  const first = doc.lineAt(it.from);
+  const closeLine = doc.lineAt(Math.min(it.to, doc.length));
+  const fb = first.number + 1, lb = closeLine.number - 1;
+  const hasBody = lb >= fb && fb <= doc.lines;
+  const bodyFrom = fb <= doc.lines ? doc.line(fb).from : first.to;
+  const bodyTo = hasBody ? doc.line(lb).to : bodyFrom;
+
+  const host = document.createElement("div");
+  host.className = "cm-lp-slot-edit-island";
+  host.setAttribute("data-testid", "slot-edit-island");
+  host.addEventListener("mousedown", (e) => e.stopPropagation()); // #265: the outer atom must not steal the caret
+  let committed = false;
+  const handle = mountSourceEditor({
+    parent: host,
+    doc: hasBody ? doc.sliceString(bodyFrom, bodyTo) : "",
+    dark,
+    testid: "slot-edit-src",
+    vim: view.state.facet(vimEnabled),
+    onInput: () => {}, // no per-keystroke doc write (that would re-run the host doc + re-mount this island)
+    onCommit: (value) => {
+      if (committed) return; // blur can fire alongside the field-clear re-render; write exactly once
+      committed = true;
+      view.dispatch({ changes: { from: bodyFrom, to: bodyTo, insert: value }, effects: setSlotEditActive.of(null) });
+      view.focus();
+      queueMicrotask(() => handle.destroy());
+    },
+  });
+  cell.replaceWith(host); // for columns: the column cell; for tabs: the active panel
+  handle.focus();
+  return true;
+}
+
 // #221: fields stashed on the widget's DOM so updateDOM can reuse it on a selection-only change (see
 // MacroWidget.updateDOM). __mwKey is the rendered-content identity; __mwRo/__mwObjUrl are the async
 // resources whose ownership must travel with the DOM so the current instance's destroy releases them.
@@ -1306,10 +1352,13 @@ class MacroWidget extends WidgetType {
   // are the display-only selection / edit-active state intersecting THIS widget (null otherwise), driving
   // the nested ring + edit button + editUI island. Stable string keys in eq so an unrelated selection
   // move never churns this widget (the project design notes "widget eq ").
-  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string, readonly selected: boolean, readonly theme: MacroTheme, readonly from = 0, readonly to = 0, readonly bodyFrom = 0, readonly nestedSel: NestedSelection | null = null, readonly nestedEdit: NestedSelection | null = null, readonly align: FenceAlign = "center", readonly wysiwyg = false) {
+  constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string, readonly selected: boolean, readonly theme: MacroTheme, readonly from = 0, readonly to = 0, readonly bodyFrom = 0, readonly nestedSel: NestedSelection | null = null, readonly nestedEdit: NestedSelection | null = null, readonly align: FenceAlign = "center", readonly wysiwyg = false, readonly slotEdit: SlotEdit | null = null) {
     super();
   }
   private nestedKey(v: NestedSelection | null) { return v ? `${v.nested.from}:${v.nested.to}:${v.anchor}` : ""; }
+  // #278 §2a: a STABLE key (container offsets + index) so the widget rebuilds ONLY when the edited slot
+  // changes (mount / unmount the island) — never per-render churn (theeq-churn anti-test concern).
+  private slotKey(v: SlotEdit | null) { return v ? `${v.container.from}:${v.container.to}:${v.index}` : ""; }
   eq(other: MacroWidget) {
     // Compare by `name` (the registry key), NOT the `macro` object: the directive renderer
     // passes a FRESH { liveRender, richEditUI } literal every render, so a `macro` identity
@@ -1321,7 +1370,8 @@ class MacroWidget extends WidgetType {
     // rebuilds it → liveRender re-runs and re-exports the SVG for the new theme (a macro like
     // Excalidraw bakes colours into its output, so it can't follow the theme via CSS alone).
     return other.name === this.name && other.body === this.body && other.foldable === this.foldable && other.selected === this.selected && other.theme === this.theme && other.align === this.align && other.wysiwyg === this.wysiwyg
-      && this.nestedKey(other.nestedSel) === this.nestedKey(this.nestedSel) && this.nestedKey(other.nestedEdit) === this.nestedKey(this.nestedEdit);
+      && this.nestedKey(other.nestedSel) === this.nestedKey(this.nestedSel) && this.nestedKey(other.nestedEdit) === this.nestedKey(this.nestedEdit)
+      && this.slotKey(other.slotEdit) === this.slotKey(this.slotEdit);
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
@@ -1567,6 +1617,15 @@ class MacroWidget extends WidgetType {
       // directly). Real Y.Text edits (removeLayoutItemAt / addLayoutItem); reorder-by-drag is a fast follow.
       if ((this.name === "columns" || this.name === "tabs") && !view.state.readOnly && !nestedActive) {
         const child = this.name === "columns" ? "column" : "tab";
+        const contentSel = this.name === "columns" ? ".cm-lp-column" : ".cm-lp-tabpanel";
+        if (this.slotEdit) {
+          // #278 §2a: a slot is being edited → swap its cell for the inline CM6 island (no ×/ affordances).
+          // Mark the host so updateDOM rebuilds (toDOM) when slot-edit toggles (else the DOM is reused + the
+          // island never mounts/unmounts — the same reason nested-host forces a rebuild).
+          wrap.classList.add("cm-lp-slot-edit-host");
+          const slotCell = wrap.querySelectorAll<HTMLElement>(contentSel)[this.slotEdit.index];
+          if (slotCell) mountSlotEditIsland(view, slotCell, { from: this.from, to: this.to }, this.slotEdit.index, child, this.theme === "dark");
+        } else {
         const cells = wrap.querySelectorAll<HTMLElement>(this.name === "columns" ? ".cm-lp-column" : ".cm-lp-tab");
         cells.forEach((cell: HTMLElement, i: number) => {
           // A span (not a button): the tab `×` nests inside a <button> tab, and a button-in-button is invalid.
@@ -1592,6 +1651,20 @@ class MacroWidget extends WidgetType {
         add.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); addLayoutItem(view, view.posAtDOM(wrap), child); });
         // columns: the add rides the end of the flex row; tabs: it rides the end of the tab bar.
         (this.name === "columns" ? wrap.querySelector(".cm-lp-columns") : wrap.querySelector(".cm-lp-tabbar"))?.appendChild(add);
+        // #278 §2a: clicking a slot's CONTENT enters inline edit for THAT slot (the CM6 island). Ignore clicks
+        // on the ×/nested-macro/tab-button (those have their own actions); for tabs only the ACTIVE panel is
+        // visible, so this naturally targets the active tab only. Captured `from`/`to` = this container.
+        const from = this.from, to = this.to;
+        wrap.querySelectorAll<HTMLElement>(contentSel).forEach((slot: HTMLElement, i: number) => {
+          slot.addEventListener("mousedown", (e) => {
+            if ((e.target as HTMLElement).closest(".cm-lp-layout-item-remove, .cm-lp-tab-remove, .cm-lp-layout-item-add, .cm-lp-tab, [data-mac-pos]")) return;
+            e.preventDefault();
+            e.stopPropagation();
+            view.dispatch({ effects: setSlotEditActive.of({ container: { from, to }, index: i }) });
+            view.focus();
+          });
+        });
+        }
       }
       // #210 / ADR-087: embed macros have no rich UI, but their TARGET (page id / URL) must be
       // changeable after insertion — otherwise a mis-picked embed strands the user in raw editing.
@@ -1639,8 +1712,13 @@ class MacroWidget extends WidgetType {
     const prev = (dom as MwDom).__mwKey;
     const nestedNow = !!(this.nestedSel || this.nestedEdit);
     const nestedBefore = dom.classList.contains("cm-lp-nested-host");
-    if (!prev || prev.body !== this.body || prev.theme !== this.theme || prev.name !== this.name || prev.foldable !== this.foldable || prev.wysiwyg !== this.wysiwyg || nestedNow || nestedBefore) {
-      return false; // content / theme / nested affordance / #174 wysiwyg nested-✎ changed → rebuild via toDOM
+    // #278 §2a: a slot-edit toggle must rebuild (toDOM) so the inline CM6 island mounts / unmounts — the DOM
+    // content identity (__mwKey) is unchanged, so without this updateDOM would reuse the DOM and the island
+    // would never appear.
+    const slotNow = !!this.slotEdit;
+    const slotBefore = dom.classList.contains("cm-lp-slot-edit-host");
+    if (!prev || prev.body !== this.body || prev.theme !== this.theme || prev.name !== this.name || prev.foldable !== this.foldable || prev.wysiwyg !== this.wysiwyg || nestedNow || nestedBefore || slotNow || slotBefore) {
+      return false; // content / theme / nested affordance / #174 wysiwyg nested-✎ / slot-edit changed → rebuild via toDOM
     }
     this.ro = (dom as MwDom).__mwRo; // adopt the live ResizeObserver so this instance's destroy() disconnects it
     this.objectUrl = (dom as MwDom).__mwObjUrl; // adopt any host-rendered blob url so destroy() revokes it
@@ -2158,10 +2236,13 @@ const RENDERERS: BlockRenderer[] = [
         const nestedSel = nsf && nsf.nested.from >= from && nsf.nested.to <= to ? nsf : null;
         const nef = ctx.state.field(nestedEditActiveField, false);
         const nestedEdit = nef && nef.nested.from >= from && nef.nested.to <= to ? nef : null;
+        // #278 §2a: the inline slot-edit state that targets THIS container (null otherwise).
+        const sef = ctx.state.field(slotEditField, false);
+        const slotEdit = sef && sef.container.from === from ? sef : null;
         // #174 comment 1003: layout containers in WYSIWYG draw hover ✎ on their nested editable slots (below);
         // the flag is part of eq so a display-mode switch rebuilds the widget (eq ignores the live facet).
         const wysiwygNested = (open!.name === "columns" || open!.name === "tabs") && ctx.state.facet(displayMode) === "wysiwyg";
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editUI: macro.editUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme, from, to, bodyFrom, nestedSel, nestedEdit, "center", wysiwygNested), block: true }), from, to);
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editUI: macro.editUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme, from, to, bodyFrom, nestedSel, nestedEdit, "center", wysiwygNested, slotEdit), block: true }), from, to);
         return macro.revealOnCursor ? false : undefined;
       }
       if (macro.collapsible && !rangeRevealed(ctx.state, first.from, lastLine.to)) {
@@ -2575,7 +2656,7 @@ export const livePreview = StateField.define<{ decorations: DecorationSet; atomi
     // change — rebuild so isFolded is re-evaluated and the stale widget is removed.
     // #215 / ADR-100: nested-selection / nested-edit are not doc/selection changes but change which nested
     // subtree draws the ring / editUI island — rebuild so the container widget re-renders.
-    for (const e of tr.effects) if (e.is(foldEffect) || e.is(unfoldEffect) || e.is(setMacroRenderActive) || e.is(setNestedSelection) || e.is(setNestedEditActive)) return buildDecorations(tr.state);
+    for (const e of tr.effects) if (e.is(foldEffect) || e.is(unfoldEffect) || e.is(setMacroRenderActive) || e.is(setNestedSelection) || e.is(setNestedEditActive) || e.is(setSlotEditActive)) return buildDecorations(tr.state);
     // #200: a theme change → rebuild so macro widgets pick up the new theme (their eq keys on theme,
     // so CM recreates them and liveRender re-exports for light/dark). Excalidraw etc. bake colours in.
     for (const e of tr.effects) if (e.is(redrawMacros)) return buildDecorations(tr.state, e.value); // #200: rebuild with the effect's theme (not the stale DOM)
@@ -3139,6 +3220,9 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-tab-remove:hover": { opacity: "1", color: "var(--fg, inherit)" },
   ".cm-lp-layout-item-add": { flex: "0 0 auto", alignSelf: "flex-start", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.6em", height: "1.6em", border: "1px dashed var(--border, #888)", borderRadius: "4px", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
   ".cm-lp-macro-wrap:hover .cm-lp-layout-item-add, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-layout-item-add": { opacity: "1" },
+  // #278 §2a: the inline CM6 slot-edit island — a bordered box that replaces the slot's rendered content while
+  // its body is edited with the full editor (accent border marks the active slot).
+  ".cm-lp-slot-edit-island": { flex: "1 1 0", minWidth: "0", border: "1px solid var(--accent, #4ea1ff)", borderRadius: "4px", background: "color-mix(in srgb, var(--accent, #4ea1ff) 4%, var(--panel, #fff))" },
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
   ".cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap:hover .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-align": { opacity: "1" },

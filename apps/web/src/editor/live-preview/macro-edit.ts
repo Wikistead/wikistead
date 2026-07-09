@@ -83,12 +83,39 @@ export const nestedEditActiveField = StateField.define<NestedSelection | null>({
   },
 });
 
+// #278 §2a / ADR-122: which layout slot (a column / tab BODY, not a nested macro) is being edited inline by a
+// CM6 island. `container` = the columns/tabs atom's [from,to] (clears when the caret leaves it); `index` = the
+// 0-based child index. Display state only (drives which cell swaps its render for the island); the actual edit
+// is a single offset-invariant Y.Text replace of the slot's body range on commit (single Y.Text untouched —
+// no 2nd CRDT, the island commits via its onCommit only). Cleared on Esc / caret-leave, mapped on doc change.
+export type SlotEdit = { container: { from: number; to: number }; index: number };
+export const setSlotEditActive = StateEffect.define<SlotEdit | null>();
+export const slotEditField = StateField.define<SlotEdit | null>({
+  create: () => null,
+  update(value, tr) {
+    for (const e of tr.effects) if (e.is(setSlotEditActive)) return e.value;
+    if (!value) return null;
+    let v = value;
+    if (tr.docChanged) v = { ...v, container: { from: tr.changes.mapPos(v.container.from, 1), to: tr.changes.mapPos(v.container.to, -1) } };
+    if (tr.selection) {
+      const h = tr.newSelection.main.head;
+      if (h < v.container.from || h > v.container.to) return null;
+    }
+    return v;
+  },
+});
+
 // Esc exits an inline edit session (the explicit way out besides the Done button; edit
 // mode otherwise persists across operations — ADR-022 review #2).
 const escExit = Prec.high(
   EditorView.domEventHandlers({
     keydown(e, view) {
       if (e.key === "Escape" && !view.state.readOnly) {
+        if (view.state.field(slotEditField)) { // #278 §2a: back out of an inline slot-edit island first
+          view.dispatch({ effects: setSlotEditActive.of(null) });
+          view.focus();
+          return true;
+        }
         if (view.state.field(nestedEditActiveField)) { // #215: back out of a nested editUI island first
           view.dispatch({ effects: setNestedEditActive.of(null) });
           return true;
@@ -124,7 +151,7 @@ const escExit = Prec.high(
   }),
 );
 
-export const macroEdit: Extension = [macroRenderActiveField, nestedSelectionField, nestedEditActiveField, escExit];
+export const macroEdit: Extension = [macroRenderActiveField, nestedSelectionField, nestedEditActiveField, slotEditField, escExit];
 
 // ADR-025 step 3: auto-demote `source` to the LOWEST tier level that can represent it (open
 // formats — persist the most portable form). `cap` is a pass-through SEAM: the highest level

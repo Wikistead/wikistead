@@ -55,92 +55,6 @@ function serializeItems(colons: number, childName: string, items: LayoutItem[]):
     .join("\n");
 }
 
-function layoutEditUI(kind: "tabs" | "columns", childName: "tab" | "column", liveRender: (body: string) => HTMLElement): EditUI {
-  return {
-    present: "inline",
-    mount(container, source, _ctx, save) {
-      const colons = childColonsOf(source, childName);
-      let items: LayoutItem[] = parseLayoutItems(source, childName).map((i) => ({ label: i.label, content: i.content }));
-      if (items.length === 0) items = [{ content: "" }]; // never a degenerate empty container
-      let active = 0;
-
-      const wrap = document.createElement("div");
-      wrap.className = "cm-lp-layout-edit cm-lp-layout-edit-structured";
-      wrap.setAttribute("data-testid", "layout-edit");
-      wrap.setAttribute("data-kind", kind);
-      const bar = document.createElement("div");
-      bar.className = "cm-lp-layout-edit-bar";
-      const editArea = document.createElement("div");
-      editArea.className = "cm-lp-layout-edit-area";
-      const preview = document.createElement("div");
-      preview.className = "cm-lp-layout-edit-preview";
-      preview.setAttribute("data-testid", "layout-edit-preview");
-      wrap.append(bar, editArea, preview);
-      container.appendChild(wrap);
-
-      const bodyNow = () => serializeItems(colons, childName, items);
-      const renderPreview = () => { try { preview.replaceChildren(liveRender(bodyNow())); } catch { preview.textContent = ""; } };
-      const commit = () => { renderPreview(); save(asMacroSource(bodyNow())); }; // one offset-invariant Y.Text write
-
-      const itemLabel = (i: number) =>
-        kind === "tabs"
-          ? (items[i]!.label || i18n.t("layoutEdit.tabN", { n: i + 1 }))
-          : i18n.t("layoutEdit.columnN", { n: i + 1 });
-
-      function renderBar() {
-        bar.replaceChildren();
-        items.forEach((_it, i) => {
-          const chip = document.createElement("button");
-          chip.type = "button";
-          chip.className = "cm-lp-layout-edit-chip" + (i === active ? " cm-lp-layout-edit-chip-active" : "");
-          chip.setAttribute("data-testid", "layout-edit-chip");
-          chip.textContent = itemLabel(i);
-          chip.addEventListener("click", () => { active = i; renderBar(); renderEditArea(); });
-          bar.appendChild(chip);
-        });
-        // #278 §1: the panel's structure buttons (+ add / − remove / ◀▶ reorder) are RETIRED — structure
-        // ops now live as per-item inline `×`/`` affordances on the rendered container cells (decorations.ts).
-        // The panel is content-only (switch item via chips, edit its text/label) until §2 replaces it entirely.
-      }
-
-      function renderEditArea() {
-        editArea.replaceChildren();
-        const it = items[active];
-        if (!it) return;
-        // tabs: an editable label for the active tab (columns have no label).
-        if (kind === "tabs") {
-          const label = document.createElement("input");
-          label.type = "text";
-          label.className = "cm-lp-layout-edit-label";
-          label.setAttribute("data-testid", "layout-edit-label");
-          label.value = it.label ?? "";
-          label.placeholder = i18n.t("layoutEdit.tabName");
-          label.addEventListener("input", () => { it.label = label.value; });
-          label.addEventListener("change", commit);
-          editArea.appendChild(label);
-        }
-        const ta = document.createElement("textarea");
-        ta.className = "cm-lp-layout-edit-content";
-        ta.setAttribute("data-testid", "layout-edit-content");
-        ta.spellcheck = false;
-        ta.value = it.content;
-        ta.addEventListener("input", () => { it.content = ta.value; renderPreview(); }); // live preview, no doc write
-        ta.addEventListener("change", commit); // commit on blur
-        editArea.appendChild(ta);
-        // #278 §1: remove / reorder buttons RETIRED here — structure ops are the per-item inline
-        // affordances on the rendered cells now (decorations.ts). The panel edits CONTENT only.
-        const focus = setTimeout(() => ta.focus(), 0);
-        ta.addEventListener("blur", () => clearTimeout(focus), { once: true });
-      }
-
-      renderBar();
-      renderEditArea();
-      renderPreview();
-      return { destroy() { wrap.remove(); } };
-    },
-  };
-}
-
 export function columnsLiveRender(body: string): HTMLElement {
   const base = takePendingBaseOffset(); // #215 / ADR-100: absolute base of `body` (null = untagged render)
   const row = document.createElement("div");
@@ -168,7 +82,8 @@ export const columnsMacro: DirectiveMacro = {
     caret: 22, // ":::​:columns\n:::column\n" → the first column's blank body line
   },
   liveRender: columnsLiveRender,
-  editUI: layoutEditUI("columns", "column", columnsLiveRender), // #196 comment 786: panel edit, not reveal (layout never breaks)
+  // #278 §2a: NO editUI panel — a column's content is edited by an inline CM6 island in the slot (click it);
+  // structure ops are the per-item inline ×/ (§1). The #257 panel is retired (the user's "no panel" ask,).
   htmlRender: columnsHtmlRender, // #85: single source of truth in @wikistead/macro-render
 };
 
@@ -243,7 +158,8 @@ export const tabsMacro: DirectiveMacro = {
     caret: 23, // "::::tabs\n:::tab[Tab 1]\n" → the first tab's blank body line
   },
   liveRender: tabsLiveRender,
-  editUI: layoutEditUI("tabs", "tab", tabsLiveRender), // #196 comment 786: panel edit, not reveal (layout never breaks)
+  // #278 §2a: NO editUI panel — the active tab's content is edited by an inline CM6 island in its panel (click
+  // it); structure ops are the per-item inline ×/ (§1). The #257 panel is retired.
   // #85/#90 export degrade (meaning-preserving: label → visible heading + body). Single source of
   // truth in @wikistead/macro-render, shared with the server export renderer.
   htmlRender: tabsHtmlRender,

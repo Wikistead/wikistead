@@ -5,7 +5,7 @@ import { enterEdit, openScratch, sleep } from "../helpers";
 // items are rendered via the sanitized S0 Markdown→DOM renderer. Editing is reveal-on-cursor
 // (caret-in shows the raw source). insertText is paste-like (bypasses the editor's auto-pairing
 // that would mangle a typed ::: fence).
-test("::::columns: side-by-side widget (S0-rendered inner md), edited via the editUI panel (not caret-in raw)", async ({ browser }) => {
+test("::::columns: side-by-side widget (S0-rendered inner md); a slot is edited by an inline CM6 island (#278 §2a)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "columns");
   await enterEdit(page);
@@ -19,53 +19,51 @@ test("::::columns: side-by-side widget (S0-rendered inner md), edited via the ed
   await expect(widget.locator("strong")).toContainText("bold"); // inner Markdown rendered (S0)
   await expect(widget.locator(".cm-lp-column").nth(1)).toContainText("Right side");
   // the raw ::: fences are hidden while the widget renders (caret is away, at "below")
-  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("::::columns");
+  expect(await page.locator("[data-pane=preview] .cm-content").first().innerText()).not.toContain("::::columns");
 
-  // #196 comment 786 (Option B, variant i): clicking the widget does NOT reveal raw — the flex layout is
-  // preserved ALWAYS (reveal-on-cursor collapsed it). The block is edited via the editUI PANEL, reached from
-  // the single edit button; the source textarea seeds the raw `::::columns` body + a live 2-column preview.
-  await widget.click();
-  await sleep(250);
-  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("::::columns"); // still a widget
-  await expect(page.locator("[data-pane=preview] [data-testid=macro-columns]")).toBeVisible(); // layout preserved
-  await page.locator("[data-pane=preview] [data-testid=macro-edit]").first().click({ force: true });
+  // #278 §2a / ADR-122 (A): clicking a slot's content mounts an inline CM6 island IN that cell — NOT a caret-in
+  // raw reveal (Option B rejected; the flex layout is preserved because the island is DOM inside the cell) and
+  // NOT the retired #257 panel. The other column stays rendered side-by-side.
+  await widget.locator(".cm-lp-column").first().click();
   await sleep(300);
-  // #257: the STRUCTURED panel — per-column chips + a content editor (markers hidden), NOT a raw textarea.
-  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit]")).toBeVisible();
-  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit-chip]")).toHaveCount(2); // 2 columns
-  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit-preview] .cm-lp-column")).toHaveCount(2); // live preview
+  await expect(page.locator("[data-pane=preview] [data-testid=slot-edit-src]")).toBeVisible();
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-columns]")).toBeVisible(); // layout preserved
+  await expect(page.locator("[data-pane=preview] .cm-lp-column")).toContainText("Right side"); // the other slot renders
+  // the retired panel is gone.
+  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit]")).toHaveCount(0);
 });
 
-// #257: the slash-inserted columns seed 2 columns, and the panel edits each column's content + adds/removes
-// columns in-panel, reassembling the container body on save.
-test("#257: columns editUI panel — 2-column seed, edit a column, add a third, round-trips", async ({ browser }) => {
+// #278 §2a: edit a column's content via the inline CM6 island (commit-on-blur → one Y.Text replace), then add
+// a third column via the inline — the edited content round-trips through the structural change.
+test("#278 §2a: inline island edits a column; the inline ＋ adds a third; the edit round-trips", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
-  await openScratch(page, "columns-257");
+  await openScratch(page, "columns-278");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.insertText("::::columns\n:::column\nleft\n:::\n:::column\nright\n:::\n::::\n\nbelow\n");
   await sleep(400);
-  await page.locator("[data-pane=preview] [data-testid=macro-edit]").first().click({ force: true });
-  await sleep(300);
-  const content = page.locator("[data-pane=preview] [data-testid=layout-edit-content]");
-  await expect(content).toHaveValue("left"); // active = first column
+  await page.getByText("below").click(); await sleep(200); // caret out → widget renders
 
-  await content.fill("left-edited");
-  await content.blur();
+  // edit the first column via the inline island.
+  await page.locator("[data-pane=preview] [data-testid=macro-columns] .cm-lp-column").first().click();
   await sleep(300);
-  // #278 §1: the panel is CONTENT-only now — structure (add/remove) moved to inline affordances on the
-  // rendered cells. Exit the panel, then add a column via the trailing on the rendered widget.
-  await page.keyboard.press("Escape");
-  await sleep(300);
-  await expect(page.locator("[data-pane=preview] [data-testid=macro-columns] .cm-lp-column")).toHaveCount(2);
+  const src = page.locator("[data-pane=preview] [data-testid=slot-edit-src]");
+  await expect(src).toBeVisible();
+  await src.click();
+  await page.keyboard.press("Control+A");
+  await page.keyboard.type("left-edited");
+  await page.getByText("below").click(); // blur → commit-on-blur
+  await sleep(400);
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-columns] .cm-lp-column").first()).toContainText("left-edited");
+
+  // add a third column via the inline ; the edited first column survives the round-trip.
   await page.locator("[data-pane=preview] [data-testid=macro-columns]").hover();
   await sleep(150);
   await page.locator("[data-pane=preview] [data-testid=layout-add-column]").click({ force: true });
   await sleep(400);
   await page.getByText("below").click();
-  await sleep(200); // caret out → the widget re-renders with 3 columns (round-trip)
+  await sleep(200);
   await expect(page.locator("[data-pane=preview] [data-testid=macro-columns] .cm-lp-column")).toHaveCount(3);
-  // The edited first column survived the add round-trip.
   await expect(page.locator("[data-pane=preview] [data-testid=macro-columns] .cm-lp-column").first()).toContainText("left-edited");
 });
 
