@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronsUpDown, FolderDown, Loader2, Pencil, Plus } from "lucide-react";
+import { ChevronDown, ChevronUp, ChevronsUpDown, FolderDown, Loader2, Pencil, Pin, Plus } from "lucide-react";
 import { Command, CommandInput, CommandList, CommandItem, CommandGroup, CommandSeparator } from "../components/ui/command";
 import { SpaceIcon } from "../ui/SpaceIcon";
+import { cn } from "../lib/utils";
 import type { Space } from "../data/queries";
 import { visibleSpaces, recordRecentSpace, hiddenSpaceCount, allSpacesSorted } from "./space-recent";
 
@@ -14,6 +15,7 @@ import { visibleSpaces, recordRecentSpace, hiddenSpaceCount, allSpacesSorted } f
 
 export function SpaceSwitcher({
   spaces, currentId, currentSpace, canManage, onSelect, onRename, onNewSpace, onExportSpace, exportingSpace = false,
+  pinnedSpaceIds = [], onTogglePin, onMovePin,
 }: {
   spaces: Space[];
   currentId: string | undefined;
@@ -22,6 +24,12 @@ export function SpaceSwitcher({
   onSelect: (id: string) => void;
   onRename: () => void;
   onNewSpace: () => void;
+  // #284: the member's pinned space ids (server pin order, view-confirmed) + the ★ toggle.
+  // Pinned spaces render first and are exempt from the bounded-list folding.
+  pinnedSpaceIds?: string[];
+  onTogglePin?: (spaceId: string) => void;
+  // v1 reorder = up/down (ADR-119): move a pinned space within the pin order.
+  onMovePin?: (spaceId: string, dir: -1 | 1) => void;
   // #309: download the current space as a Markdown ZIP. NOT canManage-gated — the server export is
   // view-filtered, so every member may use it (Open formats / no lock-in). exportingSpace keeps the
   // item disabled + spinning while the archive is being generated (it can take a while).
@@ -52,8 +60,8 @@ export function SpaceSwitcher({
   // #287: a query always searches ALL spaces (bounded/expanded is only for the no-query browse). With no
   // query, "expanded" shows every space name-sorted; otherwise the bounded default (current + recents).
   const list = useMemo(
-    () => (!query.trim() && expanded ? allSpacesSorted(spaces) : visibleSpaces(spaces, currentId, query)),
-    [spaces, currentId, query, expanded],
+    () => (!query.trim() && expanded ? allSpacesSorted(spaces) : visibleSpaces(spaces, currentId, query, pinnedSpaceIds)),
+    [spaces, currentId, query, expanded, pinnedSpaceIds],
   );
   const hidden = hiddenSpaceCount(spaces.length, list.length, query);
 
@@ -86,12 +94,42 @@ export function SpaceSwitcher({
                 </div>
               )}
               <CommandGroup>
-                {list.map((s) => (
-                  <CommandItem key={s.id} value={`space:${s.id}`} onSelect={() => select(s.id)} data-testid="space-option">
-                    <SpaceIcon id={s.id} name={s.name} image={s.iconImageUrl} size={18} />
-                    <span className="truncate">{s.name || t("sidebar.untitledSpace")}</span>
-                  </CommandItem>
-                ))}
+                {list.map((s) => {
+                  const pinIdx = pinnedSpaceIds.indexOf(s.id);
+                  const pinned = pinIdx >= 0;
+                  // #284: hover-revealed pin controls (★ toggle; up/down while pinned). stopPropagation on
+                  // pointerdown+click so a control click never selects/switches the space (cmdk item).
+                  const guard = (e: { stopPropagation(): void; preventDefault(): void }) => { e.stopPropagation(); e.preventDefault(); };
+                  const ctlBtn = "flex flex-none cursor-pointer rounded-sm p-0.5 text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
+                  return (
+                    <CommandItem key={s.id} value={`space:${s.id}`} onSelect={() => select(s.id)} data-testid="space-option" className="group/space">
+                      <SpaceIcon id={s.id} name={s.name} image={s.iconImageUrl} size={18} />
+                      <span className="truncate">{s.name || t("sidebar.untitledSpace")}</span>
+                      {onTogglePin && (
+                        <span className="ml-auto flex flex-none items-center gap-0.5">
+                          {pinned && onMovePin && !query.trim() && !expanded && (
+                            <span className={cn("flex gap-0.5 transition-opacity duration-[120ms] group-hover/space:opacity-100", "opacity-0")}>
+                              <button type="button" className={ctlBtn} disabled={pinIdx === 0} title={t("sidebar.movePinUp")} aria-label={t("sidebar.movePinUp")} data-testid="space-pin-up" onPointerDown={guard} onClick={(e) => { guard(e); onMovePin(s.id, -1); }}><ChevronUp size={13} /></button>
+                              <button type="button" className={ctlBtn} disabled={pinIdx === pinnedSpaceIds.length - 1} title={t("sidebar.movePinDown")} aria-label={t("sidebar.movePinDown")} data-testid="space-pin-down" onPointerDown={guard} onClick={(e) => { guard(e); onMovePin(s.id, 1); }}><ChevronDown size={13} /></button>
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            className={cn(ctlBtn, "transition-opacity duration-[120ms] group-hover/space:opacity-100", pinned ? "opacity-100" : "opacity-0")}
+                            title={pinned ? t("sidebar.unpin") : t("sidebar.pin")}
+                            aria-label={pinned ? t("sidebar.unpin") : t("sidebar.pin")}
+                            aria-pressed={pinned}
+                            data-testid="space-pin-toggle"
+                            onPointerDown={guard}
+                            onClick={(e) => { guard(e); onTogglePin(s.id); }}
+                          >
+                            <Pin size={13} className={pinned ? "fill-current" : undefined} />
+                          </button>
+                        </span>
+                      )}
+                    </CommandItem>
+                  );
+                })}
                 {hidden > 0 && (
                   // #287: the default list is capped, so offer a SELECTABLE "show all" item (↑↓/Enter/click)
                   // that expands to every viewable space, name-sorted, for browsing when the name is

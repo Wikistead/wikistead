@@ -27,24 +27,33 @@ export function recordRecentSpace(id: string): void {
 }
 
 // The bounded default set (empty query) OR the full filtered set (non-empty query, over ALL viewable
-// spaces). Current space is always first; then recents (most-recent first); then the rest to fill the cap.
-export function visibleSpaces(spaces: Space[], currentId: string | undefined, query: string): Space[] {
+// spaces). #284: PINNED spaces come first (in pin order) and are exempt from the cap — a pinned space is
+// always shown, never folded into "N more". Then the current space, recents (most-recent first), and the
+// rest to fill the cap. `pinnedIds` is the member's server-persisted pin order (view-confirmed upstream).
+export function visibleSpaces(spaces: Space[], currentId: string | undefined, query: string, pinnedIds: string[] = []): Space[] {
   const q = query.trim().toLowerCase();
   if (q) return spaces.filter((s) => (s.name || "").toLowerCase().includes(q));
   const byId = new Map(spaces.map((s) => [s.id, s]));
   const out: Space[] = [];
+  for (const id of pinnedIds) {
+    const s = byId.get(id);
+    if (s && !out.includes(s)) out.push(s);
+  }
   const cur = currentId ? byId.get(currentId) : undefined;
-  if (cur) out.push(cur);
+  if (cur && !out.includes(cur)) out.push(cur);
+  // The cap bounds the NON-pinned tail: pinned entries never consume it, so many pins
+  // don't crowd out the current/recents section (and pins themselves are never cut).
+  const cap = DEFAULT_LIMIT + pinnedIds.filter((id) => byId.has(id)).length;
   for (const id of readRecent()) {
+    if (out.length >= cap) return out;
     if (id === currentId) continue;
     const s = byId.get(id);
     if (s && !out.includes(s)) out.push(s);
-    if (out.length >= DEFAULT_LIMIT) return out;
   }
   for (const s of spaces) {
+    if (out.length >= cap) break;
     if (out.includes(s)) continue;
     out.push(s);
-    if (out.length >= DEFAULT_LIMIT) break;
   }
   return out;
 }

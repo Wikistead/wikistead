@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { NodeApi } from "react-arborist";
-import { ChevronDown, FilePlus, Settings } from "lucide-react";
+import { ChevronDown, ChevronUp, FilePlus, FileText, PinOff, Settings } from "lucide-react";
 import { PageTree, type PageTreeNode } from "./PageTree";
 import { SpaceSwitcher } from "./SpaceSwitcher";
 import {
@@ -14,7 +14,12 @@ import {
   useRenamePage,
   useDeletePage,
   useMovePage,
+  usePins,
+  useCreatePin,
+  useDeletePin,
+  useReorderPins,
   type Page,
+  type PinResourceType,
 } from "../data/queries";
 import { apiFetch } from "../data/apiClient";
 import { useSession } from "../session/SessionProvider";
@@ -28,11 +33,11 @@ import { downloadSpaceExport } from "../data/exportApi"; // #309: space Markdown
 
 // One space at a time (Notion/Outline style): the sidebar shows ONLY the active
 // space's page tree; the space itself is chosen in the switcher, not a tree root.
-function buildPageNodes(pages: Page[], parentId: string | null): PageTreeNode[] {
+function buildPageNodes(pages: Page[], parentId: string | null, pinnedPageIds: ReadonlySet<string>): PageTreeNode[] {
   return pages
     .filter((p) => p.parentId === parentId)
     .sort((a, b) => a.position - b.position)
-    .map((p) => ({ id: `page:${p.id}`, name: p.title, pageId: p.id, spaceId: p.spaceId, published: p.published ?? false, unpublished: p.hasUnpublishedChanges ?? false, private: p.private ?? false, taskDone: p.taskDone ?? 0, taskTotal: p.taskTotal ?? 0, children: buildPageNodes(pages, p.id) }));
+    .map((p) => ({ id: `page:${p.id}`, name: p.title, pageId: p.id, spaceId: p.spaceId, published: p.published ?? false, unpublished: p.hasUnpublishedChanges ?? false, private: p.private ?? false, taskDone: p.taskDone ?? 0, taskTotal: p.taskTotal ?? 0, pinned: pinnedPageIds.has(p.id), children: buildPageNodes(pages, p.id, pinnedPageIds) }));
 }
 
 export function Sidebar() {
@@ -63,7 +68,37 @@ export function Sidebar() {
   });
   const pages = useMemo(() => pagesQ.data ?? [], [pagesQ.data]);
   const pageById = useMemo(() => new Map(pages.map((p) => [p.id, p])), [pages]);
-  const data = useMemo(() => buildPageNodes(pages, null), [pages]);
+
+  // #284 / ADR-119: the member's pins. The server list is view-confirmed (double gate
+  // live resource row + FGA view), so rendering it verbatim can never leak a stale title.
+  const pinsQ = usePins();
+  const pins = useMemo(() => pinsQ.data ?? [], [pinsQ.data]);
+  const pagePins = useMemo(() => pins.filter((p) => p.resourceType === "page"), [pins]);
+  const spacePins = useMemo(() => pins.filter((p) => p.resourceType === "space"), [pins]);
+  const pinnedPageIds = useMemo(() => new Set(pagePins.map((p) => p.resourceId)), [pagePins]);
+  const createPin = useCreatePin();
+  const deletePin = useDeletePin();
+  const reorderPins = useReorderPins();
+
+  const togglePin = useCallback((resourceType: PinResourceType, resourceId: string) => {
+    const existing = pins.find((p) => p.resourceType === resourceType && p.resourceId === resourceId);
+    if (existing) deletePin.mutate(existing.id);
+    else createPin.mutate({ resourceType, resourceId });
+  }, [pins, createPin, deletePin]);
+
+  // v1 reorder = up/down (ADR-119 review decision): swap with the neighbour and persist
+  // the full ordered id list for that type.
+  const movePin = useCallback((resourceType: PinResourceType, pinId: string, dir: -1 | 1) => {
+    const list = resourceType === "page" ? pagePins : spacePins;
+    const i = list.findIndex((p) => p.id === pinId);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    const ids = list.map((p) => p.id);
+    [ids[i], ids[j]] = [ids[j]!, ids[i]!];
+    reorderPins.mutate({ resourceType, orderedIds: ids });
+  }, [pagePins, spacePins, reorderPins]);
+
+  const data = useMemo(() => buildPageNodes(pages, null, pinnedPageIds), [pages, pinnedPageIds]);
 
   // Active space capability gates management actions (UI only; the server is the
   // fortress). Space-level: a per-page edit override inside a view-only space would
@@ -163,7 +198,7 @@ export function Sidebar() {
     return false;
   };
 
-  const headerBtn = "flex cursor-pointer rounded-sm p-1 text-fg-dim transition-colors duration-[120ms] hover:bg-panel-2 hover:text-foreground";
+  const headerBtn = "flex cursor-pointer rounded-sm p-1 text-fg-dim transition-colors duration-[120ms] hover:bg-panel-2 hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
 
   // #193: drag the right edge to resize the sidebar. Width is the grid column --sidebar-w (AppShell),
   // clamped 180–480px and persisted to localStorage so it survives reloads. Restore on mount.
@@ -202,6 +237,9 @@ export function Sidebar() {
           onNewSpace={() => setCreatingSpace(true)}
           onExportSpace={exportSpace}
           exportingSpace={exportingSpace}
+          pinnedSpaceIds={spacePins.map((p) => p.resourceId)}
+          onTogglePin={(spaceId) => togglePin("space", spaceId)}
+          onMovePin={(spaceId, dir) => { const pin = spacePins.find((p) => p.resourceId === spaceId); if (pin) movePin("space", pin.id, dir); }}
         />
         {current && (canEdit || canManage) && (
           <div className="flex flex-none gap-0.5">
@@ -213,6 +251,33 @@ export function Sidebar() {
           </div>
         )}
       </div>
+
+      {/* #284: the "Pinned" section — the member's pinned PAGES (any space), above the tree so a deep
+          page is reachable without expanding. Rendered strictly from the server's view-confirmed list. */}
+      {pagePins.length > 0 && (
+        <div className="border-b border-border px-1 py-1" data-testid="pinned-section">
+          <div className="px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-fg-dim">{t("sidebar.pinned")}</div>
+          {pagePins.map((pin, i) => (
+            <div
+              key={pin.id}
+              className={`group flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-lg px-2 transition-colors duration-[120ms] ${pin.resourceId === pageId ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium" : "hover:bg-panel-2"}`}
+              data-testid="pinned-page"
+              onClick={() => navigate(`/p/${pin.resourceId}`)}
+            >
+              <FileText size={14} className="flex-none text-fg-dim" />
+              <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{pin.title || t("common.untitled")}</span>
+              <span
+                className="flex flex-none gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button type="button" className={headerBtn} disabled={i === 0} title={t("sidebar.movePinUp")} aria-label={t("sidebar.movePinUp")} data-testid="pin-up" onClick={() => movePin("page", pin.id, -1)}><ChevronUp size={13} /></button>
+                <button type="button" className={headerBtn} disabled={i === pagePins.length - 1} title={t("sidebar.movePinDown")} aria-label={t("sidebar.movePinDown")} data-testid="pin-down" onClick={() => movePin("page", pin.id, 1)}><ChevronDown size={13} /></button>
+                <button type="button" className={headerBtn} title={t("sidebar.unpin")} aria-label={t("sidebar.unpin")} data-testid="pin-remove" onClick={() => deletePin.mutate(pin.id)}><PinOff size={13} /></button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {spacesQ.isLoading ? (
         <div className="p-3 text-fg-dim">{t("common.loading")}</div>
@@ -229,6 +294,7 @@ export function Sidebar() {
           onOpen={(id) => navigate(`/p/${id}`)}
           canEdit={canEdit}
           onRowAction={onRowAction}
+          onTogglePin={(d) => togglePin("page", d.pageId)}
           onMove={onMove}
           disableDrop={disableDrop}
         />

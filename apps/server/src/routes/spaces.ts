@@ -9,6 +9,7 @@ import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import { auditIfEntitled } from '../audit/outbox.js'
+import { deletePinsForResources } from './pins.js'
 import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
 
@@ -248,6 +249,9 @@ export async function deleteSpace(
       const oid = await enqueueOutbox(tx, { tenantId: page.tenant_id, pageId: page.id, operation: 'delete' })
       outboxEntries.push({ id: oid, tenantId: page.tenant_id, pageId: page.id })
     }
+    // #284 / ADR-119: best-effort pin cleanup (space + its pages). Correctness does
+    // not depend on this — the pin display gate drops orphans — it's row hygiene.
+    await deletePinsForResources(tx, [args.spaceId, ...pages.map((p) => p.id)])
     await tx`DELETE FROM spaces WHERE id = ${args.spaceId}`
   })
 

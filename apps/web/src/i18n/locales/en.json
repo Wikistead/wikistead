@@ -379,6 +379,11 @@
   },
   "sidebar": {
     "searchSpaces": "Search spaces…",
+    "pinned": "Pinned",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "movePinUp": "Move pin up",
+    "movePinDown": "Move pin down",
     "noSpacesMatch": "No spaces match.",
     "moreSpacesHint": "{{count}} more — search to filter",
     "showAllSpaces": "Show all spaces ({{count}} more)",
