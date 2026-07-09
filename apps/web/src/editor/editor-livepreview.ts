@@ -30,8 +30,10 @@ export const vimCompartmentContent = (on: boolean) => (on ? [vim(), vimEnabled.o
 
 // Display-mode Compartment content (ADR-056 / #164). Reused by mount + the Editor's mode toggle.
 // Reading is READ-ONLY but stays EDITABLE-focusable (#165): it uses EditorState.readOnly (blocks doc
-// edits; nothing reveals since rangeRevealed returns false under readOnly, and grips/checkbox toggles
-// gate on state.readOnly so they go inert) — but NOT EditorView.editable.of(false). Making the view
+// edits; nothing reveals since rangeRevealed returns false under readOnly, and grips gate on
+// state.readOnly so they go inert — task checkboxes stay LIVE though (#314): Reading's invariant is
+// "no prose editing", and the task toggle is an allowed read-surface operation, ADR-019, same as the
+// published view surface) — but NOT EditorView.editable.of(false). Making the view
 // non-editable removed the contentDOM's focusability, which disabled the vim keymap AND did not come
 // back when switching out of Reading (vim⟂mode invariant violated — #165 rebound). Keeping it editable
 // + readOnly means vim NAVIGATION (j/k/scroll) still works in Reading while edits stay blocked, and
