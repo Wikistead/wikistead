@@ -26,6 +26,7 @@ import { renderCellInline } from "../macros/table-cell-dom";
 import { openMacroModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost, nestedSelectionField, setNestedSelection, nestedEditActiveField, setNestedEditActive, slotEditField, setSlotEditActive, type NestedSelection, type SlotEdit } from "./macro-edit";
 import { mountSourceEditor } from "../macros/source-editor";
+import { slashPalette } from "./palette"; // #278 §2b: the slash palette, mounted on the inline slot island (host-side wiring)
 import { tableInlineEditor } from "./table-edit";
 import { tableTier } from "../macros/table";
 import type { InlineController } from "../macros/registry";
@@ -1334,6 +1335,10 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
     dark,
     testid: "slot-edit-src",
     vim: view.state.facet(vimEnabled),
+    // #278 §2b: a slash palette inside the island — inserts markdown snippets into the island's OWN doc (no
+    // host action providers passed, so /image·/embed·/template gracefully no-op; headings·lists·todo·quote·
+    // code·divider·link work locally). Commit-on-blur still carries the result into the one Y.Text.
+    extraExtensions: [slashPalette()],
     onInput: () => {}, // no per-keystroke doc write (that would re-run the host doc + re-mount this island)
     onCommit: (value) => {
       if (committed) return; // blur can fire alongside the field-clear re-render; write exactly once
