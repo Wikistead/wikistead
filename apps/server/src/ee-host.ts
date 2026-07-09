@@ -21,3 +21,14 @@ export { groupFgaId, syncMemberGroups } from './auth/group-sync.js'
 export { billableMemberCount, lockSeats } from './auth/invites.js'
 export { auditIfEntitled, drainAuditOutbox, verifyTenantAuditChain } from './audit/outbox.js'
 export { entitlementDenied } from './entitlement-ux.js'
+
+// #178: additional CE-GENERAL auth helpers the moved SAML code needs (SAML → packages/ee-server, mirroring
+// SCIM). Each is a pure CE utility ALREADY shared by CE OIDC (session / secret-crypto / oidc / return-to) —
+// none imports EE, so exposing them via this barrel is a pure additive re-export, not new CE code. The
+// hash-chained operator ledger primitive STAYS in CE (audit/outbox already rides it, and CE's oidc-disable
+// script uses appendOperatorEntry) — EE consumes it through the seam like the rest of the audit surface.
+export { coerceGroups } from './auth/oidc.js'
+export { encryptSecret, decryptSecret } from './auth/secret-crypto.js'
+export { SESSION_COOKIE, establishMemberSession, sessionCookieOptions } from './auth/session.js'
+export { safeReturnTo } from './auth/return-to.js'
+export { appendOperatorEntry, type OperatorAction } from './audit/operator-ledger.js'
