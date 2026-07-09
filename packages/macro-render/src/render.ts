@@ -103,7 +103,16 @@ function renderInlineNode(node: SNode, src: string): SafeHtml {
     case "InlineCode": return html`<code>${stripMarks(node, src, "CodeMark")}</code>`;
     case "Link": {
       const urlNode = node.getChild("URL");
-      const href = urlNode ? safeHref(txt(src, urlNode)) : null;
+      const rawHref = urlNode ? txt(src, urlNode) : "";
+      // #273 / ADR-120: `wks-attachment:` is OUR opaque scheme (a stable attachment id, resolvable
+      // only through the authenticated app). It must NEVER be emitted as a raw anchor on a static
+      // surface (public / print / HTML export can't resolve it), so this renderer intercepts it and
+      // emits a plain non-link affordance (review condition ①: one of the TWO intercept sites —
+      // apps/web md-render.ts is the other; keep both, they are separate implementations).
+      if (/^\s*wks-attachment:/i.test(rawHref)) {
+        return html`<span class="wks-attachment-ref">📎 ${renderInline(node, src)}</span>`;
+      }
+      const href = safeHref(rawHref);
       const inner = renderInline(node, src);
       return href
         ? html`<a href="${href}" rel="noopener noreferrer nofollow">${inner}</a>`

@@ -461,6 +461,22 @@ export const imageResolver = Facet.define<ImageResolver, ImageResolver>({
   combine: (values) => values[0] ?? noopResolver,
 });
 
+// #273 / ADR-120: FILE attachment resolver — [name](wks-attachment:<id>), the image form minus
+// the `!`. meta resolves the stable id → download URL + the SERVER-SNIFFED inline kind and
+// size (the declared content type is untrusted; the server classified the bytes at confirm).
+// inlineUrl returns a blob: URL of the PROXIED inline bytes (the nosniff/CSP route) for the
+// sandboxed PDF viewer — fetched with the caller's credentials, since an <iframe src> cannot
+// carry an Authorization header. Both re-check FGA `view` server-side per call.
+export interface AttachmentMeta { downloadUrl: string; filename: string; sizeBytes: number | null; inlineKind: "pdf" | "image" | "none" }
+export interface AttachmentResolver {
+  meta(id: string): Promise<AttachmentMeta | null>;
+  inlineUrl(id: string): Promise<string | null>;
+}
+const noopAttachmentResolver: AttachmentResolver = { meta: async () => null, inlineUrl: async () => null };
+export const attachmentResolver = Facet.define<AttachmentResolver, AttachmentResolver>({
+  combine: (values) => values[0] ?? noopAttachmentResolver,
+});
+
 // Host-mediated diagram render (#140 / ADR-074). A renderable fence (plantuml) is NEVER fetched by
 // the macro (host-API is {theme} only — ADR-024); the HOST resolves the source to image bytes via
 // this injected renderer (it holds pageId/token and calls the gated, SSRF-guarded server endpoint).
@@ -612,6 +628,28 @@ function parseImageRef(text: string): ImageRef | null {
   const a = new URLSearchParams(raw.slice(q + 1)).get("align");
   return { alt, id: raw.slice(0, q), align: a === "left" || a === "right" ? a : "center" };
 }
+// #273: [name](wks-attachment:<id>) — the FILE attachment link (the image ref minus the `!`).
+// Same opaque-scheme rule: the id may carry a query (reserved), which parse strips.
+const ATTACHMENT_LINK_REF = /^\[([^\]]*)\]\(wks-attachment:([^)\s]+)\)$/;
+type AttachmentLinkRef = { name: string; id: string };
+function parseAttachmentLinkRef(text: string): AttachmentLinkRef | null {
+  const m = ATTACHMENT_LINK_REF.exec(text.trim());
+  if (!m) return null;
+  const raw = m[2]!;
+  const q = raw.indexOf("?");
+  return { name: m[1]!, id: q === -1 ? raw : raw.slice(0, q) };
+}
+// The STANDALONE attachment link (its line is nothing but the link) at `pos`, or null
+// Ctrl+Enter raw-reveal + the render gate (mirrors imageBlockAt).
+function attachmentBlockAt(state: EditorState, pos: number): { from: number; to: number; ref: AttachmentLinkRef } | null {
+  const line = state.doc.lineAt(pos);
+  const ref = parseAttachmentLinkRef(line.text);
+  if (!ref) return null;
+  const lead = line.text.length - line.text.trimStart().length;
+  const from = line.from + lead;
+  return { from, to: from + line.text.trim().length, ref };
+}
+
 // The STANDALONE image (its line is nothing but the image) at `pos`, or null — used by Ctrl+Enter reveal,
 // the right-click align menu, and the render gate. Range = the image markdown within the line.
 function imageBlockAt(state: EditorState, pos: number): { from: number; to: number; ref: ImageRef } | null {
@@ -678,6 +716,167 @@ class ImageWidget extends WidgetType {
   ignoreEvent() {
     return false; // clicks pass through so the cursor can enter → reveal raw
   }
+}
+
+// #273: human-readable size for the attachment chip/card (display-only).
+function fmtBytes(n: number | null): string {
+  if (n == null || !isFinite(n)) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+// #273: trigger a download of an attachment — resolve a fresh presigned URL (served with
+// Content-Disposition: attachment) and click a transient anchor. Never persists the URL.
+function triggerAttachmentDownload(view: EditorView, id: string): void {
+  const r = view.state.facet(attachmentResolver);
+  void r.meta(id).then((m) => {
+    if (!m) return;
+    const a = document.createElement("a");
+    a.href = m.downloadUrl;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  });
+}
+
+// #273 / ADR-120: INLINE file-attachment chip — [name](wks-attachment:id) with other text on
+// the line. Renders 📎 name (+ size once resolved) with a small download button. The chip
+// body passes clicks through (caret lands → the line reveals raw, like the inline image);
+// only the ⤓ button is interactive, and it must stopPropagation on mousedown (an atom
+// widget's interactive DOM otherwise loses the click to the editor — the #265 guard).
+class AttachmentChipWidget extends WidgetType {
+  constructor(readonly id: string, readonly name: string) { super(); }
+  eq(other: AttachmentChipWidget) { return other.id === this.id && other.name === this.name; }
+  toDOM(view: EditorView) {
+    const chip = document.createElement("span");
+    chip.className = "cm-lp-attachment-chip";
+    chip.setAttribute("data-testid", "attachment-chip");
+    const label = document.createElement("span");
+    label.textContent = `📎 ${this.name || "attachment"}`;
+    chip.appendChild(label);
+    const size = document.createElement("span");
+    size.className = "cm-lp-attachment-size";
+    chip.appendChild(size);
+    const dl = document.createElement("button");
+    dl.type = "button";
+    dl.className = "cm-lp-attachment-dl";
+    dl.title = "Download";
+    dl.setAttribute("aria-label", "Download");
+    dl.setAttribute("data-testid", "attachment-download");
+    dl.textContent = "⤓";
+    dl.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
+    dl.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); triggerAttachmentDownload(view, this.id); });
+    chip.appendChild(dl);
+    void view.state.facet(attachmentResolver).meta(this.id).then((m) => {
+      if (m?.sizeBytes != null) size.textContent = ` (${fmtBytes(m.sizeBytes)})`;
+    });
+    return chip;
+  }
+  ignoreEvent() { return false; } // body clicks pass through → caret enters → raw reveal
+}
+
+// #273 / ADR-120: STANDALONE file attachment (its line is only the link) — an ATOM like the
+// standalone image: click selects (ring), raw source only via explicit entry (Ctrl+Enter /
+// the ✎ pill → macroRenderActiveField). Renders a download card (icon + name + size + ⤓);
+// a server-sniffed PDF within the inline cap additionally mounts the sandboxed viewer
+// an <iframe sandbox> (NO allow-scripts — the ADR-120 contract) whose src is a blob: URL of
+// the PROXIED inline bytes (authoritative Content-Type + nosniff + CSP; see the resolver).
+type AtDom = HTMLElement & { __atRo?: ResizeObserver; __atKey?: string };
+class AttachmentCardWidget extends WidgetType {
+  private ro?: ResizeObserver;
+  constructor(readonly id: string, readonly name: string, readonly selected: boolean) { super(); }
+  private key() { return `${this.id} ${this.name}`; }
+  eq(o: AttachmentCardWidget) { return o.id === this.id && o.name === this.name && o.selected === this.selected; }
+  toDOM(view: EditorView) {
+    const wrap = document.createElement("div") as AtDom;
+    wrap.className = "cm-lp-macro-wrap cm-lp-attachment-wrap";
+    if (this.selected) wrap.classList.add("cm-lp-atom-sel");
+    wrap.setAttribute("data-testid", "attachment-card");
+
+    const card = document.createElement("div");
+    card.className = "cm-lp-attachment-card";
+    const label = document.createElement("span");
+    label.className = "cm-lp-attachment-name";
+    label.textContent = `📎 ${this.name || "attachment"}`;
+    card.appendChild(label);
+    const size = document.createElement("span");
+    size.className = "cm-lp-attachment-size";
+    card.appendChild(size);
+    const dl = document.createElement("button");
+    dl.type = "button";
+    dl.className = "cm-lp-attachment-dl";
+    dl.title = "Download";
+    dl.setAttribute("aria-label", "Download");
+    dl.setAttribute("data-testid", "attachment-download");
+    dl.textContent = "⤓";
+    // #265 guard: interactive DOM inside an atom widget must stopPropagation on mousedown
+    // (NOT ignoreEvent=true, which would swallow keydown and break Esc).
+    dl.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
+    dl.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); triggerAttachmentDownload(view, this.id); });
+    card.appendChild(dl);
+    wrap.appendChild(card);
+
+    const resolver = view.state.facet(attachmentResolver);
+    void resolver.meta(this.id).then((m) => {
+      if (!m) return;
+      if (m.sizeBytes != null) size.textContent = ` (${fmtBytes(m.sizeBytes)})`;
+      // v1 inline kind: PDF only (ADR-120 review). The server enforces the kind + the 25MB cap
+      // (415/413 → inlineUrl resolves null → the card stays a plain download card).
+      if (m.inlineKind === "pdf") {
+        void resolver.inlineUrl(this.id).then((url) => {
+          if (!url || !wrap.isConnected) return;
+          const frame = document.createElement("iframe");
+          // Fully sandboxed — NO allow-scripts (the ADR-120 / review-condition contract). The
+          // blob holds proxy-served bytes whose type the SERVER sniffed; the frame can't run script.
+          frame.setAttribute("sandbox", "");
+          frame.className = "cm-lp-attachment-frame";
+          frame.title = this.name || "attachment";
+          frame.setAttribute("data-testid", "attachment-inline-frame");
+          frame.src = url;
+          wrap.appendChild(frame);
+        });
+      }
+    });
+
+    // Click selects the atom (ring), never reveals raw — raw is explicit entry only (Ctrl+Enter / pill).
+    wrap.addEventListener("mousedown", (e) => {
+      if (view.state.readOnly || e.button !== 0) return;
+      if ((e.target as HTMLElement).closest("button, iframe")) return;
+      e.preventDefault();
+      view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)) });
+      view.focus();
+    });
+    if (!view.state.readOnly) {
+      const btnRow = document.createElement("div");
+      btnRow.className = "cm-lp-macro-btnrow";
+      const reveal = document.createElement("button");
+      reveal.type = "button";
+      reveal.className = "cm-lp-macro-edit cm-lp-macro-edit-hint";
+      reveal.title = "Edit";
+      reveal.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
+      reveal.setAttribute("data-testid", "macro-edit");
+      reveal.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(wrap), true); });
+      btnRow.appendChild(reveal);
+      wrap.appendChild(btnRow);
+    }
+    this.ro = observeBlockResize(view, wrap);
+    wrap.__atRo = this.ro;
+    wrap.__atKey = this.key();
+    return wrap;
+  }
+  // A selection-only change must NOT rebuild (a rebuild re-fetches and reloads the PDF frame
+  // the same flicker rule as the standalone image, #255).
+  updateDOM(dom: HTMLElement): boolean {
+    if ((dom as AtDom).__atKey !== this.key()) return false;
+    this.ro = (dom as AtDom).__atRo;
+    dom.classList.toggle("cm-lp-atom-sel", this.selected);
+    return true;
+  }
+  destroy(dom: HTMLElement) { (dom as AtDom).__atRo?.disconnect(); }
+  ignoreEvent() { return false; }
 }
 
 // #255 comment 1073: a STANDALONE image (its line is only the image) is a first-class ATOM, like a
@@ -2504,7 +2703,30 @@ const RENDERERS: BlockRenderer[] = [
     // when the destination is unsafe/absent.
     match: (n) => n === "Link",
     enter: (node, ctx) => {
-      const href = linkHref(ctx.state.doc.sliceString(node.from, node.to));
+      const src = ctx.state.doc.sliceString(node.from, node.to);
+      // #273 / ADR-120: [name](wks-attachment:<id>) — the FILE attachment link. Never styled as a
+      // clickable anchor (the scheme is opaque); rendered as a chip (inline) or a download card /
+      // sandboxed PDF viewer (standalone atom, mirroring the standalone image). Raw source: the
+      // inline chip reveals on caret landing like an inline image; the standalone card only via
+      // explicit entry (Ctrl+Enter / the ✎ pill).
+      const aRef = parseAttachmentLinkRef(src);
+      if (aRef) {
+        const line = ctx.state.doc.lineAt(node.from);
+        if (line.text.trim() === src.trim()) {
+          const active = ctx.state.field(macroRenderActiveField, false);
+          if (active && active.from <= node.from && active.to >= node.to) return; // revealed → raw markdown
+          ctx.addAtomic(
+            Decoration.replace({ widget: new AttachmentCardWidget(aRef.id, aRef.name, atomSelected(ctx.state, node.from, node.to)), block: true }),
+            node.from,
+            node.to,
+          );
+          return;
+        }
+        if (lineRevealed(ctx.state, node.from)) return; // caret on the line → raw markdown
+        ctx.addAtomic(Decoration.replace({ widget: new AttachmentChipWidget(aRef.id, aRef.name) }), node.from, node.to);
+        return;
+      }
+      const href = linkHref(src);
       ctx.add(href ? Decoration.mark({ class: "cm-lp-link", attributes: { "data-href": href } }) : linkMark, node.from, node.to);
     },
   },
@@ -2998,6 +3220,13 @@ export function enterMacroAt(view: EditorView, pos: number, raw = false): boolea
     view.focus();
     return true;
   }
+  // #273: a standalone file-attachment card reveals its raw link the same way.
+  const att = attachmentBlockAt(view.state, pos);
+  if (att) {
+    view.dispatch({ selection: EditorSelection.cursor(att.from), effects: setMacroRenderActive.of({ from: att.from, to: att.to, raw: true }) });
+    view.focus();
+    return true;
+  }
   return false;
 }
 
@@ -3190,6 +3419,31 @@ export const livePreviewTheme = EditorView.baseTheme({
   // header is always readable in any theme — no accent tint that could clash with the header text.
   ".cm-lp-table th": { background: "var(--panel-2, #f0f1f3)", color: "var(--fg)", fontWeight: "700" },
   ".cm-lp-image": { maxWidth: "100%", height: "auto", borderRadius: "4px", verticalAlign: "bottom" },
+  // #273: file-attachment affordances. The inline chip flows with the text; the standalone card
+  // is a bordered row; the sandboxed PDF frame gets a bounded height (the ResizeObserver keeps
+  // CM's heightMap honest — block-widget motion rule). Padding, not margin, on the wrap (heightMap).
+  ".cm-lp-attachment-chip": {
+    display: "inline-flex", alignItems: "center", gap: "4px", padding: "0 6px",
+    border: "1px solid var(--wks-border, rgba(128,128,128,.35))", borderRadius: "6px",
+    background: "color-mix(in srgb, currentColor 6%, transparent)", whiteSpace: "nowrap",
+  },
+  ".cm-lp-attachment-size": { opacity: "0.65", fontSize: "0.85em" },
+  ".cm-lp-attachment-dl": {
+    border: "none", background: "transparent", cursor: "pointer", padding: "0 2px",
+    fontSize: "0.95em", lineHeight: "inherit", color: "inherit", opacity: "0.75",
+  },
+  ".cm-lp-attachment-dl:hover": { opacity: "1" },
+  ".cm-lp-attachment-wrap": { padding: "2px 0" },
+  ".cm-lp-attachment-card": {
+    display: "flex", alignItems: "center", gap: "6px", padding: "8px 10px",
+    border: "1px solid var(--wks-border, rgba(128,128,128,.35))", borderRadius: "8px",
+    background: "color-mix(in srgb, currentColor 5%, transparent)",
+  },
+  ".cm-lp-attachment-name": { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: "0", flex: "1" },
+  ".cm-lp-attachment-frame": {
+    display: "block", width: "100%", height: "480px", marginTop: "6px",
+    border: "1px solid var(--wks-border, rgba(128,128,128,.35))", borderRadius: "8px", background: "#fff",
+  },
   // #305: a TRULY inline image (text shares its line) renders as a line-height thumbnail so it flows WITH the
   // text instead of forcing a wrap (a large natural size used to occupy the whole line width, pushing the
   // surrounding text onto new visual rows — the "a newline got inserted" report). Click/enter still reaches

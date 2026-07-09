@@ -133,7 +133,21 @@ function renderInlineNode(node: SNode, src: string, into: Node): void {
     case "InlineCode": { const el = document.createElement("code"); el.textContent = stripMarks(node, src, "CodeMark"); into.appendChild(el); return; }
     case "Link": {
       const urlNode = node.getChild("URL");
-      const href = urlNode ? safeHref(txt(src, urlNode)) : null;
+      const rawHref = urlNode ? txt(src, urlNode) : "";
+      // #273 / ADR-120: intercept OUR `wks-attachment:` scheme — never emit it as a raw anchor.
+      // This renderer serves macro cells and the PUBLIC reader (renderMarkdownToDom), which can't
+      // resolve the id, so the affordance is a plain non-link chip (review condition ①: one of the
+      // TWO intercept sites — packages/macro-render render.ts is the other; keep both).
+      if (/^\s*wks-attachment:/i.test(rawHref)) {
+        const chip = document.createElement("span");
+        chip.className = "wks-attachment-ref";
+        chip.setAttribute("data-testid", "attachment-ref");
+        chip.appendChild(document.createTextNode("📎 "));
+        renderInline(node, src, chip);
+        into.appendChild(chip);
+        return;
+      }
+      const href = safeHref(rawHref) || null;
       const el = document.createElement(href ? "a" : "span");
       // #223 comment 895 (B): tag the anchor cm-lp-link so it gets the same colour + underline the body
       // decoration links have. This shared renderer draws links in the static TableWidget, the RichUI grid,

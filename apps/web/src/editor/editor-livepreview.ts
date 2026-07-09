@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, reAnchorAfterReveal, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, diagramRenderer, transcludeResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, type ImageResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
+import { livePreview, reAnchorAfterReveal, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { listEditing } from "./live-preview/list-edit";
 import { pasteLinkify } from "./live-preview/paste-linkify";
@@ -49,7 +49,7 @@ export const displayModeContent = (m: DisplayMode) =>
 registerVimFold();
 
 import type { ImageUploader } from "./live-preview/commands";
-import { attachImageDrop } from "./live-preview/image-drop";
+import { attachFileDrop } from "./live-preview/image-drop";
 import { cmTheme } from "../styles/cm-theme";
 import { remoteCursors } from "./remote-cursors";
 import { macroPresenceOverlay } from "./macro-presence-overlay";
@@ -86,7 +86,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; openPageEmbedPicker?: PageEmbedPicker; openEmbedUrlPrompt?: EmbedUrlPrompt; openTemplateInsertPicker?: TemplateInsertPicker; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; titleLinks?: TitleLinkSource } = {},
+  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; resolveAttachment?: AttachmentResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; openPageEmbedPicker?: PageEmbedPicker; openEmbedUrlPrompt?: EmbedUrlPrompt; openTemplateInsertPicker?: TemplateInsertPicker; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; titleLinks?: TitleLinkSource } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -266,6 +266,8 @@ export function mountLivePreview(
       commentHighlights,
       // Resolves wks-attachment image ids → fresh presigned URLs (member only).
       ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
+      // #273: resolves [name](wks-attachment:id) file links -> chip / download card / inline viewer.
+      ...(opts.resolveAttachment ? [attachmentResolver.of(opts.resolveAttachment)] : []),
       // #140: host-mediated plantuml render (the macro never fetches — narrow host-API).
       ...(opts.renderDiagram ? [diagramRenderer.of(opts.renderDiagram)] : []),
       // #108: host-mediated transclude (the :::transclude macro never fetches — narrow host-API).
@@ -292,8 +294,8 @@ export function mountLivePreview(
     ],
   });
 
-  // Drag-and-drop image attach (editable surface only — needs an uploader).
-  if (!opts.readOnly && opts.uploadImage) attachImageDrop(view, opts.uploadImage);
+  // Drag-and-drop / paste file attach (editable surface only — needs an uploader).
+  if (!opts.readOnly && opts.uploadImage) attachFileDrop(view, opts.uploadImage); // #273: all file types (image + attachment)
 
   // No auto-fold on load: a macro is an atom and ALWAYS renders (ADR-024 / Stage 1b).
   // A large Excalidraw/mermaid body previously auto-folded to the "▶ summary" placeholder
@@ -321,7 +323,7 @@ export function mountPublishedView(
   // A checkbox click calls it; the host flips the live draft over its collab connection
   // and folds the flip into published_md via the no-revision endpoint. Absent → the
   // checkboxes render DISABLED (display only; the server is the bastion regardless).
-  opts: { resolveImageUrl?: ImageResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; onToggleTask?: (index: number, from: number, checked: boolean) => void; titleLinks?: TitleLinkSource } = {},
+  opts: { resolveImageUrl?: ImageResolver; resolveAttachment?: AttachmentResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; onToggleTask?: (index: number, from: number, checked: boolean) => void; titleLinks?: TitleLinkSource } = {},
 ): EditorView {
   const view = new EditorView({
     doc: markdown,
@@ -343,6 +345,8 @@ export function mountPublishedView(
       ...(opts.titleLinks ? [titleLinkSource.of(opts.titleLinks)] : []),
       checkboxControl.of(opts.onToggleTask ? { mode: "view", onToggle: opts.onToggleTask } : null),
       ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
+      // #273: resolves [name](wks-attachment:id) file links -> chip / download card / inline viewer.
+      ...(opts.resolveAttachment ? [attachmentResolver.of(opts.resolveAttachment)] : []),
       ...(opts.renderDiagram ? [diagramRenderer.of(opts.renderDiagram)] : []),
       ...(opts.resolveTransclude ? [transcludeResolver.of(opts.resolveTransclude)] : []),
       ...(opts.embedProviders ? [embedAllowlist.of(opts.embedProviders)] : []),
