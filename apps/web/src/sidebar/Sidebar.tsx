@@ -22,6 +22,7 @@ import { useActiveSpace } from "../app/ActiveSpace";
 import { RenameDialog, ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
 import { DeleteBacklinkWarning } from "../app/DeleteBacklinkWarning";
+import { ProgressRing } from "../app/ProgressRing"; // #290: sidebar :::todo progress ring
 import { ShareDialog } from "../ui/ShareDialog";
 import { TemplatePickerDialog } from "./TemplatePickerDialog";
 import { SpaceIcon } from "../ui/SpaceIcon";
@@ -37,6 +38,8 @@ interface Node {
   published: boolean;
   unpublished: boolean;
   private: boolean;
+  taskDone: number; // #290: :::todo checkbox aggregate (taskTotal>0 → show the ring)
+  taskTotal: number;
   children?: Node[];
 }
 
@@ -44,7 +47,7 @@ function buildPageNodes(pages: Page[], parentId: string | null): Node[] {
   return pages
     .filter((p) => p.parentId === parentId)
     .sort((a, b) => a.position - b.position)
-    .map((p) => ({ id: `page:${p.id}`, name: p.title, pageId: p.id, spaceId: p.spaceId, published: p.published ?? false, unpublished: p.hasUnpublishedChanges ?? false, private: p.private ?? false, children: buildPageNodes(pages, p.id) }));
+    .map((p) => ({ id: `page:${p.id}`, name: p.title, pageId: p.id, spaceId: p.spaceId, published: p.published ?? false, unpublished: p.hasUnpublishedChanges ?? false, private: p.private ?? false, taskDone: p.taskDone ?? 0, taskTotal: p.taskTotal ?? 0, children: buildPageNodes(pages, p.id) }));
 }
 
 // #193: measure the tree container via a CALLBACK ref, not an effect keyed on a stable
@@ -235,6 +238,9 @@ export function Sidebar() {
         ) : d.unpublished ? (
           <span className="mx-1 h-1.5 w-1.5 flex-none rounded-full bg-[var(--accent)]" data-testid="unpublished-dot" title={t("sidebar.unpublished")} aria-label={t("sidebar.unpublished")} />
         ) : null}
+        {/* #290 / ADR-114: a compact :::todo progress ring in the right badge band — only for pages
+            with a :::todo (taskTotal>0), so it's zero-width elsewhere and never clutters the tree. */}
+        {d.taskTotal > 0 && <span className="mx-0.5 flex-none" data-testid="tree-todo-ring"><ProgressRing done={d.taskDone} total={d.taskTotal} compact /></span>}
         {canEdit && (
           <span className="flex gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 has-[[aria-expanded=true]]:pointer-events-auto has-[[aria-expanded=true]]:opacity-100" onClick={(e) => e.stopPropagation()}>
             <DropdownMenu modal={false}>

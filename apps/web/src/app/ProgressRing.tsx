@@ -2,10 +2,10 @@
 // GFM-checkbox progress. Display-only; reuses the shared ring track/arc/label CSS (callout-icons.css). Its
 // own wrapper class flows inline (the .cm-lp-todo-ring class is absolutely positioned for the macro header).
 // Renders nothing when there are no tasks (0/0 → no ring, per ADR-114).
-export function ProgressRing({ done, total }: { done: number; total: number }) {
+export function ProgressRing({ done, total, compact = false }: { done: number; total: number; compact?: boolean }) {
   if (total <= 0) return null;
   const frac = Math.max(0, Math.min(1, done / total));
-  const size = 15;
+  const size = compact ? 12 : 15;
   const stroke = 2.5;
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
@@ -23,7 +23,7 @@ export function ProgressRing({ done, total }: { done: number; total: number }) {
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
         />
       </svg>
-      <span className="cm-lp-todo-ring-label">{done}/{total}</span>
+      {!compact && <span className="cm-lp-todo-ring-label">{done}/{total}</span>}
     </span>
   );
 }

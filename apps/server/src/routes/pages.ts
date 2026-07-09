@@ -11,6 +11,7 @@ import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc } from './revision-ydoc.js'
 import type { TenantDb } from '../db/index.js'
 import { flushDraft } from '../collab-flush.js'
+import { countTodoTasks } from '../task-progress.js' // #290: :::todo aggregate for the sidebar ring
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { resolveEmbed, EmbedDeniedError } from '../embed-resolve.js'
@@ -66,8 +67,8 @@ export async function setEmbedProviders(
   return providers
 }
 
-interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean; created_by?: string | null; updated_by?: string | null }
-export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean; canComment?: boolean; private?: boolean; createdBy?: string | null; updatedBy?: string | null }
+interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean; created_by?: string | null; updated_by?: string | null; task_done?: number; task_total?: number }
+export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean; canComment?: boolean; private?: boolean; createdBy?: string | null; updatedBy?: string | null; taskDone?: number; taskTotal?: number }
 function toPage(r: PageRow): Page {
   // hasUnpublishedChanges + published are only present when the SELECT included the
   // columns (listPages); together they drive the sidebar's 3-state badge
@@ -75,7 +76,7 @@ function toPage(r: PageRow): Page {
   // (published_at IS NOT NULL) — the heavy published_md is not read for the tree.
   // #222: createdBy/updatedBy (author subs) are present only when the SELECT included them (getPage)
   // they feed the title-bar metadata row; undefined for the tree list (not needed there).
-  return { id: r.id, tenantId: r.tenant_id, spaceId: r.space_id, parentId: r.parent_id, title: r.title, position: r.position, createdAt: r.created_at, updatedAt: r.updated_at, hasUnpublishedChanges: r.has_unpublished_changes ?? false, published: r.published ?? false, createdBy: r.created_by ?? null, updatedBy: r.updated_by ?? null }
+  return { id: r.id, tenantId: r.tenant_id, spaceId: r.space_id, parentId: r.parent_id, title: r.title, position: r.position, createdAt: r.created_at, updatedAt: r.updated_at, hasUnpublishedChanges: r.has_unpublished_changes ?? false, published: r.published ?? false, createdBy: r.created_by ?? null, updatedBy: r.updated_by ?? null, taskDone: r.task_done ?? 0, taskTotal: r.task_total ?? 0 }
 }
 
 // Fractional sibling ordering: a new value between two neighbours, no renumber.
@@ -276,7 +277,7 @@ export async function listPages(
 ): Promise<Page[]> {
   const rows = await db.sql<PageRow[]>`
     SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at,
-           has_unpublished_changes, (published_at IS NOT NULL) AS published
+           has_unpublished_changes, (published_at IS NOT NULL) AS published, task_done, task_total
     FROM pages WHERE space_id = ${args.spaceId} ORDER BY position, created_at
   `
   const allowed = await filterAuthorized(fga, args.subject, 'view', rows.map((r) => r.id), args.context)
@@ -405,9 +406,11 @@ export async function publishPage(
       RETURNING id
     `
     revisionId = rev.id
+    const tp = countTodoTasks(md) // #290 / ADR-114: refresh the :::todo aggregate for the sidebar ring
     const [p] = await tx<[{ published_at: Date }]>`
       UPDATE pages SET published_md = ${md}, published_revision_id = ${rev.id}, published_at = now(),
-        has_unpublished_changes = false, updated_by = ${args.subject.replace(/^user:/, '')}
+        has_unpublished_changes = false, updated_by = ${args.subject.replace(/^user:/, '')},
+        task_done = ${tp.done}, task_total = ${tp.total}
       WHERE id = ${args.pageId}
       RETURNING published_at
     `
@@ -478,8 +481,10 @@ export async function toggleTask(
   let outboxId!: string
   let publishedAt!: Date
   await db.tx(async (tx) => {
+    const tp = countTodoTasks(draftMd) // #290: a checkbox tick changes the :::todo aggregate too — keep it fresh
     const [p] = await tx<[{ published_at: Date }]>`
-      UPDATE pages SET published_md = ${draftMd}, has_unpublished_changes = false
+      UPDATE pages SET published_md = ${draftMd}, has_unpublished_changes = false,
+        task_done = ${tp.done}, task_total = ${tp.total}
       WHERE id = ${args.pageId}
       RETURNING published_at
     `
