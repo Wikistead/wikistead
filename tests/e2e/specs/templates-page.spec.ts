@@ -31,13 +31,18 @@ test("#249: a saved template appears on /templates and can be renamed and delete
   await expect(row).toBeVisible({ timeout: 8000 });
   await expect(row.getByTestId("template-scope-badge")).toBeVisible();
 
-  // Preview renders the frozen body via the shared sanitized renderer (client-side draw).
+  // Preview renders the frozen body via the EDITOR'S read-only engine (#267— a CM surface,
+  // so the heading is a styled line, not an <h1> element).
   await row.getByTestId("template-preview").click();
   const body = page.getByTestId("template-preview-body");
   await expect(body).toBeVisible({ timeout: 8000 });
-  await expect(body.locator("h1")).toHaveText("Sprint template");
-  // Sanitization: the raw <img onerror> must be ESCAPED text, never a live element (XSS boundary).
-  await expect(body.locator("img")).toHaveCount(0);
+  await expect(body.locator(".cm-content")).toBeVisible({ timeout: 8000 });
+  await expect(body.getByText("Sprint template")).toBeVisible();
+  // Sanitization: the raw <img onerror> stays inert TEXT, never a live element (same engine members
+  // already render each other's content with). CM's own aria-hidden img.cm-widgetBuffer spacers are
+  // not content images — exclude them.
+  await expect(body.locator("img:not(.cm-widgetBuffer)")).toHaveCount(0);
+  await expect(body.locator("img[onerror]")).toHaveCount(0);
   await expect(body).toContainText("onerror=alert(1)");
   await page.getByTestId("template-preview-close").click();
 
