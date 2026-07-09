@@ -167,7 +167,10 @@ export const mermaidMacro: FenceMacro = {
       });
       applyRender(source); // initial render is immediate (no debounce) so the preview shows on mount
       const focus = setTimeout(() => editor.focus(), 0);
-      return { destroy() { clearTimeout(focus); if (debounce != null) clearTimeout(debounce); gen++; editor.destroy(); wrap.remove(); } };
+      return {
+        handlesEscape: () => editor.inVimInsert(), // #243 C3 slice 2b: first Escape = vim insert→normal, not exit
+        destroy() { clearTimeout(focus); if (debounce != null) clearTimeout(debounce); gen++; editor.destroy(); wrap.remove(); },
+      };
     },
   },
   // M3 wires HTML export server-side. mermaid renders in the browser, so the static

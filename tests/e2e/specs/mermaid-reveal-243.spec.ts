@@ -140,6 +140,40 @@ test("#243 C3: the mermaid editUI CM6 source pane follows the outer vim setting"
   expect(after, `vim x should be a command, not inserted text (was: ${before}, now: ${after})`).not.toContain("x");
 });
 
+// #243 / ADR-111 C3 slice 2b: in the vim editUI, the FIRST Escape does vim insert→normal (the panel STAYS),
+// and only a NORMAL-mode Escape exits — the host's Escape handler defers via the controller's handlesEscape().
+test("#243 C3: in the vim editUI the first Escape does insert→normal (stays), the second exits", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "editui-vim-esc");
+  await enterEdit(page);
+  await page.getByTestId("vim-toggle").click(); // outer editor vim ON
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  await page.keyboard.insertText("```mermaid\nflowchart TD\n```\n\nbelow\n");
+  await sleep(600);
+  await page.getByText("below", { exact: true }).click();
+  await sleep(200);
+  await page.locator("[data-pane=preview] [data-testid=macro-mermaid]").hover();
+  await sleep(150);
+  await page.locator("[data-pane=preview] [data-testid=macro-edit]").first().click({ force: true }); // ✎ → editUI
+  const src = page.locator("[data-pane=preview] [data-testid=mermaid-edit-src]");
+  await expect(src).toBeVisible();
+  await sleep(300);
+  await page.keyboard.press("i"); // NORMAL → INSERT
+  await page.keyboard.type("XYZ");
+  await sleep(150);
+  // FIRST Escape: vim insert→normal — the panel STAYS (does NOT exit to the rendered diagram)
+  await page.keyboard.press("Escape");
+  await sleep(250);
+  await expect(src).toBeVisible(); // still editing in the panel
+  expect(await page.locator("[data-pane=preview] [data-testid=macro-mermaid]").count()).toBe(0); // NOT exited
+  // SECOND Escape: vim is NORMAL now → the host exits the editUI, the diagram renders
+  await page.keyboard.press("Escape");
+  await sleep(450);
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-mermaid]")).toBeVisible();
+  expect(await src.count()).toBe(0);
+});
+
 test("#243: plantuml also reveals its raw source on caret-in (parity with mermaid)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "reveal-plantuml");

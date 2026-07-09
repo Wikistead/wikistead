@@ -109,7 +109,11 @@ export type RichEditUI =
 // ADR-087 contract: `inline` ⇒ immediate Y.Text (concurrent edits merge via Y.Text); `modal` ⇒
 // close-flush is permitted only for canvas editors (Excalidraw). The mount returns a controller the
 // host destroys on exit. This subsumes RichEditUI (InnerEditHost/MacroModalEditor) as macros migrate.
-export interface EditUIController { destroy(): void }
+// #243 / ADR-111 C3 slice 2b: `handlesEscape` lets an editUI whose editor is vim-capable (the CM6 source
+// pane) tell the host "don't exit on THIS Escape — my editor will handle it" (vim insert→normal). Returns
+// true ONLY while the nested editor needs the Escape (vim insert mode); the host exits on every other Escape.
+// Optional + additive: a panel editUI without it (callout) keeps the plain "Escape exits" behaviour.
+export interface EditUIController { destroy(): void; handlesEscape?(): boolean }
 export interface EditUI {
   readonly present: "inline" | "modal";
   // #174 / ADR-087: what `source`/`save` operate on. "body" (default) = the macro's inner content only
