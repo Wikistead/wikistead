@@ -583,6 +583,7 @@
     "h3": "見出し 3",
     "bulletList": "箇条書き",
     "numberedList": "番号付きリスト",
+    "todoList": "ToDo リスト",
     "quote": "引用",
     "codeBlock": "コードブロック",
     "table": "テーブル",
