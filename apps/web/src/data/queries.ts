@@ -763,6 +763,22 @@ export function useBranding() {
 }
 // #108 / ADR-071: the tenant's external-embed host allowlist for the client-direct sandboxed iframe.
 // PUBLIC + host-resolved (like /branding). Empty ⇒ external embeds all degrade to a link (opt-in off).
+// #224 / ADR-104: the viewer-scoped title dictionary for auto internal links. The server derives the
+// set per principal (member = own FGA view set / guest = public-only) — the dictionary content IS the
+// authz defence, so nothing here filters. staleTime + refetchInterval are the TTL backstop for surfaces
+// without a collab connection; the collab stateless "dict-invalidate" ping invalidates this key for
+// connected editors (the security-timing channel).
+export function useTitleDictionary(pageId: string | undefined) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["title-dictionary", pageId],
+    enabled: !!pageId,
+    queryFn: () => apiFetch<{ entries: { id: string; title: string }[]; capped: boolean }>(`/pages/${encodeURIComponent(pageId!)}/title-dictionary`, token),
+    staleTime: 30_000,
+    refetchInterval: 120_000,
+  });
+}
+
 export function useEmbedProviders() {
   const { token } = useSession();
   return useQuery({

@@ -80,4 +80,16 @@ describe("matchTitleLinks", () => {
     const m = matchTitleLinks(text, dict, { selfPageId: "self" });
     expect(m.map((x) => x.pageId)).toEqual(["other"]);
   });
+
+  // #224 anti-test 7 (ADR-104 Addendum 3): the v1-ACCEPTED CJK over-match, pinned as a RECORD test.
+  // Japanese has no word boundaries, so a CJK title matches as a SUBSTRING — lights up inside
+  // . This is the documented v1 trade-off (real JP segmentation is a future ticket); if a
+  // tokenizer change alters it, this test makes that an INTENTIONAL decision, not a silent regression.
+  it("RECORD (v1-accepted over-match): a CJK title matches as a substring inside a longer word", () => {
+    const m = matchTitleLinks("この基本設計書を読む", [{ title: "設計", pageId: "p1" }]);
+    expect(m).toHaveLength(1);
+    expect(m[0]!.pageId).toBe("p1");
+    // …while a LATIN title still requires word boundaries (no such over-match).
+    expect(matchTitleLinks("concatenate these", [{ title: "cate", pageId: "p2" }])).toEqual([]);
+  });
 });

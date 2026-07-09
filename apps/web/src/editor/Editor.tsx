@@ -17,7 +17,11 @@ import { EmbedUrlModal } from "./EmbedUrlModal";
 import { TemplatePickerDialog } from "../sidebar/TemplatePickerDialog";
 import type { PageEmbedPicker as PageEmbedPickerFn, TemplateInsertPicker as TemplateInsertPickerFn } from "./live-preview/palette";
 import type { EmbedUrlPrompt as EmbedUrlPromptFn } from "./live-preview/decorations";
-import { useEmbedProviders } from "../data/queries";
+import { useEmbedProviders, useTitleDictionary } from "../data/queries";
+import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { titleLinksRefresh, type TitleLinkSource } from "./live-preview/title-links-deco";
+import type { TitleEntry } from "./live-preview/title-links";
 import { apiFetch } from "../data/apiClient";
 import { createAnchor, resolveAnchor } from "./comment-anchors";
 import { setCommentRanges, type CommentRange } from "./live-preview/comment-highlights";
@@ -297,6 +301,45 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     } catch { resolve(null); }
   }, [apiToken]);
 
+  // #224 / ADR-104 go-live: the viewer-scoped title dictionary. MEMBER surfaces only (gated on the
+  // pageId prop — guest surfaces don't pass one, so they stay inert; the guest endpoint exists and is
+  // public-only-bound server-side for a later guest go-live). The dictionary is read through a REF so
+  // an invalidation refetch updates links in place (titleLinksRefresh) without remounting the editor.
+  const navigateRouter = useNavigate();
+  const queryClient = useQueryClient();
+  const titleDictQ = useTitleDictionary(pageId);
+  const titleDictRef = useRef<readonly TitleEntry[]>([]);
+  useEffect(() => {
+    titleDictRef.current = (titleDictQ.data?.entries ?? []).map((e) => ({ title: e.title, pageId: e.id }));
+    previewViewRef.current?.dispatch({ effects: titleLinksRefresh.of(null) });
+  }, [titleDictQ.data]);
+  const titleLinks = useMemo<TitleLinkSource | undefined>(() => {
+    if (!pageId) return undefined;
+    return {
+      get dict() { return titleDictRef.current; },
+      // navigate re-confirms view at the destination (the /p route's uniform 404) — never a client gate.
+      navigate: (id: string) => navigateRouter(`/p/${id}`),
+      // Slice B: the hover-card excerpt — the server re-checks view (uniform 404 → null → empty card).
+      excerpt: (id: string) =>
+        apiFetch<{ title: string; excerpt: string | null }>(`/pages/${encodeURIComponent(id)}/excerpt`, apiToken)
+          .catch(() => null),
+      opts: { selfPageId: pageId },
+    };
+  }, [pageId, apiToken, navigateRouter]);
+  // Security-timing invalidation (ADR-104 Finding B): the collab server broadcasts a stateless
+  // "dict-invalidate" ping (carrying NO pageId — existence-hiding even on the wire); we refetch the
+  // viewer-scoped dictionary, throttled so a burst of reindex pings costs one round-trip.
+  const dictInvalidateAt = useRef(0);
+  const onDictStateless = useCallback((data: { payload: string }) => {
+    try {
+      if ((JSON.parse(data.payload) as { type?: string })?.type !== "dict-invalidate") return;
+    } catch { return; }
+    const now = Date.now();
+    if (now - dictInvalidateAt.current < 2000) return;
+    dictInvalidateAt.current = now;
+    void queryClient.invalidateQueries({ queryKey: ["title-dictionary"] });
+  }, [queryClient]);
+
   // Dev-only probe for the isolation invariant (ADR-013): editor content is not in
   // React state, so typing must NOT re-render this component (read before/after).
   if (import.meta.env.DEV) {
@@ -313,14 +356,17 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     collabRef.current = c;
     awarenessRef.current = c.provider.awareness ?? null;
     c.provider.awareness?.setLocalStateField("user", userField(user));
+    // #224: dictionary invalidation pings ride the existing collab WS as stateless messages.
+    c.provider.on("stateless", onDictStateless);
     return () => {
+      c.provider.off("stateless", onDictStateless);
       c.disconnect();
       collabRef.current = null;
       awarenessRef.current = null;
     };
     // user intentionally excluded — presence updates go through the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docName, token, collabUrl, canEdit]);
+  }, [docName, token, collabUrl, canEdit, onDictStateless]);
 
   // (2) Surface — remount when the surface changes (same connection) or after a
   // reconnect. vim is NOT in the deps (a Compartment reconfigure, below).
@@ -357,7 +403,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
             });
           }
         : undefined;
-      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, renderDiagram, resolveTransclude, embedProviders, onToggleTask: onToggleTaskInView });
+      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, renderDiagram, resolveTransclude, embedProviders, onToggleTask: onToggleTaskInView, titleLinks });
       views.push(v);
       previewViewRef.current = v;
       if (anchorGetterRef) anchorGetterRef.current = null;
@@ -402,6 +448,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       // #92 presence: publish "editing this macro" onto the page awareness so co-editors see a badge
       // at the macro's anchor while its modal is open (they'd otherwise see this user vanish).
       macroPresence: c.provider.awareness ? makeMacroPresence(c.provider.awareness) : undefined,
+      titleLinks, // #224: auto internal links (viewer-scoped dictionary; undefined on guest surfaces)
     });
     views.push(previewView);
     previewViewRef.current = previewView;
@@ -426,7 +473,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     };
     // vim excluded (Compartment reconfigure, not a remount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, renderDiagram, resolveTransclude, embedProviders, openPageEmbedPicker, openEmbedUrlPrompt, openTemplateInsertPicker, onUploadImage]);
+  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, renderDiagram, resolveTransclude, embedProviders, openPageEmbedPicker, openEmbedUrlPrompt, openTemplateInsertPicker, onUploadImage, titleLinks]);
 
   // vim on/off: reconfigure the Compartment IN PLACE (no remount → collab/presence
   // untouched). Only meaningful on the edit surface.
