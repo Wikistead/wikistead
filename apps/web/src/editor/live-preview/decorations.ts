@@ -897,7 +897,10 @@ export class EditableEditUIWidget extends WidgetType {
       view.dispatch({ changes: ch, effects: setMacroRenderActive.of({ from: ch.from, to: ch.from + ch.insert.length }) });
       view.focus();
     };
-    dom.__editUICtrl = this.editUI.mount(dom, asMacroSource(this.source), { theme: this.theme }, save);
+    // #243 / ADR-111 C3 (slice 2): pass the OUTER editor's vim ON/OFF as a SEPARATE editEnv (not folded into
+    // the {theme} MacroContext), so a CM6 source pane (mermaid/plantuml) enables vim following the user's
+    // keymap setting. Read from the vimEnabled facet the vim Compartment sets (editor-livepreview.ts).
+    dom.__editUICtrl = this.editUI.mount(dom, asMacroSource(this.source), { theme: this.theme }, save, { vim: view.state.facet(vimEnabled) });
     // #239: re-add the Done affordance after each (re)mount — mountInto's replaceChildren above wipes it.
     const done = document.createElement("button");
     done.type = "button";

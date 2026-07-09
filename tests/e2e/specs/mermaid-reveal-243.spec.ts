@@ -110,6 +110,36 @@ test("#243: motion inside a revealed TALL mermaid is one doc line per key (no wa
   }
 });
 
+// #243 / ADR-111 C3 slice 2: the CM6 editUI source pane follows the OUTER editor's vim setting (the same
+// @replit/codemirror-vim, per-view state — not a second engine). With vim ON, the pane opens in NORMAL mode,
+// so a bare letter is a vim COMMAND, not inserted text. We prove it with `x` (delete char under the caret):
+// a vim pane consumes it (no "x" appears); a plain pane would insert the literal "x".
+test("#243 C3: the mermaid editUI CM6 source pane follows the outer vim setting", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "editui-vim");
+  await enterEdit(page);
+  await page.getByTestId("vim-toggle").click(); // outer editor vim ON
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  await page.keyboard.insertText("```mermaid\nflowchart TD\n```\n\nbelow\n");
+  await sleep(600);
+  await page.getByText("below", { exact: true }).click(); // caret out → the atom renders
+  await sleep(200);
+  await page.locator("[data-pane=preview] [data-testid=macro-mermaid]").hover();
+  await sleep(150);
+  await page.locator("[data-pane=preview] [data-testid=macro-edit]").first().click({ force: true }); // ✎ → editUI
+  const src = page.locator("[data-pane=preview] [data-testid=mermaid-edit-src]");
+  await expect(src).toBeVisible();
+  await sleep(300); // let the CM6 focus + vim (normal mode) settle
+  const before = await src.textContent();
+  expect(before).toContain("flowchart TD"); // seeded
+  // NORMAL-mode `x` is a delete-char command in vim — a plain (non-vim) editor would insert a literal "x".
+  await page.keyboard.press("x");
+  await sleep(200);
+  const after = await src.textContent();
+  expect(after, `vim x should be a command, not inserted text (was: ${before}, now: ${after})`).not.toContain("x");
+});
+
 test("#243: plantuml also reveals its raw source on caret-in (parity with mermaid)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "reveal-plantuml");

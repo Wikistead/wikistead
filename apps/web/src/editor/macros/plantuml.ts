@@ -35,7 +35,7 @@ export const plantumlMacro: FenceMacro = {
   // on `change` (blur), NOT per keystroke — a per-keystroke Y.Text write re-mounts the widget mid-typing.
   editUI: {
     present: "inline",
-    mount(container, source, ctx, save) {
+    mount(container, source, ctx, save, editEnv) {
       const wrap = document.createElement("div");
       wrap.className = "cm-lp-plantuml-edit";
       // #243 / ADR-111 C3 (slice 1): CM6 mini-editor source pane (see source-editor.ts); commit on blur only.
@@ -58,6 +58,7 @@ export const plantumlMacro: FenceMacro = {
         parent: src,
         doc: source,
         dark: ctx.theme === "dark",
+        vim: editEnv?.vim, // #243 C3 slice 2: follow the outer editor's vim setting
         testid: "plantuml-edit-src",
         onInput: (v) => renderPreview(v), // local preview only, no doc write
         onCommit: (v) => save(asMacroSource(v)), // commit to Y.Text on blur (offset-invariant replaceSource)
