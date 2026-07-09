@@ -3,7 +3,7 @@ import { enterEdit, openScratch, sleep } from "../helpers";
 
 // #90 (ADR-043 A′): ::::tabs renders as a block-widget ATOM with a tab bar + only the active
 // panel shown. Switching tabs is DISPLAY-ONLY (no doc write); editing is reveal-on-cursor.
-test("::::tabs: tab bar + active panel, switch is display-only, edited via the editUI panel (not caret-in raw)", async ({ browser }) => {
+test("::::tabs: tab bar + active panel, switch is display-only; the active panel is edited by an inline CM6 island (#278 §2a)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "tabs");
   await enterEdit(page);
@@ -23,59 +23,50 @@ test("::::tabs: tab bar + active panel, switch is display-only, edited via the e
   await sleep(150);
   await expect(widget.locator(".cm-lp-tabpanel-active")).toContainText("second panel");
   await expect(widget).toBeVisible();
-  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("::::tabs");
+  expect(await page.locator("[data-pane=preview] .cm-content").first().innerText()).not.toContain("::::tabs");
 
-  // #196 comment 786 (Option B, variant i): clicking the panel body does NOT reveal raw — the tab widget is
-  // preserved ALWAYS. Editing is via the editUI PANEL (single edit button → source textarea + live preview),
-  // so the layout never collapses.
+  // #278 §2a / ADR-122 (A): clicking the ACTIVE panel's content mounts an inline CM6 island IN that panel
+  // NOT a caret-in raw reveal and NOT the retired #257 panel. Only the active tab is edited.
   await widget.locator(".cm-lp-tabpanel-active").click();
-  await sleep(250);
-  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain("::::tabs"); // still a widget
-  await page.locator("[data-pane=preview] [data-testid=macro-edit]").first().click({ force: true });
   await sleep(300);
-  // #257: the STRUCTURED panel — a tab bar (chips) + a per-tab content editor, NOT a raw `:::tab` textarea.
-  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit]")).toBeVisible();
-  const chips = page.locator("[data-pane=preview] [data-testid=layout-edit-chip]");
-  await expect(chips).toHaveCount(2);
-  // The active tab's content is edited directly (markers hidden); the first tab shows "first **a**".
-  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit-content]")).toHaveValue(/first/);
+  await expect(page.locator("[data-pane=preview] [data-testid=slot-edit-src]")).toBeVisible();
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-tabs]")).toBeVisible();
+  await expect(page.locator("[data-pane=preview] [data-testid=layout-edit]")).toHaveCount(0); // the panel is retired
 });
 
-// #257: the structured tabs panel edits each tab's content (markers hidden), switches tabs in-panel, adds a
-// tab, and reassembles the container body on save — a round-trip through the single Y.Text.
-test("#257: tabs editUI panel — switch tabs, edit content, add a tab, round-trips the source", async ({ browser }) => {
+// #278 §2a: switch to a tab, edit its ACTIVE panel via the inline CM6 island (commit-on-blur), then add a tab
+// via the inline — the edit round-trips through the structural change (single Y.Text).
+test("#278 §2a: inline island edits the active tab; the inline ＋ adds a tab; the edit round-trips", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
-  await openScratch(page, "tabs-257");
+  await openScratch(page, "tabs-278");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.insertText("::::tabs\n:::tab[One]\nalpha\n:::\n:::tab[Two]\nbeta\n:::\n::::\n\nbelow\n");
   await sleep(400);
-  await page.locator("[data-pane=preview] [data-testid=macro-edit]").first().click({ force: true });
-  await sleep(300);
-  const content = page.locator("[data-pane=preview] [data-testid=layout-edit-content]");
-  await expect(content).toHaveValue("alpha"); // active = first tab
+  await page.getByText("below").click(); await sleep(200); // caret out → widget renders
 
-  // Switch to the second tab in-panel → its content loads.
-  await page.locator("[data-pane=preview] [data-testid=layout-edit-chip]", { hasText: "Two" }).click();
-  await expect(content).toHaveValue("beta");
+  // switch to the SECOND tab, then edit its active panel via the inline island.
+  await page.locator("[data-pane=preview] [data-testid=macro-tabs] .cm-lp-tab", { hasText: "Two" }).click();
+  await sleep(150);
+  await page.locator("[data-pane=preview] [data-testid=macro-tabs] .cm-lp-tabpanel-active").click();
+  await sleep(300);
+  const src = page.locator("[data-pane=preview] [data-testid=slot-edit-src]");
+  await expect(src).toBeVisible();
+  await expect(src).toContainText("beta"); // the island holds the ACTIVE tab's body (active tab only)
+  await src.click();
+  await page.keyboard.press("Control+A");
+  await page.keyboard.type("beta-edited");
+  await page.getByText("below").click(); // blur → commit
+  await sleep(400);
 
-  // Edit the second tab's content and commit (blur), then add a third tab.
-  await content.fill("beta-edited");
-  await content.blur();
-  await sleep(300);
-  // #278 §1: the panel is CONTENT-only now — structure (add/remove) moved to inline affordances on the
-  // rendered widget. Exit the panel, then add a tab via the trailing on the rendered tab bar.
-  await page.keyboard.press("Escape");
-  await sleep(300);
-  await expect(page.locator("[data-pane=preview] [data-testid=macro-tabs] .cm-lp-tab")).toHaveCount(2);
+  // add a third tab via the inline ; the edited second tab survives the round-trip.
   await page.locator("[data-pane=preview] [data-testid=macro-tabs]").hover();
   await sleep(150);
   await page.locator("[data-pane=preview] [data-testid=layout-add-tab]").click({ force: true });
   await sleep(400);
   await page.getByText("below").click();
-  await sleep(200); // caret out → the widget re-renders with 3 tabs (round-trip)
+  await sleep(200);
   await expect(page.locator("[data-pane=preview] [data-testid=macro-tabs] .cm-lp-tab")).toHaveCount(3);
-  // The edited second tab survived the add round-trip: switch to it and confirm.
   await page.locator("[data-pane=preview] [data-testid=macro-tabs] .cm-lp-tab", { hasText: "Two" }).click();
   await expect(page.locator("[data-pane=preview] [data-testid=macro-tabs] .cm-lp-tabpanel-active")).toContainText("beta-edited");
 });

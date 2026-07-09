@@ -133,7 +133,7 @@ export function pasteLinkify(): Extension {
       // linkify. Precise check: bypass only when activeElement is inside a nested editable island.
       const ae = document.activeElement as HTMLElement | null;
       dbg.activeElement = ae ? `${ae.tagName}.${ae.className}`.slice(0, 80) : null;
-      const inNestedIsland = !!ae && ae !== view.contentDOM && !!ae.closest?.(".cm-lp-table, [data-testid=table-edit], .cm-lp-nested-edit-island");
+      const inNestedIsland = !!ae && ae !== view.contentDOM && !!ae.closest?.(".cm-lp-table, [data-testid=table-edit], .cm-lp-nested-edit-island, .cm-lp-slot-edit-island");
       if (inNestedIsland) { dbg.result = "skip:nested-focus"; return; }
       const sel = view.state.selection.main;
       const md = linkifyPaste({
