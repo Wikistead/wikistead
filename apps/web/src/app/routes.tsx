@@ -748,6 +748,24 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
   }, [pageId, token]);
   useEffect(() => { reloadPublished(); }, [reloadPublished]);
 
+  // #317: view-mode task-checkbox toggle for an EDIT-capability guest (ADR-019) — the server route
+  // already accepts guest:'edit'; only this client wiring was missing. Same contract as the member
+  // path (#303): throw on failure so the editor reverts its optimistic draft flip; a 409 (dirty
+  // draft) gets the dedicated toast (status read STRUCTURALLY — instanceof is unreliable under Vite
+  // module duplication). On success refetch the published snapshot this surface renders.
+  const onToggleTask = useCallback(
+    (index: number) =>
+      apiFetch<{ publishedAt: string | null }>(`/pages/${encodeURIComponent(pageId)}/tasks/toggle`, token, {
+        method: "POST",
+        body: JSON.stringify({ index }),
+      }).then(() => { reloadPublished(); }).catch((e) => {
+        const dirty = (e as { status?: number } | null)?.status === 409;
+        notify.error(t(dirty ? "toast.taskToggleDirty" : "toast.actionFailed"));
+        throw e; // let the editor revert the optimistic flip
+      }),
+    [pageId, token, reloadPublished, t],
+  );
+
   const onPublish = async () => {
     setPublishing(true);
     try {
@@ -790,7 +808,7 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
         )}
         <div className="relative flex min-h-0" style={{ flex: 1 }}>
           <div className="relative min-w-0 flex-1">
-            <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} />
+            <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onToggleTask={canEdit ? onToggleTask : undefined} />
             <div className="pointer-events-none absolute right-3 top-3 z-10"><PageStatus {...controls} /></div>
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #227 the shared TocChrome (rail on wide / overlay on narrow); yields to the comments
