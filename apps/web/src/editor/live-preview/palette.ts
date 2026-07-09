@@ -178,11 +178,17 @@ function openTemplateInsert(view: EditorView, open: TemplateInsertPicker): void 
 // Open the host page picker and, on selection, insert `:::embed-page\n<id>\n:::` at the caret (where
 // applyAt already removed the "/query" token). Cancel (null) leaves the doc untouched. Offset edit
 // only — no view/Yjs access from here (the picker is host-owned; this just writes the chosen id).
+// #332: the block is COMPLETE at insert time (the picker supplied the id — nothing left to type), so
+// the caret lands AFTER a trailing newline, OUTSIDE the directive range. With the caret inside (the
+// old `at + insert.length` = the close-fence end), reveal-on-cursor kept the block raw — and when the
+// block was the whole document there was nowhere to move the caret to, so the widget never rendered.
+// (Fence templates like /mermaid intentionally differ: their body is EMPTY and the caret belongs
+// inside for typing.)
 function openEmbedPagePicker(view: EditorView, open: PageEmbedPicker): void {
   open((pageId) => {
     if (!pageId) { view.focus(); return; }
     const at = view.state.selection.main.head;
-    const insert = `:::embed-page\n${pageId}\n:::`;
+    const insert = `:::embed-page\n${pageId}\n:::\n`;
     view.dispatch({ changes: { from: at, insert }, selection: EditorSelection.cursor(at + insert.length), scrollIntoView: true });
     view.focus();
   });
