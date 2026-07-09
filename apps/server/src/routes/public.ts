@@ -10,6 +10,8 @@ import { fgaClient, checkRelation } from '@wikistead/authz'
 import { pool } from '../db/pool.js'
 import { resolveTenantFromHost, loadTenant } from '../tenant.js'
 
+// noindex: the page's own flag OR'd with its space's flag (#277 / ADR-116 guardrail 4) — a page
+// reached via space inheritance is noindex if EITHER the page or its space says so.
 interface PublicPageRow { id: string; title: string; published_md: string | null; noindex: boolean }
 
 // Anonymous principal for FGA check/listObjects.
@@ -50,8 +52,9 @@ async function loadPublicPage(tenantId: string, pageId: string): Promise<PublicP
   return pool.begin(async (tx) => {
     await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
     const [r] = await tx<PublicPageRow[]>`
-      SELECT id, title, published_md, noindex FROM pages WHERE id = ${pageId}
-        AND published_at IS NOT NULL
+      SELECT p.id, p.title, p.published_md, (p.noindex OR s.noindex) AS noindex
+      FROM pages p JOIN spaces s ON s.id = p.space_id
+      WHERE p.id = ${pageId} AND p.published_at IS NOT NULL
     `
     return r ?? null
   }) as Promise<PublicPageRow | null>
@@ -131,12 +134,15 @@ export async function publicPlugin(app: FastifyInstance) {
     // The FGA viewer check is GLOBAL across the shared store; also require the space to belong to THIS
     // tenant (RLS) so a cross-tenant public-space UUID is a uniform 404 too — not a 200 empty tree that
     // confirms "this UUID is a public space somewhere" (existence-hiding, review note).
-    const inTenant = await pool.begin(async (tx) => {
+    const spaceRow = await pool.begin(async (tx) => {
       await tx`SELECT set_config('app.tenant_id', ${tenant.id}, true)`
-      const [r] = await tx<{ id: string }[]>`SELECT id FROM spaces WHERE id = ${req.params.spaceId}`
-      return !!r
-    })
-    if (!inTenant) return reply.code(404).send({ error: 'not found' })
+      const [r] = await tx<{ id: string; noindex: boolean }[]>`SELECT id, noindex FROM spaces WHERE id = ${req.params.spaceId}`
+      return r ?? null
+    }) as { id: string; noindex: boolean } | null
+    if (!spaceRow) return reply.code(404).send({ error: 'not found' })
+    // #277 / ADR-116 guardrail 4: a public space is noindex by default — emit the authoritative
+    // X-Robots-Tag on the tree route (net-new; the single-page route OR's the space flag per page).
+    if (spaceRow.noindex) reply.header('X-Robots-Tag', 'noindex')
     const roots = await loadPublicSpaceRoots(tenant.id, req.params.spaceId)
     const tree: PublicChild[] = []
     for (const r of roots) {

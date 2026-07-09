@@ -5,7 +5,7 @@ import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useActiveSpace } from "../app/ActiveSpace";
 import { useSession } from "../session/SessionProvider";
-import { useSpaces, useRenameSpace, useDeleteSpace, useUploadSpaceIcon, useRemoveSpaceIcon } from "../data/queries";
+import { useSpaces, useRenameSpace, useDeleteSpace, useUploadSpaceIcon, useRemoveSpaceIcon, usePublicSurface, useSpacePublic, useSetSpacePublic } from "../data/queries";
 import { Button } from "../ui/Button";
 import { ShareDialog } from "../ui/ShareDialog";
 import { Input } from "../ui/Input";
@@ -77,6 +77,24 @@ function SpaceGeneralTab() {
   const [confirming, setConfirming] = useState(false);
   const [sharing, setSharing] = useState(false);
 
+  // #277 / ADR-116: the space public toggle — offered ONLY while the tenant parent switch is ON
+  // (mirrors the page toggle in PermissionsDialog; the server re-checks manage + the switch anyway).
+  const { data: surfaceOn } = usePublicSurface();
+  const { data: isPublic } = useSpacePublic(spaceId, !!surfaceOn);
+  const setPublic = useSetSpacePublic(spaceId);
+  const publicUrl = `${window.location.origin}/pub/space/${spaceId}`;
+  const applyPublic = (v: boolean) => setPublic.mutate(v, {
+    onSuccess: () => notify.success(t("toast.saved")),
+    onError: (err) => {
+      const status = (err as { status?: number }).status;
+      notify.error(t(status === 403 ? "spaceSettings.publicErrorSurface" : "toast.actionFailed"));
+    },
+  });
+  const copyPublicUrl = async () => {
+    try { await navigator.clipboard.writeText(publicUrl); notify.success(t("toast.copied")); }
+    catch { notify.error(t("toast.actionFailed")); }
+  };
+
   // Image upload mirrors the tenant logo: base64 in, server re-validates magic bytes
   // + size. Unset → the space shows its auto initials chip.
   const onPickIcon = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -136,6 +154,40 @@ function SpaceGeneralTab() {
       <div style={{ marginBottom: 32 }}>
         <Button variant="default" onClick={() => setSharing(true)} data-testid="space-share">{t("spaceSettings.shareSpace")}</Button>
       </div>
+
+      {/* #277 / ADR-116: space public toggle — only rendered while the tenant parent switch is ON.
+          Copy states the exact exposure (public ∩ published ∩ not-private) and warns that per-page
+          "restrict" does NOT hide a page from the public tree (only private does) — review condition ②. */}
+      {surfaceOn && (
+        <>
+          <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("spaceSettings.publicLabel")}</label>
+          <div style={{ marginBottom: 32 }} className="rounded-md border border-border p-3" data-testid="space-public-section">
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                data-testid="space-public-toggle"
+                checked={!!isPublic}
+                disabled={setPublic.isPending}
+                onChange={(e) => applyPublic(e.target.checked)}
+              />
+              <span>
+                <span className="block text-sm text-foreground">{t("spaceSettings.publicTitle")}</span>
+                <span className="block text-xs text-fg-dim">
+                  {isPublic ? t("spaceSettings.publicOnHint") : t("spaceSettings.publicHint")}
+                </span>
+                <span className="block text-xs text-fg-dim">{t("spaceSettings.publicRestrictNote")}</span>
+              </span>
+            </label>
+            {isPublic && (
+              <div className="mt-2 flex items-center gap-2" data-testid="space-public-url-row">
+                <Input inputSize="sm" readOnly className="min-w-0 flex-1 font-mono text-xs" value={publicUrl} data-testid="space-public-url" aria-label={t("spaceSettings.publicUrlLabel")} onFocus={(e) => e.currentTarget.select()} />
+                <Button variant="default" size="sm" data-testid="space-public-url-copy" onClick={copyPublicUrl}>{t("permissions.copyUrl")}</Button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       <h3 style={{ color: "var(--danger)" }}>{t("spaceSettings.dangerZone")}</h3>
       <p style={{ color: "var(--fg-dim)", fontSize: 13 }}>{t("spaceSettings.deleteHint")}</p>

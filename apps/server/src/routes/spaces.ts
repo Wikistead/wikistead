@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { Sql } from 'postgres'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
@@ -516,6 +517,104 @@ export async function setSpaceCommentOpen(
   }
 }
 
+// ── Space public toggle (#277 / ADR-116) ─────────────────────────────────
+// The space-level mirror of setPagePublic: writes/deletes the anonymous
+// `space:S#viewer@user:*` wildcard (model.fga). Every page's exposure flows through
+// `view_base_from_space = viewer from space but not private`, so private pages stay cut
+// CONTINUOUSLY by the model — unlike the page toggle there is no public⊥private TOCTOU
+// and no compensating re-read. Guardrails: the tenant parent switch is enforced at the
+// ROUTE (403 while OFF); manage-gated with a UNIFORM 403 (never an existence oracle);
+// audited in-tx; spaces.noindex forced true in the same tx; and the space's published
+// pages are bulk-reindexed via the OUTBOX (durable — review condition ③, never
+// best-effort) so the denormalised search `is_public` tracks the new inheritance. The
+// doc-builder resolves is_public per page from FGA at reindex time, so enqueueing ALL
+// published pages is correct (a private page recomputes to non-public; no filter here).
+
+const SPACE_PUBLIC_GRANT = (spaceId: string) => ({ user: 'user:*', relation: 'viewer', object: `space:${spaceId}` })
+
+// Review condition ④ (defence-in-depth): before writing a GLOBAL user:* wildcard, assert the
+// space row exists under THIS tenant's RLS — symmetric with the public read route's belt
+// (public.ts, the in-tenant SELECT). The FGA manage gate already blocks foreign spaces; failing
+// here throws the SAME uniform 403 as a non-manager, so the write endpoint stays existence-blind.
+async function assertSpaceInTenant(db: TenantDb, spaceId: string): Promise<void> {
+  const [r] = await db.sql<{ id: string }[]>`SELECT id FROM spaces WHERE id = ${spaceId}`
+  if (!r) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+}
+
+// Enqueue an outbox upsert for every PUBLISHED page of the space (inside the caller's tx),
+// returning the jobs to fire after commit. Draft pages have no search doc to update.
+async function enqueueSpaceReindex(
+  tx: Sql,
+  args: { tenantId: string; spaceId: string },
+): Promise<{ id: string; pageId: string }[]> {
+  const pages = await tx<{ id: string }[]>`
+    SELECT id FROM pages WHERE space_id = ${args.spaceId} AND published_at IS NOT NULL
+  `
+  const jobs: { id: string; pageId: string }[] = []
+  for (const p of pages) {
+    jobs.push({ id: await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: p.id, operation: 'upsert' }), pageId: p.id })
+  }
+  return jobs
+}
+
+export async function setSpacePublic(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { spaceId: string; tenantId: string; userId: string; plan?: string },
+): Promise<void> {
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  await assertSpaceInTenant(db, args.spaceId)
+  const jobs = await db.tx(async (tx) => {
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.made_public', target: `space:${args.spaceId}` })
+    }
+    // Guardrail 4: a newly-public space is never crawler-indexed by default (same tx as the grant).
+    await tx`UPDATE spaces SET noindex = true WHERE id = ${args.spaceId}`
+    const j = await enqueueSpaceReindex(tx, { tenantId: args.tenantId, spaceId: args.spaceId })
+    await writeTuples(fga, [SPACE_PUBLIC_GRANT(args.spaceId)])
+    return j
+  })
+  for (const j of jobs) processOutboxAsync(driver, j.id, { tenantId: args.tenantId, pageId: j.pageId, operation: 'upsert' })
+  emit({ type: 'space.made_public', tenantId: args.tenantId, spaceId: args.spaceId, actorId: args.userId })
+}
+
+// Revoke: ONE tuple delete + the same bulk reindex (is_public drops). Per-page public grants
+// (view_base@user:* written by the ADR-113 page toggle) are UNTOUCHED — non-destructive.
+// noindex stays as-is (harmless while non-public; the future "allow indexing" toggle owns it).
+export async function unsetSpacePublic(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { spaceId: string; tenantId: string; userId: string; plan?: string },
+): Promise<void> {
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  const jobs = await db.tx(async (tx) => {
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.made_non_public', target: `space:${args.spaceId}` })
+    }
+    const j = await enqueueSpaceReindex(tx, { tenantId: args.tenantId, spaceId: args.spaceId })
+    await deleteTuples(fga, [SPACE_PUBLIC_GRANT(args.spaceId)]).catch(() => {}) // idempotent — may not be public
+    return j
+  })
+  for (const j of jobs) processOutboxAsync(driver, j.id, { tenantId: args.tenantId, pageId: j.pageId, operation: 'upsert' })
+  emit({ type: 'space.made_non_public', tenantId: args.tenantId, spaceId: args.spaceId, actorId: args.userId })
+}
+
+// Manage-gated read of the space's public state for the toggle UI's authoritative read.
+export async function isSpacePublic(fga: OpenFgaClient, args: { spaceId: string; userId: string }): Promise<boolean> {
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  const { tuples } = await fga.read({ object: `space:${args.spaceId}`, relation: 'viewer' })
+  return (tuples ?? []).some(({ key }) => key?.relation === 'viewer' && key.user === 'user:*')
+}
+
+// The tenant parent switch (#253 / ADR-113 guardrail 1), read fresh. Kept as a LOCAL read
+// (same one-row SELECT as pages.ts publicSurfaceEnabled) to avoid a pages↔spaces import cycle.
+async function spacePublicSurfaceEnabled(db: TenantDb): Promise<boolean> {
+  const [row] = await db.sql<{ public_enabled: boolean }[]>`SELECT public_enabled FROM tenant_settings LIMIT 1`
+  return row?.public_enabled === true
+}
+
 // Tenant group-name source for the group-grant picker (#163 / ADR-053). The set of group names
 // seen across the tenant's members (IdP-imported via members.groups, #111 — no manual group CRUD).
 // manage-gated like the grant itself: group NAMES can themselves be sensitive (existence leak), so
@@ -612,6 +711,27 @@ export async function spacesPlugin(app: FastifyInstance) {
 
   // Comment audience setting (#100 / ADR-029): read + toggle who may comment on this space's pages —
   // guests (any view link) and/or public members. manage-gated (it's an administrative setting).
+  // #277 / ADR-116: space-level anonymous public toggle. GET = current state (manage-gated).
+  // POST makes the space public — ONLY while the tenant parent switch is ON (OFF ⇒ 403, mirroring
+  // the page toggle: the hidden UI is convenience, the API is the fortress). DELETE (make
+  // non-public) is always allowed — revoking is safe.
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/public-access', async (req) => ({
+    public: await isSpacePublic(app.fga, { spaceId: req.params.spaceId, userId: req.user.sub }),
+  }))
+  app.post<{ Params: { spaceId: string } }>('/spaces/:spaceId/public-access', async (req, reply) => {
+    if (!(await spacePublicSurfaceEnabled(req.db))) throw Object.assign(new Error('public surface disabled for this tenant'), { statusCode: 403 })
+    await setSpacePublic(req.db, app.fga, app.searchDriver, {
+      spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub, plan: req.tenant.plan,
+    })
+    return reply.code(204).send()
+  })
+  app.delete<{ Params: { spaceId: string } }>('/spaces/:spaceId/public-access', async (req, reply) => {
+    await unsetSpacePublic(req.db, app.fga, app.searchDriver, {
+      spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub, plan: req.tenant.plan,
+    })
+    return reply.code(204).send()
+  })
+
   app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/comment-open', async (req) => {
     return getSpaceCommentOpen(app.fga, { spaceId: req.params.spaceId, userId: req.user.sub })
   })

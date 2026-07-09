@@ -33,6 +33,8 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `space.access_granted` | A principal was granted a relation on a space. |
 | `space.access_revoked` | A principal lost a relation on a space. |
 | `space.branding_updated` | A space's branding (accent) was changed. |
+| `space.made_public` | A space was made anonymously public (space viewer user:* granted; noindex on). |
+| `space.made_non_public` | A space was made non-public (the anonymous space viewer grant revoked). |
 | `tenant.branding_updated` | The tenant branding (accent + logo) was changed. |
 | `tenant.embed_providers_updated` | A tenant admin changed the external-embed host allowlist (#108). |
 | `tenant.oidc_updated` | The tenant OIDC login configuration was changed. |
