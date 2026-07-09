@@ -23,6 +23,11 @@ test("#305: an inline image is a line-height thumbnail; a standalone image stays
   expect(inlineMax, `inline max-height ${inlineMax} should be a small thumbnail cap`).not.toBe("none");
   expect(parseFloat(inlineMax), `inline max-height ${inlineMax} px`).toBeGreaterThan(0);
   expect(parseFloat(inlineMax), `inline max-height ${inlineMax} px should be ~1 line, not a full image`).toBeLessThan(48);
+  // (the review bounce): sizing alone is NOT enough — the Tailwind preflight sets
+  // img { display: block }, which forces the line break even for a correctly-sized thumbnail. The
+  // computed display must be overridden to an inline flavour (assertable without loading real bytes).
+  const inlineDisplay = await inline.evaluate((el) => getComputedStyle(el).display);
+  expect(inlineDisplay, `inline image display ${inlineDisplay} must flow with text, not break the line`).toBe("inline-block");
 
   // the STANDALONE image (inside cm-lp-image-wrap) is NOT capped — it keeps the full-size atom look (#255).
   const standalone = page.locator("[data-pane=preview] .cm-lp-image-wrap img.cm-lp-image").first();
@@ -30,4 +35,6 @@ test("#305: an inline image is a line-height thumbnail; a standalone image stays
   await expect(standalone).not.toHaveClass(/cm-lp-image-inline/);
   const standaloneMax = await standalone.evaluate((el) => getComputedStyle(el).maxHeight);
   expect(standaloneMax, "standalone image must NOT be thumbnail-capped").toBe("none");
+  const standaloneDisplay = await standalone.evaluate((el) => getComputedStyle(el).display);
+  expect(standaloneDisplay, "standalone image stays a block (centred full-size atom)").toBe("block");
 });
