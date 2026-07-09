@@ -34,7 +34,12 @@ beforeAll(async () => {
   spaceId = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'wh-space' })).id
   pubPage = (await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'Published' })).id
   privPage = (await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title: 'Private' })).id
-  await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id}` // clear any rows leaked by a prior crashed run (shared dev tenant; outboxCount asserts are tenant-wide)
+  // Clear the WHOLE outbox, not just this tenant: other test files' operations (signup/billing tenants
+  // publishing pages, then deleting them) leave page.published rows stuck in not-ready retry. Those
+  // residue rows crowd the drain's LIMIT-20 batch — and a freshly enqueued row sorts LAST by
+  // next_attempt_at — so with ≥20 due residue rows the drain never reaches this test's row and the
+  // drop-private assertion fails. Safe: this suite runs ONLY on the isolated server-test stack (#268/#269).
+  await admin`DELETE FROM webhook_outbox`
   await admin`UPDATE pages SET published_at = now() WHERE id IN (${pubPage}, ${privPage})`
   await writeTuples(fgaClient, [
     { user: `space:${spaceId}`, relation: 'space', object: `page:${pubPage}` }, // published/linked → deliverable
