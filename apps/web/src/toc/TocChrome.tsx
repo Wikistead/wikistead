@@ -1,5 +1,3 @@
-import { List } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { Toc } from "./Toc";
 import type { Heading } from "../editor/headings";
 
@@ -16,7 +14,6 @@ export function TocChrome({
   subscribeScroll,
   isWide,
   tocOn,
-  onToggle,
   railEnabled = true,
   railLeft = "calc(50% + 370px + 1rem)",
   railTop = "calc(var(--wks-band-h, 0px) + 0.5rem)",
@@ -28,31 +25,16 @@ export function TocChrome({
   subscribeScroll?: (fn: () => void) => () => void;
   isWide: boolean;
   tocOn: boolean;
-  // A floating on/off toggle (the public reader has no controls bar to host one). Members omit it — their
-  // toggle lives in the page controls bar and flips the same device-local pref.
-  onToggle?: () => void;
   // Members suppress the wide rail while a right panel (comments/history/…) occupies the same zone.
   railEnabled?: boolean;
   railLeft?: string;
   railTop?: string;
 }) {
-  const { t } = useTranslation();
   if (headings.length === 0) return null;
+  // (#227 ①: the old public-only floating toggle was removed — every surface hosts the toggle in
+  // the shared PageStatus ToggleButton, so member and public are the same UI.)
   return (
     <>
-      {onToggle && (
-        <button
-          type="button"
-          data-testid="toc-toggle"
-          aria-pressed={tocOn}
-          aria-label={t("toc.toggle")}
-          title={t("toc.toggle")}
-          onClick={onToggle}
-          className={`absolute right-3 top-[calc(var(--wks-band-h,5.5rem)+0.5rem)] z-10 rounded p-1.5 ${tocOn ? "bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-[var(--accent)]" : "text-fg-dim hover:bg-panel-2"}`}
-        >
-          <List size={16} />
-        </button>
-      )}
       {isWide && tocOn && railEnabled && (
         // #212 bounce 3: clear the absolute header band (offset top by --wks-band-h) so the rail isn't hidden.
         // #304 (4): elastic width — grow into the right whitespace instead of a fixed 210px (which truncated
