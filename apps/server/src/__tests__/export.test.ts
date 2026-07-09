@@ -9,7 +9,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalStorageDriver } from '../storage/index.js'
-import { buildExport } from '../export/index.js'
+import { buildExport, buildSpaceExport, buildTenantExport } from '../export/index.js'
 import { buildHtmlExport } from '../render/html-export.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -148,6 +148,89 @@ describe('buildExport', () => {
     expect(res!.filename).toMatch(/\.md$/)
     expect(res!.contentType).toContain('text/markdown')
     expect(strFromU8(res!.body)).toContain('Child page body')
+  })
+})
+
+// #309: whole-space / whole-tenant Markdown ZIP export. Reuses the per-page collect+bundle path (so the
+// per-page view-filter + image auth boundary are already covered by buildExport above); these tests pin the
+// NEW authz surface — the space `view` gate (existence-hiding 404) and the space-level view-filter of a tenant
+// export. A SECOND user with space `viewer` (not the page-grant USER) so the buildExport fixtures stay intact.
+describe('buildSpaceExport / buildTenantExport (#309)', () => {
+  const SPACE_USER = 'exp-user2', SPACE2 = 'exp-space2', PAGE2 = 'exp-p2'
+  // #309 authz anti-test fixtures: a PRIVATE page (ADR-098) and a RESTRICTED page (ADR-072) in SPACE — a space
+  // VIEWER must NOT be able to export them (the `but not private` / `but not restricted` cut survives the
+  // space-level access). Regression guard against a future "space is gated → skip per-node checks" shortcut.
+  const PRIV = 'exp-priv', REST = 'exp-rest'
+  const spaceGrants = [
+    { user: `user:${SPACE_USER}`, relation: 'viewer', object: `space:${SPACE}` }, // views SPACE, NOT SPACE2
+    // Link the fixture pages to their space (page#space) so the `viewer from space` inheritance resolves — a
+    // real page carries this; the direct-SQL fixtures don't, so add it here (scoped to these tests).
+    ...[ROOT, CHILD, HIDDEN, OTHER, XSS, DEGRADE, PRIV, REST].map((id) => ({ user: `space:${SPACE}`, relation: 'space', object: `page:${id}` })),
+    { user: `space:${SPACE2}`, relation: 'space', object: `page:${PAGE2}` },
+    // PRIV is private (marker written as the user:* / share_link:* pair, like setPagePrivate).
+    { user: 'user:*', relation: 'private', object: `page:${PRIV}` },
+    { user: 'share_link:*', relation: 'private', object: `page:${PRIV}` },
+    // REST is restricted for SPACE_USER specifically (deny wins over the space grant).
+    { user: `user:${SPACE_USER}`, relation: 'restricted', object: `page:${REST}` },
+  ]
+  beforeAll(async () => {
+    await admin`INSERT INTO spaces (id, tenant_id, name) VALUES (${SPACE2}, ${TENANT}, 'Second Space') ON CONFLICT (id) DO NOTHING`
+    await admin`INSERT INTO pages (id, tenant_id, space_id, parent_id, title, ydoc, published_md) VALUES
+      (${PAGE2}, ${TENANT}, ${SPACE2}, NULL, 'Second Space Page', ${ydoc('## second')}, '## second space body'),
+      (${PRIV},  ${TENANT}, ${SPACE},  NULL, 'Private Page',      ${ydoc('## private')}, '## private body'),
+      (${REST},  ${TENANT}, ${SPACE},  NULL, 'Restricted Page',   ${ydoc('## restricted')}, '## restricted body')
+      ON CONFLICT (id) DO NOTHING`
+    await writeTuples(fgaClient, spaceGrants)
+  })
+  afterAll(async () => {
+    await deleteTuples(fgaClient, spaceGrants).catch(() => {})
+    await admin`DELETE FROM pages WHERE id IN (${PAGE2}, ${PRIV}, ${REST})`.catch(() => {})
+    await admin`DELETE FROM spaces WHERE id = ${SPACE2}`.catch(() => {})
+  })
+
+  it('buildSpaceExport returns null (→ 404) when the space is not viewable', async () => {
+    expect(await buildSpaceExport(db, fgaClient, storage, { userId: 'nobody-xyz', spaceId: SPACE })).toBeNull()
+    // SPACE_USER can view SPACE but NOT SPACE2 → existence-hiding 404 for the space they can't see.
+    expect(await buildSpaceExport(db, fgaClient, storage, { userId: SPACE_USER, spaceId: SPACE2 })).toBeNull()
+  })
+
+  it('buildSpaceExport bundles the viewable space as one ZIP (named for the space)', async () => {
+    const res = await buildSpaceExport(db, fgaClient, storage, { userId: SPACE_USER, spaceId: SPACE })
+    expect(res!.filename).toBe('Export Space.zip')
+    const entries = Object.keys(unzipSync(res!.body)).join('\n')
+    // space viewer sees every page in the space → all roots + children present (multiple top-level dirs).
+    expect(entries).toContain('Root Page')
+    expect(entries).toContain('Child Page')
+    expect(entries).toContain('Other Page')
+    // and NOTHING from the other space (that's a different export).
+    expect(entries).not.toContain('Second Space Page')
+  })
+
+  it('view-filters PRIVATE (ADR-098) and RESTRICTED (ADR-072) pages out of a space export, even for a space VIEWER', async () => {
+    const res = await buildSpaceExport(db, fgaClient, storage, { userId: SPACE_USER, spaceId: SPACE })
+    const entries = Object.keys(unzipSync(res!.body)).join('\n')
+    // SPACE_USER is a space viewer, yet the private page (but not private) and the restricted page
+    // (but not restricted) are cut — the per-node view check survives the space-level access. No leak.
+    expect(entries).not.toContain('Private Page')
+    expect(entries).not.toContain('Restricted Page')
+    // sanity: a normal page in the same space IS present (so the omission is the cut, not an empty export).
+    expect(entries).toContain('Root Page')
+  })
+
+  it('buildTenantExport includes ONLY the spaces the caller can view (view-filtered, no leak)', async () => {
+    const res = await buildTenantExport(db, fgaClient, storage, { userId: SPACE_USER })
+    expect(res.filename).toBe('workspace.zip')
+    const entries = Object.keys(unzipSync(res.body)).join('\n')
+    // SPACE (viewable) is present under its own directory; SPACE2 (not viewable) is absent — existence hidden.
+    expect(entries).toContain('Export Space/Root Page')
+    expect(entries).not.toContain('Second Space')
+    expect(entries).not.toContain(PAGE2)
+  })
+
+  it('buildTenantExport for a user who can view nothing yields an empty archive (no leak)', async () => {
+    const res = await buildTenantExport(db, fgaClient, storage, { userId: 'nobody-xyz' })
+    const entries = Object.keys(unzipSync(res.body))
+    expect(entries.length).toBe(0)
   })
 })
 
