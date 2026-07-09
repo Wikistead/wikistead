@@ -126,3 +126,23 @@ polish, hardening, and the business layer — most of it captured as ADR drafts 
 - **Business / legal**: final plan limits + pricing and a metered-overage soft cap;
   CE/EE split + AGPL legal review; `LICENSE` / `CHANGELOG` / `CONTRIBUTING`; release
   tooling (semantic-release, intentionally deferred — see the project design notes).
+
+## Contributing
+
+Wikistead has a [Code of Conduct](CODE_OF_CONDUCT.md). **Security issues** must go through
+the private channel in [SECURITY.md](SECURITY.md) — never a public issue. Bug reports and
+feature requests use the [issue forms](.github/ISSUE_TEMPLATE/); the feature form is scored
+against the product's north stars (Knowledge First, Open formats — see the project design notes). External
+pull requests are **not accepted at this time** (see the
+[PR template](.github/PULL_REQUEST_TEMPLATE.md) for the policy and the internal validation
+checklist: `pnpm build` / `pnpm typecheck` / `pnpm test` / `pnpm license:check`).
+
+## License
+
+Wikistead ships **open-core**: the Community Edition (CE) is **AGPL-3.0**, and Enterprise
+Edition (EE) features are proprietary, kept in gitignored overlays outside the public source
+(two-repo overlay, ADR-084). Every **bundled dependency is permissive** (MIT / Apache-2.0 /
+BSD / ISC; MPL-2.0 only when the file is unmodified) — no AGPL/GPL/SSPL/BSL/source-available
+code is linked, bundled, or integrated into a distributable — enforced by a CI license
+allowlist (`pnpm license:check`, ADR-011). The `LICENSE` file and the final AGPL legal
+review are tracked as a pre-launch item (not yet committed here).
