@@ -55,7 +55,12 @@ export function TocChrome({
       )}
       {isWide && tocOn && railEnabled && (
         // #212 bounce 3: clear the absolute header band (offset top by --wks-band-h) so the rail isn't hidden.
-        <div className="pointer-events-none absolute bottom-2 z-[5] w-[210px]" style={{ left: railLeft, top: railTop }}>
+        // #304 (4): elastic width — grow into the right whitespace instead of a fixed 210px (which truncated
+        // items even with room to spare), clamped so it never collides with the reading column or overruns.
+        <div
+          className="pointer-events-none absolute bottom-2 z-[5]"
+          style={{ left: railLeft, top: railTop, width: "clamp(210px, calc(50vw - 370px - 2rem), 300px)" }}
+        >
           <div className="pointer-events-auto h-full">
             <Toc headings={headings} activeFrom={activeFrom} depth={depth} onJump={onJump} variant="rail" />
           </div>
