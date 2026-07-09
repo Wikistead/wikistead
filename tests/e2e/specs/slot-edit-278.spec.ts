@@ -29,8 +29,9 @@ test("#278 §2a: clicking a column slot mounts an inline CM6 editor; type + blur
   // the OTHER column still renders side-by-side (flex preserved — the island is DOM inside the cell).
   await expect(page.locator("[data-pane=preview] .cm-lp-column")).toContainText("BBB");
 
-  // type into the island (it holds "AAA"); the #265 guard means the click/keys reach the island, not the atom.
-  await src.click();
+  // #278 §2a reviewer B: a SINGLE click opens AND focuses the island — no second click needed. Type directly.
+  const focused = await page.evaluate(() => !!document.activeElement?.closest?.("[data-testid=slot-edit-island]"));
+  expect(focused, "the island is focused after a single click").toBe(true);
   await page.keyboard.press("Control+End");
   await page.keyboard.type(" MORE");
   await sleep(150);
@@ -46,6 +47,38 @@ test("#278 §2a: clicking a column slot mounts an inline CM6 editor; type + blur
   expect(src2).toContain("BBB");
   expect(src2).toContain(":::column"); // structure round-trips (fences intact)
   expect(errs, errs.join(" | ")).toHaveLength(0);
+});
+
+// #278 §2a (reviewer must-fix 2): an EMPTY / adjacent-fence slot (`:::column\n:::`, reachable via GFM
+// paste/import) must NOT be corrupted by a commit — inserting text at the naive close-fence point would make
+// `hello:::`. The commit inserts at the open-fence line end with newlines, so the fence stays intact.
+test("#278 §2a: editing an EMPTY slot keeps the fence intact (no `hello:::` round-trip break)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "slot-empty"); await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  // second column is EMPTY (adjacent fences) — the paste/import case.
+  await page.keyboard.insertText("top\n\n::::columns\n:::column\nAAA\n:::\n:::column\n:::\n::::\n\nbot\n");
+  await sleep(700);
+  await page.getByText("bot").click(); await sleep(200);
+
+  // edit the SECOND (empty) column.
+  await page.locator("[data-pane=preview] .cm-lp-column").nth(1).click();
+  await sleep(300);
+  const src = page.locator("[data-pane=preview] [data-testid=slot-edit-src]");
+  await expect(src).toBeVisible();
+  await src.click();
+  await page.keyboard.type("hello");
+  await page.getByText("bot").click(); // blur → commit
+  await sleep(400);
+
+  await page.getByTestId("displaymode-source").click();
+  await sleep(250);
+  const s = await content(page);
+  expect(s).toContain("hello");
+  expect(s).not.toContain("hello:::"); // the fence was NOT merged/destroyed
+  // both columns' open fences intact — match the WHOLE line (`::::columns` contains ":::column" as a substring).
+  expect((s.match(/^:::column$/gm) || []).length).toBe(2);
+  expect((s.match(/^:::$/gm) || []).length).toBe(2); // both close fences intact
 });
 
 test("#278 §2a: Escape exits the slot island without committing a stray edit", async ({ browser }) => {

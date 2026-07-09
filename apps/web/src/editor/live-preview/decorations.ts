@@ -1299,28 +1299,38 @@ function findNestedSlot(root: HTMLElement, anchor: number): HTMLElement | null {
 // Y.Text replace of the body range on BLUR — no second CRDT, no Y.Text sub-range live-binding (ADR-025 /
 // ADR-017). vim follows the outer editor (vimEnabled facet). Escape bubbles to escExit which clears the field;
 // mousedown is stopped so the outer container atom doesn't swallow the caret (#265). Returns true if mounted.
+// The island EditorView is stashed on the host DOM so the widget's destroy(dom) can dispose it on EVERY unmount
+// path (commit, Escape, caret-leave, rebuild) — not only the blur→onCommit path (the reviewer's leak finding).
+type SlotHost = HTMLElement & { __slotHandle?: { destroy(): void } };
 function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { from: number; to: number }, index: number, childName: "column" | "tab", dark: boolean): boolean {
   const doc = view.state.doc;
   const items = resolveDirectiveRanges(doc.toString()).filter((r) => r.name === childName && r.from >= container.from && r.to <= container.to);
   const it = items[index];
   if (!it) return false;
-  // Body = the lines between the child's open fence and its closing fence (empty slot → a zero-width point
-  // just after the open fence). Captured once at mount; commit-on-blur is the first write, so it stays valid.
+  // Body = the lines between the child's open fence and its closing fence. Captured once at mount; commit-on-blur
+  // is the first write, so it stays valid.
   const first = doc.lineAt(it.from);
   const closeLine = doc.lineAt(Math.min(it.to, doc.length));
   const fb = first.number + 1, lb = closeLine.number - 1;
   const hasBody = lb >= fb && fb <= doc.lines;
-  const bodyFrom = fb <= doc.lines ? doc.line(fb).from : first.to;
-  const bodyTo = hasBody ? doc.line(lb).to : bodyFrom;
+  const bodyText = hasBody ? doc.sliceString(doc.line(fb).from, doc.line(lb).to) : "";
+  // Commit target. For a slot with a body, REPLACE the body lines. For an EMPTY / adjacent-fence slot
+  // (`:::column` immediately followed by `:::` — reachable via GFM paste/import), the naive body point is the
+  // CLOSE-fence line start, so inserting text there would produce `hello:::` and destroy the fence (the
+  // reviewer's round-trip finding). Instead insert AT THE END OF THE OPEN-FENCE LINE and add the surrounding
+  // newlines, so an empty slot becomes `:::column\n<text>\n:::` (fence intact) and stays empty when cleared.
+  const insFrom = hasBody ? doc.line(fb).from : first.to;
+  const insTo = hasBody ? doc.line(lb).to : first.to;
+  const shape = (v: string) => (hasBody ? v : v ? `\n${v}` : "");
 
-  const host = document.createElement("div");
+  const host = document.createElement("div") as SlotHost;
   host.className = "cm-lp-slot-edit-island";
   host.setAttribute("data-testid", "slot-edit-island");
   host.addEventListener("mousedown", (e) => e.stopPropagation()); // #265: the outer atom must not steal the caret
   let committed = false;
   const handle = mountSourceEditor({
     parent: host,
-    doc: hasBody ? doc.sliceString(bodyFrom, bodyTo) : "",
+    doc: bodyText,
     dark,
     testid: "slot-edit-src",
     vim: view.state.facet(vimEnabled),
@@ -1328,13 +1338,15 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
     onCommit: (value) => {
       if (committed) return; // blur can fire alongside the field-clear re-render; write exactly once
       committed = true;
-      view.dispatch({ changes: { from: bodyFrom, to: bodyTo, insert: value }, effects: setSlotEditActive.of(null) });
+      view.dispatch({ changes: { from: insFrom, to: insTo, insert: shape(value) }, effects: setSlotEditActive.of(null) });
       view.focus();
-      queueMicrotask(() => handle.destroy());
     },
   });
+  host.__slotHandle = handle; // disposed by MacroWidget.destroy(dom) on any unmount path
   cell.replaceWith(host); // for columns: the column cell; for tabs: the active panel
-  handle.focus();
+  // Focus AFTER CM attaches this widget DOM to the document — focusing during toDOM (DOM not yet in the tree)
+  // is a no-op, which left the island unfocused so a single click opened but couldn't type (reviewer B).
+  requestAnimationFrame(() => handle.focus());
   return true;
 }
 
@@ -1660,8 +1672,9 @@ class MacroWidget extends WidgetType {
             if ((e.target as HTMLElement).closest(".cm-lp-layout-item-remove, .cm-lp-tab-remove, .cm-lp-layout-item-add, .cm-lp-tab, [data-mac-pos]")) return;
             e.preventDefault();
             e.stopPropagation();
+            // Do NOT view.focus here — the rebuild mounts the island and focuses IT; focusing the outer view
+            // would steal focus back (a single click must open AND focus the island). #278 §2a reviewer B.
             view.dispatch({ effects: setSlotEditActive.of({ container: { from, to }, index: i }) });
-            view.focus();
           });
         });
         }
@@ -1733,11 +1746,16 @@ class MacroWidget extends WidgetType {
     }
     return true;
   }
-  destroy() {
+  destroy(dom?: HTMLElement) {
     this.destroyed = true;
     if (this.objectUrl) { URL.revokeObjectURL(this.objectUrl); this.objectUrl = undefined; }
     this.ro?.disconnect();
     this.ro = undefined;
+    // #278 §2a: dispose the inline slot-edit island's CM6 EditorView on ANY unmount (commit / Escape /
+    // caret-leave / rebuild) — CM calls destroy(dom) when it removes the widget DOM. Without this the EditorView
+    // (and its DOM listeners) leaked on the non-blur exit paths (reviewer finding A).
+    const host = (dom as HTMLElement | undefined)?.querySelector?.(".cm-lp-slot-edit-island") as SlotHost | null;
+    host?.__slotHandle?.destroy();
   }
   ignoreEvent() {
     // #265: do NOT blanket-ignore island events here — that would also swallow keydown, so the CM-level
@@ -3289,7 +3307,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-layout-edit-move:hover": { color: "var(--fg, inherit)", borderColor: "var(--accent, #4ea1ff)" },
   ".cm-lp-layout-edit-preview": { borderTop: "1px solid var(--border, #888)", paddingTop: "0.5em" },
   ".cm-lp-columns": { display: "flex", gap: "1.2em", alignItems: "flex-start" },
-  ".cm-lp-column": { flex: "1 1 0", minWidth: "0" },
+  ".cm-lp-column": { flex: "1 1 0", minWidth: "0", minHeight: "1.4em" }, // #278 §2a: an empty column stays clickable (to open its inline editor)
   ".cm-lp-column > :first-child": { marginTop: "0" },
   // #90 tabs: a tab bar + only the active panel shown (display-only switch).
   ".cm-lp-tabbar": { display: "flex", gap: "0.25em", borderBottom: "1px solid var(--border, #888)", marginBottom: "0.6em" },
