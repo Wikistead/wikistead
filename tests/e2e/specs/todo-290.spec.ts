@@ -77,6 +77,33 @@ test("#290: Ctrl+Enter promotes a plain task list to :::todo", async ({ browser 
   await expect(ring).toHaveAttribute("data-done", "0");
 });
 
+// #290 / ADR-114: DEMOTION — the header ✕ "remove ring" button unwraps a :::todo back to a plain
+// GFM task list (explicit, never auto). The task list (and its checkboxes) survive; the ring/title are gone.
+test("#290: the header ✕ demotes a :::todo back to a plain task list", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "todo-demote-btn");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::todo[Sprint]\n- [x] alpha\n- [ ] beta\n:::\n\nbelow\n");
+  await sleep(400);
+  await page.getByText("below").click(); // caret off → the todo box + header render
+  await sleep(200);
+
+  const todo = page.locator("[data-pane=preview] .cm-lp-todo").first();
+  await todo.hover(); // reveal the hover-gated header button
+  await sleep(120);
+  await page.getByTestId("todo-demote").first().click({ force: true });
+  await sleep(250);
+
+  // the :::todo wrapper is gone; the plain task list (with its checkbox state) remains
+  await page.getByTestId("displaymode-source").click();
+  await sleep(200);
+  const src = await content(page);
+  expect(src).not.toContain(":::todo");
+  expect(src).toContain("- [x] alpha");
+  expect(src).toContain("- [ ] beta");
+});
+
 // Round-trip: :::todo source is preserved (Source display mode shows the raw directive + task list).
 test("#290: :::todo round-trips as plain :::todo + a GFM task list (Open formats)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();

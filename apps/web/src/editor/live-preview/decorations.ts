@@ -198,6 +198,25 @@ class TodoRingWidget extends WidgetType {
   ignoreEvent() { return true; } // display-only — clicks pass through to the line
 }
 
+// #290 / ADR-114: the :::todo header "remove ring" (demote) button — the explicit affordance that
+// unwraps the directive back to a plain task list. Shown on the editable surface, on header hover (CSS). Its
+// mousedown demotes and is guarded (preventDefault/stopPropagation) so it never places the caret / reveals
+// raw first (memory: nested-widget input mousedown guard). Keyed on the block's start position (`from`).
+class TodoDemoteWidget extends WidgetType {
+  constructor(readonly from: number) { super(); }
+  eq(o: TodoDemoteWidget) { return o.from === this.from; }
+  toDOM(view: EditorView) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cm-lp-todo-demote";
+    btn.title = "Remove the progress ring (back to a plain task list)";
+    btn.setAttribute("data-testid", "todo-demote");
+    btn.textContent = "✕";
+    btn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); demoteTodoToTaskList(view, this.from); });
+    return btn;
+  }
+}
+
 // #202 (comment 761): nested ORDERED lists mirror the bullet hierarchy — each nesting level counts
 // independently (a nested list restarts, not merged into the parent's run) and gets its own ordinal
 // STYLE: level 0 = decimal (1.), 1 = lower-alpha (a.), 2 = lower-roman (i.), then cycle. The DISPLAYED
@@ -2051,6 +2070,8 @@ const RENDERERS: BlockRenderer[] = [
           for (let n = first.number + 1; n < lastLine.number; n++) bodyTxt += doc.line(n).text + "\n";
           const { done, total } = countTasks(bodyTxt);
           if (total > 0) ctx.add(Decoration.widget({ widget: new TodoRingWidget(done, total), side: 1 }), first.to);
+          // #290: a "remove ring" (demote) button in the header, editable surface only (hover-shown).
+          if (!ctx.state.readOnly) ctx.add(Decoration.widget({ widget: new TodoDemoteWidget(first.from), side: 1 }), first.to);
         }
         // #174 comment 878 (ADR-087 addendum 2): caret-in raw editing → the SHARED RichUI-entry pill at the
         // top-left (the same affordance as the pipe table, #216). Live + editable only. Click / Ctrl+Enter →
@@ -2663,6 +2684,23 @@ export function promoteTaskListToTodo(view: EditorView): boolean {
     changes: { from, to, insert: `:::todo[]\n${body}\n:::` },
     selection: { anchor: from + ":::todo[".length }, // caret inside the [] for the title
     userEvent: "input.promote",
+  });
+  view.focus();
+  return true;
+}
+
+// #290 / ADR-114: DEMOTE a :::todo back to a plain GFM task list — an EXPLICIT action ("remove ring"),
+// never the table-style auto-demote (the ring is the directive's reason to exist). Replaces the whole
+// `:::todo[…]\n…\n:::` block with just its body (the task list) in one offset-invariant Y.Text edit; the
+// title is dropped (the body task list is lossless — Open formats). Reached via the header ✕ button (below).
+export function demoteTodoToTaskList(view: EditorView, pos: number): boolean {
+  if (view.state.readOnly) return false;
+  const dir = directiveMacroAt(view.state, pos);
+  if (!dir || dir.name !== "todo") return false;
+  view.dispatch({
+    changes: { from: dir.from, to: dir.to, insert: dir.body },
+    selection: { anchor: dir.from },
+    userEvent: "input.demote",
   });
   view.focus();
   return true;

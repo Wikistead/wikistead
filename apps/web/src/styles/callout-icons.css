@@ -49,6 +49,11 @@
 .cm-lp-todo-ring-track{fill:none;stroke:color-mix(in srgb,var(--fg-dim,#888) 35%,transparent);stroke-width:2.5}
 .cm-lp-todo-ring-arc{fill:none;stroke:var(--accent,#4ea1ff);stroke-width:2.5;stroke-linecap:round;transition:stroke-dashoffset 200ms ease}
 .cm-lp-todo-ring-label{font-variant-numeric:tabular-nums}
+/* #290: the header "remove ring" (demote) button — hover-shown on the editable surface, left of the
+   ring so the two don't overlap. Absolute on the open line's right edge. */
+.cm-lp-todo-demote{position:absolute;right:3.6em;top:0.05em;border:none;background:transparent;color:var(--fg-dim,#888);cursor:pointer;font-size:0.85em;line-height:1;padding:0.15em 0.3em;border-radius:4px;opacity:0;transition:opacity 120ms ease}
+.cm-lp-todo:hover .cm-lp-todo-demote{opacity:1}
+.cm-lp-todo-demote:hover{background:color-mix(in srgb,var(--fg-dim,#888) 18%,transparent);color:var(--fg,#222)}
 /* #185: the nested renderMarkdownToDom output (inside columns / tabs / transclude / a callout panel
    body) must have the SAME vertical rhythm as top-level blocks. Without this, paragraphs and dispatched
    macros (mermaid / nested callouts / tables) rendered flush against each other — the paragraph/blank-
