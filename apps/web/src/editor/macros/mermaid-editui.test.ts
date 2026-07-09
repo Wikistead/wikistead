@@ -13,27 +13,24 @@ describe("mermaid inline editUI (#174 slice 4b)", () => {
     expect(mermaidMacro.editUI?.present).toBe("inline");
   });
 
-  it("mounts a source textarea seeded with the body; saves on change (blur), NOT per keystroke", () => {
+  it("mounts a CM6 source pane seeded with the body; commits on blur, NOT per keystroke; destroy cleans up", () => {
+    // #243 / ADR-111 C3: the source pane is a CM6 mini-editor (contenteditable), not a <textarea>. The
+    // per-keystroke → local-preview-only vs blur → Y.Text-commit contract is exercised end-to-end in real
+    // Chromium (macro-raw-vs-editui.spec); here (happy-dom, no layout to drive CM typing) we verify the
+    // mount/blur/destroy contract: the source pane exists, a blur commits the CURRENT doc via save(), and
+    // save is NOT called before the blur (no per-keystroke write).
     const container = document.createElement("div");
     const save = vi.fn();
     const ctrl = mermaidMacro.editUI!.mount(container, asMacroSource("graph TD; A-->B"), ctx, save);
-    const ta = container.querySelector('[data-testid="mermaid-edit-src"]') as HTMLTextAreaElement;
-    expect(ta).toBeTruthy();
-    expect(ta.value).toBe("graph TD; A-->B"); // seeded with the current source
+    const src = container.querySelector('[data-testid="mermaid-edit-src"]') as HTMLElement;
+    expect(src).toBeTruthy();
+    expect(save).not.toHaveBeenCalled(); // nothing committed on mount
 
-    // input drives the LOCAL preview only — it must NOT write to Y.Text (else the host re-mounts the
-    // widget mid-typing and the textarea resets)
-    ta.value = "graph TD; A-->C";
-    ta.dispatchEvent(new Event("input"));
-    expect(save).not.toHaveBeenCalled();
-
-    // change (blur) commits the new source to Y.Text
-    ta.dispatchEvent(new Event("change"));
+    src.dispatchEvent(new Event("blur")); // blur commits the current source to Y.Text (offset-invariant save)
     expect(save).toHaveBeenCalledTimes(1);
-    expect(save).toHaveBeenCalledWith("graph TD; A-->C");
+    expect(save).toHaveBeenCalledWith("graph TD; A-->B"); // the seeded source (read from the CM6 doc state)
 
-    // teardown removes the editor DOM
-    ctrl.destroy();
+    ctrl.destroy(); // teardown removes the editor DOM
     expect(container.querySelector('[data-testid="mermaid-edit-src"]')).toBeNull();
   });
 });

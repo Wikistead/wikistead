@@ -14,24 +14,22 @@ describe("plantuml inline editUI (#174 addendum)", () => {
     expect(plantumlMacro.editUI?.present).toBe("inline");
   });
 
-  it("mounts a source textarea seeded with the body; saves on change (blur), NOT per keystroke", () => {
+  it("mounts a CM6 source pane seeded with the body; the degraded preview shows it; commits on blur; destroy cleans up", () => {
+    // #243 / ADR-111 C3: the source pane is a CM6 mini-editor, not a <textarea>. The per-keystroke →
+    // local-preview vs blur → Y.Text-commit contract is exercised in real Chromium (macro-raw-vs-editui.spec);
+    // here (happy-dom) we verify the mount/preview/blur/destroy contract.
     const container = document.createElement("div");
     const save = vi.fn();
     const ctrl = plantumlMacro.editUI!.mount(container, asMacroSource("@startuml\nA -> B\n@enduml"), ctx, save);
-    const ta = container.querySelector('[data-testid="plantuml-edit-src"]') as HTMLTextAreaElement;
-    expect(ta).toBeTruthy();
-    expect(ta.value).toBe("@startuml\nA -> B\n@enduml"); // seeded with the current source
+    const src = container.querySelector('[data-testid="plantuml-edit-src"]') as HTMLElement;
+    expect(src).toBeTruthy();
+    // the degraded code preview renders the seeded source (textContent, XSS-safe) on mount
+    expect(container.querySelector('[data-testid="plantuml-edit-preview"] code')?.textContent).toBe("@startuml\nA -> B\n@enduml");
+    expect(save).not.toHaveBeenCalled(); // nothing committed on mount
 
-    // input drives the LOCAL degraded preview only — it must NOT write to Y.Text
-    ta.value = "@startuml\nA -> C\n@enduml";
-    ta.dispatchEvent(new Event("input"));
-    expect(save).not.toHaveBeenCalled();
-    expect(container.querySelector('[data-testid="plantuml-edit-preview"] code')?.textContent).toBe("@startuml\nA -> C\n@enduml");
-
-    // change (blur) commits the new source to Y.Text
-    ta.dispatchEvent(new Event("change"));
+    src.dispatchEvent(new Event("blur")); // blur commits the current source to Y.Text
     expect(save).toHaveBeenCalledTimes(1);
-    expect(save).toHaveBeenCalledWith("@startuml\nA -> C\n@enduml");
+    expect(save).toHaveBeenCalledWith("@startuml\nA -> B\n@enduml");
 
     ctrl.destroy();
     expect(container.querySelector('[data-testid="plantuml-edit-src"]')).toBeNull();
