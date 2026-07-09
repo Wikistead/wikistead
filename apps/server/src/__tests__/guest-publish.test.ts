@@ -85,7 +85,11 @@ afterAll(async () => {
 
 describe('guest HTTP path: published read + publish authorization', () => {
   it('a VIEW token can read published but CANNOT publish (hook rejects → 401)', async () => {
-    expect((await guestGet(viewTok, pageA)).statusCode).toBe(200)
+    const read = await guestGet(viewTok, pageA)
+    expect(read.statusCode).toBe(200)
+    // #318: the published read carries the page TITLE (the guest surface's only page read — it renders
+    // the title band from it). Minimal-field: title only, no space/creator/member data.
+    expect((read.json() as { title?: string }).title).toBe('Guest A')
     expect((await guestPublish(viewTok, pageA)).statusCode).toBe(401) // route needs guest:'edit'
   })
 

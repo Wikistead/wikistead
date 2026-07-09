@@ -523,13 +523,16 @@ export async function getPublished(
   // subject is the FGA principal ("user:<sub>" | "share_link:<id>"); guests pass a
   // context so the share_link's non_expired condition is evaluated (expired = denied).
   args: { pageId: string; subject: string; context?: { current_time: string } },
-): Promise<{ publishedMd: string | null; publishedAt: Date | null; hasUnpublishedChanges: boolean; canComment: boolean }> {
+): Promise<{ title: string; publishedMd: string | null; publishedAt: Date | null; hasUnpublishedChanges: boolean; canComment: boolean }> {
   const canView = await check(fga, args.subject, 'view', { type: 'page', id: args.pageId }, args.context)
   // #262: existence-hiding — view-denied returns the SAME 404 as a missing page (a "published" read is a
   // display path). Uniform 404 with getPage + the public surface.
   if (!canView) throw Object.assign(new Error('not found'), { statusCode: 404 })
-  const [row] = await db.sql<[{ published_md: string | null; published_at: Date | null; ydoc: Buffer | null }]>`
-    SELECT published_md, published_at, ydoc FROM pages WHERE id = ${args.pageId}
+  // #318: title rides along so a view-capable GUEST (whose only page read is this route) can render the
+  // title band. Minimal-field policy (the #270 space-info precedent): nothing beyond what the surface
+  // shows — no space/creator/member data is added here.
+  const [row] = await db.sql<[{ title: string; published_md: string | null; published_at: Date | null; ydoc: Buffer | null }]>`
+    SELECT title, published_md, published_at, ydoc FROM pages WHERE id = ${args.pageId}
   `
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const hasUnpublishedChanges = decodeYdocContent(row.ydoc) !== (row.published_md ?? '')
@@ -537,7 +540,7 @@ export async function getPublished(
   // page (comment_open on + view, an explicit comment grant, or edit)? The guest page uses it to show
   // the comment composer. Convenience only — the comment routes re-check FGA (fortress).
   const canComment = await check(fga, args.subject, 'comment', { type: 'page', id: args.pageId }, args.context)
-  return { publishedMd: row.published_md, publishedAt: row.published_at, hasUnpublishedChanges, canComment }
+  return { title: row.title, publishedMd: row.published_md, publishedAt: row.published_at, hasUnpublishedChanges, canComment }
 }
 
 // ── per-page access grant/revoke/list (Phase 4b) ────────────────────────────
