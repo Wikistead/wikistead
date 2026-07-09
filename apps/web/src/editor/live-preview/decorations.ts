@@ -2639,6 +2639,35 @@ export function enterMacroAt(view: EditorView, pos: number, raw = false): boolea
 
 // Ctrl+Enter (ADR-024 Q1): enter the macro atom at the caret. event.key "Enter" is
 // layout/JIS-safe. Bound via the editor keymap; remappable later (#4).
+// #290 / ADR-114: PROMOTE a plain GFM task-list block to a :::todo directive (the table-precedent
+// promotion — an explicit action, never auto). Wraps the contiguous task-list block at the caret in
+// `:::todo[]\n…\n:::` as ONE offset-invariant Y.Text edit and drops the caret in the `[]` to type the title.
+// Skips when already inside a directive (so a :::todo / callout task list doesn't double-wrap). Reached via
+// Ctrl+Enter on a task line (below); the plain body keeps the ADR-019 checkboxes working throughout.
+const PROMOTE_TASK_RE = /^\s*(?:[-*+]|\d+[.)])\s+\[[ xX]\]/;
+export function promoteTaskListToTodo(view: EditorView): boolean {
+  if (view.state.readOnly) return false;
+  const { state } = view;
+  const head = state.selection.main.head;
+  const line = state.doc.lineAt(head);
+  if (!PROMOTE_TASK_RE.test(line.text)) return false;
+  if (directiveMacroAt(state, head)) return false; // already inside a directive (e.g. a :::todo) → no double-wrap
+  let first = line.number;
+  let last = line.number;
+  while (first > 1 && PROMOTE_TASK_RE.test(state.doc.line(first - 1).text)) first--;
+  while (last < state.doc.lines && PROMOTE_TASK_RE.test(state.doc.line(last + 1).text)) last++;
+  const from = state.doc.line(first).from;
+  const to = state.doc.line(last).to;
+  const body = state.doc.sliceString(from, to);
+  view.dispatch({
+    changes: { from, to, insert: `:::todo[]\n${body}\n:::` },
+    selection: { anchor: from + ":::todo[".length }, // caret inside the [] for the title
+    userEvent: "input.promote",
+  });
+  view.focus();
+  return true;
+}
+
 export function enterMacroCommand(view: EditorView): boolean {
   // #174 comment 1003 / ADR-100 (innermost-wins): if a NESTED macro (inside a columns/tabs container) is
   // selected, Ctrl+Enter opens ITS editUI — the same target as the nested ✎ — not the container's. In
@@ -2648,7 +2677,9 @@ export function enterMacroCommand(view: EditorView): boolean {
   if (nsel && enterNestedMacroAt(view, nsel)) return true;
   // #174 addendum: otherwise Ctrl+Enter reveals RAW source (raw=true) — for a ``` editUI macro (mermaid)
   // that means the vim-editable source, NOT the editUI (which the ✎ button opens). Harmless for others.
-  return enterMacroAt(view, view.state.selection.main.head, true);
+  if (enterMacroAt(view, view.state.selection.main.head, true)) return true;
+  // #290: no macro at the caret but on a plain task-list block → promote it to :::todo.
+  return promoteTaskListToTodo(view);
 }
 
 // Follows a clickable link's data-href. In a READ-ONLY (view) surface a plain click

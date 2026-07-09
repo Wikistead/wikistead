@@ -42,6 +42,41 @@ test("#290: :::todo renders a container box whose body checkboxes stay interacti
   await expect(page.locator("[data-pane=preview] [data-testid=todo-ring]")).toHaveAttribute("data-done", "2");
 });
 
+// #290 / ADR-114: PROMOTION — Ctrl+Enter on a plain GFM task-list block wraps it in :::todo (the
+// table-precedent explicit promotion). The plain list keeps its interactive checkboxes throughout.
+test("#290: Ctrl+Enter promotes a plain task list to :::todo", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "todo-promote");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("- [ ] alpha\n- [ ] beta\nbelow"); // insertText: no Enter list-continuation
+  await sleep(200);
+  await page.keyboard.press("ArrowUp"); // caret onto the "beta" task line (the block)
+  await sleep(100);
+  await page.keyboard.press("Control+Enter"); // promote the contiguous task-list block
+  await sleep(200);
+  await page.keyboard.type("Mine"); // the caret landed inside :::todo[] → type the title
+
+  // the source is now a :::todo wrapping the plain task list (Open formats — the list is unchanged)
+  await page.getByTestId("displaymode-source").click();
+  await sleep(200);
+  const src = await content(page);
+  expect(src).toContain(":::todo[Mine]");
+  expect(src).toContain("- [ ] alpha");
+  expect(src).toContain("- [ ] beta");
+  expect(src).toContain("below"); // the following line is untouched
+
+  // back to Live: it renders as a :::todo box with a 0/2 ring
+  await page.getByTestId("displaymode-live").click();
+  await sleep(200);
+  await page.getByText("below").click();
+  await sleep(150);
+  await expect(page.locator("[data-pane=preview] .cm-lp-todo").first()).toBeVisible();
+  const ring = page.locator("[data-pane=preview] [data-testid=todo-ring]");
+  await expect(ring).toHaveAttribute("data-total", "2");
+  await expect(ring).toHaveAttribute("data-done", "0");
+});
+
 // Round-trip: :::todo source is preserved (Source display mode shows the raw directive + task list).
 test("#290: :::todo round-trips as plain :::todo + a GFM task list (Open formats)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
