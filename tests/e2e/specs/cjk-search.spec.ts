@@ -66,8 +66,8 @@ test("searching Japanese shows a correctly-rendered body snippet", async ({ page
   await poll(async () => (await meiliDoc(id))?.body === JP_BODY);
 
   // Search a mid-text Japanese keyword (matches the body, not the latin title).
+  await page.getByTestId("search-trigger").click(); // #285: search lives in the modal now
   const input = page.locator("[data-testid=search-input]");
-  await input.click();
   await input.fill("");
   await input.fill("東京都");
   await sleep(800);
