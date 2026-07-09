@@ -559,6 +559,13 @@ body {
   padding: 0;
 }
 
+/* #267 the template preview mounts the editor's read-only surface in a BOUNDED box (picker pane /
+   manage panel). The page-level clearances above (72px floating-controls room, header-band offset) don't
+   exist there — neutralize them, keep a compact padding, and bound the editor to the pane so the CM
+   scroller (engine parity) owns the scrolling. */
+.wks-template-preview .lp-editor-host .cm-content { padding: 0.5rem 0.75rem 0.75rem; }
+.wks-template-preview .cm-editor { height: 100%; }
+
 /* #204: custom thin, subtle scrollbars app-wide (light/dark via --fg + color-mix). A track-less slim
    pill: a semi-transparent thumb inset by a transparent border (background-clip: padding-box) so it
    reads as thin with breathing room, darkening on hover. Firefox uses scrollbar-width/color; WebKit

@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Eye, FileStack, Pencil, Trash2, X } from "lucide-react";
-import { renderMarkdownToDom } from "../editor/macros/md-render";
+import { TemplateBodyPreview } from "../editor/TemplateBodyPreview";
 import { useTemplates, useTemplateBody, useRenameTemplate, useDeleteTemplate, type TemplateSummary } from "../data/queries";
 import { RenameDialog, ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
@@ -89,19 +89,12 @@ export function TemplatesRoute() {
   );
 }
 
-// A read-only preview of the template's frozen body. #267: rendered by renderMarkdownToDom — the same client
-// DOM renderer the public reader uses — so ALL first-party macros render (callout/columns/tabs recurse, a
-// `:::table` builds a real table, mermaid/plantuml draw). It IS the XSS boundary (text nodes from an
-// allowlist, never innerHTML), so no dangerouslySetInnerHTML. Client-side draw only — embed macros are static
-// placeholders that never fetch (ADR-110's concern was server-resolving embeds).
+// A read-only preview of the template's frozen body. #267 mounts the editor's own read-only
+// surface (TemplateBodyPreview → mountPublishedView) so the preview renders structurally identical to
+// the real page — same engine, same trust boundary members already render each other's content with.
 function TemplatePreview({ tpl, onClose }: { tpl: TemplateSummary; onClose: () => void }) {
   const { t } = useTranslation();
   const { data, isLoading } = useTemplateBody(tpl.id);
-  const [previewEl, setPreviewEl] = useState<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!previewEl) return;
-    previewEl.replaceChildren(data?.body != null ? renderMarkdownToDom(data.body) : document.createDocumentFragment());
-  }, [previewEl, data]);
   return (
     <div className="mt-4 rounded-md border border-border" data-testid="template-preview-panel">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
@@ -111,15 +104,11 @@ function TemplatePreview({ tpl, onClose }: { tpl: TemplateSummary; onClose: () =
           <X size={14} />
         </button>
       </div>
-      <div className="max-h-[24rem] overflow-auto px-4 py-3">
+      <div className="flex h-[24rem] flex-col overflow-hidden">
         {isLoading || !data ? (
-          <p className="text-fg-dim">{t("common.loading")}</p>
+          <p className="p-3 text-fg-dim">{t("common.loading")}</p>
         ) : (
-          <div
-            ref={setPreviewEl}
-            className="cm-lp-md-preview text-[length:var(--text-body)] leading-relaxed"
-            data-testid="template-preview-body"
-          />
+          <TemplateBodyPreview body={data.body} testid="template-preview-body" />
         )}
       </div>
     </div>

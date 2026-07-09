@@ -1,21 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileStack } from "lucide-react";
-import { renderMarkdownToDom } from "../editor/macros/md-render";
+import { TemplateBodyPreview } from "../editor/TemplateBodyPreview";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Button } from "../ui/Button";
 import { useTemplates, useTemplateBody, type TemplateSummary } from "../data/queries";
 
 // #250 / ADR-110: the "create from template" picker (opened from the sidebar split- ▾). Lists the
 // templates the user can view (server FGA-filtered), grouped by scope — Personal / This space / Tenant
-// with a live preview. #267: the preview renders via renderMarkdownToDom — the SAME client DOM renderer the
-// public reader (#227) uses — so ALL first-party macros render (callout/columns/tabs recurse their body,
-// `:::table` builds a real table from its escaped-cell model, mermaid/plantuml draw). It builds the DOM
-// node-by-node from an allowlist (textContent, never innerHTML), so it is the XSS boundary itself — no
-// dangerouslySetInnerHTML, no sanitizer-sharing (that's why the old previewMacroRegistry table-exclusion is
-// gone). Still client-only: the embed macros are static placeholders that never fetch (ADR-110's concern was
-// server-resolving embeds). Choosing one calls onPick(templateId); the caller creates the page (server
-// re-checks template view + destination edit — two-layer defence).
+// with a live preview. #267 the preview mounts the EDITOR'S OWN read-only surface
+// (TemplateBodyPreview → mountPublishedView), so it renders structurally identical to the real page
+// math, checkboxes, highlighting, wrapping, every macro. Choosing one calls onPick(templateId); the
+// caller creates the page (server re-checks template view + destination edit — two-layer defence).
 export function TemplatePickerDialog({
   open,
   spaceId,
@@ -31,13 +27,6 @@ export function TemplatePickerDialog({
   const { data, isLoading } = useTemplates(open);
   const [selected, setSelected] = useState<string | null>(null);
   const body = useTemplateBody(open ? selected : null);
-  // #267: render the frozen body with the public-reader DOM renderer via a ref + replaceChildren (no
-  // dangerouslySetInnerHTML — renderMarkdownToDom IS the sanitizer, building text nodes from an allowlist).
-  const [previewEl, setPreviewEl] = useState<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!previewEl) return;
-    previewEl.replaceChildren(body.data?.body != null ? renderMarkdownToDom(body.data.body) : document.createDocumentFragment());
-  }, [previewEl, body.data]);
 
   // Group into the three ADR-110 buckets. Space-scope templates are shown only for the CURRENT space
   // (the picker is contextual to where the page will be created); personal/tenant are always relevant.
@@ -94,19 +83,16 @@ export function TemplatePickerDialog({
                 </li>
               ))}
             </ul>
-            {/* Right: sanitized preview of the frozen body. */}
+            {/* Right: the frozen body rendered by the editor's own read-only surface (#267). The
+                pane clips; the CM view inside owns the scrolling (its .cm-scroller — engine parity). */}
             <div className="flex w-1/2 min-w-0 flex-col">
-              <div className="min-h-0 flex-1 overflow-auto rounded border border-border p-3" data-testid="template-picker-preview">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-border" data-testid="template-picker-preview">
                 {!selected ? (
-                  <p className="text-fg-dim">{t("templatePicker.selectPrompt")}</p>
+                  <p className="p-3 text-fg-dim">{t("templatePicker.selectPrompt")}</p>
                 ) : body.isLoading || !body.data ? (
-                  <p className="text-fg-dim">{t("common.loading")}</p>
+                  <p className="p-3 text-fg-dim">{t("common.loading")}</p>
                 ) : (
-                  <div
-                    ref={setPreviewEl}
-                    className="cm-lp-md-preview text-[length:var(--text-body)] leading-relaxed"
-                    data-testid="template-picker-preview-body"
-                  />
+                  <TemplateBodyPreview body={body.data.body} testid="template-picker-preview-body" />
                 )}
               </div>
               <div className="mt-3 flex justify-end">

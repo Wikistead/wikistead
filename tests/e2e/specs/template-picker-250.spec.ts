@@ -36,8 +36,8 @@ test("#250: the template picker creates a page seeded from the template", async 
   const item = page.getByTestId("template-picker-item").filter({ hasText: "Retro Template" }).first();
   await expect(item).toBeVisible({ timeout: 8000 });
   await item.click();
-  // Sanitized preview renders the template's H1.
-  await expect(page.getByTestId("template-picker-preview-body").locator("h1")).toHaveText("Retro template", { timeout: 8000 });
+  // The preview is the editor's own read-only CM surface (#267) — the heading is a styled line.
+  await expect(page.getByTestId("template-picker-preview-body").locator(".cm-content")).toContainText("Retro template", { timeout: 8000 });
   await page.getByTestId("template-picker-use").click();
 
   // A new draft opens in edit, seeded with the template body.
@@ -48,27 +48,25 @@ test("#250: the template picker creates a page seeded from the template", async 
   await expect(page.locator("[data-pane=preview] .cm-content")).toContainText("went well");
 });
 
-// #267: the picker preview renders via renderMarkdownToDom — the SAME client DOM renderer the public
-// reader uses — so ALL first-party macros RENDER: a callout recurses its body markdown, a NESTED :::tabs shows
-// BOTH tabs (the resolver corrects lezer's early-close), and a `:::table` builds a real table. It stays
-// XSS-safe (text nodes from an allowlist, never innerHTML): a top-level <script> and a malicious <img onerror>
-// inside a table cell are neutralized. The preview scrolls internally (the dialog never exceeds the viewport).
-test("#267: template preview renders ALL macros (callout/tabs/table), scrolls, and stays XSS-safe", async ({ browser }) => {
+// #267: the picker preview mounts the EDITOR'S OWN read-only CM surface (mountPublishedView), so it
+// renders structurally identical to a real page — math (KaTeX), a todo checkbox (display-only), syntax
+// highlighting, line WRAPPING, a callout panel, mermaid centering, nested :::tabs and a :::table all come
+// from the same engine. XSS stays inert (a <script> block and an <img onerror> in a table cell are text /
+// escaped cells in that engine). The CM view is virtualised, so the probe SCROLLS through the document the
+// way a user would (a seek helper) instead of expecting the whole body in the DOM at once.
+test("#267: template preview renders with the editor engine (math/todo/highlight/wrap/macros) and stays XSS-safe", async ({ browser }) => {
   const page = await (await browser.newContext({ viewport: { width: 1100, height: 720 } })).newPage();
   const src = await openScratch(page, `pick267-${Date.now()}`);
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
-  // A callout with **bold** body, a NESTED :::tabs (2 tabs — the early-close case), a MALICIOUS :::table
-  // (renders as a real table but the onerror cell is inert), a top-level <script>, and a long scroll tail.
   const long = Array.from({ length: 40 }, (_, i) => `Paragraph line ${i} lorem ipsum dolor sit amet.`).join("\n\n");
-  // #267 bounce: a HEAVY body — a WIDE 12-column pipe table + a display-math block + a second mermaid
-  // on top of the tall prose — is what burst the preview pane out of the dialog (right + no vertical scroll).
   const wideCols = Array.from({ length: 12 }, (_, i) => `Col ${i}`).join(" | ");
   const wideSep = Array.from({ length: 12 }, () => "---").join(" | ");
   const wideRow = Array.from({ length: 12 }, (_, i) => `v${i}`).join(" | ");
   const wide = `| ${wideCols} |\n| ${wideSep} |\n| ${wideRow} |`;
+  const wrapProbe = `WRAPPROBE ${Array.from({ length: 60 }, () => "wrapword").join(" ")}`;
   await page.keyboard.insertText(
-    `# Macro template\n\n:::note\nHello **bold** callout\n:::\n\n\`\`\`mermaid\nflowchart TD\n  A --> B\n\`\`\`\n\n::::tabs\n:::tab[One]\nAlpha\n:::\n:::tab[Two]\nBravo\n:::\n::::\n\n:::table\n<table><tr><td><img src=x onerror="window.__xss267=1"></td></tr></table>\n:::\n\n${wide}\n\n$$a^2 + b^2 = c^2$$\n\n\`\`\`mermaid\nflowchart LR\n  X --> Y --> Z\n\`\`\`\n\n<script>window.__xss267=1</script>\n\n${long}\n`,
+    `# Macro template\n\n$$a^2 + b^2 = c^2$$\n\n- [ ] preview task\n\n\`\`\`js\nconst answer = 42;\n\`\`\`\n\n${wrapProbe}\n\n:::note\nHello **bold** callout\n:::\n\n\`\`\`mermaid\nflowchart TD\n  A --> B\n\`\`\`\n\n::::tabs\n:::tab[One]\nAlpha\n:::\n:::tab[Two]\nBravo\n:::\n::::\n\n:::table\n<table><tr><td><img src=x onerror="window.__xss267=1"></td></tr></table>\n:::\n\n${wide}\n\n<script>window.__xss267=1</script>\n\n${long}\n`,
   );
   await sleep(500);
   await page.getByTestId("publish-page").click();
@@ -86,61 +84,100 @@ test("#267: template preview renders ALL macros (callout/tabs/table), scrolls, a
   await page.waitForSelector("[data-testid=template-picker]");
   await page.getByTestId("template-picker-item").filter({ hasText: "Macro Template" }).first().click();
   const preview = page.getByTestId("template-picker-preview-body");
-  await expect(preview.locator("h1")).toHaveText("Macro template", { timeout: 8000 });
+  await expect(preview.locator(".cm-content")).toContainText("Macro template", { timeout: 8000 });
+  await sleep(400); // async widgets (katex/mermaid) settle
 
-  // (1) the callout RENDERS as a panel and its body markdown recurses (**bold** → <strong>); no raw ::: text.
+  // Scroll the CM scroller one viewport at a time until `sel` is rendered (virtualised doc), collecting
+  // the rendered text along the way so the "no raw ::: markers" check covers the whole document.
+  const seenText: string[] = [];
+  const seek = async (sel: string) => {
+    for (let i = 0; i <= 14; i++) {
+      seenText.push(await preview.innerText());
+      if ((await preview.locator(sel).count()) > 0) return;
+      const atEnd = await preview.locator(".cm-scroller").evaluate((sc) => {
+        const before = sc.scrollTop;
+        sc.scrollTop = Math.min(sc.scrollTop + sc.clientHeight * 0.8, sc.scrollHeight);
+        return sc.scrollTop === before;
+      });
+      await sleep(300);
+      if (atEnd) return;
+    }
+  };
+
+  // (a) ENGINE PARITY — math renders as KaTeX, the todo checkbox exists but is DISABLED (display-only),
+  // the js fence is syntax-highlighted (the `const` token paints differently from base text), and the
+  // long paragraph WRAPS (its line is at least two text rows tall — EditorView.lineWrapping).
+  await expect(preview.locator(".katex").first()).toBeVisible({ timeout: 8000 });
+  const box = preview.getByTestId("task-checkbox").first();
+  await expect(box).toBeVisible();
+  await expect(box).toBeDisabled();
+  const colors = await preview.evaluate((root) => {
+    const spans = Array.from(root.querySelectorAll(".cm-line span"));
+    const constSpan = spans.find((s) => s.textContent === "const");
+    const base = root.querySelector(".cm-content");
+    return { c: constSpan ? getComputedStyle(constSpan).color : null, base: base ? getComputedStyle(base).color : null };
+  });
+  expect(colors.c, "the `const` keyword has no highlight span").not.toBeNull();
+  expect(colors.c, "code is not syntax-highlighted (keyword = base colour)").not.toBe(colors.base);
+  const wrapGeom = await preview.evaluate((root) => {
+    const line = Array.from(root.querySelectorAll(".cm-line")).find((l) => l.textContent?.includes("WRAPPROBE"));
+    if (!line) return null;
+    const lh = parseFloat(getComputedStyle(line).lineHeight) || 24;
+    return { h: line.getBoundingClientRect().height, lh, right: line.getBoundingClientRect().right, paneRight: root.getBoundingClientRect().right };
+  });
+  expect(wrapGeom, "wrap probe line not rendered").not.toBeNull();
+  expect(wrapGeom!.h, "long text does not wrap (single row)").toBeGreaterThan(wrapGeom!.lh * 1.8);
+  expect(wrapGeom!.right, "wrapped text overflows the pane").toBeLessThanOrEqual(wrapGeom!.paneRight + 1);
+
+  // (b) MACROS in the same engine — callout panel with recursed bold + box (tint + colour bar), mermaid
+  // centred (the editor's own cm-lp-macro-wrap align class), nested tabs with both labels, a real table.
+  await seek("[data-testid=callout-panel]");
   await expect(preview.locator("[data-testid=callout-panel]")).toHaveCount(1);
   await expect(preview.locator("[data-testid=callout-panel] strong")).toHaveText("bold");
-  expect(await preview.innerText()).not.toContain(":::note");
-
-  // (1b) #267 point 1: the callout PANEL shows its BOX — a background tint + a left colour bar — even
-  // though the preview is OUTSIDE .cm-editor (the tint/bar used to come only from the .cm-editor baseTheme,
-  // so the box vanished in the preview). Global CSS now backs it: the panel has a non-transparent tint.
   const calloutBg = await preview.locator("[data-testid=callout-panel]").evaluate((el) => {
     const cs = getComputedStyle(el);
     return { bg: cs.backgroundColor, bar: cs.borderLeftWidth };
   });
-  expect(calloutBg.bg, "callout panel has no background tint (the box is missing)").not.toBe("rgba(0, 0, 0, 0)");
+  expect(calloutBg.bg, "callout panel has no background tint").not.toBe("rgba(0, 0, 0, 0)");
   expect(calloutBg.bg).not.toBe("transparent");
   expect(parseFloat(calloutBg.bar), "callout panel has no left colour bar").toBeGreaterThan(0);
 
-  // (1c) #267 point 2: a rendered mermaid diagram is CENTERED by default (#255), matching the editor
-  // md-render tags it cm-lp-align-center and the global align CSS (not the .cm-editor baseTheme) centers it.
-  const mermaid = preview.locator(".cm-lp-mermaid").first();
-  await expect(mermaid).toHaveClass(/cm-lp-align-center/);
-  expect(await mermaid.evaluate((el) => getComputedStyle(el).alignItems)).toBe("center");
+  await seek(".cm-lp-macro-wrap");
+  await expect(preview.locator(".cm-lp-macro-wrap").first()).toHaveClass(/cm-lp-align-center/);
 
-  // (2) the NESTED :::tabs renders BOTH tabs (early-close corrected) and leaks no literal ":::".
+  await seek("[data-testid=macro-tabs]");
   const tabs = preview.locator("[data-testid=macro-tabs]");
-  await expect(tabs).toHaveCount(1);
+  await expect(tabs.first()).toBeVisible();
   await expect(tabs.locator(".cm-lp-tab")).toHaveText(["One", "Two"]);
-  expect(await preview.innerText()).not.toContain(":::");
 
-  // (3) the :::table RENDERS as a real <table> (not source), and its malicious onerror cell is inert.
-  await expect(preview.locator("table.cm-lp-table")).toHaveCount(1);
+  await seek("table.cm-lp-table");
+  await expect(preview.locator("table.cm-lp-table").first()).toBeVisible();
 
-  // (4) XSS-safe: neither the <script> nor the table's <img onerror> injected anything or executed.
+  // (c) XSS — scroll clear to the bottom so the <script> block's range is rendered, then assert nothing
+  // injected or executed, and that no raw ::: marker ever appeared in any rendered viewport.
+  await seek("__never-matches__"); // drains to the bottom
   await expect(preview.locator("script")).toHaveCount(0);
   await expect(preview.locator("img[onerror]")).toHaveCount(0);
-  await sleep(150); // give any (unwanted) onerror a chance to fire before asserting it did not
+  await sleep(150);
   expect(await page.evaluate(() => (window as unknown as { __xss267?: number }).__xss267)).toBeUndefined();
+  for (const t of seenText) {
+    expect(t).not.toContain(":::note");
+    expect(t).not.toContain("::::tabs");
+    expect(t).not.toContain(":::tab[");
+  }
 
-  // (3) the preview scrolls internally — the long body is scrollable and the dialog stays within the
-  // viewport (the max-h clamp makes the inner overflow-auto engage instead of the dialog overflowing).
+  // (d) GEOMETRY — the pane clips (overflow-hidden), the CM scroller inside owns the scrolling, and the
+  // dialog stays within the viewport.
   const previewPane = page.getByTestId("template-picker-preview");
-  expect(await previewPane.evaluate((el) => el.scrollHeight > el.clientHeight + 4)).toBe(true);
+  const scroll = await previewPane.locator(".cm-scroller").evaluate((sc) => ({ sh: sc.scrollHeight, ch: sc.clientHeight }));
+  expect(scroll.sh, "the tall content does not scroll inside the CM scroller").toBeGreaterThan(scroll.ch + 4);
   const dlg = (await page.getByTestId("template-picker").boundingBox())!;
   expect(dlg.y).toBeGreaterThanOrEqual(-1);
   expect(dlg.y + dlg.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
-
-  // #267 bounce: the preview pane's VISIBLE box must stay within the dialog on BOTH axes — the heavy
-  // body (wide table + math + 2 mermaids + tall prose) used to burst it right and grow it to ~4000px tall.
-  // (boundingBox reports the un-clipped layout size, so measure the client box the user actually sees.)
-  const pane = await previewPane.evaluate((el) => ({ cw: el.clientWidth, ch: el.clientHeight, sw: el.scrollWidth, sh: el.scrollHeight }));
+  const pane = await previewPane.evaluate((el) => ({ cw: el.clientWidth, ch: el.clientHeight }));
   const dlgClient = await page.getByTestId("template-picker").evaluate((el) => ({ cw: el.clientWidth, ch: el.clientHeight }));
   expect(pane.cw, "preview pane is wider than the dialog (horizontal burst)").toBeLessThanOrEqual(dlgClient.cw);
   expect(pane.ch, "preview pane is taller than the dialog (vertical burst)").toBeLessThanOrEqual(dlgClient.ch);
-  expect(pane.sh, "the tall content does not scroll inside the capped pane").toBeGreaterThan(pane.ch + 4);
 });
 
 // #267 (5th bounce): the REAL torture-page body expanded the two-pane row past the dialog while the
@@ -171,7 +208,7 @@ for (const vp of [{ width: 1310, height: 940 }, { width: 1280, height: 720 }]) {
     await page.waitForSelector("[data-testid=template-picker]");
     await page.getByTestId("template-picker-item").filter({ hasText: `Torture ${vp.width}` }).first().click();
     const preview = page.getByTestId("template-picker-preview-body");
-    await expect(preview.locator("h1")).toBeVisible({ timeout: 8000 });
+    await expect(preview.locator(".cm-content")).toContainText("拷問ページ", { timeout: 8000 }); // CM surface
     await sleep(1200); // async macro renders (mermaid/math) settle before measuring
 
     // BOTH panes sit inside the dialog box on the x-axis (the bounce: pane x ≈ dialog right edge).
@@ -188,13 +225,13 @@ for (const vp of [{ width: 1310, height: 940 }, { width: 1280, height: 720 }]) {
     expect(dlg.x + dlg.width).toBeLessThanOrEqual(vp.width + 1);
     expect(dlg.y + dlg.height).toBeLessThanOrEqual(vp.height + 1);
 
-    // tall content scrolls INSIDE the pane; wide content (mermaid/table) h-scrolls INSIDE the body
-    const m = await page.getByTestId("template-picker-preview").evaluate((el) => ({ ch: el.clientHeight, sh: el.scrollHeight }));
-    expect(m.sh, "tall torture body scrolls inside the capped pane").toBeGreaterThan(m.ch + 4);
+    // tall content scrolls INSIDE the CM scroller (the pane clips; the editor surface scrolls)
+    const m = await page.getByTestId("template-picker-preview").locator(".cm-scroller").evaluate((sc) => ({ ch: sc.clientHeight, sh: sc.scrollHeight }));
+    expect(m.sh, "tall torture body scrolls inside the CM scroller").toBeGreaterThan(m.ch + 4);
 
     // the macros still render in that constrained pane: nested tabs mount and no RAW directive
     // markers leak (the body legitimately contains a `:::` code SPAN, so check the marker forms).
-    await expect(preview.locator("[data-testid=macro-tabs]")).toHaveCount(1);
+    await expect(preview.locator("[data-testid=macro-tabs]").first()).toBeVisible({ timeout: 8000 });
     const text = await preview.innerText();
     expect(text).not.toContain("::::tabs");
     expect(text).not.toContain(":::tab[");
