@@ -49,9 +49,13 @@ export interface SourceEditorOptions {
 }
 
 // A minimal editor theme — code face, no gutter, transparent background so it sits inside the panel chrome.
+// #278NO fixed min-height — a short mermaid/plantuml source opened a mostly-empty box (the same
+// "editing must not look bigger than the content" bounce as the layout slots). The pane hugs its content;
+// an empty doc is still one line tall, so it stays clickable. The code face stays — these macros' source
+// IS code (the carve-outmakes explicit).
 const baseTheme = EditorView.theme({
   "&": { fontSize: "13px", background: "transparent" },
-  ".cm-content": { fontFamily: "var(--font-code)", padding: "6px 8px", minHeight: "4.5em" }, // usable even when empty
+  ".cm-content": { fontFamily: "var(--font-code)", padding: "6px 8px" },
   ".cm-scroller": { fontFamily: "var(--font-code)", lineHeight: "1.5" },
   "&.cm-focused": { outline: "none" },
 });

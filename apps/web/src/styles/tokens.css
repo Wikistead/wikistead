@@ -546,11 +546,18 @@ body {
    Falls back to 0 before the var is set (e.g. a header-less route). This gives the backdrop-blur real
    content to blur as the document scrolls up behind the band. */
 .lp-editor-host .cm-content { padding-top: var(--wks-band-h, 0px); }
-/* #278 rev4 (①): the slot-edit island is a NESTED editor inside the host surface, so the two
-   host-only clearances above (bottom floating-controls room, header-band offset) also matched ITS
-   .cm-content and inflated a one-line slot into a huge empty box. Neutralize them for the island —
-   its own theme (slotIslandTheme) supplies the real compact padding. */
-.lp-editor-host .cm-lp-slot-edit-island .cm-content { padding-top: 0.15em; padding-bottom: 0.15em; }
+/* #278 rev4 (①): the slot-edit island is a NESTED editor inside the host surface, so HOST-only
+   .cm-content rules also matched ITS .cm-content: the clearances above (bottom floating-controls room,
+   header-band offset) inflated a one-line slot into a huge empty box, and the reading-column rule
+   ([data-pane="preview"] .cm-content, ~line 348) indented the island text by its horizontal padding
+   (24px — the③ "text jumps right when the island opens"). Neutralize ALL of them: the island
+   text must sit exactly where the rendered slot text sat (no jump on open, either axis). */
+.lp-editor-host .cm-lp-slot-edit-island .cm-content,
+[data-pane="preview"] .cm-lp-slot-edit-island .cm-content {
+  max-width: none;
+  margin-inline: 0;
+  padding: 0;
+}
 
 /* #204: custom thin, subtle scrollbars app-wide (light/dark via --fg + color-mix). A track-less slim
    pill: a semi-transparent thumb inset by a transparent border (background-clip: padding-box) so it

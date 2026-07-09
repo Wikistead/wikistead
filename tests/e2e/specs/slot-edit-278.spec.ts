@@ -174,6 +174,111 @@ test("#278 rev4: an EMPTY tab panel stays clickable and opens the island", async
   await expect(page.locator("[data-pane=preview] [data-testid=slot-edit-src]")).toBeVisible();
 });
 
+// ── #278(review bounce #2) ────────────────────────────────────────────────────────────
+
+//①: the island only opens on EDITING surfaces. Reading is a reading surface (#166/#314) — a slot
+// click must not open the island there (the click gate is evaluated at CLICK time because the widget DOM
+// and its listeners are reused across display-mode switches).
+test("#278Reading mode never opens the slot island", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "slot-reading-gate"); await enterEdit(page);
+  await columnsDoc(page);
+  await page.getByTestId("displaymode-reading").click();
+  await sleep(400);
+  await page.locator("[data-pane=preview] .cm-lp-column").first().click({ force: true });
+  await sleep(400);
+  await expect(page.locator("[data-testid=slot-edit-island]")).toHaveCount(0);
+});
+
+//①: in WYSIWYG the island follows the outer mode — syntax stays hidden inside it (#164: wysiwyg
+// never reveals markers), instead of snapping to Live's caret-reveal behaviour.
+test("#278a WYSIWYG island stays syntax-free (no ** revealed at the caret)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "slot-wysiwyg-island"); await enterEdit(page);
+  await columnsDoc(page);
+  await page.getByTestId("displaymode-wysiwyg").click();
+  await sleep(400);
+  await page.locator("[data-pane=preview] .cm-lp-column").first().click();
+  await sleep(400);
+  const island = page.locator("[data-testid=slot-edit-island]");
+  await expect(island).toBeVisible();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.type("\n**bold wys**");
+  await sleep(300);
+  // caret is ON the bold text — Live would reveal the ** markers; WYSIWYG must not.
+  await expect(island.locator(".cm-lp-strong")).toContainText("bold wys");
+  expect(await island.innerText(), "no raw ** markers in a WYSIWYG island").not.toContain("**");
+});
+
+//③: opening the island must not MOVE the text — the editing surface sits exactly where the
+// rendered slot text sat ("the look changes when I click" bounce; the ADR-122 rev4 cross-cutting rule).
+test("#278opening the island keeps the slot text position (x within 2px)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "slot-open-geometry"); await enterEdit(page);
+  await columnsDoc(page);
+  const textRect = () => page.evaluate(() => {
+    const scope = document.querySelector("[data-testid=slot-edit-island]") ?? document.querySelector("[data-pane=preview] .cm-lp-column");
+    if (!scope) return null;
+    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+    let n: Node | null;
+    while ((n = walker.nextNode())) {
+      const i = (n.textContent ?? "").indexOf("AAA");
+      if (i >= 0) {
+        const r = document.createRange();
+        r.setStart(n, i); r.setEnd(n, i + 3);
+        const b = r.getBoundingClientRect();
+        return { x: b.x, y: b.y };
+      }
+    }
+    return null;
+  });
+  const before = await textRect();
+  expect(before, "rendered slot text found").not.toBeNull();
+  await page.locator("[data-pane=preview] .cm-lp-column").first().click();
+  await sleep(400);
+  const after = await textRect();
+  expect(after, "island text found").not.toBeNull();
+  expect(Math.abs(after!.x - before!.x), `x moved ${before!.x} → ${after!.x}`).toBeLessThanOrEqual(2);
+  expect(Math.abs(after!.y - before!.y), `y moved ${before!.y} → ${after!.y}`).toBeLessThanOrEqual(10);
+});
+
+//②: vim inside the island. `o` on the LAST line opens a new line INSIDE the island (never exits
+// to the outer editor), and Escape is two-stage: insert→normal stays in the island, a second (normal-
+// mode) Escape exits. The reported "caret vanished after o" trace matched the island closing on the
+// insert-mode Escape and the next key hitting the outer editor — both stages are pinned here.
+test("#278island vim — last-line `o` stays inside; Escape is two-stage (insert→normal, then exit)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "slot-vim-o"); await enterEdit(page);
+  await page.getByTestId("vim-toggle").click(); // vim ON before the island mounts (it mirrors at mount)
+  await sleep(200);
+  await columnsDoc(page);
+  await page.locator("[data-pane=preview] .cm-lp-column").first().click();
+  await sleep(400);
+  const island = page.locator("[data-testid=slot-edit-island]");
+  await expect(island).toBeVisible();
+  const inIsland = () => page.evaluate(() => !!document.activeElement?.closest?.("[data-testid=slot-edit-island]"));
+
+  // vim normal: G (last line) then o → a line opens INSIDE the island, focus stays, insert mode types.
+  await page.keyboard.press("Shift+G");
+  await page.keyboard.press("o");
+  await sleep(300);
+  expect(await inIsland(), "after o: still focused inside the island").toBe(true);
+  await page.keyboard.type("newline");
+  await sleep(150);
+  await expect(island.locator(".cm-content")).toContainText("newline");
+
+  // Escape #1 (insert mode): insert→normal, the island STAYS open.
+  await page.keyboard.press("Escape");
+  await sleep(300);
+  await expect(island, "insert-mode Escape must not close the island").toBeVisible();
+  expect(await inIsland(), "still focused inside after insert-mode Escape").toBe(true);
+
+  // Escape #2 (normal mode): exits the island (the intended way out).
+  await page.keyboard.press("Escape");
+  await sleep(400);
+  await expect(page.locator("[data-testid=slot-edit-island]")).toHaveCount(0);
+});
+
 test("#278 §2a: Escape exits the slot island without committing a stray edit", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "slot-edit-esc"); await enterEdit(page);
