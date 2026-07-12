@@ -11,12 +11,15 @@ type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 // never a broken embed). null on: a non-host-rendered lang, an empty body, 204 (operator endpoint
 // unconfigured / failed), any non-200, a non-image body, or a network error. The fetcher is
 // injectable so the request/response mapping is unit-tested without a real network.
-export function makeDiagramRenderer(token: string, pageId: string, fetcher: Fetcher = fetch): DiagramRenderer {
+// Core: POST the plantuml source to a gated render endpoint and map the response to blob | null (degrade).
+// The endpoint URL (page- vs template-scoped) is the only thing that varies; the request/response contract
+// and the degrade rules are identical, so page and template previews cannot drift.
+function makeRenderer(url: string, token: string, fetcher: Fetcher): DiagramRenderer {
   return async (lang, source) => {
     if (lang !== "plantuml") return null; // only plantuml is host-rendered today
     if (!source.trim()) return null; // empty fence → nothing to render (the empty placeholder shows)
     try {
-      const res = await fetcher(`${API_URL}/pages/${encodeURIComponent(pageId)}/plantuml/render`, {
+      const res = await fetcher(url, {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -29,4 +32,15 @@ export function makeDiagramRenderer(token: string, pageId: string, fetcher: Fetc
       return null; // network failure → degrade
     }
   };
+}
+
+export function makeDiagramRenderer(token: string, pageId: string, fetcher: Fetcher = fetch): DiagramRenderer {
+  return makeRenderer(`${API_URL}/pages/${encodeURIComponent(pageId)}/plantuml/render`, token, fetcher);
+}
+
+// #267the TEMPLATE-preview variant — hits the template-scoped, view-gated render endpoint (a faithful
+// mirror of the page one) so a template preview renders plantuml like the real editor. The server 404s a
+// non-viewer (existence-hidden) and 204-degrades when the operator endpoint is unconfigured — same contract.
+export function makeTemplateDiagramRenderer(token: string, templateId: string, fetcher: Fetcher = fetch): DiagramRenderer {
+  return makeRenderer(`${API_URL}/templates/${encodeURIComponent(templateId)}/plantuml/render`, token, fetcher);
 }

@@ -92,7 +92,7 @@ export function TemplatePickerDialog({
                 ) : body.isLoading || !body.data ? (
                   <p className="p-3 text-fg-dim">{t("common.loading")}</p>
                 ) : (
-                  <TemplateBodyPreview body={body.data.body} testid="template-picker-preview-body" />
+                  <TemplateBodyPreview body={body.data.body} templateId={selected} testid="template-picker-preview-body" />
                 )}
               </div>
               <div className="mt-3 flex justify-end">

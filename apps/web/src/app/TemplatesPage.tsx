@@ -108,7 +108,7 @@ function TemplatePreview({ tpl, onClose }: { tpl: TemplateSummary; onClose: () =
         {isLoading || !data ? (
           <p className="p-3 text-fg-dim">{t("common.loading")}</p>
         ) : (
-          <TemplateBodyPreview body={data.body} testid="template-preview-body" />
+          <TemplateBodyPreview body={data.body} templateId={tpl.id} testid="template-preview-body" />
         )}
       </div>
     </div>

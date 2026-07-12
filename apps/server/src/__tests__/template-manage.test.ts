@@ -96,6 +96,24 @@ describe('#249 template management — authz', () => {
     expect((await app.inject({ method: 'DELETE', url: '/templates/no-such-id', headers: devGet })).statusCode).toBe(404)
   })
 
+  // #267the template-preview PlantUML render endpoint mirrors the page endpoint's authz exactly.
+  it('plantuml render: member-viewer 204-degrades (no operator endpoint); missing source 400; guest 401; non-viewer id 404', async () => {
+    const created = await save({ fromPageId: pubPage, name: `${tag}-puml`, scope: 'tenant' })
+    const id = (created.json() as { id: string }).id
+    const puml = { source: '@startuml\nA -> B\n@enduml' }
+    // member + viewer (the creator) + no PLANTUML_RENDER_URL in the test env → 204 degrade-to-source.
+    expect((await app.inject({ method: 'POST', url: `/templates/${id}/plantuml/render`, headers: dev, payload: puml })).statusCode).toBe(204)
+    // a viewer with a missing/blank source → 400 (canView passes first, then the body check).
+    expect((await app.inject({ method: 'POST', url: `/templates/${id}/plantuml/render`, headers: dev, payload: {} })).statusCode).toBe(400)
+    // a GUEST token → 401 (member-only, checked before authz).
+    const gh = { host: 'dev.localhost', authorization: `Bearer ${viewTok}`, 'content-type': 'application/json' }
+    expect((await app.inject({ method: 'POST', url: `/templates/${id}/plantuml/render`, headers: gh, payload: puml })).statusCode).toBe(401)
+    // a non-existent / non-viewer id → 404 (existence-hidden, never 403).
+    expect((await app.inject({ method: 'POST', url: `/templates/no-such-id/plantuml/render`, headers: dev, payload: puml })).statusCode).toBe(404)
+    await admin`DELETE FROM templates WHERE id = ${id}`.catch(() => {})
+    await deleteObjectTuples(fgaClient, `template:${id}`).catch(() => {})
+  })
+
   it('scope containment + non-manager (FGA layer the routes delegate to): a viewer who is not a manager', async () => {
     // A tenant-scope template owned by OTHER: a tenant member can VIEW but not MANAGE; a non-member neither.
     const obj = `template:${tag}-scope`

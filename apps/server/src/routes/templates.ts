@@ -3,6 +3,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { check, writeTuples, deleteObjectTuples } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import type { TenantDb } from '../db/index.js'
+import { renderPlantuml } from '../plantuml-render.js' // #267template preview plantuml render (faithful mirror of the page endpoint)
 
 // #241 / ADR-110: page templates — the SAVE path. A template is a SNAPSHOT of a page's published Markdown
 // (frozen in the `templates` table, #247) whose audience is authorized by the `template` FGA type. Save is
@@ -160,6 +161,23 @@ export async function templatesPlugin(app: FastifyInstance) {
     const t = await getTemplate(req.db, app.fga, { userId: req.user.sub, id: req.params.id })
     if (!t) return reply.code(404).send({ error: 'not found' })
     return t
+  })
+
+  // #267PlantUML render for the TEMPLATE preview — a faithful mirror of the page endpoint
+  // (`POST /pages/:pageId/plantuml/render`, #140/ADR-074), but view-gated on the TEMPLATE instead of the
+  // page. Member-only (no `config.guest` → a guest token 401s); a non-viewer gets 404 (existence-hidden,
+  // never 403, uniform with getTemplate). The source is the plantuml body the viewer is ALREADY authorized
+  // to see (its own template preview) — it is handed to the SAME `renderPlantuml` (operator Kroki/PlantUML,
+  // existing SSRF/allowlist guard), so this adds NO new existence exposure and NO new external-fetch surface.
+  // 200 image/png on success; 204 = degrade-to-source (unconfigured / endpoint failure), same as the page.
+  app.post<{ Params: { id: string }; Body: { source?: string } }>('/templates/:id/plantuml/render', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ error: 'unauthorized' })
+    if (!(await canView(app.fga, req.user.sub, req.params.id))) return reply.code(404).send({ error: 'not found' }) // existence-hidden
+    const source = req.body?.source
+    if (typeof source !== 'string' || !source.trim()) return reply.code(400).send({ error: 'source is required' })
+    const png = await renderPlantuml(source)
+    if (!png) return reply.code(204).send() // degrade: caller renders the source fence
+    return reply.header('content-type', 'image/png').send(png)
   })
 
   app.patch<{ Params: { id: string }; Body: { name?: string } }>('/templates/:id', async (req, reply) => {
