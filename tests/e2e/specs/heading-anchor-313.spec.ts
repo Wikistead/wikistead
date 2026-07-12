@@ -78,16 +78,22 @@ test("#313the anchor icon scales with the heading level (h1 icon > h3 icon)", as
   await page.keyboard.insertText("# Big Heading\n\nprose\n\n### Small Heading\n\nprose\n");
   await sleep(400);
 
-  const iconHeight = async (text: string) => {
+  const iconMetrics = async (text: string) => {
     const line = page.locator(".cm-line", { hasText: text }).first();
     const svg = line.locator("[data-testid=heading-anchor-copy] svg");
     await expect(svg).toHaveCount(1);
-    return (await svg.boundingBox())!.height;
+    const height = (await svg.boundingBox())!.height;
+    const fontSize = await svg.evaluate((el) => parseFloat(getComputedStyle(el).fontSize)); // inherited heading size
+    return { height, fontSize };
   };
-  const h1 = await iconHeight("Big Heading");
-  const h3 = await iconHeight("Small Heading");
-  expect(h1, `h1 icon ${h1}px should be larger than a fixed 14px`).toBeGreaterThan(20);
-  expect(h1, `h1 icon ${h1}px vs h3 icon ${h3}px`).toBeGreaterThan(h3 * 1.2);
+  const h1 = await iconMetrics("Big Heading");
+  const h3 = await iconMetrics("Small Heading");
+  expect(h1.height, `h1 icon ${h1.height}px should be larger than a fixed 14px`).toBeGreaterThan(20);
+  expect(h1.height, `h1 icon ${h1.height}px vs h3 icon ${h3.height}px`).toBeGreaterThan(h3.height * 1.2);
+  //(review bounce): the icon is at most CAP height (≤ font-size × 0.85), not a full 1em square
+  // that overshoots the glyph tops. A 1em icon (height ≈ font-size × 1.0) fails this.
+  expect(h1.height, `h1 icon ${h1.height}px ≤ cap (font-size ${h1.fontSize}px × 0.85)`).toBeLessThanOrEqual(h1.fontSize * 0.85);
+  expect(h3.height, `h3 icon ${h3.height}px ≤ cap (font-size ${h3.fontSize}px × 0.85)`).toBeLessThanOrEqual(h3.fontSize * 0.85);
 });
 
 test("#313 deep link: /p/:id#slug lands the heading below the band; unknown slug stays at top", async ({ browser }) => {
