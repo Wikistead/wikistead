@@ -229,6 +229,12 @@ export interface BlockDirectiveMacro extends DirectiveMacroBase {
   // #90 (A′): REVEAL the raw source when the caret is inside the range (like the GFM table /
   // mermaid atoms) instead of entering explicitly. Used by the layout directives (columns/tabs).
   readonly revealOnCursor?: boolean;
+  // #332: with revealOnCursor, an EMPTY caret resting on the block SELECTS the atom (rendered card +
+  // ring, the image-atom model) instead of revealing its raw source; the raw reveals only on explicit
+  // entry (Ctrl+Enter → macroRenderActiveField) or a non-empty selection. For a picker-completed atom
+  // (embed-page) whose id is edited via the ⇆ retarget button / Ctrl+Enter — there is nothing to type
+  // in place, so caret-in-reveals-raw would only strand the caret. Omit → caret-in reveals raw (default).
+  readonly atomSelectable?: boolean;
   readonly containerClass?: never;
   readonly icon?: never;
   readonly collapsible?: never;

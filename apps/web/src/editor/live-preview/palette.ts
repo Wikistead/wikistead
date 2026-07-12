@@ -1,6 +1,6 @@
 import { EditorView, ViewPlugin, showTooltip, keymap, type Tooltip, type TooltipView } from "@codemirror/view";
 import { StateField, StateEffect, EditorSelection, Facet, Prec, type EditorState, type Extension } from "@codemirror/state";
-import { getCM } from "@replit/codemirror-vim";
+import { Vim, getCM } from "@replit/codemirror-vim";
 import i18n from "../../i18n";
 import { INLINE_FORMATS, insertImage, insertLink, type InlineFormat, type ImageUploader } from "./commands";
 import { orderByRecency, recordUse } from "./palette-recency";
@@ -178,19 +178,28 @@ function openTemplateInsert(view: EditorView, open: TemplateInsertPicker): void 
 // Open the host page picker and, on selection, insert `:::embed-page\n<id>\n:::` at the caret (where
 // applyAt already removed the "/query" token). Cancel (null) leaves the doc untouched. Offset edit
 // only — no view/Yjs access from here (the picker is host-owned; this just writes the chosen id).
-// #332: the block is COMPLETE at insert time (the picker supplied the id — nothing left to type), so
-// the caret lands AFTER a trailing newline, OUTSIDE the directive range. With the caret inside (the
-// old `at + insert.length` = the close-fence end), reveal-on-cursor kept the block raw — and when the
-// block was the whole document there was nowhere to move the caret to, so the widget never rendered.
-// (Fence templates like /mermaid intentionally differ: their body is EMPTY and the caret belongs
-// inside for typing.)
+// #332: the block is COMPLETE at insert time (the picker supplied the id — nothing left to type). The
+// caret lands on the block START, where embed-page's `atomSelectable` (transclude.ts) SELECTS the atom
+// the card renders with a selection ring instead of revealing raw. A trailing newline is added only when
+// non-newline content follows (so the closing `:::` keeps its own line), never a gratuitous blank line.
+// The `/embed` palette runs in vim INSERT mode, so after inserting a completed atom we drop back to
+// NORMAL and re-pin the caret on the atom (vim's Esc nudges it left) — otherwise the caret is stranded
+// in insert mode below the card. (Fence templates like /mermaid keep insert-inside: their body is empty
+// and you type into it.)
 function openEmbedPagePicker(view: EditorView, open: PageEmbedPicker): void {
   open((pageId) => {
     if (!pageId) { view.focus(); return; }
     const at = view.state.selection.main.head;
-    const insert = `:::embed-page\n${pageId}\n:::\n`;
-    view.dispatch({ changes: { from: at, insert }, selection: EditorSelection.cursor(at + insert.length), scrollIntoView: true });
-    view.focus();
+    const needsNl = at < view.state.doc.length && view.state.doc.sliceString(at, at + 1) !== "\n";
+    const insert = `:::embed-page\n${pageId}\n:::${needsNl ? "\n" : ""}`;
+    view.dispatch({ changes: { from: at, insert }, selection: EditorSelection.cursor(at), scrollIntoView: true });
+    const cm = getCM(view);
+    if (cm?.state.vim?.insertMode) { try { Vim.handleKey(cm, "<Esc>", "mapping"); } catch { /* vim unavailable */ } }
+    view.dispatch({ selection: EditorSelection.cursor(at) }); // pin the caret on the atom start (a vim Esc moves it left)
+    // The host picker's close restores focus to its trigger (now gone → <body>), which lands AFTER a
+    // synchronous view.focus. Defer so the editor wins the focus back — otherwise the next keystroke
+    // (e.g. Ctrl+Enter to edit the id) is lost to <body>. Same seam the template/link pickers use.
+    requestAnimationFrame(() => view.focus());
   });
 }
 
