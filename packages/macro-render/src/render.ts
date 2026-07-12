@@ -210,9 +210,10 @@ function renderBlock(node: SNode, src: string, macros: MacroHtmlRegistry): SafeH
       return html`<pre><code>${body}</code></pre>`;
     }
     case "HorizontalRule": return unsafeHtml("<hr>");
-    // #335 / ADR-130: a footnote DEFINITION is not rendered in place — it is collected into the end-of-document
-    // footnotes section (renderMarkdownToHtml, top-level). Emitting nothing here keeps it out of the body flow.
-    case "FootnoteDef": return html``;
+    // #335 / ADR-130: at the document root a footnote DEFINITION is not rendered in place — it is collected
+    // into the end-of-document section (footnoteNumbers is set). Inside a macro body (§A, footnoteNumbers null)
+    // there is no collection, so emit the definition as LITERAL text rather than dropping it (no content loss).
+    case "FootnoteDef": return footnoteNumbers == null ? html`<p>${txt(src, node)}</p>` : html``;
     case "Table": {
       // #174 point 4: GFM pipe table → a real <table>. TableHeader → <th>s in <thead>; each TableRow →
       // <td>s in <tbody>; TableDelimiter (the `|---|` separator) is skipped. Cell content is inline markdown
@@ -282,11 +283,19 @@ interface FootnoteData { numbers: Map<string, number>; defs: Map<string, SNode>;
 function collectFootnotes(tree: SNode, src: string): FootnoteData {
   const refOrder: string[] = [];
   const defs = new Map<string, SNode>();
+  // #335 / ADR-130 §A: a footnote inside a `:::` macro/callout body renders LITERALLY there (a muted `?`) and
+  // must NOT be pulled into the document-end section — otherwise this export and the DOM reader diverge
+  // (ADR-085) and the nested ref/def would collide with a top-level number. Nested bodies render via renderDoc
+  // (topLevel=false → footnoteNumbers null → `?`), so drop any node strictly inside a resolved directive range.
+  const dirs = resolvedFor(src);
+  const insideMacro = (pos: number): boolean => dirs.some((d) => pos > d.from && pos < d.to);
   tree.cursor().iterate((n) => {
     if (n.name === "FootnoteRef") {
+      if (insideMacro(n.from)) return;
       const label = footnoteRefLabel(src, n.from, n.to);
       if (label) refOrder.push(label);
     } else if (n.name === "FootnoteDef") {
+      if (insideMacro(n.from)) return;
       const m = /^\[\^([^\]\s]+)\]:/.exec(src.slice(n.from, n.to));
       const label = m?.[1];
       if (label && !defs.has(label)) defs.set(label, n.node); // duplicate def → first wins

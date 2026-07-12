@@ -87,6 +87,12 @@ const MARKS = new Set([
 // its number as a superscript link using this map; nested renders (renderBase != null) leave it null so a
 // footnote inside a macro body stays literal (ADR-130 §A). fn-<n> / fnref-<n> id namespace (ADR-130 §E).
 let footnoteNumbers: Map<string, number> | null = null;
+// #335 / ADR-130 §A: true while the OUTERMOST render owns the document footnote scope. A directive body is
+// rendered by a nested renderMarkdownToDom call that also sees renderBase == null (a top-level container's
+// body has no base offset), so `renderBase == null` alone can't tell "document root" from "macro body at the
+// root". This flag does: only the outermost render collects/numbers/sections; a nested body leaves the map
+// null → its footnotes stay literal `?` and it never starts its own section (matches the server's renderDoc).
+let footnoteDocActive = false;
 // The label inside `[^label]` (a FootnoteRef node spans `[^` … `]`).
 function footnoteRefLabel(src: string, from: number, to: number): string {
   return src.slice(from + 2, to - 1);
@@ -215,9 +221,13 @@ function stripMarks(node: SNode, src: string, mark: string): string {
 function renderBlock(node: SNode, src: string, into: Node): number | void {
   if (HEADINGS[node.name]) { const el = document.createElement(HEADINGS[node.name]!); renderInline(node, src, el); into.appendChild(el); return; }
   switch (node.name) {
-    // #335 / ADR-130: a footnote DEFINITION is NOT rendered in place — it is collected into the end-of-document
-    // footnotes section (renderMarkdownToDom, top-level). Skipping it here keeps it out of the body flow.
-    case "FootnoteDef": return;
+    // #335 / ADR-130: at the document root a footnote DEFINITION is collected into the end-of-document section
+    // (footnoteNumbers set) — skip it in the body flow. Inside a macro body (§A, footnoteNumbers null) there is
+    // no collection, so render it as LITERAL text rather than dropping it (no content loss).
+    case "FootnoteDef": {
+      if (footnoteNumbers == null) { const p = document.createElement("p"); p.textContent = txt(src, node); into.appendChild(p); }
+      return;
+    }
     case "Paragraph": { const el = document.createElement("p"); renderInline(node, src, el); into.appendChild(el); return; }
     case "Blockquote": { const el = document.createElement("blockquote"); renderBlocks(node, src, el); into.appendChild(el); return; }
     case "BulletList": { const el = document.createElement("ul"); renderBlocks(node, src, el); into.appendChild(el); return; }
@@ -366,20 +376,24 @@ function renderBlocks(parent: SNode, src: string, into: Node): void {
 export function renderMarkdownToDom(src: string, baseOffset?: number): DocumentFragment {
   const prevBase = renderBase;
   const prevFn = footnoteNumbers;
+  const prevDocActive = footnoteDocActive;
   renderBase = baseOffset ?? null;
   try {
     const tree = mdParser.parse(src);
     const frag = document.createDocumentFragment();
-    // #335 / ADR-130: footnote resolution is TOP-LEVEL ONLY (renderBase == null). Collect the ref order (→
-    // numbers) and the definitions, render the body (refs use the number map, defs are skipped), then append
-    // the end-of-document footnotes section. A nested render leaves footnoteNumbers null → a footnote inside a
-    // macro body stays literal (§A) and never starts its own section.
-    const fn = renderBase == null ? collectFootnotes(tree.topNode, src) : null;
+    // #335 / ADR-130: footnote resolution is TOP-LEVEL / DOCUMENT-ROOT ONLY. The outermost render (renderBase
+    // == null AND not already inside a footnote document) collects the ref order (→ numbers) and definitions,
+    // renders the body (refs use the number map, defs are skipped), then appends the end-of-document section. A
+    // nested render (a macro cell with a baseOffset, OR a directive body re-rendered at the root) leaves
+    // footnoteNumbers null → its footnotes stay literal `?` and it never starts its own section (§A).
+    const collect = renderBase == null && !footnoteDocActive;
+    const fn = collect ? collectFootnotes(tree.topNode, src) : null;
     footnoteNumbers = fn ? fn.numbers : null;
+    if (collect) footnoteDocActive = true;
     renderBlocks(tree.topNode, src, frag);
     if (fn && (fn.order.length > 0 || fn.unreferenced.length > 0)) frag.appendChild(renderFootnoteSection(fn, src));
     return frag;
-  } finally { renderBase = prevBase; footnoteNumbers = prevFn; }
+  } finally { renderBase = prevBase; footnoteNumbers = prevFn; footnoteDocActive = prevDocActive; }
 }
 
 // #335 / ADR-130: the document-scoped footnote pass. Numbers are assigned by FIRST-REFERENCE order; a repeated
@@ -391,11 +405,20 @@ function collectFootnotes(tree: SNode, src: string): FootnoteData {
   // Pass 1: gather every reference label in document order (defs can appear after refs) and every definition.
   const refOrder: string[] = [];
   const defs = new Map<string, SNode>();
+  // #335 / ADR-130 §A: a footnote inside a `:::` macro/callout body renders LITERALLY there (a muted `?`) and
+  // must NOT be pulled into the document-end section — otherwise this reader and the server export diverge
+  // (ADR-085) and the nested ref/def would collide with a top-level number. The lezer tree nests those nodes
+  // under the Directive, so skip any node strictly inside a resolved directive range (nested directives are
+  // covered: an inner-body node lies inside every enclosing range).
+  const dirs = resolvedDirectivesFor(src);
+  const insideMacro = (pos: number): boolean => dirs.some((d) => pos > d.from && pos < d.to);
   tree.cursor().iterate((n) => {
     if (n.name === "FootnoteRef") {
+      if (insideMacro(n.from)) return;
       const label = footnoteRefLabel(src, n.from, n.to);
       if (label) refOrder.push(label);
     } else if (n.name === "FootnoteDef") {
+      if (insideMacro(n.from)) return;
       const m = /^\[\^([^\]\s]+)\]:/.exec(src.slice(n.from, n.to));
       const label = m?.[1];
       if (label && !defs.has(label)) defs.set(label, n.node); // duplicate def → first wins
