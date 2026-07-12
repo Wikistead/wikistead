@@ -138,3 +138,34 @@ test("#303: a dirty-draft view toggle shows the dedicated 'publish first' toast 
   await expect(page.getByText(/Publish your draft changes first|先に下書きの変更を公開/)).toBeVisible({ timeout: 5000 });
   expect(await page.getByText(/Something went wrong|問題が発生しました/).count()).toBe(0);
 });
+
+// #317 (review): when the draft has DIVERGED AT THE TASK LEVEL (the clicked ordinal no longer lines up
+// in the draft — here the task was removed entirely), the #303 corruption guard correctly writes NOTHING to
+// the draft, but the OLD code then returned SILENTLY — the box didn't move and no toast fired ("dead
+// checkbox"). The fix still calls onToggleTask so the server 409s (skeleton mismatch) and the dirty toast
+// fires. Shared onToggleTaskInView path → this covers member AND guest.
+test("#317: a TASK-diverged dirty draft shows the dirty toast, not a silent no-op", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const pageId = await openScratch(page, "cb-317-diverge");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("- [ ] alpha");
+  await sleep(200);
+  await publish(page, pageId);
+
+  // Diverge the draft at the TASK level: remove the task line entirely (draft skeleton != published skeleton),
+  // so the clicked ordinal (index 0) resolves to pos<0 in the draft → the client guard hits.
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Delete");
+  await page.keyboard.type("no tasks anymore");
+  await expect.poll(() => isDirty(page, pageId), { timeout: 8000 }).toBe(true);
+
+  await page.click("[data-testid=view-toggle]");
+  await sleep(400);
+  await page.getByTestId("task-checkbox").first().click();
+
+  // The dedicated dirty toast fires (was a silent no-op before the fix); published stays untouched.
+  await expect(page.getByText(/Publish your draft changes first|先に下書きの変更を公開/)).toBeVisible({ timeout: 5000 });
+  expect(await page.getByText(/Something went wrong|問題が発生しました/).count()).toBe(0);
+  expect(await publishedMd(page, pageId)).toContain("- [ ] alpha"); // published never changed
+});
