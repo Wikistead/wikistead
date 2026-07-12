@@ -793,6 +793,7 @@
     "changedHidWysiwyg": "モード切替から WYSIWYG を非表示にしました",
     "changedHidMarkdownModes": "モード切替から Live / Source を非表示にしました",
     "bannerText": "新機能：書き方に合わせてエディタを最適化できます。",
-    "bannerCta": "設定する"
+    "bannerCta": "設定する",
+    "skippedMarkdownNote": "エディタを Markdown 向けに設定しました（vim オフ・WYSIWYG なし）。設定または「最初の質問をやり直す」でいつでも変更できます。"
   }
 }

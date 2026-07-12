@@ -57,24 +57,33 @@ test("#289 first run: vim answer applies the vim preset and the dialog never re-
   await expect(page.getByTestId("onboarding-dialog")).toHaveCount(0);
 });
 
-test("#289 skip keeps the FULL chrome and only marks seen", async ({ browser }) => {
+// #347 (ADR-115 addendum, supersedes the old "skip = full chrome" ruling): skipping now applies the MARKDOWN
+// persona preset explicitly (vim off, no WYSIWYG, launch Live) — the most common "didn't answer" profile —
+// with a note on the done screen (not a silent change). It is an explicit per-member write, NOT a change to
+// the chrome=null default, so backfilled members are unaffected. Ctrl+Alt+V keeps vim reachable.
+test("#347 skip applies the Markdown preset (vim off, no WYSIWYG) with a note, not full chrome", async ({ browser }) => {
   await armFirstRun();
   const page = await (await browser.newContext()).newPage();
   await openDemo(page);
   await expect(page.getByTestId("onboarding-dialog")).toBeVisible({ timeout: 8000 });
   await page.getByTestId("onboarding-skip").click();
-  await expect(page.getByTestId("onboarding-dialog")).toHaveCount(0);
+  // Skip lands on the done screen with a Markdown note (never a silent change), then close.
+  await expect(page.getByTestId("onboarding-done")).toBeVisible();
+  await page.getByTestId("onboarding-close").click();
   await sleep(600); // let the PATCH settle
 
   const s = await mySettings(page);
-  expect(s.editorChrome).toBeNull(); // untouched (ruling#4)
+  expect(s.editorChrome).toEqual({ vimToggleVisible: false, modesVisible: { live: true, source: true, reading: true, wysiwyg: false } });
+  expect(s.editorDisplayMode).toBe("live");
   expect(s.onboardingCompletedAt).not.toBeNull();
 
   await enterEdit(page);
-  await expect(page.getByTestId("vim-toggle")).toBeVisible();
-  for (const m of ["live", "source", "reading", "wysiwyg"]) {
-    await expect(page.getByTestId(`displaymode-${m}`)).toBeVisible();
-  }
+  await expect(page.getByTestId("vim-toggle")).toHaveCount(0); // vim button hidden (markdown preset)
+  await expect(page.getByTestId("displaymode-wysiwyg")).toHaveCount(0); // WYSIWYG hidden
+  for (const m of ["live", "source", "reading"]) await expect(page.getByTestId(`displaymode-${m}`)).toBeVisible();
+  // no dead-end: Ctrl+Alt+V still toggles vim even with the button hidden (ADR-115 §3)
+  await page.keyboard.press("Control+Alt+v");
+  await sleep(200);
 });
 
 test("#289 wysiwyg persona: hidden modes leave the segment AND the cycle; startup mode is wysiwyg", async ({ browser }) => {

@@ -33,8 +33,9 @@ export function EditorOnboardingDialog({ open, onClose }: { open: boolean; onClo
   const update = useUpdateAccountSettings();
   const [step, setStep] = useState<"q1" | "q2" | "done">("q1");
   const [persona, setPersona] = useState<Persona | null>(null);
+  const [skipped, setSkipped] = useState(false); // #347: the done screen shows a distinct note when reached by skip
 
-  const reset = () => { setStep("q1"); setPersona(null); };
+  const reset = () => { setStep("q1"); setPersona(null); setSkipped(false); };
   const close = () => { reset(); onClose(); };
 
   const apply = (p: Persona) => {
@@ -50,8 +51,14 @@ export function EditorOnboardingDialog({ open, onClose }: { open: boolean; onClo
     setStep("done");
   };
   const skip = () => {
-    update.mutate({ onboardingCompleted: true }); // seen — full chrome untouched (#4)
-    close();
+    // #347 / ADR-115 addendum: skipping ("answer later") now applies the MARKDOWN persona preset — the most
+    // common "didn't answer" profile is a markdown, not-vim user. This is an EXPLICIT write scoped to this
+    // member (NOT a change to the chrome=null default, which would silently strip vim from backfilled members).
+    // Vim stays reachable via Ctrl+Alt+V (no dead-end), and the done screen shows a note (never a silent change).
+    setPersona("markdown");
+    setSkipped(true);
+    update.mutate({ editorChrome: CHROME.markdown, editorDisplayMode: "live", onboardingCompleted: true });
+    setStep("done");
   };
 
   return (
@@ -88,7 +95,7 @@ export function EditorOnboardingDialog({ open, onClose }: { open: boolean; onClo
         )}
         {step === "done" && persona && (
           <div className="flex flex-col gap-3" data-testid="onboarding-done">
-            <p>{t("onboarding.doneBody")}</p>
+            <p>{skipped ? t("onboarding.skippedMarkdownNote") : t("onboarding.doneBody")}</p>
             <ul className="flex flex-col gap-1">
               {CHANGE_KEYS[persona].map((k) => (
                 <li key={k} className="flex items-center gap-2 text-sm"><Check size={14} className="flex-none text-[var(--accent)]" /> {t(k)}</li>
