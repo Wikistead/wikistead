@@ -2536,6 +2536,22 @@ function atomSelected(state: EditorState, from: number, to: number): boolean {
   const s = state.selection.main;
   return !state.readOnly && s.empty && s.head >= from && s.head <= to;
 }
+// #332: whether a directive block should show its RAW source right now. Identical to `rangeRevealed`
+// for every macro EXCEPT an `atomSelectable` one (embed-page): there an empty caret resting on the block
+// SELECTS the atom (the widget stays rendered — the image-atom model), and the raw reveals only on
+// EXPLICIT entry (Ctrl+Enter sets macroRenderActiveField over the block) or a NON-empty selection. This
+// is the single source of truth the three reveal sites (widget render + the two fence-hide passes) share
+// so the widget and its `:::` fences never disagree (one rendered, one raw). Source mode is handled
+// upstream (isSourceMode short-circuits before any widget renders), so it is not re-checked here.
+function directiveRevealed(state: EditorState, name: string, from: number, to: number): boolean {
+  const macro = findDirectiveMacro(name);
+  if (macro?.revealOnCursor && macro.atomSelectable) {
+    const active = state.field(macroRenderActiveField, false);
+    if (active && active.from <= from && active.to >= to) return true; // Ctrl+Enter / explicit entry
+    return rangeRevealed(state, from, to) && !atomSelected(state, from, to); // empty caret selects, not reveals
+  }
+  return rangeRevealed(state, from, to);
+}
 
 // ── Extensible block-render registry (P3) ──────────────────────────────────
 // Each renderer maps markdown syntax-tree nodes to DECORATIONS. The builder it
@@ -2860,7 +2876,7 @@ const RENDERERS: BlockRenderer[] = [
           ctx.addAtomic(Decoration.replace({ widget: new EditableTableWidget(from, to, doc.sliceString(from, to)), block: true }), from, to);
           return false; // skip inner nodes — the inline editor owns the block
         }
-        if (macro.revealOnCursor && rangeRevealed(ctx.state, from, to)) {
+        if (macro.revealOnCursor && directiveRevealed(ctx.state, open!.name, from, to)) {
           // #196 / ADR-092 innermost-wins reveal: a caret inside the container reveals the WHOLE block
           // raw ONLY when it's editing the container's own structure (chain innermost === container).
           // When the caret is deeper inside a NESTED registered macro (e.g. a callout in a column),
@@ -2987,7 +3003,7 @@ const RENDERERS: BlockRenderer[] = [
     // `::::` markers raw (the leak the reviewer saw), because the caret is within the container's range.
     // Innermost-wins: an ancestor container hides its markers while a descendant reveals; the frame +
     // descend renderer (above) keeps the container drawn, so only the innermost child shows raw.
-    if (dir && rangeRevealed(ctx.state, dir.from, dir.to) && !caretInNestedMacro(ctx.state, dir.from, dir.to)) return;
+    if (dir && directiveRevealed(ctx.state, dir.name, dir.from, dir.to) && !caretInNestedMacro(ctx.state, dir.from, dir.to)) return;
     ctx.fenceLineStarts.add(ctx.state.doc.lineAt(node.from).from); // #185 2b: lezer hid this fence line
     ctx.hideMarker(node.from, node.to, undefined, false);
   } },
@@ -3262,13 +3278,13 @@ function buildDecorations(state: EditorState, themeOverride?: MacroTheme): {
   // early-closed DESCEND containers (columns/tabs) leak, and those are never under a block-replace widget
   // (callout etc. parse correctly → their fences ARE in fenceLineStarts), so this never overlaps a replace.
   for (const dir of resolveDirectiveRanges(state.doc.toString())) {
-    if (typeof window !== "undefined") { const w = window as unknown as { __pp?: unknown[] }; (w.__pp ??= []).push({ name: dir.name, from: dir.from, to: dir.to, closed: dir.closed, revealed: rangeRevealed(state, dir.from, dir.to), nested: caretInNestedMacro(state, dir.from, dir.to) }); }
+    if (typeof window !== "undefined") { const w = window as unknown as { __pp?: unknown[] }; (w.__pp ??= []).push({ name: dir.name, from: dir.from, to: dir.to, closed: dir.closed, revealed: directiveRevealed(state, dir.name, dir.from, dir.to), nested: caretInNestedMacro(state, dir.from, dir.to) }); }
     // #196 / ADR-092 (comment 740): innermost-wins — reveal a directive's raw fences ONLY when the caret
     // edits THIS directive itself, not when it's deeper inside a nested child. Without `!caretInNestedMacro`
     // a layout container (columns/tabs) whose nested callout is being edited kept its own `::::columns` /
     // `::::` fences raw (the leak): the caret is within the container's range, so plain `rangeRevealed` was
     // true. The frame + descend renderer keeps the container drawn, so hiding its fences here is correct.
-    if (rangeRevealed(state, dir.from, dir.to) && !caretInNestedMacro(state, dir.from, dir.to)) continue; // editing this block → raw fences
+    if (directiveRevealed(state, dir.name, dir.from, dir.to) && !caretInNestedMacro(state, dir.from, dir.to)) continue; // editing this block → raw fences
     const openLine = state.doc.lineAt(dir.from);
     if (!ctx.fenceLineStarts.has(openLine.from) && openLine.from < openLine.to) ctx.hideMarker(openLine.from, openLine.to, undefined, false);
     if (dir.closed) {
@@ -3566,7 +3582,14 @@ export function enterMacroAt(view: EditorView, pos: number, raw = false): boolea
     }
     return true;
   }
-  const dir = directiveMacroAt(view.state, pos);
+  let dir = directiveMacroAt(view.state, pos);
+  if (!dir) {
+    // #332: an atomSelectable block (embed-page) rests the caret at its atomic EDGE (block start/end),
+    // which is a syntax-tree boundary where directiveMacroAt can miss. When the caret sits on a block
+    // atom, retry from a position strictly inside it so Ctrl+Enter still reveals the raw source to edit.
+    const b = view.state.field(livePreview, false)?.blocks?.find((bl) => pos >= bl.from && pos <= bl.to);
+    if (b) dir = directiveMacroAt(view.state, Math.min(b.from + 1, view.state.doc.length));
+  }
   if (dir) {
     view.dispatch({ selection: EditorSelection.cursor(dir.from), effects: setMacroRenderActive.of({ from: dir.from, to: dir.to }) });
     view.focus();
