@@ -558,6 +558,17 @@ body {
   margin-inline: 0;
   padding: 0;
 }
+/* #278 D: the SAME clearances (bottom 4.5rem, header-band top) also leak into the mermaid/plantuml
+   editUI panel's nested editor — a 1-line source inflated to ~208px. The rule above only scopes the slot
+   island; neutralize the VERTICAL clearances for ANY editor nested inside another editor (a .cm-content whose
+   editor is itself inside a .cm-editor), so an editUI source pane hugs its content too. Only top/bottom (the
+   nested editor keeps its own horizontal padding); the slot island's own rule still zeroes its L/R for the
+   no-x-jump requirement. */
+.lp-editor-host .cm-editor .cm-editor .cm-content,
+[data-pane="preview"] .cm-editor .cm-editor .cm-content {
+  padding-top: 0;
+  padding-bottom: 0;
+}
 
 /* #267 the template preview mounts the editor's read-only surface in a BOUNDED box (picker pane /
    manage panel). The page-level clearances above (72px floating-controls room, header-band offset) don't
