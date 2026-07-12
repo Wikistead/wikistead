@@ -45,8 +45,8 @@ test("publish flow: create→edit, draft hidden in view until publish, then visi
   await sleep(2800);
   await expect(page.locator("[data-testid=unpublished-badge]")).toBeVisible({ timeout: 8000 });
 
-  // (5) the sidebar shows the unpublished dot on this page (after the tree refetches)
-  await page.reload();
-  await page.waitForSelector("[data-pane=preview] .cm-content");
-  await expect(page.locator("[data-testid=tree-page][data-selected] [data-testid=unpublished-dot]")).toBeVisible();
+  // (5) #336 B: the sidebar shows the unpublished dot on this page WITHOUT a reload — usePublished's
+  // server poll detects the persisted dirty state and invalidates the pages list once (presence-safe;
+  // NOT driven by an editor React signal). The dot is a badge overlaid on the page icon (A(1)).
+  await expect(page.locator("[data-testid=tree-page][data-selected] [data-testid=unpublished-dot]")).toBeVisible({ timeout: 10000 });
 });

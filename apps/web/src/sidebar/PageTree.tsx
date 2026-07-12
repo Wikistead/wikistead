@@ -114,60 +114,84 @@ export function PageTree({
           {hasChildren ? <ChevronRight size={14} className={cn("transition-transform duration-[120ms]", node.isOpen && "rotate-90")} /> : <span className="inline-block w-[14px]" />}
         </span>
         {/* #315: a draft (never-published) page swaps the file icon itself — zero extra row width. The
-            tooltip lives on a wrapping span (a title attribute on an <svg> shows no native tooltip). */}
-        {d.published ? (
-          <FileText size={14} className="flex-none text-fg-dim" />
-        ) : (
-          <span className="inline-flex flex-none items-center" data-testid="tree-draft-icon" title={t("sidebar.draftTitle")}>
-            <FilePen size={14} className="text-fg-dim" aria-label={t("sidebar.draftTitle")} />
-          </span>
-        )}
+            tooltip lives on a wrapping span (a title attribute on an <svg> shows no native tooltip).
+            #336 A(1): the "unpublished changes" dot is now a badge overlaid on the icon's bottom-right
+            (was a separate inline slot that ate row width and truncated the title early). 3-state stays
+            distinct: draft = FilePen · published+unpublished = FileText + dot · clean = FileText. */}
+        <span className="relative inline-flex flex-none items-center">
+          {d.published ? (
+            <FileText size={14} className="text-fg-dim" />
+          ) : (
+            <span className="inline-flex items-center" data-testid="tree-draft-icon" title={t("sidebar.draftTitle")}>
+              <FilePen size={14} className="text-fg-dim" aria-label={t("sidebar.draftTitle")} />
+            </span>
+          )}
+          {d.published && d.unpublished ? (
+            <span
+              className="absolute -bottom-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-[var(--accent)] ring-1 ring-[var(--panel)]"
+              data-testid="unpublished-dot"
+              title={t("sidebar.unpublished")}
+              aria-label={t("sidebar.unpublished")}
+            />
+          ) : null}
+        </span>
         {/* #219: a native tooltip ONLY when the title is truncated (checked at hover via scrollWidth). */}
         {/* #315: a draft row also dims its title so "not published yet" reads from the whole row. */}
         <span className={cn("min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap", !d.published && "text-fg-dim")} data-testid="tree-page-name"
           onMouseEnter={(e) => { const el = e.currentTarget; el.title = el.scrollWidth > el.clientWidth ? (d.name || t("common.untitled")) : ""; }}>{d.name || t("common.untitled")}</span>
         {/* #109 Fix B: private (allowlist-only) lock. Shown only to viewers of the page — non-viewers 404. */}
         {d.private && <Lock size={12} className="mx-0.5 flex-none text-fg-dim" data-testid="tree-private-lock" aria-label={t("sidebar.private")} />}
-        {/* 3-state: Draft (FilePen icon, above) / Unpublished changes (dot) / clean (nothing). The #315
-            text pill is gone — draft is carried by the file icon swap, so the two states stay distinct. */}
-        {d.published && d.unpublished ? (
-          <span className="mx-1 h-1.5 w-1.5 flex-none rounded-full bg-[var(--accent)]" data-testid="unpublished-dot" title={t("sidebar.unpublished")} aria-label={t("sidebar.unpublished")} />
-        ) : null}
         {/* #290 / ADR-114: a compact :::todo progress ring — only for pages with a :::todo (taskTotal>0). */}
         {d.taskTotal > 0 && <span className="mx-0.5 flex-none inline-flex items-center self-center" data-testid="tree-todo-ring"><ProgressRing done={d.taskDone} total={d.taskTotal} compact /></span>}
-        {/* #284: pin toggle — hover-revealed like the row menu, but NOT canEdit-gated (pinning is a
-            member-personal view action). A pinned row keeps its ★ visible so the state is readable. */}
-        {onTogglePinRef.current && (
-          <span
-            className={cn(
-              "flex flex-none transition-opacity duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
-              d.pinned ? "opacity-100" : "pointer-events-none opacity-0",
-            )}
-            onClick={(e) => e.stopPropagation()}
-          >
+        {/* #284 / #336 A(4): a PINNED page shows its ★ ALWAYS (click to unpin — the ★ then disappears).
+            Unpinned pages have NO standalone pin button; pinning moved into the row menu below, so the row
+            stays narrow. Pin is a member-personal action, so still NOT canEdit-gated. */}
+        {onTogglePinRef.current && d.pinned && (
+          <span className="flex flex-none" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
               className="flex cursor-pointer rounded-sm p-0.5 text-fg-dim transition-colors duration-[120ms] hover:bg-border hover:text-foreground"
-              title={d.pinned ? t("sidebar.unpin") : t("sidebar.pin")}
-              aria-label={d.pinned ? t("sidebar.unpin") : t("sidebar.pin")}
-              aria-pressed={d.pinned ?? false}
+              title={t("sidebar.unpin")}
+              aria-label={t("sidebar.unpin")}
+              aria-pressed
               data-testid="tree-pin-toggle"
               onClick={() => onTogglePinRef.current!(d)}
             >
-              <Pin size={13} className={d.pinned ? "fill-current" : undefined} />
+              <Pin size={13} className="fill-current" />
             </button>
           </span>
         )}
-        {canEdit && onRowActionRef.current && (
-          <span className="flex gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 has-[[aria-expanded=true]]:pointer-events-auto has-[[aria-expanded=true]]:opacity-100" onClick={(e) => e.stopPropagation()}>
+        {/* #336 A(3): the row menu is shown only on hover / selected / open (else it takes zero width so the
+            title truncates later), sliding in from the right (motion-reduce disables the slide). It holds the
+            canEdit page actions AND — for an unpinned page — the "Pin" action (A(4)). Rendered whenever there
+            is ANY action for this row: canEdit items, or the pin item for a non-canEdit member. */}
+        {((canEdit && onRowActionRef.current) || (onTogglePinRef.current && !d.pinned)) && (
+          <span
+            className={cn(
+              "flex gap-0.5 transition-[opacity,transform] duration-[120ms] motion-reduce:transition-none",
+              "translate-x-1 opacity-0 pointer-events-none",
+              "group-hover:translate-x-0 group-hover:opacity-100 group-hover:pointer-events-auto",
+              "group-focus-within:translate-x-0 group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
+              "has-[[aria-expanded=true]]:translate-x-0 has-[[aria-expanded=true]]:opacity-100 has-[[aria-expanded=true]]:pointer-events-auto",
+              selected && "!translate-x-0 !opacity-100 !pointer-events-auto",
+            )}
+            onClick={(e) => e.stopPropagation()}
+          >
             <DropdownMenu modal={false}>
               <DropdownMenuTrigger className="flex cursor-pointer rounded-sm p-0.5 text-fg-dim transition-colors duration-[120ms] hover:bg-border hover:text-foreground" aria-label={t("sidebar.pageActions")} data-testid="page-actions"><MoreHorizontal size={14} /></DropdownMenuTrigger>
               <DropdownMenuContent align="start" data-testid="page-menu">
-                <DropdownMenuItem onSelect={() => onRowActionRef.current!("subpage", d)} data-testid="add-subpage"><FilePlus size={13} /> {t("sidebar.addSubpage")}</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onRowActionRef.current!("share", d)}><Share2 size={13} /> {t("sidebar.share")}</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onRowActionRef.current!("rename", d)}><Pencil size={13} /> {t("sidebar.rename")}</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onRowActionRef.current!("duplicate", d)} data-testid="tree-duplicate-page"><Copy size={13} /> {t("page.duplicatePage")}</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onRowActionRef.current!("delete", d)} data-danger="" variant="destructive"><Trash2 size={13} /> {t("sidebar.delete")}</DropdownMenuItem>
+                {onTogglePinRef.current && !d.pinned && (
+                  <DropdownMenuItem onSelect={() => onTogglePinRef.current!(d)} data-testid="tree-pin-menu-item"><Pin size={13} /> {t("sidebar.pin")}</DropdownMenuItem>
+                )}
+                {canEdit && onRowActionRef.current && (
+                  <>
+                    <DropdownMenuItem onSelect={() => onRowActionRef.current!("subpage", d)} data-testid="add-subpage"><FilePlus size={13} /> {t("sidebar.addSubpage")}</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onRowActionRef.current!("share", d)}><Share2 size={13} /> {t("sidebar.share")}</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onRowActionRef.current!("rename", d)}><Pencil size={13} /> {t("sidebar.rename")}</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onRowActionRef.current!("duplicate", d)} data-testid="tree-duplicate-page"><Copy size={13} /> {t("page.duplicatePage")}</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onRowActionRef.current!("delete", d)} data-danger="" variant="destructive"><Trash2 size={13} /> {t("sidebar.delete")}</DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </span>
