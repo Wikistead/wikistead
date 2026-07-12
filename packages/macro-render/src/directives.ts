@@ -70,10 +70,12 @@ export function tabsHtmlRender(body: string, renderInner?: (md: string) => SafeH
   )}</div>`;
 }
 
-// details → standard HTML <details> (Markdown-compatible). The [label] summary lives on the fence
-// line (not in body), so the server export path (#85 slice 3) will thread it in; generic for now. #85: recurse.
-export function detailsHtmlRender(body: string, renderInner?: (md: string) => SafeHtml): SafeHtml {
-  return html`<details><summary>Details</summary>\n\n${inner(body, renderInner)}\n\n</details>`;
+// details → standard HTML <details> (Markdown-compatible). #337 point 3: the `[label]` summary lives on the
+// fence line (`:::details[More info]`); it is threaded in as `label` and rendered as the <summary> (escaped
+// through html`` — XSS-inert). Falls back to "Details" when the directive has no label. #85: body recurses.
+export function detailsHtmlRender(body: string, renderInner?: (md: string) => SafeHtml, label?: string): SafeHtml {
+  const summary = label && label.trim() ? label.trim() : "Details";
+  return html`<details><summary>${summary}</summary>\n\n${inner(body, renderInner)}\n\n</details>`;
 }
 
 // Typed callouts (#150 / ADR-049): each admonition type is its own directive (:::note / :::info /

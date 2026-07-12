@@ -2189,42 +2189,58 @@ class MacroWidget extends WidgetType {
 const detailsOpenState = new Map<number, boolean>();
 class DetailsSummaryWidget extends WidgetType {
   private ro?: ResizeObserver;
+  private destroyed = false;
   constructor(readonly summary: string, readonly body: string, readonly from: number) { super(); }
   eq(o: DetailsSummaryWidget) { return o.summary === this.summary && o.body === this.body; }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
-    wrap.className = "cm-lp-details-collapsible";
+    wrap.className = "cm-lp-details-collapsible"; // #337: a SINGLE enclosing box (border + radius); it grows
     wrap.setAttribute("data-testid", "macro-details");
     const isOpen = detailsOpenState.get(this.from) ?? false;
+    wrap.classList.toggle("cm-lp-details-open", isOpen);
     const bar = document.createElement("div");
     bar.className = "cm-lp-details-summary";
     bar.setAttribute("data-testid", "details-summary-bar");
     const arrow = document.createElement("span");
-    arrow.className = "cm-lp-details-arrow";
-    arrow.textContent = isOpen ? "▾" : "▸";
+    arrow.className = "cm-lp-details-arrow"; // one glyph; CSS rotates it 90° in the open state (no text swap)
+    arrow.textContent = "▸";
     const label = document.createElement("span");
+    label.className = "cm-lp-details-label";
     label.textContent = ` ${this.summary}`; // textContent — never innerHTML
     bar.append(arrow, label);
-    // The rendered body (open state). Sanitized DOM via the shared renderer; untagged (display-only, editing
-    // goes through raw reveal). `cm-lp-md-directive` gives it the nested-block styling (headings/lists/tables).
+    // #337 point 2: the body lives in a grid wrapper whose single row animates 0fr↔1fr, so the WHOLE box grows
+    // and shrinks as ONE container (not a separate quoted block appearing below). The inner body clips.
+    const bodyWrap = document.createElement("div");
+    bodyWrap.className = "cm-lp-details-bodywrap";
+    bodyWrap.setAttribute("aria-hidden", String(!isOpen)); // collapsed body is out of the a11y tree (it's clipped, not display:none)
+    // The grid child clips (overflow hidden, min-height 0) and carries NO padding — padding on the clipped
+    // element would keep a residual height at 0fr; it lives on the inner block instead. #337 point 2.
     const bodyEl = document.createElement("div");
-    bodyEl.className = "cm-lp-details-body cm-lp-md-directive";
+    bodyEl.className = "cm-lp-details-body";
     bodyEl.setAttribute("data-testid", "details-body");
-    bodyEl.appendChild(renderMarkdownToDom(this.body));
-    if (!isOpen) bodyEl.style.display = "none";
-    wrap.append(bar, bodyEl);
+    const bodyInner = document.createElement("div");
+    bodyInner.className = "cm-lp-details-body-inner cm-lp-md-directive"; // padding + nested-block styling
+    bodyInner.appendChild(renderMarkdownToDom(this.body)); // shared renderer, sanitized DOM (display-only)
+    bodyEl.appendChild(bodyInner);
+    bodyWrap.appendChild(bodyEl);
+    wrap.append(bar, bodyWrap);
+    // #337 point 1: the bar toggle is DISPLAY-ONLY (no doc / offset / presence change), so it must work on
+    // EVERY surface — including the read-only view / Reading / guest panels (mountPublishedView is readOnly).
+    // Only the ✎ raw-reveal edit entry stays gated on !readOnly (same split as #314's Reading task checkbox).
+    bar.addEventListener("mousedown", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const now = !(detailsOpenState.get(this.from) ?? false);
+      detailsOpenState.set(this.from, now);
+      wrap.classList.toggle("cm-lp-details-open", now);
+      bodyWrap.setAttribute("aria-hidden", String(!now));
+      view.requestMeasure(); // the ResizeObserver follows the transition; transitionend settles the final height
+    });
+    // #255/#282 block-widget rule: nail the final height at the END of the open/close animation so lines below
+    // don't drift once the transition finishes (the continuous change is tracked by observeBlockResize).
+    bodyWrap.addEventListener("transitionend", (e) => { if (e.propertyName === "grid-template-rows") view.requestMeasure(); });
     if (!view.state.readOnly) {
-      // ▸/▾ click TOGGLES the rendered open state — display-only, in-place, never enters raw (#337 issue 2).
-      bar.addEventListener("mousedown", (e) => {
-        e.preventDefault(); e.stopPropagation();
-        const now = !(detailsOpenState.get(this.from) ?? false);
-        detailsOpenState.set(this.from, now);
-        arrow.textContent = now ? "▾" : "▸";
-        bodyEl.style.display = now ? "" : "none";
-        view.requestMeasure(); // height changed → CM re-measures so lines below don't drift
-      });
       // Edit entry (raw reveal): a hover ✎ button (mouse) + Ctrl+Enter (the atom is selected) — the callout
-      // panel's affordance, so overloading the bar-click is unnecessary. stopPropagation so it doesn't toggle.
+      // panel's affordance. stopPropagation so it doesn't also toggle the bar.
       wrap.classList.add("cm-lp-callout-panel-editable");
       const edit = document.createElement("button");
       edit.type = "button";
@@ -2236,9 +2252,12 @@ class DetailsSummaryWidget extends WidgetType {
       wrap.appendChild(edit);
     }
     this.ro = observeBlockResize(view, wrap);
+    // Enable transitions only AFTER the first paint, so the initial mount / a rebuild (body edit) doesn't
+    // animate the box — only a user toggle does.
+    requestAnimationFrame(() => { if (!this.destroyed) wrap.classList.add("cm-lp-details-animated"); });
     return wrap;
   }
-  destroy() { this.ro?.disconnect(); this.ro = undefined; }
+  destroy() { this.destroyed = true; this.ro?.disconnect(); this.ro = undefined; }
   ignoreEvent() { return false; }
 }
 
@@ -3893,12 +3912,28 @@ export const livePreviewTheme = EditorView.baseTheme({
   // returns as soon as the caret leaves the block.
   ".cm-lp-columns-frame, .cm-lp-tabs-frame": { borderLeft: "2px solid var(--border, #888)", paddingLeft: "0.6em" },
   ".cm-lp-column-frame, .cm-lp-tab-frame": { borderLeft: "2px solid color-mix(in srgb, var(--accent, #4ea1ff) 40%, transparent)", paddingLeft: "0.6em" },
-  // #90 / #337 details: the collapsible container (summary bar + rendered body) + (revealed) a subtle box.
-  ".cm-lp-details-collapsible": { position: "relative" },
-  ".cm-lp-details-summary": { border: "1px solid var(--border, #888)", borderRadius: "4px", padding: "0.35em 0.7em", cursor: "pointer", color: "var(--fg-dim, #888)", userSelect: "none" },
-  ".cm-lp-details-arrow": { display: "inline-block", width: "1em", textAlign: "center" },
-  // #337 issue 2: the rendered open body — bordered like the block it belongs to, offset under the bar.
-  ".cm-lp-details-body": { marginTop: "0.4em", borderLeft: "3px solid var(--border, #888)", paddingLeft: "0.8em" },
+  // #90 / #337: the collapsible details container is ONE box (border + radius) that GROWS when opened — the
+  // summary bar and the body share the same box, and the body's row animates its height (no separate quoted
+  // block appearing below). #337 point 2.
+  ".cm-lp-details-collapsible": { position: "relative", border: "1px solid var(--border, rgba(127,127,127,0.4))", borderRadius: "6px", overflow: "hidden", margin: "0.3em 0" },
+  ".cm-lp-details-summary": { display: "flex", alignItems: "center", gap: "0.35em", padding: "0.4em 0.7em", cursor: "pointer", color: "var(--fg-dim, #888)", userSelect: "none", fontWeight: "600" },
+  ".cm-lp-details-summary:hover": { background: "var(--panel-2, rgba(127,127,127,0.06))" },
+  // ONE glyph rotated 90° in the open state (no ▸/▾ text swap). Transitions apply only after mount (the
+  // `details-animated` class is added post-paint) so a rebuild / initial render doesn't animate.
+  ".cm-lp-details-arrow": { display: "inline-block", flex: "none", transformOrigin: "center", lineHeight: "1" },
+  ".cm-lp-details-animated .cm-lp-details-arrow": { transition: "transform 160ms ease" },
+  ".cm-lp-details-open .cm-lp-details-arrow": { transform: "rotate(90deg)" },
+  // The body wrapper animates its single grid row 0fr↔1fr → the box height grows/shrinks smoothly. The inner
+  // body clips (overflow hidden, min-height 0) so its padding is hidden when collapsed.
+  ".cm-lp-details-bodywrap": { display: "grid", gridTemplateRows: "0fr" },
+  ".cm-lp-details-animated .cm-lp-details-bodywrap": { transition: "grid-template-rows 180ms ease" },
+  ".cm-lp-details-open .cm-lp-details-bodywrap": { gridTemplateRows: "1fr" },
+  ".cm-lp-details-body": { overflow: "hidden", minHeight: "0" }, // grid child clips; NO padding (see above)
+  ".cm-lp-details-body-inner": { padding: "0.1em 0.7em 0.55em" },
+  ".cm-lp-details-body-inner > :first-child": { marginTop: "0" },
+  "@media (prefers-reduced-motion: reduce)": {
+    ".cm-lp-details-animated .cm-lp-details-bodywrap, .cm-lp-details-animated .cm-lp-details-arrow": { transition: "none" },
+  },
   ".cm-lp-details": { borderLeft: "3px solid var(--border, #888)", paddingLeft: "0.8em" },
   // ::: callout directive: a tinted box with a SEMANTIC (never accent) left bar. Applied per line
   // (the fence lines are hidden → empty padding rows inside the box). The content

@@ -23,7 +23,10 @@ export interface MacroHtmlDescriptor {
   // directives (columns / tabs / details / callout) call it so a `:::tab` body's table / list / nested
   // directive renders as real HTML instead of flattened raw text. Optional — leaf macros (table = trusted
   // HTML, mermaid = <pre>, embed = URL) ignore it and stay byte-for-byte as before.
-  htmlRender(body: string, renderInner?: (md: string) => SafeHtml): SafeHtml;
+  // #337 point 3: `label` is the directive's `[label]` (e.g. `:::details[More]`), threaded so a macro whose
+  // export needs it — `details` → `<summary>` — can use it. Optional and additive (existing 2-arg impls are
+  // still assignable); leaf/fence macros ignore it. The label is escaped through the SafeHtml boundary.
+  htmlRender(body: string, renderInner?: (md: string) => SafeHtml, label?: string): SafeHtml;
 }
 
 export interface MacroHtmlRegistry {
@@ -246,7 +249,7 @@ function renderBlock(node: SNode, src: string, macros: MacroHtmlRegistry): SafeH
         // #85: hand the macro a recursive renderer so a container directive's nested Markdown body renders as
         // real HTML (SafeHtml, so XSS-safe by construction — the same allowlist boundary at every depth).
         const renderInner = (md: string): SafeHtml => renderDoc(md, macros, false); // #335: nested body, footnotes literal
-        try { return withFidelity(parsed!.name, macro.exportFidelity, macro.htmlRender(directiveBody(full), renderInner)); }
+        try { return withFidelity(parsed!.name, macro.exportFidelity, macro.htmlRender(directiveBody(full), renderInner, parsed!.label)); }
         catch { /* fall through to the generic box */ }
       }
       return html`<div class="wks-directive">${renderBlocks(node, src, macros)}</div>`;

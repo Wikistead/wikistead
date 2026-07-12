@@ -180,10 +180,18 @@ describe("renderMarkdownToHtml — built-in M2 directives (#85 slice 2)", () => 
     expect(h).toContain('<h3 class="tab-label">Setup</h3>');
     expect(h).toContain('<h3 class="tab-label">Usage</h3>');
   });
-  it("details → standard <details>", () => {
-    const h = out(":::details[More]\nhidden body\n:::", reg);
-    expect(h).toContain("<details><summary>");
+  it("details → standard <details>, with the [label] as the <summary> (#337 point 3)", () => {
+    const h = out(":::details[More info]\nhidden body\n:::", reg);
+    expect(h).toContain("<summary>More info</summary>"); // the fence [label], not the hardcoded "Details"
     expect(h).toContain("hidden body");
+  });
+  it("details with no [label] falls back to <summary>Details</summary>", () => {
+    expect(out(":::details\nbody\n:::", reg)).toContain("<summary>Details</summary>");
+  });
+  it("details [label] is XSS-inert (escaped in the summary)", () => {
+    const h = out(":::details[<script>alert(1)</script>]\nbody\n:::", reg);
+    expect(h).not.toContain("<script>alert(1)</script>");
+    expect(h).toContain("&lt;script&gt;");
   });
   it("typed callouts → a per-type wrapper (note / warning), body escaped", () => {
     expect(out(":::note\nheads up\n:::", reg)).toContain('<div class="callout callout-note">');
