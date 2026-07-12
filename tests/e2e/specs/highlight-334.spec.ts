@@ -21,3 +21,25 @@ test(":::highlight `==text==` styles a mark and hides the `==` when the caret is
   expect(shown).toContain("before foo after"); // `==` delimiters hidden around the styled run
   expect(shown).not.toContain("==foo=="); // raw delimiters not shown when the caret is away
 });
+
+// #334 review (comment 1519): the reported failure — `==` mixed with **bold** left the `==` literal.
+// Real Chromium: `word==**bold**==word` (no surrounding spaces) must highlight AND hide the `==`.
+test("#334: highlight opens next to bold with no surrounding spaces (word==**bold**==word)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "hl-bold");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("前後あり==**太字**==つづき\n\nsecond line\n");
+  await sleep(300);
+  await page.keyboard.press("Control+End"); // caret away from the highlight line
+  await sleep(300);
+
+  // The editor styles marks as classed spans (.cm-lp-highlight / .cm-lp-strong), not <mark>/<strong> elements.
+  const mark = page.locator("[data-pane=preview] .cm-lp-highlight").first();
+  await expect(mark).toBeVisible();
+  await expect(mark).toContainText("太字"); // the highlighted run holds the bold text
+  expect(await page.locator("[data-pane=preview] .cm-lp-strong").count(), "the bold is still styled inside").toBeGreaterThan(0);
+  const shown = await page.locator("[data-pane=preview] .cm-content").innerText();
+  expect(shown).toContain("前後あり太字つづき"); // `==` hidden, bold rendered
+  expect(shown).not.toContain("=="); // the raw `==` no longer leaks (the reported bug)
+});

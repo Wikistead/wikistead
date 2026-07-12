@@ -619,7 +619,8 @@
     "link": "Link",
     "insertTemplate": "Insert template",
     "pageLink": "Page link",
-    "backlinks": "Backlinks (pages that link here)"
+    "backlinks": "Backlinks (pages that link here)",
+    "highlight": "Highlight"
   },
   "calloutEdit": {
     "title": "Edit callout",

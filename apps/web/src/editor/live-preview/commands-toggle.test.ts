@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { EditorState, EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { markdownExtension } from "../markdown-config";
-import { toggleBold, toggleItalic, toggleStrikethrough, toggleInlineCode } from "./commands";
+import { toggleBold, toggleItalic, toggleStrikethrough, toggleHighlight, toggleInlineCode } from "./commands";
 
 // #236: inline formats TOGGLE against the syntax tree — already formatted → remove; mixed → unify-apply
 // (2nd press removes); sub-range of a formatted span → split. All paths are offset-invariant plain
@@ -79,6 +79,11 @@ describe("#236 inline-format toggle (body, syntax-tree based)", () => {
   it("strikethrough toggles", () => {
     expect(runOn("~~gone~~", [2, 6], toggleStrikethrough)).toBe("gone");
     expect(runOn("keep", [0, 4], toggleStrikethrough)).toBe("~~keep~~");
+  });
+
+  it("highlight toggles (#334 / ADR-129: the selection-popup marker)", () => {
+    expect(runOn("==lit==", [2, 5], toggleHighlight)).toBe("lit"); // unwrap
+    expect(runOn("mark", [0, 4], toggleHighlight)).toBe("==mark=="); // wrap
   });
 
   it("inline code toggles", () => {
