@@ -10,6 +10,7 @@ import { tableMacro } from "./table";
 import { columnsMacro, tabsMacro, detailsMacro } from "./layout-directives";
 import { transcludeMacro } from "./transclude";
 import { embedMacro } from "./embed";
+import { backlinksMacro } from "./backlinks";
 import { todoMacro } from "./todo";
 
 registerMacro(mermaidMacro);
@@ -22,6 +23,7 @@ registerMacro(tabsMacro); // M2 layout directive (#90)
 registerMacro(detailsMacro); // M2 layout directive (#90)
 registerMacro(transcludeMacro); // #108 internal transclude (host-mediated; ADR-071)
 registerMacro(embedMacro); // #108 external embed (host-mediated sandboxed iframe; ADR-071 comment 551)
+registerMacro(backlinksMacro); // #307 / ADR-127: :::backlinks (host-mediated backlink list; empty renders nothing)
 registerMacro(todoMacro); // #290 / ADR-114: :::todo (promoted GFM task list + progress ring)
 
 export { macroFold } from "./fold";

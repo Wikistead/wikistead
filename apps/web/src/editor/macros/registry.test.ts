@@ -104,6 +104,18 @@ describe("macro registry", () => {
   it("callout htmlRender escapes its body (XSS-safe wrapper)", () => {
     expect(noteCalloutMacro.htmlRender("<img src=x onerror=1>").toString()).not.toContain("<img");
   });
+
+  // #307 / ADR-127: the :::backlinks directive macro is host-mediated — export DEGRADES (the list is derived,
+  // not content) and its web htmlRender is a type-contract stub (empty; the server export doesn't register it).
+  // The liveRender placeholder + the host resolve/collapse behaviour are exercised in the real-browser e2e
+  // (this suite runs in node — no DOM — so it checks the declarative contract only).
+  it("registers the :::backlinks directive macro as degrade with an empty htmlRender stub", () => {
+    const m = findDirectiveMacro("backlinks");
+    expect(m).toBeTruthy();
+    expect(m!.exportFidelity).toBe("degrade");
+    expect(registeredDirectiveNames()).toContain("backlinks");
+    expect(m!.htmlRender && m!.htmlRender("").toString()).toBe(""); // empty output — export emits nothing
+  });
 });
 
 // ADR-045 / #88 item 5 — registerMacro's RUNTIME fortress for registrations that reach the registry

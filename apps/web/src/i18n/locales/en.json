@@ -618,7 +618,8 @@
     "image": "Image",
     "link": "Link",
     "insertTemplate": "Insert template",
-    "pageLink": "Page link"
+    "pageLink": "Page link",
+    "backlinks": "Backlinks (pages that link here)"
   },
   "calloutEdit": {
     "title": "Edit callout",
@@ -722,7 +723,8 @@
   "macro": {
     "excalidrawEmpty": "Empty drawing — click the ✎ button to edit",
     "embedEmpty": "Empty embed — click the ✎ button to add a URL",
-    "pageEmbedEmpty": "Empty page embed — click the ✎ button to add a page"
+    "pageEmbedEmpty": "Empty page embed — click the ✎ button to add a page",
+    "backlinksEmpty": "No backlinks yet"
   },
   "templates": {
     "title": "Templates",

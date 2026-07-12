@@ -200,7 +200,10 @@ export function useDeletePage() {
   return useMutation({
     mutationFn: (args: { pageId: string; spaceId: string }) =>
       apiFetch<null>(`/pages/${args.pageId}`, token, { method: "DELETE" }),
-    onSuccess: (_p, args) => qc.invalidateQueries({ queryKey: ["pages", args.spaceId] }),
+    onSuccess: (_p, args) => {
+      qc.invalidateQueries({ queryKey: ["pages", args.spaceId] });
+      qc.invalidateQueries({ queryKey: ["backlinks"] }); // #307 / ADR-127: a deleted page's outbound links vanish → other pages' backlinks change
+    },
   });
 }
 
