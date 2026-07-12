@@ -28,7 +28,7 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) close(null); }}>
-      <DialogContent className="overflow-hidden p-0" showCloseButton={false}>
+      <DialogContent className="overflow-hidden p-0" showCloseButton={false} position="top">
         <DialogHeader className="sr-only"><DialogTitle>{t("embedPicker.title")}</DialogTitle></DialogHeader>
         <Command shouldFilter={false} className="bg-transparent">
           <CommandInput
