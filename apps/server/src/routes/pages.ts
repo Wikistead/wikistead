@@ -1262,6 +1262,15 @@ export async function getBacklinks(
   fga: OpenFgaClient,
   args: { pageId: string; subject: string; context?: { current_time: string } },
 ): Promise<Backlink[]> {
+  // #307 /view-gate the TARGET page itself. This endpoint is now callable with an ARBITRARY target
+  // (the `:::backlinks` macro can carry a page id in its body). Without this, a caller could probe any id and
+  // learn "which pages I can see link to it" — leaking the target's existence/backlinks even when they can't
+  // view it. `check(view)` is false for BOTH a non-viewable AND a non-existent page, so a uniform 404 keeps the
+  // two indistinguishable (existence-hiding,.4). The current-page callers (#230 panel, delete warning)
+  // are always viewing the page, so this passes for them (no regression).
+  if (!(await check(fga, args.subject, 'view', { type: 'page', id: args.pageId }, args.context))) {
+    throw Object.assign(new Error('not found'), { statusCode: 404 })
+  }
   // A real reference = an /p/<id> link OR the id as an embed-page body line. Word-boundary the id so
   // `/p/ab` doesn't match page `abc`.
   const idRe = args.pageId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

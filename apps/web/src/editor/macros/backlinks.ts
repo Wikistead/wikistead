@@ -6,9 +6,12 @@ import { html } from "@wikistead/macro-render";
 // (live-preview MacroWidget, #307) resolves this page's view-authorized backlinks via the gated
 // `GET /pages/:id/backlinks` (#230) — which FGA-view-confirms every source for the caller, so an unviewable
 // source is absent from list AND count (no new permission surface, #244 preserved) — and swaps the list in,
-// or collapses to nothing (read surface) / a dim placeholder (edit surface) when empty. The body is ALWAYS
-// empty; the list is display output, never written into the source (Open formats: `:::backlinks[label]`
-// round-trips as a directive). An optional `[label]` renders only alongside a non-empty list.
+// or collapses to nothing (read surface) / a dim placeholder (edit surface) when empty. #307 /the
+// body gives the TARGET — empty ⇒ THIS page's backlinks (the default); exactly one non-empty line ⇒ that
+// page's id (a hub aggregating another page's backlinks, same convention as `:::embed-page`); anything else ⇒
+// rendered as 0 results. A non-viewable/absent target id renders nothing (the endpoint 404s uniformly
+// existence-hiding). The list is display output, never written into the source (Open formats: the directive
+// round-trips). An optional `[label]` renders only alongside a non-empty list.
 export const backlinksMacro: DirectiveMacro = {
   kind: "directive",
   name: "backlinks",
