@@ -193,11 +193,25 @@ function consumeReAnchor(view: EditorView): void {
   // deadline so a slow diagram settle is still caught but an unrelated later resize is not.
   if (reAnchorUntil === 0 || Date.now() > reAnchorUntil) { reAnchorUntil = 0; return; }
   const head = Math.min(view.state.selection.main.head, view.state.doc.length);
-  const coords = view.coordsAtPos(head);
+  const coords = view.coordsAtPos(head); // forces a sync measure → fresh layout coords for the caret line
   if (!coords) return;
   const box = view.scrollDOM.getBoundingClientRect();
-  if (coords.top >= box.top + RE_ANCHOR_MARGIN && coords.bottom <= box.bottom - RE_ANCHOR_MARGIN) return; // already visible → no-op
-  view.dispatch({ effects: EditorView.scrollIntoView(head, { y: "nearest", yMargin: RE_ANCHOR_MARGIN }) });
+  const offscreen = coords.top < box.top + RE_ANCHOR_MARGIN || coords.bottom > box.bottom - RE_ANCHOR_MARGIN;
+  if (offscreen) {
+    // Caret pushed off the viewport by the taller widget → scroll it back (also redraws the caret).
+    view.dispatch({ effects: EditorView.scrollIntoView(head, { y: "nearest", yMargin: RE_ANCHOR_MARGIN }) });
+    return;
+  }
+  // #340: even when the caret line is still in view, the async settle leaves the DRAWN caret stale — CM's
+  // selection layer measured `.cm-cursor-primary` BEFORE the widget grew, so it still sits at the widget's old
+  // top (now INSIDE the tall figure) while coordsAtPos (fresh) reports the correct line below. Re-assert the
+  // selection so drawSelection redraws the caret DOM at the settled coordinates. A same-range selection still
+  // runs its transaction (selectionSet → redraw) and changes no block, so it cannot re-open the settle window
+  // (reAnchorAfterReveal only opens on a NEW block). Only when the drawn caret actually diverges (>1px).
+  const caretDom = view.dom.querySelector(".cm-cursor-primary") as HTMLElement | null;
+  if (caretDom && Math.abs(caretDom.getBoundingClientRect().top - coords.top) > 1) {
+    view.dispatch({ selection: EditorSelection.cursor(head) });
+  }
 }
 
 // Detect the reveal→atom transition (a caret move that un-reveals a macro): a block present in `blocks` NOW
