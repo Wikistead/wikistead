@@ -794,6 +794,7 @@
     "changedHidWysiwyg": "Hid the WYSIWYG mode from the switch",
     "changedHidMarkdownModes": "Hid the Live and Source modes from the switch",
     "bannerText": "New: tailor the editor to how you write.",
-    "bannerCta": "Set it up"
+    "bannerCta": "Set it up",
+    "skippedMarkdownNote": "We set the editor up for Markdown (vim off, no WYSIWYG). You can change this any time in Settings, or with “redo the questions”."
   }
 }
