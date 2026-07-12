@@ -420,7 +420,16 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
             const next = checked ? " " : "x";
             const flipAt = (pos: number, ch: string) => { c.ytext.delete(pos, 1); c.ytext.insert(pos, ch); };
             const pos = taskStatePosAt(c.ytext.toString(), index);
-            if (pos < 0 || c.ytext.toString()[pos] !== expect) return; // draft diverged → do not touch it
+            if (pos < 0 || c.ytext.toString()[pos] !== expect) {
+              // #317: the draft has DIVERGED at the task level (the ordinal/pre-state don't line up). Writing
+              // NOTHING is still correct (the #303 corruption guard — never touch the diverged draft), but a
+              // SILENT no-op reads as "the checkbox is dead / nothing happened". So still call onToggleTask:
+              // the server flushes the draft, its skeleton won't match the published one → 409, and the existing
+              // dirty toast fires (member routes.tsx / guest routes.tsx). No local flip ⇒ no revert; onToggleTask
+              // shows the toast and re-throws, which we swallow. One shared path — fixes member AND guest.
+              void onToggleTask(index).catch(() => {});
+              return;
+            }
             flipAt(pos, next); // optimistic draft flip, re-located in the DRAFT
             onToggleTask(index).catch(() => {
               const p = taskStatePosAt(c.ytext.toString(), index); // re-resolve for the revert too (offsets moved)
