@@ -1,5 +1,5 @@
 import { parser, Strikethrough, Table } from "@lezer/markdown";
-import { parseFenceInfo } from "@wikistead/macro-render"; // #267: read a diagram fence's align= (default center)
+import { parseFenceInfo, highlightExtension } from "@wikistead/macro-render"; // #267 fence align=; #334 `==` highlight grammar
 import { directiveExtension, parseDirectiveOpen, resolveDirectiveRanges, type ResolvedDirective } from "./directive-parser";
 import { findDirectiveMacro, findFenceMacro } from "./registry";
 import { currentMacroTheme } from "./theme";
@@ -24,7 +24,7 @@ const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 // <table> instead of the raw `| a | b |` source (the shared server renderer gets the same extension). The
 // Table render case below builds the DOM node-by-node (textContent only), so it stays inside the XSS
 // boundary — a cell's content is inline markdown, never raw HTML.
-const mdParser = parser.configure([directiveExtension, Strikethrough, Table]);
+const mdParser = parser.configure([directiveExtension, Strikethrough, Table, highlightExtension]);
 // @lezer/common isn't a direct dependency — derive the SyntaxNode type from the parser instead.
 type SNode = ReturnType<typeof mdParser.parse>["topNode"];
 
@@ -78,6 +78,7 @@ const MARKS = new Set([
   "EmphasisMark", "CodeMark", "LinkMark", "HeaderMark", "QuoteMark", "ListMark",
   "DirectiveMark", "URL", "CodeInfo", "LinkTitle",
   "StrikethroughMark", // #89 comment 848: skip the `~~` delimiters so <s> holds only the text
+  "HighlightMark", // #334 / ADR-129: skip the `==` delimiters so <mark> holds only the text
 ]);
 
 // Block-level nodes get their own recursion; everything else is inline/text.
@@ -130,6 +131,7 @@ function renderInlineNode(node: SNode, src: string, into: Node): void {
     case "Emphasis": { const el = document.createElement("em"); renderInline(node, src, el); into.appendChild(el); return; }
     case "StrongEmphasis": { const el = document.createElement("strong"); renderInline(node, src, el); into.appendChild(el); return; }
     case "Strikethrough": { const el = document.createElement("s"); renderInline(node, src, el); into.appendChild(el); return; }
+    case "Highlight": { const el = document.createElement("mark"); renderInline(node, src, el); into.appendChild(el); return; } // #334 / ADR-129
     case "InlineCode": { const el = document.createElement("code"); el.textContent = stripMarks(node, src, "CodeMark"); into.appendChild(el); return; }
     case "Link": {
       const urlNode = node.getChild("URL");

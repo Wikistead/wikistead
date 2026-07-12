@@ -90,6 +90,7 @@ if (import.meta.hot) import.meta.hot.accept(() => window.location.reload());
 const strongMark = Decoration.mark({ class: "cm-lp-strong" });
 const emphasisMark = Decoration.mark({ class: "cm-lp-emphasis" });
 const strikeMark = Decoration.mark({ class: "cm-lp-strike" });
+const highlightMark = Decoration.mark({ class: "cm-lp-highlight" }); // #334 / ADR-129: `==text==` → <mark>
 const inlineCodeMark = Decoration.mark({ class: "cm-lp-inline-code" });
 const linkMark = Decoration.mark({ class: "cm-lp-link" });
 const hide = Decoration.replace({});
@@ -2363,6 +2364,9 @@ const RENDERERS: BlockRenderer[] = [
   // GFM strikethrough: style the run, hide the "~~" delimiters (reveal on cursor line).
   { match: (n) => n === "Strikethrough", enter: (node, ctx) => ctx.add(strikeMark, node.from, node.to) },
   { match: (n) => n === "StrikethroughMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
+  // #334 / ADR-129: highlight — style the run, hide the `==` delimiters (reveal on the cursor line).
+  { match: (n) => n === "Highlight", enter: (node, ctx) => ctx.add(highlightMark, node.from, node.to) },
+  { match: (n) => n === "HighlightMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
   { match: (n) => n === "InlineCode", enter: (node, ctx) => ctx.add(inlineCodeMark, node.from, node.to) },
   {
     match: (n) => n === "FencedCode",
@@ -3363,6 +3367,9 @@ export const linkClicks = EditorView.domEventHandlers({
 export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-strong": { fontWeight: "700" },
   ".cm-lp-emphasis": { fontStyle: "italic" },
+  // #334 / ADR-129: highlight (`==text==`) — a themed marker tint, foreground preserved (matches the
+  // rendered <mark> in callout-icons.css so the editor and the published page look identical).
+  ".cm-lp-highlight": { background: "color-mix(in srgb, var(--accent, #4ea1ff) 22%, transparent)", borderRadius: "2px", padding: "0 0.1em" },
   ".cm-lp-strike": { textDecoration: "line-through", opacity: "0.75" },
   ".cm-lp-inline-code": {
     fontFamily: "var(--font-code)", // #190: code face (Wikistead Mono), distinct from prose --font-body

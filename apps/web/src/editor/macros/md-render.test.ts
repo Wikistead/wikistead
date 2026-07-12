@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeAll } from "vitest";
 import { renderMarkdownToDom, renderCalloutPanel } from "./md-render";
+import { renderMarkdownToHtml, builtinMacroRegistry } from "@wikistead/macro-render";
 import { registerMacro } from "./registry";
 import { tabsMacro } from "./layout-directives";
 import { html, unsafeHtml } from "./safe-html";
@@ -38,6 +39,45 @@ describe("renderMarkdownToDom — wks-attachment intercept (#273 / ADR-120 condi
     const d = root("[site](https://example.com)");
     const a = d.querySelector("a");
     expect(a?.getAttribute("href")).toBe("https://example.com");
+  });
+});
+
+// #334 / ADR-129: highlight (`==text==` → <mark>). Assert the BROWSER renderer (renderMarkdownToDom) and
+// the DOM-free SERVER export renderer (renderMarkdownToHtml) both emit <mark> — the two of the three
+// surfaces coverable without a browser (the CM6 editor decoration is the e2e's job). They must not drift.
+describe("highlight #334 / ADR-129 — `==text==` → <mark>", () => {
+  const serverHtml = (src: string) => renderMarkdownToHtml(src, builtinMacroRegistry()).value;
+
+  it("browser renderer: `==foo==` becomes a <mark> holding just the text", () => {
+    const d = root("mark ==foo== here\n");
+    const m = d.querySelector("mark");
+    expect(m?.textContent).toBe("foo");
+    expect(d.querySelector("p")?.textContent).toBe("mark foo here"); // `==` delimiters hidden
+  });
+
+  it("server export renderer: `==foo==` becomes <mark>foo</mark> (parity with the browser)", () => {
+    expect(serverHtml("mark ==foo== here")).toContain("<mark>foo</mark>");
+  });
+
+  it("XSS: highlighted raw HTML stays literal text, no element injection (both renderers)", () => {
+    const d = root("==<img src=x onerror=alert(1)>==\n");
+    expect(d.querySelector("mark")).not.toBeNull();
+    expect(d.querySelector("img"), "no img element is injected").toBeNull();
+    const srv = serverHtml("==<img src=x onerror=alert(1)>==");
+    expect(srv).toContain("<mark>");
+    expect(srv).not.toContain("<img"); // escaped inside the mark
+  });
+
+  it("no false positives: a lone `=`, spaced `= =`, and a `===` run are NOT highlights", () => {
+    expect(root("a = b and x === y\n").querySelector("mark"), "= / === are not marks").toBeNull();
+    expect(serverHtml("a = b and x === y")).not.toContain("<mark>");
+  });
+
+  it("does not collide with emphasis / strikethrough on the same line", () => {
+    const d = root("*em* ~~s~~ ==h==\n");
+    expect(d.querySelector("em")?.textContent).toBe("em");
+    expect(d.querySelector("s")?.textContent).toBe("s");
+    expect(d.querySelector("mark")?.textContent).toBe("h");
   });
 });
 

@@ -4,6 +4,7 @@
 // XSS boundary. The editor re-exports safe-html / directive-parser from here (zero-churn shims).
 export { SafeHtml, html, joinSafe, unsafeHtml, escapeHtml } from "./safe-html.js";
 export { parseDirectiveOpen, isDirectiveClose, directiveExtension, resolveDirectiveRanges, type ResolvedDirective } from "./directive-parser.js";
+export { highlightExtension } from "./highlight-ext.js"; // #334 / ADR-129: shared `==` → <mark> grammar
 export { renderMarkdownToHtml } from "./render.js";
 export type { MacroHtmlDescriptor, MacroHtmlRegistry } from "./render.js";
 export {
