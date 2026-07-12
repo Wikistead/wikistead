@@ -128,10 +128,13 @@ export function mountLivePreview(
       // needed to keep it at the band edge (y:"nearest" + yMargin —re-centering "yanked" the view to
       // the middle on every band exit; real scrolloff pins the caret at the ≈75%/25% line and scrolls one line
       // per keypress). Within the band, do nothing (no jitter). Near the ends it scrolls as far as it can.
-      // Mouse clicks are excluded (select.pointer): clicking must never move the view (spec).
+      // Mouse clicks are excluded (select.pointer): clicking must never move the view (spec). #345: a
+      // TOC/anchor jump (select.jump) is also excluded — its own bandScrollMargins already lands the heading
+      // flush under the band, and the scrolloff correction would drag that landing ~55px too low (off-by-one
+      // scroll-spy).
       EditorView.updateListener.of((u) => {
         if (!u.selectionSet || u.docChanged) return;
-        if (u.transactions.some((tr) => tr.isUserEvent("select.pointer"))) return;
+        if (u.transactions.some((tr) => tr.isUserEvent("select.pointer") || tr.isUserEvent("select.jump"))) return;
         const view = u.view;
         requestAnimationFrame(() => {
           const head = view.state.selection.main.head;

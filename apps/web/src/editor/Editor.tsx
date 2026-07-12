@@ -155,7 +155,11 @@ function wireToc(
     const ref = opts.tocJumpRef;
     ref.current = (from: number) => {
       const pos = Math.min(from, view.state.doc.length);
-      view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "start" }) });
+      // #345: tag the jump as `select.jump` so the #306 scrolloff listener SKIPS it. A TOC/anchor jump's
+      // contract is "land the heading flush under the band" (bandScrollMargins handles that); the scrolloff's
+      // "keep the caret in the 25% band" correction fights it and dragged the landing ~55px too low, so the
+      // scroll-spy then highlighted the PREVIOUS heading (the #304 off-by-one regression, toc-304 red).
+      view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "start" }), userEvent: "select.jump" });
       if (!view.state.readOnly) view.focus();
       // #304 (3): report the jumped-to heading as active IMMEDIATELY — don't wait for the scroll event's
       // recompute (which would otherwise, for a frame, keep the previous section highlighted). The scroll
