@@ -141,6 +141,23 @@ describe('OIDC login flow', () => {
     expect(res.statusCode).toBe(302)
     expect(res.headers.location).toBe('/') // NOT evil.com
   })
+
+  // #346: when the IdP is unreachable, /auth/login must degrade GRACEFULLY (like /auth/callback) instead of
+  // letting the OIDC-discovery exception bubble to Fastify's default handler as a raw 500 JSON.
+  it('#346: an unreachable IdP redirects to a vague error, not a raw 500', async () => {
+    // Point the tenant OIDC at a dead issuer so buildLogin's discovery throws (ECONNREFUSED).
+    await db.sql`UPDATE tenant_oidc SET issuer = ${'http://127.0.0.1:1/dead-idp'} WHERE tenant_id = ${tenant.id}`
+    try {
+      const res = await app.inject({ method: 'GET', url: '/auth/login', headers: { host: 'dev.localhost' } })
+      expect(res.statusCode).toBe(302) // graceful redirect, NOT 500
+      expect(res.headers.location).toBe('/login?error=idp_unavailable')
+      // existence-hiding preserved: the error surface never echoes the issuer / which IdP.
+      expect(String(res.headers.location)).not.toContain('127.0.0.1')
+    } finally {
+      // Restore the working test issuer for the remaining tests (order-independent).
+      await db.sql`UPDATE tenant_oidc SET issuer = ${issuer.url} WHERE tenant_id = ${tenant.id}`
+    }
+  })
 })
 
 // CE first-admin bootstrap THROUGH the real callback (P1.2 P2c): a member-less
