@@ -301,4 +301,26 @@ describe("renderMarkdownToHtml — footnotes (#335 / ADR-130)", () => {
     expect(h).not.toContain("<script>alert(1)</script>");
     expect(h).toContain("&lt;script&gt;");
   });
+
+  // §A scope (review): a footnote INSIDE a macro body is literal — never pulled into the document-end
+  // section, never numbered against the top level, and it never starts its own nested section. DOM and server
+  // must agree here (ADR-085); the DOM twin lives in md-render.test.ts.
+  it("does NOT pull a footnote from inside a :::columns body into the document-end section", () => {
+    const reg = builtinMacroRegistry();
+    const h = out(
+      "top[^1]\n\n::::columns\n:::column\ninside[^2] here\n\n[^2]: nested note\n:::\n:::column\ntext\n:::\n::::\n\n[^1]: top note\n",
+      reg,
+    );
+    // the top-level footnote resolves and is collected exactly once
+    expect(h).toContain('id="fnref-1"');
+    expect(h).toContain("top note");
+    expect((h.match(/class="cm-lp-footnotes"/g) ?? []).length).toBe(1); // one section, no nested duplicate
+    // the nested [^2] is NOT numbered against the top level and has no dangling back-link target
+    expect(h).not.toContain("#fn-2");
+    expect(h).not.toContain('id="fn-2"');
+    expect(h).not.toContain("#fnref-2");
+    expect(h).toContain("cm-lp-footnote-undef"); // nested ref renders as a muted `?`
+    // the nested definition is preserved literally in the body (not silently dropped), not in the section
+    expect(h).toContain("nested note");
+  });
 });

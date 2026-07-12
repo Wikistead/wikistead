@@ -128,6 +128,25 @@ describe("footnote #335 / ADR-130 — `[^1]` + `[^1]: body`", () => {
     expect(d.querySelector("section.cm-lp-footnotes img")).toBeNull();
     expect(d.querySelector("li#fn-1")?.textContent).toContain("danger");
   });
+
+  // §A scope (review): a footnote INSIDE a macro body is literal — it is NOT pulled into the
+  // document-end section, NOT numbered against the top level, and it never starts its own nested section.
+  // This reader and the server export must agree (ADR-085); the server twin lives in server-render.test.ts.
+  it("does NOT pull a footnote from inside a :::columns body into the document-end section", () => {
+    const d = root("top[^1]\n\n::::columns\n:::column\ninside[^2] here\n\n[^2]: nested note\n:::\n:::column\ntext\n:::\n::::\n\n[^1]: top note\n");
+    // the top-level footnote resolves and is collected exactly once
+    expect((d.querySelector("sup#fnref-1 a"))?.getAttribute("href")).toBe("#fn-1");
+    expect(d.querySelectorAll("section.cm-lp-footnotes").length).toBe(1); // one section, no nested duplicate
+    const section = d.querySelector("section.cm-lp-footnotes")!;
+    expect(section.textContent).toContain("top note");
+    expect(section.textContent).not.toContain("nested note"); // nested def is NOT collected
+    expect(section.querySelector("#fn-2")).toBeNull(); // no cross-boundary number
+    // the nested ref is a muted `?` (no id, no target), and there is no fn-2/fnref-2 anywhere
+    expect(d.querySelector("#fn-2")).toBeNull();
+    expect(d.querySelector("#fnref-2")).toBeNull();
+    // the nested definition is preserved literally somewhere in the body (not silently dropped)
+    expect(d.textContent).toContain("nested note");
+  });
 });
 
 describe("renderMarkdownToDom (#90 S0)", () => {
