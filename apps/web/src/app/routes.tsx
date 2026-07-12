@@ -223,6 +223,21 @@ function PageRoute() {
   const openSpaceId = page?.spaceId;
   useEffect(() => { if (openSpaceId) setActiveSpaceId(openSpaceId); }, [openSpaceId, setActiveSpaceId]);
 
+  // #336 part B: the sidebar's unpublished-changes dot reads from the ["pages"] list, which has NO poll
+  // so a fresh draft edit did not surface on the dot until a reload. usePublished already polls the OPEN
+  // page's persisted draft-vs-published state (presence-safe: it's a SERVER poll, never an editor React
+  // signal — driving unpublished/dirty UI from an editor signal regressed the presence e2e, memory
+  // editor-dirty-presence-constraint). When it transitions to "unpublished", invalidate the pages list
+  // ONCE so the sidebar dot appears within the poll interval, without touching the editor render path.
+  const dirty = published?.hasUnpublishedChanges ?? false;
+  const openSpaceForDirty = page?.spaceId;
+  const prevDirtyRef = useRef(false);
+  const qcForDirty = useQueryClient();
+  useEffect(() => {
+    if (dirty && !prevDirtyRef.current && openSpaceForDirty) qcForDirty.invalidateQueries({ queryKey: ["pages", openSpaceForDirty] });
+    prevDirtyRef.current = dirty;
+  }, [dirty, openSpaceForDirty, qcForDirty]);
+
   // Upload a picked image to this page's space, returning the ref to insert. Bound
   // to the resolved spaceId; null (no image button) until the page meta loads.
   const spaceId = page?.spaceId;
