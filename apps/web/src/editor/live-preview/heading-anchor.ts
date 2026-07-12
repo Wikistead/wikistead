@@ -15,7 +15,7 @@ import { extractHeadings } from "../headings";
 // Lucide link glyph (trusted constant — shared with the public-reader DOM variant). Sized in em
 //: the icon follows the HEADING's font size (h1 gets a big icon, h6 a small one) instead of
 // a fixed 14px. Requires the host button to inherit the heading's font-size (both surfaces do).
-export const HEADING_LINK_ICON = '<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
+export const HEADING_LINK_ICON = '<svg width="0.8em" height="0.8em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
 
 export function headingAnchorUrl(slug: string): string {
   return `${window.location.origin}${window.location.pathname}#${encodeURIComponent(slug)}`;
@@ -66,9 +66,12 @@ const headingAnchorTheme = EditorView.baseTheme({
     cursor: "pointer",
     padding: "0 0.2em",
     marginLeft: "0.3em",
-    verticalAlign: "baseline",
+    // a full 1em icon on the baseline overshot the glyph tops (cap height ≈ 0.7em) and read as "too big
+    // and floating above the text". Size it to the cap height (0.8em, ≤ font-size × 0.85) and drop it ~0.1em so
+    // its top sits at the cap, not above it.
+    verticalAlign: "-0.1em",
     transition: "opacity 120ms",
-    // a <button> does NOT inherit font by default (UA font: menu), so the 1em icon would
+    // a <button> does NOT inherit font by default (UA font: menu), so the em-sized icon would
     // resolve against ~13px regardless of the heading. Inherit the heading line's font-size so the
     // icon scales with h1…h6.
     fontSize: "inherit",
