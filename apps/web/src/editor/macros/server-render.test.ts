@@ -302,6 +302,17 @@ describe("renderMarkdownToHtml — footnotes (#335 / ADR-130)", () => {
     expect(h).toContain("&lt;script&gt;");
   });
 
+  // #307 / ADR-127 §6: `:::backlinks` is a MEMBER-surface data macro; on the server export it is deliberately
+  // NOT registered, so it takes the unregistered-directive fallback (empty <div>, fences + [label] stripped)
+  // — the v1 "public/print/export emits nothing" mechanism. No raw ::: and no label may leak.
+  it("emits nothing for :::backlinks on export (no raw :::, no label leak)", () => {
+    const reg = builtinMacroRegistry();
+    const h = out(":::backlinks[関連ページ]\n\n:::\n", reg);
+    expect(h).not.toContain(":::"); // the fences are stripped by the fallback
+    expect(h).not.toContain("関連ページ"); // the label is on the (dropped) open line — never leaked
+    expect(h).not.toContain("cm-lp-backlinks"); // no list is rendered server-side (member surface only)
+  });
+
   // §A scope (review): a footnote INSIDE a macro body is literal — never pulled into the document-end
   // section, never numbered against the top level, and it never starts its own nested section. DOM and server
   // must agree here (ADR-085); the DOM twin lives in md-render.test.ts.

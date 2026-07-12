@@ -563,6 +563,60 @@ export const transcludeResolver = Facet.define<TranscludeResolver, TranscludeRes
   combine: (values) => values[0] ?? noopTranscludeResolver,
 });
 
+// #307 / ADR-127: host-mediated `:::backlinks`. The macro NEVER fetches (host-API is {theme} only, ADR-024);
+// the HOST supplies a `fetch` bound to THIS page that hits the view-gated `GET /pages/:id/backlinks` (#230),
+// which FGA-view-confirms every source for the caller (no new permission surface, no count leak — an
+// unviewable source is absent from list AND count). `fetch` returns the authorized sources, or null (existence-
+// hiding: denied/network are indistinguishable). `navigate` routes a click (the destination re-confirms view →
+// uniform 404). Strings live on the host (i18n stays out of the CM layer, like titleLinkSource). The facet is
+// absent on template previews / non-page contexts (no pageId) → no fetch, so the ADR-110 boundary is enforced
+// by absence. The Markdown source (`:::backlinks[label]`) is canonical; the list is display-only output.
+export interface BacklinksSource {
+  readonly fetch: () => Promise<{ id: string; title: string }[] | null>;
+  readonly navigate: (pageId: string) => void;
+  readonly emptyLabel: string; // dim edit-surface placeholder (a 0-height read-surface widget shows nothing)
+  readonly untitledLabel: string; // fallback text for a source page with no title
+}
+export const backlinksSource = Facet.define<BacklinksSource | null, BacklinksSource | null>({
+  combine: (v) => (v.length ? v[v.length - 1]! : null),
+});
+
+// The optional `[label]` on a `:::backlinks[]` open line (renders only alongside a non-empty list).
+function backlinksLabel(openLine: string): string | null {
+  const m = /^\s*:::+\s*backlinks\s*\[([^\]]*)\]/.exec(openLine);
+  return m && m[1]!.trim() ? m[1]!.trim() : null;
+}
+
+// Build the rendered backlinks DOM: an optional label + a list of view-authorized sources. Each row navigates
+// through the host seam (never hardcoded routing — the destination re-confirms view). Text via textContent
+// (no innerHTML) — the titles came from the view-gated endpoint and are treated as untrusted here regardless.
+function buildBacklinksList(items: { id: string; title: string }[], label: string | null, src: BacklinksSource): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "cm-lp-backlinks";
+  box.setAttribute("data-testid", "macro-backlinks");
+  if (label) {
+    const h = document.createElement("div");
+    h.className = "cm-lp-backlinks-label";
+    h.textContent = label;
+    box.appendChild(h);
+  }
+  const ul = document.createElement("ul");
+  ul.className = "cm-lp-backlinks-list";
+  for (const it of items) {
+    const li = document.createElement("li");
+    const a = document.createElement("a");
+    a.className = "cm-lp-backlinks-item";
+    a.setAttribute("data-testid", `macro-backlink-${it.id}`);
+    a.href = `/p/${it.id}`;
+    a.textContent = it.title || src.untitledLabel;
+    a.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); src.navigate(it.id); });
+    li.appendChild(a);
+    ul.appendChild(li);
+  }
+  box.appendChild(ul);
+  return box;
+}
+
 // Host-injected external-embed host allowlist (#108 / ADR-071 comment 551). The :::embed macro can't
 // read the allowlist (host-API is {theme} only); the HOST supplies the tenant's allowlisted hosts and
 // the MacroWidget renders a sandboxed iframe for an allowlisted https URL, else degrades to a link.
@@ -1704,7 +1758,10 @@ class MacroWidget extends WidgetType {
     // like blank space even though a block widget occupies it (so vertical caret motion
     // "jumps" past invisible content). Render a common, visible placeholder for ALL macros
     // when the body is empty, so the block is obviously present and obviously editable.
-    if (this.body.trim() === "") {
+    if (this.body.trim() === "" && this.name !== "backlinks") {
+      // #307 / ADR-127: `:::backlinks` has an ALWAYS-empty body (its content is the host-resolved list, not
+      // the source), so it must NOT take this generic "Empty macro" placeholder — it flows to the liveRender +
+      // host-resolve path below (which renders the list, or collapses/placeholders when there are no backlinks).
       const ph = document.createElement("div");
       ph.className = "cm-lp-macro cm-lp-macro-empty";
       ph.setAttribute("data-testid", "macro-empty");
@@ -1828,6 +1885,38 @@ class MacroWidget extends WidgetType {
       // (client-direct iframe — no server proxy/fetch, so no SSRF surface on this path).
       if (this.name === "embed-external" && this.body.trim() !== "") {
         rendered.replaceChildren(buildEmbedElement(this.body, view.state.facet(embedAllowlist)));
+      }
+      // #307 / ADR-127: host-mediated `:::backlinks`. The macro can't fetch (narrow host-API); the host
+      // resolves this page's view-authorized backlinks and the widget renders the list — or, when EMPTY,
+      // renders NOTHING per surface (§3): on a read surface (view / Reading / readOnly) the widget collapses
+      // to zero height; on the EDIT surface it keeps a dim one-line placeholder so the author can still see,
+      // select and delete the atom they inserted (a 0-height atom is mouse-unreachable). Loading shows nothing
+      // (no skeleton). Fires once per widget instance (eq stable on name + empty body). Height changes as the
+      // async result lands → view.requestMeasure so CM's block ResizeObserver reflows (block-widget motion rule).
+      if (this.name === "backlinks") {
+        const src = view.state.facet(backlinksSource);
+        if (src) {
+          const editable = !view.state.readOnly;
+          void src.fetch().then((items) => {
+            if (this.destroyed) return;
+            rendered.replaceChildren();
+            if (!items || items.length === 0) {
+              if (editable) {
+                const ph = document.createElement("div");
+                ph.className = "cm-lp-backlinks-empty";
+                ph.setAttribute("data-testid", "macro-backlinks-empty");
+                ph.textContent = src.emptyLabel;
+                rendered.appendChild(ph);
+              } else {
+                wrap.style.display = "none"; // read surface: render nothing (§3 — collapse to zero height)
+              }
+            } else {
+              const label = backlinksLabel(view.state.doc.lineAt(this.from).text);
+              rendered.appendChild(buildBacklinksList(items, label, src));
+            }
+            view.requestMeasure();
+          });
+        }
       }
     }
     if (!view.state.readOnly) {
@@ -3420,6 +3509,14 @@ export const livePreviewTheme = EditorView.baseTheme({
   // rendered `.cm-lp-footnote-ref` / `.cm-lp-footnotes` in callout-icons.css so editor and page don't drift).
   ".cm-lp-footnote-ref": { verticalAlign: "super", fontSize: "0.75em", color: "var(--link, #4ea1ff)", lineHeight: "1" },
   ".cm-lp-footnote-def": { fontSize: "0.9em", opacity: "0.8" },
+  // #307 / ADR-127: the :::backlinks list (a subtle "pages that link here" box). Empty ⇒ the widget is
+  // removed/collapsed by the host, so nothing shows on read surfaces; the edit-surface placeholder is dim.
+  ".cm-lp-backlinks": { margin: "0.3em 0", padding: "0.5em 0.75em", border: "1px solid var(--border, rgba(127,127,127,0.3))", borderRadius: "6px", background: "var(--panel-2, rgba(127,127,127,0.05))" },
+  ".cm-lp-backlinks-label": { fontSize: "0.85em", fontWeight: "600", color: "var(--fg-dim, #888)", marginBottom: "0.3em" },
+  ".cm-lp-backlinks-list": { listStyle: "none", margin: "0", padding: "0", display: "flex", flexDirection: "column", gap: "0.15em" },
+  ".cm-lp-backlinks-item": { color: "var(--link, #4ea1ff)", textDecoration: "none", cursor: "pointer" },
+  ".cm-lp-backlinks-item:hover": { textDecoration: "underline" },
+  ".cm-lp-backlinks-empty": { fontSize: "0.85em", color: "var(--fg-dim, #888)", fontStyle: "italic", padding: "0.2em 0" },
   ".cm-lp-inline-code": {
     fontFamily: "var(--font-code)", // #190: code face (Wikistead Mono), distinct from prose --font-body
     background: "rgba(127,127,127,0.18)",

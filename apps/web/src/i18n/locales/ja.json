@@ -618,7 +618,8 @@
     "image": "画像",
     "link": "リンク",
     "insertTemplate": "テンプレートを挿入",
-    "pageLink": "ページリンク"
+    "pageLink": "ページリンク",
+    "backlinks": "バックリンク（このページへのリンク）"
   },
   "calloutEdit": {
     "title": "コールアウトを編集",
@@ -721,7 +722,8 @@
   "macro": {
     "excalidrawEmpty": "空の図 — 左上の ✎ ボタンで編集",
     "embedEmpty": "空の埋め込み — ✎ ボタンで URL を追加",
-    "pageEmbedEmpty": "空のページ埋め込み — ✎ ボタンでページを追加"
+    "pageEmbedEmpty": "空のページ埋め込み — ✎ ボタンでページを追加",
+    "backlinksEmpty": "被リンクはまだありません"
   },
   "templates": {
     "title": "テンプレート",
