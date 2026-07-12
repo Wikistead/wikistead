@@ -2049,21 +2049,71 @@ class MacroWidget extends WidgetType {
   }
 }
 
-// #90 details: the collapsed state — a single "▸ summary" bar replacing the whole block. Caret-in
-// (click / motion) reveals the raw source (enterMacroAt). Display-only; no doc/offset/presence.
+// #90 / #337 details: a real open/close model with THREE states (the collapsed-only bar was issue 2)
+// closed (caret away) → "▸ summary" bar only.
+// open (caret away) → "▾ summary" bar + the body RENDERED (renderMarkdownToDom). Clicking the bar
+// toggles open↔closed — DISPLAY-ONLY (no doc/offset/presence): a module-level Map
+// keyed by the block anchor + an in-place DOM toggle, the SAME discipline as the tabs
+// tabActiveIndex (no dispatch → no decoration rebuild → single Y.Text untouched).
+// edit (caret-in) → the raw source reveals for editing (enterMacroAt via Ctrl+Enter / the hover ✎),
+// unchanged. Clicking the bar NO LONGER enters raw (that was the "only 2 states" bug);
+// editing is reached via the atom's Ctrl+Enter or the ✎ button, like the callout panel.
+// The open state survives a widget rebuild (body edited) via detailsOpenState (keyed by the block start, which
+// is stable across body edits) and no-change re-renders via CM's DOM reuse. Height settles after the body
+// renders / on toggle → observeBlockResize + requestMeasure re-measure so lines below don't drift (#255/#282).
+const detailsOpenState = new Map<number, boolean>();
 class DetailsSummaryWidget extends WidgetType {
-  constructor(readonly summary: string) { super(); }
-  eq(o: DetailsSummaryWidget) { return o.summary === this.summary; }
+  private ro?: ResizeObserver;
+  constructor(readonly summary: string, readonly body: string, readonly from: number) { super(); }
+  eq(o: DetailsSummaryWidget) { return o.summary === this.summary && o.body === this.body; }
   toDOM(view: EditorView) {
-    const el = document.createElement("div");
-    el.className = "cm-lp-details-summary";
-    el.setAttribute("data-testid", "macro-details");
-    el.textContent = `▸ ${this.summary}`; // textContent — never innerHTML
+    const wrap = document.createElement("div");
+    wrap.className = "cm-lp-details-collapsible";
+    wrap.setAttribute("data-testid", "macro-details");
+    const isOpen = detailsOpenState.get(this.from) ?? false;
+    const bar = document.createElement("div");
+    bar.className = "cm-lp-details-summary";
+    bar.setAttribute("data-testid", "details-summary-bar");
+    const arrow = document.createElement("span");
+    arrow.className = "cm-lp-details-arrow";
+    arrow.textContent = isOpen ? "▾" : "▸";
+    const label = document.createElement("span");
+    label.textContent = ` ${this.summary}`; // textContent — never innerHTML
+    bar.append(arrow, label);
+    // The rendered body (open state). Sanitized DOM via the shared renderer; untagged (display-only, editing
+    // goes through raw reveal). `cm-lp-md-directive` gives it the nested-block styling (headings/lists/tables).
+    const bodyEl = document.createElement("div");
+    bodyEl.className = "cm-lp-details-body cm-lp-md-directive";
+    bodyEl.setAttribute("data-testid", "details-body");
+    bodyEl.appendChild(renderMarkdownToDom(this.body));
+    if (!isOpen) bodyEl.style.display = "none";
+    wrap.append(bar, bodyEl);
     if (!view.state.readOnly) {
-      el.addEventListener("mousedown", (e) => { e.preventDefault(); enterMacroAt(view, view.posAtDOM(el)); view.focus(); });
+      // ▸/▾ click TOGGLES the rendered open state — display-only, in-place, never enters raw (#337 issue 2).
+      bar.addEventListener("mousedown", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const now = !(detailsOpenState.get(this.from) ?? false);
+        detailsOpenState.set(this.from, now);
+        arrow.textContent = now ? "▾" : "▸";
+        bodyEl.style.display = now ? "" : "none";
+        view.requestMeasure(); // height changed → CM re-measures so lines below don't drift
+      });
+      // Edit entry (raw reveal): a hover ✎ button (mouse) + Ctrl+Enter (the atom is selected) — the callout
+      // panel's affordance, so overloading the bar-click is unnecessary. stopPropagation so it doesn't toggle.
+      wrap.classList.add("cm-lp-callout-panel-editable");
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "cm-lp-macro-edit cm-lp-macro-edit-hint cm-lp-callout-panel-edit";
+      edit.title = "Edit (Ctrl+Enter)";
+      edit.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
+      edit.setAttribute("data-testid", "details-edit");
+      edit.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(wrap)); view.focus(); });
+      wrap.appendChild(edit);
     }
-    return el;
+    this.ro = observeBlockResize(view, wrap);
+    return wrap;
   }
+  destroy() { this.ro?.disconnect(); this.ro = undefined; }
   ignoreEvent() { return false; }
 }
 
@@ -2550,7 +2600,9 @@ const RENDERERS: BlockRenderer[] = [
         // #90 details, collapsed: replace the whole block with a "▸ summary" bar (one widget →
         // no per-line decoration conflict). Skip children so the fences aren't double-processed.
         // Caret-in (rangeRevealed) falls through to the container render below = raw editable.
-        ctx.addAtomic(Decoration.replace({ widget: new DetailsSummaryWidget(open!.label ?? "Details"), block: true }), first.from, lastLine.to);
+        const dBody: string[] = [];
+        for (let n = first.number + 1; n < lastLine.number; n++) dBody.push(doc.line(n).text);
+        ctx.addAtomic(Decoration.replace({ widget: new DetailsSummaryWidget(open!.label ?? "Details", dBody.join("\n"), first.from), block: true }), first.from, lastLine.to);
         return false;
       }
       if (macro.containerClass) {
@@ -3666,8 +3718,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   // returns as soon as the caret leaves the block.
   ".cm-lp-columns-frame, .cm-lp-tabs-frame": { borderLeft: "2px solid var(--border, #888)", paddingLeft: "0.6em" },
   ".cm-lp-column-frame, .cm-lp-tab-frame": { borderLeft: "2px solid color-mix(in srgb, var(--accent, #4ea1ff) 40%, transparent)", paddingLeft: "0.6em" },
-  // #90 details: collapsed bar + (revealed) a subtle bordered box.
+  // #90 / #337 details: the collapsible container (summary bar + rendered body) + (revealed) a subtle box.
+  ".cm-lp-details-collapsible": { position: "relative" },
   ".cm-lp-details-summary": { border: "1px solid var(--border, #888)", borderRadius: "4px", padding: "0.35em 0.7em", cursor: "pointer", color: "var(--fg-dim, #888)", userSelect: "none" },
+  ".cm-lp-details-arrow": { display: "inline-block", width: "1em", textAlign: "center" },
+  // #337 issue 2: the rendered open body — bordered like the block it belongs to, offset under the bar.
+  ".cm-lp-details-body": { marginTop: "0.4em", borderLeft: "3px solid var(--border, #888)", paddingLeft: "0.8em" },
   ".cm-lp-details": { borderLeft: "3px solid var(--border, #888)", paddingLeft: "0.8em" },
   // ::: callout directive: a tinted box with a SEMANTIC (never accent) left bar. Applied per line
   // (the fence lines are hidden → empty padding rows inside the box). The content

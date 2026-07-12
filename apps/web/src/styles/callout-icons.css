@@ -64,6 +64,10 @@
    (TodoIconWidget, on the open line) MEASURES the block and sets `top` itself; this supplies the paint. The
    0.35em top is only the pre-measure fallback for one frame. */
 .cm-lp-todo.cm-lp-directive-label::before{display:none}
+/* #337 issue 1: a directive-label WITHOUT an icon (:::details has a [label] but no --cb-icon) must not paint
+   the ::before box — with the mask unset it degrades to a solid grey square on the revealed open fence. Only
+   the label text (::after) should show. Same suppression as todo above (which owns its icon differently). */
+.cm-lp-details.cm-lp-directive-label::before{display:none}
 .cm-lp-todo-icon{position:absolute;left:0.65em;top:0.35em;width:1.5em;height:1.5em;background-color:var(--cb-color,var(--accent,#4ea1ff));-webkit-mask:var(--cb-icon) center/contain no-repeat;mask:var(--cb-icon) center/contain no-repeat;pointer-events:none}
 /* #290(4): round the todo BOX like the callout panel (callout-icons.css .cm-lp-callout-panel — keep
    the radii equal; the e2e asserts the computed values match). Per-line boxes → explicit corner classes. */
