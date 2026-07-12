@@ -3674,7 +3674,8 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-layout-item-remove": { position: "absolute", top: "2px", right: "2px", zIndex: "3", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.4em", height: "1.4em", border: "1px solid color-mix(in srgb, var(--danger, #cf222e) 45%, transparent)", borderRadius: "4px", background: "var(--panel, #fff)", color: "var(--danger, #cf222e)", cursor: "pointer", fontSize: "0.85em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms, background 120ms" },
   ".cm-lp-column:hover .cm-lp-layout-item-remove": { opacity: "1" },
   ".cm-lp-layout-item-remove:hover": { background: "color-mix(in srgb, var(--danger, #cf222e) 15%, var(--panel, #fff))", borderColor: "var(--danger, #cf222e)" },
-  ".cm-lp-tab-remove": { marginLeft: "0.4em", border: "none", background: "transparent", color: "var(--danger, #cf222e)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
+  // #278G: absolute (top-right of the tab) so it never adds flow width — hover-revealed, danger red.
+  ".cm-lp-tab-remove": { position: "absolute", top: "50%", right: "0.25em", transform: "translateY(-50%)", border: "none", background: "transparent", color: "var(--danger, #cf222e)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
   ".cm-lp-tab:hover .cm-lp-tab-remove, .cm-lp-tabbar:hover .cm-lp-tab-remove": { opacity: "0.75" },
   ".cm-lp-tab-remove:hover": { opacity: "1", color: "var(--danger, #cf222e)" },
   ".cm-lp-layout-item-add": { flex: "0 0 auto", alignSelf: "flex-start", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.6em", height: "1.6em", border: "1px dashed var(--border, #888)", borderRadius: "4px", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
@@ -3736,14 +3737,24 @@ export const livePreviewTheme = EditorView.baseTheme({
   // #90 columns: the A′ widget lays its inner column DOM out as an even flex row.
   // (#257's structured layout-edit panel CSS removed — the panel itself was retired by #278 §2a and the
   // rules were dead: nothing emits .cm-lp-layout-edit-* any more.)
-  ".cm-lp-columns": { display: "flex", gap: "1.2em", alignItems: "flex-start" },
+  // #278H: align-items STRETCH (was flex-start) so a short/EMPTY column follows the row height — its
+  // whole box is clickable (opens the island), not just a 1.6em top strip next to a tall neighbour.
+  ".cm-lp-columns": { display: "flex", gap: "1.2em", alignItems: "stretch" },
   // #278 §2a / rev4 (④): an EMPTY column must stay comfortably clickable (click = open its inline
   // editor) — a full text line of hit area, not a sliver.
   ".cm-lp-column": { flex: "1 1 0", minWidth: "0", minHeight: "1.6em" },
+  // #278H: an EMPTY column / active empty tab panel shows a faint dashed accent frame on hover so the
+  // (now full-height, via stretch) clickable slot is DISCOVERABLE — "you can write here". Editor-scoped
+  // (baseTheme). The island opens on click as before.
+  ".cm-lp-column-empty:hover, .cm-lp-tabpanel-empty.cm-lp-tabpanel-active:hover": { outline: "1px dashed color-mix(in srgb, var(--accent, #4ea1ff) 50%, transparent)", outlineOffset: "-2px", borderRadius: "3px" },
   ".cm-lp-column > :first-child": { marginTop: "0" },
   // #90 tabs: a tab bar + only the active panel shown (display-only switch).
   ".cm-lp-tabbar": { display: "flex", gap: "0.25em", borderBottom: "1px solid var(--border, #888)", marginBottom: "0.6em" },
-  ".cm-lp-tab": { border: "none", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", padding: "0.3em 0.7em", fontSize: "0.9em", borderBottom: "2px solid transparent", marginBottom: "-1px" },
+  // #278G: position:relative anchors the tab's × (below) absolutely so it takes NO flow width — a tab
+  // is the same width with or without the × (Reading vs edit modes match). A little right padding gives the
+  // hover-shown × a home at the tab's right edge without overlapping the label; it's on ALL tabs (both modes)
+  // so widths stay equal.
+  ".cm-lp-tab": { position: "relative", border: "none", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", padding: "0.3em 1.4em 0.3em 0.7em", fontSize: "0.9em", borderBottom: "2px solid transparent", marginBottom: "-1px" },
   ".cm-lp-tab:hover": { color: "var(--fg, inherit)" },
   ".cm-lp-tab-active": { color: "var(--fg, inherit)", borderBottomColor: "var(--accent, #4ea1ff)", fontWeight: "600" },
   ".cm-lp-tabpanel": { display: "none" },

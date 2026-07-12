@@ -31,6 +31,7 @@ export function columnsLiveRender(body: string): HTMLElement {
   for (const c of parseLayoutItems(body, "column")) {
     const col = document.createElement("div");
     col.className = "cm-lp-column";
+    if (!c.content.trim()) col.classList.add("cm-lp-column-empty"); // #278H: hover affordance for an empty slot
     // The column SLOT is not tagged (a click on empty slot area selects the container, ADR-100 §1);
     // only real nested macros inside get data-mac-pos, via renderMarkdownToDom with the column base.
     col.appendChild(renderMarkdownToDom(c.content, base != null ? base + c.contentOffset : undefined));
@@ -96,6 +97,7 @@ export function tabsLiveRender(body: string): HTMLElement {
     btn.textContent = t.label || `Tab ${i + 1}`;
     const panel = document.createElement("div");
     panel.className = "cm-lp-tabpanel";
+    if (!t.content.trim()) panel.classList.add("cm-lp-tabpanel-empty"); // #278H: hover affordance for an empty tab
     panel.appendChild(renderMarkdownToDom(t.content, base != null ? base + t.contentOffset : undefined));
     const activate = () => {
       for (const b of Array.from(bar.children)) b.classList.toggle("cm-lp-tab-active", b === btn);
