@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { enterEdit, openScratch, sleep } from "../helpers";
 
 // #174 (review rejection comment 1071): four block-interaction fixes for nested macros, all in WYSIWYG.
-// Real Chromium — nested-widget hit-testing / :has() hover suppression / re-render tab state can't be
+// Real Chromium — nested-widget hit-testing / :has hover suppression / re-render tab state can't be
 // exercised in happy-dom.
 
 // Point 1: a fence macro (mermaid) NESTED in a tabs/columns container gets the same hover ✎ as a nested
@@ -102,4 +102,37 @@ test("#174-4: a pipe table nested in columns renders as a <table>", async ({ bro
   await expect(table, "the nested pipe table renders as a real <table>").toBeVisible();
   await expect(table.locator("th")).toHaveCount(2);
   await expect(table.locator("tbody td")).toHaveCount(2);
+});
+
+// #278 E part 1: clicking a NESTED callout inside a column must NOT reflow the column width. The
+// (add-item) is a flex child; it used to be skipped whenever a nested macro was selected, which removed it
+// and jumped the columns (measured 315->336px). Now the renders unconditionally, so the width is stable
+// and with the width stable the nested edit form stays contained in its column (no layout "explosion").
+test("#278 E: clicking a nested callout in a column does not reflow the column width", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1100, height: 700 } })).newPage();
+  await openScratch(page, "nested-callout-reflow"); await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("top\n\n::::columns\n:::column\n:::warning\nhi there\n:::\n:::\n:::column\nBBB\n:::\n::::\n\nbot\n");
+  await sleep(800);
+  await page.getByText("bot", { exact: true }).click(); await sleep(300);
+  const cols = page.locator("[data-pane=preview] [data-testid=macro-columns] .cm-lp-column");
+  const before = await cols.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
+  expect(before.length).toBe(2);
+  // click the nested warning callout → nested-select; the column width must NOT jump.
+  await page.locator("[data-pane=preview] .cm-lp-callout-warning").first().click({ force: true }); await sleep(400);
+  const afterClick = await cols.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
+  expect(afterClick, `column width must not reflow on nested-select (was ${before}, now ${afterClick})`).toEqual(before);
+  // the nested edit form (if opened) stays CONTAINED within its column — no horizontal overflow / explosion.
+  await page.locator("[data-pane=preview] .cm-lp-callout-warning").first().hover(); await sleep(200);
+  await page.locator("[data-pane=preview] .cm-lp-macro-edit").first().click({ force: true }).catch(() => {});
+  await sleep(400);
+  const contained = await page.evaluate(() => {
+    const form = document.querySelector("[data-pane=preview] .cm-lp-callout-edit") as HTMLElement | null;
+    const col = form?.closest(".cm-lp-column") as HTMLElement | null;
+    if (!form || !col) return true; // no form → nothing to contain
+    return form.getBoundingClientRect().right <= col.getBoundingClientRect().right + 1;
+  });
+  expect(contained, "the nested edit form must stay within its column (no overflow)").toBe(true);
+  const afterEdit = await cols.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
+  expect(afterEdit, "column width stays stable through the nested edit").toEqual(before);
 });
