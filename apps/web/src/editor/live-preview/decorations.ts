@@ -98,6 +98,111 @@ const highlightMark = Decoration.mark({ class: "cm-lp-highlight" }); // #334 / A
 // as "this is a footnote" without a second (numbered) copy fighting the source you're editing.
 const footnoteRefMark = Decoration.mark({ class: "cm-lp-footnote-ref" });
 const footnoteDefLine = Decoration.line({ attributes: { class: "cm-lp-footnote-def" } });
+
+// #335on a READ-ONLY surface (Reading / template preview) footnotes AGGREGATE — the reference becomes
+// a numbered superscript that JUMPS to a document-end section, the in-place definition lines are hidden, and
+// the section carries `↩` back-links. This matches the public reader (renderMarkdownToDom); only the EDITABLE
+// surface keeps the in-place muted definitions (edit them where they are). Document-scoped + top-level only
+// (a footnote inside a :::macro body stays literal — §A), reusing the shared grammar's nodes.
+interface DocFootnotes {
+  numbers: Map<string, number>; // label → number (first-reference order; only refs that have a matching def)
+  defRange: Map<string, { from: number; to: number }>; // label → its FIRST definition's node range
+  refFirstPos: Map<string, number>; // label → first reference position (the `↩` target)
+  order: string[]; // referenced labels in number order
+  unreferenced: string[]; // defined-but-never-referenced (still shown, de-emphasised — content never dropped)
+}
+const footnoteRefLabelD = (text: string): string => text.slice(2, -1); // `[^label]` → label
+function collectDocFootnotes(state: EditorState): DocFootnotes | null {
+  const dirs = resolveDirectiveRanges(state.doc.toString());
+  const insideMacro = (pos: number) => dirs.some((d) => pos > d.from && pos < d.to);
+  const doc = state.doc;
+  const refOrder: string[] = [];
+  const refFirstPos = new Map<string, number>();
+  const defRange = new Map<string, { from: number; to: number }>();
+  syntaxTree(state).iterate({
+    enter: (n) => {
+      if (n.name === "FootnoteRef") {
+        if (insideMacro(n.from)) return;
+        const label = footnoteRefLabelD(doc.sliceString(n.from, n.to));
+        if (label) { refOrder.push(label); if (!refFirstPos.has(label)) refFirstPos.set(label, n.from); }
+      } else if (n.name === "FootnoteDef") {
+        if (insideMacro(n.from)) return;
+        const m = /^\[\^([^\]\s]+)\]:/.exec(doc.sliceString(n.from, n.to));
+        const label = m?.[1];
+        if (label && !defRange.has(label)) defRange.set(label, { from: n.from, to: n.to });
+      }
+    },
+  });
+  const numbers = new Map<string, number>();
+  const order: string[] = [];
+  for (const label of refOrder) if (defRange.has(label) && !numbers.has(label)) { numbers.set(label, numbers.size + 1); order.push(label); }
+  const unreferenced = [...defRange.keys()].filter((l) => !numbers.has(l));
+  if (order.length === 0 && unreferenced.length === 0) return null;
+  return { numbers, defRange, refFirstPos, order, unreferenced };
+}
+
+// Bring the end-of-document footnote section into view (CM scroll — virtualization-safe, unlike a raw DOM
+// scrollIntoView on a possibly-unrendered widget), then centre the specific item once it's painted.
+function jumpToFootnoteSection(view: EditorView, n: number): void {
+  view.dispatch({ effects: EditorView.scrollIntoView(view.state.doc.length, { y: "end" }) });
+  requestAnimationFrame(() => { view.dom.querySelector(`#fn-${n}`)?.scrollIntoView({ block: "center" }); });
+}
+
+// The read-only footnote REFERENCE: a superscript number that jumps to its end-section item; an undefined
+// reference (no matching def) is a muted `?`. Display-only (offset-invariant replace).
+class FootnoteRefWidget extends WidgetType {
+  constructor(readonly n: number | null) { super(); }
+  eq(o: FootnoteRefWidget) { return o.n === this.n; }
+  toDOM(view: EditorView) {
+    const sup = document.createElement("sup");
+    sup.className = "cm-lp-footnote-ref";
+    if (this.n == null) { sup.classList.add("cm-lp-footnote-undef"); sup.textContent = "?"; return sup; }
+    sup.id = `fnref-${this.n}`;
+    const a = document.createElement("a");
+    a.textContent = String(this.n);
+    a.setAttribute("data-testid", `footnote-ref-${this.n}`);
+    a.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); jumpToFootnoteSection(view, this.n!); });
+    sup.appendChild(a);
+    return sup;
+  }
+  ignoreEvent() { return false; }
+}
+
+// The read-only end-of-document footnote SECTION: a numbered list of definitions, each with a `↩` back-link to
+// its first reference. `key` (numbers + def ranges) drives eq so the widget rebuilds on a footnote change but
+// NOT on a selection-only change (#84 stable-key lesson). Definition bodies render via the shared renderer.
+class FootnoteSectionWidget extends WidgetType {
+  constructor(readonly key: string, readonly items: { n: number; from: number; to: number; refPos: number | null; unref: boolean }[]) { super(); }
+  eq(o: FootnoteSectionWidget) { return o.key === this.key; }
+  toDOM(view: EditorView) {
+    const section = document.createElement("section");
+    section.className = "cm-lp-footnotes";
+    section.setAttribute("data-testid", "footnotes");
+    section.appendChild(document.createElement("hr"));
+    const ol = document.createElement("ol");
+    ol.className = "cm-lp-footnotes-list";
+    for (const it of this.items) {
+      const li = document.createElement("li");
+      li.className = it.unref ? "cm-lp-footnote-item cm-lp-footnote-unref" : "cm-lp-footnote-item";
+      if (!it.unref) li.id = `fn-${it.n}`;
+      const bodySrc = view.state.doc.sliceString(it.from, it.to).replace(/^\[\^[^\]\s]+\]:[ \t]?/, ""); // drop `[^label]: `
+      li.appendChild(renderMarkdownToDom(bodySrc)); // sanitized DOM (no innerHTML), inline styled by CSS
+      if (!it.unref && it.refPos != null) {
+        li.appendChild(document.createTextNode(" "));
+        const back = document.createElement("a");
+        back.className = "cm-lp-footnote-back";
+        back.textContent = "↩";
+        const rp = it.refPos;
+        back.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); view.dispatch({ effects: EditorView.scrollIntoView(rp, { y: "center" }) }); });
+        li.appendChild(back);
+      }
+      ol.appendChild(li);
+    }
+    section.appendChild(ol);
+    return section;
+  }
+  ignoreEvent() { return false; }
+}
 const inlineCodeMark = Decoration.mark({ class: "cm-lp-inline-code" });
 const linkMark = Decoration.mark({ class: "cm-lp-link" });
 const hide = Decoration.replace({});
@@ -2475,6 +2580,10 @@ export interface RenderCtx {
   // and leaked). Only leaked fences (early-closed descend containers — columns/tabs) are absent, and
   // those are never under a block-replace widget, so the post-pass never overlaps an existing replace.
   readonly fenceLineStarts: Set<number>;
+  // #335the document-scoped footnote aggregation, computed ONCE per build and non-null ONLY on a
+  // READ-ONLY surface (Reading / template preview). When set, the footnote renderers switch to aggregate mode
+  // (numbered jump-refs + hidden def lines + an end-of-document section); null keeps the in-place edit rendering.
+  readonly footnotes: DocFootnotes | null;
 }
 
 // Minimal structural view of a syntax-tree node — what renderers need. A real
@@ -2521,19 +2630,34 @@ const RENDERERS: BlockRenderer[] = [
   // #334 / ADR-129: highlight — style the run, hide the `==` delimiters (reveal on the cursor line).
   { match: (n) => n === "Highlight", enter: (node, ctx) => ctx.add(highlightMark, node.from, node.to) },
   { match: (n) => n === "HighlightMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
-  // #335 / ADR-130: footnote reference `[^label]` — style the run as a superscript and hide the `[^` opener
-  // and `]` closer (reveal-on-cursor, exactly like highlight's `==`), so it reads as a superscript label.
+  // #335 / ADR-130: footnote reference `[^label]`. READ surface (ctx.footnotes,): replace it with a
+  // numbered superscript that jumps to the end-section (aggregated view). EDIT surface: style the run as a
+  // superscript and hide the `[^`/`]` (reveal-on-cursor, like highlight's `==`), keeping the source editable.
   {
     match: (n) => n === "FootnoteRef",
     enter: (node, ctx) => {
+      if (ctx.footnotes) {
+        const label = footnoteRefLabelD(ctx.state.doc.sliceString(node.from, node.to));
+        ctx.add(Decoration.replace({ widget: new FootnoteRefWidget(ctx.footnotes.numbers.get(label) ?? null) }), node.from, node.to);
+        return;
+      }
       ctx.add(footnoteRefMark, node.from, node.to);
       ctx.hideMarker(node.from, node.from + 2); // `[^`
       ctx.hideMarker(node.to - 1, node.to); // `]`
     },
   },
-  // #335 / ADR-130: footnote definition line `[^label]: body` — a muted line style; the source stays visible
-  // and editable in place (the numbered end-section is a rendered-surface concern, not the live editor).
-  { match: (n) => n === "FootnoteDef", enter: (node, ctx) => ctx.add(footnoteDefLine, ctx.state.doc.lineAt(node.from).from) },
+  // #335 / ADR-130: footnote definition line `[^label]: body`. READ surface: HIDE the line entirely
+  // it is aggregated into the end-of-document section. EDIT surface: a muted line style; the source stays
+  // visible and editable in place.
+  { match: (n) => n === "FootnoteDef", enter: (node, ctx) => {
+    if (ctx.footnotes) {
+      const line = ctx.state.doc.lineAt(node.from);
+      const to = Math.min(line.to + 1, ctx.state.doc.length); // include the trailing newline so the line fully collapses
+      if (to > line.from) ctx.add(Decoration.replace({ block: true }), line.from, to);
+      return;
+    }
+    ctx.add(footnoteDefLine, ctx.state.doc.lineAt(node.from).from);
+  } },
   { match: (n) => n === "InlineCode", enter: (node, ctx) => ctx.add(inlineCodeMark, node.from, node.to) },
   {
     match: (n) => n === "FencedCode",
@@ -3118,6 +3242,7 @@ function buildDecorations(state: EditorState, themeOverride?: MacroTheme): {
     // so it isn't double-rendered (frame box / note fallback) on top of the container's own widget.
     coveredByBlock: (pos) => blocks.some((b) => pos >= b.from && pos < b.to),
     fenceLineStarts: new Set<number>(),
+    footnotes: state.readOnly ? collectDocFootnotes(state) : null, // #335aggregate on read surfaces only
   };
 
   syntaxTree(state).iterate({
@@ -3150,6 +3275,18 @@ function buildDecorations(state: EditorState, themeOverride?: MacroTheme): {
       const closeLine = state.doc.lineAt(Math.min(dir.to, state.doc.length));
       if (!ctx.fenceLineStarts.has(closeLine.from) && closeLine.from < closeLine.to) ctx.hideMarker(closeLine.from, closeLine.to, undefined, false);
     }
+  }
+
+  // #335on a read surface, append the aggregated end-of-document footnote section (numbered defs +
+  // `↩` back-links). The refs were turned into numbered jump-widgets and the def lines hidden by the renderers.
+  if (ctx.footnotes) {
+    const fn = ctx.footnotes;
+    const items = [
+      ...fn.order.map((label) => { const d = fn.defRange.get(label)!; return { n: fn.numbers.get(label)!, from: d.from, to: d.to, refPos: fn.refFirstPos.get(label) ?? null, unref: false }; }),
+      ...fn.unreferenced.map((label) => { const d = fn.defRange.get(label)!; return { n: 0, from: d.from, to: d.to, refPos: null, unref: true }; }),
+    ];
+    const key = items.map((it) => `${it.n}:${it.from}:${it.to}`).join("|");
+    all.push(Decoration.widget({ widget: new FootnoteSectionWidget(key, items), side: 1, block: true }).range(state.doc.length));
   }
 
   return {
