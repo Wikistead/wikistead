@@ -607,9 +607,12 @@ function buildBacklinksList(items: { id: string; title: string }[], label: strin
     const a = document.createElement("a");
     a.className = "cm-lp-backlinks-item";
     a.setAttribute("data-testid", `macro-backlink-${it.id}`);
-    a.href = `/p/${it.id}`;
+    a.href = `/p/${it.id}`; // real href (middle-click / open-in-new-tab work); left-click is SPA-routed below
     a.textContent = it.title || src.untitledLabel;
-    a.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); src.navigate(it.id); });
+    // mousedown: keep the caret out of the atom / don't let CM handle it. click: SPA-navigate and preventDefault
+    // so the anchor's own full-page navigation to the SAME url never also fires (no double nav / white flash).
+    a.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
+    a.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); src.navigate(it.id); });
     li.appendChild(a);
     ul.appendChild(li);
   }
