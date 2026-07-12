@@ -279,6 +279,41 @@ test("#278 island vim — last-line `o` stays inside; Escape is two-stage (inser
   await expect(page.locator("[data-testid=slot-edit-island]")).toHaveCount(0);
 });
 
+// #278 B: the shipped island-vim-`o` test covered COLUMNS only; the review bounce suspected a
+// TAB-panel island unmounting on `o`. Tracing (per-transaction slotEditField trace + activeElement) showed the
+// island survives `o` in a tab panel exactly as in a column — the earlier "unmount" repro was an artifact of an
+// Escape BEFORE `o` (a normal-mode Escape is the intended island exit). This is the missing tabs coverage: a
+// last-line `o` in a TAB island opens a line inside, focus stays, insert-mode types — no unmount (both tabs).
+test("#278 B: TAB-panel island last-line `o` stays inside (parity with columns)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "slot-vim-o-tabs"); await enterEdit(page);
+  await page.getByTestId("vim-toggle").click(); await sleep(200);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Escape");
+  await page.keyboard.insertText("::::tabs\n:::tab[One]\nalpha\n:::\n:::tab[Two]\nbeta\n:::\n::::\n\ntail\n");
+  await sleep(700);
+  await page.getByText("tail", { exact: true }).click(); await sleep(200); // caret OUT → the tabs widget renders
+  const inIsland = () => page.evaluate(() => !!document.activeElement?.closest?.("[data-testid=slot-edit-island]"));
+
+  for (const tab of ["One", "Two"]) {
+    await page.locator("[data-pane=preview] .cm-lp-tab", { hasText: tab }).click(); await sleep(200); // switch tab
+    await page.locator("[data-pane=preview] .cm-lp-tabpanel-active").first().click(); await sleep(400); // open the island
+    const island = page.locator("[data-testid=slot-edit-island]");
+    await expect(island, `${tab}: island opens`).toBeVisible();
+    await page.keyboard.press("Shift+G"); // vim normal: last line
+    await page.keyboard.press("o");        // open a line INSIDE the island (no Escape before — the real interaction)
+    await sleep(300);
+    await expect(island, `${tab}: island survives o (no unmount)`).toBeVisible();
+    expect(await inIsland(), `${tab}: focus stays inside the island after o`).toBe(true);
+    await page.keyboard.type("xyz"); await sleep(150);
+    await expect(island.locator(".cm-content"), `${tab}: insert-mode types into the island`).toContainText("xyz");
+    await page.keyboard.press("Escape"); await sleep(200); // insert→normal (stays)
+    await page.keyboard.press("Escape"); await sleep(400); // normal→exit the island
+    await expect(page.locator("[data-testid=slot-edit-island]"), `${tab}: normal-Escape exits`).toHaveCount(0);
+    await page.getByText("tail", { exact: true }).click(); await sleep(200); // reset caret out for the next tab
+  }
+});
+
 test("#278 §2a: Escape exits the slot island without committing a stray edit", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "slot-edit-esc"); await enterEdit(page);
