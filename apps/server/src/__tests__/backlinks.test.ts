@@ -76,12 +76,27 @@ describe('getBacklinks (#230)', () => {
     expect(links.map((l) => l.id)).not.toContain(noise)
   })
 
-  it('authz: a backlink from a page the viewer CANNOT see is not leaked', async () => {
-    // `hidden` links to target but is private (creator-only). A different member must not see it.
-    const asOther = await getBacklinks(db, fgaClient, { pageId: target, subject: 'user:other-member' })
-    expect(asOther.map((l) => l.id)).not.toContain(hidden)
-    // ...while the creator (who can view it) DOES get it.
+  it('authz: the creator (who can view the target) gets the view-authorized backlinks incl. their own private source', async () => {
+    // The per-source `check(view, source)` loop is the source-hiding mechanism (#230/#244); the creator can
+    // view every source here, so they see them all. A caller who could view the TARGET but not a given SOURCE
+    // still wouldn't get that source — that per-source filter is unchanged and separately covered by
+    // private-sharelink-244.test.ts (guest non-leak).
     const asCreator = await getBacklinks(db, fgaClient, { pageId: target, subject: 'user:dev-user' })
     expect(asCreator.map((l) => l.id)).toContain(hidden)
+    expect(asCreator.map((l) => l.id)).toContain(linker)
+  })
+
+  // #307 /.4: the TARGET page is view-gated. The `:::backlinks` macro can carry an arbitrary target id
+  // in its body, so a caller who cannot view the target (or it doesn't exist) must get a UNIFORM 404 — the two
+  // are indistinguishable, so a page's existence/backlinks can't be probed by a viewer who can't see it.
+  it('#307: a target the caller CANNOT view is a 404 (existence-hiding), not a leaked source list', async () => {
+    // `other-member` has no grant in this space → cannot view `target`.
+    await expect(getBacklinks(db, fgaClient, { pageId: target, subject: 'user:other-member' }))
+      .rejects.toMatchObject({ statusCode: 404 })
+  })
+
+  it('#307: a non-existent target id is the SAME uniform 404 (indistinguishable from a non-viewable one)', async () => {
+    await expect(getBacklinks(db, fgaClient, { pageId: 'no-such-page-id', subject: 'user:dev-user' }))
+      .rejects.toMatchObject({ statusCode: 404 })
   })
 })

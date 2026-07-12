@@ -343,13 +343,17 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
   const backlinks = useMemo<BacklinksSource | undefined>(() => {
     if (!pageId) return undefined;
     return {
-      fetch: () =>
-        queryClient
+      // #307 / targetPageId=null ⇒ this page; a string ⇒ that page's backlinks (the endpoint view-gates
+      // the target, so a non-viewable/absent id throws → .catch → null → the widget renders nothing).
+      fetch: (targetPageId: string | null) => {
+        const id = targetPageId ?? pageId;
+        return queryClient
           .fetchQuery({
-            queryKey: ["backlinks", pageId],
-            queryFn: () => apiFetch<{ id: string; title: string }[]>(`/pages/${encodeURIComponent(pageId)}/backlinks`, apiToken).then((r) => r ?? []),
+            queryKey: ["backlinks", id],
+            queryFn: () => apiFetch<{ id: string; title: string }[]>(`/pages/${encodeURIComponent(id)}/backlinks`, apiToken).then((r) => r ?? []),
           })
-          .catch(() => null),
+          .catch(() => null);
+      },
       navigate: (id: string) => navigateRouter(`/p/${id}`),
       emptyLabel: i18n.t("macro.backlinksEmpty"),
       untitledLabel: i18n.t("backlinks.untitled"),

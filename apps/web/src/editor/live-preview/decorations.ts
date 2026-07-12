@@ -572,7 +572,10 @@ export const transcludeResolver = Facet.define<TranscludeResolver, TranscludeRes
 // absent on template previews / non-page contexts (no pageId) → no fetch, so the ADR-110 boundary is enforced
 // by absence. The Markdown source (`:::backlinks[label]`) is canonical; the list is display-only output.
 export interface BacklinksSource {
-  readonly fetch: () => Promise<{ id: string; title: string }[] | null>;
+  // #307 / `targetPageId` = the page whose backlinks to fetch; null = THIS page (the resolver's own
+  // bound pageId). A non-viewable / non-existent target yields null (the endpoint 404s uniformly → nothing),
+  // so an author can't probe a page they can't see.
+  readonly fetch: (targetPageId: string | null) => Promise<{ id: string; title: string }[] | null>;
   readonly navigate: (pageId: string) => void;
   readonly emptyLabel: string; // dim edit-surface placeholder (a 0-height read-surface widget shows nothing)
   readonly untitledLabel: string; // fallback text for a source page with no title
@@ -1900,7 +1903,7 @@ class MacroWidget extends WidgetType {
         const src = view.state.facet(backlinksSource);
         if (src) {
           const editable = !view.state.readOnly;
-          void src.fetch().then((items) => {
+          const renderResult = (items: { id: string; title: string }[] | null) => {
             if (this.destroyed) return;
             rendered.replaceChildren();
             if (!items || items.length === 0) {
@@ -1918,7 +1921,15 @@ class MacroWidget extends WidgetType {
               rendered.appendChild(buildBacklinksList(items, label, src));
             }
             view.requestMeasure();
-          });
+          };
+          // #307 / body semantics — empty ⇒ THIS page (null); exactly ONE non-empty line ⇒ that page's
+          // id (a hub page aggregating another page's backlinks, same convention as `:::embed-page`); anything
+          // else (multiple lines / whitespace-only garbage) ⇒ invalid ⇒ render as 0 results (never a parse
+          // error in the body). A non-viewable/absent target id resolves to null via the endpoint's uniform 404.
+          const lines = this.body.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+          const target: string | null | undefined = lines.length === 0 ? null : lines.length === 1 ? lines[0] : undefined;
+          if (target === undefined) renderResult(null); // invalid body → same as 0 results
+          else void src.fetch(target).then(renderResult);
         }
       }
     }
