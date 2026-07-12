@@ -1,5 +1,5 @@
 import { parser, Strikethrough, Table } from "@lezer/markdown";
-import { parseFenceInfo, highlightExtension } from "@wikistead/macro-render"; // #267 fence align=; #334 `==` highlight grammar
+import { parseFenceInfo, highlightExtension, footnoteExtension } from "@wikistead/macro-render"; // #267 fence align=; #334 highlight; #335 footnote grammar
 import { directiveExtension, parseDirectiveOpen, resolveDirectiveRanges, type ResolvedDirective } from "./directive-parser";
 import { findDirectiveMacro, findFenceMacro } from "./registry";
 import { currentMacroTheme } from "./theme";
@@ -24,7 +24,7 @@ const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 // <table> instead of the raw `| a | b |` source (the shared server renderer gets the same extension). The
 // Table render case below builds the DOM node-by-node (textContent only), so it stays inside the XSS
 // boundary — a cell's content is inline markdown, never raw HTML.
-const mdParser = parser.configure([directiveExtension, Strikethrough, Table, highlightExtension]);
+const mdParser = parser.configure([directiveExtension, Strikethrough, Table, highlightExtension, footnoteExtension]);
 // @lezer/common isn't a direct dependency — derive the SyntaxNode type from the parser instead.
 type SNode = ReturnType<typeof mdParser.parse>["topNode"];
 
@@ -79,7 +79,18 @@ const MARKS = new Set([
   "DirectiveMark", "URL", "CodeInfo", "LinkTitle",
   "StrikethroughMark", // #89 comment 848: skip the `~~` delimiters so <s> holds only the text
   "HighlightMark", // #334 / ADR-129: skip the `==` delimiters so <mark> holds only the text
+  "FootnoteDefMark", // #335 / ADR-130: skip the `[^label]:` marker; the def body renders alone
 ]);
+
+// #335 / ADR-130: footnote resolution is DOCUMENT-SCOPED and TOP-LEVEL only (renderBase == null). During a
+// top-level render, `footnoteNumbers` maps a label → its number (first-reference order). A FootnoteRef renders
+// its number as a superscript link using this map; nested renders (renderBase != null) leave it null so a
+// footnote inside a macro body stays literal (ADR-130 §A). fn-<n> / fnref-<n> id namespace (ADR-130 §E).
+let footnoteNumbers: Map<string, number> | null = null;
+// The label inside `[^label]` (a FootnoteRef node spans `[^` … `]`).
+function footnoteRefLabel(src: string, from: number, to: number): string {
+  return src.slice(from + 2, to - 1);
+}
 
 // Block-level nodes get their own recursion; everything else is inline/text.
 const HEADINGS: Record<string, string> = {
@@ -132,6 +143,28 @@ function renderInlineNode(node: SNode, src: string, into: Node): void {
     case "StrongEmphasis": { const el = document.createElement("strong"); renderInline(node, src, el); into.appendChild(el); return; }
     case "Strikethrough": { const el = document.createElement("s"); renderInline(node, src, el); into.appendChild(el); return; }
     case "Highlight": { const el = document.createElement("mark"); renderInline(node, src, el); into.appendChild(el); return; } // #334 / ADR-129
+    // #335 / ADR-130: a footnote REFERENCE → a superscript number linking to its end-section definition. The
+    // number comes from the document-scoped map (first-reference order). An undefined reference (no matching
+    // def, or a nested/non-top-level render where the map is null) renders as a muted number with no target
+    // never a dangling link, never the raw `[^label]`. In-document anchors only → XSS-inert (textContent).
+    case "FootnoteRef": {
+      const label = footnoteRefLabel(src, node.from, node.to);
+      const n = footnoteNumbers?.get(label);
+      const sup = document.createElement("sup");
+      sup.className = "cm-lp-footnote-ref";
+      if (n != null) {
+        sup.id = `fnref-${n}`;
+        const a = document.createElement("a");
+        a.href = `#fn-${n}`;
+        a.textContent = String(n);
+        sup.appendChild(a);
+      } else {
+        sup.classList.add("cm-lp-footnote-undef");
+        sup.textContent = "?"; // referenced-but-undefined (or a nested render) — muted, no target
+      }
+      into.appendChild(sup);
+      return;
+    }
     case "InlineCode": { const el = document.createElement("code"); el.textContent = stripMarks(node, src, "CodeMark"); into.appendChild(el); return; }
     case "Link": {
       const urlNode = node.getChild("URL");
@@ -182,6 +215,9 @@ function stripMarks(node: SNode, src: string, mark: string): string {
 function renderBlock(node: SNode, src: string, into: Node): number | void {
   if (HEADINGS[node.name]) { const el = document.createElement(HEADINGS[node.name]!); renderInline(node, src, el); into.appendChild(el); return; }
   switch (node.name) {
+    // #335 / ADR-130: a footnote DEFINITION is NOT rendered in place — it is collected into the end-of-document
+    // footnotes section (renderMarkdownToDom, top-level). Skipping it here keeps it out of the body flow.
+    case "FootnoteDef": return;
     case "Paragraph": { const el = document.createElement("p"); renderInline(node, src, el); into.appendChild(el); return; }
     case "Blockquote": { const el = document.createElement("blockquote"); renderBlocks(node, src, el); into.appendChild(el); return; }
     case "BulletList": { const el = document.createElement("ul"); renderBlocks(node, src, el); into.appendChild(el); return; }
@@ -329,13 +365,93 @@ function renderBlocks(parent: SNode, src: string, into: Node): void {
 // output. renderBase is saved/restored so nested renderMarkdownToDom calls don't corrupt a parent's base.
 export function renderMarkdownToDom(src: string, baseOffset?: number): DocumentFragment {
   const prevBase = renderBase;
+  const prevFn = footnoteNumbers;
   renderBase = baseOffset ?? null;
   try {
     const tree = mdParser.parse(src);
     const frag = document.createDocumentFragment();
+    // #335 / ADR-130: footnote resolution is TOP-LEVEL ONLY (renderBase == null). Collect the ref order (→
+    // numbers) and the definitions, render the body (refs use the number map, defs are skipped), then append
+    // the end-of-document footnotes section. A nested render leaves footnoteNumbers null → a footnote inside a
+    // macro body stays literal (§A) and never starts its own section.
+    const fn = renderBase == null ? collectFootnotes(tree.topNode, src) : null;
+    footnoteNumbers = fn ? fn.numbers : null;
     renderBlocks(tree.topNode, src, frag);
+    if (fn && (fn.order.length > 0 || fn.unreferenced.length > 0)) frag.appendChild(renderFootnoteSection(fn, src));
     return frag;
-  } finally { renderBase = prevBase; }
+  } finally { renderBase = prevBase; footnoteNumbers = prevFn; }
+}
+
+// #335 / ADR-130: the document-scoped footnote pass. Numbers are assigned by FIRST-REFERENCE order; a repeated
+// reference shares its number. Definitions are matched by label; a duplicate definition — the FIRST wins.
+// `order` = referenced labels in number order; `unreferenced` = defined-but-never-referenced (still shown,
+// de-emphasised, so content is never silently dropped).
+interface FootnoteData { numbers: Map<string, number>; defs: Map<string, SNode>; order: string[]; unreferenced: string[]; }
+function collectFootnotes(tree: SNode, src: string): FootnoteData {
+  // Pass 1: gather every reference label in document order (defs can appear after refs) and every definition.
+  const refOrder: string[] = [];
+  const defs = new Map<string, SNode>();
+  tree.cursor().iterate((n) => {
+    if (n.name === "FootnoteRef") {
+      const label = footnoteRefLabel(src, n.from, n.to);
+      if (label) refOrder.push(label);
+    } else if (n.name === "FootnoteDef") {
+      const m = /^\[\^([^\]\s]+)\]:/.exec(src.slice(n.from, n.to));
+      const label = m?.[1];
+      if (label && !defs.has(label)) defs.set(label, n.node); // duplicate def → first wins
+    }
+  });
+  // Pass 2: number ONLY references that have a matching definition, by first-reference order (a repeated
+  // reference shares its number). A reference with no def gets no number → it renders as a muted `?` (§D).
+  const numbers = new Map<string, number>();
+  const order: string[] = [];
+  for (const label of refOrder) {
+    if (defs.has(label) && !numbers.has(label)) { numbers.set(label, numbers.size + 1); order.push(label); }
+  }
+  const unreferenced = [...defs.keys()].filter((l) => !numbers.has(l));
+  return { numbers, defs, order, unreferenced };
+}
+
+// Render the collected definitions' inline body (everything after the `[^label]:` mark). Reuses renderInline;
+// the FootnoteDefMark is in MARKS so it is skipped, leaving just the note text (XSS-inert, textContent path).
+function renderFootnoteBody(def: SNode, src: string, into: Node): void { renderInline(def, src, into); }
+
+function renderFootnoteSection(fn: FootnoteData, src: string): HTMLElement {
+  const section = document.createElement("section");
+  section.className = "cm-lp-footnotes";
+  section.setAttribute("data-testid", "footnotes");
+  const hr = document.createElement("hr");
+  section.appendChild(hr);
+  const ol = document.createElement("ol");
+  ol.className = "cm-lp-footnotes-list";
+  // Referenced defs first (in number order), then unreferenced (de-emphasised). A referenced label with no
+  // definition contributes NO list item (the ref already renders as a muted `?`); content is never dropped.
+  for (const label of fn.order) {
+    const def = fn.defs.get(label);
+    if (!def) continue;
+    ol.appendChild(footnoteItem(fn.numbers.get(label)!, def, src, false));
+  }
+  for (const label of fn.unreferenced) {
+    ol.appendChild(footnoteItem(null, fn.defs.get(label)!, src, true));
+  }
+  section.appendChild(ol);
+  return section;
+}
+
+function footnoteItem(n: number | null, def: SNode, src: string, unreferenced: boolean): HTMLElement {
+  const li = document.createElement("li");
+  li.className = unreferenced ? "cm-lp-footnote-item cm-lp-footnote-unref" : "cm-lp-footnote-item";
+  if (n != null) li.id = `fn-${n}`;
+  renderFootnoteBody(def, src, li);
+  if (n != null) {
+    li.appendChild(document.createTextNode(" "));
+    const back = document.createElement("a"); // ↩ back to the (first) reference
+    back.href = `#fnref-${n}`;
+    back.className = "cm-lp-footnote-back";
+    back.textContent = "↩";
+    li.appendChild(back);
+  }
+  return li;
 }
 
 // #89 (WYSIWYG cell, comment 830): render a ONE-LINE Markdown string's INLINE marks (bold/italic/strike/
