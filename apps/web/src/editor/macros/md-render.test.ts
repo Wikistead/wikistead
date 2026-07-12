@@ -79,6 +79,33 @@ describe("highlight #334 / ADR-129 — `==text==` → <mark>", () => {
     expect(d.querySelector("s")?.textContent).toBe("s");
     expect(d.querySelector("mark")?.textContent).toBe("h");
   });
+
+  // #334 review (comment 1519): the delimiter is markdown-it-mark can-split-word, so it opens intraword
+  // and right next to punctuation — `word==**bold**==word` highlights (the old GFM-strikethrough flanking left
+  // the `==` literal). Both renderers, since the grammar is shared (ADR-085).
+  it("highlights a run that STARTS with bold, intraword, no surrounding spaces (word==**bold**==word)", () => {
+    const d = root("前後あり==**太字**==つづき\n");
+    const mark = d.querySelector("mark");
+    expect(mark, "the `==` opens even though `**` (punctuation) immediately follows").not.toBeNull();
+    expect(mark?.querySelector("strong")?.textContent).toBe("太字"); // the bold nests inside the mark
+    expect(d.querySelector("p")?.textContent).toBe("前後あり太字つづき"); // `==` delimiters hidden
+    // server parity
+    const srv = serverHtml("前後あり==**太字**==つづき");
+    expect(srv).toContain("<mark>");
+    expect(srv).toContain("<strong>太字</strong>");
+    expect(srv).not.toContain("=="); // no literal delimiter leaked
+  });
+
+  it("highlights ascii intraword too (a==**b**==c) — not a CJK-only fix", () => {
+    expect(root("a==**b**==c\n").querySelector("mark strong")?.textContent).toBe("b");
+    expect(root("==**x**==\n").querySelector("mark strong")?.textContent).toBe("x"); // standalone
+    expect(serverHtml("a==**b**==c")).toContain("<mark>");
+  });
+
+  it("still keeps space-flanked `==` literal after the relaxation (a == b)", () => {
+    expect(root("a == b\n").querySelector("mark")).toBeNull();
+    expect(serverHtml("a == b")).not.toContain("<mark>");
+  });
 });
 
 // #335 / ADR-130: footnote (`[^1]` ref + `[^1]: body` def) → superscript number links + an end-of-document

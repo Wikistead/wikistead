@@ -619,7 +619,8 @@
     "link": "リンク",
     "insertTemplate": "テンプレートを挿入",
     "pageLink": "ページリンク",
-    "backlinks": "バックリンク（このページへのリンク）"
+    "backlinks": "バックリンク（このページへのリンク）",
+    "highlight": "マーカー"
   },
   "calloutEdit": {
     "title": "コールアウトを編集",

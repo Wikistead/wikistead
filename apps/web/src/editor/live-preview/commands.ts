@@ -143,6 +143,7 @@ function prefixLines(view: EditorView, prefix: string): void {
 export const toggleBold = (view: EditorView) => wrap(view, "**", ["StrongEmphasis"]);
 export const toggleItalic = (view: EditorView) => wrap(view, "*", ["Emphasis"]);
 export const toggleStrikethrough = (view: EditorView) => wrap(view, "~~", ["Strikethrough"]);
+export const toggleHighlight = (view: EditorView) => wrap(view, "==", ["Highlight"]); // #334 / ADR-129: `==text==` → <mark>
 export const toggleInlineCode = (view: EditorView) => wrap(view, "`", ["InlineCode"]);
 export const setHeading = (view: EditorView, level = 2) =>
   prefixLines(view, `${"#".repeat(level)} `);
@@ -162,6 +163,7 @@ export const INLINE_FORMATS: InlineFormat[] = [
   { id: "bold", symbol: "B", labelKey: "lpToolbar.bold", mnemonic: "b", run: toggleBold },
   { id: "italic", symbol: "I", labelKey: "palette.italic", mnemonic: "i", run: toggleItalic },
   { id: "strike", symbol: "S", labelKey: "palette.strikethrough", mnemonic: "s", run: toggleStrikethrough },
+  { id: "highlight", symbol: "H", labelKey: "palette.highlight", mnemonic: "h", run: toggleHighlight }, // #334 / ADR-129
   { id: "code", symbol: "</>", labelKey: "lpToolbar.inlineCode", mnemonic: "c", run: toggleInlineCode },
   { id: "link", symbol: "Link", labelKey: "lpToolbar.link", mnemonic: "l", run: insertLink },
 ];
