@@ -1310,7 +1310,10 @@ function addLayoutItem(view: EditorView, pos: number, childName: "column" | "tab
   const colons = containerChildColons(view, d);
   const label = childName === "tab" ? "[Tab]" : "";
   const closeLine = view.state.doc.lineAt(Math.min(d.to, view.state.doc.length)); // the closing container fence line
-  view.dispatch({ changes: { from: closeLine.from, insert: `${colons}${childName}${label}\n\n${colons}\n` }, userEvent: "input.insert", scrollIntoView: true });
+  // #278 A: NO scrollIntoView. The `` click preventDefaults (the outer caret does NOT move to the
+  // insertion point), so scrollIntoView would scroll to wherever the caret happens to be — jumping the page to
+  // the top when the caret is above. The widget re-renders in place; the new item is visible without scrolling.
+  view.dispatch({ changes: { from: closeLine.from, insert: `${colons}${childName}${label}\n\n${colons}\n` }, userEvent: "input.insert" });
 }
 // #278 §1: remove the i-th column/tab (was #213's remove-LAST only). One offset-invariant Y.Text delete of
 // that child's fence range; never removes the last remaining item (a degenerate empty container).
@@ -3562,8 +3565,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-mermaid svg": { maxWidth: "100%", height: "auto", pointerEvents: "none" },
   // #174 / ADR-087: the mermaid inline editUI — source textarea beside a live preview (stacks on a
   // narrow block). The preview reuses the .cm-lp-mermaid svg sizing above.
-  ".cm-lp-mermaid-edit": { display: "flex", gap: "0.8em", alignItems: "stretch", flexWrap: "wrap" },
-  ".cm-lp-mermaid-edit-src": { flex: "1 1 16em", minWidth: "12em", minHeight: "8em", resize: "vertical", fontFamily: "var(--font-code, monospace)", fontSize: "0.85em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.5em", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
+  // #278 D: the source pane HUGS its content — alignItems flex-start (was `stretch`, which pulled the
+  // source pane up to the preview's height so a 1-line diagram sat in a huge empty box). The src container no
+  // longer forces minHeight/font/resize: it now hosts a CM6 mini-editor (mountSourceEditor) that controls its
+  // own font (inherits the host size, code face) and height; the container only frames it.
+  ".cm-lp-mermaid-edit": { display: "flex", gap: "0.8em", alignItems: "flex-start", flexWrap: "wrap" },
+  ".cm-lp-mermaid-edit-src": { flex: "1 1 16em", minWidth: "12em", border: "1px solid var(--border, #888)", borderRadius: "6px", overflow: "hidden", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
   ".cm-lp-mermaid-edit-preview": { flex: "1 1 16em", minWidth: "12em", display: "flex", alignItems: "center", justifyContent: "center", border: "1px dashed var(--border, #888)", borderRadius: "6px", padding: "0.5em", overflow: "auto" },
   // #174 / ADR-087 addendum: the plantuml editUI — same split as mermaid (source textarea + a degraded
   // code preview, since plantuml has no bundled renderer). Reuses the mermaid geometry.
@@ -3653,11 +3660,15 @@ export const livePreviewTheme = EditorView.baseTheme({
   // sits top-right IN the cell (hover-revealed); a tab's `×` rides the tab button; a trailing `` adds one.
   // The `×` glyph is a ::before so it never enters textContent (keeps tab labels / column text clean).
   ".cm-lp-layout-item-remove::before, .cm-lp-tab-remove::before": { content: '"×"' },
-  ".cm-lp-layout-item-remove": { position: "absolute", top: "2px", right: "2px", zIndex: "3", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.4em", height: "1.4em", border: "1px solid var(--border, #888)", borderRadius: "4px", background: "var(--panel, #fff)", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.85em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
+  // #278 F: destructive affordances (the column/tab `×`) use the semantic danger token, not fg-dim
+  // delete reads as delete. Hover deepens (danger-tinted fill / full-strength colour). Token-referenced, not
+  // hardcoded, so it tracks light/dark (tokens.css --danger).
+  ".cm-lp-layout-item-remove": { position: "absolute", top: "2px", right: "2px", zIndex: "3", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.4em", height: "1.4em", border: "1px solid color-mix(in srgb, var(--danger, #cf222e) 45%, transparent)", borderRadius: "4px", background: "var(--panel, #fff)", color: "var(--danger, #cf222e)", cursor: "pointer", fontSize: "0.85em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms, background 120ms" },
   ".cm-lp-column:hover .cm-lp-layout-item-remove": { opacity: "1" },
-  ".cm-lp-tab-remove": { marginLeft: "0.4em", border: "none", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
-  ".cm-lp-tab:hover .cm-lp-tab-remove, .cm-lp-tabbar:hover .cm-lp-tab-remove": { opacity: "0.7" },
-  ".cm-lp-tab-remove:hover": { opacity: "1", color: "var(--fg, inherit)" },
+  ".cm-lp-layout-item-remove:hover": { background: "color-mix(in srgb, var(--danger, #cf222e) 15%, var(--panel, #fff))", borderColor: "var(--danger, #cf222e)" },
+  ".cm-lp-tab-remove": { marginLeft: "0.4em", border: "none", background: "transparent", color: "var(--danger, #cf222e)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
+  ".cm-lp-tab:hover .cm-lp-tab-remove, .cm-lp-tabbar:hover .cm-lp-tab-remove": { opacity: "0.75" },
+  ".cm-lp-tab-remove:hover": { opacity: "1", color: "var(--danger, #cf222e)" },
   ".cm-lp-layout-item-add": { flex: "0 0 auto", alignSelf: "flex-start", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.6em", height: "1.6em", border: "1px dashed var(--border, #888)", borderRadius: "4px", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
   ".cm-lp-macro-wrap:hover .cm-lp-layout-item-add, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-layout-item-add": { opacity: "1" },
   // #278 §2a (rev4): the inline CM6 slot-edit island — an accent-ringed box that replaces the slot's
