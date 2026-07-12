@@ -81,6 +81,55 @@ describe("highlight #334 / ADR-129 — `==text==` → <mark>", () => {
   });
 });
 
+// #335 / ADR-130: footnote (`[^1]` ref + `[^1]: body` def) → superscript number links + an end-of-document
+// footnotes section with back-links. Numbering by first-reference order; document-scoped; XSS-inert.
+describe("footnote #335 / ADR-130 — `[^1]` + `[^1]: body`", () => {
+  it("renders a reference as a numbered superscript link + an end section with a back-link", () => {
+    const d = root("see [^1] here\n\n[^1]: the note body\n");
+    const ref = d.querySelector("sup.cm-lp-footnote-ref a") as HTMLAnchorElement;
+    expect(ref?.textContent).toBe("1");
+    expect(ref?.getAttribute("href")).toBe("#fn-1");
+    expect((d.querySelector("sup.cm-lp-footnote-ref") as HTMLElement)?.id).toBe("fnref-1");
+    const item = d.querySelector("section.cm-lp-footnotes li#fn-1");
+    expect(item?.textContent).toContain("the note body");
+    expect(item?.querySelector("a.cm-lp-footnote-back")?.getAttribute("href")).toBe("#fnref-1");
+    // the def is NOT rendered in the body flow (only in the end section).
+    expect(d.querySelectorAll("section.cm-lp-footnotes li").length).toBe(1);
+  });
+
+  it("numbers by FIRST-reference order; a repeated reference shares its number", () => {
+    const d = root("[^b] then [^a] then [^b] again\n\n[^a]: A\n[^b]: B\n");
+    const refs = Array.from(d.querySelectorAll("sup.cm-lp-footnote-ref a")).map((a) => a.textContent);
+    expect(refs).toEqual(["1", "2", "1"]); // b=1 (first), a=2, b=1 again
+    expect(d.querySelector("li#fn-1")?.textContent).toContain("B");
+    expect(d.querySelector("li#fn-2")?.textContent).toContain("A");
+  });
+
+  it("an undefined reference is a muted '?' (no link); an unreferenced def is still shown", () => {
+    const d = root("ref [^x] only\n\n[^y]: orphan note\n");
+    const sup = d.querySelector("sup.cm-lp-footnote-ref");
+    expect(sup?.classList.contains("cm-lp-footnote-undef")).toBe(true);
+    expect(sup?.querySelector("a")).toBeNull(); // no target
+    // the unreferenced def is still rendered (de-emphasised) — content never silently dropped.
+    const unref = d.querySelector("li.cm-lp-footnote-unref");
+    expect(unref?.textContent).toContain("orphan note");
+  });
+
+  it("does not collide with links: `[t](url)` / `[t][id]` still parse as links, `[^1]` is a footnote", () => {
+    const d = root("a [link](https://x.example) and [^1] and [ref][id]\n\n[^1]: note\n");
+    const link = Array.from(d.querySelectorAll("a")).find((a) => a.textContent === "link");
+    expect(link, "the real link still parses as a link").toBeTruthy();
+    expect(link!.getAttribute("href")).toContain("x.example");
+    expect(d.querySelector("sup.cm-lp-footnote-ref a")?.textContent).toBe("1"); // `[^1]` is a footnote
+  });
+
+  it("XSS: a def body's raw HTML is inert text (no element injection)", () => {
+    const d = root("x [^1]\n\n[^1]: <img src=x onerror=alert(1)> danger\n");
+    expect(d.querySelector("section.cm-lp-footnotes img")).toBeNull();
+    expect(d.querySelector("li#fn-1")?.textContent).toContain("danger");
+  });
+});
+
 describe("renderMarkdownToDom (#90 S0)", () => {
   it("renders common Markdown to elements", () => {
     const d = root("# Title\n\npara **bold** _i_ `c`\n\n- a\n- b\n");

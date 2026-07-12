@@ -91,6 +91,13 @@ const strongMark = Decoration.mark({ class: "cm-lp-strong" });
 const emphasisMark = Decoration.mark({ class: "cm-lp-emphasis" });
 const strikeMark = Decoration.mark({ class: "cm-lp-strike" });
 const highlightMark = Decoration.mark({ class: "cm-lp-highlight" }); // #334 / ADR-129: `==text==` → <mark>
+// #335 / ADR-130: footnote — the inline reference `[^label]` renders as a superscript (the `[^`/`]` delimiters
+// hide on reveal-on-cursor, like highlight's `==`), and the definition line `[^label]: body` gets a muted
+// line style. Numbering + the end-of-document collection are a RENDERED concern (preview / reader / export);
+// the editor's live surface keeps definitions in place (edit them where they are) — a superscript label reads
+// as "this is a footnote" without a second (numbered) copy fighting the source you're editing.
+const footnoteRefMark = Decoration.mark({ class: "cm-lp-footnote-ref" });
+const footnoteDefLine = Decoration.line({ attributes: { class: "cm-lp-footnote-def" } });
 const inlineCodeMark = Decoration.mark({ class: "cm-lp-inline-code" });
 const linkMark = Decoration.mark({ class: "cm-lp-link" });
 const hide = Decoration.replace({});
@@ -2392,6 +2399,19 @@ const RENDERERS: BlockRenderer[] = [
   // #334 / ADR-129: highlight — style the run, hide the `==` delimiters (reveal on the cursor line).
   { match: (n) => n === "Highlight", enter: (node, ctx) => ctx.add(highlightMark, node.from, node.to) },
   { match: (n) => n === "HighlightMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
+  // #335 / ADR-130: footnote reference `[^label]` — style the run as a superscript and hide the `[^` opener
+  // and `]` closer (reveal-on-cursor, exactly like highlight's `==`), so it reads as a superscript label.
+  {
+    match: (n) => n === "FootnoteRef",
+    enter: (node, ctx) => {
+      ctx.add(footnoteRefMark, node.from, node.to);
+      ctx.hideMarker(node.from, node.from + 2); // `[^`
+      ctx.hideMarker(node.to - 1, node.to); // `]`
+    },
+  },
+  // #335 / ADR-130: footnote definition line `[^label]: body` — a muted line style; the source stays visible
+  // and editable in place (the numbered end-section is a rendered-surface concern, not the live editor).
+  { match: (n) => n === "FootnoteDef", enter: (node, ctx) => ctx.add(footnoteDefLine, ctx.state.doc.lineAt(node.from).from) },
   { match: (n) => n === "InlineCode", enter: (node, ctx) => ctx.add(inlineCodeMark, node.from, node.to) },
   {
     match: (n) => n === "FencedCode",
@@ -3396,6 +3416,10 @@ export const livePreviewTheme = EditorView.baseTheme({
   // rendered <mark> in callout-icons.css so the editor and the published page look identical).
   ".cm-lp-highlight": { background: "color-mix(in srgb, var(--accent, #4ea1ff) 22%, transparent)", borderRadius: "2px", padding: "0 0.1em" },
   ".cm-lp-strike": { textDecoration: "line-through", opacity: "0.75" },
+  // #335 / ADR-130: footnote — a superscript accent reference and a muted definition line (matches the
+  // rendered `.cm-lp-footnote-ref` / `.cm-lp-footnotes` in callout-icons.css so editor and page don't drift).
+  ".cm-lp-footnote-ref": { verticalAlign: "super", fontSize: "0.75em", color: "var(--link, #4ea1ff)", lineHeight: "1" },
+  ".cm-lp-footnote-def": { fontSize: "0.9em", opacity: "0.8" },
   ".cm-lp-inline-code": {
     fontFamily: "var(--font-code)", // #190: code face (Wikistead Mono), distinct from prose --font-body
     background: "rgba(127,127,127,0.18)",

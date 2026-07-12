@@ -1,6 +1,7 @@
 import { parser, Strikethrough, Table } from "@lezer/markdown";
 import { directiveExtension, parseDirectiveOpen, resolveDirectiveRanges, type ResolvedDirective } from "./directive-parser.js";
 import { highlightExtension } from "./highlight-ext.js"; // #334 / ADR-129: `==` → <mark>
+import { footnoteExtension } from "./footnote-ext.js"; // #335 / ADR-130: `[^1]` / `[^1]:` grammar
 import { SafeHtml, html, joinSafe, unsafeHtml } from "./safe-html.js";
 
 // #85 / ADR-059 + ADR-085: the SERVER-SIDE, DOM-FREE markdown → HTML renderer for published / static
@@ -40,7 +41,7 @@ const EMPTY_REGISTRY: MacroHtmlRegistry = { fence: () => undefined, directive: (
 // #174 point 4: GFM Table so a pipe table (incl. one nested in columns/tabs/transclude) renders as a real
 // <table> here too — the client md-render gets the same extension, keeping the single source of truth
 // (ADR-085). Cell content goes through the `html` tag (escaped), so this stays inside the XSS boundary.
-const mdParser = parser.configure([directiveExtension, Strikethrough, Table, highlightExtension]);
+const mdParser = parser.configure([directiveExtension, Strikethrough, Table, highlightExtension, footnoteExtension]);
 type SNode = ReturnType<typeof mdParser.parse>["topNode"];
 
 // Mark/structural nodes whose own text must NOT be emitted.
@@ -49,7 +50,16 @@ const MARKS = new Set([
   "DirectiveMark", "URL", "CodeInfo", "LinkTitle",
   "StrikethroughMark", // #89 comment 848: skip the `~~` delimiters so <s> holds only the text
   "HighlightMark", // #334 / ADR-129: skip the `==` delimiters so <mark> holds only the text
+  "FootnoteDefMark", // #335 / ADR-130: skip the `[^label]:` marker; the def body renders alone
 ]);
+
+// #335 / ADR-130: footnote resolution is DOCUMENT-SCOPED and TOP-LEVEL only. During a top-level render,
+// `footnoteNumbers` maps a label → its number (first-reference order); a FootnoteRef renders its number as a
+// superscript in-document link. A nested body (macro renderInner) leaves it null so a footnote inside a macro
+// stays a muted `?` (ADR-130 §A) — never a dangling link. Mirrors apps/web md-render.ts (ADR-085 single truth).
+let footnoteNumbers: Map<string, number> | null = null;
+// The label inside `[^label]` (a FootnoteRef node spans `[^` … `]`).
+const footnoteRefLabel = (src: string, from: number, to: number): string => src.slice(from + 2, to - 1);
 
 const HEADINGS: Record<string, string> = {
   ATXHeading1: "h1", ATXHeading2: "h2", ATXHeading3: "h3", ATXHeading4: "h4", ATXHeading5: "h5", ATXHeading6: "h6",
@@ -103,6 +113,16 @@ function renderInlineNode(node: SNode, src: string): SafeHtml {
     case "StrongEmphasis": return html`<strong>${renderInline(node, src)}</strong>`;
     case "Strikethrough": return html`<s>${renderInline(node, src)}</s>`;
     case "Highlight": return html`<mark>${renderInline(node, src)}</mark>`; // #334 / ADR-129
+    // #335 / ADR-130: a footnote REFERENCE → a superscript number linking to its end-section definition. The
+    // number comes from the document-scoped map (first-reference order). An undefined reference — no matching
+    // def, or a nested render where the map is null — renders as a muted `?` with no target (never a dangling
+    // link, never the raw `[^label]`). Only in-document `#fn-N` / `#fnref-N` anchors → XSS-inert.
+    case "FootnoteRef": {
+      const n = footnoteNumbers?.get(footnoteRefLabel(src, node.from, node.to));
+      return n != null
+        ? html`<sup class="cm-lp-footnote-ref" id="fnref-${String(n)}"><a href="#fn-${String(n)}">${String(n)}</a></sup>`
+        : html`<sup class="cm-lp-footnote-ref cm-lp-footnote-undef">?</sup>`;
+    }
     case "InlineCode": return html`<code>${stripMarks(node, src, "CodeMark")}</code>`;
     case "Link": {
       const urlNode = node.getChild("URL");
@@ -190,6 +210,9 @@ function renderBlock(node: SNode, src: string, macros: MacroHtmlRegistry): SafeH
       return html`<pre><code>${body}</code></pre>`;
     }
     case "HorizontalRule": return unsafeHtml("<hr>");
+    // #335 / ADR-130: a footnote DEFINITION is not rendered in place — it is collected into the end-of-document
+    // footnotes section (renderMarkdownToHtml, top-level). Emitting nothing here keeps it out of the body flow.
+    case "FootnoteDef": return html``;
     case "Table": {
       // #174 point 4: GFM pipe table → a real <table>. TableHeader → <th>s in <thead>; each TableRow →
       // <td>s in <tbody>; TableDelimiter (the `|---|` separator) is skipped. Cell content is inline markdown
@@ -221,7 +244,7 @@ function renderBlock(node: SNode, src: string, macros: MacroHtmlRegistry): SafeH
       if (macro) {
         // #85: hand the macro a recursive renderer so a container directive's nested Markdown body renders as
         // real HTML (SafeHtml, so XSS-safe by construction — the same allowlist boundary at every depth).
-        const renderInner = (md: string): SafeHtml => renderMarkdownToHtml(md, macros);
+        const renderInner = (md: string): SafeHtml => renderDoc(md, macros, false); // #335: nested body, footnotes literal
         try { return withFidelity(parsed!.name, macro.exportFidelity, macro.htmlRender(directiveBody(full), renderInner)); }
         catch { /* fall through to the generic box */ }
       }
@@ -251,10 +274,70 @@ function renderBlocks(parent: SNode, src: string, macros: MacroHtmlRegistry): Sa
   return joinSafe(parts, "\n");
 }
 
+// #335 / ADR-130: the document-scoped footnote pass. Numbers are assigned by FIRST-REFERENCE order; a repeated
+// reference shares its number. Definitions are matched by label; a duplicate definition — the FIRST wins.
+// `order` = referenced labels in number order; `unreferenced` = defined-but-never-referenced (still shown,
+// de-emphasised, so content is never silently dropped). Mirrors apps/web md-render.ts collectFootnotes.
+interface FootnoteData { numbers: Map<string, number>; defs: Map<string, SNode>; order: string[]; unreferenced: string[]; }
+function collectFootnotes(tree: SNode, src: string): FootnoteData {
+  const refOrder: string[] = [];
+  const defs = new Map<string, SNode>();
+  tree.cursor().iterate((n) => {
+    if (n.name === "FootnoteRef") {
+      const label = footnoteRefLabel(src, n.from, n.to);
+      if (label) refOrder.push(label);
+    } else if (n.name === "FootnoteDef") {
+      const m = /^\[\^([^\]\s]+)\]:/.exec(src.slice(n.from, n.to));
+      const label = m?.[1];
+      if (label && !defs.has(label)) defs.set(label, n.node); // duplicate def → first wins
+    }
+  });
+  const numbers = new Map<string, number>();
+  const order: string[] = [];
+  for (const label of refOrder) {
+    if (defs.has(label) && !numbers.has(label)) { numbers.set(label, numbers.size + 1); order.push(label); }
+  }
+  const unreferenced = [...defs.keys()].filter((l) => !numbers.has(l));
+  return { numbers, defs, order, unreferenced };
+}
+
+// One `<li>` for a definition: its inline body (FootnoteDefMark is in MARKS → skipped) plus, for a referenced
+// note, a `↩` back-link to the first reference. `#fn-N` / `#fnref-N` are in-document anchors (XSS-inert).
+function footnoteItem(n: number | null, def: SNode, src: string, unreferenced: boolean): SafeHtml {
+  const cls = unreferenced ? "cm-lp-footnote-item cm-lp-footnote-unref" : "cm-lp-footnote-item";
+  const body = renderInline(def, src);
+  return n != null
+    ? html`<li class="${cls}" id="fn-${String(n)}">${body} <a href="#fnref-${String(n)}" class="cm-lp-footnote-back">↩</a></li>`
+    : html`<li class="${cls}">${body}</li>`;
+}
+
+function renderFootnoteSection(fn: FootnoteData, src: string): SafeHtml {
+  const items: SafeHtml[] = [];
+  for (const label of fn.order) { const def = fn.defs.get(label); if (def) items.push(footnoteItem(fn.numbers.get(label)!, def, src, false)); }
+  for (const label of fn.unreferenced) items.push(footnoteItem(null, fn.defs.get(label)!, src, true));
+  return html`<section class="cm-lp-footnotes" data-testid="footnotes"><hr><ol class="cm-lp-footnotes-list">${joinSafe(items)}</ol></section>`;
+}
+
 // Render a Markdown source string to sanitized HTML (SafeHtml). Safe by construction: every dynamic
 // value is escaped through the SafeHtml boundary; macros are dispatched via the injected registry and
 // degraded ones are badged. `macros` defaults to none (plain Markdown only).
 export function renderMarkdownToHtml(src: string, macros: MacroHtmlRegistry = EMPTY_REGISTRY): SafeHtml {
+  return renderDoc(src, macros, true);
+}
+
+// #335 / ADR-130: footnotes resolve at the TOP LEVEL only. A top-level render collects refs/defs, numbers them,
+// renders the body with `footnoteNumbers` set, then appends the end-of-document section. A nested body (macro
+// renderInner) passes topLevel=false → the map is null → a footnote inside a macro renders as a muted `?` and
+// gets no section of its own (ADR-130 §A). footnoteNumbers is saved/restored so nesting never corrupts a parent.
+function renderDoc(src: string, macros: MacroHtmlRegistry, topLevel: boolean): SafeHtml {
   const tree = mdParser.parse(src);
-  return renderBlocks(tree.topNode, src, macros);
+  const prevFn = footnoteNumbers;
+  const fn = topLevel ? collectFootnotes(tree.topNode, src) : null;
+  footnoteNumbers = fn ? fn.numbers : null;
+  try {
+    const body = renderBlocks(tree.topNode, src, macros);
+    return fn && (fn.order.length > 0 || fn.unreferenced.length > 0)
+      ? joinSafe([body, renderFootnoteSection(fn, src)], "\n")
+      : body;
+  } finally { footnoteNumbers = prevFn; }
 }

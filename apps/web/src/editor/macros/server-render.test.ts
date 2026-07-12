@@ -263,3 +263,42 @@ describe("renderMarkdownToHtml — #85 recursive nested-directive bodies", () =>
     expect(h).toContain("&lt;script&gt;"); // the allowlist boundary holds at every nesting depth
   });
 });
+
+describe("renderMarkdownToHtml — footnotes (#335 / ADR-130)", () => {
+  it("renders a reference as a numbered superscript link and collects the definition into a section", () => {
+    const h = out("Text with a note[^1].\n\n[^1]: the note body\n");
+    expect(h).toContain('<sup class="cm-lp-footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup>');
+    expect(h).toContain('<section class="cm-lp-footnotes" data-testid="footnotes">');
+    expect(h).toContain('<li class="cm-lp-footnote-item" id="fn-1">');
+    expect(h).toContain("the note body");
+    expect(h).toContain('<a href="#fnref-1" class="cm-lp-footnote-back">↩</a>');
+    expect(h).not.toContain("[^1]:"); // the def line is never emitted in the body flow
+  });
+
+  it("numbers by first-reference order and shares a number across repeated references", () => {
+    const h = out("a[^b] then a[^a] then again[^b].\n\n[^a]: A\n[^b]: B\n");
+    // [^b] is referenced first → number 1; [^a] second → number 2 (definition order is irrelevant).
+    expect(h).toContain('id="fnref-1"><a href="#fn-1">1</a>');
+    expect(h).toContain('id="fnref-2"><a href="#fn-2">2</a>');
+    expect(h.indexOf("#fn-1")).toBeLessThan(h.indexOf("#fn-2"));
+  });
+
+  it("renders a reference with no definition as a muted ?, never a dangling link or raw [^x]", () => {
+    const h = out("orphan[^missing] here\n");
+    expect(h).toContain('<sup class="cm-lp-footnote-ref cm-lp-footnote-undef">?</sup>');
+    expect(h).not.toContain("[^missing]");
+    expect(h).not.toContain("#fn-"); // no target for an undefined reference
+  });
+
+  it("does NOT treat a real link or reference link as a footnote", () => {
+    const h = out("[text](https://example.com) and [ref][id]\n\n[id]: https://x.example\n");
+    expect(h).toContain('<a href="https://example.com" rel="noopener noreferrer nofollow">text</a>');
+    expect(h).not.toContain("cm-lp-footnote-ref");
+  });
+
+  it("keeps a footnote body XSS-inert — a <script> in a definition is escaped", () => {
+    const h = out("ref[^x]\n\n[^x]: <script>alert(1)</script>\n");
+    expect(h).not.toContain("<script>alert(1)</script>");
+    expect(h).toContain("&lt;script&gt;");
+  });
+});
