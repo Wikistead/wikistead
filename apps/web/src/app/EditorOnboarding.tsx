@@ -143,7 +143,11 @@ export function FirstRunOnboarding() {
     <>
       <EditorOnboardingDialog open={firstRun || redoOpen} onClose={() => { setActive(false); setRedoOpen(false); }} />
       {showBanner && (
-        <div className="fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-border bg-popover px-4 py-2 text-sm shadow-lg" data-testid="onboarding-banner">
+        // #339: sit ABOVE the edit-mode bottom toolbar (PageControls is `absolute bottom-4`: vim / display-mode
+        // segment on one side, Publish/Close on the other). A centered banner at bottom-4 overlapped the
+        // display-mode group (its left edge covered the WYSIWYG button and hijacked the click) — and the overlap
+        // shifted with viewport width. `bottom-20` clears the whole bottom-4 control band, width-independently.
+        <div className="fixed bottom-20 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-border bg-popover px-4 py-2 text-sm shadow-lg" data-testid="onboarding-banner">
           <span>{t("onboarding.bannerText")}</span>
           <Button size="sm" variant="primary" data-testid="onboarding-banner-open" onClick={() => { dismissBanner(); setRedoOpen(true); }}>{t("onboarding.bannerCta")}</Button>
           <button type="button" className="flex-none rounded p-1 text-fg-dim hover:text-foreground" aria-label={t("common.close")} data-testid="onboarding-banner-dismiss" onClick={dismissBanner}>
