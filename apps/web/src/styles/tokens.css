@@ -605,3 +605,14 @@ body {
    class on the editor while the caret is on an atom; make the fat-cursor GLYPH transparent so the block
    cursor stays visible (its background) but the leaked syntax char does not show. */
 .cm-wys-blank-fatcursor .cm-fat-cursor { color: transparent !important; }
+
+/* #278C: a NESTED CM editor that HAS focus (the slot-edit island, and the mermaid/plantuml source
+   panel) must show its own vim cursor. @replit/codemirror-vim styles `&:not(.cm-focused) .cm-fat-cursor`
+   (hollow/transparent) and `.cm-vimMode .cm-line{caret-color:transparent}` — scoped to the OUTER editor, both
+   match the nested editor's cursor as a DESCENDANT of the now-unfocused outer editor, so the inner block
+   cursor goes hollow (normal mode) and the native caret vanishes (insert mode). Restore them for any focused
+   nested editor: `.cm-editor .cm-editor.cm-focused …` outranks the outer theme's `:not(.cm-focused)` /
+   `.cm-vimMode` selectors by specificity, and only ever matches an editor nested inside another editor (the
+   top-level editor is never affected). Covers slot island + both diagram source panels + any future nested CM. */
+.cm-editor .cm-editor.cm-focused .cm-fat-cursor { background: #ff9696 !important; outline: none !important; color: inherit !important; }
+.cm-editor .cm-editor.cm-focused .cm-line { caret-color: auto !important; }

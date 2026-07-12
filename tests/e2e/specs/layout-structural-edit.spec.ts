@@ -35,3 +35,24 @@ test("#278 §1: a per-item × removes THAT column (not the last); a trailing ＋
   await expect(cols(page)).toHaveCount(2);
   expect(errs, errs.join(" | ")).toHaveLength(0);
 });
+
+// #278A: clicking a column/tab must NOT scroll the editor. The addLayoutItem dispatch dropped
+// `scrollIntoView` — which had scrolled to the outer caret, jumping the page to the top when the caret was
+// above the (measured: scrollTop 1622 → 0).
+test("#278A: adding a column via ＋ does not scroll the editor to the top", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 900, height: 500 } })).newPage();
+  await openScratch(page, "layout278-scroll"); await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  const filler = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n");
+  await page.keyboard.insertText(`${filler}\n\n::::columns\n:::column\nAAA\n:::\n:::column\nBBB\n:::\n::::\n\nbot\n`);
+  await sleep(700);
+  await page.getByText("bot").click(); await sleep(200); // caret out → widget renders
+  await page.keyboard.press("Control+Home"); await sleep(150); // park the OUTER caret at the very top
+  await page.locator("[data-pane=preview] [data-testid=macro-columns]").scrollIntoViewIfNeeded(); await sleep(250);
+  const scroller = page.locator("[data-pane=preview] .cm-scroller").first();
+  const before = await scroller.evaluate((el) => el.scrollTop);
+  expect(before, "the columns should be scrolled well below the fold").toBeGreaterThan(100);
+  await page.locator("[data-pane=preview] [data-testid=layout-add-column]").click({ force: true }); await sleep(350);
+  const after = await scroller.evaluate((el) => el.scrollTop);
+  expect(after, `scrollTop must not jump toward the top on ＋ (was ${before}, now ${after})`).toBeGreaterThan(before - 60);
+});

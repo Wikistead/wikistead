@@ -54,7 +54,10 @@ export interface SourceEditorOptions {
 // an empty doc is still one line tall, so it stays clickable. The code face stays — these macros' source
 // IS code (the carve-outmakes explicit).
 const baseTheme = EditorView.theme({
-  "&": { fontSize: "13px", background: "transparent" },
+  // #278D: font size INHERITS the host editor (the main editor's code face size) rather than a fixed
+  // 13px — the user ruled the source panes should feel like the main editor, not a smaller widget. The code
+  // FACE stays (var(--font-code)) — mermaid/plantuml source IS code.
+  "&": { fontSize: "inherit", background: "transparent" },
   ".cm-content": { fontFamily: "var(--font-code)", padding: "6px 8px" },
   ".cm-scroller": { fontFamily: "var(--font-code)", lineHeight: "1.5" },
   "&.cm-focused": { outline: "none" },
