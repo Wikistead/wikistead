@@ -81,7 +81,7 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
 .cm-lp-footnote-ref a{color:var(--link,#4ea1ff);text-decoration:none}
 .cm-lp-footnote-ref a:hover{text-decoration:underline}
 .cm-lp-footnote-undef{color:var(--fg-dim,#888)}
-.cm-lp-footnotes{margin-top:1.5em;font-size:0.9em;color:var(--fg-dim,#666)}
+.cm-lp-footnotes{padding-top:1.5em;font-size:0.9em;color:var(--fg-dim,#666)}
 .cm-lp-footnotes hr{border:none;border-top:1px solid var(--border,rgba(127,127,127,0.3));margin:0 0 0.6em}
 .cm-lp-footnotes-list{padding-left:1.4em;margin:0}
 .cm-lp-footnote-item{margin:0.2em 0}

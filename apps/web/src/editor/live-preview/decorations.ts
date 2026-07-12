@@ -2654,7 +2654,7 @@ const RENDERERS: BlockRenderer[] = [
       const line = ctx.state.doc.lineAt(node.from);
       const to = Math.min(line.to + 1, ctx.state.doc.length); // include the trailing newline so the line fully collapses
       if (to > line.from) ctx.add(Decoration.replace({ block: true }), line.from, to);
-      return;
+      return false; // the line is block-hidden — skip its inline children (like every other block-replace)
     }
     ctx.add(footnoteDefLine, ctx.state.doc.lineAt(node.from).from);
   } },
