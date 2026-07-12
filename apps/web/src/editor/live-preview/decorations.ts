@@ -1919,6 +1919,22 @@ class MacroWidget extends WidgetType {
       // (remove THAT item — not just the last) and a trailing `` adds one. Editor surface only (added here, in
       // the widget's !readOnly path — never in the read-only view / the panel preview, which use liveRender
       // directly). Real Y.Text edits (removeLayoutItemAt / addLayoutItem); reorder-by-drag is a fast follow.
+      // #278E part 1: the (add-item) renders WHENEVER the container is editable — NOT gated on
+      // !nestedActive. It is a flex child of the row/tabbar, so skipping it when a nested macro is selected
+      // removed it and REFLOWED the columns (a measured 315→336px jump on clicking a nested callout). Rendering
+      // it unconditionally keeps the flex width constant; the × / slot-open click handlers stay nested-gated
+      // below (structure ops are suppressed while editing a nested macro, but the width must not move).
+      if ((this.name === "columns" || this.name === "tabs") && !view.state.readOnly && !this.slotEdit) {
+        const child = this.name === "columns" ? "column" : "tab";
+        const add = document.createElement("button");
+        add.type = "button";
+        add.className = "cm-lp-layout-item-add";
+        add.textContent = "＋";
+        add.title = `Add ${child}`;
+        add.setAttribute("data-testid", `layout-add-${child}`);
+        add.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (view.state.readOnly) return; addLayoutItem(view, view.posAtDOM(wrap), child); });
+        (this.name === "columns" ? wrap.querySelector(".cm-lp-columns") : wrap.querySelector(".cm-lp-tabbar"))?.appendChild(add);
+      }
       if ((this.name === "columns" || this.name === "tabs") && !view.state.readOnly && !nestedActive) {
         const child = this.name === "columns" ? "column" : "tab";
         const contentSel = this.name === "columns" ? ".cm-lp-column" : ".cm-lp-tabpanel";
@@ -1949,15 +1965,7 @@ class MacroWidget extends WidgetType {
           if (this.name === "columns") cell.style.position = "relative"; // the × is absolutely placed in the cell
           cell.appendChild(x);
         });
-        const add = document.createElement("button");
-        add.type = "button";
-        add.className = "cm-lp-layout-item-add";
-        add.textContent = "＋";
-        add.title = `Add ${child}`;
-        add.setAttribute("data-testid", `layout-add-${child}`);
-        add.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (view.state.readOnly) return; addLayoutItem(view, view.posAtDOM(wrap), child); }); //①: live readOnly gate (DOM reuse across mode switches)
-        // columns: the add rides the end of the flex row; tabs: it rides the end of the tab bar.
-        (this.name === "columns" ? wrap.querySelector(".cm-lp-columns") : wrap.querySelector(".cm-lp-tabbar"))?.appendChild(add);
+        // (#278E part 1: the is rendered above, unconditionally, so a nested-select doesn't reflow.)
         // #278 §2a: clicking a slot's CONTENT enters inline edit for THAT slot (the CM6 island). Ignore clicks
         // on the ×/nested-macro/tab-button (those have their own actions); for tabs only the ACTIVE panel is
         // visible, so this naturally targets the active tab only. Captured `from`/`to` = this container.
