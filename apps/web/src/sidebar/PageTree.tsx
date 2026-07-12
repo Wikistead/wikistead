@@ -166,17 +166,25 @@ export function PageTree({
             canEdit page actions AND — for an unpinned page — the "Pin" action (A(4)). Rendered whenever there
             is ANY action for this row: canEdit items, or the pin item for a non-canEdit member. */}
         {((canEdit && onRowActionRef.current) || (onTogglePinRef.current && !d.pinned)) && (
+          // #343: the row menu collapses to ZERO WIDTH when idle (not just opacity-0, which kept ~19px of
+          // reserved width and floated the lock/ring/★ a slot in from the edge). A `grid-template-columns`
+          // 0fr→1fr animation grows the real width, so the lock/ring/★ sit flush at the row's right edge and
+          // the title truncates later; on reveal they glide left as the menu takes its width (one motion, no
+          // extra transform). `-ml-1.5` cancels the row's `gap-1.5` while collapsed so nothing is reserved.
+          // Reveal on hover / focus-within (keyboard) / while the menu is open (aria-expanded) / selected.
           <span
             className={cn(
-              "flex gap-0.5 transition-[opacity,transform] duration-[120ms] motion-reduce:transition-none",
-              "translate-x-1 opacity-0 pointer-events-none",
-              "group-hover:translate-x-0 group-hover:opacity-100 group-hover:pointer-events-auto",
-              "group-focus-within:translate-x-0 group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
-              "has-[[aria-expanded=true]]:translate-x-0 has-[[aria-expanded=true]]:opacity-100 has-[[aria-expanded=true]]:pointer-events-auto",
-              selected && "!translate-x-0 !opacity-100 !pointer-events-auto",
+              "grid transition-[grid-template-columns,margin] duration-[120ms] motion-reduce:transition-none",
+              "grid-cols-[0fr] -ml-1.5",
+              "group-hover:grid-cols-[1fr] group-hover:ml-0",
+              "group-focus-within:grid-cols-[1fr] group-focus-within:ml-0",
+              "has-[[aria-expanded=true]]:grid-cols-[1fr] has-[[aria-expanded=true]]:ml-0",
+              selected && "!grid-cols-[1fr] !ml-0",
             )}
+            data-testid="tree-row-menu"
             onClick={(e) => e.stopPropagation()}
           >
+           <span className="flex gap-0.5 overflow-hidden">
             <DropdownMenu modal={false}>
               <DropdownMenuTrigger className="flex cursor-pointer rounded-sm p-0.5 text-fg-dim transition-colors duration-[120ms] hover:bg-border hover:text-foreground" aria-label={t("sidebar.pageActions")} data-testid="page-actions"><MoreHorizontal size={14} /></DropdownMenuTrigger>
               <DropdownMenuContent align="start" data-testid="page-menu">
@@ -194,6 +202,7 @@ export function PageTree({
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+           </span>
           </span>
         )}
        </div>
