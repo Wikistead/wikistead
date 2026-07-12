@@ -1,6 +1,7 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { LanguageDescription, LanguageSupport, StreamLanguage, type StreamParser } from "@codemirror/language";
 import { directiveExtension } from "./macros/directive-parser";
+import { highlightExtension } from "@wikistead/macro-render"; // #334 / ADR-129: shared `==` → <mark> grammar
 
 // Fenced-code syntax highlighting (#158-C2 / #171). Broad language coverage (GitHub/Notion/Confluence
 // class) via DYNAMIC import: each language's lezer parser (@codemirror/lang-*) or legacy stream mode
@@ -64,4 +65,4 @@ const codeLanguages: LanguageDescription[] = [
 //   - codeLanguages = per-language highlighting inside fenced code blocks (dynamic import)
 //   - directiveExtension = in-house ::: container directives (macros, ADR-022)
 // Keeping it in one place means the source and live-preview parsers stay identical.
-export const markdownExtension = () => markdown({ base: markdownLanguage, codeLanguages, extensions: [directiveExtension] });
+export const markdownExtension = () => markdown({ base: markdownLanguage, codeLanguages, extensions: [directiveExtension, highlightExtension] });

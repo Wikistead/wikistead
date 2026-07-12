@@ -1,5 +1,6 @@
 import { parser, Strikethrough, Table } from "@lezer/markdown";
 import { directiveExtension, parseDirectiveOpen, resolveDirectiveRanges, type ResolvedDirective } from "./directive-parser.js";
+import { highlightExtension } from "./highlight-ext.js"; // #334 / ADR-129: `==` → <mark>
 import { SafeHtml, html, joinSafe, unsafeHtml } from "./safe-html.js";
 
 // #85 / ADR-059 + ADR-085: the SERVER-SIDE, DOM-FREE markdown → HTML renderer for published / static
@@ -39,7 +40,7 @@ const EMPTY_REGISTRY: MacroHtmlRegistry = { fence: () => undefined, directive: (
 // #174 point 4: GFM Table so a pipe table (incl. one nested in columns/tabs/transclude) renders as a real
 // <table> here too — the client md-render gets the same extension, keeping the single source of truth
 // (ADR-085). Cell content goes through the `html` tag (escaped), so this stays inside the XSS boundary.
-const mdParser = parser.configure([directiveExtension, Strikethrough, Table]);
+const mdParser = parser.configure([directiveExtension, Strikethrough, Table, highlightExtension]);
 type SNode = ReturnType<typeof mdParser.parse>["topNode"];
 
 // Mark/structural nodes whose own text must NOT be emitted.
@@ -47,6 +48,7 @@ const MARKS = new Set([
   "EmphasisMark", "CodeMark", "LinkMark", "HeaderMark", "QuoteMark", "ListMark",
   "DirectiveMark", "URL", "CodeInfo", "LinkTitle",
   "StrikethroughMark", // #89 comment 848: skip the `~~` delimiters so <s> holds only the text
+  "HighlightMark", // #334 / ADR-129: skip the `==` delimiters so <mark> holds only the text
 ]);
 
 const HEADINGS: Record<string, string> = {
@@ -100,6 +102,7 @@ function renderInlineNode(node: SNode, src: string): SafeHtml {
     case "Emphasis": return html`<em>${renderInline(node, src)}</em>`;
     case "StrongEmphasis": return html`<strong>${renderInline(node, src)}</strong>`;
     case "Strikethrough": return html`<s>${renderInline(node, src)}</s>`;
+    case "Highlight": return html`<mark>${renderInline(node, src)}</mark>`; // #334 / ADR-129
     case "InlineCode": return html`<code>${stripMarks(node, src, "CodeMark")}</code>`;
     case "Link": {
       const urlNode = node.getChild("URL");

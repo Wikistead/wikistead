@@ -68,6 +68,10 @@
    the ::before box — with the mask unset it degrades to a solid grey square on the revealed open fence. Only
    the label text (::after) should show. Same suppression as todo above (which owns its icon differently). */
 .cm-lp-details.cm-lp-directive-label::before{display:none}
+/* #334 / ADR-129: highlight (`==text==`) rendered as a real <mark> on every out-of-editor surface (public
+   reader, template preview, nested macro bodies, server export). Themed marker tint with the foreground
+   preserved — mirrors the editor's .cm-lp-highlight (decorations.ts baseTheme) so the two never drift. */
+mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:inherit;border-radius:2px;padding:0 0.1em}
 .cm-lp-todo-icon{position:absolute;left:0.65em;top:0.35em;width:1.5em;height:1.5em;background-color:var(--cb-color,var(--accent,#4ea1ff));-webkit-mask:var(--cb-icon) center/contain no-repeat;mask:var(--cb-icon) center/contain no-repeat;pointer-events:none}
 /* #290(4): round the todo BOX like the callout panel (callout-icons.css .cm-lp-callout-panel — keep
    the radii equal; the e2e asserts the computed values match). Per-line boxes → explicit corner classes. */
