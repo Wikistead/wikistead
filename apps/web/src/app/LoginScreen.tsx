@@ -6,6 +6,7 @@ import { LanguageToggle } from "./LanguageToggle";
 import { useBranding } from "../data/queries";
 import { assetUrl } from "../data/apiClient";
 import { Button } from "../ui/Button";
+import { SocialIcon } from "./SocialIcon";
 
 // #261: the sign-in screen (real auth mode). A centred, branded card — the tenant logo/name (public
 // /branding) ▷ the Wikistead lockup — kicks off the OIDC flow as a top-level navigation to /auth/login
@@ -95,7 +96,10 @@ export function LoginScreen() {
                     data-testid={`login-social-${slug}`}
                     onClick={() => { window.location.href = `/auth/login?provider=${encodeURIComponent(slug)}&returnTo=${encodeURIComponent(returnTo)}`; }}
                   >
-                    {t("auth.continueWith", { provider: SOCIAL_LABELS[slug] })}
+                    <span className="inline-flex items-center gap-2">
+                      <SocialIcon slug={slug} />
+                      {t("auth.continueWith", { provider: SOCIAL_LABELS[slug] })}
+                    </span>
                   </Button>
                 ))}
               </div>
