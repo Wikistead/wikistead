@@ -25,7 +25,7 @@ export function EmbedUrlModal({ open, current, onSubmit }: { open: boolean; curr
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) submit(null); }}>
-      <DialogContent>
+      <DialogContent position="top">
         <DialogHeader><DialogTitle>{t("embedUrl.title")}</DialogTitle></DialogHeader>
         <Input
           value={url}

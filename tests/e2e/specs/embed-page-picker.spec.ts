@@ -33,3 +33,37 @@ test("slash 'embed a page' → picker → pick a page id → inserts :::embed-pa
   await sleep(300);
   await expect(page.locator("[data-pane=preview] [data-testid=macro-embed-page]")).toBeVisible();
 });
+
+// #344: the picker dialog is TOP-PINNED, so its top input never shifts vertically as the candidate list
+// grows/shrinks (the "input jumps while typing" bug on center-aligned dialogs with variable content).
+test("#344: the picker input stays put vertically as the candidate list changes", async ({ browser }) => {
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  await page.goto("/p/demo");
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  const targetId = await createScratchPage(page, "Embed Target 344");
+
+  await openScratch(page, "embed-host-344");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("/embed");
+  await expect(page.getByTestId("slash-palette")).toBeVisible();
+  await page.click('[data-testid="slash-item-macro:embed-page"]');
+
+  const input = page.getByTestId("embed-picker-input");
+  await expect(input).toBeVisible();
+  const vh = page.viewportSize()!.height;
+  // Top-pinned: the dialog sits near the top (top-[10%]), so the input is well within the upper third —
+  // a center-aligned dialog would put it near the middle.
+  const y0 = (await input.boundingBox())!.y;
+  expect(y0, "the input is top-pinned, not vertically centered").toBeLessThan(vh * 0.35);
+
+  // Grow the candidate list (the raw-id item appears; the empty state disappears) → the input must NOT move.
+  await input.fill(targetId);
+  await expect(page.getByTestId("embed-picker-raw")).toBeVisible();
+  await sleep(150);
+  const y1 = (await input.boundingBox())!.y;
+  // Top-pinned → the input barely moves (a couple sub-pixels of reflow); a center-aligned dialog would
+  // shift it by ~half the list-height delta. The top-third assertion above is the primary top-pin proof.
+  expect(Math.abs(y1 - y0), "the input does not shift when the list changes size").toBeLessThan(5);
+});
