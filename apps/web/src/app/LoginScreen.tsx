@@ -35,6 +35,9 @@ function useAuthError(): string | null {
   const kind = new URLSearchParams(window.location.search).get("error");
   if (!kind) return null;
   if (kind === "seat_full") return t("auth.errorSeatFull");
+  // #346: the IdP was unreachable / misconfigured when starting login — a "temporarily unavailable"
+  // message (distinct from access-denied), still vague about WHICH IdP (no enumeration / config leak).
+  if (kind === "idp_unavailable") return t("auth.errorIdpUnavailable");
   // access / auth / saml all collapse to a single vague message — never reveal WHY (no enumeration).
   return t("auth.errorAccess");
 }

@@ -72,6 +72,14 @@ export async function authPlugin(app: FastifyInstance) {
       const inviteToken = req.query?.invite || undefined
       await saveState(app.valkey, state, { nonce, codeVerifier, tenantId: tenant.id, returnTo, viaTenantOidc: resolved.viaTenantOidc, inviteToken })
       return reply.redirect(url)
+    } catch (e) {
+      // #346: buildLogin does OIDC discovery against the issuer; if the IdP is unreachable /
+      // misconfigured / mid-outage it throws. Match /auth/callback's graceful contract instead of letting
+      // Fastify's default handler emit a raw 500 JSON (a broken-looking page): redirect to the login screen
+      // with a VAGUE error (never echo which IdP or the discovery detail — existence-hiding is preserved),
+      // and log the detail server-side so operators can trace the outage. authz/behaviour otherwise unchanged.
+      req.log.error({ err: e, tenantId: tenant.id }, 'auth/login: IdP discovery / login build failed')
+      return reply.redirect('/login?error=idp_unavailable')
     } finally {
       await db.release()
     }

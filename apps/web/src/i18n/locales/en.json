@@ -350,7 +350,8 @@
     "createWorkspaceError": "Could not create workspace",
     "inviteTitle": "You've been invited",
     "inviteBody": "Sign in to accept your invitation and join the workspace.",
-    "acceptInvite": "Accept invite"
+    "acceptInvite": "Accept invite",
+    "errorIdpUnavailable": "Sign-in is temporarily unavailable. Please try again in a moment."
   },
   "share": {
     "opening": "Opening shared page…",

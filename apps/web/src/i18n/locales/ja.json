@@ -350,7 +350,8 @@
     "createWorkspaceError": "ワークスペースを作成できませんでした",
     "inviteTitle": "招待されています",
     "inviteBody": "サインインして招待を承認し、ワークスペースに参加します。",
-    "acceptInvite": "招待を承認"
+    "acceptInvite": "招待を承認",
+    "errorIdpUnavailable": "サインインが一時的に利用できません。しばらくしてからもう一度お試しください。"
   },
   "share": {
     "opening": "共有ページを開いています…",
