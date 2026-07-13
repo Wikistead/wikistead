@@ -6,7 +6,7 @@ import { taskProgressExtension, type TaskProgress } from "./task-progress"; // #
 import { connect, connectEphemeral } from "./collab";
 import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayModeContent } from "./editor-livepreview";
 import { wireToc } from "./toc-wiring"; // #319: extracted so the public reader shares the CM TOC wiring
-import type { DisplayMode, MacroTheme, BacklinksSource } from "./live-preview/decorations";
+import type { DisplayMode, MacroTheme, BacklinksSource, QuerySource } from "./live-preview/decorations";
 import { redrawMacros, taskStatePosAt } from "./live-preview/decorations";
 import i18n from "../i18n"; // #307: strings for the host-owned :::backlinks source (i18n stays out of the CM layer)
 import { useTheme } from "../app/ThemeProvider";
@@ -295,6 +295,26 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       untitledLabel: i18n.t("backlinks.untitled"),
     };
   }, [pageId, apiToken, navigateRouter, queryClient]);
+  // #324 / ADR-134: the host-mediated `:::query` source. MEMBER surfaces only (gated on pageId — a guest /
+  // template preview passes none, so the macro renders nothing and never fetches; Hole A rev2). The raw
+  // directive body is the query spec (parsed server-side); the endpoint is member-only and view-filters every
+  // result (`GET /pages/:id/query?spec=...`). Stale-by-default fetchQuery keyed on (pageId, spec) → refetch on
+  // each widget mount, so re-entering the page re-resolves the list (member-live per-viewer).
+  const query = useMemo<QuerySource | undefined>(() => {
+    if (!pageId) return undefined;
+    return {
+      fetch: (spec: string) =>
+        queryClient
+          .fetchQuery({
+            queryKey: ["page-query", pageId, spec],
+            queryFn: () => apiFetch<{ id: string; title: string }[]>(`/pages/${encodeURIComponent(pageId)}/query?spec=${encodeURIComponent(spec)}`, apiToken).then((r) => r ?? []),
+          })
+          .catch(() => null),
+      navigate: (id: string) => navigateRouter(`/p/${id}`),
+      emptyLabel: i18n.t("macro.queryEmpty"),
+      untitledLabel: i18n.t("backlinks.untitled"),
+    };
+  }, [pageId, apiToken, navigateRouter, queryClient]);
   // Security-timing invalidation (ADR-104 Finding B): the collab server broadcasts a stateless
   // "dict-invalidate" ping (carrying NO pageId — existence-hiding even on the wire); we refetch the
   // viewer-scoped dictionary, throttled so a burst of reindex pings costs one round-trip.
@@ -381,7 +401,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
             });
           }
         : undefined;
-      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, onToggleTask: onToggleTaskInView, titleLinks, backlinks, linkStatus });
+      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, onToggleTask: onToggleTaskInView, titleLinks, backlinks, query, linkStatus });
       views.push(v);
       previewViewRef.current = v;
       if (anchorGetterRef) anchorGetterRef.current = null;
@@ -429,6 +449,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       macroPresence: c.provider.awareness ? makeMacroPresence(c.provider.awareness) : undefined,
       titleLinks, // #224: auto internal links (viewer-scoped dictionary; undefined on guest surfaces)
       backlinks, // #307 / ADR-127: host-mediated :::backlinks (member surface; undefined without a pageId)
+      query, // #324 / ADR-134: host-mediated :::query (member surface; undefined without a pageId)
       linkStatus, // #276 / ADR-117: dead-internal-link strikethrough (member surface; undefined for guests)
     });
     views.push(previewView);

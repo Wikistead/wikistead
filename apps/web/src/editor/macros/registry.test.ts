@@ -116,6 +116,18 @@ describe("macro registry", () => {
     expect(registeredDirectiveNames()).toContain("backlinks");
     expect(m!.htmlRender && m!.htmlRender("").toString()).toBe(""); // empty output — export emits nothing
   });
+
+  // #324 / ADR-134: :::query — same host-mediated contract as :::backlinks (degrade, empty htmlRender stub;
+  // the server export doesn't register it, so off-platform it emits nothing). The member-live resolve/collapse
+  // is exercised in e2e.
+  it("registers the :::query directive macro as degrade with an empty htmlRender stub", () => {
+    const m = findDirectiveMacro("query");
+    expect(m).toBeTruthy();
+    expect(m!.exportFidelity).toBe("degrade");
+    expect(m!.revealOnCursor).toBe(true);
+    expect(registeredDirectiveNames()).toContain("query");
+    expect(m!.htmlRender && m!.htmlRender("").toString()).toBe(""); // empty output — export emits nothing
+  });
 });
 
 // ADR-045 / #88 item 5 — registerMacro's RUNTIME fortress for registrations that reach the registry

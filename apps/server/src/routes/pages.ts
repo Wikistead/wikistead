@@ -1338,6 +1338,62 @@ export async function getBacklinks(
   return out
 }
 
+// #324 / ADR-134: the query spec carried in a `:::query` directive body. The body is authoring free-text,
+// so an unrecognised spec parses to `null` and renders 0 results (never a parse error, §2). Three v1 query
+// types, each resolving to a view-filtered list of pages
+// - `backlinks` → the pages that link to THIS page (a tag page's members, when this IS a tag page).
+// - `tag <pageId>` → the pages that link to <pageId> (list another tag page's members from a hub page).
+// - `children` → the direct child pages of THIS page in the tree.
+export type QuerySpec =
+  | { type: 'backlinks' }
+  | { type: 'tag'; target: string }
+  | { type: 'children' }
+
+export function parseQuerySpec(body: string): QuerySpec | null {
+  const line = body.split('\n').map((l) => l.trim()).find((l) => l.length > 0)
+  if (!line) return null
+  if (line === 'backlinks') return { type: 'backlinks' }
+  if (line === 'children') return { type: 'children' }
+  // `tag <id>` or `tag:<id>` — a single token target. A missing/multi-token target parses to null (0 results).
+  const m = /^tag[\s:]+(\S+)$/.exec(line)
+  if (m) return { type: 'tag', target: m[1]! }
+  return null
+}
+
+// #324 / ADR-134: resolve a read-only `:::query` list FOR THE VIEWER. Every branch is view-filtered and
+// existence-hiding (ADR-134 §3, the search-leak class): `backlinks`/`tag` reuse getBacklinks (which view-gates
+// the target page AND FGA-view-confirms every source — an unviewable source is absent from list AND count);
+// `children` view-gates the parent first (a caller who can't see the parent can't enumerate its children →
+// uniform 404) then FGA-view-confirms each child (omit-on-deny, no count leak). PUBLISHED-only throughout (the
+// published graph, §3 — a draft child/backlink is absent until publish, consistent with export/backlinks).
+// Called ONLY from the member route (no guest config), so a share_link principal never triggers a live
+// reverse-lookup (Hole A rev2); the anonymous/public surface renders the static snapshot instead (②b).
+export async function getQueryResults(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { pageId: string; spec: QuerySpec; subject: string; context?: { current_time: string } },
+): Promise<Backlink[]> {
+  const { pageId, spec, subject, context } = args
+  if (spec.type === 'backlinks') return getBacklinks(db, fga, { pageId, subject, context })
+  if (spec.type === 'tag') return getBacklinks(db, fga, { pageId: spec.target, subject, context })
+  // children: view-gate the PARENT (existence-hiding, same as getBacklinks' target gate), then per-child view.
+  if (!(await check(fga, subject, 'view', { type: 'page', id: pageId }, context))) {
+    throw Object.assign(new Error('not found'), { statusCode: 404 })
+  }
+  const rows = await db.sql<{ id: string; title: string }[]>`
+    SELECT id, title FROM pages
+    WHERE parent_id = ${pageId}
+      AND published_at IS NOT NULL
+    ORDER BY position ASC, updated_at DESC
+    LIMIT 200
+  `
+  const out: Backlink[] = []
+  for (const r of rows) {
+    if (await check(fga, subject, 'view', { type: 'page', id: r.id }, context)) out.push({ id: r.id, title: r.title })
+  }
+  return out
+}
+
 // ── #224 / ADR-104: title dictionary + excerpt (auto internal links) ─────────
 
 export interface TitleDictEntry { id: string; title: string }
@@ -1539,6 +1595,17 @@ export async function pagesPlugin(app: FastifyInstance) {
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/backlinks', { config: { guest: 'view' } }, async (req) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
     return getBacklinks(req.db, app.fga, { pageId: req.params.pageId, subject, context })
+  })
+
+  // #324 / ADR-134: resolve a member-live `:::query` list. MEMBER-ONLY — the route deliberately omits
+  // `config.guest`, so a share_link token is rejected (a guest never triggers a live reverse-lookup, Hole A
+  // rev2; the anonymous/public surface renders the static snapshot instead, ②b). An unrecognised spec returns
+  // an empty list (never an error — the body is authoring free-text). getQueryResults view-filters every branch.
+  app.get<{ Params: { pageId: string }; Querystring: { spec?: string } }>('/pages/:pageId/query', async (req) => {
+    const { subject, context } = principalForPage(req, req.params.pageId)
+    const spec = parseQuerySpec(req.query.spec ?? '')
+    if (!spec) return [] as Backlink[]
+    return getQueryResults(req.db, app.fga, { pageId: req.params.pageId, spec, subject, context })
   })
 
   // #224 / ADR-104: the viewer-scoped title dictionary for auto internal links. The :pageId only
