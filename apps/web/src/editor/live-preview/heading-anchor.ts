@@ -59,17 +59,18 @@ function buildDecos(view: EditorView): DecorationSet {
 
 const headingAnchorTheme = EditorView.baseTheme({
   ".cm-lp-heading-anchor": {
+    // STOP the up/down pendulum. The icon is 0.8em and the cap band (glyph-top→baseline) is ~0.7em, so
+    // it cannot sit ENTIRELY inside the cap; the honest seat is the BASELINE — vertical-align:baseline rests the
+    // icon's bottom edge on the text baseline (measured: no bottom overflow past the baseline, and its top stays
+    // below the line-box top). No hand-tuned nudge (that was the pendulum). Tighter left gap (0.15em).
+    verticalAlign: "baseline",
     opacity: "0",
     border: "none",
     background: "transparent",
     color: "var(--fg-dim, #888)",
     cursor: "pointer",
-    padding: "0 0.2em",
-    marginLeft: "0.3em",
-    // a full 1em icon on the baseline overshot the glyph tops (cap height ≈ 0.7em) and read as "too big
-    // and floating above the text". Size it to the cap height (0.8em, ≤ font-size × 0.85) and drop it ~0.1em so
-    // its top sits at the cap, not above it.
-    verticalAlign: "-0.1em",
+    padding: "0", // no horizontal padding: the visual left gap is margin-left ONLY (0.15em ≤ 0.2em)
+    marginLeft: "0.15em",
     transition: "opacity 120ms",
     // a <button> does NOT inherit font by default (UA font: menu), so the em-sized icon would
     // resolve against ~13px regardless of the heading. Inherit the heading line's font-size so the

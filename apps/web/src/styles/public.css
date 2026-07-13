@@ -108,12 +108,13 @@
 /* #313: the hover 🔗 on public headings (added by addHeadingAnchorButtons, inline at the heading's
  * end). Opacity-only reveal — the space is always reserved, so hovering never shifts layout. */
 .wks-public [data-testid="public-body"] :is(h1, h2, h3, h4, h5, h6) .wks-heading-anchor {
-  display: inline-flex;
-  align-items: center;
-  /* drop the icon ~0.1em so a cap-height (0.8em) mark sits at the glyph tops, not floating above. */
-  vertical-align: -0.1em;
-  margin-left: 0.3em;
-  padding: 0 0.2em;
+  /* STOP the pendulum. A 0.8em icon can't fit inside the ~0.7em cap band, so rest its BOTTOM on the text
+     baseline (vertical-align: baseline) — no hand nudge, and the same seat/mechanism as the CM face (a plain
+     inline button, not inline-flex, so its baseline is the icon bottom). Left gap = margin only (0.15em ≤
+     0.2em); no horizontal padding. */
+  vertical-align: baseline;
+  margin-left: 0.15em;
+  padding: 0;
   border: none;
   background: transparent;
   color: var(--fg-dim, #888);
