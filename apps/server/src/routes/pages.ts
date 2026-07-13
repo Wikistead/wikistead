@@ -1248,6 +1248,24 @@ export function principalForPage(req: FastifyRequest, pageId: string): { subject
   throw Object.assign(new Error('unauthorized'), { statusCode: 401 })
 }
 
+// #276 / ADR-117: the subject for a BATCH request NOT bound to a single pageId (link-status). Unlike
+// principalForPage there is no URL resource to bind a guest token against, so a guest resolves as its
+// bare `share_link:<id>` and the per-id FGA `view` check is the sole gate — a page-token guest then sees
+// every OTHER page as dead (no leak; ADR-117 §1 guardrail). Never sets/reads existence — subject only.
+export function batchPrincipal(req: FastifyRequest): { subject: string; context?: { current_time: string } } {
+  if (req.user) return { subject: `user:${req.user.sub}` }
+  if (req.guest) return { subject: `share_link:${req.guest.shareLinkId}`, context: { current_time: new Date().toISOString() } }
+  throw Object.assign(new Error('unauthorized'), { statusCode: 401 })
+}
+
+// #276 / ADR-117: resolve which of a client-supplied id list the viewer can `view` — the batch behind the
+// dead-internal-link overlay. This is a VIEWABILITY check, NEVER an existence check: it runs ONLY the FGA
+// `check` (via the shared filterAuthorized primitive, the same one search stage-2 / #224 use), with NO DB
+// existence query — a non-existent id, a deleted page, and a private page the viewer can't see are all
+// byte-identically absent from the result (the 404-unification / no-existence-oracle invariant, #262). A
+// DB prefilter here would REINTRODUCE the oracle and is forbidden. De-duped + capped by the caller.
+export const MAX_LINK_STATUS_IDS = 256
+
 // #230: backlinks — the pages that reference `pageId` from their PUBLISHED content. Sources are the
 // PERSISTED internal references only: an `:::embed-page\n<id>\n:::` block (the body IS the target id)
 // and an explicit markdown link to `/p/<id>`. (The #224 title-match auto-links are display-only
@@ -1504,6 +1522,20 @@ export async function pagesPlugin(app: FastifyInstance) {
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/title-dictionary', { config: { guest: 'view' } }, async (req) => {
     const { subject } = principalForPage(req, req.params.pageId)
     return getTitleDictionary(req.db, app.fga, { subject })
+  })
+
+  // #276 / ADR-117: dead-internal-link resolution — "which of these ids can the viewer VIEW?" NEVER "which
+  // exist?". The client collects its page's `/p/<id>` link targets and posts them; the subset it gets back
+  // is alive, everything else is struck through. Purely a viewability check (filterAuthorized = per-id FGA
+  // `view`, no DB existence query), so non-existent / deleted / private / other-space / cross-tenant ids are
+  // all uniformly dead and indistinguishable (existence-hiding, #262). Guest-capable (a share-link viewer's
+  // dead-set is computed under its own capability). Batch de-duped + capped (anti-test 8).
+  app.post<{ Body: { ids?: unknown } }>('/pages/link-status', { config: { guest: 'view' } }, async (req, reply) => {
+    const { subject, context } = batchPrincipal(req)
+    const raw = Array.isArray(req.body?.ids) ? req.body!.ids : []
+    const ids = [...new Set(raw.filter((x): x is string => typeof x === 'string' && x.length > 0))].slice(0, MAX_LINK_STATUS_IDS)
+    const viewable = await filterAuthorized(app.fga, subject, 'view', ids, context) // FGA-only; no existence lookup
+    return reply.send({ viewable: [...viewable] })
   })
 
   // #224 / ADR-104 Slice B: the hover-card excerpt — re-confirms `view` at display time (the
