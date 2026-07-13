@@ -28,6 +28,13 @@ export default defineConfig({
   // so the e2e harness can point at its own ports.
   server: {
     port: Number(process.env.WEB_PORT ?? 5173),
+    // #273the PDF viewer's iframe is `sandbox="allow-scripts"` (no allow-same-origin) = an OPAQUE
+    // origin, whose document fetches its `<script type="module">` (and its imports) in CORS mode with
+    // `Origin: null`. Without an ACAO header the frame's pdf-frame entry is blocked and never runs ("Loading…"
+    // forever). Serve every dev asset with `Access-Control-Allow-Origin: *` so the opaque frame can load its
+    // own same-file module chunk. No credentials ride these public static assets, so the sandbox containment
+    // (no allow-same-origin) is NOT weakened. PROD must serve the pdf-frame chunk/assets with the same header.
+    headers: { "Access-Control-Allow-Origin": "*" },
     proxy: {
       "/api": {
         target: process.env.API_PROXY_TARGET ?? "http://localhost:4000",
