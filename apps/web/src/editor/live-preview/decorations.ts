@@ -614,6 +614,17 @@ export const diagramRenderer = Facet.define<DiagramRenderer, DiagramRenderer>({
   combine: (values) => values[0] ?? noopDiagramRenderer,
 });
 
+// #276 / ADR-117: host-mediated dead-internal-link resolution. Given the `/p/<id>` targets collected from
+// the doc, returns the subset the viewer can `view` (everything else is struck through). The MACRO/editor
+// never learns existence — the host POSTs to the gated /pages/link-status (a pure FGA `view` batch, NO DB
+// existence query), so non-existent / deleted / private / cross-tenant ids are uniformly "not viewable"
+// (existence-hiding, #262). null ⇒ could not resolve → the overlay treats every link as ALIVE (never a
+// false "dead"). Absent facet (guest/picker-less surfaces without the seam) ⇒ nothing is struck.
+export type LinkStatusResolver = (ids: string[]) => Promise<Set<string> | null>;
+export const linkStatusResolver = Facet.define<LinkStatusResolver, LinkStatusResolver | null>({
+  combine: (values) => (values.length ? values[values.length - 1]! : null),
+});
+
 // #92 / ADR-093: host-provided EPHEMERAL collab seam for level-2 macro co-editing (Excalidraw). The
 // macro's own host-API stays {theme} (ADR-023 trust boundary is NOT widened); collab is a SEPARATE,
 // host-only channel injected here and handed to a collab-capable modal by openMacroModal. null ⇒ no
@@ -1168,7 +1179,7 @@ const isDelimiterRow = (cells: string[]) => cells.length > 0 && cells.every((c) 
 // `[text](<dest>)`, then sanitize it. Only http(s)/mailto and scheme-less (relative)
 // URLs are allowed — javascript:/data:/vbscript: are rejected so a clickable link can
 // never execute script (these run in the user's authenticated session).
-function linkHref(src: string): string | null {
+export function linkHref(src: string): string | null {
   const m = /\]\(\s*(<[^>]*>|[^)\s]+)/.exec(src);
   if (!m) return null;
   let u = m[1]!.trim();
@@ -3717,6 +3728,9 @@ export const livePreviewTheme = EditorView.baseTheme({
     padding: "0 3px",
   },
   ".cm-lp-link": { color: "var(--link, #4ea1ff)", textDecoration: "underline" }, // #223: semantic token, not a hardcoded blue
+  // #276 / ADR-117: a dead internal link (target not viewable) reads as struck-through + dimmed. Layered
+  // OVER cm-lp-link (a second mark), so line-through + the muted colour win over the link's underline/colour.
+  ".cm-lp-link-dead": { textDecoration: "line-through", color: "var(--fg-dim, #8a8f98)", cursor: "pointer" },
   // In the read-only render links are click-to-open, so show the affordance there.
   ".cm-content[contenteditable=false] .cm-lp-link[data-href]": { cursor: "pointer" },
   // #224 / ADR-104: auto internal links — a subtler affordance than explicit links (dotted underline) so a

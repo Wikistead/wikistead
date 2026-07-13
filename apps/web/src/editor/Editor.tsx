@@ -13,6 +13,7 @@ import { makeMacroPresence } from "./macro-presence";
 import { makeImageResolver } from "./image-resolver";
 import { makeAttachmentResolver } from "./attachment-resolver";
 import { makeDiagramRenderer } from "./diagram-renderer";
+import { makeLinkStatusResolver } from "./link-status";
 import { makeTranscludeResolver } from "./transclude-resolver";
 import { PageEmbedPicker } from "./PageEmbedPicker";
 import { EmbedUrlModal } from "./EmbedUrlModal";
@@ -250,6 +251,9 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
   // #140: host-mediated diagram render (plantuml). Only when we have a pageId (the render endpoint is
   // page-scoped + page-view gated); otherwise undefined → the macro degrades to its source fence.
   const renderDiagram = useMemo(() => (pageId ? makeDiagramRenderer(apiToken, pageId) : undefined), [apiToken, pageId]);
+  // #276 / ADR-117: dead-internal-link resolver. Member surfaces only in v1 — gated on the API token (a
+  // guest/anon `view` path is a named follow-up, ADR §4), so guests simply see no strikethrough.
+  const linkStatus = useMemo(() => (apiToken ? makeLinkStatusResolver(apiToken) : undefined), [apiToken]);
   // #108: host-mediated internal transclude (the :::transclude macro never fetches). page-scoped (the
   // server re-checks view on the referenced page); undefined without a pageId → placeholder.
   const resolveTransclude = useMemo(() => (pageId ? makeTranscludeResolver(apiToken, pageId) : undefined), [apiToken, pageId]);
@@ -445,7 +449,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
             });
           }
         : undefined;
-      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, onToggleTask: onToggleTaskInView, titleLinks, backlinks });
+      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, onToggleTask: onToggleTaskInView, titleLinks, backlinks, linkStatus });
       views.push(v);
       previewViewRef.current = v;
       if (anchorGetterRef) anchorGetterRef.current = null;
@@ -493,6 +497,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       macroPresence: c.provider.awareness ? makeMacroPresence(c.provider.awareness) : undefined,
       titleLinks, // #224: auto internal links (viewer-scoped dictionary; undefined on guest surfaces)
       backlinks, // #307 / ADR-127: host-mediated :::backlinks (member surface; undefined without a pageId)
+      linkStatus, // #276 / ADR-117: dead-internal-link strikethrough (member surface; undefined for guests)
     });
     views.push(previewView);
     previewViewRef.current = previewView;
