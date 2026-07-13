@@ -2,6 +2,7 @@ import { Facet, StateEffect, type Extension, type Range } from "@codemirror/stat
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, hoverTooltip } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { matchTitleLinks, type TitleEntry, type MatchOpts } from "./title-links";
+import { renderMarkdownToDom } from "../macros/md-render";
 
 // #224 / ADR-104: render auto internal links over body text whose words match a page title. The decoration is
 // DISPLAY-ONLY and OFFSET-INVARIANT (a Mark over the existing text — the source stays plain Markdown, Open
@@ -108,22 +109,37 @@ export function titleLinkDecorations(): Extension {
 // Rendered in the CM TOOLTIP layer (the floating-UI rule: persistent DOM outside the tooltip layer
 // gets reconciled away). The excerpt is set via textContent ONLY — never parsed/injected as markup.
 const titleLinkCardTheme = EditorView.baseTheme({
+  // #351: match the app's floating surfaces (popover/toast) via design tokens instead of a bare box, and follow
+  // light/dark. The CM tooltip wrapper draws its own chrome, so blank it and let the card own the surface.
+  ".cm-tooltip:has(.cm-lp-title-link-card)": { background: "transparent", border: "0" },
   ".cm-lp-title-link-card": {
-    maxWidth: "22rem",
-    padding: "0.5em 0.7em",
+    maxWidth: "24rem",
+    padding: "0.6em 0.75em",
     fontSize: "0.85em",
     lineHeight: "1.45",
+    background: "var(--popover, var(--panel, #1b1d21))",
+    color: "var(--fg)",
+    border: "1px solid var(--border, #33363b)",
+    borderRadius: "var(--radius-md, 8px)",
+    boxShadow: "var(--shadow-md, 0 8px 24px rgba(0,0,0,0.28))",
+    // enter-only motion (surface-only, the motion convention): a small fade + rise. No exit animation.
+    animation: "cmLpCardIn 120ms cubic-bezier(0.2,0,0,1)",
   },
-  ".cm-lp-title-link-card-title": { fontWeight: "700", marginBottom: "0.25em" },
+  "@keyframes cmLpCardIn": {
+    from: { opacity: "0", transform: "translateY(3px) scale(0.98)" },
+    to: { opacity: "1", transform: "none" },
+  },
+  ".cm-lp-title-link-card-title": { fontWeight: "700", marginBottom: "0.3em" },
+  // The rendered markdown body: clamp to a few lines, dim, and tame the block spacing so a heading/list excerpt
+  // stays compact inside the card.
   ".cm-lp-title-link-card-body": {
     color: "var(--fg-dim, #888)",
-    whiteSpace: "pre-wrap",
-    display: "-webkit-box",
-    "-webkit-line-clamp": "6",
-    "-webkit-box-orient": "vertical",
+    maxHeight: "9em",
     overflow: "hidden",
     overflowWrap: "anywhere",
   },
+  ".cm-lp-title-link-card-body :is(h1,h2,h3,h4,h5,h6,p,ul,ol,pre)": { margin: "0.15em 0" },
+  ".cm-lp-title-link-card-body :is(h1,h2,h3,h4,h5,h6)": { fontSize: "1em", fontWeight: "700", color: "var(--fg)" },
 });
 
 export function titleLinkHover(): Extension {
@@ -162,10 +178,15 @@ export function titleLinkHover(): Extension {
             .excerpt!(hit.pageId)
             .then((r) => {
               if (r?.title) title.textContent = r.title;
-              body.textContent = r?.excerpt ?? ""; // textContent only — no injection surface
+              // #351: render the excerpt markdown RICHLY (headings/bold/code/lists) via the shared DOM-safe
+              // renderer — the SAME `renderMarkdownToDom` the #285 search preview / transclude use (textContent /
+              // createTextNode construction, `safeHref`, NO innerHTML), so raw `<script>` / dangerous schemes stay
+              // inert. The excerpt is still the view-gated /excerpt source (deny/missing → null → empty card).
+              body.replaceChildren();
+              if (r?.excerpt) body.appendChild(renderMarkdownToDom(r.excerpt));
             })
             .catch(() => {
-              body.textContent = ""; // denied/missing → uniform empty card (no oracle)
+              body.replaceChildren(); // denied/missing → uniform empty card (no oracle)
             });
           return { dom };
         },

@@ -1450,8 +1450,9 @@ export async function getTitleDictionary(
 // The hover-card excerpt (ADR-104 Slice B): a thin, view-gated read following the getPublished
 // pattern — deny and missing are the SAME 404 (#262 existence-hiding; anti-test 5: no wording ever
 // distinguishes them). Published content only: an unpublished draft returns excerpt null (the title
-// alone is already in the viewer's dictionary). The client renders the excerpt as textContent
-// (plain text, no markdown render → no injection surface).
+// alone is already in the viewer's dictionary). This returns the published Markdown SOURCE prefix; the client
+// renders it with the shared DOM-safe renderer (`renderMarkdownToDom` — createTextNode/textContent
+// construction, `safeHref`, NO innerHTML), so a raw `<script>` / dangerous scheme stays inert (#351).
 export async function getExcerpt(
   db: TenantDb,
   fga: OpenFgaClient,
