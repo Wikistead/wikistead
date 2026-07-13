@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openScratch, createScratchPage, enterEdit, sleep } from "../helpers";
+import { openScratch, createScratchPage, enterEdit, sleep, publishAndWait } from "../helpers";
 
 // #224 / ADR-104 go-live: auto internal links. Body text matching a viewer-authorized page title is
 // decorated as a link (display-only mark — the SOURCE stays plain text, Open formats); a click routes
@@ -62,10 +62,7 @@ test("#224 hover card: the excerpt card appears in the tooltip layer (view-re-co
   await page.waitForSelector("[data-pane=preview] .cm-content");
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.type("hover excerpt body 224");
-  await sleep(2800); // collab persist
-  await page.evaluate(async ({ api, id }) => {
-    await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
-  }, { api: API, id: targetId });
+  await publishAndWait(page, targetId, "hover excerpt body 224"); // #354: poll the published body, not a fixed sleep
 
   await openScratch(page, "title-links-hover");
   await enterEdit(page);
@@ -120,10 +117,7 @@ test("#224 guest surface: NO auto links render for a guest (uninjected — 2-lay
   await member.waitForSelector("[data-pane=preview] .cm-content");
   await member.click("[data-pane=preview] .cm-content");
   await member.keyboard.type(`guest body mentions ${target} here`);
-  await sleep(2800);
-  await member.evaluate(async ({ api, id }) => {
-    await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
-  }, { api: API, id: hostId });
+  await publishAndWait(member, hostId, "guest body mentions"); // #354: poll the published body, not a fixed sleep
   const linkId = await member.evaluate(async ({ api, id }) => {
     const r = await fetch(`${api}/share-links`, {
       method: "POST",

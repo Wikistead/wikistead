@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, publishAndWait } from "../helpers";
 import { STALE_TITLE } from "../fixtures";
 
 const API = "http://dev.localhost:4010";
@@ -88,10 +88,7 @@ test("#285: the search modal shows a preview pane (meta + body excerpt + draft b
   await page.waitForSelector("[data-pane=preview] .cm-content");
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.type("preview body 285 unique text");
-  await sleep(2800); // collab persist
-  await page.evaluate(async ({ api, id }) => {
-    await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
-  }, { api: API, id });
+  await publishAndWait(page, id, "preview body 285 unique text"); // #354: poll the published body, not a fixed sleep
   await expect
     .poll(
       () => page.evaluate(async ({ api, q }) => {

@@ -4,6 +4,32 @@ export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const API = "http://dev.localhost:4010";
 
+// #354: publish a page and WAIT until its published body actually contains `expectSubstring`. The publish flush
+// (collab Valkey req/ack) has a timeout and, under parallel-load, can snapshot a stale/empty ydoc so
+// published_md comes out empty — making "type → sleep → publish → assert the view" specs flaky. Polling the
+// real published body (re-publishing until it lands) replaces the non-deterministic fixed sleep, so a slow
+// flush just costs another poll instead of a false red. Throws if the content never lands within the timeout.
+export async function publishAndWait(page: Page, id: string, expectSubstring: string, timeoutMs = 15000): Promise<void> {
+  await page.evaluate(
+    async ({ api, id, expect, timeoutMs }) => {
+      const H = { Authorization: "Bearer dev-token" };
+      const deadline = Date.now() + timeoutMs;
+      let last = "";
+      while (Date.now() < deadline) {
+        await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: H });
+        const r = await fetch(`${api}/pages/${id}/published`, { headers: H });
+        if (r.ok) {
+          last = ((await r.json())?.publishedMd as string | null) ?? "";
+          if (last.includes(expect)) return;
+        }
+        await new Promise((res) => setTimeout(res, 400));
+      }
+      throw new Error(`publishAndWait: /published never contained "${expect}" within ${timeoutMs}ms (last: "${last.slice(0, 80)}")`);
+    },
+    { api: API, id, expect: expectSubstring, timeoutMs },
+  );
+}
+
 export async function openDemo(page: Page) {
   await page.goto("/p/demo");
   await page.waitForSelector("[data-pane=preview] .cm-content");
