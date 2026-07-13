@@ -1,13 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Copy, Eye, Code, BookOpen, Sparkles, List, FileStack, Link as LinkIcon } from "lucide-react";
-import { WatchButton } from "../notifications/WatchButton";
+import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Copy, Eye, EyeOff, Code, BookOpen, Sparkles, List, FileStack, Check, Link as LinkIcon } from "lucide-react";
+import { useWatchState, useToggleWatch } from "../notifications/useNotifications";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui/Button";
 import { ToggleButton } from "../ui/ToggleButton";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel } from "../components/ui/dropdown-menu";
 import { useDirty, type DirtySignal } from "../editor/dirtySignal";
-import { cn } from "../lib/utils";
 
 // #165 display-mode segment: icon-only entries, in cycle order (matches Ctrl+Alt+E). Icons mirror the
 // per-mode glyphs used elsewhere (Live=Eye, Source=Code, Reading=BookOpen, WYSIWYG=Sparkles).
@@ -103,8 +102,17 @@ function RoundBtn({ label, icon, onClick, testId, primary, disabled, badge, acti
   );
 }
 
-function overflowItems(p: PageControlsProps, t: (k: string) => string): OverflowItem[] {
+// #368: the page watch is a ⋯-menu ITEM now (not a standalone round button). Its async watching state
+// (react-query) is resolved by the caller and passed in so `overflowItems` — a plain builder, no hooks —
+// can reflect it (Eye = watching / EyeOff = not) and flip it on select.
+export interface WatchItem { watching: boolean; toggle: () => void; disabled: boolean }
+
+function overflowItems(p: PageControlsProps, t: (k: string) => string, watch?: WatchItem): OverflowItem[] {
   const items: OverflowItem[] = [];
+  // #368: Watch lives in the ⋯ menu in VIEW mode (member-only; only for a real page). Eye = watching,
+  // EyeOff = not — a toggle item (trailing ✓ when on). Icon is the EYE glyph per the ticket; the
+  // notification-feed bell (NotificationBell) is a different control and is untouched.
+  if (!p.editing && p.pageId && watch) items.push({ value: "watch", label: watch.watching ? t("watch.unwatch") : t("watch.watch"), icon: watch.watching ? <Eye size={14} /> : <EyeOff size={14} />, testId: "watch-toggle", checked: watch.watching, disabled: watch.disabled });
   // #212: comments toggle lives here now (was an always-visible bar button). It's a right-panel toggle
   // exactly like history/attachments, so it shows NO ✓ open-state marker (comment 720): the three
   // right-panel items are visually identical and open/closed is read from the panel itself, not a tick.
@@ -121,9 +129,10 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string): Overflow
   // #230: "Backlinks" — open the backlinks right-rail panel (both modes).
   if (p.onBacklinks) items.push({ value: "backlinks", label: t("backlinks.title"), icon: <LinkIcon size={14} />, testId: "backlinks-toggle" });
   if (p.onPermissions) items.push({ value: "permissions", label: t("page.permissions"), icon: <Shield size={14} />, testId: "permissions-open" });
-  // Share in the ⋯ only while EDITING (view mode already has the dedicated Share button).
-  // manage-gated by onShare being set (the server re-checks). #4.
-  if (p.editing && p.onShare) items.push({ value: "share", label: t("page.share"), icon: <Share2 size={14} />, testId: "share-page" });
+  // Share in the ⋯ in BOTH modes. #368 removed the dedicated view-mode Share round button (it grew the
+  // bottom-right cluster and pushed the always-present Edit button around), so view mode reaches Share here
+  // too. manage-gated by onShare being set (the server re-checks). #4.
+  if (p.onShare) items.push({ value: "share", label: t("page.share"), icon: <Share2 size={14} />, testId: "share-page" });
   // #229: use this page as a template — create a new page seeded with its content. Any viewer can
   // (the server view-gates the source); available in both modes.
   if (p.onDuplicate) items.push({ value: "duplicate", label: t("page.duplicatePage"), icon: <Copy size={14} />, testId: "duplicate-page" });
@@ -134,7 +143,8 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string): Overflow
   if (p.onDelete) items.push({ value: "delete", label: t("page.delete"), icon: <Trash2 size={14} />, testId: "delete-page", danger: true });
   return items;
 }
-function runOverflow(p: PageControlsProps, v: string) {
+function runOverflow(p: PageControlsProps, v: string, watch?: WatchItem) {
+  if (v === "watch") { watch?.toggle(); return; }
   if (v === "duplicate") { p.onDuplicate?.(); return; }
   if (v === "save-template") { p.onSaveTemplate?.(); return; }
   if (v === "backlinks") { p.onBacklinks?.(); return; }
@@ -217,18 +227,30 @@ export function PageVim(p: PageControlsProps) {
   );
 }
 
-// ── ACTIONS: bottom-right — round icon buttons (edit/done/publish/share + ⋯) ──────────
+// #368: resolve the page's async watch state into a plain, serialisable WatchItem the ⋯-menu builder can
+// consume. Hooks run unconditionally (react-query gates on pageId via `enabled`); returns undefined for a
+// surface with no real page so no watch item is offered. Shared by desktop + mobile controls.
+function useWatchItem(pageId: string | undefined): WatchItem | undefined {
+  const state = useWatchState(pageId);
+  const toggle = useToggleWatch(pageId);
+  if (!pageId) return undefined;
+  return { watching: state.data?.watching ?? false, toggle: () => toggle.mutate(state.data), disabled: toggle.isPending || state.isLoading };
+}
+
+// ── ACTIONS: bottom-right — round icon buttons (edit/done/publish + ⋯) ─────────────────
 export function PageActions(p: PageControlsProps) {
   const { t } = useTranslation();
   const dirty = useDirty(p.dirtySignal);
   const canPublish = p.canPublish || dirty;
-  const overflow = overflowItems(p, t);
+  const watch = useWatchItem(p.pageId);
+  const overflow = overflowItems(p, t, watch);
   return (
     // Outer stays click-through (pointer-events-none) so the empty bottom-right area doesn't eat editor clicks;
-    // the inner cluster is pointer-events-auto so `group-hover`/`group-focus-within` fire on it (a
-    // pointer-events-none element is never a :hover target). #368: the cluster is the `group`.
+    // the inner cluster is pointer-events-auto. #368: the view-mode cluster is a FIXED [Edit][⋯] (edit never
+    // moves) — Watch + Share moved INTO the ⋯ menu (the earlier slide-out grew the cluster and shoved the
+    // always-present Edit button around, and hovering to reach Edit tripped the reveal).
     <div className="pointer-events-none absolute right-4 bottom-4 z-10 flex items-center">
-      <div className="group pointer-events-auto flex items-center gap-2">
+      <div className="pointer-events-auto flex items-center gap-2">
         {p.editing ? (
           <>
             {p.onPublish && (
@@ -239,35 +261,10 @@ export function PageActions(p: PageControlsProps) {
             <RoundBtn label={t("page.done")} testId="view-toggle" onClick={p.onDone} icon={<X size={16} />} />
           </>
         ) : (
-          <>
-            {p.canEdit && <RoundBtn label={t("page.edit")} testId="edit-toggle" primary onClick={p.onEdit} icon={<Pencil size={16} />} />}
-            {/* #368: Watch + Share take NO width when idle and slide out (to the left of the ⋯) on hover/focus of
-                the cluster. Same grid-template-columns 0fr→1fr mechanism as the sidebar row menu (#343): the
-                width itself animates (opacity alone would keep the reserved space). Revealing on hover of the
-                WHOLE cluster (not just the ⋯) keeps the buttons inside the hover area, so moving the pointer from
-                the ⋯ onto them never drops the hover (no collapse-before-click) — no timer needed. Keyboard: Tab
-                into Watch/Share triggers group-focus-within, so they stay reachable. `-ml-2` cancels the cluster
-                gap while collapsed so nothing is reserved. */}
-            {(p.pageId || p.onShare) && (
-              <span
-                data-testid="page-actions-secondary"
-                className={cn(
-                  "grid transition-[grid-template-columns,margin] duration-[140ms] motion-reduce:transition-none",
-                  "grid-cols-[0fr] -ml-2",
-                  "group-hover:grid-cols-[1fr] group-hover:ml-0",
-                  "group-focus-within:grid-cols-[1fr] group-focus-within:ml-0",
-                )}
-              >
-                <span className="flex items-center gap-2 overflow-hidden">
-                  {p.pageId && <WatchButton pageId={p.pageId} className={`${ROUND} ${ROUND_BG}`} />}
-                  {p.onShare && <RoundBtn label={t("page.share")} testId="share-open" onClick={p.onShare} icon={<Share2 size={16} />} />}
-                </span>
-              </span>
-            )}
-          </>
+          p.canEdit && <RoundBtn label={t("page.edit")} testId="edit-toggle" primary onClick={p.onEdit} icon={<Pencil size={16} />} />
         )}
         {overflow.length > 0 && (
-          <OverflowMenu items={overflow} onSelect={(v) => runOverflow(p, v)} label={t("page.moreActions")} triggerClassName={`${ROUND} ${ROUND_BG}`} />
+          <OverflowMenu items={overflow} onSelect={(v) => runOverflow(p, v, watch)} label={t("page.moreActions")} triggerClassName={`${ROUND} ${ROUND_BG}`} />
         )}
       </div>
     </div>
@@ -279,7 +276,8 @@ export function PageControlsMobile(p: PageControlsProps) {
   const { t } = useTranslation();
   const dirty = useDirty(p.dirtySignal);
   const canPublish = p.canPublish || dirty;
-  const overflow = overflowItems(p, t);
+  const watch = useWatchItem(p.pageId);
+  const overflow = overflowItems(p, t, watch);
   return (
     <div className="absolute right-4 bottom-4 z-10">
       <DropdownMenu modal={false}>
@@ -302,15 +300,14 @@ export function PageControlsMobile(p: PageControlsProps) {
               {p.onCycleDisplayMode && <DropdownMenuItem onSelect={p.onCycleDisplayMode} data-testid="m-displaymode-toggle">{p.displayMode === "source" ? <Code size={14} /> : p.displayMode === "reading" ? <BookOpen size={14} /> : p.displayMode === "wysiwyg" ? <Sparkles size={14} /> : <Eye size={14} />} {t("page.displayMode")}: {t(p.displayMode === "source" ? "page.modeSource" : p.displayMode === "reading" ? "page.modeReading" : p.displayMode === "wysiwyg" ? "page.modeWysiwyg" : "page.modeLive")}</DropdownMenuItem>}
             </>
           ) : (
-            <>
-              {p.canEdit && <DropdownMenuItem onSelect={p.onEdit} data-testid="m-edit-toggle"><Pencil size={14} /> {t("page.edit")}</DropdownMenuItem>}
-              {p.onShare && <DropdownMenuItem onSelect={p.onShare} data-testid="m-share-open"><Share2 size={14} /> {t("page.share")}</DropdownMenuItem>}
-            </>
+            // #368: view mode = just Edit here; Watch + Share are in the overflow section below (built by
+            // overflowItems, so desktop and mobile stay in sync — no duplicate Share).
+            p.canEdit && <DropdownMenuItem onSelect={p.onEdit} data-testid="m-edit-toggle"><Pencil size={14} /> {t("page.edit")}</DropdownMenuItem>
           )}
           {/* #212: comments is part of overflowItems now (rendered below), so no separate entry here. */}
           {overflow.length > 0 && <DropdownMenuSeparator />}
           {overflow.map((it) => (
-            <DropdownMenuItem key={it.value} onSelect={() => runOverflow(p, it.value)} data-testid={`m-${it.testId}`}>{it.icon} {it.label}</DropdownMenuItem>
+            <DropdownMenuItem key={it.value} disabled={it.disabled} onSelect={() => runOverflow(p, it.value, watch)} data-testid={`m-${it.testId}`}>{it.icon} {it.label}{it.checked && <Check size={14} className="ml-auto text-[var(--accent)]" />}</DropdownMenuItem>
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
