@@ -5,7 +5,9 @@ import type IORedis from 'ioredis'
 import { check } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
+import type { Sql } from 'postgres'
 import { pool } from '../db/pool.js'
+import { fanOutFeedEvent } from './notifications.js' // #327 / ADR-143: reliable in-tx restore feed event
 import type { TenantDb } from '../db/index.js'
 import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc, readRevisionYdoc } from './revision-ydoc.js'
@@ -142,9 +144,9 @@ export async function restoreRevision(
   const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: args.pageId })
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
-  // Load current ydoc and target revision from DB
-  const [current] = await db.sql<[{ ydoc: Buffer | null; title: string }]>`
-    SELECT ydoc, title FROM pages WHERE id = ${args.pageId}
+  // Load current ydoc and target revision from DB (space_id → the #327 restore feed event fan-out below).
+  const [current] = await db.sql<[{ ydoc: Buffer | null; title: string; space_id: string }]>`
+    SELECT ydoc, title, space_id FROM pages WHERE id = ${args.pageId}
   `
   if (!current) throw Object.assign(new Error('not found'), { statusCode: 404 })
 
@@ -203,6 +205,11 @@ export async function restoreRevision(
       INSERT INTO search_outbox (tenant_id, page_id, operation)
       VALUES (${args.tenantId}, ${args.pageId}, 'upsert')
     `
+    // #327 / ADR-143 (C-2 increment 1): fan the restore out to watchers IN this tx (reliable — a commit-then-
+    // crash still delivers, matching #320 publish), replacing the old fire-and-forget emit-only path. A restore
+    // re-publishes (published_at just set above), so the §2 published guard passes. Actor is the member (restore
+    // is member-only). The feed groups vandal runs by actor (C-6 anon id / user sub) for one-click revert.
+    await fanOutFeedEvent(tx as unknown as Sql, { tenantId: args.tenantId, eventType: 'page.restored', pageId: args.pageId, spaceId: current.space_id, actor: `user:${args.userId}`, publishedAt: new Date() })
   })
 
   // Publish restore update to Valkey for immediate propagation to live clients.
