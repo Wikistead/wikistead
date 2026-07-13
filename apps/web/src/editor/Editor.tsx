@@ -273,7 +273,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
   }, [pageId, apiToken, navigateRouter]);
   // #307 / ADR-127: the host-mediated `:::backlinks` source. MEMBER surfaces only (gated on pageId — a
   // template preview / guest surface passes none, so the macro shows the empty-edit placeholder / nothing and
-  // never fetches). `fetch` shares the react-query cache (["backlinks", pageId]) with the BacklinksPanel and,
+  // never fetches). `fetch` shares the react-query cache (["backlinks", pageId]) with the RelatedPanel and,
   // being stale-by-default, refetches on each widget mount → re-entering the page yields fresh backlinks
   // (ADR-127 §9 remount freshness; push freshness is out of v1 scope). The endpoint FGA-view-confirms every
   // source for the caller (no new permission surface); navigate re-confirms view at the destination (uniform 404).

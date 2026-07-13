@@ -699,6 +699,10 @@
     "untitled": "(無題)",
     "empty": "このページにリンクしているページはまだありません。"
   },
+  "related": {
+    "title": "関連",
+    "backlinks": "リンク元"
+  },
   "template": {
     "saveAsTemplate": "テンプレートとして保存",
     "saveTitle": "テンプレートとして保存",

@@ -23,14 +23,15 @@ test("#230: a page shows a backlink from another page that links to it", async (
   await page.getByTestId("publish-page").click();
   await sleep(800);
 
-  // #230 (redesign): open the target, then open the "Backlinks" right-rail panel from the ⋯ menu.
+  // #322 / ADR-133: open the target, then open the "Related" right-rail panel from the ⋯ menu (was the
+  // standalone "Backlinks" panel #230; backlinks are now the first SECTION inside Related).
   await page.goto(`/p/${target}`);
   await page.waitForSelector("[data-pane=preview] .cm-content");
   await sleep(400);
   await page.getByTestId("page-overflow-trigger").click();
-  await page.getByTestId("backlinks-toggle").click();
-  await expect(page.getByTestId("backlinks-panel")).toBeVisible({ timeout: 10000 });
-  await expect(page.getByTestId("backlinks-panel")).toContainText("Backlinks"); // #230heading wording
+  await page.getByTestId("related-toggle").click();
+  await expect(page.getByTestId("related-panel")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByTestId("related-panel")).toContainText("Backlinks"); // the §Backlinks section header
   const link = page.getByTestId(`backlink-${linker}`);
   await expect(link).toBeVisible();
   await expect(link).toHaveText("bl-linker");
@@ -107,13 +108,13 @@ test("#230: the backlinks panel shows an empty state and opens in edit mode too"
   await sleep(400);
   // Open the panel (read mode) → empty state, not a list. No always-on bottom section anymore.
   await page.getByTestId("page-overflow-trigger").click();
-  await page.getByTestId("backlinks-toggle").click();
-  await expect(page.getByTestId("backlinks-panel")).toBeVisible();
+  await page.getByTestId("related-toggle").click();
+  await expect(page.getByTestId("related-panel")).toBeVisible();
   await expect(page.getByTestId("backlinks-empty")).toBeVisible();
   // #230 redesign: openable in EDIT mode too (the old bottom section never rendered while editing).
-  await page.getByTestId("backlinks-close").click();
+  await page.getByTestId("related-close").click();
   await enterEdit(page);
   await page.getByTestId("page-overflow-trigger").click();
-  await page.getByTestId("backlinks-toggle").click();
-  await expect(page.getByTestId("backlinks-panel")).toBeVisible();
+  await page.getByTestId("related-toggle").click();
+  await expect(page.getByTestId("related-panel")).toBeVisible();
 });

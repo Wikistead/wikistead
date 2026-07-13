@@ -66,7 +66,7 @@ export interface PageControlsProps {
   onDelete?: () => void;
   onDuplicate?: () => void; // #229: create a new page seeded from this one (template)
   onSaveTemplate?: () => void; // #248: save this page's published content as a reusable template
-  onBacklinks?: () => void; // #230: open the "Backlinks" (backlinks) right-rail panel
+  onRelated?: () => void; // #322 / ADR-133: open the "Related" right-rail panel (§Backlinks 1-hop + future 2-hop/graph/tags)
   dirtySignal?: DirtySignal;
 }
 
@@ -126,8 +126,8 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string, watch?: W
   if (p.onPrint) items.push({ value: "print", label: t("page.print"), icon: <Printer size={14} />, testId: "print-page", disabled: true, hint: t("page.printDisabled") });
   if (p.onAttachments) items.push({ value: "attachments", label: t("page.attachments"), icon: <Paperclip size={14} />, testId: "attachments-toggle" });
   if (p.onHistory) items.push({ value: "history", label: t("page.history"), icon: <History size={14} />, testId: "history-toggle" });
-  // #230: "Backlinks" — open the backlinks right-rail panel (both modes).
-  if (p.onBacklinks) items.push({ value: "backlinks", label: t("backlinks.title"), icon: <LinkIcon size={14} />, testId: "backlinks-toggle" });
+  // #322 / ADR-133: "Related" — open the related right-rail panel (both modes; §Backlinks 1-hop today).
+  if (p.onRelated) items.push({ value: "related", label: t("related.title"), icon: <LinkIcon size={14} />, testId: "related-toggle" });
   if (p.onPermissions) items.push({ value: "permissions", label: t("page.permissions"), icon: <Shield size={14} />, testId: "permissions-open" });
   // Share in the ⋯ in BOTH modes. #368 removed the dedicated view-mode Share round button (it grew the
   // bottom-right cluster and pushed the always-present Edit button around), so view mode reaches Share here
@@ -147,7 +147,7 @@ function runOverflow(p: PageControlsProps, v: string, watch?: WatchItem) {
   if (v === "watch") { watch?.toggle(); return; }
   if (v === "duplicate") { p.onDuplicate?.(); return; }
   if (v === "save-template") { p.onSaveTemplate?.(); return; }
-  if (v === "backlinks") { p.onBacklinks?.(); return; }
+  if (v === "related") { p.onRelated?.(); return; }
   if (v === "comments") p.onToggleComments?.();
   else if (v === "export") p.onExport?.();
   else if (v === "export-html") p.onExportHtml?.();

@@ -143,7 +143,7 @@ import { useHeadingHashLanding, replaceHashWith } from "../toc/useHashLanding"; 
 import { PageTitle } from "./PageTitle";
 import { PageMeta } from "./PageMeta";
 import { ProgressRing } from "./ProgressRing"; // #290: title-band page-progress ring
-import { BacklinksPanel } from "./BacklinksPanel";
+import { RelatedPanel } from "./RelatedPanel";
 import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
 import { CommentsPanel } from "../comments/CommentsPanel";
@@ -336,23 +336,24 @@ function PageRoute() {
   };
   const closeAttachments = useCallback(() => setAttachmentsOpen(false), []);
 
-  // #230: "Backlinks" — a right-rail panel opened from the ⋯ menu (was a bottom section that never
-  // rendered in edit mode). Openable in both modes; part of the #206 mutual exclusion.
-  const [backlinksOpen, setBacklinksOpen] = useState(false);
-  const toggleBacklinks = () => {
-    const willOpen = !backlinksOpen;
-    setBacklinksOpen(willOpen);
-    if (willOpen) closeOtherRightPanels("backlinks");
+  // #322 / ADR-133: the "Related" panel (was "Backlinks" #230) — a right-rail panel opened from the ⋯ menu,
+  // now a section container (§Backlinks 1-hop today; 2-hop / graph / tags slot in later). Openable in both
+  // modes; part of the #206 mutual exclusion.
+  const [relatedOpen, setRelatedOpen] = useState(false);
+  const toggleRelated = () => {
+    const willOpen = !relatedOpen;
+    setRelatedOpen(willOpen);
+    if (willOpen) closeOtherRightPanels("related");
   };
-  const closeBacklinks = useCallback(() => setBacklinksOpen(false), []);
+  const closeRelated = useCallback(() => setRelatedOpen(false), []);
 
-  // #206: mutual exclusion — only one right panel (comments / history / attachments / backlinks) is open
+  // #206: mutual exclusion — only one right panel (comments / history / attachments / related) is open
   // at a time. Opening one closes the others (and clears their persisted-open flag).
-  const closeOtherRightPanels = (keep: "comments" | "history" | "attachments" | "backlinks") => {
+  const closeOtherRightPanels = (keep: "comments" | "history" | "attachments" | "related") => {
     if (keep !== "comments") { setCommentsOpen(false); try { localStorage.setItem("wks.commentsOpen", "0"); } catch { /* no storage */ } }
     if (keep !== "history") { setHistoryOpen(false); try { localStorage.setItem("wks.historyOpen", "0"); } catch { /* no storage */ } }
     if (keep !== "attachments") setAttachmentsOpen(false);
-    if (keep !== "backlinks") setBacklinksOpen(false);
+    if (keep !== "related") setRelatedOpen(false);
   };
 
   // Per-page permissions (manage only). Also the invite-to-draft surface.
@@ -487,7 +488,7 @@ function PageRoute() {
     onToggleToc: () => setTocOn(!tocOn),
     onHistory: toggleHistory,
     onAttachments: toggleAttachments,
-    onBacklinks: pageId ? toggleBacklinks : undefined,
+    onRelated: pageId ? toggleRelated : undefined,
     onExport: () => { if (pageId) void downloadPageExport(token, pageId); },
     // #85 bounce: the HTML-export UI entry is SEALED until the post-launch Option-A redesign (a
     // DOM-free render core shared by client + SSR). The current renderMarkdownToHtml output is
@@ -577,14 +578,14 @@ function PageRoute() {
               subscribeScroll={subscribeTocScroll}
               isWide={isWide}
               tocOn={tocOn}
-              railEnabled={!commentsOpen && !historyOpen && !attachmentsOpen && !backlinksOpen}
+              railEnabled={!commentsOpen && !historyOpen && !attachmentsOpen && !relatedOpen}
             />
           </div>
         </div>
         {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={page?.canComment ?? capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} />}
         {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} onCompare={openDiff} onClose={closeHistory} />}
         {pageId && attachmentsOpen && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} onClose={closeAttachments} />}
-        {pageId && backlinksOpen && <BacklinksPanel pageId={pageId} onClose={closeBacklinks} />}
+        {pageId && relatedOpen && <RelatedPanel pageId={pageId} onClose={closeRelated} />}
       </div>
       {pageId && diffRevId && <DiffModal pageId={pageId} revId={diffRevId} onClose={closeDiff} />}
       {pageId && <PermissionsDialog pageId={pageId} open={permsOpen} onClose={() => setPermsOpen(false)} />}
