@@ -3,6 +3,7 @@ import { filterAuthorized } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { getPublished, listPages, getBacklinks, createPage, publishPage } from './pages.js'
 import { listSpaces } from './spaces.js'
+import { createPageComment } from './comments.js'
 import { fillAuthorizedPage, SEARCH_CANDIDATE_LIMIT } from '../search/paginate.js'
 import { authenticateMcpRequest, type McpPrincipal } from '../auth/mcp-request-auth.js'
 
@@ -151,6 +152,28 @@ const TOOLS: McpTool[] = [
       } catch (e) {
         const sc = (e as { statusCode?: number }).statusCode
         if (sc === 403 || sc === 404) throw toolError('cannot publish that page')
+        throw e
+      }
+    },
+  },
+  {
+    name: 'create_comment',
+    description: 'Add a page-level comment to a page (requires comment access). Returns the thread id.',
+    scope: 'write',
+    inputSchema: { type: 'object', properties: { pageId: { type: 'string' }, body: { type: 'string' } }, required: ['pageId', 'body'] },
+    async run(req, app, principal, args) {
+      const pageId = typeof args.pageId === 'string' ? args.pageId : ''
+      const body = typeof args.body === 'string' ? args.body : ''
+      if (!pageId) throw toolError('pageId is required')
+      if (!body.trim()) throw toolError('body is required')
+      // Thin broker: createPageComment gates `view` (404, existence-hiding) then `comment` (403), inside a tx.
+      try {
+        const { threadId } = await createPageComment(req.db, app.fga, { tenantId: principal.tenantId, pageId, subject: `user:${principal.sub}`, authorId: principal.sub, body })
+        return `added comment (thread ${threadId})`
+      } catch (e) {
+        const sc = (e as { statusCode?: number }).statusCode
+        if (sc === 403 || sc === 404) throw toolError('cannot comment on that page')
+        if (sc === 400) throw toolError('body is required')
         throw e
       }
     },
