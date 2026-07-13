@@ -1,6 +1,7 @@
 import { syntaxTree } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
 import type { EditorState, Extension } from "@codemirror/state";
+import { slugify } from "@wikistead/macro-render";
 
 // #192 / ADR-091: table-of-contents heading model. Headings are DERIVED from the document's
 // ATXHeading nodes (the same Lezer tree the live-preview uses) — never a second stored structure —
@@ -14,24 +15,10 @@ export interface Heading {
   slug: string; // stable, unique id (GitHub-style, deduped)
 }
 
-// GitHub-style slug: lowercase, spaces→'-', drop punctuation, collapse hyphens. Dedup with a
-// `-2`, `-3`… suffix via the shared `seen` set (so repeated headings get distinct anchors). Pure.
-// #313: Unicode letters/numbers are KEPT (\p{L}\p{N}, like github-slugger) — the previous ASCII
-// `\w` collapsed every CJK heading to the "section" fallback, so Japanese anchors all collided.
-export function slugify(text: string, seen: Set<string>): string {
-  const base = text
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s_-]/gu, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "") || "section";
-  let slug = base;
-  let n = 2;
-  while (seen.has(slug)) slug = `${base}-${n++}`;
-  seen.add(slug);
-  return slug;
-}
+// #325 / ADR-137: `slugify` now lives in @wikistead/macro-render (the DOM-free, shared anchor vocabulary
+// the server section-transclusion + this editor extraction both run — structurally drift-proof). Re-exported
+// here so the existing editor importers (and headings.test.ts) are unchanged.
+export { slugify };
 
 // Walk the syntax tree for ATXHeading{1..6}, returning ordered, slugged headings. The heading TEXT is
 // the line minus the leading `#`s (HeaderMark) and one following space.
