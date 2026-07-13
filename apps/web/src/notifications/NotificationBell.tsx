@@ -60,10 +60,12 @@ export function NotificationBell() {
               type="button"
               onClick={() => openItem(e)}
               data-testid="notification-item"
-              className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm hover:bg-panel-2 ${e.read ? "opacity-60" : ""}`}
+              className={`flex w-full items-start gap-2 px-3 py-2 text-left text-sm hover:bg-panel-2 ${e.read ? "opacity-60" : ""}`}
             >
-              <span className="line-clamp-2">{eventLabel(e, t)}</span>
-              {!e.read && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" aria-hidden />}
+              {/* #380: the unread dot sits INLINE at the right of the row (aligned to the first text line), not
+                  stacked below the message — a flex-col put it on its own line, dangling under the text. */}
+              <span className="line-clamp-2 flex-1">{eventLabel(e, t)}</span>
+              {!e.read && <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" aria-hidden data-testid="notification-unread-dot" />}
             </button>
           ))}
         </div>
