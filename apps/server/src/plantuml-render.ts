@@ -15,31 +15,54 @@ import { deflateSync } from 'node:zlib'
 export const MAX_RENDER_BYTES = 2 * 1024 * 1024
 type Fetcher = (url: string) => Promise<Response>
 
-// #342: the built-in PlantUML dark theme injected for dark-mode renders (user ruling use a
-// built-in `!theme`, not app-matched skinparam). `carbon-gray` is a real built-in (reviewer-vetted,
-//) — the exact choice is a visual call, swap this one constant to re-tune. Light mode injects
-// nothing (the default look).
-export const PLANTUML_DARK_THEME = 'carbon-gray'
+// #342 a readable dark for PlantUML. The built-in `!theme`s (carbon-gray etc.) only recolour ELEMENTS —
+// the canvas stays WHITE, so black text on a white box reads terribly on a dark app. Real "readable dark" needs
+// `skinparam` (the option first deferred): a dark canvas + light text/lines across the common diagram
+// element types. Colours track the app's dark surface tokens (panel/border/fg). Swap these to re-tune.
+const DARK = { bg: '#1E1E22', panel: '#2C2C31', border: '#55555C', fg: '#E6E6E6', line: '#C8C8C8' } as const
+export const PLANTUML_DARK_SKINPARAM: readonly string[] = [
+  `skinparam backgroundColor ${DARK.bg}`,
+  `skinparam defaultFontColor ${DARK.fg}`,
+  `skinparam ArrowColor ${DARK.line}`,
+  `skinparam ArrowFontColor ${DARK.fg}`,
+  `skinparam TitleFontColor ${DARK.fg}`,
+  `skinparam NoteBackgroundColor ${DARK.panel}`,
+  `skinparam NoteBorderColor ${DARK.border}`,
+  `skinparam NoteFontColor ${DARK.fg}`,
+  `skinparam ActorBorderColor ${DARK.line}`,
+  `skinparam ActorFontColor ${DARK.fg}`,
+  `skinparam ParticipantBackgroundColor ${DARK.panel}`,
+  `skinparam ParticipantBorderColor ${DARK.border}`,
+  `skinparam ParticipantFontColor ${DARK.fg}`,
+  `skinparam SequenceLifeLineBorderColor ${DARK.border}`,
+  `skinparam SequenceBoxBackgroundColor ${DARK.bg}`,
+  // Boxed node types (class / component / rectangle / state / activity / usecase / object) share the palette.
+  ...['Class', 'Component', 'Rectangle', 'State', 'Activity', 'Usecase', 'Object', 'Node', 'Package'].flatMap((k) => [
+    `skinparam ${k}BackgroundColor ${DARK.panel}`,
+    `skinparam ${k}BorderColor ${DARK.border}`,
+    `skinparam ${k}FontColor ${DARK.fg}`,
+  ]),
+  `skinparam ClassAttributeFontColor ${DARK.fg}`,
+]
 
-// #342: prepend the dark `!theme` to a PlantUML source, UNLESS the author already set their own theme.
-// Respect an explicit `!theme` or `skinparam` on any line START (PlantUML comments begin with `'` or sit
-// inside `/' … '/`, so a leading-quote line is a comment and never a real directive — note 2). The
-// directive must sit INSIDE the diagram, so it goes right after the first `@start…`; a snippet with no
-// `@start…` gets it prepended (still valid). Idempotent-safe: returns the source untouched when explicit.
-export function injectPlantumlTheme(source: string, themeName = PLANTUML_DARK_THEME): string {
+// #342 inject the dark `skinparam` block into a PlantUML source, UNLESS the author already set their own
+// theme. Respect an explicit `!theme` or `skinparam` on any line START (PlantUML comments begin with `'` or sit
+// inside `/' … '/`, so a leading-quote line is a comment and never a real directive — note 2). skinparam
+// must sit INSIDE the diagram, so it goes right after the first `@start…`; a snippet with no `@start…` gets it
+// prepended (still valid). Idempotent-safe: returns the source untouched when the author styled it explicitly.
+export function injectPlantumlTheme(source: string, skinparam: readonly string[] = PLANTUML_DARK_SKINPARAM): string {
   const lines = source.split('\n')
   const hasExplicit = lines.some((line) => {
     const t = line.trimStart()
     return /^!theme\b/i.test(t) || /^skinparam\b/i.test(t)
   })
   if (hasExplicit) return source
-  const directive = `!theme ${themeName}`
   const startIdx = lines.findIndex((l) => /^\s*@start\w*/i.test(l))
   if (startIdx >= 0) {
-    lines.splice(startIdx + 1, 0, directive)
+    lines.splice(startIdx + 1, 0, ...skinparam)
     return lines.join('\n')
   }
-  return `${directive}\n${source}`
+  return `${[...skinparam, source].join('\n')}`
 }
 
 async function defaultFetch(url: string, timeoutMs: number): Promise<Response> {
