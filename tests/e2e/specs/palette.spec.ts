@@ -16,6 +16,9 @@ test("slash palette: open, filter, Ctrl-j nav, Enter applies with caret at conte
   await page.keyboard.type("/");
   await expect(page.getByTestId("slash-palette")).toBeVisible();
   expect(await page.locator("[data-testid=slash-palette] .lp-palette-row").count()).toBeGreaterThan(3);
+  // #357: every row has a leading inline-SVG type icon (theme-follow currentColor).
+  expect(await page.locator("[data-testid=slash-palette] .lp-palette-row .lp-palette-icon svg").count()).toBeGreaterThan(3);
+  await expect(page.getByTestId("slash-item-h1").locator(".lp-palette-icon svg")).toBeVisible();
   // first item selected; Ctrl-j moves to the next (vim-style; Ctrl-n is browser-reserved)
   await expect(page.getByTestId("slash-item-h1")).toHaveAttribute("data-selected", "true");
   await page.keyboard.press("Control+j");
