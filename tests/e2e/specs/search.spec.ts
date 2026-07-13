@@ -113,7 +113,11 @@ test("#285: the search modal shows a preview pane (meta + body excerpt + draft b
   await expect(preview).toContainText(title, { timeout: 8000 });
   await expect(preview.getByTestId("page-meta")).toBeVisible(); // #222 metadata row
   await expect(preview.getByTestId("search-preview-body")).toContainText("preview body 285 unique text");
+  // #285 (B): the body renders through the member read-engine (mountPublishedView), not a plain dump.
+  await expect(preview.getByTestId("search-preview-rendered").locator(".cm-content")).toBeVisible();
   await expect(preview.getByTestId("search-preview-draft")).toHaveCount(0); // published → no draft badge
+  // #285 (C): each result row shows a space icon (not just the space name text).
+  await expect(page.getByTestId("search-item-space").first()).toBeVisible();
 
   // an UNPUBLISHED page shows the draft badge (view-gated `published` boolean, not manage-gated state).
   const draftTitle = `DRAFTME-${Date.now().toString(36)}`;
@@ -137,4 +141,6 @@ test("#285: the search modal shows a preview pane (meta + body excerpt + draft b
   await page.waitForSelector("[data-testid=search-item]", { timeout: 5000 });
   await expect(preview).toContainText(draftTitle, { timeout: 8000 });
   await expect(preview.getByTestId("search-preview-draft")).toBeVisible();
+  // #285 (B): a draft (no published body) shows an explicit placeholder, not a broken empty pane.
+  await expect(preview.getByTestId("search-preview-unpublished")).toBeVisible();
 });
