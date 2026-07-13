@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { getPublished } from './pages.js'
+import { getPublished, listPages, getBacklinks } from './pages.js'
+import { listSpaces } from './spaces.js'
 import { authenticateMcpRequest, type McpPrincipal } from '../auth/mcp-request-auth.js'
 
 // #311 / ADR-131 slice 5: the MCP endpoint — a minimal Streamable-HTTP (JSON-RPC 2.0 over POST) transport with a
@@ -41,6 +42,52 @@ const TOOLS: McpTool[] = [
         throw e
       }
       return `# ${page.title}\n\n${page.publishedMd ?? '(no published content)'}`
+    },
+  },
+  {
+    name: 'list_spaces',
+    description: 'List the spaces you can access (id + name).',
+    scope: 'read',
+    inputSchema: { type: 'object', properties: {} },
+    async run(req, app, principal) {
+      // Thin broker: listSpaces returns only the view-authorized spaces for this member.
+      const spaces = await listSpaces(req.db, app.fga, principal.sub)
+      if (!spaces.length) return 'no accessible spaces'
+      return spaces.map((s) => `- ${s.name} (${s.id})`).join('\n')
+    },
+  },
+  {
+    name: 'list_pages',
+    description: 'List the pages in a space that you can view (id + title). Returns none if the space is empty or not visible to you.',
+    scope: 'read',
+    inputSchema: { type: 'object', properties: { spaceId: { type: 'string', description: 'the space id' } }, required: ['spaceId'] },
+    async run(req, app, principal, args) {
+      const spaceId = typeof args.spaceId === 'string' ? args.spaceId : ''
+      if (!spaceId) throw toolError('spaceId is required')
+      // listPages FGA-view-filters per page (a non-viewable space yields an empty list — no existence oracle).
+      const pages = await listPages(req.db, app.fga, { spaceId, subject: `user:${principal.sub}` })
+      if (!pages.length) return 'no visible pages'
+      return pages.map((p) => `- ${p.title} (${p.id})`).join('\n')
+    },
+  },
+  {
+    name: 'get_backlinks',
+    description: 'List the pages that link to a given page (id + title). Returns not-found if you cannot view the target page.',
+    scope: 'read',
+    inputSchema: { type: 'object', properties: { pageId: { type: 'string', description: 'the target page id' } }, required: ['pageId'] },
+    async run(req, app, principal, args) {
+      const pageId = typeof args.pageId === 'string' ? args.pageId : ''
+      if (!pageId) throw toolError('pageId is required')
+      // getBacklinks view-gates the TARGET (uniform 404 when denied/missing) then FGA-view-confirms each source.
+      let links
+      try {
+        links = await getBacklinks(req.db, app.fga, { pageId, subject: `user:${principal.sub}` })
+      } catch (e) {
+        if ((e as { statusCode?: number }).statusCode === 404) throw toolError('page not found')
+        throw e
+      }
+      if (!links.length) return 'no backlinks'
+      return links.map((l) => `- ${l.title} (${l.id})`).join('\n')
     },
   },
 ]
