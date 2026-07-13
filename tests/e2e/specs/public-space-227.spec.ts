@@ -67,6 +67,6 @@ test("#227: an anonymous visitor browses a public space via the sidebar reader-c
 
   // Clicking a page renders its sanitized body in the content area.
   await row.click();
-  await expect(anon.getByTestId("public-body").locator("h1")).toHaveText("Public space page", { timeout: 10000 });
+  await expect(anon.getByTestId("public-body").locator(".cm-lp-h1")).toContainText("Public space page", { timeout: 10000 }); // #319: CM heading line
   await expect(anon.getByTestId("public-body")).toContainText("visible to anyone");
 });

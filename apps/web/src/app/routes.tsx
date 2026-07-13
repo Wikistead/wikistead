@@ -139,8 +139,6 @@ function useDisplayModeShortcut(cycle: () => void, enabled: boolean, chord: stri
   }, [cycle, enabled, chord]);
 }
 import { Lock } from "lucide-react";
-import { addCodeCopyButtons } from "../editor/live-preview/code-copy";
-import { addHeadingAnchorButtons } from "../editor/live-preview/heading-anchor-dom"; // #313: public heading 🔗
 import { useHeadingHashLanding, replaceHashWith } from "../toc/useHashLanding"; // #313: #<slug> deep links
 import { PageTitle } from "./PageTitle";
 import { PageMeta } from "./PageMeta";
@@ -151,7 +149,6 @@ import { ShareDialog } from "../ui/ShareDialog";
 import { CommentsPanel } from "../comments/CommentsPanel";
 import { TocChrome } from "../toc/TocChrome"; // #227: shared TOC rail/overlay/toggle wiring (member + public)
 import { useTocPref } from "../toc/useTocPref";
-import { usePublicToc } from "./public-toc"; // #227: TOC for the public reader (headings from the rendered DOM)
 import type { Heading } from "../editor/headings";
 import { HistoryPanel } from "../history/HistoryPanel";
 import { DiffModal } from "../history/DiffModal";
@@ -165,7 +162,6 @@ import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, assetUrl, type GuestToken } from "../data/apiClient";
-import { renderMarkdownToDom } from "../editor/macros/md-render"; // #227: public render via the shared sanitized renderer
 import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useCreatePage, useEntitlements, type Page } from "../data/queries";
 import { GuestSidebar } from "./GuestSidebar";
 import { ConfirmDialog } from "../ui/dialogs";
@@ -1008,6 +1004,16 @@ function PublicPageContent({ pageId }: { pageId: string }) {
   const [bandEl, setBandEl] = useState<HTMLDivElement | null>(null); // #227 ②: publish the band's real height
   const isWide = useMediaQuery("(min-width: 1200px)");
   const { on: tocOn, setOn: setTocOn } = useTocPref(); // #227 ①: TOC on/off parity with the member view
+  // #319 / ADR-124: the public body renders with the member CM6 read engine (mountPublishedView), so its TOC
+  // is driven by the CM heading extension via wireToc — the member page-route wiring (headings state + a jump
+  // ref + a scroll-activity fan-out), not the old DOM-scraping usePublicToc (CM headings are not <h1> tags).
+  const [headings, setHeadings] = useState<Heading[]>([]);
+  const [activeFrom, setActiveFrom] = useState<number | null>(null);
+  const tocJumpRef = useRef<((from: number) => void) | null>(null);
+  const tocJump = useCallback((f: number) => tocJumpRef.current?.(f), []);
+  useHeadingHashLanding(headings, tocJump); // #313: /pub/:id#<slug> deep link → band-aware CM jump
+  const tocScrollListeners = useRef(new Set<() => void>());
+  const subscribeTocScroll = useCallback((fn: () => void) => { tocScrollListeners.current.add(fn); return () => { tocScrollListeners.current.delete(fn); }; }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1022,11 +1028,36 @@ function PublicPageContent({ pageId }: { pageId: string }) {
     return () => { cancelled = true; };
   }, [pageId]);
 
+  // #319 / ADR-124: render the public body with mountPublishedView (the member read engine) instead of the
+  // reduced renderMarkdownToDom, so math / code highlighting / task checkboxes / line wrapping / every macro
+  // render structurally identical to the real page. The anonymous-context XSS boundary was re-proven
+  // (review, ADR-124 — the one finding, an unsanitized :::embed-external degrade href, is
+  // fixed). The CM6 engine is LAZY-loaded (dynamic import) — a hygiene split (routes.tsx already pulls CM6 via
+  // the member Editor, so eager growth is ~net-zero; the fuller isolation is a later member-route lazify).
+  // No member resolvers are wired (anonymous surface) → images/plantuml/transclude degrade, like the template
+  // preview. wireToc drives the TOC from the CM heading extension, listening on the OUTER scroll container.
   useEffect(() => {
     if (state.status !== "ok" || !bodyEl) return;
-    bodyEl.replaceChildren(renderMarkdownToDom(state.page!.content));
-    addCodeCopyButtons(bodyEl, t("contextMenu.copy")); // #227 ②: copy button parity for public code blocks
-  }, [state, bodyEl, t]);
+    setHeadings([]);
+    setActiveFrom(null);
+    let cancelled = false;
+    let dispose = () => {};
+    void Promise.all([import("../editor/editor-livepreview"), import("../editor/toc-wiring")]).then(([{ mountPublishedView }, { wireToc }]) => {
+      if (cancelled || !bodyEl) return;
+      const view = mountPublishedView(bodyEl, state.page!.content, {});
+      const unwire = wireToc(view, {
+        onHeadings: setHeadings,
+        onActiveHeading: setActiveFrom,
+        onScrollActivity: () => tocScrollListeners.current.forEach((fn) => fn()),
+        tocJumpRef,
+        // The CM view owns the scrolling (band is an absolute overlay, content clears it via
+        // `.lp-editor-host .cm-content { padding-top: var(--wks-band-h) }`), exactly like the member view
+        // so wireToc uses its defaults (the CM scroller + contentDOM padding-top as the band offset).
+      });
+      dispose = () => { unwire(); view.destroy(); };
+    });
+    return () => { cancelled = true; dispose(); if (bodyEl) bodyEl.replaceChildren(); };
+  }, [state, bodyEl]);
 
   useEffect(() => {
     if (state.status !== "ok" || !state.page!.noindex) return;
@@ -1037,17 +1068,8 @@ function PublicPageContent({ pageId }: { pageId: string }) {
     return () => meta.remove();
   }, [state]);
 
-  // #227 ②: declared AFTER the replaceChildren effect so its heading collection runs on the POPULATED body
-  // (React runs effects in declaration order — collecting before replaceChildren would see an empty DOM).
-  const toc = usePublicToc(bodyEl, state.status === "ok");
-
-  // #313: hover 🔗 per heading + /pub/:id#<slug> deep-link landing. Both need the ids usePublicToc
-  // assigns, so they hang off toc.headings (populated ⇒ ids are on the DOM).
-  useEffect(() => {
-    if (state.status !== "ok" || !bodyEl || toc.headings.length === 0) return;
-    addHeadingAnchorButtons(bodyEl, t("toc.copyAnchor"), () => notify.success(t("toast.copied")));
-  }, [state, bodyEl, toc.headings, t]);
-  useHeadingHashLanding(toc.headings, toc.jump);
+  // #319: hover 🔗 heading anchors are now provided by the CM `headingAnchors` extension inside
+  // mountPublishedView (member parity) — the old DOM-based addHeadingAnchorButtons + usePublicToc are gone.
 
   // #227 ②: publish the frosted band's ACTUAL height as --wks-band-h on the outer wrapper (a 2-line
   // title makes the band taller, so a fixed value can't clear it). Mirrors the member bandRef ResizeObserver.
@@ -1073,16 +1095,19 @@ function PublicPageContent({ pageId }: { pageId: string }) {
     // wrapper, stays viewport-fixed instead of scrolling away with the content. h-full is bounded by the
     // parent in both layouts (AppShell main on the space route; the route container on /pub/:id).
     <div ref={setOuterEl} className="wks-public relative h-full" style={{ fontFamily: "var(--font-body, sans-serif)" }}>
-      <div className="h-full overflow-y-auto">
-        {/* #227 ① : the member frosted title BAND, reused read-only. Sticky so it frosts the content scrolling
-            under it. PageTitle with no onRename renders a plain read-only <h1> — no edit affordances leak. The
-            band's height is published as --wks-band-h (bandEl ResizeObserver) so the rail + heading offsets
-            clear it. ①/ ④: the row is the MEMBER band row (740px column, px-6/pt-6, title flexing
-            with the status area at its right), and the TOC toggle is the member `PageStatus` ToggleButton —
-            not a public-only floating button. */}
-        <div ref={setBandEl} data-testid="public-band" className="sticky top-0 z-20 pb-6">
+      {/* #319: mirror the member editor-area layout (routes.tsx ~511) so the embedded CM read view OWNS the
+          scrolling (its `.cm-scroller` virtualizes) instead of an outer scroller. The band is an ABSOLUTE
+          overlay over the top of the CM surface; content scrolls UNDER it and clears it via
+          `.lp-editor-host .cm-content { padding-top: var(--wks-band-h) }`. */}
+      <div className="relative h-full" style={{ minHeight: 0 }}>
+        {/* #227 ① : the member frosted title BAND, reused read-only. An absolute overlay (pointer-events-none;
+            its row is auto) so the CM content scrolls under it and the frost actually shows. PageTitle with no
+            onRename renders a plain read-only <h1>. The band's height is published as --wks-band-h (bandEl RO)
+            so the CM content padding + rail offsets clear it. ①/ ④: the MEMBER band row (740px
+            column) with the member `PageStatus` TOC toggle. */}
+        <div ref={setBandEl} data-testid="public-band" className="pointer-events-none absolute inset-x-0 top-0 z-20 pb-6">
           <div aria-hidden="true" className="absolute inset-x-0 inset-y-0 bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_90%,transparent)] via-[color-mix(in_srgb,var(--bg)_42%,transparent)] to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_55%,transparent)]" />
-          <div className="relative mx-auto flex w-full max-w-[740px] items-center gap-3 px-6 pt-6" data-testid="public-title">
+          <div className="pointer-events-auto relative mx-auto flex w-full max-w-[740px] items-center gap-3 px-6 pt-6" data-testid="public-title">
             <div className="min-w-0 flex-1">
               <PageTitle title={page.title} />
             </div>
@@ -1092,19 +1117,18 @@ function PublicPageContent({ pageId }: { pageId: string }) {
             </div>
           </div>
         </div>
-        <div className="mx-auto w-full max-w-[740px] px-6 pb-16">
-          <div ref={setBodyEl} data-testid="public-body" />
-        </div>
+        {/* the CM read view fills this box and scrolls internally (the member surface pattern). */}
+        <div ref={setBodyEl} data-testid="public-body" className="h-full" />
       </div>
       {/* #227 the SAME shared TocChrome the member views render (rail on wide / overlay on narrow) — no
           public-only reimplementation. The toggle lives in the band's PageStatus (member parity, ①).
           The rail offsets clear the frosted band (--wks-band-h, published above by the bandEl RO). */}
       <TocChrome
-        headings={toc.headings}
-        activeFrom={toc.activeFrom}
+        headings={headings}
+        activeFrom={activeFrom}
         depth={3}
-        onJump={(f) => { toc.jump(f); const h = toc.headings.find((x) => x.from === f); if (h) replaceHashWith(h.slug); }}
-        subscribeScroll={toc.subscribeScroll}
+        onJump={(f) => { tocJump(f); const h = headings.find((x) => x.from === f); if (h) replaceHashWith(h.slug); }}
+        subscribeScroll={subscribeTocScroll}
         isWide={isWide}
         tocOn={tocOn}
         railLeft="calc(50% + 368px)"

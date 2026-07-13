@@ -145,9 +145,18 @@ test("#313 public reader: heading 🔗 copies /pub/:id#slug and the anchor URL l
   const anonCtx = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
   const anon = await anonCtx.newPage();
 
-  // (a) copy from the public reader's DOM heading
+  // (a) copy from the public reader's heading — #319: the CM `headingAnchors` extension (member parity) puts
+  // the 🔗 button on the heading LINE (.cm-lp-h2), and headingAnchorUrl uses origin+pathname → /pub/:id#slug.
   await anon.goto(`/pub/${id}`);
-  const h2 = anon.getByTestId("public-body").locator("h2", { hasText: "対象見出し" });
+  await anon.waitForSelector("[data-testid=public-body] .cm-content");
+  // #319: the CM read surface VIRTUALIZES — this heading is deep in the doc (30 filler paragraphs above), so
+  // scroll the CM scroller down until it mounts (a reader scrolls to it too), then its anchor widget renders.
+  const scroller = anon.locator("[data-testid=public-body] .cm-scroller");
+  const h2 = anon.getByTestId("public-body").locator(".cm-lp-h2", { hasText: "対象見出し" });
+  await expect.poll(async () => {
+    await scroller.evaluate((el) => { el.scrollTop = Math.min(el.scrollTop + 500, el.scrollHeight); });
+    return h2.count();
+  }, { timeout: 10000 }).toBeGreaterThan(0);
   await expect(h2).toBeVisible();
   const btn = h2.locator("[data-testid=heading-anchor-copy]");
   await expect(btn).toHaveCount(1);
@@ -161,8 +170,8 @@ test("#313 public reader: heading 🔗 copies /pub/:id#slug and the anchor URL l
   const anon2 = await (await browser.newContext()).newPage();
   await anon2.goto(`/pub/${id}#${encodeURIComponent(SLUG)}`);
   await expect(anon2.getByTestId("public-body")).toBeVisible();
-  await expect.poll(async () => (await anon2.getByTestId("public-body").locator("h2", { hasText: "対象見出し" }).boundingBox())!.y, { timeout: 8000 }).toBeLessThan(400);
+  await expect.poll(async () => (await anon2.getByTestId("public-body").locator(".cm-lp-h2", { hasText: "対象見出し" }).boundingBox())!.y, { timeout: 8000 }).toBeLessThan(400);
   const bandBottom = await anon2.evaluate(() => document.querySelector("[data-testid=public-band]")!.getBoundingClientRect().bottom);
-  const hTop = (await anon2.getByTestId("public-body").locator("h2", { hasText: "対象見出し" }).boundingBox())!.y;
+  const hTop = (await anon2.getByTestId("public-body").locator(".cm-lp-h2", { hasText: "対象見出し" }).boundingBox())!.y;
   expect(hTop, "public heading under the band").toBeGreaterThanOrEqual(bandBottom - 40); // pb-6 fade zone overlaps a little
 });

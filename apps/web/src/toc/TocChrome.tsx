@@ -3,9 +3,9 @@ import type { Heading } from "../editor/headings";
 
 // The shared TOC chrome: the rail (wide) + overlay (narrow) variant switching, and an optional floating
 // on/off toggle. Every surface that shows a table of contents renders THIS — the member page views and the
-// anonymous public reader (#227) — so the public reader stops re-implementing the wiring. Only the heading
-// SOURCE differs per caller (the editor's heading extension for members; usePublicToc, from the rendered DOM,
-// for the public reader); the presentation/variant-switching is one component. Presentation only; no fetching.
+// anonymous public reader (#227) — so the public reader stops re-implementing the wiring. #319: BOTH surfaces
+// now source their headings from the SAME CM heading extension via `wireToc` (the public reader renders with
+// mountPublishedView too); the presentation/variant-switching is one component. Presentation only; no fetching.
 export function TocChrome({
   headings,
   activeFrom,
