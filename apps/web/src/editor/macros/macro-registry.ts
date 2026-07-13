@@ -79,3 +79,76 @@ export function validateMacroSubmission(
   }
   return errors.length ? { ok: false, errors } : { ok: true };
 }
+
+// ── Registry index (index.json) ──────────────────────────────────────────────
+// The static registry's index.json (ADR-136 §1): the read-only view the discovery site renders and the in-app
+// marketplace (#182) reads. It is DERIVED from the accepted, signed submissions — the site/app never re-decide
+// trust (that is the signature at install). Building it is pure + deterministic so CI and tests agree.
+
+// One accepted, signed submission version (already validateMacroSubmission-passed AND verifyPackage-verified in
+// CI). `signatureKeyId` derives the tier at install (never claimed here); revoked versions are filtered out.
+export interface AcceptedVersion {
+  readonly manifest: MacroManifest;
+  readonly meta: RegistryEntryMeta;
+  readonly signatureKeyId: string;
+  readonly publishedAt: string; // ISO; the CI stamps it (deterministic input, not read from a clock here)
+}
+
+export interface RegistryIndexVersion {
+  readonly version: string;
+  readonly license: string;
+  readonly capabilities: readonly string[];
+  readonly contentHash: string;
+  readonly signatureKeyId: string;
+  readonly publishedAt: string;
+}
+export interface RegistryIndexEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly homepage?: string;
+  readonly latest: string; // the highest non-revoked semver
+  readonly versions: readonly RegistryIndexVersion[]; // newest-first
+}
+export interface RegistryIndex {
+  readonly formatVersion: 1;
+  readonly macros: readonly RegistryIndexEntry[];
+}
+
+// Compare two semver CORE versions (pre-release/build ignored for ordering here — v1 keeps it simple; a
+// pre-release policy is a later slice). Returns >0 if a is newer.
+function semverCmp(a: string, b: string): number {
+  const pa = a.split(/[-+]/)[0]!.split(".").map(Number);
+  const pb = b.split(/[-+]/)[0]!.split(".").map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
+  return 0;
+}
+
+// Build the registry index from the accepted versions. Groups by macro id, drops `revokedVersions`
+// (`${id}@${version}`), sorts each macro's versions newest-first, sets `latest` to the highest surviving version,
+// and drops a macro with no surviving version. Discovery fields (name/description/homepage) come from the LATEST
+// version's meta. Deterministic (stable id sort) so CI output is reproducible. Pure — no clock, no I/O.
+export function buildRegistryIndex(accepted: readonly AcceptedVersion[], revokedVersions: ReadonlySet<string> = new Set()): RegistryIndex {
+  const byId = new Map<string, AcceptedVersion[]>();
+  for (const a of accepted) {
+    if (revokedVersions.has(`${a.manifest.id}@${a.manifest.version}`)) continue;
+    (byId.get(a.manifest.id) ?? byId.set(a.manifest.id, []).get(a.manifest.id)!).push(a);
+  }
+  const macros: RegistryIndexEntry[] = [];
+  for (const [id, versions] of [...byId.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    versions.sort((x, y) => semverCmp(y.manifest.version, x.manifest.version)); // newest-first
+    const latest = versions[0]!;
+    macros.push({
+      id,
+      name: latest.meta.name,
+      description: latest.meta.description,
+      ...(latest.meta.homepage ? { homepage: latest.meta.homepage } : {}),
+      latest: latest.manifest.version,
+      versions: versions.map((v) => ({
+        version: v.manifest.version, license: v.manifest.license, capabilities: v.manifest.capabilities,
+        contentHash: v.manifest.contentHash, signatureKeyId: v.signatureKeyId, publishedAt: v.publishedAt,
+      })),
+    });
+  }
+  return { formatVersion: 1, macros };
+}
