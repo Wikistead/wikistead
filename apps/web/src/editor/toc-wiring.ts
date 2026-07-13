@@ -20,6 +20,10 @@ export function wireToc(
   opts: {
     onHeadings?: (h: Heading[]) => void;
     onActiveHeading?: (from: number | null) => void;
+    // #345the VISIBLE set (light layer) — the headings whose section intersects the viewport judgment
+    // band. Reported only when the set changes (diff-apply). The single ACTIVE (dark) heading stays on
+    // onActiveHeading. The two layers together are the redesigned Recent-position highlight.
+    onVisibleHeadings?: (froms: number[]) => void;
     onScrollActivity?: () => void;
     tocJumpRef?: MutableRefObject<((from: number) => void) | null>;
     onTaskProgress?: (p: TaskProgress) => void;
@@ -32,6 +36,10 @@ export function wireToc(
   const bandPx = (): number => (opts.bandPx ? opts.bandPx() : parseFloat(getComputedStyle(view.contentDOM).paddingTop) || 0);
   if (opts.onHeadings) view.dispatch({ effects: StateEffect.appendConfig.of(headingsExtension(opts.onHeadings)) });
   if (opts.onTaskProgress) view.dispatch({ effects: StateEffect.appendConfig.of(taskProgressExtension(opts.onTaskProgress)) }); // #290
+  // #345jump-intent priority. After a TOC click we PIN the clicked heading as the current (dark) one
+  // until the user ACTUALLY scrolls (wheel/touch/keyboard). The programmatic jump fires `scroll` events whose
+  // recompute would otherwise yank the dark highlight to a neighbour on a short section (theregression).
+  let jumpPinned: number | null = null;
   if (opts.tocJumpRef) {
     const ref = opts.tocJumpRef;
     ref.current = (from: number) => {
@@ -49,44 +57,66 @@ export function wireToc(
         view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "start" }), userEvent: "select.jump" });
         if (!view.state.readOnly) view.focus();
       }
+      jumpPinned = from; // pin the dark highlight until a real user scroll releases it
       opts.onActiveHeading?.(from); // #304 (3): light the jumped-to heading immediately (scroll recompute converges)
     };
     cleanups.push(() => { ref.current = null; });
   }
-  if (opts.onActiveHeading || opts.onScrollActivity) {
-    const report = opts.onActiveHeading;
+  if (opts.onActiveHeading || opts.onVisibleHeadings || opts.onScrollActivity) {
+    const reportActive = opts.onActiveHeading;
+    const reportVisible = opts.onVisibleHeadings;
     const activity = opts.onScrollActivity;
     let raf = 0;
+    let lastVisibleKey = "";
     const compute = () => {
       raf = 0;
-      if (!report) return;
-      // #192: find the heading whose section contains the TOP of the viewport (under the band). Resolve the
-      // DOC POSITION at the sample point once (posAtCoords) and compare heading doc offsets — robust for
-      // headings scrolled ABOVE the viewport (per-heading coordsAtPos returns null there).
+      // #192 / #345two sample points (band top, ~80% down) → doc positions via posAtCoords (integer
+      // offset comparison against heading `from`s, O(headings), NO per-item coordsAtPos — robust for headings
+      // scrolled above the viewport, and works for BOTH scroll seams: the CM scroller and the public outer one).
       const rect = scrollEl().getBoundingClientRect();
       const hs = extractHeadings(view.state);
-      const topPos = view.posAtCoords({ x: rect.left + rect.width / 2, y: rect.top + bandPx() + 8 });
-      let active: number | null = null;
-      if (topPos != null) {
-        for (const h of hs) {
-          if (h.from <= topPos) active = h.from; // last heading at/above the viewport top → current section
-          else break; // headings are in doc order
-        }
+      const cx = rect.left + rect.width / 2;
+      const topPos = view.posAtCoords({ x: cx, y: rect.top + bandPx() + 8 });
+      const botPos = view.posAtCoords({ x: cx, y: rect.top + bandPx() + (rect.height - bandPx()) * 0.8 });
+      // ACTIVE (dark): the last heading at/above the band-top sample.the bottom clamp (#304-2) is GONE —
+      // a short final section is covered by the light layer instead; a jump to it is held by jumpPinned.
+      if (reportActive) {
+        let active: number | null = null;
+        if (topPos != null) for (const h of hs) { if (h.from <= topPos) active = h.from; else break; }
+        if (jumpPinned != null) active = jumpPinned; // jump-intent wins until the user scrolls
+        reportActive(active);
       }
-      // #304 (2): at the very bottom, a final section shorter than the viewport can never reach the sample
-      // line, so its heading would never activate. Clamp: when scrolled to the end, the LAST heading is active.
-      const sc = scrollEl();
-      if (hs.length && sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2) active = hs[hs.length - 1].from;
-      report(active);
+      // VISIBLE (light): every section [h.from, next.from) intersecting [topPos, botPos]. Diff-apply.
+      if (reportVisible && topPos != null && botPos != null) {
+        const lo = Math.min(topPos, botPos), hi = Math.max(topPos, botPos);
+        const visible: number[] = [];
+        for (let i = 0; i < hs.length; i++) {
+          const end = i + 1 < hs.length ? hs[i + 1]!.from : view.state.doc.length;
+          if (hs[i]!.from <= hi && end >= lo) visible.push(hs[i]!.from);
+        }
+        const key = visible.join(",");
+        if (key !== lastVisibleKey) { lastVisibleKey = key; reportVisible(visible); }
+      }
     };
     const onScroll = () => {
       activity?.(); // #192: drive the narrow-screen TOC overlay's "visible while scrolling"
-      if (report && !raf) raf = requestAnimationFrame(compute);
+      if (!raf) raf = requestAnimationFrame(compute);
     };
+    // #345a REAL user scroll (wheel / touch / keyboard) releases the jump pin → normal scroll-spy resumes.
+    const releasePin = () => { jumpPinned = null; };
     const el = scrollEl();
     el.addEventListener("scroll", onScroll, { passive: true });
-    cleanups.push(() => { el.removeEventListener("scroll", onScroll); if (raf) cancelAnimationFrame(raf); });
-    if (report) raf = requestAnimationFrame(compute); // initial active
+    el.addEventListener("wheel", releasePin, { passive: true });
+    el.addEventListener("touchmove", releasePin, { passive: true });
+    el.addEventListener("keydown", releasePin);
+    cleanups.push(() => {
+      el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("wheel", releasePin);
+      el.removeEventListener("touchmove", releasePin);
+      el.removeEventListener("keydown", releasePin);
+      if (raf) cancelAnimationFrame(raf);
+    });
+    raf = requestAnimationFrame(compute); // initial
   }
   return () => cleanups.forEach((c) => c());
 }

@@ -260,9 +260,11 @@ function PageRoute() {
   const { on: tocOn, setOn: setTocOn, depth: tocDepth } = useTocPref();
   const [headings, setHeadings] = useState<Heading[]>([]);
   const [activeHeading, setActiveHeading] = useState<number | null>(null);
+  const [visibleHeadings, setVisibleHeadings] = useState<number[]>([]); // #345light-layer set
   const tocJumpRef = useRef<((from: number) => void) | null>(null);
   const onHeadings = useCallback((h: Heading[]) => setHeadings(h), []);
   const onActiveHeading = useCallback((f: number | null) => setActiveHeading(f), []);
+  const onVisibleHeadings = useCallback((f: number[]) => setVisibleHeadings(f), []);
   // #313: /p/:id#<slug> deep link — once the doc's headings include the hash slug, land on it via the
   // same band-aware TOC jump a rail click uses.
   const tocJump = useCallback((f: number) => tocJumpRef.current?.(f), []);
@@ -553,7 +555,7 @@ function PageRoute() {
                 {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}
               </div>
             </div>
-            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #192: the TOC rail lives in the content's RIGHT WHITESPACE, inside the editor area, so the
                 scrollbar (the editor's, at the far right) is to the RIGHT of the rail — not between them.
@@ -568,6 +570,7 @@ function PageRoute() {
             <TocChrome
               headings={headings}
               activeFrom={activeHeading}
+              visibleFroms={visibleHeadings}
               depth={tocDepth}
               // #313: reflect the jumped-to heading in the URL (hash-only replaceState — shareable, no history spam)
               onJump={(f) => { tocJumpRef.current?.(f); const h = headings.find((x) => x.from === f); if (h) replaceHashWith(h.slug); }}
@@ -767,9 +770,11 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
   const { on: tocOn, setOn: setTocOn, depth: tocDepth } = useTocPref();
   const [headings, setHeadings] = useState<Heading[]>([]);
   const [activeHeading, setActiveHeading] = useState<number | null>(null);
+  const [visibleHeadings, setVisibleHeadings] = useState<number[]>([]); // #345light-layer set
   const tocJumpRef = useRef<((from: number) => void) | null>(null);
   const onHeadings = useCallback((h: Heading[]) => setHeadings(h), []);
   const onActiveHeading = useCallback((f: number | null) => setActiveHeading(f), []);
+  const onVisibleHeadings = useCallback((f: number[]) => setVisibleHeadings(f), []);
   // #313: /share/:linkId#<slug> deep link (same device as the member surface).
   const tocJump = useCallback((f: number) => tocJumpRef.current?.(f), []);
   useHeadingHashLanding(headings, tocJump);
@@ -880,13 +885,14 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
                 {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}
               </div>
             </div>
-            <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #227the shared TocChrome (rail on wide / overlay on narrow); yields to the comments
                 panel when open (shared right zone — no pointer overlap). */}
             <TocChrome
               headings={headings}
               activeFrom={activeHeading}
+              visibleFroms={visibleHeadings}
               depth={tocDepth}
               onJump={(f) => { tocJumpRef.current?.(f); const h = headings.find((x) => x.from === f); if (h) replaceHashWith(h.slug); }}
               subscribeScroll={subscribeTocScroll}
@@ -1010,6 +1016,7 @@ function PublicPageContent({ pageId }: { pageId: string }) {
   // ref + a scroll-activity fan-out), not the old DOM-scraping usePublicToc (CM headings are not <h1> tags).
   const [headings, setHeadings] = useState<Heading[]>([]);
   const [activeFrom, setActiveFrom] = useState<number | null>(null);
+  const [visibleFroms, setVisibleFroms] = useState<number[]>([]); // #345light-layer set
   const tocJumpRef = useRef<((from: number) => void) | null>(null);
   const tocJump = useCallback((f: number) => tocJumpRef.current?.(f), []);
   useHeadingHashLanding(headings, tocJump); // #313: /pub/:id#<slug> deep link → band-aware CM jump
@@ -1041,6 +1048,7 @@ function PublicPageContent({ pageId }: { pageId: string }) {
     if (state.status !== "ok" || !bodyEl) return;
     setHeadings([]);
     setActiveFrom(null);
+    setVisibleFroms([]);
     let cancelled = false;
     let dispose = () => {};
     void Promise.all([import("../editor/editor-livepreview"), import("../editor/toc-wiring")]).then(([{ mountPublishedView }, { wireToc }]) => {
@@ -1049,6 +1057,7 @@ function PublicPageContent({ pageId }: { pageId: string }) {
       const unwire = wireToc(view, {
         onHeadings: setHeadings,
         onActiveHeading: setActiveFrom,
+        onVisibleHeadings: setVisibleFroms,
         onScrollActivity: () => tocScrollListeners.current.forEach((fn) => fn()),
         tocJumpRef,
         // The CM view owns the scrolling (band is an absolute overlay, content clears it via
@@ -1130,6 +1139,7 @@ function PublicPageContent({ pageId }: { pageId: string }) {
       <TocChrome
         headings={headings}
         activeFrom={activeFrom}
+        visibleFroms={visibleFroms}
         depth={3}
         onJump={(f) => { tocJump(f); const h = headings.find((x) => x.from === f); if (h) replaceHashWith(h.slug); }}
         subscribeScroll={subscribeTocScroll}
