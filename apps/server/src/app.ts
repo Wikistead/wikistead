@@ -51,6 +51,7 @@ import { mcpOAuthMetadataPlugin } from './routes/mcp-oauth-metadata.js'
 import { mcpOAuthRegisterPlugin } from './routes/mcp-oauth-register.js'
 import { mcpOAuthFlowPlugin } from './routes/mcp-oauth-flow.js'
 import { mcpOAuthTokenPlugin } from './routes/mcp-oauth-token.js'
+import { mcpPlugin } from './routes/mcp.js'
 import { enrollmentPlugin } from './auth/enroll-domains.js'
 import { aiPlugin } from './routes/ai.js'
 // #178 / ADR-084: SCIM (scim-tokens + scim router) is EE and now lives in @wikistead-ee/server; it is
@@ -358,6 +359,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(mcpOAuthRegisterPlugin) // #311 / ADR-131 slice 2: RFC 7591 DCR (public client; no token mint yet)
   await app.register(mcpOAuthFlowPlugin) // #311 / ADR-131 slice 3b: authorize → login-delegate → code (no token yet)
   await app.register(mcpOAuthTokenPlugin) // #311 / ADR-131 slice 4: token endpoint (PKCE + tenant-bound access token)
+  await app.register(mcpPlugin) // #311 / ADR-131 slice 5: the /mcp JSON-RPC endpoint (Bearer-auth'd read tools)
   await app.register(enrollmentPlugin)
   // #178: SAML (tenant-saml + saml-auth) is an EE feature — physically moved to packages/ee-server and
   // mounted via the getEeFeatures seam by the EE composition root. A CE build registers no SAML here.
