@@ -109,6 +109,16 @@ test("#224 hover card: the excerpt card appears in the tooltip layer (view-re-co
   // XSS: the raw <script> is inert (escaped text, never a live element).
   expect(await card.locator("script").count()).toBe(0);
   await expect(card).toContainText("<script>alert(1)</script>");
+
+  // #351 (flicker): the card mounts at its FINAL size (the excerpt is resolved BEFORE the tooltip is
+  // created), so its body is already rendered the instant it's visible and its position does NOT jump from an
+  // async resize/re-anchor. The `strong` (rendered body) is present in the SAME frame the card became visible…
+  expect(await card.locator("strong").count()).toBe(1);
+  // …and the card's top edge is stable over time (no upward re-anchor as content arrives late).
+  const box1 = (await card.boundingBox())!;
+  await sleep(400);
+  const box2 = (await card.boundingBox())!;
+  expect(Math.abs(box2.y - box1.y)).toBeLessThan(2); // no re-anchor jump
 });
 
 test("#224 anti-test 4 (security-timing): a RENAME makes the stale colored link disappear WITHOUT a reload", async ({ browser }) => {
