@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { Loader2 } from "lucide-react";
 import { WikisteadMark } from "./BrandLockup";
 import { ThemeToggle } from "./ThemeToggle";
 import { LanguageToggle } from "./LanguageToggle";
@@ -50,6 +52,15 @@ export function LoginScreen() {
   const social = useLoginOptions();
   const logoUrl = branding.data?.logoUrl;
   const name = branding.data?.displayName;
+  // #371: sign-in navigates top-level to /auth/login (then the IdP), which can take a beat. Show a spinner on the
+  // clicked button and lock the others so the click reads as "working" instead of dead. Navigate from an EFFECT
+  // (not inline in the handler) so React commits+paints the spinner BEFORE the browser starts unloading — a
+  // synchronous `location.href =` right after setState would navigate before the spinner ever renders. The state
+  // persists until the page unloads, so no reset is needed.
+  const [pending, setPending] = useState<{ key: string; url: string } | null>(null);
+  useEffect(() => { if (pending) window.location.href = pending.url; }, [pending]);
+  const navigating = pending?.key ?? null;
+  const go = (key: string, url: string) => setPending({ key, url });
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
@@ -81,8 +92,10 @@ export function LoginScreen() {
             variant="primary"
             className="w-full"
             data-testid="login-signin"
-            onClick={() => { window.location.href = `/auth/login?returnTo=${encodeURIComponent(returnTo)}`; }}
+            disabled={navigating !== null}
+            onClick={() => go("signin", `/auth/login?returnTo=${encodeURIComponent(returnTo)}`)}
           >
+            {navigating === "signin" && <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />}
             {t("auth.signIn")}
           </Button>
           {/* #281 / ADR-121: Cloud social sign-in — deep-links the platform flow with the provider
@@ -97,10 +110,11 @@ export function LoginScreen() {
                     variant="default"
                     className="w-full"
                     data-testid={`login-social-${slug}`}
-                    onClick={() => { window.location.href = `/auth/login?provider=${encodeURIComponent(slug)}&returnTo=${encodeURIComponent(returnTo)}`; }}
+                    disabled={navigating !== null}
+                    onClick={() => go(slug, `/auth/login?provider=${encodeURIComponent(slug)}&returnTo=${encodeURIComponent(returnTo)}`)}
                   >
                     <span className="inline-flex items-center gap-2">
-                      <SocialIcon slug={slug} />
+                      {navigating === slug ? <Loader2 size={16} className="animate-spin" data-testid="login-spinner" /> : <SocialIcon slug={slug} />}
                       {t("auth.continueWith", { provider: SOCIAL_LABELS[slug] })}
                     </span>
                   </Button>
