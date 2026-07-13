@@ -130,6 +130,16 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
 .cm-lp-column>*+*,.cm-lp-tabpanel>*+*,.cm-lp-embed-page>*+*,.cm-lp-callout-panel-body>*+*,.cm-lp-md-preview>*+*{margin-top:var(--lp-block-gap)}
 .cm-lp-column>*:first-child,.cm-lp-tabpanel>*:first-child,.cm-lp-embed-page>*:first-child,.cm-lp-md-preview>*:first-child{margin-top:0}
 
+/* #325align embedded (transclude) content with the surrounding body text. A normal `.cm-line`
+   carries CM6's default 6px left padding, but the embed content container (`.cm-lp-embed-page`) had none, so
+   BOTH the resolved markdown AND the denied placeholder (`.cm-lp-embed-page-denied`, a child) sat 6px LEFT of
+   ordinary paragraphs (worst at narrow widths). Match that 6px on the container so the whole embed — section
+   slice, whole-page embed, and denied placeholder — lines up. Global rule ⇒ editor CM surface + public reader
+   (same class). Deliberately NOT on the shared `.cm-lp-macro-wrap` box (it also frames callouts/mermaid, which
+   must keep their own alignment). --lp-line-pad-left tracks the `.cm-line` value so a future theme change stays
+   in sync from one source. */
+.cm-lp-embed-page{padding-left:var(--lp-line-pad-left,6px)}
+
 /* #185: nested renderMarkdownToDom blocks (inside columns / tabs / transclude / a callout panel body /
    a generic directive box) need the SAME block styling as the top-level editor. Tailwind preflight
    strips h1-h6 / blockquote / hr / list defaults, so WITHOUT this a nested heading is present in the

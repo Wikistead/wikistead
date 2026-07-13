@@ -125,3 +125,50 @@ test("#325 slice 2b: Copy block reference appends ^id + clipboards pageId#^id; t
   await expect(host).not.toContainText("first para");
   await expect(host).not.toContainText("last para");
 });
+
+// #325(review bounce): the transcluded content (and the denied placeholder) sat 6px LEFT of
+// ordinary paragraphs — the embed container lacked the `.cm-line` 6px left padding. Pin the GLYPH left of the
+// embed body against a normal paragraph's glyph left at a narrow viewport (where the 6px was most visible).
+// Real Chromium — a layout geometry assert (no happy-dom layout engine). Measures the true text glyph x via a
+// Range, not the box left (the box and the glyph differ by exactly the padding under test).
+test("#325transcluded content aligns with normal body text (no 6px left drift)", async ({ browser }) => {
+  // 820px: a narrow-but-still-DESKTOP viewport (the chrome collapses to the mobile ⋯ below 768). The 6px
+  // drift is absolute (a fixed padding, not proportional), so it is detectable at any width.
+  const page = await (await browser.newContext({ viewport: { width: 820, height: 800 } })).newPage();
+  const src = await openScratch(page, "sx-align-src");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("# Section\n\nembedded body text\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(700);
+
+  await openScratch(page, "sx-align-host");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(`normal paragraph line\n\n:::embed-page\n${src}\n:::\n\n`);
+  await sleep(400);
+  await page.keyboard.press("Control+End");
+  await sleep(700);
+
+  // Glyph-left of the first text node whose content includes `needle`, via a Range (true painted x).
+  const glyphLeft = (needle: string) => page.evaluate((needle) => {
+    const walk = document.createTreeWalker(document.querySelector("[data-pane=preview] .cm-content")!, NodeFilter.SHOW_TEXT);
+    let n: Node | null;
+    while ((n = walk.nextNode())) {
+      if ((n.textContent ?? "").includes(needle)) {
+        const r = document.createRange();
+        r.selectNodeContents(n);
+        return r.getBoundingClientRect().left;
+      }
+    }
+    return -1;
+  }, needle);
+
+  const normalX = await glyphLeft("normal paragraph line");
+  const embedX = await glyphLeft("embedded body text");
+  expect(normalX).toBeGreaterThan(0);
+  expect(embedX).toBeGreaterThan(0);
+  // After the fix the embed body's glyph left matches the normal paragraph's (was ~6px left before).
+  expect(Math.abs(embedX - normalX), `embed glyph left ${embedX} should match normal ${normalX} (±1px)`).toBeLessThanOrEqual(1);
+});
