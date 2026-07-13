@@ -84,3 +84,44 @@ test("#325 slice 2: :::embed-page with #^id transcludes just that block; the ^id
   await expect(host).not.toContainText("alpha para"); // only the one block, not the whole page
   await expect(host).not.toContainText("^myblk"); // the marker is stripped from the transcluded block
 });
+
+// #325 slice 2b: "Copy block reference" — right-click a text block → the menu appends a ` ^id` marker (if absent)
+// and copies `pageId#^id`; that ref transcludes exactly that block on another page. Real Chromium (clipboard +
+// context menu + async transclude fetch are all real-browser-only).
+test("#325 slice 2b: Copy block reference appends ^id + clipboards pageId#^id; the ref transcludes the block", async ({ browser }) => {
+  const ctx = await browser.newContext();
+  await ctx.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const page = await ctx.newPage();
+  const src = await openScratch(page, "sx-copyref-src");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("first para\n\ncopy this block\n\nlast para\n");
+  await sleep(300);
+  // Right-click ON the middle paragraph (position the caret there first so the click lands on its line).
+  await page.getByText("copy this block", { exact: false }).click();
+  await sleep(150);
+  await page.getByText("copy this block", { exact: false }).click({ button: "right" });
+  await expect(page.getByTestId("context-menu")).toBeVisible();
+  await expect(page.getByTestId("ctx-item-copyblockref")).toBeVisible();
+  await page.getByTestId("ctx-item-copyblockref").click();
+  await sleep(250);
+  // The clipboard holds `<src>#^<id>`; the marker was appended to the block's line.
+  const ref = await page.evaluate(() => navigator.clipboard.readText());
+  expect(ref).toMatch(new RegExp(`^${src}#\\^[a-z0-9-]{3,24}$`));
+  // Publish the source so the appended ` ^id` marker is in published_md (transclusion reads the published body).
+  await page.getByTestId("publish-page").click();
+  await sleep(700);
+
+  // Transclude via the copied ref on a host page → just that block, not the neighbours.
+  await openScratch(page, "sx-copyref-host");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(`host top\n\n:::embed-page\n${ref}\n:::\n\nhost bottom\n`);
+  await sleep(400);
+  await page.keyboard.press("Control+End");
+  await sleep(600);
+  const host = page.locator("[data-pane=preview] .cm-content");
+  await expect(host).toContainText("copy this block", { timeout: 10000 });
+  await expect(host).not.toContainText("first para");
+  await expect(host).not.toContainText("last para");
+});

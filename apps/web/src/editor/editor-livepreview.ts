@@ -88,7 +88,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; resolveAttachment?: AttachmentResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; openPageEmbedPicker?: PageEmbedPicker; openEmbedUrlPrompt?: EmbedUrlPrompt; openTemplateInsertPicker?: TemplateInsertPicker; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; titleLinks?: TitleLinkSource; backlinks?: BacklinksSource; query?: QuerySource; linkStatus?: LinkStatusResolver } = {},
+  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; resolveAttachment?: AttachmentResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; openPageEmbedPicker?: PageEmbedPicker; openEmbedUrlPrompt?: EmbedUrlPrompt; openTemplateInsertPicker?: TemplateInsertPicker; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; titleLinks?: TitleLinkSource; backlinks?: BacklinksSource; query?: QuerySource; linkStatus?: LinkStatusResolver; selfPageId?: string } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -299,7 +299,7 @@ export function mountLivePreview(
       // container (the host, so the hidden file input survives CM's DOM reconcile) go
       // here. The bubble is decoration-only (A). slashPalette FIRST so its vimVisualField
       // precedes the toolbar's bubble (which reads it to suppress itself in vim visual).
-      ...(!opts.readOnly ? [slashPalette({ uploadImage: opts.uploadImage, container: parent, openPageEmbedPicker: opts.openPageEmbedPicker, openTemplateInsertPicker: opts.openTemplateInsertPicker }), floatingToolbar(), contextMenu(), vimExCommands({ exitEdit: opts.onExitEdit, publish: opts.onPublish })] : []),
+      ...(!opts.readOnly ? [slashPalette({ uploadImage: opts.uploadImage, container: parent, openPageEmbedPicker: opts.openPageEmbedPicker, openTemplateInsertPicker: opts.openTemplateInsertPicker }), floatingToolbar(), contextMenu({ selfPageId: opts.selfPageId }), vimExCommands({ exitEdit: opts.onExitEdit, publish: opts.onPublish })] : []),
       ...(opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
     ],
   });

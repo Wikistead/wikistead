@@ -451,6 +451,7 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       backlinks, // #307 / ADR-127: host-mediated :::backlinks (member surface; undefined without a pageId)
       query, // #324 / ADR-134: host-mediated :::query (member surface; undefined without a pageId)
       linkStatus, // #276 / ADR-117: dead-internal-link strikethrough (member surface; undefined for guests)
+      selfPageId: pageId, // #325 / ADR-137 slice 2b: "Copy block reference" builds `pageId#^id` (member surface only)
     });
     views.push(previewView);
     previewViewRef.current = previewView;
