@@ -49,15 +49,15 @@ docker-compose.yml        full local middleware stack
 cp .env.example .env
 cp apps/web/.env.example apps/web/.env.local   # web → API on dev.localhost (tenant routing)
 pnpm install
-pnpm dev:up                    # up the middleware + idempotently bootstrap OpenFGA (store/model/tuples → .env)
-pnpm --filter @wikistead/server migrate        # apply DB migrations
-pnpm --filter @wikistead/server db:seed        # demo tenant / space / page
+pnpm dev:up                    # up the middleware + provision everything (app DB migrate + seed, OpenFGA store/model/tuples → .env)
 pnpm dev                       # runs server + collab + web on the host
 ```
-`pnpm dev:up` is `docker compose up -d` + `dev:setup` (the idempotent FGA bootstrap). OpenFGA runs on the
-**persistent postgres datastore** (#338 / ADR-128), so the store + model **survive `docker compose down` /
-reboot** — `dev:setup` is first-run-only and a restart no longer breaks authz. (Upgrading an older in-memory
-setup: `docker compose down -v && pnpm dev:up` once to create the `openfga` DB + run its migration.)
+`pnpm dev:up` is `docker compose up -d` + `dev:setup`. On a fresh volume `dev:setup` migrates and seeds the app
+DB (demo tenant / space / page) and bootstraps the OpenFGA store + model — so a clean **`pnpm dev:up && pnpm
+dev` is all you need** (#338 / ADR-128). OpenFGA runs on the **persistent postgres datastore**, so the store +
+model **survive `docker compose down` / reboot**; `dev:setup` is first-run-only (idempotent) and a restart no
+longer breaks authz. (Upgrading an older in-memory setup, or starting clean: `docker compose down -v && pnpm
+dev:up` once to create the `openfga` DB, run its migration, and re-provision the app DB.)
 
 Open **http://localhost:5173/p/demo**. The API resolves the tenant from the Host
 header, so the web calls it on `dev.localhost:4000` (see `apps/web/.env.example`).
