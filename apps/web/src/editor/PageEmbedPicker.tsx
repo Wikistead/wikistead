@@ -4,6 +4,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from "../components/ui/command";
 import { useSearch, useSpaces } from "../data/queries";
 import { useDebouncedValue } from "../search/useDebouncedValue";
+import { HitPreviewPane } from "../search/HitPreviewPane";
+import { SpaceIcon } from "../ui/SpaceIcon";
 
 // #205 part 2 / ADR-071: the title-search page picker for `:::embed-page`. Candidates come from
 // GET /search — the SAME two-stage guard (Meili + FGA `view`) as global search — and cmdk runs with
@@ -18,7 +20,11 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
   const debounced = useDebouncedValue(input, 250);
   const { data: hits } = useSearch(debounced);
   const spaces = useSpaces();
-  const spaceName = (id: string) => (spaces.data ?? []).find((s) => s.id === id)?.name ?? "";
+  const space = (id: string) => (spaces.data ?? []).find((s) => s.id === id) ?? null;
+  const spaceName = (id: string) => space(id)?.name ?? "";
+  // #348: the highlighted hit id drives the right preview pane, debounced so arrowing doesn't fetch per keypress.
+  const [selected, setSelected] = useState("");
+  const previewId = useDebouncedValue(selected, 200);
 
   const close = (id: string | null, title?: string | null) => { setInput(""); onPick(id, title ?? null); };
   // A raw id (or url tail) typed directly — the escape hatch when search can't reach a page (e.g. a
@@ -28,9 +34,23 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) close(null); }}>
-      <DialogContent className="overflow-hidden p-0" showCloseButton={false} position="top">
+      {/* #348: widen to a 2-pane picker (list + rich preview), like the search modal; a narrow viewport keeps
+          the single-column list (the preview pane is md:block only). */}
+      <DialogContent className="sm:max-w-5xl overflow-hidden p-0" showCloseButton={false} position="top">
         <DialogHeader className="sr-only"><DialogTitle>{t("embedPicker.title")}</DialogTitle></DialogHeader>
-        <Command shouldFilter={false} className="bg-transparent">
+        <Command
+          shouldFilter={false}
+          value={selected}
+          onValueChange={setSelected}
+          className="bg-transparent"
+          onKeyDown={(e) => {
+            // Ctrl-j/k = list nav (the app-wide cmdk convention; Ctrl-n is browser-reserved).
+            if (e.ctrlKey && (e.key === "j" || e.key === "k")) {
+              e.preventDefault();
+              e.currentTarget.dispatchEvent(new KeyboardEvent("keydown", { key: e.key === "j" ? "ArrowDown" : "ArrowUp", bubbles: true }));
+            }
+          }}
+        >
           <CommandInput
             value={input}
             onValueChange={setInput}
@@ -38,26 +58,32 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
             placeholder={t("embedPicker.placeholder")}
             autoFocus
           />
-          <CommandList>
-            <CommandEmpty>{t("embedPicker.empty")}</CommandEmpty>
-            {(hits ?? []).map((h) => (
-              <CommandItem key={h.id} value={h.id} onSelect={() => close(h.id, h.title || null)} data-testid="embed-picker-item">
-                <div className="flex min-w-0 flex-col">
-                  <span className="truncate">{h.title || t("common.untitled")}</span>
-                  {/* #205: same-name pages (e.g. many "Untitled") are told apart by their space + a
-                      content preview — both are view-authorized (the whole hit came through the FGA gate). */}
-                  <span className="truncate text-xs text-fg-dim">
-                    {spaceName(h.spaceId)}{spaceName(h.spaceId) && h.snippet ? " · " : ""}{h.snippet ?? ""}
-                  </span>
-                </div>
-              </CommandItem>
-            ))}
-            {looksLikeId && (
-              <CommandItem value={`__raw__${raw}`} onSelect={() => close(raw)} data-testid="embed-picker-raw">
-                {t("embedPicker.useId", { id: raw })}
-              </CommandItem>
-            )}
-          </CommandList>
+          <div className="flex min-h-0">
+            <CommandList className="min-w-0 flex-1 md:max-w-xs md:border-r md:border-border">
+              <CommandEmpty>{t("embedPicker.empty")}</CommandEmpty>
+              {(hits ?? []).map((h) => (
+                <CommandItem key={h.id} value={h.id} onSelect={() => close(h.id, h.title || null)} data-testid="embed-picker-item">
+                  <div className="flex min-w-0 items-center gap-2">
+                    {space(h.spaceId) && <SpaceIcon id={h.spaceId} name={spaceName(h.spaceId)} image={space(h.spaceId)!.iconImageUrl} size={12} />}
+                    <div className="flex min-w-0 flex-col">
+                      <span className="truncate">{h.title || t("common.untitled")}</span>
+                      {/* #205: same-name pages are told apart by space + snippet — all view-authorized (FGA gate). */}
+                      <span className="truncate text-xs text-fg-dim">
+                        {spaceName(h.spaceId)}{spaceName(h.spaceId) && h.snippet ? " · " : ""}{h.snippet ?? ""}
+                      </span>
+                    </div>
+                  </div>
+                </CommandItem>
+              ))}
+              {looksLikeId && (
+                <CommandItem value={`__raw__${raw}`} onSelect={() => close(raw)} data-testid="embed-picker-raw">
+                  {t("embedPicker.useId", { id: raw })}
+                </CommandItem>
+              )}
+            </CommandList>
+            {/* #348: the shared rich preview of the highlighted hit (view-gated body — same as the search modal). */}
+            <HitPreviewPane pageId={open ? previewId : ""} testid="embed-picker-preview" />
+          </div>
         </Command>
       </DialogContent>
     </Dialog>
