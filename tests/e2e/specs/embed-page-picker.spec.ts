@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openScratch, createScratchPage, enterEdit, sleep } from "../helpers";
+import { openScratch, createScratchPage, enterEdit, sleep, publishAndWait } from "../helpers";
 
 const vimInsert = (p: import("@playwright/test").Page) => p.evaluate(() => (window as unknown as { __lpVimInsert?: boolean }).__lpVimInsert === true);
 const headLine = (p: import("@playwright/test").Page) => p.evaluate(() => (window as unknown as { __lpHeadLine?: number }).__lpHeadLine ?? -1);
@@ -35,6 +35,46 @@ test("slash 'embed a page' → picker → pick a page id → inserts :::embed-pa
   await expect(page.getByTestId("embed-picker-input")).toHaveCount(0);
   await sleep(300);
   await expect(page.locator("[data-pane=preview] [data-testid=macro-embed-page]")).toBeVisible();
+});
+
+// #348: the embed picker now has a right-hand rich PREVIEW of the highlighted hit (shared with the search
+// modal, view-gated body via the member read-engine), and the widened 2-pane dialog.
+test("#348: the embed picker shows a rich preview of the highlighted hit + a space icon", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const title = `Preview Embed ${Date.now().toString(36)}`;
+  await page.goto("/p/demo");
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  const targetId = await createScratchPage(page, title);
+  // publish a body so the preview has rich content, and let it index so it's a search hit.
+  await page.goto(`/p/${targetId}?edit=1`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("embed preview body 348 with **strong words**");
+  await publishAndWait(page, targetId, "embed preview body 348");
+  await sleep(1200); // Meili index (outbox drain)
+
+  await openScratch(page, "embed-preview-host");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("/embed");
+  await expect(page.getByTestId("slash-palette")).toBeVisible();
+  await page.click('[data-testid="slash-item-macro:embed-page"]');
+  await expect(page.getByTestId("embed-picker-input")).toBeVisible();
+
+  // the dialog is the widened 2-pane size.
+  const dialogW = (await page.locator("[data-slot=dialog-content]").boundingBox())!.width;
+  expect(dialogW, `embed picker width ${dialogW} should be the wide 2-pane size`).toBeGreaterThan(700);
+
+  // search by title → the hit appears (with a space icon), cmdk auto-highlights the first → the preview renders.
+  await page.getByTestId("embed-picker-input").fill(title);
+  await expect(page.getByTestId("embed-picker-item").first()).toBeVisible({ timeout: 10000 });
+  expect(await page.locator("[data-testid=embed-picker-item] [role=img]").count(), "hit row has a space icon").toBeGreaterThan(0);
+  // the right preview pane renders the published body RICHLY via the read-engine (.cm-content) — the bold text
+  // shows with its `**` markers HIDDEN (a raw source dump would show the literal `**strong words**`).
+  const preview = page.getByTestId("embed-picker-preview");
+  await expect(preview.locator(".cm-content")).toBeVisible({ timeout: 10000 });
+  await expect(preview.locator(".cm-content")).toContainText("strong words", { timeout: 10000 });
+  await expect(preview.locator(".cm-content")).not.toContainText("**strong words**");
 });
 
 // #332 (review reject): in vim, the `/embed` picker (run from the INSERT-mode slash palette)
