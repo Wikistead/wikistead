@@ -576,7 +576,8 @@
     "placeholder": "ページを検索…",
     "placeholderKbd": "ページを検索…  (Ctrl-K)",
     "searching": "検索中…",
-    "noResults": "結果なし"
+    "noResults": "結果なし",
+    "previewUnpublished": "未公開 — プレビューなし"
   },
   "lpToolbar": {
     "bold": "太字",

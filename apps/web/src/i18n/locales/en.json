@@ -576,7 +576,8 @@
     "placeholder": "Search pages…",
     "placeholderKbd": "Search pages…  (Ctrl-K)",
     "searching": "Searching…",
-    "noResults": "No results"
+    "noResults": "No results",
+    "previewUnpublished": "Not published yet — no preview"
   },
   "lpToolbar": {
     "bold": "Bold",
