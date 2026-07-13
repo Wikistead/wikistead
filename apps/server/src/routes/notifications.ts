@@ -126,11 +126,12 @@ export interface FeedItem {
   createdAt: Date
   notificationId?: string
   read?: boolean
+  patrolled?: boolean // #326: set on the feed (patrol view) — whether a moderator has marked this event reviewed
 }
 
 interface RawRow {
   id: string; event_type: string; page_id: string | null; space_id: string | null
-  actor: string; created_at: Date; notification_id?: string; read_at?: Date | null
+  actor: string; created_at: Date; notification_id?: string; read_at?: Date | null; patrolled_at?: Date | null
 }
 
 // Apply BOTH display gates to raw event rows: (1) the live resource must still exist (JOIN by id → its current
@@ -175,27 +176,84 @@ async function gateEvents(db: TenantDb, fga: OpenFgaClient, subject: string, row
 function toItem(r: RawRow, title: string): FeedItem {
   const item: FeedItem = { id: r.id, eventType: r.event_type, pageId: r.page_id, spaceId: r.space_id, actor: r.actor, title, createdAt: r.created_at }
   if (r.notification_id !== undefined) { item.notificationId = r.notification_id; item.read = r.read_at != null }
+  if (r.patrolled_at !== undefined) item.patrolled = r.patrolled_at != null // #326: the feed row's patrol state
   return item
+}
+
+// #326 / ADR-142 (C-1 patrol): gate a SINGLE feed event for a patrol op. Loads the live row (the reserved
+// connection is tenant-scoped by RLS → a cross-tenant / missing id yields nothing → 404) and VIEW-confirms it
+// via the same gateEvents used by the feed (non-viewable → dropped → 404) — BEFORE any capability check. So a
+// caller with `manage` on a space but no `view` on a strict-private page's event gets a uniform 404, never a
+// write-side existence oracle (the mirror of the read-feed gate; reviewer's blocking fix). Returns the resource
+// ref to capability-check, or null (→ 404).
+async function gatePatrolTarget(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  subject: string,
+  feedEventId: string,
+): Promise<{ type: 'page' | 'space'; id: string } | null> {
+  const rows = await db.sql<RawRow[]>`
+    SELECT id, event_type, page_id, space_id, actor, created_at FROM feed_events WHERE id = ${feedEventId}`
+  if (!rows.length) return null
+  const [item] = await gateEvents(db, fga, subject, rows) // live-row + FGA view (most-specific resource)
+  if (!item) return null
+  return item.pageId ? { type: 'page', id: item.pageId } : item.spaceId ? { type: 'space', id: item.spaceId } : null
+}
+
+// Mark a feed event as patrolled (reviewed). member-only. Gate order (reviewer): view-confirm → uniform 404 →
+// capability 403. Patrol requires `manage` today; #330 (C-5) will widen this to `moderate`. Idempotent upsert.
+export async function markPatrolled(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { tenantId: string; subject: string; memberSub: string; feedEventId: string },
+): Promise<void> {
+  const ref = await gatePatrolTarget(db, fga, args.subject, args.feedEventId)
+  if (!ref) throw Object.assign(new Error('not found'), { statusCode: 404 }) // missing / cross-tenant / not viewable
+  if (!(await check(fga, args.subject, 'manage', ref))) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  await db.sql`
+    INSERT INTO patrolled_events (tenant_id, feed_event_id, patrolled_by)
+    VALUES (${args.tenantId}, ${args.feedEventId}, ${args.memberSub})
+    ON CONFLICT (tenant_id, feed_event_id) DO UPDATE SET patrolled_by = ${args.memberSub}, patrolled_at = now()`
+}
+
+// Unmark (remove a patrol). Same gate order (view → 404 → manage 403), then delete.
+export async function unmarkPatrolled(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { tenantId: string; subject: string; feedEventId: string },
+): Promise<void> {
+  const ref = await gatePatrolTarget(db, fga, args.subject, args.feedEventId)
+  if (!ref) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  if (!(await check(fga, args.subject, 'manage', ref))) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  await db.sql`DELETE FROM patrolled_events WHERE tenant_id = ${args.tenantId} AND feed_event_id = ${args.feedEventId}`
 }
 
 // Cross-space activity feed (member-only). Over-fetch to absorb gate drops (the stage1/stage2 lesson).
 export async function listFeed(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { subject: string; spaceId?: string | null; before?: string | null; limit?: number },
+  // #326: `unpatrolledOnly` keeps only events with no patrol mark (the Recent Changes "needs review" filter);
+  // the LEFT JOIN also carries each item's `patrolled` state for display. The FGA view gate is unchanged (the
+  // patrol join adds no new page ids — the #320 two-stage gate still runs).
+  args: { subject: string; spaceId?: string | null; before?: string | null; limit?: number; unpatrolledOnly?: boolean },
 ): Promise<FeedItem[]> {
   const limit = Math.min(args.limit ?? 30, 100)
   const overfetch = limit * 4
   const before = args.before || null
+  const unpatrolled = args.unpatrolledOnly === true
   const rows = args.spaceId
     ? await db.sql<RawRow[]>`
-        SELECT id, event_type, page_id, space_id, actor, created_at FROM feed_events
-        WHERE space_id = ${args.spaceId} AND (${before}::text IS NULL OR id < ${before})
-        ORDER BY created_at DESC, id DESC LIMIT ${overfetch}`
+        SELECT fe.id, fe.event_type, fe.page_id, fe.space_id, fe.actor, fe.created_at, pe.patrolled_at
+        FROM feed_events fe LEFT JOIN patrolled_events pe ON pe.feed_event_id = fe.id
+        WHERE fe.space_id = ${args.spaceId} AND (${before}::text IS NULL OR fe.id < ${before})
+          AND (${unpatrolled}::bool IS NOT TRUE OR pe.patrolled_at IS NULL)
+        ORDER BY fe.created_at DESC, fe.id DESC LIMIT ${overfetch}`
     : await db.sql<RawRow[]>`
-        SELECT id, event_type, page_id, space_id, actor, created_at FROM feed_events
-        WHERE (${before}::text IS NULL OR id < ${before})
-        ORDER BY created_at DESC, id DESC LIMIT ${overfetch}`
+        SELECT fe.id, fe.event_type, fe.page_id, fe.space_id, fe.actor, fe.created_at, pe.patrolled_at
+        FROM feed_events fe LEFT JOIN patrolled_events pe ON pe.feed_event_id = fe.id
+        WHERE (${before}::text IS NULL OR fe.id < ${before})
+          AND (${unpatrolled}::bool IS NOT TRUE OR pe.patrolled_at IS NULL)
+        ORDER BY fe.created_at DESC, fe.id DESC LIMIT ${overfetch}`
   return (await gateEvents(db, fga, args.subject, rows)).slice(0, limit)
 }
 
@@ -260,8 +318,31 @@ export async function notificationsPlugin(app: FastifyInstance) {
     return reply.code(204).send()
   })
 
-  app.get<{ Querystring: { spaceId?: string; before?: string } }>('/feed', async (req) =>
-    listFeed(req.db, app.fga, { subject: subjectOf(req.user.sub), spaceId: req.query.spaceId ?? null, before: req.query.before ?? null }))
+  app.get<{ Querystring: { spaceId?: string; before?: string; unpatrolled?: string } }>('/feed', async (req) =>
+    listFeed(req.db, app.fga, { subject: subjectOf(req.user.sub), spaceId: req.query.spaceId ?? null, before: req.query.before ?? null, unpatrolledOnly: req.query.unpatrolled === 'true' }))
+
+  // #326 / ADR-142 (C-1 patrol): mark / unmark a feed event as reviewed. Member-only (no guest config → a guest
+  // is structurally 401, like /feed). The gate order (view-confirm → 404 → capability 403) lives in mark/unmark.
+  app.post<{ Params: { eventId: string } }>('/feed/:eventId/patrol', async (req, reply) => {
+    try {
+      await markPatrolled(req.db, app.fga, { tenantId: req.tenant.id, subject: subjectOf(req.user.sub), memberSub: req.user.sub, feedEventId: req.params.eventId })
+      return reply.code(204).send()
+    } catch (e) {
+      const sc = (e as { statusCode?: number }).statusCode
+      if (sc === 404 || sc === 403) return reply.code(sc).send({ error: sc === 404 ? 'not found' : 'forbidden' })
+      throw e
+    }
+  })
+  app.delete<{ Params: { eventId: string } }>('/feed/:eventId/patrol', async (req, reply) => {
+    try {
+      await unmarkPatrolled(req.db, app.fga, { tenantId: req.tenant.id, subject: subjectOf(req.user.sub), feedEventId: req.params.eventId })
+      return reply.code(204).send()
+    } catch (e) {
+      const sc = (e as { statusCode?: number }).statusCode
+      if (sc === 404 || sc === 403) return reply.code(sc).send({ error: sc === 404 ? 'not found' : 'forbidden' })
+      throw e
+    }
+  })
 
   app.get<{ Querystring: { before?: string } }>('/notifications', async (req) =>
     listNotifications(req.db, app.fga, { memberSub: req.user.sub, before: req.query.before ?? null }))
