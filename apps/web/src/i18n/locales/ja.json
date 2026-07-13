@@ -701,7 +701,10 @@
   },
   "related": {
     "title": "関連",
-    "backlinks": "リンク元"
+    "backlinks": "リンク元",
+    "related": "関連ページ",
+    "via": "共通リンク:",
+    "empty": "関連ページはまだありません。"
   },
   "template": {
     "saveAsTemplate": "テンプレートとして保存",

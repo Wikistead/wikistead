@@ -1435,6 +1435,73 @@ export async function syncPageLinks(tx: Sql, tenantId: string, fromPageId: strin
   }
 }
 
+// #322 / ADR-133 §2/§3: 2-hop RELATED pages. Intermediates = the pages the target P links to; related pages
+// = OTHER pages that ALSO link to the same intermediate, grouped by that shared link (Scrapbox-style). Both
+// endpoints (the intermediate AND the related page) are view-filtered for the caller in a SINGLE pass, so a
+// group whose shared link the caller cannot see — or a related page they cannot see — simply does not appear
+// (existence-hiding, exactly like getBacklinks / search stage-2). Count / group / rank run ONLY over the
+// view-filtered set (review §3 — computing "N pages link to X" before filtering would leak a count).
+// MEMBER-only (the route carries no guest config); the public reader gets Related in a later increment (§3).
+export interface RelatedGroup { intermediate: { id: string; title: string }; pages: { id: string; title: string }[] }
+export interface RelatedResult { groups: RelatedGroup[]; truncated: boolean }
+
+const RELATED_OVER_FETCH = 600    // rank-ordered candidate edges fetched so view-filtering still yields groups
+const RELATED_DISPLAY_GROUPS = 20 // max intermediate groups shown
+const RELATED_PER_GROUP = 12      // max related pages per group
+
+export async function getRelatedPages(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { pageId: string; subject: string; context?: { current_time: string } },
+): Promise<RelatedResult> {
+  // View-gate the TARGET itself first: a non-viewable OR non-existent target is a uniform 404 so its
+  // existence / neighbourhood can't be probed (same guard as getBacklinks, #307/).
+  if (!(await check(fga, args.subject, 'view', { type: 'page', id: args.pageId }, args.context))) {
+    throw Object.assign(new Error('not found'), { statusCode: 404 })
+  }
+  // Candidate edges: OTHER pages (from ≠ P) linking to an intermediate P also links to. Over-fetched by
+  // related-page recency so the post-filter still yields up to the display caps (ADR-027 boundary-drop fix).
+  const rows = await db.sql<{ mid: string; mid_title: string; related: string; related_title: string }[]>`
+    WITH mids AS (SELECT DISTINCT to_page_id AS mid FROM page_links WHERE from_page_id = ${args.pageId})
+    SELECT pl.to_page_id AS mid, mp.title AS mid_title, pl.from_page_id AS related, rp.title AS related_title
+    FROM page_links pl
+    JOIN mids ON mids.mid = pl.to_page_id
+    JOIN pages mp ON mp.id = pl.to_page_id
+    JOIN pages rp ON rp.id = pl.from_page_id
+    WHERE pl.from_page_id <> ${args.pageId}
+    ORDER BY rp.updated_at DESC
+    LIMIT ${RELATED_OVER_FETCH}
+  `
+  if (rows.length === 0) return { groups: [], truncated: false }
+  // SINGLE-PASS view-filter over BOTH endpoints, THEN count/group/rank (never before — §3).
+  const nodeIds = [...new Set(rows.flatMap((r) => [r.mid, r.related]))]
+  const viewable = await filterAuthorized(fga, args.subject, 'view', nodeIds, args.context)
+  const edges = rows.filter((r) => viewable.has(r.mid) && viewable.has(r.related))
+  if (edges.length === 0) return { groups: [], truncated: false }
+  // A related page's rank key = how many of P's (viewable) intermediates it shares (shared-intermediate count).
+  const sharedCount = new Map<string, number>()
+  for (const e of edges) sharedCount.set(e.related, (sharedCount.get(e.related) ?? 0) + 1)
+  // Group by intermediate (the shared link word); edges arrive in related-recency order (preserved by Map).
+  const byMid = new Map<string, { title: string; pages: Map<string, string> }>()
+  for (const e of edges) {
+    let g = byMid.get(e.mid)
+    if (!g) { g = { title: e.mid_title, pages: new Map() }; byMid.set(e.mid, g) }
+    if (!g.pages.has(e.related)) g.pages.set(e.related, e.related_title)
+  }
+  const groupsAll = [...byMid.entries()].map(([mid, g]) => ({
+    intermediate: { id: mid, title: g.title },
+    pages: [...g.pages.entries()]
+      .map(([id, title]) => ({ id, title }))
+      // shared-intermediate count desc; ties keep the DB recency order (stable sort).
+      .sort((a, b) => sharedCount.get(b.id)! - sharedCount.get(a.id)!)
+      .slice(0, RELATED_PER_GROUP),
+  }))
+  // Rank groups by their related-page count (desc), then cap the number of groups shown.
+  groupsAll.sort((a, b) => b.pages.length - a.pages.length)
+  const groups = groupsAll.slice(0, RELATED_DISPLAY_GROUPS)
+  return { groups, truncated: groupsAll.length > groups.length }
+}
+
 // #324 / ADR-134: the query spec carried in a `:::query` directive body. The body is authoring free-text,
 // so an unrecognised spec parses to `null` and renders 0 results (never a parse error, §2). Three v1 query
 // types, each resolving to a view-filtered list of pages
@@ -1796,6 +1863,16 @@ export async function pagesPlugin(app: FastifyInstance) {
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/backlinks', { config: { guest: 'view' } }, async (req) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
     return getBacklinks(req.db, app.fga, { pageId: req.params.pageId, subject, context })
+  })
+
+  // #322 / ADR-133 §2/§3: 2-hop RELATED pages for the "Related" panel. MEMBER-ONLY — the route deliberately
+  // omits `config.guest`, so a share_link token is rejected (§3: the public reader gets Related in a later
+  // increment; the member API is never on an anonymous surface). getRelatedPages view-gates the target and
+  // view-filters BOTH endpoints of every candidate edge, so no unviewable page/title leaks. Lazy-fetched by
+  // the panel when the Related section opens.
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/related', async (req) => {
+    const { subject, context } = principalForPage(req, req.params.pageId)
+    return getRelatedPages(req.db, app.fga, { pageId: req.params.pageId, subject, context })
   })
 
   // #324 / ADR-134: resolve a member-live `:::query` list. MEMBER-ONLY — the route deliberately omits
