@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronUp, ChevronsUpDown, FolderDown, Loader2, Pencil, Pin, Plus } from "lucide-react";
+import { ChevronDown, ChevronUp, ChevronsUpDown, FolderDown, FolderUp, Loader2, Pencil, Pin, Plus } from "lucide-react";
 import { Command, CommandInput, CommandList, CommandItem, CommandGroup, CommandSeparator } from "../components/ui/command";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import { cn } from "../lib/utils";
@@ -15,6 +15,7 @@ import { visibleSpaces, recordRecentSpace, hiddenSpaceCount, allSpacesSorted } f
 
 export function SpaceSwitcher({
   spaces, currentId, currentSpace, canManage, onSelect, onRename, onNewSpace, onExportSpace, exportingSpace = false,
+  onImportSpace, importingSpace = false,
   pinnedSpaceIds = [], onTogglePin, onMovePin,
 }: {
   spaces: Space[];
@@ -35,9 +36,14 @@ export function SpaceSwitcher({
   // item disabled + spinning while the archive is being generated (it can take a while).
   onExportSpace?: () => void;
   exportingSpace?: boolean;
+  // #308 / ADR-132: import an export ZIP into the current space (manage-gated UI; server gates edit). The
+  // item opens a file picker; onImportSpace gets the chosen .zip. importingSpace disables + spins it.
+  onImportSpace?: (file: File) => void;
+  importingSpace?: boolean;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(false); // #287: "show all" — full name-sorted list
   const boxRef = useRef<HTMLDivElement>(null);
@@ -154,6 +160,14 @@ export function SpaceSwitcher({
                     {exportingSpace ? <Loader2 size={13} className="animate-spin" /> : <FolderDown size={13} />} {t("export.spaceItem")}
                   </CommandItem>
                 )}
+                {/* #308: import an export ZIP into this space (manage-gated; the server also gates edit). The
+                    item triggers a hidden file input; the menu stays open + spinning while the archive uploads
+                    and materializes, then the caller's toast reports the result. */}
+                {currentSpace && canManage && onImportSpace && (
+                  <CommandItem value="__import" disabled={importingSpace} onSelect={() => { if (!importingSpace) importInputRef.current?.click(); }} data-testid="space-import">
+                    {importingSpace ? <Loader2 size={13} className="animate-spin" /> : <FolderUp size={13} />} {t("import.spaceItem")}
+                  </CommandItem>
+                )}
                 <CommandItem value="__new" onSelect={() => { onNewSpace(); setOpen(false); }} data-testid="space-new">
                   <Plus size={13} /> {t("sidebar.newSpace")}
                 </CommandItem>
@@ -162,6 +176,16 @@ export function SpaceSwitcher({
           </Command>
         </div>
       )}
+      {/* #308: hidden picker for the import item. Reset value after each pick so choosing the SAME file twice
+          still fires onChange. */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".zip,application/zip"
+        className="hidden"
+        data-testid="space-import-input"
+        onChange={(e) => { const f = e.target.files?.[0]; e.currentTarget.value = ""; if (f && onImportSpace) { setOpen(false); onImportSpace(f); } }}
+      />
     </div>
   );
 }

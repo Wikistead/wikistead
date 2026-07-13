@@ -47,6 +47,42 @@ export function downloadTenantExport(token: string): Promise<number> {
   return fetchToDownload(token, `${API_URL}/export`);
 }
 
+// #308 / ADR-132: import an export ZIP into a space (member-only; the server gates `edit`). The file is sent as
+// base64 in a JSON body (no multipart dep, mirroring the icon/logo uploads). Returns { status, report } — the
+// report is the server's summary (pages/attachments created, etc.) or null on any non-2xx.
+export interface ImportReport {
+  pagesCreated: number;
+  emptyPagesCreated: number;
+  attachmentsImported: number;
+  attachmentsSkipped: { name: string; reason: string }[];
+  deadCrossLinks: number;
+  published: number;
+  lossyTitles: boolean;
+}
+export async function importSpaceArchive(
+  token: string,
+  spaceId: string,
+  file: File,
+  opts: { publish?: boolean } = {},
+): Promise<{ status: number; report: ImportReport | null }> {
+  // File → base64 (chunked to avoid a call-stack blow-up on large archives).
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < buf.length; i += 0x8000) binary += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  const zipBase64 = btoa(binary);
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/spaces/${encodeURIComponent(spaceId)}/import`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ zipBase64, publish: opts.publish === true }),
+    });
+  } catch { return { status: 0, report: null }; }
+  const report = res.ok ? ((await res.json()) as ImportReport) : null;
+  return { status: res.status, report };
+}
+
 // #207 part 2: print/PDF must render the WHOLE document statically — every macro rendered, no CM
 // viewport virtualisation (only the on-screen slice is in the editor DOM), no reveal-on-cursor raw
 // `:::` leaking. window.print() on the live editor surface can't do that; the #85 server HTML export
