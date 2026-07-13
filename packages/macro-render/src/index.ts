@@ -8,7 +8,7 @@ export { highlightExtension } from "./highlight-ext.js"; // #334 / ADR-129: shar
 export { footnoteExtension } from "./footnote-ext.js"; // #335 / ADR-130: shared `[^1]` / `[^1]:` grammar
 export { renderMarkdownToHtml, mdParser } from "./render.js";
 export type { MacroHtmlDescriptor, MacroHtmlRegistry } from "./render.js";
-export { slugify, extractHeadingsFromMarkdown, sliceSectionBySlug } from "./headings.js"; // #325 / ADR-137: shared slug + section extractor
+export { slugify, extractHeadingsFromMarkdown, sliceSectionBySlug, sliceBlockByAnchor } from "./headings.js"; // #325 / ADR-137: shared slug + section/block extractor
 export type { MdHeading } from "./headings.js";
 export {
   parseLayoutItems,

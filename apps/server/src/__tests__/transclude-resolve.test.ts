@@ -65,8 +65,14 @@ describe('resolveTranscludeRef section fragments (#325 / ADR-137)', () => {
     expect(r).toEqual({ ok: false, reason: 'denied' })
   })
 
-  it('a `#^id` block fragment is denied in slice 1 (blocks are slice 2 — same placeholder, no oracle)', async () => {
-    const r = await resolveTranscludeRef({ db: db({ b: doc }), fga: fga(true) }, { principal: 'user:u', refPageId: 'b#^para1' })
+  it('#325 slice 2: a `#^id` block fragment resolves the enclosing block (marker stripped)', async () => {
+    const bdoc = '# Intro\n\nintro body\n\ntarget paragraph ^myblk\n\n# Other\n'
+    const r = await resolveTranscludeRef({ db: db({ b: bdoc }), fga: fga(true) }, { principal: 'user:u', refPageId: 'b#^myblk' })
+    expect(r).toEqual({ ok: true, content: 'target paragraph' })
+  })
+
+  it('#325 slice 2: an UNKNOWN `#^id` is byte-identical to a denied page (no block-existence oracle)', async () => {
+    const r = await resolveTranscludeRef({ db: db({ b: doc }), fga: fga(true) }, { principal: 'user:u', refPageId: 'b#^nope' })
     expect(r).toEqual({ ok: false, reason: 'denied' })
   })
 

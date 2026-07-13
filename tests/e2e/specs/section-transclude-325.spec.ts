@@ -52,3 +52,35 @@ test("#325: :::embed-page with an unknown #slug renders the denied placeholder (
   await sleep(600);
   await expect(page.getByTestId("macro-embed-page-denied")).toBeVisible({ timeout: 10000 });
 });
+
+// #325 slice 2: a block-reference `^id` marker is hidden in the live display (revealed on the caret line), and
+// `:::embed-page pageId#^id` transcludes just that block.
+test("#325 slice 2: :::embed-page with #^id transcludes just that block; the ^id marker is hidden", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const src = await openScratch(page, "sx-block-src");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("# Alpha\n\nalpha para\n\ntarget block body ^myblk\n\nmore text\n");
+  await sleep(300);
+  await page.keyboard.press("Control+End"); // caret OFF the marker line → the ` ^myblk` marker hides
+  await sleep(300);
+  // the marker is hidden in the rendered text (the block still reads cleanly).
+  const host0 = page.locator("[data-pane=preview] .cm-content");
+  await expect(host0).toContainText("target block body");
+  await expect(host0).not.toContainText("^myblk");
+  await page.getByTestId("publish-page").click();
+  await sleep(700);
+
+  // Host page transcludes ONLY that block via #^id.
+  await openScratch(page, "sx-block-host");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(`host\n\n:::embed-page\n${src}#^myblk\n:::\n\nbelow\n`);
+  await sleep(400);
+  await page.keyboard.press("Control+End");
+  await sleep(600);
+  const host = page.locator("[data-pane=preview] .cm-content");
+  await expect(host).toContainText("target block body", { timeout: 10000 });
+  await expect(host).not.toContainText("alpha para"); // only the one block, not the whole page
+  await expect(host).not.toContainText("^myblk"); // the marker is stripped from the transcluded block
+});

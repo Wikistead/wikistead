@@ -8,6 +8,7 @@ import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { livePreview, reAnchorAfterReveal, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, backlinksSource, querySource, linkStatusResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type BacklinksSource, type QuerySource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
 import { deadLinks } from "./live-preview/dead-links"; // #276 / ADR-117: dead-internal-link strikethrough overlay
+import { blockAnchors } from "./live-preview/block-anchor"; // #325 / ADR-137 slice 2: hide trailing ` ^id` markers
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
 import { listEditing } from "./live-preview/list-edit";
 import { pasteLinkify } from "./live-preview/paste-linkify";
@@ -279,6 +280,7 @@ export function mountLivePreview(
       ...(opts.backlinks ? [backlinksSource.of(opts.backlinks)] : []), // #307 / ADR-127: host-mediated :::backlinks
       ...(opts.query ? [querySource.of(opts.query)] : []), // #324 / ADR-134: host-mediated :::query (member-only)
       deadLinks, // #276 / ADR-117: dead-internal-link strikethrough (inert without the linkStatus seam)
+      blockAnchors, // #325 / ADR-137 slice 2: hide trailing ` ^id` block-ref markers (reveal on the caret line)
       ...(opts.linkStatus ? [linkStatusResolver.of(opts.linkStatus)] : []),
       ...(opts.embedProviders ? [embedAllowlist.of(opts.embedProviders)] : []),
       // #210 bounce: host seam for the in-app :::embed-external URL modal (retarget button → modal, not window.prompt).
@@ -360,6 +362,7 @@ export function mountPublishedView(
       ...(opts.backlinks ? [backlinksSource.of(opts.backlinks)] : []), // #307 / ADR-127: host-mediated :::backlinks
       ...(opts.query ? [querySource.of(opts.query)] : []), // #324 / ADR-134: host-mediated :::query (member-only)
       deadLinks, // #276 / ADR-117: dead-internal-link strikethrough (inert without the linkStatus seam)
+      blockAnchors, // #325 / ADR-137 slice 2: hide trailing ` ^id` block-ref markers (reveal on the caret line)
       ...(opts.linkStatus ? [linkStatusResolver.of(opts.linkStatus)] : []),
       ...(opts.embedProviders ? [embedAllowlist.of(opts.embedProviders)] : []),
       EditorState.readOnly.of(true),
