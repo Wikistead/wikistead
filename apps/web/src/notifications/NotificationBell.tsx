@@ -24,6 +24,7 @@ function eventLabel(e: FeedItem, t: TFunction): string {
   const title = e.title ?? t("notifications.untitled");
   switch (e.eventType) {
     case "page.published": return t("notifications.published", { who, title });
+    case "page.restored": return t("notifications.restored", { who, title }); // #327 / ADR-143 C-2
     default: return t("notifications.changed", { who, title });
   }
 }

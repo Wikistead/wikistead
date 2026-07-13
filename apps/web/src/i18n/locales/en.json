@@ -799,6 +799,7 @@
     "guest": "Guest",
     "untitled": "a page",
     "published": "{{who}} published {{title}}",
+    "restored": "{{who}} restored {{title}}",
     "changed": "{{who}} changed {{title}}"
   },
   "watch": {
