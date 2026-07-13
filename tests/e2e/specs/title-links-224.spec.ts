@@ -51,6 +51,31 @@ test("#224 go-live: body text matching a page title renders the auto link; click
   await expect(page).toHaveURL(new RegExp(`/p/${targetId}`), { timeout: 8000 });
 });
 
+// #350: an explicit markdown link whose LABEL equals a page title must NOT get the auto title-link decoration
+// stacked on top (double link / conflicting target / #276 contradiction). (Plain-text auto-linking itself is
+// covered by the #224 go-live test above — here we pin that a hand-written link is EXCLUDED.)
+test("#350: a hand-written [title](/p/id) is NOT auto-title-linked", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const target = `Manual Link Title ${RUN}`;
+  await page.goto("/p/demo");
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await createScratchPage(page, target); // the page whose title the hand link's label matches
+
+  await openScratch(page, "manual-link-host");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  // the title INSIDE a hand link (pointing at a DIFFERENT id) — the auto-linker must not overlay it.
+  await page.keyboard.insertText(`see [${target}](/p/some-other-id) here\n\nbot\n`);
+  await sleep(600);
+  await page.getByText("bot").click();
+  await sleep(400);
+
+  const handLine = page.locator("[data-pane=preview] .cm-line", { hasText: "see" }).first();
+  await expect(handLine).toBeVisible();
+  // the label renders as a real markdown link (cm-lp-link), NOT an auto title-link (no cm-lp-title-link over it).
+  expect(await handLine.locator(`.cm-lp-title-link`).count(), "no auto title-link over a hand-written link").toBe(0);
+});
+
 test("#224 hover card: the excerpt card appears in the tooltip layer (view-re-confirmed fetch)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   const target = `Hover Card Target ${RUN}`;

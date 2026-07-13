@@ -1,5 +1,6 @@
 import { Facet, StateEffect, type Extension, type Range } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, hoverTooltip } from "@codemirror/view";
+import { syntaxTree } from "@codemirror/language";
 import { matchTitleLinks, type TitleEntry, type MatchOpts } from "./title-links";
 
 // #224 / ADR-104: render auto internal links over body text whose words match a page title. The decoration is
@@ -33,6 +34,21 @@ export const titleLinksRefresh = StateEffect.define<null>();
 const titleLinkMark = (pageId: string) =>
   Decoration.mark({ class: "cm-lp-title-link", attributes: { "data-title-link": pageId } });
 
+// #350: the explicit-markdown link/image ranges (`[text](url)` / `![alt](url)`) — an auto title-link must NOT
+// overlay them. `matchTitleLinks` only sees plain text and would linkify a `[]/p/x)` whose LABEL
+// happens to equal a page title, stacking a second (possibly different-target) link + hover card on a hand-
+// written one (and contradicting a #276 struck-through dead link). Collect the Link/Image node ranges from the
+// shared Lezer tree (like dead-links.ts) and drop any auto-match that overlaps one. This only SHRINKS the
+// auto-link set, so it adds no authz surface (the viewer dictionary / view re-confirm are untouched).
+function collectLinkRanges(view: EditorView, from: number, to: number): { from: number; to: number }[] {
+  const out: { from: number; to: number }[] = [];
+  syntaxTree(view.state).iterate({
+    from, to,
+    enter: (node) => { if (node.name === "Link" || node.name === "Image") out.push({ from: node.from, to: node.to }); },
+  });
+  return out;
+}
+
 // Only decorate the visible viewport ranges (large docs stay cheap); matchTitleLinks re-runs per slice.
 function buildTitleLinks(view: EditorView): DecorationSet {
   const src = view.state.facet(titleLinkSource);
@@ -40,8 +56,11 @@ function buildTitleLinks(view: EditorView): DecorationSet {
   const ranges: Range<Decoration>[] = [];
   for (const { from, to } of view.visibleRanges) {
     const text = view.state.sliceDoc(from, to);
+    const links = collectLinkRanges(view, from, to);
     for (const m of matchTitleLinks(text, src.dict, src.opts)) {
-      ranges.push(titleLinkMark(m.pageId).range(from + m.from, from + m.to));
+      const mFrom = from + m.from, mTo = from + m.to;
+      if (links.some((l) => mFrom < l.to && mTo > l.from)) continue; // #350: skip — inside an explicit link/image
+      ranges.push(titleLinkMark(m.pageId).range(mFrom, mTo));
     }
   }
   return Decoration.set(ranges, true);
