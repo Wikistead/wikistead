@@ -13,6 +13,13 @@ describe("authorLabel (#208)", () => {
     expect(authorLabel(sub, "ゲスト")).toBe("ゲスト 3ca3");
   });
 
+  it("#331: shortens an `anon:` pseudonym the same way (Guest 7f3a — never the raw hex)", () => {
+    const sub = "anon:7f3a1b2c3d4e";
+    expect(isGuestSub(sub)).toBe(true);
+    expect(authorLabel(sub, "Guest")).toBe("Guest 7f3a");
+    expect(authorLabel(sub, "ゲスト")).toBe("ゲスト 7f3a");
+  });
+
   it("uses the email local-part for a member email sub", () => {
     expect(isGuestSub("alice@example.com")).toBe(false);
     expect(authorLabel("alice@example.com", "Guest")).toBe("alice");

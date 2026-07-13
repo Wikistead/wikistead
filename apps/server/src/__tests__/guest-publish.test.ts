@@ -1,7 +1,7 @@
 // Integration test — real Postgres + OpenFGA + Meilisearch + Fastify, no mocks.
 // 2f-3 guest HTTP path (security-critical). The load-bearing authz boundaries:
 //   - a VIEW share token can read published content but CANNOT publish,
-//   - an EDIT share token can publish (attributed to guest:<shareLinkId>),
+//   - an EDIT share token can publish (attributed to the anon:<id> pseudonym, #331),
 //   - JWT asserts intent, OpenFGA asserts authority: a view link has no edit tuple
 //     so publishPage is denied even bypassing the hook; a REVOKED link is denied,
 //   - resource binding: a token for page A cannot read/publish page B,
@@ -14,7 +14,7 @@ import * as Y from 'yjs'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, deleteObjectTuples } from '@wikistead/authz'
-import { mintGuestToken } from '@wikistead/auth'
+import { mintGuestToken, verifyGuestToken } from '@wikistead/auth'
 import { createSpace } from '../routes/spaces.js'
 import { createPage, publishPage } from '../routes/pages.js'
 import { buildApp } from '../app.js'
@@ -100,10 +100,13 @@ describe('guest HTTP path: published read + publish authorization', () => {
     })).rejects.toMatchObject({ statusCode: 403 })
   })
 
-  it('an EDIT token publishes — attributed to guest:<shareLinkId>; view then sees the content', async () => {
+  it('an EDIT token publishes — attributed to the anon:<id> pseudonym (#331); view then sees the content', async () => {
     expect((await guestPublish(editTok, pageA)).statusCode).toBe(200)
     const [{ created_by }] = await admin<[{ created_by: string }]>`SELECT created_by FROM revisions WHERE page_id = ${pageA} ORDER BY created_at DESC LIMIT 1`
-    expect(created_by).toBe(`guest:${editLinkId}`)
+    // #331 / ADR-138 (C-6): the revision actor is the token's pseudonymous per-session id, NOT the raw share-link id.
+    const claims = await verifyGuestToken(guestCfg, editTok)
+    expect(created_by).toBe(claims.anonId)
+    expect(created_by).toMatch(/^anon:[0-9a-f]{12}$/)
     const body = (await guestGet(viewTok, pageA)).json() as { publishedMd: string | null }
     expect(body.publishedMd).toContain(WORD)
   })

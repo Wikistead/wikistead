@@ -6,15 +6,20 @@ import { useTranslation } from "react-i18next";
 // Guests showed a full UUID ("guest:3ca39b02-…") which is unreadable → shorten to "Guest <4 chars>"
 // (stable per guest). Members show a friendly label (email local-part when the sub is an email).
 
-const GUEST_PREFIX = "guest:";
+// A guest identity is `guest:<uuid>` (the share-link id) OR, since #331 / ADR-138 (C-6), `anon:<12 hex>` (the
+// pseudonymous per-session id the server records as the revision/feed actor). Both are 6-char prefixes, so the
+// short label ("Guest 7f3a") is the first 4 chars after the prefix either way. NEVER shown raw.
+const GUEST_PREFIXES = ["guest:", "anon:"];
 export function isGuestSub(sub: string): boolean {
-  return sub.startsWith(GUEST_PREFIX);
+  return GUEST_PREFIXES.some((p) => sub.startsWith(p));
 }
 
-// Human-readable author label. Guest → "Guest 3ca3" (short, stable). Member → email local-part, or the
-// sub verbatim when it isn't an email. `guestWord` is the localized "Guest".
+// Human-readable author label. Guest → "Guest 3ca3" / "Guest 7f3a" (short, stable). Member → email local-part,
+// or the sub verbatim when it isn't an email. `guestWord` is the localized "Guest".
 export function authorLabel(sub: string, guestWord: string): string {
-  if (isGuestSub(sub)) return `${guestWord} ${sub.slice(GUEST_PREFIX.length, GUEST_PREFIX.length + 4)}`;
+  for (const p of GUEST_PREFIXES) {
+    if (sub.startsWith(p)) return `${guestWord} ${sub.slice(p.length, p.length + 4)}`;
+  }
   const at = sub.indexOf("@");
   return at > 0 ? sub.slice(0, at) : sub;
 }

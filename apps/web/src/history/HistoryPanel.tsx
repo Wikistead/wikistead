@@ -5,6 +5,7 @@ import { usePageRevisions, useRestoreRevision, type Revision } from "../data/que
 import { ConfirmDialog } from "../ui/dialogs";
 import { RightPanel } from "../ui/RightPanel";
 import { notify } from "../ui/toast";
+import { authorLabel, isGuestSub } from "../comments/AuthorChip";
 
 // Page history: lists the snapshot revisions (newest first) and, for edit-capable
 // users, restores the page to a chosen one. Backend (GET list / POST restore) has
@@ -22,10 +23,14 @@ function fmt(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
-// created_by is stored as the FGA subject ("user:<sub>" / "guest:<id>"); show the sub.
-function author(createdBy: string | null, unknown: string): string {
+// created_by is stored as the FGA subject / actor: "user:<sub>" (show the sub), or a guest actor
+// "guest:<id>" / #331 `anon:<id>` (show the short "Guest 7f3a" pseudonym — the raw id / anon hex must NEVER be
+// shown in full, ADR-138 C-6 reviewer condition 3; the old `.replace(/^(user|guest):/)` leaked the raw uuid).
+function author(createdBy: string | null, unknown: string, guestWord: string): string {
   if (!createdBy) return unknown;
-  return createdBy.replace(/^(user|guest):/, "");
+  if (createdBy.startsWith("user:")) return createdBy.slice(5);
+  if (isGuestSub(createdBy)) return authorLabel(createdBy, guestWord);
+  return createdBy;
 }
 
 export function HistoryPanel({
@@ -54,7 +59,7 @@ export function HistoryPanel({
           <li key={rev.id} className="flex items-center justify-between gap-2 rounded-md border border-border p-2" data-testid="revision-item">
             <div className="flex min-w-0 flex-col">
               <span className="text-[0.85em]">{fmt(rev.createdAt)}</span>
-              <span className="text-[0.75em] text-fg-dim">{author(rev.createdBy, t("history.unknown"))}</span>
+              <span className="text-[0.75em] text-fg-dim">{author(rev.createdBy, t("history.unknown"), t("common.guest"))}</span>
             </div>
             <div className="flex flex-none gap-1.5">
               <button type="button" className={rowBtn} data-testid="revision-diff" onClick={() => onCompare(rev.id)}>

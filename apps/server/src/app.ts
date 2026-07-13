@@ -73,7 +73,9 @@ declare module 'fastify' {
     // share (guest) token is presented. Distinct from `user` so member-only routes
     // (which read `user`) are never reachable by a guest. Authority is still derived
     // from OpenFGA per request (the token asserts intent, not authority).
-    guest?: { shareLinkId: string; resource: ResourceRef; capability: Capability }
+    // #331 / ADR-138 (C-6): anonId is the pseudonymous per-session id carried in the token claim. Used ONLY as
+    // the recorded actor for attribution (revision/feed) — NOT for authority (authz stays on shareLinkId).
+    guest?: { shareLinkId: string; resource: ResourceRef; capability: Capability; anonId?: string }
     // Set when authenticated via an API key — the key's scope ceiling. 'read'
     // restricts to GET/HEAD (mutations 403); 'write' is the owner's full authority.
     apiScope?: 'read' | 'write'
@@ -265,7 +267,7 @@ export async function buildApp(): Promise<FastifyInstance> {
         await reply.code(401).send({ error: 'unauthorized' })
         return
       }
-      req.guest = { shareLinkId: c.shareLinkId, resource: c.resource, capability: c.capability }
+      req.guest = { shareLinkId: c.shareLinkId, resource: c.resource, capability: c.capability, anonId: c.anonId }
       emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: `guest:${c.shareLinkId}`, method: 'guest' })
       return
     }
