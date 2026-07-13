@@ -11,6 +11,7 @@ import type { SearchDriver } from '../search/index.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { deletePinsForResources } from './pins.js'
+import { importArchive, ImportTooLargeError, ImportInvalidError } from '../import/index.js'
 import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
 
@@ -27,6 +28,9 @@ const ICON_MAX_BYTES = 512 * 1024
 // Bound the raw JSON body BEFORE parse so a huge base64 string can't exhaust memory
 // (base64 ≈ 1.34x the bytes; this fits a ≤512KB image with JSON overhead).
 const ICON_BODY_LIMIT = 1_000_000
+// #308: bound the base64 import body BEFORE parse. The streaming unzip caps (IMPORT_MAX_*) bound the INFLATED
+// size; this bounds the compressed upload (base64 ≈ 1.34x): ~200MB zip → ~270MB JSON body.
+const IMPORT_BODY_LIMIT = 280 * 1024 * 1024
 function sniffImage(b: Uint8Array): { mime: string; ext: string } | null {
   if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return { mime: 'image/png', ext: 'png' }
   if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return { mime: 'image/jpeg', ext: 'jpg' }
@@ -775,6 +779,32 @@ export async function spacesPlugin(app: FastifyInstance) {
     })
     return reply.code(204).send()
   })
+
+  // #308 / ADR-132: content import — materialize an export ZIP as DRAFT pages under this space. MEMBER-ONLY:
+  // the route carries no `config.guest`, so a share_link (anonymous edit-guest, #274) is rejected before any
+  // work — closing the anonymous-ZIP storage-abuse surface (§4). The executor is further gated to space `edit`
+  // inside createPage (a viewer is 403'd). base64 ZIP in (no multipart dep; bodyLimit + streaming size caps
+  // bound memory). Returns the import report. `publish` opt-in bulk-publishes (else all pages land as drafts).
+  app.post<{ Params: { spaceId: string }; Body: { zipBase64?: string; parentPageId?: string | null; publish?: boolean } }>(
+    '/spaces/:spaceId/import', { bodyLimit: IMPORT_BODY_LIMIT }, async (req, reply) => {
+      const archive = Buffer.from(req.body?.zipBase64 ?? '', 'base64')
+      if (archive.length === 0) return reply.code(400).send({ error: 'empty archive' })
+      try {
+        return await importArchive(
+          { db: req.db, fga: app.fga, storage: app.storageDriver, driver: app.searchDriver },
+          new Uint8Array(archive),
+          {
+            tenantId: req.tenant.id, spaceId: req.params.spaceId, userId: req.user.sub, plan: req.tenant.plan,
+            parentPageId: req.body?.parentPageId ?? null, publish: req.body?.publish === true,
+          },
+        )
+      } catch (e) {
+        if ((e as { statusCode?: number })?.statusCode === 403) return reply.code(403).send({ error: 'forbidden' })
+        if (e instanceof ImportTooLargeError) return reply.code(413).send({ error: 'archive too large' })
+        if (e instanceof ImportInvalidError) return reply.code(400).send({ error: 'invalid archive' })
+        throw e
+      }
+    })
 
   // PUBLIC icon bytes (read public, write strict — mirrors the tenant logo). The query
   // is RLS-scoped to the Host-resolved tenant, so a space id from another tenant yields

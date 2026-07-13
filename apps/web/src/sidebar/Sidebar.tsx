@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { NodeApi } from "react-arborist";
 import { ChevronDown, ChevronUp, FilePlus, FileText, PinOff, Settings } from "lucide-react";
 import { PageTree, type PageTreeNode } from "./PageTree";
@@ -30,7 +30,7 @@ import { notify } from "../ui/toast";
 import { DeleteBacklinkWarning } from "../app/DeleteBacklinkWarning";
 import { ShareDialog } from "../ui/ShareDialog";
 import { TemplatePickerDialog } from "./TemplatePickerDialog";
-import { downloadSpaceExport } from "../data/exportApi"; // #309: space Markdown-ZIP export
+import { downloadSpaceExport, importSpaceArchive } from "../data/exportApi"; // #309 export / #308 import
 
 // One space at a time (Notion/Outline style): the sidebar shows ONLY the active
 // space's page tree; the space itself is chosen in the switcher, not a tree root.
@@ -140,6 +140,25 @@ export function Sidebar() {
     });
   }, [current, exportingSpace, token, t]);
 
+  // #308 / ADR-132: import an export ZIP into the current space as DRAFT pages. Member-gated on the server
+  // (edit); the switcher item is manage-gated as a conservative UI proxy. On success the page tree is refetched
+  // so the imported drafts appear, and the report drives a summary toast (413 = too large, 403 = not permitted).
+  const qc = useQueryClient();
+  const [importingSpace, setImportingSpace] = useState(false);
+  const importSpace = useCallback((file: File) => {
+    if (!current || importingSpace) return;
+    setImportingSpace(true);
+    void importSpaceArchive(token, current, file).then(({ status, report }) => {
+      setImportingSpace(false);
+      if (report) {
+        void qc.invalidateQueries({ queryKey: ["pages", current] });
+        notify.success(t("import.done", { pages: report.pagesCreated, attachments: report.attachmentsImported }));
+      } else {
+        notify.error(t(status === 413 ? "import.tooLarge" : status === 403 ? "import.forbidden" : status === 400 ? "import.invalid" : "toast.actionFailed"));
+      }
+    });
+  }, [current, importingSpace, token, qc, t]);
+
   const newPage = (parentId: string | null) => {
     if (!current) return;
     // A new page is created as a DRAFT and opens straight in the editor (?edit=1)
@@ -238,6 +257,8 @@ export function Sidebar() {
           onNewSpace={() => setCreatingSpace(true)}
           onExportSpace={exportSpace}
           exportingSpace={exportingSpace}
+          onImportSpace={importSpace}
+          importingSpace={importingSpace}
           pinnedSpaceIds={spacePins.map((p) => p.resourceId)}
           onTogglePin={(spaceId) => togglePin("space", spaceId)}
           onMovePin={(spaceId, dir) => { const pin = spacePins.find((p) => p.resourceId === spaceId); if (pin) movePin("space", pin.id, dir); }}

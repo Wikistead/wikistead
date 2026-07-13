@@ -781,6 +781,13 @@
     "done": "Export downloaded",
     "tooLarge": "The export exceeds the size limit. Try exporting spaces individually."
   },
+  "import": {
+    "spaceItem": "Import ZIP…",
+    "done": "Imported {{pages}} pages ({{attachments}} attachments) as drafts",
+    "tooLarge": "The archive exceeds the size limit.",
+    "forbidden": "You don't have permission to import into this space.",
+    "invalid": "That file isn't a valid Wikistead export ZIP."
+  },
   "onboarding": {
     "title": "Set up your editor",
     "q1": "Do you use vim keybindings?",
