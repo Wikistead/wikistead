@@ -9,10 +9,11 @@ import type { FastifyInstance } from 'fastify'
 import { fgaClient, checkRelation } from '@wikistead/authz'
 import { pool } from '../db/pool.js'
 import { resolveTenantFromHost, loadTenant } from '../tenant.js'
+import { substituteQuerySnapshots, type QuerySnapshot } from './pages.js' // #353: bake `:::query` → static list for anon
 
 // noindex: the page's own flag OR'd with its space's flag (#277 / ADR-116 guardrail 4) — a page
 // reached via space inheritance is noindex if EITHER the page or its space says so.
-interface PublicPageRow { id: string; title: string; published_md: string | null; noindex: boolean }
+interface PublicPageRow { id: string; title: string; published_md: string | null; noindex: boolean; published_query_snapshot: string | null }
 
 // Anonymous principal for FGA check/listObjects.
 // user:anonymous has NO tenant memberships, no groups, no explicit grants.
@@ -52,7 +53,7 @@ async function loadPublicPage(tenantId: string, pageId: string): Promise<PublicP
   return pool.begin(async (tx) => {
     await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
     const [r] = await tx<PublicPageRow[]>`
-      SELECT p.id, p.title, p.published_md, (p.noindex OR s.noindex) AS noindex
+      SELECT p.id, p.title, p.published_md, (p.noindex OR s.noindex) AS noindex, p.published_query_snapshot
       FROM pages p JOIN spaces s ON s.id = p.space_id
       WHERE p.id = ${pageId} AND p.published_at IS NOT NULL
     `
@@ -167,7 +168,12 @@ export async function publicPlugin(app: FastifyInstance) {
     const page = await loadPublicPage(tenant.id, req.params.pageId)
     if (!page) return reply.code(404).send({ error: 'not found' })
 
-    const content = page.published_md ?? ''
+    // #353 / ADR-134 rev2 (Hole A): substitute each `:::query` directive with its baked ANONYMOUS static list
+    // (resolved as user:anonymous at publish — member-only pages already excluded). The public surface renders a
+    // static list, NEVER a live per-viewer reverse-lookup (the #244 re-entry class). A missing/mismatched
+    // snapshot collapses the block to nothing (fail-safe inside substituteQuerySnapshots).
+    const snapshot = page.published_query_snapshot ? (JSON.parse(page.published_query_snapshot) as QuerySnapshot) : null
+    const content = substituteQuerySnapshots(page.published_md ?? '', snapshot)
 
     // noindex enforcement (#124): emit the HTTP X-Robots-Tag header so a crawler that fetches
     // this page is told not to index it — the header is authoritative even before any HTML/SSR
