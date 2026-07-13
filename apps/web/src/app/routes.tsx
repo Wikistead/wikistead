@@ -1119,7 +1119,10 @@ function PublicPageContent({ pageId }: { pageId: string }) {
           </div>
         </div>
         {/* the CM read view fills this box and scrolls internally (the member surface pattern). */}
-        <div ref={setBodyEl} data-testid="public-body" className="h-full" />
+        {/* #319 c1587-A: `data-pane="preview"` gives the public body the SAME 740px centred reading column as
+            the member Reading surface (tokens.css). The band top-offset (`.lp-editor-host .cm-content`
+            padding-top) has higher specificity, so it still wins over this rule's padding-top. */}
+        <div ref={setBodyEl} data-testid="public-body" data-pane="preview" className="h-full" />
       </div>
       {/* #227 the SAME shared TocChrome the member views render (rail on wide / overlay on narrow) — no
           public-only reimplementation. The toggle lives in the band's PageStatus (member parity, ①).
