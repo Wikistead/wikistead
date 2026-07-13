@@ -7,7 +7,7 @@ import { verifyMcpAccessToken } from '@wikistead/auth'
 // new attack surface, ADR-131). The token asserts IDENTITY only; the tool handler re-checks OpenFGA on
 // `user:<sub>` per operation (the ADR-075 broker rule) and enforces the token's scopes as a ceiling.
 
-export interface McpPrincipal { sub: string; tenantId: string; scopes: string[] }
+export interface McpPrincipal { sub: string; tenantId: string; scopes: string[]; groups: string[] }
 
 export async function authenticateMcpRequest(req: FastifyRequest, hostTenantId: string): Promise<McpPrincipal> {
   const m = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')
@@ -21,5 +21,9 @@ export async function authenticateMcpRequest(req: FastifyRequest, hostTenantId: 
   }
   // Tenant binding (the new attack surface): the token's tenant MUST equal the Host-resolved tenant.
   if (claims.tenantId !== hostTenantId) throw Object.assign(new Error('token tenant mismatch'), { statusCode: 401 })
-  return { sub: claims.sub, tenantId: claims.tenantId, scopes: Array.isArray(claims.scopes) ? claims.scopes : [] }
+  return {
+    sub: claims.sub, tenantId: claims.tenantId,
+    scopes: Array.isArray(claims.scopes) ? claims.scopes : [],
+    groups: Array.isArray(claims.groups) ? claims.groups : [],
+  }
 }

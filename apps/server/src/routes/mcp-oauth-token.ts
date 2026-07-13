@@ -48,7 +48,7 @@ export async function mcpOAuthTokenPlugin(app: FastifyInstance) {
 
     const access_token = await mintMcpAccessToken(
       { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: MCP_TOKEN_TTL_S },
-      { tenantId: authCode.tenantId, sub: authCode.sub, scopes: authCode.scopes },
+      { tenantId: authCode.tenantId, sub: authCode.sub, scopes: authCode.scopes, groups: authCode.groups ?? [] },
     )
     return { access_token, token_type: 'Bearer', expires_in: MCP_TOKEN_TTL_S, scope: authCode.scopes.join(' ') }
   })

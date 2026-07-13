@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { filterAuthorized } from '@wikistead/authz'
 import { getPublished, listPages, getBacklinks } from './pages.js'
 import { listSpaces } from './spaces.js'
+import { fillAuthorizedPage, SEARCH_CANDIDATE_LIMIT } from '../search/paginate.js'
 import { authenticateMcpRequest, type McpPrincipal } from '../auth/mcp-request-auth.js'
 
 // #311 / ADR-131 slice 5: the MCP endpoint — a minimal Streamable-HTTP (JSON-RPC 2.0 over POST) transport with a
@@ -88,6 +90,26 @@ const TOOLS: McpTool[] = [
       }
       if (!links.length) return 'no backlinks'
       return links.map((l) => `- ${l.title} (${l.id})`).join('\n')
+    },
+  },
+  {
+    name: 'search',
+    description: 'Full-text search across pages you can view (returns the top matches: id + title).',
+    scope: 'read',
+    inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'the search query' } }, required: ['query'] },
+    async run(req, app, principal, args) {
+      const q = typeof args.query === 'string' ? args.query.trim() : ''
+      if (!q) throw toolError('query is required')
+      // The SAME two-stage gate as GET /search: Meili stage-1 (denormalized viewer set — needs the member's
+      // groups, carried on the token) THEN stage-2 filterAuthorized FGA on the candidates (authoritative). One
+      // page (no cursor) for the tool. A view-denied hit never survives stage-2.
+      const { results } = await fillAuthorizedPage(
+        (offset, limit) => app.searchDriver.search({ tenantId: principal.tenantId, userId: principal.sub, groups: principal.groups, q, offset, limit }),
+        (ids) => filterAuthorized(app.fga, `user:${principal.sub}`, 'view', ids),
+        { startOffset: 0, windowSize: SEARCH_CANDIDATE_LIMIT },
+      )
+      if (!results.length) return 'no results'
+      return results.map((r) => `- ${r.title} (${r.id})`).join('\n')
     },
   },
 ]

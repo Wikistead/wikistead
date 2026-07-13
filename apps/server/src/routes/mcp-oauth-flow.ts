@@ -90,6 +90,7 @@ export async function mcpOAuthFlowPlugin(app: FastifyInstance) {
     await saveAuthCode(app.valkey, code, {
       sub: req.user.sub, tenantId: pending.tenantId, clientId: pending.clientId,
       redirectUri: pending.redirectUri, codeChallenge: pending.codeChallenge, scopes: pending.scopes,
+      groups: req.user.groups ?? [], // the logged-in member's groups → carried into the token
     })
     // redirect_uri came from the STORED (already-validated) request — never from tamperable current params.
     return reply.redirect(redirectWithParams(pending.redirectUri, { code, state: pending.state }))
