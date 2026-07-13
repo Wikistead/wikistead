@@ -1,7 +1,7 @@
 import { Vim, getCM } from "@replit/codemirror-vim";
 import { EditorState, EditorSelection, type Extension } from "@codemirror/state";
-import { ViewPlugin, type EditorView, type ViewUpdate } from "@codemirror/view";
-import { livePreview, displayMode, nestedDeleteChange, enterMacroCommand, setVimMotionActive } from "./decorations";
+import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
+import { livePreview, displayMode, nestedDeleteChange, enterMacroCommand, setVimMotionActive, atomSelectableSelectedAt } from "./decorations";
 import { nestedSelectionField, setNestedSelection, macroRenderActiveField } from "./macro-edit";
 
 // ADR-024 1b (Mode A): dd treats a macro ATOM as one unit — the WHOLE macro source is the
@@ -208,7 +208,25 @@ export const atomYank: Extension = ViewPlugin.define((view) => {
 // onto the nearest VISIBLE char in the motion direction, so the fat cursor never paints a hidden glyph and
 // h/l step by visible character. Block atoms (a table / `:::` fence the caret sits ON per ADR-024) are
 // LEFT ALONE (that fat-cursor case shares its root with #238). Offset-invariant: only the caret rest moves.
-export const vimWysiwygCaretGuard: Extension = ViewPlugin.fromClass(
+// #332when the caret rests on a SELECTED atomSelectable atom (embed-page), the vim fat cursor's pink
+// BACKGROUND block (a 1-char bar from @replit/codemirror-vim) sits on the wide card, and its glyph blanking is
+// timing-fragile (CM strips a classList-toggled class during the focus rebuild). Suppress the whole fat cursor
+// there via `EditorView.editorAttributes` — CM MERGES editorAttributes into `view.dom` on every update INCLUDING
+// the focus rebuild, so the class survives without a re-pin (thetiming bug). Gated to the empty-caret /
+// vim-normal / non-source / on-a-block case before the (rare) full-doc directive scan. Plain block atoms (table
+// cell, non-atomSelectable `:::`) keep their fat cursor — this only fires for a selected atomSelectable atom.
+const atomSelHideFatCursor: Extension = EditorView.editorAttributes.of((view): Record<string, string> | null => {
+  const vim = getCM(view)?.state.vim;
+  if (!vim || vim.insertMode) return null;
+  const s = view.state.selection.main;
+  if (!s.empty) return null;
+  if (view.state.facet(displayMode) === "source") return null;
+  const lp = view.state.field(livePreview, false);
+  if (!lp || !lp.blocks.some((b) => s.head >= b.from && s.head < b.to)) return null;
+  return atomSelectableSelectedAt(view.state, s.head) ? { class: "cm-atomsel-hide-fatcursor" } : null;
+});
+
+export const vimWysiwygCaretGuard: Extension = [atomSelHideFatCursor, ViewPlugin.fromClass(
   class {
     vimMotionMirror = false;
     constructor(readonly view: EditorView) {}
@@ -283,4 +301,4 @@ export const vimWysiwygCaretGuard: Extension = ViewPlugin.fromClass(
       });
     }
   },
-);
+)];

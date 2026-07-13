@@ -2694,6 +2694,21 @@ function directiveRevealed(state: EditorState, name: string, from: number, to: n
   return rangeRevealed(state, from, to);
 }
 
+// #332is `pos` inside a directive block that is an `atomSelectable` atom currently SELECTED (an empty
+// caret resting on it → the atom-selection ring shows and the widget stays rendered, per directiveRevealed)?
+// There the vim fat cursor must be suppressed ENTIRELY (the full-card ring is the only selection affordance)
+// unlike a plain block atom (table cell / `:::` fence) where the fat cursor stays a position marker. Gated by
+// the caller to the empty-caret / vim-normal / non-source / on-a-block case, so the full-doc scan is rare.
+export function atomSelectableSelectedAt(state: EditorState, pos: number): boolean {
+  if (state.readOnly) return false;
+  for (const dir of resolveDirectiveRanges(state.doc.toString())) {
+    if (pos < dir.from || pos > dir.to) continue;
+    const macro = findDirectiveMacro(dir.name);
+    if (macro?.revealOnCursor && macro.atomSelectable && atomSelected(state, dir.from, dir.to) && !directiveRevealed(state, dir.name, dir.from, dir.to)) return true;
+  }
+  return false;
+}
+
 // ── Extensible block-render registry (P3) ──────────────────────────────────
 // Each renderer maps markdown syntax-tree nodes to DECORATIONS. The builder it
 // receives (RenderCtx) can ONLY push decorations — it exposes no way to dispatch a
