@@ -4,7 +4,7 @@
 // authz is enforced by the route (covered separately).
 import { describe, it, expect } from 'vitest'
 import { inflateSync } from 'node:zlib'
-import { renderPlantuml, injectPlantumlTheme, PLANTUML_DARK_THEME, MAX_RENDER_BYTES } from '../plantuml-render.js'
+import { renderPlantuml, injectPlantumlTheme, PLANTUML_DARK_SKINPARAM, MAX_RENDER_BYTES } from '../plantuml-render.js'
 
 const png = (bytes = 8) => new Response(new Uint8Array(bytes), { headers: { 'content-type': 'image/png' } })
 
@@ -66,42 +66,54 @@ describe('renderPlantuml (#140 / ADR-074)', () => {
     expect(await renderPlantuml('x', { endpoint: 'https://k/', fetcher: streamed })).toBeNull()
   })
 
-  // #342: dark mode injects a built-in `!theme` into the source the server sends to Kroki.
-  it('dark render injects the built-in !theme right after @startuml; light injects nothing', async () => {
+  // #342dark mode injects a READABLE-dark skinparam block (dark canvas + light text) into the source
+  // the server sends to Kroki — a built-in `!theme` alone left a white canvas.
+  it('dark render injects a dark-canvas skinparam block right after @startuml; light injects nothing', async () => {
     const cap: string[] = []
     const fetcher = async (url: string) => { cap.push(decodeKrokiSource(url)); return png() }
     await renderPlantuml('@startuml\nA->B\n@enduml', { endpoint: 'https://k/', fetcher, dark: true })
-    expect(cap[0]).toBe(`@startuml\n!theme ${PLANTUML_DARK_THEME}\nA->B\n@enduml`)
+    const sent = cap[0]!
+    expect(sent.startsWith('@startuml\nskinparam backgroundColor')).toBe(true) // dark canvas, inside the diagram
+    expect(sent).toContain('skinparam defaultFontColor') // light text
+    expect(sent).toContain('A->B\n@enduml') // the body is preserved after the block
     cap.length = 0
     await renderPlantuml('@startuml\nA->B\n@enduml', { endpoint: 'https://k/', fetcher, dark: false })
     expect(cap[0]).toBe('@startuml\nA->B\n@enduml') // light = unchanged
   })
 })
 
+// A small deterministic stub block for the placement/respect tests (the real PLANTUML_DARK_SKINPARAM is long).
+const STUB = ['skinparam backgroundColor #111', 'skinparam defaultFontColor #eee']
+
 describe('injectPlantumlTheme (#342)', () => {
-  it('inserts the directive after the first @start… (must sit inside the diagram)', () => {
-    expect(injectPlantumlTheme('@startuml\nA->B\n@enduml', 'carbon-gray')).toBe('@startuml\n!theme carbon-gray\nA->B\n@enduml')
+  it('the real dark block is a dark canvas + a light default font (readable dark, not just recoloured elements)', () => {
+    expect(PLANTUML_DARK_SKINPARAM.some((l) => /^skinparam backgroundColor #[0-9a-f]{3,6}$/i.test(l))).toBe(true)
+    expect(PLANTUML_DARK_SKINPARAM.some((l) => /^skinparam defaultFontColor /i.test(l))).toBe(true)
+  })
+
+  it('inserts the skinparam block after the first @start… (must sit inside the diagram)', () => {
+    expect(injectPlantumlTheme('@startuml\nA->B\n@enduml', STUB)).toBe('@startuml\nskinparam backgroundColor #111\nskinparam defaultFontColor #eee\nA->B\n@enduml')
     // a non-uml @start (mindmap/gantt/…) is handled the same
-    expect(injectPlantumlTheme('@startmindmap\n* root\n@endmindmap', 'carbon-gray')).toBe('@startmindmap\n!theme carbon-gray\n* root\n@endmindmap')
+    expect(injectPlantumlTheme('@startmindmap\n* root\n@endmindmap', STUB)).toBe('@startmindmap\nskinparam backgroundColor #111\nskinparam defaultFontColor #eee\n* root\n@endmindmap')
   })
 
   it('prepends when the snippet has no @start… line', () => {
-    expect(injectPlantumlTheme('A->B', 'carbon-gray')).toBe('!theme carbon-gray\nA->B')
+    expect(injectPlantumlTheme('A->B', STUB)).toBe('skinparam backgroundColor #111\nskinparam defaultFontColor #eee\nA->B')
   })
 
   it('respects an explicit !theme — the author’s choice is never overridden', () => {
     const src = '@startuml\n!theme cyborg\nA->B\n@enduml'
-    expect(injectPlantumlTheme(src, 'carbon-gray')).toBe(src)
+    expect(injectPlantumlTheme(src, STUB)).toBe(src)
   })
 
   it('respects an explicit skinparam (leading whitespace tolerated)', () => {
     const src = '@startuml\n  skinparam backgroundColor #111\nA->B\n@enduml'
-    expect(injectPlantumlTheme(src, 'carbon-gray')).toBe(src)
+    expect(injectPlantumlTheme(src, STUB)).toBe(src)
   })
 
   it('does NOT treat a COMMENT line as an explicit directive (leading-quote = comment)', () => {
-    // a commented-out skinparam must NOT block the dark theme (note 2: line-start, comment-aware)
+    // a commented-out skinparam must NOT block the dark styling (note 2: line-start, comment-aware)
     const src = "@startuml\n' skinparam mono true\nA->B\n@enduml"
-    expect(injectPlantumlTheme(src, 'carbon-gray')).toBe("@startuml\n!theme carbon-gray\n' skinparam mono true\nA->B\n@enduml")
+    expect(injectPlantumlTheme(src, STUB)).toBe("@startuml\nskinparam backgroundColor #111\nskinparam defaultFontColor #eee\n' skinparam mono true\nA->B\n@enduml")
   })
 })
