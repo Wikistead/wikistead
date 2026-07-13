@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../lib/utils";
 import type { Heading } from "../editor/headings";
@@ -12,10 +12,14 @@ import type { Heading } from "../editor/headings";
 // Depth (H1 / H1–H3 / all) and on/off are set in Settings → Editor now, not in the rail itself, so
 // the TOC stays clean (the depth just filters the list here).
 export function Toc({
-  headings, activeFrom, depth, onJump, variant = "rail", subscribeScroll,
+  headings, activeFrom, visibleFroms, depth, onJump, variant = "rail", subscribeScroll,
 }: {
   headings: Heading[];
   activeFrom: number | null;
+  // #345 the two-layer highlight — `activeFrom` is the single CURRENT heading (dark, accent), while
+  // `visibleFroms` are the headings whose section is on screen (light, a subtle wash). A short final section
+  // that the sample point can't reach is still lit (light) by the visible layer.
+  visibleFroms?: number[];
   depth: number;
   onJump: (from: number) => void;
   variant?: "rail" | "overlay";
@@ -24,6 +28,11 @@ export function Toc({
   const { t } = useTranslation();
   const shown = headings.filter((h) => h.level <= depth);
   const minLevel = shown.length ? Math.min(...shown.map((h) => h.level)) : 1;
+  const visible = useMemo(() => new Set(visibleFroms ?? []), [visibleFroms]);
+  // #345 auto-follow — keep the current item in view as the reader scrolls a long TOC (no-op for a short
+  // rail). block:"nearest" scrolls the minimum; only the rail (not the pointer-events-none overlay) follows.
+  const activeRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => { if (variant === "rail") activeRef.current?.scrollIntoView({ block: "nearest" }); }, [activeFrom, variant]);
 
   // Overlay visibility: each scroll shows it and resets a fade timer; it hides ~1.2s after scrolling
   // stops. setScrolling(true) during a continuous scroll is a no-op re-render (React bails on an
@@ -63,14 +72,19 @@ export function Toc({
         <li key={h.slug}>
           <button
             type="button"
+            ref={activeFrom === h.from ? activeRef : undefined}
             onClick={() => onJump(h.from)}
             data-testid="toc-item"
             data-active={activeFrom === h.from ? "" : undefined}
+            data-visible={visible.has(h.from) ? "" : undefined}
             style={{ paddingLeft: `${6 + (h.level - minLevel) * 12}px` }}
             className={cn(
               "block w-full cursor-pointer truncate rounded py-1 pr-2 text-left text-[length:var(--text-xs)] text-fg-dim transition-colors duration-[120ms] hover:text-foreground",
-              // #192: the active heading — accent text PLUS a faint accent-tinted background wash on the
-              // whole row (low opacity via color-mix), so the current section reads at a glance.
+              // #345 LIGHT layer — a section that's on screen but not the current one reads a touch
+              // brighter than idle (a subtle presence cue), below the dark active row.
+              visible.has(h.from) && activeFrom !== h.from && "text-foreground/80",
+              // #192 / #345: DARK layer — the single active heading: accent text PLUS a faint accent-tinted
+              // background wash on the whole row (low opacity via color-mix), so the current section stands out.
               activeFrom === h.from && "font-medium text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]",
             )}
             title={h.text}

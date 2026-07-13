@@ -9,6 +9,7 @@ import type { Heading } from "../editor/headings";
 export function TocChrome({
   headings,
   activeFrom,
+  visibleFroms,
   depth,
   onJump,
   subscribeScroll,
@@ -20,6 +21,7 @@ export function TocChrome({
 }: {
   headings: Heading[];
   activeFrom: number | null;
+  visibleFroms?: number[]; // #345 the light-layer visible set (rail only)
   depth: number;
   onJump: (from: number) => void;
   subscribeScroll?: (fn: () => void) => () => void;
@@ -44,7 +46,7 @@ export function TocChrome({
           style={{ left: railLeft, top: railTop, width: "clamp(210px, calc(50vw - 370px - 2rem), 300px)" }}
         >
           <div className="pointer-events-auto h-full">
-            <Toc headings={headings} activeFrom={activeFrom} depth={depth} onJump={onJump} variant="rail" />
+            <Toc headings={headings} activeFrom={activeFrom} visibleFroms={visibleFroms} depth={depth} onJump={onJump} variant="rail" />
           </div>
         </div>
       )}
