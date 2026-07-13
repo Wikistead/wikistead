@@ -122,11 +122,13 @@ const titleLinkCardTheme = EditorView.baseTheme({
     border: "1px solid var(--border, #33363b)",
     borderRadius: "var(--radius-md, 8px)",
     boxShadow: "var(--shadow-md, 0 8px 24px rgba(0,0,0,0.28))",
-    // enter-only motion (surface-only, the motion convention): a small fade + rise. No exit animation.
+    // enter-only motion (surface-only, the motion convention): a small fade + rise. No exit animation. #351
+    //rise+fade only (no scale — scale sub-pixels wobble); the card now mounts at its FINAL size (the
+    // excerpt is resolved BEFORE the tooltip is created), so the animation plays ONCE with no resize/re-anchor.
     animation: "cmLpCardIn 120ms cubic-bezier(0.2,0,0,1)",
   },
   "@keyframes cmLpCardIn": {
-    from: { opacity: "0", transform: "translateY(3px) scale(0.98)" },
+    from: { opacity: "0", transform: "translateY(3px)" },
     to: { opacity: "1", transform: "none" },
   },
   ".cm-lp-title-link-card-title": { fontWeight: "700", marginBottom: "0.3em" },
@@ -143,8 +145,17 @@ const titleLinkCardTheme = EditorView.baseTheme({
 });
 
 export function titleLinkHover(): Extension {
+  // #351cache the resolved excerpt per pageId so pointer movement within a link never re-fetches (and the
+  // tooltip resolves instantly on a re-hover). Per-editor closure; excerpts are ephemeral, so a little staleness
+  // is fine. The view-gated /excerpt path itself is unchanged.
+  type Excerpt = { title: string; excerpt: string | null } | null;
+  const cache = new Map<string, Promise<Excerpt>>();
   return [
-    hoverTooltip((view, pos) => {
+    // ASYNC source: resolve the excerpt BEFORE returning the tooltip, so `create` builds a card that is already
+    // at its FINAL size. The old code mounted an empty card, then filled it asynchronously — the height grew and
+    // the `above` tooltip re-anchored UP, and that resize collided with the enter animation ("flicker",).
+    // One resolve → one measure → one position → one animation.
+    hoverTooltip(async (view, pos) => {
       const src = view.state.facet(titleLinkSource);
       if (!src?.excerpt) return null;
       const plugin = view.plugin(titleLinkPlugin);
@@ -159,6 +170,17 @@ export function titleLinkHover(): Extension {
       });
       if (!found) return null;
       const hit: { from: number; to: number; pageId: string } = found;
+      let resolved: Excerpt = null;
+      try {
+        let p = cache.get(hit.pageId);
+        if (!p) { p = src.excerpt(hit.pageId); cache.set(hit.pageId, p); }
+        resolved = await p;
+      } catch {
+        resolved = null; // denied/missing → uniform empty card (no oracle); the dict is already view-gated
+      }
+      const entry = src.dict.find((d) => d.pageId === hit.pageId);
+      const titleText = resolved?.title ?? entry?.title ?? "";
+      const excerptMd = resolved?.excerpt;
       return {
         pos: hit.from,
         end: hit.to,
@@ -169,25 +191,14 @@ export function titleLinkHover(): Extension {
           dom.setAttribute("data-testid", "title-link-card");
           const title = document.createElement("div");
           title.className = "cm-lp-title-link-card-title";
-          const entry = src.dict.find((d) => d.pageId === hit.pageId);
-          title.textContent = entry?.title ?? "";
+          title.textContent = titleText;
           const body = document.createElement("div");
           body.className = "cm-lp-title-link-card-body";
+          // #351: render the excerpt markdown RICHLY (headings/bold/code/lists) via the shared DOM-safe renderer
+          // the SAME `renderMarkdownToDom` the #285 search preview / transclude use (textContent / createTextNode
+          // construction, `safeHref`, NO innerHTML), so raw `<script>` / dangerous schemes stay inert.
+          if (excerptMd) body.appendChild(renderMarkdownToDom(excerptMd));
           dom.append(title, body);
-          void src
-            .excerpt!(hit.pageId)
-            .then((r) => {
-              if (r?.title) title.textContent = r.title;
-              // #351: render the excerpt markdown RICHLY (headings/bold/code/lists) via the shared DOM-safe
-              // renderer — the SAME `renderMarkdownToDom` the #285 search preview / transclude use (textContent /
-              // createTextNode construction, `safeHref`, NO innerHTML), so raw `<script>` / dangerous schemes stay
-              // inert. The excerpt is still the view-gated /excerpt source (deny/missing → null → empty card).
-              body.replaceChildren();
-              if (r?.excerpt) body.appendChild(renderMarkdownToDom(r.excerpt));
-            })
-            .catch(() => {
-              body.replaceChildren(); // denied/missing → uniform empty card (no oracle)
-            });
           return { dom };
         },
       };
