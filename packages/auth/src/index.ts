@@ -81,6 +81,36 @@ export function looksLikeMemberCollabToken(token: string): boolean {
   }
 }
 
+// ── MCP access tokens (#311 / ADR-131 slice 4) ─────────────────────────────
+// The OAuth 2.1 token endpoint mints this app-signed access token from an authorization
+// code. Like the member/guest tokens it asserts IDENTITY, not authority — the /mcp tools
+// re-derive access from OpenFGA on `user:<sub>` per request. It is TENANT-BOUND: the
+// `tenantId` claim must equal the Host-resolved tenant on every /mcp request (a token
+// minted for tenant A is rejected at tenant B). Distinct typ so one endpoint can tell it
+// apart. Reuses the same signing secret.
+export interface McpAccessClaims {
+  tenantId: string;
+  sub: string;
+  scopes: string[];
+}
+
+export async function mintMcpAccessToken(
+  cfg: GuestTokenConfig,
+  args: { tenantId: string; sub: string; scopes: string[] },
+): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  return new SignJWT({ tenantId: args.tenantId, sub: args.sub, scopes: args.scopes })
+    .setProtectedHeader({ alg: "HS256", typ: "mcp+jwt" })
+    .setIssuedAt(now)
+    .setExpirationTime(now + cfg.ttlSeconds)
+    .sign(enc.encode(cfg.secret));
+}
+
+export async function verifyMcpAccessToken(cfg: GuestTokenConfig, token: string): Promise<McpAccessClaims> {
+  const { payload } = await jwtVerify(token, enc.encode(cfg.secret), { typ: "mcp+jwt" });
+  return payload as unknown as McpAccessClaims;
+}
+
 export interface OidcConfig {
   issuer: string;
   jwksUri: string;

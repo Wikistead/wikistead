@@ -21,7 +21,7 @@ describe('MCP OAuth 2.1 discovery metadata (#311 / ADR-131)', () => {
     expect(m.code_challenge_methods_supported).toEqual(['S256'])
     expect(m.token_endpoint_auth_methods_supported).toEqual(['none'])
     expect(m.response_types_supported).toEqual(['code'])
-    expect(m.grant_types_supported).toEqual(['authorization_code', 'refresh_token'])
+    expect(m.grant_types_supported).toEqual(['authorization_code']) // refresh_token not advertised (later slice)
     expect(m.scopes_supported).toEqual(['read', 'write'])
   })
 

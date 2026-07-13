@@ -40,7 +40,7 @@ describe('registerClient (#311 / ADR-131 slice 2)', () => {
     expect(r.redirect_uris).toEqual(['https://claude.ai/callback'])
     expect(r.token_endpoint_auth_method).toBe('none') // public client — no secret is issued
     expect(r.client_name).toBe('Claude')
-    expect(r.grant_types).toEqual(['authorization_code', 'refresh_token'])
+    expect(r.grant_types).toEqual(['authorization_code'])
     expect(r.client_id_issued_at).toBe(1_700_000_000)
     // persisted under THIS tenant (RLS) — the table has no client_secret column at all.
     const [row] = await admin<{ tenant_id: string; redirect_uris: string[]; token_endpoint_auth_method: string }[]>`
