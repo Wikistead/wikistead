@@ -29,11 +29,26 @@ services:
     command: ["valkey-server", "--save", "", "--appendonly", "no"]
     ports: ["6381:6379"]
 
+  # #338 / ADR-128: postgres datastore (parity with dev + prod). Ephemeral by design — the server-test teardown
+  # `down -v` wipes the volume, so isolation is preserved; the migrate just re-runs on the fresh volume.
+  openfga-migrate:
+    image: openfga/openfga:latest
+    command: migrate
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://postgres:postgres@postgres:5432/openfga?sslmode=disable
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: on-failure
+
   openfga:
     image: openfga/openfga:latest
     command: run
     environment:
-      OPENFGA_DATASTORE_ENGINE: memory
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://postgres:postgres@postgres:5432/openfga?sslmode=disable
+    depends_on:
+      openfga-migrate: { condition: service_completed_successfully }
     ports: ["8092:8080", "8093:8081"]
 
   meilisearch:
