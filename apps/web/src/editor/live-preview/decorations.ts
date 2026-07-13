@@ -1022,7 +1022,7 @@ class AttachmentChipWidget extends WidgetType {
 // a server-sniffed PDF within the inline cap additionally mounts the sandboxed viewer
 // an <iframe sandbox> (NO allow-scripts — the ADR-120 contract) whose src is a blob: URL of
 // the PROXIED inline bytes (authoritative Content-Type + nosniff + CSP; see the resolver).
-type AtDom = HTMLElement & { __atRo?: ResizeObserver; __atKey?: string; __atPdfMsg?: (e: MessageEvent) => void };
+type AtDom = HTMLElement & { __atRo?: ResizeObserver; __atKey?: string; __atPdfMsg?: (e: MessageEvent) => void; __atInlineDone?: boolean };
 class AttachmentCardWidget extends WidgetType {
   private ro?: ResizeObserver;
   constructor(readonly id: string, readonly name: string, readonly selected: boolean) { super(); }
@@ -1057,44 +1057,17 @@ class AttachmentCardWidget extends WidgetType {
     card.appendChild(dl);
     wrap.appendChild(card);
 
-    const resolver = view.state.facet(attachmentResolver);
-    void resolver.meta(this.id).then((m) => {
-      if (!m) return;
-      if (m.sizeBytes != null) size.textContent = ` (${fmtBytes(m.sizeBytes)})`;
-      // v1 inline kind: PDF only (ADR-120 review). The server enforces the kind + the 25MB cap
-      // (415/413 → inlineUrl resolves null → the card stays a plain download card).
-      if (m.inlineKind === "pdf") {
-        // #273 / ADR-120 (Option B): render the sniffed-PDF bytes with OUR pdf.js inside an
-        // OPAQUE-ORIGIN iframe — `sandbox="allow-scripts"` (so pdf.js runs) but NO `allow-same-origin`
-        // (the frame can't reach the app origin / cookies / storage). Chromium's native PDF viewer refused
-        // a fully-empty sandbox (#1447), and PDF-embedded JS must never run against an app that will accept
-        // anonymous-editor attachments (#274), so pdf.js (v6, no eval, byte→canvas) in an opaque frame is
-        // the containment. The parent (which already view-gate-fetched the bytes) posts them IN — a blob
-        // URL is origin-scoped and unreadable by the opaque frame, so we transfer the ArrayBuffer instead.
-        void resolver.inlineUrl(this.id).then(async (url) => {
-          if (!url || !wrap.isConnected) return;
-          const bytes = await fetch(url).then((r) => r.arrayBuffer()).catch(() => null);
-          URL.revokeObjectURL(url); // the bytes are captured; drop the blob URL
-          if (!bytes || !wrap.isConnected) return;
-          const frame = document.createElement("iframe");
-          frame.setAttribute("sandbox", "allow-scripts"); // opaque origin; NO allow-same-origin
-          frame.className = "cm-lp-attachment-frame";
-          frame.title = this.name || "attachment";
-          frame.setAttribute("data-testid", "attachment-inline-frame");
-          frame.src = "/pdf-frame.html";
-          // Hand the bytes over once the frame signals ready; size the frame to the rendered content.
-          const onMsg = (e: MessageEvent) => {
-            if (e.source !== frame.contentWindow) return;
-            const d = e.data as { type?: string; height?: number };
-            if (d?.type === "pdf-frame:ready") { try { frame.contentWindow?.postMessage(bytes, "*", [bytes]); } catch { /* frame gone */ } }
-            else if (d?.type === "pdf-frame:rendered" && typeof d.height === "number") { frame.style.height = `${Math.min(d.height + 4, 800)}px`; }
-          };
-          window.addEventListener("message", onMsg);
-          wrap.__atPdfMsg = onMsg; // removed in destroy() (below) so it never outlives the widget DOM
-          wrap.appendChild(frame);
-        });
-      }
+    // #273 (2): a DOWNLOAD card (non-inline binary) downloads on a click ANYWHERE in the card, not just
+    // the ⤓. A PDF INLINE card is excluded (the body is the viewer — only its header ⤓ downloads). The wrap's
+    // mousedown still selects the atom (ring) first, so a click both selects AND downloads (owner-approved).
+    card.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("button")) return; // the ⤓ (or edit) button handles itself
+      if (wrap.querySelector(".cm-lp-attachment-frame")) return; // an inline PDF card — header click never downloads
+      e.preventDefault();
+      triggerAttachmentDownload(view, this.id);
     });
+
+    this.ensureInlineMount(view, wrap, size);
 
     // Click selects the atom (ring), never reveals raw — raw is explicit entry only (Ctrl+Enter / pill).
     wrap.addEventListener("mousedown", (e) => {
@@ -1122,12 +1095,74 @@ class AttachmentCardWidget extends WidgetType {
     wrap.__atKey = this.key();
     return wrap;
   }
+  // #273 (1): resolve the attachment meta and, for a PDF, mount the inline pdf.js frame — IDEMPOTENTLY.
+  // The async continuation is torn down by `wrap.isConnected` if the wrap disconnects (e.g. the publish
+  // transition rebuilds the widget DOM while this is in flight), and `updateDOM` reuses the surviving DOM
+  // (no fresh toDOM). Previously the aborted mount never re-ran on the surviving DOM → the PDF frame only
+  // appeared after a reload. Now updateDOM re-invokes this when the mount hasn't completed (`__atInlineDone`),
+  // and the guards (done-flag + frame-present) make it safe to call again on an already-mounted card.
+  private ensureInlineMount(view: EditorView, wrap: AtDom, size: HTMLElement) {
+    if (wrap.__atInlineDone) return;
+    const resolver = view.state.facet(attachmentResolver);
+    void resolver.meta(this.id).then((m) => {
+      if (!m) return; // couldn't resolve → leave undone so a later updateDOM re-attempts
+      if (m.sizeBytes != null && size.textContent === "") size.textContent = ` (${fmtBytes(m.sizeBytes)})`;
+      // v1 inline kind: PDF only (ADR-120 review). The server enforces the kind + the 25MB cap
+      // (415/413 → inlineUrl resolves null → the card stays a plain download card).
+      if (m.inlineKind !== "pdf") { wrap.__atInlineDone = true; return; } // non-inline → done (never re-run)
+      if (wrap.querySelector(".cm-lp-attachment-frame")) { wrap.__atInlineDone = true; return; } // already mounted
+      // Claim the mount SYNCHRONOUSLY so a concurrent ensureInlineMount (toDOM + updateDOM racing across the
+      // publish transition) doesn't double-mount; reset it on failure so updateDOM can retry.
+      wrap.__atInlineDone = true;
+      // #273 / ADR-120 (Option B): render the sniffed-PDF bytes with OUR pdf.js inside an
+      // OPAQUE-ORIGIN iframe — `sandbox="allow-scripts"` (so pdf.js runs) but NO `allow-same-origin`
+      // (the frame can't reach the app origin / cookies / storage). Chromium's native PDF viewer refused
+      // a fully-empty sandbox (#1447), and PDF-embedded JS must never run against an app that will accept
+      // anonymous-editor attachments (#274), so pdf.js (v6, no eval, byte→canvas) in an opaque frame is
+      // the containment. The parent (which already view-gate-fetched the bytes) posts them IN — a blob
+      // URL is origin-scoped and unreadable by the opaque frame, so we transfer the ArrayBuffer instead.
+      void resolver.inlineUrl(this.id).then(async (url) => {
+        if (!url) { wrap.__atInlineDone = false; return; } // no inline route → allow a retry
+        // NB: do NOT revoke `url` — the resolver caches this blob URL (blobCache, alive until page unload)
+        // and hands the SAME url back on a later render (publish→view re-mount). Revoking it here (the old
+        // #273 bug) killed the cached URL, so the second render's fetch failed and the frame never
+        // reappeared without a reload.
+        const bytes = await fetch(url).then((r) => r.arrayBuffer()).catch(() => null);
+        if (!bytes) { wrap.__atInlineDone = false; return; }
+        if (wrap.querySelector(".cm-lp-attachment-frame")) return; // a concurrent mount already won
+        // #273 (1): do NOT abort on a transient `!wrap.isConnected` — the publish transition briefly
+        // detaches the reused card DOM while it swaps draft→published, and the old code dropped the mount
+        // permanently (the frame only returned on reload). Append to the captured wrap regardless; if it is
+        // the live/reused node the frame shows, and destroy removes the listener when CM discards the DOM.
+        const frame = document.createElement("iframe");
+        frame.setAttribute("sandbox", "allow-scripts"); // opaque origin; NO allow-same-origin
+        frame.className = "cm-lp-attachment-frame";
+        frame.title = this.name || "attachment";
+        frame.setAttribute("data-testid", "attachment-inline-frame");
+        frame.src = "/pdf-frame.html";
+        // Hand the bytes over once the frame signals ready; size the frame to the rendered content.
+        const onMsg = (e: MessageEvent) => {
+          if (e.source !== frame.contentWindow) return;
+          const d = e.data as { type?: string; height?: number };
+          if (d?.type === "pdf-frame:ready") { try { frame.contentWindow?.postMessage(bytes, "*", [bytes]); } catch { /* frame gone */ } }
+          else if (d?.type === "pdf-frame:rendered" && typeof d.height === "number") { frame.style.height = `${Math.min(d.height + 4, 800)}px`; }
+        };
+        window.addEventListener("message", onMsg);
+        wrap.__atPdfMsg = onMsg; // removed in destroy() (below) so it never outlives the widget DOM
+        wrap.appendChild(frame);
+      });
+    });
+  }
   // A selection-only change must NOT rebuild (a rebuild re-fetches and reloads the PDF frame
   // the same flicker rule as the standalone image, #255).
-  updateDOM(dom: HTMLElement): boolean {
+  updateDOM(dom: HTMLElement, view: EditorView): boolean {
     if ((dom as AtDom).__atKey !== this.key()) return false;
     this.ro = (dom as AtDom).__atRo;
     dom.classList.toggle("cm-lp-atom-sel", this.selected);
+    // #273 (1): if a prior mount was aborted (the publish transition disconnected the earlier wrap),
+    // this surviving DOM never got its PDF frame. Re-run the idempotent mount so it appears without a reload.
+    const size = dom.querySelector<HTMLElement>(".cm-lp-attachment-size");
+    if (size) this.ensureInlineMount(view, dom as AtDom, size);
     return true;
   }
   destroy(dom: HTMLElement) {
