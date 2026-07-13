@@ -47,6 +47,7 @@ import { brandingPlugin } from './routes/branding.js'
 import { tenantOidcPlugin } from './routes/tenant-oidc.js'
 import { orphanDraftsPlugin } from './routes/orphan-drafts.js'
 import { customDomainsPlugin } from './routes/custom-domains.js'
+import { mcpOAuthMetadataPlugin } from './routes/mcp-oauth-metadata.js'
 import { enrollmentPlugin } from './auth/enroll-domains.js'
 import { aiPlugin } from './routes/ai.js'
 // #178 / ADR-084: SCIM (scim-tokens + scim router) is EE and now lives in @wikistead-ee/server; it is
@@ -350,6 +351,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(orphanDraftsPlugin)
   await app.register(webhooksPlugin)
   await app.register(customDomainsPlugin)
+  await app.register(mcpOAuthMetadataPlugin) // #311 / ADR-131: MCP OAuth 2.1 discovery metadata (public; no token/DCR yet)
   await app.register(enrollmentPlugin)
   // #178: SAML (tenant-saml + saml-auth) is an EE feature — physically moved to packages/ee-server and
   // mounted via the getEeFeatures seam by the EE composition root. A CE build registers no SAML here.
