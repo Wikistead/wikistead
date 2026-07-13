@@ -3181,7 +3181,14 @@ const RENDERERS: BlockRenderer[] = [
       // real href). Its `[ ]` markers stay visible (the LinkMark visitor below). Only `[text](url)` (a
       // resolvable href) gets the clickable link mark.
       const href = linkHref(src);
-      if (!href) return;
+      if (!href) {
+        // #323a bare `[text]` is literal CommonMark text — but the SYNTAX HIGHLIGHTER still tints the
+        // Link node blue (tags.link), so at caret-AWAY the literal `[text]` reads as a link. Override it to the
+        // body colour so it looks like plain text (reader parity). At caret-in (revealed line) the syntax colour
+        // is fine — like any other raw markdown being edited — so only override when NOT revealed.
+        if (!lineRevealed(ctx.state, node.from)) ctx.add(Decoration.mark({ class: "cm-lp-link-plain" }), node.from, node.to);
+        return;
+      }
       ctx.add(Decoration.mark({ class: "cm-lp-link", attributes: { "data-href": href } }), node.from, node.to);
     },
   },
@@ -3819,6 +3826,10 @@ export const livePreviewTheme = EditorView.baseTheme({
     padding: "0 3px",
   },
   ".cm-lp-link": { color: "var(--link, #4ea1ff)", textDecoration: "underline" }, // #223: semantic token, not a hardcoded blue
+  // #323a bare `[text]` (no href) at caret-away — cancel the syntax highlighter's link tint so it reads
+  // as plain body text (reader parity). The highlight span nests INSIDE this mark span, so force the inner span
+  // to inherit too (a mark-only rule would be overridden by the inner highlight colour).
+  ".cm-lp-link-plain, .cm-lp-link-plain span": { color: "inherit !important", textDecoration: "none !important" },
   // #276 / ADR-117: a dead internal link (target not viewable) reads as struck-through + dimmed. Layered
   // OVER cm-lp-link (a second mark), so line-through + the muted colour win over the link's underline/colour.
   ".cm-lp-link-dead": { textDecoration: "line-through", color: "var(--fg-dim, #8a8f98)", cursor: "pointer" },
