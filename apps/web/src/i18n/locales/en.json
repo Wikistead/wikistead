@@ -819,8 +819,9 @@
     "changedStartWysiwyg": "Set your startup mode to WYSIWYG",
     "changedHidWysiwyg": "Hid the WYSIWYG mode from the switch",
     "changedHidMarkdownModes": "Hid the Live and Source modes from the switch",
+    "changedBalancedModes": "Kept Live, Reading and WYSIWYG (Source is in Settings)",
     "bannerText": "New: tailor the editor to how you write.",
     "bannerCta": "Set it up",
-    "skippedMarkdownNote": "We set the editor up for Markdown (vim off, no WYSIWYG). You can change this any time in Settings, or with “redo the questions”."
+    "skippedNote": "We set up a balanced editor for you (vim off, with WYSIWYG). You can change this any time in Settings, or with “redo the questions”."
   }
 }

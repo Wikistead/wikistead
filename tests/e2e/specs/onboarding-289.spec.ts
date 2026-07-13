@@ -57,30 +57,31 @@ test("#289 first run: vim answer applies the vim preset and the dialog never re-
   await expect(page.getByTestId("onboarding-dialog")).toHaveCount(0);
 });
 
-// #347 (ADR-115 addendum, supersedes the old "skip = full chrome" ruling): skipping now applies the MARKDOWN
-// persona preset explicitly (vim off, no WYSIWYG, launch Live) — the most common "didn't answer" profile —
-// with a note on the done screen (not a silent change). It is an explicit per-member write, NOT a change to
-// the chrome=null default, so backfilled members are unaffected. Ctrl+Alt+V keeps vim reachable.
-test("#347 skip applies the Markdown preset (vim off, no WYSIWYG) with a note, not full chrome", async ({ browser }) => {
+// #347 (ADR-115 addendum, supersedes the old "skip = full chrome" and the first "skip = markdown" ruling):
+// skipping now applies a BALANCED preset (vim off, launch Live, Live/Reading/WYSIWYG — Source hidden) — the
+// "didn't answer" member wants WYSIWYG, not raw Source (a power mode they can add in Settings) — with a note on
+// the done screen (not a silent change). It is an explicit per-member write, NOT a change to the chrome=null
+// default, so backfilled members are unaffected. Ctrl+Alt+V keeps vim reachable.
+test("#347 skip applies the balanced preset (vim off, WYSIWYG on, no Source) with a note, not full chrome", async ({ browser }) => {
   await armFirstRun();
   const page = await (await browser.newContext()).newPage();
   await openDemo(page);
   await expect(page.getByTestId("onboarding-dialog")).toBeVisible({ timeout: 8000 });
   await page.getByTestId("onboarding-skip").click();
-  // Skip lands on the done screen with a Markdown note (never a silent change), then close.
+  // Skip lands on the done screen with a note (never a silent change), then close.
   await expect(page.getByTestId("onboarding-done")).toBeVisible();
   await page.getByTestId("onboarding-close").click();
   await sleep(600); // let the PATCH settle
 
   const s = await mySettings(page);
-  expect(s.editorChrome).toEqual({ vimToggleVisible: false, modesVisible: { live: true, source: true, reading: true, wysiwyg: false } });
+  expect(s.editorChrome).toEqual({ vimToggleVisible: false, modesVisible: { live: true, source: false, reading: true, wysiwyg: true } });
   expect(s.editorDisplayMode).toBe("live");
   expect(s.onboardingCompletedAt).not.toBeNull();
 
   await enterEdit(page);
-  await expect(page.getByTestId("vim-toggle")).toHaveCount(0); // vim button hidden (markdown preset)
-  await expect(page.getByTestId("displaymode-wysiwyg")).toHaveCount(0); // WYSIWYG hidden
-  for (const m of ["live", "source", "reading"]) await expect(page.getByTestId(`displaymode-${m}`)).toBeVisible();
+  await expect(page.getByTestId("vim-toggle")).toHaveCount(0); // vim button hidden (balanced preset)
+  await expect(page.getByTestId("displaymode-source")).toHaveCount(0); // Source hidden (power mode → Settings)
+  for (const m of ["live", "reading", "wysiwyg"]) await expect(page.getByTestId(`displaymode-${m}`)).toBeVisible();
   // no dead-end: Ctrl+Alt+V still toggles vim even with the button hidden (ADR-115 §3)
   await page.keyboard.press("Control+Alt+v");
   await sleep(200);

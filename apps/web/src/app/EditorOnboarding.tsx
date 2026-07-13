@@ -19,6 +19,12 @@ const CHROME: Record<Persona, EditorChromeVisibility> = {
   markdown: { vimToggleVisible: false, modesVisible: { live: true, source: true, reading: true, wysiwyg: false } },
   wysiwyg: { vimToggleVisible: false, modesVisible: { live: false, source: false, reading: true, wysiwyg: true } },
 };
+// #347 the SKIP ("answer later") default is its OWN balanced preset, not the markdown persona. The
+// "didn't answer" member is better served by WYSIWYG than raw Source (a power-user mode they can add from
+// settings), so skip shows Live / Reading / WYSIWYG (Source hidden), vim off, launch Live. The explicit
+// "markdown" persona is unchanged (it keeps Source for the raw-markdown crowd).
+const SKIP_CHROME: EditorChromeVisibility = { vimToggleVisible: false, modesVisible: { live: true, source: false, reading: true, wysiwyg: true } };
+const SKIP_CHANGE_KEYS = ["onboarding.changedHidVim", "onboarding.changedStartLive", "onboarding.changedBalancedModes"];
 // What each preset changes — the completion screen lists these lines (ADR-115 §1/§6).
 const CHANGE_KEYS: Record<Persona, string[]> = {
   vim: ["onboarding.changedVimOn", "onboarding.changedStartLive", "onboarding.changedHidWysiwyg"],
@@ -51,13 +57,13 @@ export function EditorOnboardingDialog({ open, onClose }: { open: boolean; onClo
     setStep("done");
   };
   const skip = () => {
-    // #347 / ADR-115 addendum: skipping ("answer later") now applies the MARKDOWN persona preset — the most
-    // common "didn't answer" profile is a markdown, not-vim user. This is an EXPLICIT write scoped to this
-    // member (NOT a change to the chrome=null default, which would silently strip vim from backfilled members).
-    // Vim stays reachable via Ctrl+Alt+V (no dead-end), and the done screen shows a note (never a silent change).
-    setPersona("markdown");
+    // #347 / ADR-115 addendum (revision): skipping ("answer later") applies a BALANCED preset — the most
+    // common "didn't answer" profile wants WYSIWYG, not raw Source (vim off, launch Live, Source hidden). This is
+    // an EXPLICIT write scoped to this member (NOT a change to the chrome=null default, which would silently strip
+    // vim from backfilled members). Vim stays reachable via Ctrl+Alt+V (no dead-end); the done screen shows a note.
+    setPersona(null);
     setSkipped(true);
-    update.mutate({ editorChrome: CHROME.markdown, editorDisplayMode: "live", onboardingCompleted: true });
+    update.mutate({ editorChrome: SKIP_CHROME, editorDisplayMode: "live", onboardingCompleted: true });
     setStep("done");
   };
 
@@ -93,11 +99,11 @@ export function EditorOnboardingDialog({ open, onClose }: { open: boolean; onClo
             </button>
           </div>
         )}
-        {step === "done" && persona && (
+        {step === "done" && (persona || skipped) && (
           <div className="flex flex-col gap-3" data-testid="onboarding-done">
-            <p>{skipped ? t("onboarding.skippedMarkdownNote") : t("onboarding.doneBody")}</p>
+            <p>{skipped ? t("onboarding.skippedNote") : t("onboarding.doneBody")}</p>
             <ul className="flex flex-col gap-1">
-              {CHANGE_KEYS[persona].map((k) => (
+              {(skipped ? SKIP_CHANGE_KEYS : CHANGE_KEYS[persona!]).map((k) => (
                 <li key={k} className="flex items-center gap-2 text-sm"><Check size={14} className="flex-none text-[var(--accent)]" /> {t(k)}</li>
               ))}
             </ul>
