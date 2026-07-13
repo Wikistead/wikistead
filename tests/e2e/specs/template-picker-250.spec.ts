@@ -48,6 +48,42 @@ test("#250: the template picker creates a page seeded from the template", async 
   await expect(page.locator("[data-pane=preview] .cm-content")).toContainText("went well");
 });
 
+// #366: the template picker now shares the embed/page-link picker keyboard model — the FIRST candidate is
+// auto-highlighted (so Enter confirms without arrowing → the preview follows), and Ctrl-j/k / arrows move the
+// highlight over the flattened list. Real Chromium (the auto-select + keyboard nav are runtime behaviours).
+test("#366: the template picker auto-selects the first item and Enter confirms it (keyboard nav)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const src = await openScratch(page, `pick-kbd-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("# Keyboard template\n\n- first item\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(700);
+
+  await page.goto(`/p/${src}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await page.getByTestId("page-overflow-trigger").click();
+  await page.getByTestId("save-template-open").click();
+  await page.getByTestId("template-name").fill("Keyboard Template");
+  await page.getByTestId("save-template-submit").click();
+  await sleep(500);
+
+  await page.getByTestId("new-page-from-template").click();
+  await page.waitForSelector("[data-testid=template-picker]");
+  // the first candidate is auto-highlighted (no click) → its preview renders and Enter can confirm it.
+  const first = page.getByTestId("template-picker-item").first();
+  await expect(first).toBeVisible({ timeout: 8000 });
+  await expect(first).toHaveAttribute("data-selected", "true");
+  await expect(page.getByTestId("template-picker-preview-body").locator(".cm-content")).toContainText("Keyboard template", { timeout: 8000 });
+  // Enter (no click on the Use button) creates the page from the auto-highlighted template.
+  await page.keyboard.press("Enter");
+  await page.waitForURL(/\/p\/.*edit=1/, { timeout: 8000 });
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(500);
+  await expect(page.locator("[data-pane=preview] .cm-content")).toContainText("Keyboard template");
+});
+
 // #267: the picker preview mounts the EDITOR'S OWN read-only CM surface (mountPublishedView), so it
 // renders structurally identical to a real page — math (KaTeX), a todo checkbox (display-only), syntax
 // highlighting, line WRAPPING, a callout panel, mermaid centering, nested :::tabs and a :::table all come

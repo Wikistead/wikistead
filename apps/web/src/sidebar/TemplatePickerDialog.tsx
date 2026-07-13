@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileStack } from "lucide-react";
 import { TemplateBodyPreview } from "../editor/TemplateBodyPreview";
@@ -27,6 +27,10 @@ export function TemplatePickerDialog({
   const { data, isLoading } = useTemplates(open);
   const [selected, setSelected] = useState<string | null>(null);
   const body = useTemplateBody(open ? selected : null);
+  const selectedRef = useRef<HTMLButtonElement | null>(null);
+  // Keep the highlighted row visible as Ctrl-j/k / arrows walk a long, scrolling list (block:"nearest" scrolls
+  // the minimum needed). Fires only on selection change, so it costs nothing while the list is static.
+  useEffect(() => { selectedRef.current?.scrollIntoView({ block: "nearest" }); }, [selected]);
 
   // Group into the three ADR-110 buckets. Space-scope templates are shown only for the CURRENT space
   // (the picker is contextual to where the page will be created); personal/tenant are always relevant.
@@ -43,9 +47,29 @@ export function TemplatePickerDialog({
 
   const empty = !isLoading && groups.length === 0;
 
+  // #366: unify the picker keyboard model with the embed/page-link picker (PageEmbedPicker) — auto-highlight the
+  // first candidate (Enter confirms without arrowing → the right preview follows), and move the highlight with
+  // Ctrl-j/k / arrows over the FLATTENED order (the visual top-to-bottom sequence across the scope groups).
+  const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);
+  useEffect(() => {
+    if (flat.length === 0) { if (selected !== null) setSelected(null); return; }
+    if (!flat.some((i) => i.id === selected)) setSelected(flat[0]!.id);
+  }, [flat, selected]);
+  const moveSelection = (delta: number) => {
+    if (flat.length === 0) return;
+    const cur = flat.findIndex((i) => i.id === selected);
+    const next = cur < 0 ? 0 : Math.min(flat.length - 1, Math.max(0, cur + delta));
+    setSelected(flat[next]!.id);
+  };
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "j")) { e.preventDefault(); moveSelection(+1); }
+    else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "k")) { e.preventDefault(); moveSelection(-1); }
+    else if (e.key === "Enter" && selected) { e.preventDefault(); onPick(selected); }
+  };
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent data-testid="template-picker" className="sm:max-w-[720px] max-h-[85vh] overflow-hidden">
+      <DialogContent data-testid="template-picker" className="sm:max-w-[720px] max-h-[85vh] overflow-hidden" onKeyDown={onKeyDown}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><FileStack size={16} /> {t("templatePicker.title")}</DialogTitle>
         </DialogHeader>
@@ -71,6 +95,7 @@ export function TemplatePickerDialog({
                     <button
                       key={tpl.id}
                       type="button"
+                      ref={selected === tpl.id ? selectedRef : undefined}
                       data-testid="template-picker-item"
                       data-selected={selected === tpl.id ? "true" : undefined}
                       onClick={() => setSelected(tpl.id)}
