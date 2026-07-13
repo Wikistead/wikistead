@@ -9,6 +9,26 @@ import { mountSourceEditor } from "./source-editor"; // #243 / ADR-111 C3: CM6 m
 let seq = 0;
 const nextId = () => `wks-mermaid-${seq++}`;
 
+// #352: LRU cache of rendered SVGs, keyed on (theme + code). CM6 virtualizes — it DESTROYS a block widget that
+// scrolls out of the viewport — so without a cache a re-entered ```mermaid re-runs the full mermaid.render
+// (parse + layout + SVG gen) from scratch every time, the scroll-jank + async-burst the ticket measured. A
+// cache hit re-injects the SAME SVG synchronously (no async render, no height re-settle). The SVG's baked id is
+// reused verbatim, which the anti-test pins as the cache-hit signal (a body/theme edit changes the key → a
+// fresh render → a new id). Bounded so a huge document can't grow it without limit. Only successful renders
+// laid out at a REAL width are cached (a degenerate width-0 render — a hidden tab, #174 — is never stored).
+const SVG_CACHE_MAX = 60;
+const svgCache = new Map<string, string>();
+function svgCacheGet(key: string): string | undefined {
+  const v = svgCache.get(key);
+  if (v !== undefined) { svgCache.delete(key); svgCache.set(key, v); } // LRU touch (move to most-recent)
+  return v;
+}
+function svgCacheSet(key: string, svg: string): void {
+  svgCache.delete(key);
+  svgCache.set(key, svg);
+  while (svgCache.size > SVG_CACHE_MAX) { const oldest = svgCache.keys().next().value; if (oldest === undefined) break; svgCache.delete(oldest); }
+}
+
 // Lazy-loaded so mermaid (large) stays out of the main bundle — imported on first
 // render of a ```mermaid block. `securityLevel: "strict"` makes mermaid sanitize the
 // SVG it produces (it bundles DOMPurify), so user-authored diagram text cannot inject
@@ -75,6 +95,10 @@ export const mermaidMacro: FenceMacro = {
     const fig = document.createElement("div");
     fig.className = "cm-lp-mermaid-fig";
     el.appendChild(fig);
+    // #352: cache key is (theme + code). A hit re-injects the cached SVG synchronously — no mermaid.render, no
+    // async paint, no height re-settle on scroll re-entry (the measured jank). The id baked into the cached SVG
+    // is reused (the anti-test's cache-hit signal).
+    const cacheKey = `${ctx.theme ?? "light"}\x00${code}`;
     // #174(1): mermaid sizes a diagram by MEASURING text via layout. Inside a display:none tab
     // panel that measures 0, so the SVG comes out degenerate (a tiny sliver). Paint once now; then re-paint
     // ONCE the element first gains a real width — a ResizeObserver fires when the tab activates (display:none
@@ -93,6 +117,7 @@ export const mermaidMacro: FenceMacro = {
           const { svg } = await renderMermaidOffscreen(mermaid, id, code, el.clientWidth);
           fig.innerHTML = svg; // sanitized by mermaid (securityLevel: strict)
           paintedWidth = el.clientWidth;
+          if (paintedWidth > 0) svgCacheSet(cacheKey, svg); // #352: cache a real-width render for scroll re-entry
         } catch {
           el.classList.add("cm-lp-macro-error");
           fig.textContent = "Invalid mermaid diagram"; // in-macro only (suppressErrorRendering stops the body bomb)
@@ -101,7 +126,17 @@ export const mermaidMacro: FenceMacro = {
         }
       });
     };
-    paint();
+    // #352: on a cache hit (a diagram re-entering the viewport, or an identical one already rendered this
+    // session), inject the cached SVG SYNCHRONOUSLY and skip the async render — mark it painted so the
+    // ResizeObserver below won't re-paint it. A cache MISS falls through to the async paint (and stores the
+    // result). paintedWidth is set nonzero so the RO's "gained a real width" re-paint doesn't re-run it.
+    const cached = svgCacheGet(cacheKey);
+    if (cached) {
+      fig.innerHTML = cached;
+      paintedWidth = el.clientWidth || 1;
+    } else {
+      paint();
+    }
     const ro = new ResizeObserver(() => { if (paintedWidth === 0 && el.clientWidth > 0) paint(); });
     ro.observe(el);
     return el;
