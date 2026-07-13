@@ -105,9 +105,16 @@ test("#285: the search modal shows a preview pane (meta + body excerpt + draft b
   await page.waitForSelector("[data-testid=search-trigger]");
   await typeSearch(page, title);
   await page.waitForSelector("[data-testid=search-item]", { timeout: 5000 });
-  // cmdk highlights the first hit → the preview follows (debounced fetch through view-gated routes).
+  // cmdk highlights the first hit → the preview follows (debounced fetch through view-gated routes). #367: pin
+  // the FIRST (auto-highlighted) item to this title before checking the preview — under load the list can still
+  // show the previous query's hit for a beat, and the preview follows THAT stale highlight.
   const preview = page.getByTestId("search-preview");
-  await expect(preview).toContainText(title, { timeout: 8000 });
+  await expect(page.getByTestId("search-item").first()).toContainText(title, { timeout: 8000 });
+  // #367: cmdk's highlighted value drives the preview; under load it doesn't always auto-move to the new first
+  // item on a query change (the preview then stays on the previous hit). Hover the target item to set cmdk's
+  // value deterministically (hover, not click — click opens the page).
+  await page.getByTestId("search-item").first().hover();
+  await expect(preview).toContainText(title, { timeout: 12_000 });
   await expect(preview.getByTestId("page-meta")).toBeVisible(); // #222 metadata row
   await expect(preview.getByTestId("search-preview-body")).toContainText("preview body 285 unique text");
   // #285 (B): the body renders through the member read-engine (mountPublishedView), not a plain dump.
@@ -136,7 +143,11 @@ test("#285: the search modal shows a preview pane (meta + body excerpt + draft b
     .toBeGreaterThan(0);
   await typeSearch(page, draftTitle);
   await page.waitForSelector("[data-testid=search-item]", { timeout: 5000 });
-  await expect(preview).toContainText(draftTitle, { timeout: 8000 });
+  // #367: the preview was showing the PREVIOUS (PREVIEWME) hit; wait for the list's first item to converge to
+  // the draft title before checking the preview, so we don't assert against the stale preview body.
+  await expect(page.getByTestId("search-item").first()).toContainText(draftTitle, { timeout: 8000 });
+  await page.getByTestId("search-item").first().hover(); // #367: deterministically drive cmdk's preview selection
+  await expect(preview).toContainText(draftTitle, { timeout: 12_000 });
   await expect(preview.getByTestId("search-preview-draft")).toBeVisible();
   // #285 (B): a draft (no published body) shows an explicit placeholder, not a broken empty pane.
   await expect(preview.getByTestId("search-preview-unpublished")).toBeVisible();

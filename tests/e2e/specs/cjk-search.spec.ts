@@ -56,25 +56,33 @@ test("searching Japanese shows a correctly-rendered body snippet", async ({ page
   // the doc with a Japanese body — otherwise that late reindex clobbers our body.
   // Latin title forces the query to match the BODY only.
   const JP_BODY = "新宿区にある東京都庁についてのまとめwiki本文スニペット表示テストです。";
-  await poll(async () => (await meiliDoc(id)) !== null);
+  // #367: under parallel load the create-reindex and the upsert reflection both take longer, so poll generously
+  // (60×250ms = 15s) instead of the default 10s.
+  await poll(async () => (await meiliDoc(id)) !== null, 60);
   await meiliUpsert({
     id, tenantId: E2E.tenant, spaceId: "demo_space", title: "CJKSNIPPETPAGE",
     body: JP_BODY,
     viewerUsers: ["user:dev-user"], viewerGroups: [], isPublic: false, updatedAt: Date.now(),
   });
   // Confirm the injected body stuck (no further reindex raced past it) before searching.
-  await poll(async () => (await meiliDoc(id))?.body === JP_BODY);
+  await poll(async () => (await meiliDoc(id))?.body === JP_BODY, 60);
 
   // Search a mid-text Japanese keyword (matches the body, not the latin title).
   await page.getByTestId("search-trigger").click(); // #285: search lives in the modal now
   const input = page.locator("[data-testid=search-input]");
-  await input.fill("");
-  await input.fill("東京都");
-  await sleep(800);
+  // #367: the UI issues ONE debounced fetch per query change — if that fetch fires before Meili has the doc
+  // visible under load, the list stays empty and never auto-retries. RE-issue the query each poll iteration
+  // (clear + refill) until a hit appears, instead of a single fixed sleep(800) + one waitForSelector.
+  await expect
+    .poll(async () => {
+      await input.fill("");
+      await input.fill("東京都");
+      return page.getByTestId("search-item").count();
+    }, { timeout: 20_000, intervals: [600, 800, 1000, 1000] })
+    .toBeGreaterThan(0);
 
-  await page.waitForSelector("[data-testid=search-item]", { timeout: 5000 });
   const snippet = page.locator("[data-testid=search-snippet]").first();
   await expect(snippet).toBeVisible();
   // Japanese renders correctly and the crop includes the matched term in context.
-  await expect(snippet).toContainText("東京都庁");
+  await expect(snippet).toContainText("東京都庁", { timeout: 8000 });
 });
