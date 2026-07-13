@@ -172,6 +172,33 @@ function taskStates(md: string): boolean[] {
   return states
 }
 
+// #316 / ADR-123: the ordered task LABELS (the text after each checkbox). Two docs share the same task
+// COMPOSITION iff these sequences are equal — same tasks, same order — regardless of the prose around them
+// or their checked states. `taskSkeleton` above is the WHOLE-doc guard for the one-flip toggle (same prose);
+// this is the task-STRUCTURE-only skeleton the restore reconciliation needs, because a restore legitimately
+// changes the surrounding prose.
+const TASK_LINE = /^([ \t]*(?:[-*+]|\d+[.)])[ \t]+)\[[ xX]\][ \t](.*)$/gm
+function taskLabels(md: string): string[] {
+  const out: string[] = []
+  for (const m of md.matchAll(TASK_LINE)) out.push(m[2].trimEnd())
+  return out
+}
+
+// #316 / ADR-123: reconcile a restore target's checkbox states with the CURRENT ones. When the task
+// composition is unchanged (same labels in the same order), overlay the CURRENT checked/unchecked states
+// onto the target's prose — restoring the BODY must not silently revert live task progress (case a). When a
+// task was added / removed / reordered, the target's own snapshot states stand (fallback — an ordinal
+// overlay would mis-map). Checkbox state stays INLINE in the markdown (the ADR-123 invariant), so export /
+// search / render / the #290 ring stay correct by construction. Pure — unit-tested.
+export function reconcileTaskChecks(currentMd: string, targetMd: string): string {
+  const cur = taskLabels(currentMd)
+  const tgt = taskLabels(targetMd)
+  if (cur.length !== tgt.length || !cur.every((l, i) => l === tgt[i])) return targetMd // composition differs → fallback
+  const states = taskStates(currentMd)
+  let i = 0
+  return targetMd.replace(TASK_MARKER, (_m, lead: string) => `${lead}[${states[i++] ? 'x' : ' '}]`)
+}
+
 // ── Service functions ─────────────────────────────────────────────────────
 
 // Create a page. Outbox entry is written in the same DB transaction as the

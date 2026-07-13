@@ -9,6 +9,7 @@ import { pool } from '../db/pool.js'
 import type { TenantDb } from '../db/index.js'
 import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc, readRevisionYdoc } from './revision-ydoc.js'
+import { reconcileTaskChecks } from './pages.js' // #316 / ADR-123: restore-time checkbox reconciliation
 
 interface RevisionRow {
   id: string; tenant_id: string; page_id: string
@@ -31,20 +32,24 @@ export interface RevisionSummary {
 // Yjs retains tombstones permanently, so repeated restores grow pages.ydoc.
 // Consider Y.Doc GC (Y.applyUpdate with gc=true) or compaction for high-frequency use.
 export function computeRestoreUpdate(current: Buffer, snapshot: Buffer): Uint8Array {
+  const snapDoc = new Y.Doc()
+  Y.applyUpdate(snapDoc, new Uint8Array(snapshot))
+  return computeRestoreUpdateToText(current, snapDoc.getText('content').toString())
+}
+
+// The same delete+insert delta, but targeting an already-decoded body TEXT — so the caller can transform
+// the snapshot text (e.g. #316 checkbox reconciliation) before building the restore update.
+export function computeRestoreUpdateToText(current: Buffer, targetText: string): Uint8Array {
   const currentDoc = new Y.Doc()
   Y.applyUpdate(currentDoc, new Uint8Array(current))
   const currentSV = Y.encodeStateVector(currentDoc)
-
-  const snapDoc = new Y.Doc()
-  Y.applyUpdate(snapDoc, new Uint8Array(snapshot))
-  const snapText = snapDoc.getText('content').toString()
 
   // Build restore operations on top of current state
   const restoreDoc = new Y.Doc()
   Y.applyUpdate(restoreDoc, new Uint8Array(current))
   const t = restoreDoc.getText('content')
   t.delete(0, t.length)
-  t.insert(0, snapText)
+  t.insert(0, targetText)
 
   // Return only the delta (operations added since currentDoc state)
   return Y.encodeStateAsUpdate(restoreDoc, currentSV)
@@ -154,7 +159,15 @@ export async function restoreRevision(
   if (!current.ydoc) throw Object.assign(new Error('no saved ydoc for this page'), { statusCode: 409 })
 
   const revBytes = await readRevisionYdoc(storage, rev) // dual-read of the target revision
-  const restoreUpdate = computeRestoreUpdate(current.ydoc, Buffer.from(revBytes))
+  // #316 / ADR-123: restoring the BODY must not silently revert live task progress. Reconcile the target
+  // revision's checkbox states against the CURRENT ones: unchanged task composition → keep the current
+  // checked/unchecked (overlaid onto the restored prose); added/removed/reordered tasks → the revision's
+  // own snapshot states stand. Checkbox state stays inline in the markdown (no new store), so the restore
+  // writes it to BOTH pages.ydoc (draft) and published_md below — one consistent write (no #303 dirty skew).
+  const snapDoc = new Y.Doc(); Y.applyUpdate(snapDoc, new Uint8Array(revBytes))
+  const currentDoc0 = new Y.Doc(); Y.applyUpdate(currentDoc0, new Uint8Array(current.ydoc))
+  const reconciledText = reconcileTaskChecks(currentDoc0.getText('content').toString(), snapDoc.getText('content').toString())
+  const restoreUpdate = computeRestoreUpdateToText(current.ydoc, reconciledText)
 
   // Apply restore update to get new full state
   const restoredDoc = new Y.Doc()
