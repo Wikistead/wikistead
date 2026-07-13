@@ -1412,6 +1412,33 @@ export async function getQueryResults(
   return out
 }
 
+// #353 / ADR-134 rev2 (Hole A): resolve a `:::query` as the ANONYMOUS principal for a PUBLIC snapshot. The live
+// `:::query` is MEMBER-only (guest 401) — a per-viewer reverse-lookup is never handed to an anonymous surface
+// (that would be the #244 re-entry hole). Instead, at PUBLISH a page's queries are resolved ONCE as
+// `user:anonymous` and the results are baked into the published page; the public/guest reader renders that static
+// snapshot. This is the security-critical primitive: it MUST resolve as the anonymous principal (NOT the
+// publisher — resolving with the publisher's grants would leak member-only titles into the public snapshot), so
+// every branch's existing per-item `view` filter drops any page not publicly viewable. Same view-filter,
+// existence-hiding, and published-only rules as getQueryResults; only the subject differs.
+export const PUBLIC_ANON_SUBJECT = 'user:anonymous' // user:* in GRANT tuples ≠ user:anonymous in CHECK (public.ts)
+
+export async function resolveAnonymousQuerySnapshot(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { pageId: string; spec: QuerySpec; context?: { current_time: string } },
+): Promise<Backlink[]> {
+  // Resolve with the anonymous subject: only pages granted `view` to user:anonymous (a `view_base@user:*` grant
+  // AND published) survive the per-item filter — a member-only page is dropped, so its title never enters the
+  // public snapshot. A non-publicly-viewable TARGET/parent throws the same uniform 404 (no public existence
+  // oracle); the caller (the publish baker) treats that as "no snapshot" (empty), never a leak.
+  try {
+    return await getQueryResults(db, fga, { pageId: args.pageId, spec: args.spec, subject: PUBLIC_ANON_SUBJECT, context: args.context })
+  } catch (e) {
+    if ((e as { statusCode?: number }).statusCode === 404) return [] // target not publicly viewable → empty snapshot
+    throw e
+  }
+}
+
 // ── #224 / ADR-104: title dictionary + excerpt (auto internal links) ─────────
 
 export interface TitleDictEntry { id: string; title: string }

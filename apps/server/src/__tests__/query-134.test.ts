@@ -2,6 +2,7 @@
 // (existence-hiding): `backlinks`/`tag` reuse getBacklinks; `children` view-gates the parent then per-child.
 // PUBLISHED-only throughout (the published graph). Real Postgres + OpenFGA.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+// resolveAnonymousQuerySnapshot imported below (with the other pages.ts exports)
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
@@ -10,7 +11,7 @@ import type { TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, deletePage, getQueryResults, parseQuerySpec } from '../routes/pages.js'
+import { createPage, deletePage, getQueryResults, parseQuerySpec, resolveAnonymousQuerySnapshot } from '../routes/pages.js'
 import type { Tenant } from '@wikistead/types'
 
 const driver = new LogicalSearchDriver()
@@ -128,5 +129,54 @@ describe('getQueryResults tag/backlinks (#324 — reuse getBacklinks view-filter
   it('backlinks lists the pages linking to THIS page', async () => {
     const rows = await getQueryResults(db, fgaClient, { pageId: tagPage, spec: { type: 'backlinks' }, subject: 'user:dev-user' })
     expect(rows.map((r) => r.id)).toContain(tagMember)
+  })
+})
+
+// #353 / ADR-134 rev2 (Hole A): resolveAnonymousQuerySnapshot — the PUBLIC snapshot resolves as `user:anonymous`,
+// NEVER as the publisher. THE binding anti-test: a member-only page that matches a query MUST NOT appear in the
+// anonymous snapshot (else the publisher's grants would leak member-only titles onto the public surface, the
+// #244 class). `user:anonymous` is a user-type principal, so a `view_base@user:*` grant (public) matches it while
+// a members-only page (no such grant) does not — the existing per-item view-filter drops it.
+describe('resolveAnonymousQuerySnapshot (#353 / ADR-134 rev2 Hole A)', () => {
+  let anonTag!: string
+  let pubMember!: string
+  let memberOnly!: string
+  const anonGrants: { user: string; relation: string; object: string }[] = []
+
+  beforeAll(async () => {
+    anonTag = await mkPage('public-tag', 'the public tag page')
+    pubMember = await mkPage('Public Member', `tagged [public-tag](/p/${anonTag})`)
+    memberOnly = await mkPage('Secret Member', `tagged [public-tag](/p/${anonTag})`)
+    // Make the tag page AND the public member publicly viewable (view_base@user:* — the phase-4 publish switch's
+    // public grant). memberOnly is published but has NO public grant → viewable only to members.
+    anonGrants.push(
+      { user: 'user:*', relation: 'view_base', object: `page:${anonTag}` },
+      { user: 'user:*', relation: 'view_base', object: `page:${pubMember}` },
+    )
+    await writeTuples(fgaClient, anonGrants)
+  }, 60_000)
+
+  afterAll(async () => {
+    await deleteTuples(fgaClient, anonGrants).catch(() => {})
+  }, 60_000)
+
+  it('resolves the public subset: the public member appears', async () => {
+    const rows = await resolveAnonymousQuerySnapshot(db, fgaClient, { pageId: anonTag, spec: { type: 'tag', target: anonTag } })
+    expect(rows.map((r) => r.id)).toContain(pubMember)
+  })
+
+  it('EXCLUDES a member-only page — its title never enters the public snapshot (the ADR-134 rev2 binding)', async () => {
+    const rows = await resolveAnonymousQuerySnapshot(db, fgaClient, { pageId: anonTag, spec: { type: 'tag', target: anonTag } })
+    const ids = rows.map((r) => r.id)
+    expect(ids).not.toContain(memberOnly) // member-only → absent from list AND count (no public leak)
+    expect(rows.map((r) => r.title)).not.toContain('Secret Member')
+  })
+
+  it('a non-public TARGET yields an EMPTY snapshot (uniform 404 → [], no public existence oracle)', async () => {
+    // tagPage (from the outer setup) has no public grant → user:anonymous cannot view the target → getBacklinks
+    // throws a uniform 404, which the snapshot resolver swallows to [] (the publish baker treats it as "no
+    // snapshot", never a leak or an error surfaced to the public reader).
+    const rows = await resolveAnonymousQuerySnapshot(db, fgaClient, { pageId: tagPage, spec: { type: 'tag', target: tagPage } })
+    expect(rows).toEqual([])
   })
 })
