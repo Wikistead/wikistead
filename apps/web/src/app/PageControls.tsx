@@ -7,6 +7,7 @@ import { ToggleButton } from "../ui/ToggleButton";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel } from "../components/ui/dropdown-menu";
 import { useDirty, type DirtySignal } from "../editor/dirtySignal";
+import { cn } from "../lib/utils";
 
 // #165 display-mode segment: icon-only entries, in cycle order (matches Ctrl+Alt+E). Icons mirror the
 // per-mode glyphs used elsewhere (Live=Eye, Source=Code, Reading=BookOpen, WYSIWYG=Sparkles).
@@ -223,26 +224,52 @@ export function PageActions(p: PageControlsProps) {
   const canPublish = p.canPublish || dirty;
   const overflow = overflowItems(p, t);
   return (
-    <div className="pointer-events-none absolute right-4 bottom-4 z-10 flex items-center gap-2">
-      {p.editing ? (
-        <>
-          {p.onPublish && (
-            <RoundBtn label={t("page.publish")} testId="publish-page" primary disabled={p.publishing || !canPublish} onClick={p.onPublish}
-              icon={p.publishing ? <span data-testid="publish-spinner"><UploadCloud size={16} className="animate-pulse" /></span> : <UploadCloud size={16} />} />
-          )}
-          {/* Done = close the edit surface → X (not a check) reads as "close". */}
-          <RoundBtn label={t("page.done")} testId="view-toggle" onClick={p.onDone} icon={<X size={16} />} />
-        </>
-      ) : (
-        <>
-          {p.canEdit && <RoundBtn label={t("page.edit")} testId="edit-toggle" primary onClick={p.onEdit} icon={<Pencil size={16} />} />}
-          {p.pageId && <WatchButton pageId={p.pageId} className={`${ROUND} ${ROUND_BG}`} />}
-          {p.onShare && <RoundBtn label={t("page.share")} testId="share-open" onClick={p.onShare} icon={<Share2 size={16} />} />}
-        </>
-      )}
-      {overflow.length > 0 && (
-        <OverflowMenu items={overflow} onSelect={(v) => runOverflow(p, v)} label={t("page.moreActions")} triggerClassName={`${ROUND} ${ROUND_BG}`} />
-      )}
+    // Outer stays click-through (pointer-events-none) so the empty bottom-right area doesn't eat editor clicks;
+    // the inner cluster is pointer-events-auto so `group-hover`/`group-focus-within` fire on it (a
+    // pointer-events-none element is never a :hover target). #368: the cluster is the `group`.
+    <div className="pointer-events-none absolute right-4 bottom-4 z-10 flex items-center">
+      <div className="group pointer-events-auto flex items-center gap-2">
+        {p.editing ? (
+          <>
+            {p.onPublish && (
+              <RoundBtn label={t("page.publish")} testId="publish-page" primary disabled={p.publishing || !canPublish} onClick={p.onPublish}
+                icon={p.publishing ? <span data-testid="publish-spinner"><UploadCloud size={16} className="animate-pulse" /></span> : <UploadCloud size={16} />} />
+            )}
+            {/* Done = close the edit surface → X (not a check) reads as "close". */}
+            <RoundBtn label={t("page.done")} testId="view-toggle" onClick={p.onDone} icon={<X size={16} />} />
+          </>
+        ) : (
+          <>
+            {p.canEdit && <RoundBtn label={t("page.edit")} testId="edit-toggle" primary onClick={p.onEdit} icon={<Pencil size={16} />} />}
+            {/* #368: Watch + Share take NO width when idle and slide out (to the left of the ⋯) on hover/focus of
+                the cluster. Same grid-template-columns 0fr→1fr mechanism as the sidebar row menu (#343): the
+                width itself animates (opacity alone would keep the reserved space). Revealing on hover of the
+                WHOLE cluster (not just the ⋯) keeps the buttons inside the hover area, so moving the pointer from
+                the ⋯ onto them never drops the hover (no collapse-before-click) — no timer needed. Keyboard: Tab
+                into Watch/Share triggers group-focus-within, so they stay reachable. `-ml-2` cancels the cluster
+                gap while collapsed so nothing is reserved. */}
+            {(p.pageId || p.onShare) && (
+              <span
+                data-testid="page-actions-secondary"
+                className={cn(
+                  "grid transition-[grid-template-columns,margin] duration-[140ms] motion-reduce:transition-none",
+                  "grid-cols-[0fr] -ml-2",
+                  "group-hover:grid-cols-[1fr] group-hover:ml-0",
+                  "group-focus-within:grid-cols-[1fr] group-focus-within:ml-0",
+                )}
+              >
+                <span className="flex items-center gap-2 overflow-hidden">
+                  {p.pageId && <WatchButton pageId={p.pageId} className={`${ROUND} ${ROUND_BG}`} />}
+                  {p.onShare && <RoundBtn label={t("page.share")} testId="share-open" onClick={p.onShare} icon={<Share2 size={16} />} />}
+                </span>
+              </span>
+            )}
+          </>
+        )}
+        {overflow.length > 0 && (
+          <OverflowMenu items={overflow} onSelect={(v) => runOverflow(p, v)} label={t("page.moreActions")} triggerClassName={`${ROUND} ${ROUND_BG}`} />
+        )}
+      </div>
     </div>
   );
 }

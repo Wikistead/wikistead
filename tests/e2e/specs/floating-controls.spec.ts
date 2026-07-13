@@ -17,12 +17,34 @@ test("floating controls + title clamp (view) / full (edit)", async ({ browser })
   await expect(page.getByTestId("edit-toggle")).toBeVisible();
   expect(await lineClamp(page)).toBe("2"); // long title clamps to 2 lines in view
 
-  // EDIT: vim floats bottom-left; publish/done float bottom-right; title shows in full.
+  // EDIT: vim floats bottom-left; publish/done float bottom-right.
   await enterEdit(page);
   await expect(page.getByTestId("vim-toggle")).toBeVisible();
   await expect(page.getByTestId("publish-page")).toBeVisible();
   await expect(page.getByTestId("view-toggle")).toBeVisible();
-  expect(await lineClamp(page)).toBe("none"); // full title while editing it
+  // #312 (ea12965): the static title clamps to 2 lines on EVERY surface — view AND page-edit mode (only the
+  // rename TEXTAREA grows). This assertion previously expected "none" (the old pageEditing→block branch) and
+  // had been stale-red since #312 landed.
+  expect(await lineClamp(page)).toBe("2");
+});
+
+// #368: in view mode the Watch + Share buttons take NO width when idle and slide out (grid 0fr→1fr) on hover of
+// the bottom-right cluster; Edit stays always-visible. Real Chromium — a width geometry assert.
+test("#368: Watch/Share collapse to zero width and slide out on cluster hover", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "collapse-controls");
+  await expect(page.getByTestId("edit-toggle")).toBeVisible(); // Edit is always shown
+  const secondary = page.getByTestId("page-actions-secondary");
+  await expect(secondary).toBeAttached(); // the collapsible Watch/Share wrapper exists in view mode
+
+  const width = async () => (await secondary.boundingBox())?.width ?? -1;
+  const idle = await width();
+  expect(idle).toBeLessThan(6); // grid-cols-[0fr] → ~zero width when idle (no reserved space)
+
+  // Hover the always-visible Edit button (inside the same cluster group) → the secondary slides open.
+  await page.getByTestId("edit-toggle").hover();
+  await expect.poll(width, { timeout: 3000, intervals: [150, 250, 400] }).toBeGreaterThan(28); // Watch + Share now take width
+  await expect(page.getByTestId("share-open")).toBeVisible();
 });
 
 test("narrow viewport collapses the groups into one bottom-right ⋯", async ({ browser }) => {
