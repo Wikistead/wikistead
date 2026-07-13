@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { openDemo, sleep } from "../helpers";
+import { assertConstantChipRatio } from "../avatar-ratio";
 
 const API = "http://dev.localhost:4010";
 
@@ -37,24 +38,15 @@ test("#288: a digit+CJK space name renders a single-glyph, square, non-wrapping 
   expect(wrapped).toBe(false);
 });
 
-// #284 a space chip must be a clean proportional scale at every call-site size. The Avatar font size
-// was Math.round(size*0.42), so the font/box ratio drifted (0.40–0.444) and the same space's chip looked
-// different at 14px (pin row) vs 18/20px (switcher). Removing the round makes the ratio EXACTLY constant.
-test("#284 space chip font/box ratio is constant across sizes (no rounding drift)", async ({ page }) => {
+// #284 → a space chip must be a clean proportional scale at every call-site size — the VISUAL font/
+// box ratio (rendered glyph size ÷ box) must be constant so the same space looks identical at 14px (pin row) and
+// 18/20px (switcher). removed Math.round; draws the glyph at a fixed 16px and shrinks it with a
+// transform so the browser minimum-font-size floor can't re-clamp it. The floor-enforced counterpart is in
+// space-avatar-floor-1625.spec.ts (a `test.use({ launchOptions })` font floor forces a new worker, which
+// Playwright only allows at file top level). The shared ratio assertion lives in ../avatar-ratio.
+test("#284 space chip visual font/box ratio is constant across sizes", async ({ page }) => {
   await openDemo(page);
-  await page.waitForSelector("[data-testid=space-switcher]");
-  await page.click("[data-testid=space-switcher]");
-  await expect(page.getByTestId("space-menu")).toBeVisible();
-  await sleep(200);
-  // Every initials chip (role=img with text — not an uploaded <img>) across the switcher (trigger size vs
-  // option-row size are different) must share ONE font/box ratio.
-  const ratios = await page.locator("[role=img]").evaluateAll((els) =>
-    els
-      .filter((el) => (el.textContent ?? "").trim().length > 0)
-      .map((el) => { const cs = getComputedStyle(el); return parseFloat(cs.fontSize) / parseFloat(cs.height); })
-      .filter((r) => isFinite(r) && r > 0),
-  );
-  expect(ratios.length, "at least two initials chips are on screen").toBeGreaterThanOrEqual(2);
-  const spread = Math.max(...ratios) - Math.min(...ratios);
-  expect(spread, `font/box ratios [${ratios.map((r) => r.toFixed(3)).join(", ")}] must be constant`).toBeLessThan(0.01);
+  await assertConstantChipRatio(page);
 });
+// The floor-enforced (#284) counterpart lives in space-avatar-floor-1625.spec.ts — a `test.use({ launchOptions })`
+// for the font floor forces a new worker and Playwright only allows it at file top level, so it needs its own file.

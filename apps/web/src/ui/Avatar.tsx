@@ -27,18 +27,25 @@ export interface AvatarProps {
   "data-testid"?: string;
 }
 
+// #284 the glyph is ALWAYS drawn at this fixed px (comfortably above every browser's minimum-font-size
+// floor, which in ja/CJK locales Chrome enforces at ~10px) and then shrunk to the target with a CSS `transform:
+// scale()`. The floor clamps `font-size` but NOT transforms, so a small chip (14px box → 5.88px target) that used
+// to get re-clamped to 10px — re-breaking the font/box ratio the fractional font had fixed — now stays a
+// pure proportional scale of the same 16px glyph at EVERY call-site size, floor or no floor.
+const GLYPH_BASE_PX = 16;
+
 export function Avatar({ name, src, seed, glyph, size = 24, shape = "circle", title, className, ...rest }: AvatarProps) {
   const [failed, setFailed] = useState(false);
   const showImg = src && !failed;
   const style: CSSProperties = {
     width: size,
     height: size,
-    // #284 NO Math.round — rounding made the font/box ratio drift per size (0.40–0.444), so the same
-    // space's chip wasn't a clean scaled version across call-sites (14px pin row vs 18px switcher). A fractional
-    // px keeps the ratio EXACTLY constant (0.42 / 0.55 glyph) at every size, so every chip is a proportional scale.
-    fontSize: size * (glyph ? 0.55 : 0.42),
     background: showImg ? undefined : colorFromString(seed ?? name),
   };
+  // #284 → keep the font/box ratio EXACTLY constant (0.42 / 0.55 glyph) at every size — but achieve
+  // the sub-floor sizes via a transform scale of the fixed-size glyph rather than a fractional font-size that the
+  // browser floor would clamp. transform-origin defaults to center; the outer flex centres the base glyph box.
+  const glyphScale = (size * (glyph ? 0.55 : 0.42)) / GLYPH_BASE_PX;
   const cls = cn(
     // #288: whitespace-nowrap so a 2-glyph monogram can never WRAP to two stacked rows (which the fixed
     // px box + overflow-hidden then clipped, making the same name look different per call-site size). It
@@ -53,7 +60,10 @@ export function Avatar({ name, src, seed, glyph, size = 24, shape = "circle", ti
         // referrerPolicy: don't leak the app URL to the IdP/CDN serving the picture.
         <img className="block h-full w-full object-cover" src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
       ) : (
-        glyph || initials(name)
+        // inline-block: `transform` does not apply to non-replaced inline boxes, so the glyph must be a block box.
+        <span className="inline-block leading-none" style={{ fontSize: GLYPH_BASE_PX, transform: `scale(${glyphScale})` }}>
+          {glyph || initials(name)}
+        </span>
       )}
     </span>
   );
