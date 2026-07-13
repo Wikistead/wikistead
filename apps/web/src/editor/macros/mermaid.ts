@@ -32,20 +32,36 @@ function svgCacheSet(key: string, svg: string): void {
 // Lazy-loaded so mermaid (large) stays out of the main bundle — imported on first
 // render of a ```mermaid block. `securityLevel: "strict"` makes mermaid sanitize the
 // SVG it produces (it bundles DOMPurify), so user-authored diagram text cannot inject
-// script even though we assign the result via innerHTML below. Theme is bound at first
-// load (a mid-session theme switch re-rendering existing diagrams is M2 polish).
+// script even though we assign the result via innerHTML below.
+const mermaidTheme = (theme: MacroContext["theme"]): "dark" | "default" => (theme === "dark" ? "dark" : "default");
+// suppressErrorRendering (#191): on a syntax error mermaid otherwise injects a "bomb" error diagram into the
+// DOM (body), which accumulates on every re-render/keystroke. Suppress it — we render our own in-macro error
+// message in the catch below.
+const mermaidConfig = (theme: MacroContext["theme"]) =>
+  ({ startOnLoad: false, securityLevel: "strict" as const, suppressErrorRendering: true, theme: mermaidTheme(theme) });
 let mermaidP: Promise<typeof import("mermaid")["default"]> | null = null;
+let initedTheme: "dark" | "default" | null = null;
+// #360: mermaid is a singleton whose theme is set by initialize. It was initialized ONCE at first load, so a
+// mid-session light/dark switch left every diagram rendered in the ORIGINAL theme (the widget rebuilds with the
+// new ctx.theme — MacroWidget.eq keys on theme, #200 — and the #352 SVG cache key includes the theme, so it
+// re-renders; but mermaid.render still used the stale initialized theme). RE-initialize whenever the requested
+// theme differs from the last one applied — theme is page-global, so all diagrams share it at any instant.
 function loadMermaid(theme: MacroContext["theme"]) {
   if (!mermaidP) {
     mermaidP = import("mermaid").then(({ default: mermaid }) => {
-      // suppressErrorRendering (#191): on a syntax error mermaid otherwise injects a "bomb" error
-      // diagram into the DOM (body), which accumulates on every re-render/keystroke. Suppress it
-      // we render our own in-macro error message in the catch below.
-      mermaid.initialize({ startOnLoad: false, securityLevel: "strict", suppressErrorRendering: true, theme: theme === "dark" ? "dark" : "default" });
+      mermaid.initialize(mermaidConfig(theme));
+      initedTheme = mermaidTheme(theme);
       return mermaid;
     });
   }
-  return mermaidP;
+  return mermaidP.then((mermaid) => {
+    const want = mermaidTheme(theme);
+    if (initedTheme !== want) {
+      mermaid.initialize(mermaidConfig(theme)); // follow a mid-session theme switch
+      initedTheme = want;
+    }
+    return mermaid;
+  });
 }
 
 // #282 (3): `mermaid.render(id, code)` with NO 3rd arg makes mermaid 11 append its text-measuring
