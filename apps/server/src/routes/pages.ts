@@ -465,6 +465,9 @@ export async function publishPage(
       RETURNING published_at
     `
     publishedAt = p.published_at
+    // #322 / ADR-133 §6: refresh this page's outbound link edges from the newly published content, in-tx
+    // (derived index moves atomically with published_md). Inert — nothing reads page_links yet.
+    await syncPageLinks(tx, draft.tenant_id, args.pageId, md)
     outboxId = await enqueueOutbox(tx, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' })
     // #228 / ADR-108: enqueue the page.published webhook IN this tx (reliable — a commit-then-crash still
     // delivers). Thin payload (ids/actor only). The drain applies the private/draft existence-hiding
@@ -1385,6 +1388,51 @@ export async function getBacklinks(
     if (ok) out.push({ id: c.id, title: c.title })
   }
   return out
+}
+
+// #322 / ADR-133 §6: the internal-link EDGE INDEX (page_links). A DERIVED index of the outbound page
+// references a page's PUBLISHED content makes — the persistent backing for the future 2-hop "Related"
+// query + graph view (cheaper than getBacklinks' on-the-fly LIKE/regex scan). INERT for now: nothing
+// reads page_links yet, so this slice adds NO read/authz surface (the view-filtered 2-hop query is the
+// next slice; there both endpoints are view-filtered → a dead/non-viewable target yields no node).
+export type PageLinkType = 'link' | 'embed'
+export interface PageLinkEdge { toId: string; type: PageLinkType }
+
+// A page's own id is a v4-style UUID. Word-boundary the tail so `/p/<uuid>#frag` still captures the id and
+// a longer token isn't half-matched.
+const PAGE_UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+const LINK_REF_RE = new RegExp(`/p/(${PAGE_UUID})(?![0-9a-f-])`, 'gi')
+// A `:::embed-page` block whose body line IS the target id (mirrors getBacklinks' embed reference shape).
+const EMBED_REF_RE = new RegExp(`:::embed-page[^\\n]*\\n\\s*(${PAGE_UUID})\\s*(?:\\n|$)`, 'gi')
+
+// Extract the DISTINCT internal references `md` makes: `/p/<id>` links (type 'link') and `:::embed-page`
+// bodies (type 'embed'). Self-references are dropped. The #224 title-match auto-links are display-only
+// (never in the source), so they are out of scope (a future 'autolink' derived edge — ADR-133 §6).
+export function extractPageLinks(md: string, selfId: string): PageLinkEdge[] {
+  const edges = new Map<string, PageLinkEdge>()
+  const add = (toId: string, type: PageLinkType) => {
+    const id = toId.toLowerCase()
+    if (id && id !== selfId.toLowerCase()) edges.set(`${id} ${type}`, { toId: id, type })
+  }
+  for (const m of md.matchAll(LINK_REF_RE)) add(m[1], 'link')
+  for (const m of md.matchAll(EMBED_REF_RE)) add(m[1], 'embed')
+  return [...edges.values()]
+}
+
+// Replace a page's outbound edges with the set derived from its just-published markdown. DERIVED +
+// idempotent (delete-then-insert), called INSIDE the publish tx so the index moves with the published
+// content atomically. `md === null` (unpublish) clears the page's edges. A page DELETE cascades its rows
+// away via the from_page_id FK, so no explicit cleanup is needed there.
+export async function syncPageLinks(tx: Sql, tenantId: string, fromPageId: string, md: string | null): Promise<void> {
+  await tx`DELETE FROM page_links WHERE from_page_id = ${fromPageId}`
+  const edges = md ? extractPageLinks(md, fromPageId) : []
+  for (const e of edges) {
+    await tx`
+      INSERT INTO page_links (tenant_id, from_page_id, to_page_id, type)
+      VALUES (${tenantId}, ${fromPageId}, ${e.toId}, ${e.type})
+      ON CONFLICT DO NOTHING
+    `
+  }
 }
 
 // #324 / ADR-134: the query spec carried in a `:::query` directive body. The body is authoring free-text,
