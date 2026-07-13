@@ -459,7 +459,7 @@ export async function publishPage(
     const tp = countTodoTasks(md) // #290 / ADR-114: refresh the :::todo aggregate for the sidebar ring
     const [p] = await tx<[{ published_at: Date }]>`
       UPDATE pages SET published_md = ${md}, published_revision_id = ${rev.id}, published_at = now(),
-        has_unpublished_changes = false, updated_by = ${args.subject.replace(/^user:/, '')},
+        has_unpublished_changes = false, updated_by = ${args.createdBy.replace(/^user:/, '')},
         task_done = ${tp.done}, task_total = ${tp.total}, published_query_snapshot = ${querySnapshot}::jsonb
       WHERE id = ${args.pageId}
       RETURNING published_at
@@ -1302,7 +1302,10 @@ export function principalForPage(req: FastifyRequest, pageId: string): { subject
     if (!bound) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
     return {
       subject: `share_link:${req.guest.shareLinkId}`,
-      createdBy: `guest:${req.guest.shareLinkId}`,
+      // #331 / ADR-138 (C-6): attribute the revision/feed to the pseudonymous per-session id (unforgeable — it
+      // comes from the verified token, not client awareness). Falls back to the share-link id for an older token
+      // minted before anonId existed. authz `subject` is unchanged (the anonId is never an authority).
+      createdBy: req.guest.anonId ?? `guest:${req.guest.shareLinkId}`,
       context: { current_time: new Date().toISOString() },
     }
   }

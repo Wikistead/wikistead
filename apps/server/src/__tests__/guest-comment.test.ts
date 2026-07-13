@@ -9,7 +9,7 @@ import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
-import { mintGuestToken } from '@wikistead/auth'
+import { mintGuestToken, verifyGuestToken } from '@wikistead/auth'
 import { buildApp } from '../app.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -58,7 +58,11 @@ describe('#100 guest commenting (view link + comment_open)', () => {
     const list = await app.inject({ method: 'GET', url: `/pages/${PAGE}/comments`, headers: H(viewTok) })
     const body = list.json() as { threads: { comments: { body: string; authorSub: string }[] }[] }
     const c = body.threads.flatMap((t) => t.comments).find((c) => c.body === 'hello from a guest')!
-    expect(c.authorSub).toBe(`guest:${VLINK}`) // a label — never a member sub (sum-type integrity)
+    // #331 / ADR-138 (C-6): a guest comment is authored under the pseudonymous per-session id, NOT a member sub
+    // and NOT the raw share-link id (sum-type integrity — a guest label can never collide with a member).
+    const claims = await verifyGuestToken(guestCfg, viewTok)
+    expect(c.authorSub).toBe(claims.anonId)
+    expect(c.authorSub).toMatch(/^anon:[0-9a-f]{12}$/)
     expect(c.authorSub.startsWith('user:')).toBe(false)
   })
 
