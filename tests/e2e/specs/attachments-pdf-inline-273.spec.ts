@@ -10,10 +10,10 @@ const API = "http://dev.localhost:4010";
 // pdf.js parser bug must stay in the opaque frame), so it is attribute-asserted here. Real Chromium (the async
 // attachment resolve → iframe mount is only observable in a browser). The server-side sniff (a non-PDF /
 // HTML-disguised-as-PDF → inline_kind "none" → no inline route) is covered by attachments-inline-273.test.ts.
-const MINIMAL_PDF = Buffer.from(
-  "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n" +
-  "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n",
-);
+// A VALID single-page PDF (proper xref table + a content stream drawing a filled rectangle), so pdf.js renders
+// it to a real canvas AND the "Loading…" message hides on success — the rendering pin (an earlier
+// malformed PDF made page.render throw "Could not display", which masked whether the frame even loaded).
+const MINIMAL_PDF = Buffer.from("JVBERi0xLjQKMSAwIG9iago8PC9UeXBlL0NhdGFsb2cvUGFnZXMgMiAwIFI+PgplbmRvYmoKMiAwIG9iago8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PgplbmRvYmoKMyAwIG9iago8PC9UeXBlL1BhZ2UvUGFyZW50IDIgMCBSL01lZGlhQm94WzAgMCAyMDAgMjAwXS9Db250ZW50cyA0IDAgUi9SZXNvdXJjZXM8PD4+Pj4KZW5kb2JqCjQgMCBvYmoKPDwvTGVuZ3RoIDMwPj5zdHJlYW0KMCAwIDEgcmcgMjAgMjAgMTIwIDEyMCByZSBmCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDUKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTQgMDAwMDAgbiAKMDAwMDAwMDEwNSAwMDAwMCBuIAowMDAwMDAwMTk5IDAwMDAwIG4gCnRyYWlsZXI8PC9TaXplIDUvUm9vdCAxIDAgUj4+CnN0YXJ0eHJlZgoyNzMKJSVFT0YK", "base64");
 
 test("#273: a sniffed PDF renders in a sandboxed (allow-scripts, NO allow-same-origin) pdf.js frame", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
@@ -52,4 +52,11 @@ test("#273: a sniffed PDF renders in a sandboxed (allow-scripts, NO allow-same-o
   expect(sandbox).toBe("allow-scripts"); // our pdf.js runs…
   expect(sandbox).not.toContain("allow-same-origin"); // …but the frame is opaque-origin (can't reach the app)
   expect(await frame.getAttribute("src")).toContain("/pdf-frame.html");
+
+  // (review bounce — the shipped test was false-green): assert the PDF actually RENDERS, not just
+  // that the frame mounts. The opaque frame's module script + blob worker must load (ACAO + blob-worker fix),
+  // then pdf.js paints the page to a <canvas> and the "Loading…" message disappears.
+  const pdfFrame = page.frameLocator("[data-testid=attachment-inline-frame]");
+  await expect(pdfFrame.locator("canvas")).toHaveCount(1, { timeout: 20000 });
+  await expect(pdfFrame.locator("#msg")).toBeHidden();
 });

@@ -10,11 +10,28 @@
 // / OpenAction (PDF-embedded JavaScript never runs), no text/annotation layer, no external fetch — just
 // getDocument({ data }) + page.render onto a <canvas>.
 import * as pdfjs from "pdfjs-dist";
-// The worker is bundled as a same-file module URL so it loads from THIS origin (opaque frames can still load
-// same-origin module workers spawned from their own document).
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+// #273 pdf.js v6.1.200 calls the TC39 "Map/Set upsert" methods (getOrInsertComputed / getOrInsert),
+// which are still behind a flag in V8 and ABSENT in current Chromium (~149). Without them page.render throws
+// "getOrInsertComputed is not a function" and the PDF never paints — in the e2e AND in a real browser. Define
+// them (the main thread) and prepend the same source to the worker blob below (the worker is a separate realm).
+// Standards-track proposal semantics; a no-op once browsers ship it natively.
+const UPSERT_POLYFILL = `(function(){for(var C of [Map,WeakMap]){var p=C.prototype;
+if(!p.getOrInsert){p.getOrInsert=function(k,d){if(this.has(k))return this.get(k);this.set(k,d);return d;};}
+if(!p.getOrInsertComputed){p.getOrInsertComputed=function(k,f){if(this.has(k))return this.get(k);var v=f(k);this.set(k,v);return v;};}}})();`;
+// eslint-disable-next-line @typescript-eslint/no-implied-eval
+new Function(UPSERT_POLYFILL)();
+// #273 the worker CANNOT be a URL here. This document runs in an OPAQUE origin (sandbox=allow-scripts,
+// no allow-same-origin), which has NO same-origin — and `new Worker(url)` requires a same-origin (or blob/data)
+// script, so a URL worker is blocked regardless of CORS. Inline the worker SOURCE into this chunk (`?raw`) and
+// hand pdf.js a BLOB-URL module worker, which IS constructible from an opaque origin. (This also removes a
+// second cross-origin fetch — only the entry module itself needs the dev ACAO header, see vite.config.ts.)
+import workerSource from "pdfjs-dist/build/pdf.worker.min.mjs?raw";
+
+// Prepend the upsert polyfill to the worker source too (a Worker is a separate realm — the main-thread define
+// above doesn't reach it, and the worker's pdf.js uses the same methods).
+const workerBlobUrl = URL.createObjectURL(new Blob([UPSERT_POLYFILL + "\n" + workerSource], { type: "text/javascript" }));
+pdfjs.GlobalWorkerOptions.workerSrc = workerBlobUrl;
 
 const msg = document.getElementById("msg")!;
 const pages = document.getElementById("pages")!;
@@ -34,8 +51,9 @@ async function render(data: ArrayBuffer): Promise<void> {
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
       pages.appendChild(canvas);
-      const ctx = canvas.getContext("2d");
-      if (ctx) await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+      // pdf.js v6: pass the CANVAS element (the primary param); `canvasContext` is deprecated and passing both
+      // trips an internal private-field access. The context is derived from the canvas.
+      await page.render({ canvas, viewport }).promise;
     }
     // let the parent size the frame to the content
     try { window.parent?.postMessage({ type: "pdf-frame:rendered", pages: doc.numPages, height: pages.scrollHeight }, "*"); } catch { /* parent gone */ }
