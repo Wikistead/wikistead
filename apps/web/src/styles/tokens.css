@@ -625,6 +625,14 @@ body {
    cursor stays visible (its background) but the leaked syntax char does not show. */
 .cm-wys-blank-fatcursor .cm-fat-cursor { color: transparent !important; }
 
+/* #332 a SELECTED atomSelectable atom (embed-page) shows its selection as the full-card ring
+   (.cm-lp-atom-sel). The vim fat cursor's 1-char PINK BACKGROUND block (from @replit/codemirror-vim) then sits
+   as a thin bar on the wide card, mismatched — and blanking only its glyph left the bar. Suppress the WHOLE fat
+   cursor (background + glyph) there so the ring is the only affordance. Applied via editorAttributes (survives
+   CM's focus className rebuild — no timing re-pin). NOT applied to a plain block atom (no .cm-atomsel- class),
+   which keeps its fat cursor as a position marker. */
+.cm-atomsel-hide-fatcursor .cm-fat-cursor { background-color: transparent !important; color: transparent !important; }
+
 /* #278 C: a NESTED CM editor that HAS focus (the slot-edit island, and the mermaid/plantuml source
    panel) must show its own vim cursor. @replit/codemirror-vim styles `&:not(.cm-focused) .cm-fat-cursor`
    (hollow/transparent) and `.cm-vimMode .cm-line{caret-color:transparent}` — scoped to the OUTER editor, both

@@ -129,14 +129,20 @@ test("#332: vim /embed picker leaves NORMAL mode with the caret on the rendered 
     const view = pane?.querySelector(".cm-editor") as HTMLElement | null;
     const fat = pane?.querySelector(".cm-fat-cursor") as HTMLElement | null;
     const wrap = pane?.querySelector("[data-testid=macro-embed-page]")?.closest(".cm-lp-macro-wrap") as HTMLElement | null;
+    const cs = fat ? getComputedStyle(fat) : null;
     return {
-      blankClass: view?.classList.contains("cm-wys-blank-fatcursor") ?? false,
-      fatGlyphColor: fat ? getComputedStyle(fat).color : null,
+      hideClass: view?.classList.contains("cm-atomsel-hide-fatcursor") ?? false,
+      fatGlyphColor: cs ? cs.color : null,
+      fatBgColor: cs ? cs.backgroundColor : null,
       ring: wrap?.classList.contains("cm-lp-atom-sel") ?? false,
     };
   });
-  expect(sel.blankClass, "the blank-fatcursor class survives the picker's focus rebuild").toBe(true);
+  // #332 the WHOLE fat cursor is suppressed on a selected atomSelectable atom — glyph AND the pink
+  // background block — via editorAttributes (survives the focus rebuild, no timing re-pin). The full-card ring
+  // is the only selection affordance. only blanked the glyph, so a ~10px pink bar stayed on the card.
+  expect(sel.hideClass, "the atomsel-hide-fatcursor class is applied (via editorAttributes, survives the focus rebuild)").toBe(true);
   expect(sel.fatGlyphColor, "the fat cursor glyph is transparent (no raw `:` leaks on the cursor)").toBe("rgba(0, 0, 0, 0)");
+  expect(sel.fatBgColor, "the fat cursor pink BACKGROUND block is transparent (not a thin bar on the card)").toBe("rgba(0, 0, 0, 0)");
   expect(sel.ring, "the full-card selection ring is shown (image-atom look)").toBe(true);
 
   // #332 item 3 (user ruling): Ctrl+Enter on the selected atom opens the RETARGET PICKER (the ⇆ UI),
