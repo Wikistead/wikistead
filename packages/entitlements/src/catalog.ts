@@ -147,6 +147,13 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     enforcedAt: 'host-mediated macro permission gate (entitlement AND admin allowlist)',
     downgrade: 'gated; first-party macros keep working',
   },
+  mcpWrite: {
+    title: 'MCP write tools',
+    summary: 'Whether the tenant may use MCP WRITE tools (create/edit/publish via the connector, #311 / ADR-131). MCP read tools are all-plans; only write is gated (write = Cloud/EE,). OpenFGA still gates each resource.',
+    unit: 'boolean',
+    enforcedAt: 'the /mcp tools/call handler (write-scope tools) — checked alongside the token write scope',
+    downgrade: 'write tools gated; read tools + previously-created pages keep working',
+  },
   apiRateLimit: {
     title: 'API rate limit',
     summary: 'Authenticated API-key request rate per window — perKey (per-key fairness) and perTenant (all-keys ceiling), evaluated AND (the stricter trips first → 429) (#175 / ADR-063).',

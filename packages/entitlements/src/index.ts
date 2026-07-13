@@ -107,6 +107,11 @@ export interface Entitlements {
   // Requires this AND a tenant-admin allowlist (host-mediated gate; macros never self-authorize).
   // first-party macros ignore this. Self-host UNLIMITED on; Cloud = business placeholder.
   userMacros: boolean
+
+  // #311 / ADR-131: may the tenant use MCP WRITE tools (create/edit/publish via the connector)?
+  // READ tools are all-plans (not gated here); this gates WRITE only. Self-host UNLIMITED on; Cloud = paid
+  // tiers (write = Cloud/EE — free off, pro/team on), resolved in the one entitlement seam (never `if(plan)`).
+  mcpWrite: boolean
 }
 
 // Self-host / Community edition: never plan-limited.
@@ -128,6 +133,7 @@ export const UNLIMITED: Entitlements = {
   aiTokenAllowance: Infinity,
   apiRateLimit: { perKey: Infinity, perTenant: Infinity },
   userMacros: true,
+  mcpWrite: true,
 }
 
 // NOTE (ADR-069 / #132): the Cloud plan table (`CLOUD_PLANS`) and its resolver
