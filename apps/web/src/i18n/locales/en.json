@@ -699,6 +699,10 @@
     "untitled": "(untitled)",
     "empty": "No pages link here yet."
   },
+  "related": {
+    "title": "Related",
+    "backlinks": "Backlinks"
+  },
   "template": {
     "saveAsTemplate": "Save as template",
     "saveTitle": "Save as template",
