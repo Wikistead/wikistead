@@ -31,6 +31,13 @@ describe("makeDiagramRenderer (#140 / ADR-074)", () => {
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBe("Bearer tok");
   });
 
+  it("#342: forwards the theme to the endpoint so a dark render is themed server-side", async () => {
+    const { fetcher, calls } = stub(png(4));
+    const render = makeDiagramRenderer("tok", "page-1", fetcher);
+    await render("plantuml", "@startuml\nA->B\n@enduml", "dark");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ source: "@startuml\nA->B\n@enduml", theme: "dark" });
+  });
+
   it("degrades (null) for a non-host-rendered lang and an empty body WITHOUT fetching", async () => {
     const { fetcher, calls } = stub(png());
     const render = makeDiagramRenderer("tok", "page-1", fetcher);

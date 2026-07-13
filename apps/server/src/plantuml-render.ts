@@ -15,6 +15,33 @@ import { deflateSync } from 'node:zlib'
 export const MAX_RENDER_BYTES = 2 * 1024 * 1024
 type Fetcher = (url: string) => Promise<Response>
 
+// #342: the built-in PlantUML dark theme injected for dark-mode renders (user rulinguse a
+// built-in `!theme`, not app-matched skinparam). `carbon-gray` is a real built-in (reviewer-vetted,
+//) — the exact choice is a visual call, swap this one constant to re-tune. Light mode injects
+// nothing (the default look).
+export const PLANTUML_DARK_THEME = 'carbon-gray'
+
+// #342: prepend the dark `!theme` to a PlantUML source, UNLESS the author already set their own theme.
+// Respect an explicit `!theme` or `skinparam` on any line START (PlantUML comments begin with `'` or sit
+// inside `/' … '/`, so a leading-quote line is a comment and never a real directive —note 2). The
+// directive must sit INSIDE the diagram, so it goes right after the first `@start…`; a snippet with no
+// `@start…` gets it prepended (still valid). Idempotent-safe: returns the source untouched when explicit.
+export function injectPlantumlTheme(source: string, themeName = PLANTUML_DARK_THEME): string {
+  const lines = source.split('\n')
+  const hasExplicit = lines.some((line) => {
+    const t = line.trimStart()
+    return /^!theme\b/i.test(t) || /^skinparam\b/i.test(t)
+  })
+  if (hasExplicit) return source
+  const directive = `!theme ${themeName}`
+  const startIdx = lines.findIndex((l) => /^\s*@start\w*/i.test(l))
+  if (startIdx >= 0) {
+    lines.splice(startIdx + 1, 0, directive)
+    return lines.join('\n')
+  }
+  return `${directive}\n${source}`
+}
+
 async function defaultFetch(url: string, timeoutMs: number): Promise<Response> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
@@ -30,11 +57,12 @@ async function defaultFetch(url: string, timeoutMs: number): Promise<Response> {
 // is zlib-deflated + base64url into the Kroki GET path so no separate POST body is needed.
 export async function renderPlantuml(
   source: string,
-  opts: { fetcher?: Fetcher; endpoint?: string; timeoutMs?: number } = {},
+  opts: { fetcher?: Fetcher; endpoint?: string; timeoutMs?: number; dark?: boolean } = {},
 ): Promise<Buffer | null> {
   const base = (opts.endpoint ?? process.env.PLANTUML_RENDER_URL ?? '').replace(/\/+$/, '')
   if (!base) return null // not configured → operator opt-in not taken → degrade
-  const encoded = deflateSync(Buffer.from(source, 'utf8')).toString('base64url')
+  const themed = opts.dark ? injectPlantumlTheme(source) : source // #342: dark → inject a built-in !theme
+  const encoded = deflateSync(Buffer.from(themed, 'utf8')).toString('base64url')
   const url = `${base}/plantuml/png/${encoded}`
   let res: Response
   try {
