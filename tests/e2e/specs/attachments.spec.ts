@@ -50,5 +50,7 @@ test("attachments: upload -> confirm -> download, and unauthorized page is forbi
     return { presign: presign.status, list: listing.status };
   }, { api: API, space: LOCKED_SPACE_ID, pageId: LOCKED_PAGE_ID });
   expect(forbidden.presign).toBe(403); // upload (edit) denied
-  expect(forbidden.list).toBe(403); // list/URLs (view) denied
+  // #280: listing is view-gated by assertPageViewable, which is EXISTENCE-HIDING — a non-viewer gets a
+  // uniform 404 (not 403), so a locked page can't be probed for existence. (The old 403 here was stale.)
+  expect(forbidden.list).toBe(404); // list/URLs (view) denied → 404 existence-hidden
 });
