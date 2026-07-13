@@ -111,6 +111,10 @@ test("#230: the backlinks panel shows an empty state and opens in edit mode too"
   await page.getByTestId("related-toggle").click();
   await expect(page.getByTestId("related-panel")).toBeVisible();
   await expect(page.getByTestId("backlinks-empty")).toBeVisible();
+  // #322 inc②: the Related panel also carries the 2-hop §Related section (empty here — a scratch page shares
+  // no links) — confirms the section wires up alongside §Backlinks under the one panel.
+  await expect(page.getByTestId("related-panel")).toContainText("Related pages");
+  await expect(page.getByTestId("related-empty")).toBeVisible();
   // #230 redesign: openable in EDIT mode too (the old bottom section never rendered while editing).
   await page.getByTestId("related-close").click();
   await enterEdit(page);

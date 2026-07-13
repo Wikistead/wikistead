@@ -701,7 +701,10 @@
   },
   "related": {
     "title": "Related",
-    "backlinks": "Backlinks"
+    "backlinks": "Backlinks",
+    "related": "Related pages",
+    "via": "via",
+    "empty": "No related pages yet."
   },
   "template": {
     "saveAsTemplate": "Save as template",

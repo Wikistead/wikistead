@@ -240,6 +240,20 @@ export function useBacklinks(pageId: string | null, enabled = true) {
   });
 }
 
+// #322 / ADR-133: 2-hop RELATED pages — OTHER pages that also link to a page this one links to, grouped by
+// the shared link. Member-only + server view-filters BOTH endpoints of every edge (no unviewable page/title
+// leaks). Lazy: only fetched when the Related section opens (the panel passes enabled).
+export interface RelatedGroup { intermediate: { id: string; title: string }; pages: { id: string; title: string }[] }
+export interface RelatedResult { groups: RelatedGroup[]; truncated: boolean }
+export function useRelated(pageId: string | null, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["related", pageId],
+    queryFn: () => apiFetch<RelatedResult>(`/pages/${encodeURIComponent(pageId!)}/related`, token).then((r) => r ?? { groups: [], truncated: false }),
+    enabled: enabled && pageId != null,
+  });
+}
+
 // #284 / ADR-119: per-member pins (spaces + pages). The server list is view-confirmed
 // (a deleted / no-longer-viewable resource is silently dropped server-side), so this
 // list is authoritative for what may be rendered — never cache-render a stale title.

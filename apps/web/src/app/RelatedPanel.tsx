@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Link as LinkIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { RightPanel } from "../ui/RightPanel";
-import { useBacklinks } from "../data/queries";
+import { useBacklinks, useRelated } from "../data/queries";
 
 // #322 / ADR-133 increment ①: the right-rail "Related" panel — the IA home for a page's link
 // neighbourhood. It replaces the single-purpose "Backlinks" panel (#230) with a SECTION layout so the
@@ -27,6 +27,21 @@ export function RelatedPanel({ pageId, onClose }: { pageId: string; onClose: () 
   const navigate = useNavigate();
   const { data } = useBacklinks(pageId);
   const backlinks = data ?? [];
+  // #322 / ADR-133 §2: 2-hop related pages (grouped by the shared link). The panel is only mounted when open,
+  // so the query is effectively lazy (fetched when Related opens); the server view-filters both edge ends.
+  const related = useRelated(pageId);
+  const relatedGroups = related.data?.groups ?? [];
+  const relatedCount = relatedGroups.reduce((n, g) => n + g.pages.length, 0);
+  const linkBtn = (id: string, title: string, testid: string) => (
+    <button
+      type="button"
+      data-testid={testid}
+      className="w-full cursor-pointer truncate text-left text-[13px] text-[var(--link)] hover:underline"
+      onClick={() => navigate(`/p/${id}`)}
+    >
+      {title || t("backlinks.untitled")}
+    </button>
+  );
   return (
     <RightPanel
       testId="related-panel"
@@ -41,22 +56,41 @@ export function RelatedPanel({ pageId, onClose }: { pageId: string; onClose: () 
           ) : (
             <ul className="flex flex-col gap-0.5">
               {backlinks.map((b) => (
-                <li key={b.id}>
-                  <button
-                    type="button"
-                    data-testid={`backlink-${b.id}`}
-                    className="w-full cursor-pointer truncate text-left text-[13px] text-[var(--link)] hover:underline"
-                    onClick={() => navigate(`/p/${b.id}`)}
-                  >
-                    {b.title || t("backlinks.untitled")}
-                  </button>
-                </li>
+                <li key={b.id}>{linkBtn(b.id, b.title, `backlink-${b.id}`)}</li>
               ))}
             </ul>
           )}
         </RelatedSection>
-        {/* Reserved for later increments (ADR-133): §Related (2-hop, increment ②), §Local graph, §Tags.
-            Each will be its own view-gated section under this same panel — no further IA change. */}
+        {/* §Related — 2-hop pages that share a link with this one, grouped by the shared link (Scrapbox-style).
+            Both edge ends are view-filtered server-side (#322 / ADR-133 §3). */}
+        <RelatedSection title={t("related.related")} count={relatedCount}>
+          {relatedGroups.length === 0 ? (
+            <p className="text-[13px] text-fg-dim" data-testid="related-empty">{t("related.empty")}</p>
+          ) : (
+            <div className="flex flex-col gap-3" data-testid="related-groups">
+              {relatedGroups.map((g) => (
+                <div key={g.intermediate.id} className="flex flex-col gap-0.5">
+                  {/* the shared link (intermediate) heads its group; clicking it navigates to that page. */}
+                  <button
+                    type="button"
+                    data-testid={`related-via-${g.intermediate.id}`}
+                    className="truncate text-left text-[11px] text-fg-dim hover:text-[var(--link)] hover:underline"
+                    onClick={() => navigate(`/p/${g.intermediate.id}`)}
+                  >
+                    {t("related.via")} {g.intermediate.title || t("backlinks.untitled")}
+                  </button>
+                  <ul className="flex flex-col gap-0.5 pl-2">
+                    {g.pages.map((p) => (
+                      <li key={p.id}>{linkBtn(p.id, p.title, `related-${p.id}`)}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+        </RelatedSection>
+        {/* Reserved for later increments (ADR-133): §Local graph, §Tags. Each will be its own view-gated
+            section under this same panel — no further IA change. */}
       </div>
     </RightPanel>
   );
