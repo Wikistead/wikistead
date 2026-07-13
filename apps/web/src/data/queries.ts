@@ -244,7 +244,7 @@ export function useBacklinks(pageId: string | null, enabled = true) {
 // (a deleted / no-longer-viewable resource is silently dropped server-side), so this
 // list is authoritative for what may be rendered — never cache-render a stale title.
 export type PinResourceType = "space" | "page";
-export interface Pin { id: string; resourceType: PinResourceType; resourceId: string; title: string; position: number }
+export interface Pin { id: string; resourceType: PinResourceType; resourceId: string; title: string; position: number; space?: { id: string; name: string; iconImageUrl: string | null } }
 export function usePins(enabled = true) {
   const { token } = useSession();
   return useQuery({

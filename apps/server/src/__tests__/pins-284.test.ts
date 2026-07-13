@@ -48,7 +48,7 @@ const pageBTuple = [{ user: `space:${SPACE}`, relation: 'space', object: `page:$
 const listPins = async (who: string) => {
   const res = await app.inject({ method: 'GET', url: '/pins', headers: H(who) })
   expect(res.statusCode).toBe(200)
-  return res.json() as { id: string; resourceType: string; resourceId: string; title: string; position: number }[]
+  return res.json() as { id: string; resourceType: string; resourceId: string; title: string; position: number; space?: { id: string; name: string; iconImageUrl: string | null } }[]
 }
 const pin = (who: string, resourceType: string, resourceId: string) =>
   app.inject({ method: 'POST', url: '/pins', headers: H(who), payload: { resourceType, resourceId } })
@@ -87,6 +87,9 @@ describe('#284 pin write gate (view-gated, non-oracle)', () => {
     const pins = await listPins('alice')
     const p = pins.find((x) => x.resourceId === PAGE_A)
     expect(p?.title).toBe('Pin A')
+    // #284a PAGE pin carries its owning space (name + icon) so the sidebar can disambiguate a deep
+    // page. No icon_image_key on this space → iconImageUrl is null (initials chip on the client).
+    expect(p?.space).toEqual({ id: SPACE, name: 'Pin Space', iconImageUrl: null })
   })
 
   it('re-pinning is idempotent (returns the existing pin, no duplicate row)', async () => {
