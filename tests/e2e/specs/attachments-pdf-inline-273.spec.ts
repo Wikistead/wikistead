@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, enterEdit, sleep } from "../helpers";
+import { openDemo, openScratch, enterEdit, sleep } from "../helpers";
 
 const API = "http://dev.localhost:4010";
 
@@ -59,4 +59,83 @@ test("#273: a sniffed PDF renders in a sandboxed (allow-scripts, NO allow-same-o
   const pdfFrame = page.frameLocator("[data-testid=attachment-inline-frame]");
   await expect(pdfFrame.locator("canvas")).toHaveCount(1, { timeout: 20000 });
   await expect(pdfFrame.locator("#msg")).toBeHidden();
+});
+
+// Upload an attachment to `pageId` via the panel and return its id. mimeType drives the server sniff (a real
+// PDF → inline; octet-stream / non-PDF bytes → inline_kind "none" → a download card).
+async function uploadAttachment(page: import("@playwright/test").Page, pageId: string, name: string, mimeType: string, buffer: Buffer): Promise<string> {
+  if ((await page.getByTestId("attachments-panel").count()) === 0) {
+    await page.click("[data-testid=page-overflow-trigger]");
+    await page.click("[data-testid=attachments-toggle]");
+    await expect(page.getByTestId("attachments-panel")).toBeVisible();
+    await sleep(150);
+  }
+  await page.setInputFiles("[data-testid=attachments-panel] input[type=file]", { name, mimeType, buffer });
+  await page.waitForFunction(
+    (n) => [...document.querySelectorAll("[data-testid=attach-item]")].some((e) => (e as HTMLElement).innerText.includes(n)),
+    name,
+    { timeout: 8000 },
+  );
+  return page.evaluate(async ({ api, id, n }) => {
+    const list = await (await fetch(`${api}/spaces/demo_space/pages/${id}/attachments`, { headers: { Authorization: "Bearer dev-token" } })).json();
+    return (list.find((a: { filename: string }) => a.filename === n) as { id: string }).id;
+  }, { api: API, id: pageId, n: name });
+}
+
+// #273(1): the PDF inline frame must appear RIGHT AFTER publish, without a reload. Root cause: the
+// widget REVOKED the resolver's cached inline blob URL, so the second render (publish→view) got a dead cached
+// URL and never re-mounted the frame. A FRESH scratch page (isolated from the shared demo page). Real Chromium.
+test("#273the PDF inline frame re-mounts after publish without a reload", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const pageId = await openScratch(page, "pdf-publish-273");
+  await enterEdit(page);
+  const name = `pub-${Date.now().toString(36)}.pdf`;
+  const pdfId = await uploadAttachment(page, pageId, name, "application/pdf", MINIMAL_PDF);
+
+  const linkName = `pub-doc-${Date.now().toString(36)}.pdf`;
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Control+End");
+  await page.keyboard.insertText(`\n[${linkName}](wks-attachment:${pdfId})\n`);
+  await page.keyboard.press("ArrowUp");
+  await sleep(700);
+  // the frame is present while editing.
+  await expect(page.locator("[data-testid=attachment-inline-frame]")).toHaveCount(1, { timeout: 8000 });
+
+  // publish through the UI (the transition that used to drop the frame). Publish is async (collab flush →
+  // mutate → setEditing(false)); wait for the switch to VIEW mode (the Edit button appears) so we assert the
+  // POST-transition state, then require the frame WITHOUT a reload.
+  await page.click("[data-testid=publish-page]");
+  await expect(page.getByTestId("edit-toggle")).toBeVisible({ timeout: 15000 }); // publish done → view mode
+  // the published body renders the card (card=1 post-transition), and — the fix — its frame MOUNTS
+  // without a reload (frame was 0 until reload).
+  await expect(page.locator("[data-testid=attachment-card]")).toHaveCount(1, { timeout: 10000 });
+  await expect(page.locator("[data-testid=attachment-inline-frame]")).toHaveCount(1, { timeout: 10000 });
+});
+
+// #273(2): a DOWNLOAD card (non-inline binary) downloads on a click ANYWHERE in the card body, not just
+// the ⤓ icon. An inline PDF card is excluded (its body is the viewer). Real Chromium (a real download event).
+test("#273a download card downloads on a full-body click", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const pageId = await openScratch(page, "dl-card-273");
+  await enterEdit(page);
+  const binName = `blob-${Date.now().toString(36)}.bin`;
+  const binId = await uploadAttachment(page, pageId, binName, "application/octet-stream", Buffer.from("not a pdf, just bytes"));
+
+  const linkName = `download-${Date.now().toString(36)}.bin`;
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Control+End");
+  await page.keyboard.insertText(`\n[${linkName}](wks-attachment:${binId})\n`);
+  await page.keyboard.press("ArrowUp");
+  await sleep(600);
+
+  const card = page.locator("[data-pane=preview] [data-testid=attachment-card]").filter({ hasText: linkName });
+  await expect(card).toBeVisible();
+  await expect(card.locator("[data-testid=attachment-inline-frame]")).toHaveCount(0); // a download card, no viewer
+
+  // clicking the card BODY (the name label, not the ⤓ button) triggers the download.
+  const [download] = await Promise.all([
+    page.waitForEvent("download", { timeout: 8000 }),
+    card.locator(".cm-lp-attachment-name").click(),
+  ]);
+  expect(download.suggestedFilename()).toBeTruthy();
 });
