@@ -233,7 +233,15 @@ function openEmbedPagePicker(view: EditorView, open: PageEmbedPicker): void {
     // The host picker's close restores focus to its trigger (now gone → <body>), which lands AFTER a
     // synchronous view.focus. Defer so the editor wins the focus back — otherwise the next keystroke
     // (e.g. Ctrl+Enter to edit the id) is lost to <body>. Same seam the template/link pickers use.
-    requestAnimationFrame(() => view.focus());
+    // #332 CM REBUILDS view.dom.className on the focus transition, stripping the class the
+    // vimWysiwygCaretGuard added during the focus update (cm-wys-blank-fatcursor) — so the vim fat cursor
+    // paints the atom's first RAW char (`:`) until the next keystroke, and the selection reads as a bright
+    // one-char block instead of the image-atom look (blanked glyph + full-card ring). Re-pin the caret on a
+    // SECOND frame, after CM has finalized focus, so the guard re-applies the blank class and it sticks.
+    requestAnimationFrame(() => {
+      view.focus();
+      requestAnimationFrame(() => { if (!view.dom.isConnected) return; view.dispatch({ selection: EditorSelection.cursor(Math.min(at, view.state.doc.length)) }); });
+    });
   });
 }
 

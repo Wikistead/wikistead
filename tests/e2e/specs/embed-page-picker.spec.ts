@@ -119,11 +119,69 @@ test("#332: vim /embed picker leaves NORMAL mode with the caret on the rendered 
   expect(onAtom.h, "the caret is on the atom's opening line, not a blank line below").toBe(1);
   expect(onAtom.onBlock, "the caret's line is inside a rendered macro block (the card), not a bare line").toBe(true);
 
-  // Non-regression: the id is still editable — Ctrl+Enter (explicit entry) reveals the raw block. (Focus
-  // returns to the editor after the picker closes — the deferred view.focus() — so the keystroke lands.)
+  // #332 items 1 & 2: the selection reads like the IMAGE atom — the vim fat cursor's GLYPH is BLANKED
+  // (no bright raw `:` leaking on the cursor) and the full-card ring is the selection indicator. The blank is
+  // applied by the vimWysiwygCaretGuard AND must SURVIVE CM's focus className rebuild (the picker re-pins the
+  // caret on a 2nd frame). Assert the editor carries the blank-fatcursor class and the fat cursor glyph is
+  // transparent right after the pick (it used to show a coloured `:` until the next keystroke).
+  const sel = await page.evaluate(() => {
+    const pane = document.querySelector("[data-pane=preview]") as HTMLElement | null;
+    const view = pane?.querySelector(".cm-editor") as HTMLElement | null;
+    const fat = pane?.querySelector(".cm-fat-cursor") as HTMLElement | null;
+    const wrap = pane?.querySelector("[data-testid=macro-embed-page]")?.closest(".cm-lp-macro-wrap") as HTMLElement | null;
+    return {
+      blankClass: view?.classList.contains("cm-wys-blank-fatcursor") ?? false,
+      fatGlyphColor: fat ? getComputedStyle(fat).color : null,
+      ring: wrap?.classList.contains("cm-lp-atom-sel") ?? false,
+    };
+  });
+  expect(sel.blankClass, "the blank-fatcursor class survives the picker's focus rebuild").toBe(true);
+  expect(sel.fatGlyphColor, "the fat cursor glyph is transparent (no raw `:` leaks on the cursor)").toBe("rgba(0, 0, 0, 0)");
+  expect(sel.ring, "the full-card selection ring is shown (image-atom look)").toBe(true);
+
+  // #332 item 3 (user ruling): Ctrl+Enter on the selected atom opens the RETARGET PICKER (the ⇆ UI),
+  // NOT the raw reveal — the id is re-picked, never hand-edited in the block. The raw `:::embed-page` must NOT
+  // appear; the picker input must.
   await page.keyboard.press("Control+Enter");
-  await sleep(200);
-  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain(":::embed-page");
+  await expect(page.getByTestId("embed-picker-input")).toBeVisible({ timeout: 4000 });
+  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).not.toContain(":::embed-page");
+  await page.keyboard.press("Escape"); // close the picker without changing the target
+  await expect(page.getByTestId("embed-picker-input")).toHaveCount(0);
+});
+
+// #332 item 4: the picker auto-highlights the FIRST hit so Enter confirms immediately (no arrowing), and
+// Ctrl-j/k move the highlight. Real Chromium (the cmdk controlled-value + shouldFilter=false auto-select is a
+// runtime behaviour). Uses the deterministic search-by-title path.
+test("#332 the embed picker auto-selects the first hit (Enter confirms without arrowing)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const title = `Autoselect Embed ${Date.now().toString(36)}`;
+  await page.goto("/p/demo");
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  const targetId = await createScratchPage(page, title);
+  await page.goto(`/p/${targetId}?edit=1`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("autoselect body");
+  await publishAndWait(page, targetId, "autoselect body");
+  await sleep(1200); // Meili index
+
+  await openScratch(page, "embed-autoselect-host");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("/embed");
+  await expect(page.getByTestId("slash-palette")).toBeVisible();
+  await page.click('[data-testid="slash-item-macro:embed-page"]');
+  await expect(page.getByTestId("embed-picker-input")).toBeVisible();
+  await page.getByTestId("embed-picker-input").fill(title);
+  // the first hit appears and is auto-highlighted (aria-selected) → pressing Enter confirms it directly.
+  const firstHit = page.getByTestId("embed-picker-item").first();
+  await expect(firstHit).toBeVisible({ timeout: 10000 });
+  await expect(firstHit).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("embed-picker-input")).toHaveCount(0);
+  await sleep(300);
+  // the chosen page was embedded (Enter picked the auto-highlighted first hit — not a no-op).
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-embed-page]")).toBeVisible();
 });
 
 // #344: the picker dialog is TOP-PINNED, so its top input never shifts vertically as the candidate list

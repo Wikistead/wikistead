@@ -819,13 +819,22 @@ export function embedRetargetChange(state: EditorState, pos: number, name: strin
 // id/URL back via embedRetargetChange — a single canonical dispatch whose offset is re-resolved fresh
 // at WRITE time (posAtDOM → the block's current start), so a concurrent edit can't stale it. No new
 // fetch path: embed-page reuses the FGA-view-gated search picker (the pageEmbedPicker seam).
-function changeEmbedTarget(view: EditorView, wrap: HTMLElement, name: string): void {
+function changeEmbedTarget(view: EditorView, getPos: () => number, name: string): void {
   const write = (value: string) => {
     let ch: { from: number; to: number; insert: string } | null = null;
-    try { ch = embedRetargetChange(view.state, view.posAtDOM(wrap), name, value); } catch { ch = null; }
+    try { ch = embedRetargetChange(view.state, getPos(), name, value); } catch { ch = null; }
     if (!ch) { view.focus(); return; }
-    view.dispatch({ changes: ch, selection: EditorSelection.cursor(ch.from + ch.insert.length), scrollIntoView: true });
+    // #332 an atomSelectable embed (embed-page) must land the caret on the atom START so the block
+    // renders SELECTED (the image-atom look: blanked fat cursor + full-card ring) rather than revealing raw
+    // at the block end. Re-pin on a SECOND frame so the vimWysiwygCaretGuard's blank class survives CM's
+    // focus className rebuild (see openEmbedPagePicker). embed-external is not atomSelectable → caret stays
+    // at the block end (its caret-in reveal is the intended edit path).
+    const m = findDirectiveMacro(name);
+    const atomSel = !!(m?.revealOnCursor && m.atomSelectable);
+    const caret = atomSel ? ch.from : ch.from + ch.insert.length;
+    view.dispatch({ changes: ch, selection: EditorSelection.cursor(caret), scrollIntoView: true });
     view.focus();
+    if (atomSel) requestAnimationFrame(() => { view.focus(); requestAnimationFrame(() => { if (view.dom.isConnected) view.dispatch({ selection: EditorSelection.cursor(Math.min(caret, view.state.doc.length)) }); }); });
   };
   if (name === "embed-page") {
     const picker = view.state.facet(pageEmbedPicker);
@@ -836,7 +845,7 @@ function changeEmbedTarget(view: EditorView, wrap: HTMLElement, name: string): v
     const prompt = view.state.facet(embedUrlPrompt);
     if (!prompt) { view.focus(); return; } // modal-less surface: raw edit via reveal remains
     let cur = "";
-    try { cur = directiveMacroAt(view.state, view.posAtDOM(wrap))?.body.trim() ?? ""; } catch { /* detached → empty seed */ }
+    try { cur = directiveMacroAt(view.state, getPos())?.body.trim() ?? ""; } catch { /* detached → empty seed */ }
     prompt(cur, (url) => { if (url != null && url.trim() !== "") write(url.trim()); else view.focus(); });
   }
 }
@@ -2320,7 +2329,7 @@ class MacroWidget extends WidgetType {
         // mousedown only PREVENTS the caret/fall-through (don't open here); `click` does the action, so
         // it can't double-fire, and click lands even when an intervening pointer phase is swallowed.
         retarget.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
-        retarget.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); changeEmbedTarget(view, wrap, this.name); });
+        retarget.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); changeEmbedTarget(view, () => view.posAtDOM(wrap), this.name); });
         wrap.appendChild(retarget);
       }
       // #174 comment 911: the ⊟ collapse BUTTON is removed from every macro (it cluttered the block
@@ -3783,6 +3792,21 @@ export function demoteTodoToTaskList(view: EditorView, pos: number): boolean {
   return true;
 }
 
+// #332 the embed macro at `pos` if it is an `atomSelectable` embed (embed-page) — resolved with the
+// atom-edge retry (an empty caret rests at the block edge, where directiveMacroAt can miss). Ctrl+Enter on such
+// an atom opens its RETARGET picker (the ⇆ UI), NOT the raw reveal: the id is re-picked, never hand-edited in
+// the block (raw editing stays reachable via Source mode — Open formats intact). Returns the directive name.
+function atomSelectableEmbedAt(state: EditorState, pos: number): string | null {
+  let dir = directiveMacroAt(state, pos);
+  if (!dir) {
+    const b = state.field(livePreview, false)?.blocks?.find((bl) => pos >= bl.from && pos <= bl.to);
+    if (b) dir = directiveMacroAt(state, Math.min(b.from + 1, state.doc.length));
+  }
+  if (!dir) return null;
+  const m = findDirectiveMacro(dir.name);
+  return m?.revealOnCursor && m.atomSelectable ? dir.name : null;
+}
+
 export function enterMacroCommand(view: EditorView): boolean {
   // #174 comment 1003 / ADR-100 (innermost-wins): if a NESTED macro (inside a columns/tabs container) is
   // selected, Ctrl+Enter opens ITS editUI — the same target as the nested ✎ — not the container's. In
@@ -3790,6 +3814,15 @@ export function enterMacroCommand(view: EditorView): boolean {
   // (setNestedSelection); this makes the keyboard entry match the mouse one for the selected nested macro.
   const nsel = view.state.field(nestedSelectionField, false);
   if (nsel && enterNestedMacroAt(view, nsel)) return true;
+  // #332 (user ruling): Ctrl+Enter on a selected atomSelectable embed (embed-page) opens the RETARGET
+  // picker (same as the ⇆ button), not the raw reveal. The picker re-picks the page id; raw editing is via
+  // Source mode. Only when the picker seam exists (else fall through to the raw reveal below).
+  const embedName = atomSelectableEmbedAt(view.state, view.state.selection.main.head);
+  const embedSeam = embedName === "embed-page" ? view.state.facet(pageEmbedPicker) : embedName === "embed-external" ? view.state.facet(embedUrlPrompt) : null;
+  if (embedName && embedSeam) {
+    changeEmbedTarget(view, () => view.state.selection.main.head, embedName);
+    return true;
+  }
   // #174 addendum: otherwise Ctrl+Enter reveals RAW source (raw=true) — for a ``` editUI macro (mermaid)
   // that means the vim-editable source, NOT the editUI (which the ✎ button opens). Harmless for others.
   if (enterMacroAt(view, view.state.selection.main.head, true)) return true;
