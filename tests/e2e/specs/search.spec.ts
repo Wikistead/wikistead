@@ -164,3 +164,22 @@ test("#285the search modal is wide enough for the 2-pane layout", async ({ brows
   const w = (await dialog.boundingBox())!.width;
   expect(w, `search modal width ${w}px should be the wide 2-pane size (>900px, not the old 768px)`).toBeGreaterThan(900);
 });
+
+// #285(review bounce): at intermediate viewports (640–1024px) the `sm:max-w-5xl` cap OVERRODE the
+// base `max-w-[calc(100%-2rem)]` gutter, so the modal went full-bleed with a 0px side gutter (touching both
+// screen edges). The min() cap keeps the 2rem (32px) gutter until the viewport exceeds ~66rem. Pin the left AND
+// right gutter at two intermediate widths (both would be ~0 before the fix).
+for (const width of [900, 640]) {
+  test(`#285the search modal keeps a side gutter at ${width}px (no full-bleed)`, async ({ browser }) => {
+    const page = await (await browser.newContext({ viewport: { width, height: 800 } })).newPage();
+    await openDemo(page);
+    await typeSearch(page, "the");
+    const dialog = page.locator("[data-slot=dialog-content]");
+    await expect(dialog).toBeVisible();
+    const box = (await dialog.boundingBox())!;
+    const leftGutter = box.x;
+    const rightGutter = width - (box.x + box.width);
+    expect(leftGutter, `left gutter ${leftGutter}px at ${width}px viewport should be ≥12px (was ~0 = full-bleed)`).toBeGreaterThanOrEqual(12);
+    expect(rightGutter, `right gutter ${rightGutter}px at ${width}px viewport should be ≥12px (was ~0 = full-bleed)`).toBeGreaterThanOrEqual(12);
+  });
+}

@@ -60,8 +60,12 @@ export function SearchModal({ open, onOpenChange }: { open: boolean; onOpenChang
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) setInput(""); onOpenChange(o); }}>
       {/* #285widen to 5xl (1024px) so the 2-pane list + rich preview isn't cramped — the preview
-          pane's reading line-length drove the choice. A narrow viewport still shrinks it (max-w caps, not sets);
-          the mobile 1-column layout is unchanged. */}
+          pane's reading line-length drove the choice.
+          #285the "0px side gutter at 640–1024px" bounce is structurally fixed by #365 (fdc019e), which
+          rebased DialogContent onto `w-[calc(100vw-4rem)]` — a WIDTH the per-dialog `sm:max-w-5xl` only CAPS
+          (never widens). So the effective width is min(100vw-4rem, 64rem): a 2rem/side gutter is always kept at
+          narrow/mid widths, and 5xl still governs the ceiling on wide screens. No per-dialog max-w override is
+          needed here anymore; the gutter pin in search.spec guards the regression. Mobile 1-column unchanged. */}
       <DialogContent className="sm:max-w-5xl overflow-hidden p-0" showCloseButton={false} position="top">
         <DialogHeader className="sr-only"><DialogTitle>{t("search.placeholder")}</DialogTitle></DialogHeader>
         <Command
