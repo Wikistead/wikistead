@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from "../components/ui/command";
@@ -31,6 +31,16 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
   // brand-new page not yet indexed). Trimmed; only offered when it looks like a bare token.
   const raw = input.trim();
   const looksLikeId = raw.length > 0 && !/\s/.test(raw);
+  // #332item 4: auto-highlight the FIRST candidate so Enter confirms immediately (and the right preview
+  // shows) without arrowing. cmdk with a controlled value + shouldFilter={false} does NOT re-select when the
+  // result list changes, so when the current highlight falls out of the list we reset it to the first hit (or
+  // the raw-id fallback). Keyboard nav (Ctrl-j/k / arrows) and Escape are unchanged.
+  useEffect(() => {
+    const ids = (hits ?? []).map((h) => h.id);
+    const candidates = looksLikeId ? [...ids, `__raw__${raw}`] : ids;
+    if (candidates.length === 0) { if (selected !== "") setSelected(""); return; }
+    if (!candidates.includes(selected)) setSelected(candidates[0]!);
+  }, [hits, looksLikeId, raw, selected]);
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) close(null); }}>
