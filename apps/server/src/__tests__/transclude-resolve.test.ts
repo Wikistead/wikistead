@@ -45,3 +45,40 @@ describe('resolveTranscludeRef (#108 / ADR-071)', () => {
     expect(r).toEqual({ ok: false, reason: 'cycle' })
   })
 })
+
+// #325 / ADR-137 slice 1: a `pageId#slug` fragment extracts ONE section AFTER the page-level view gate.
+describe('resolveTranscludeRef section fragments (#325 / ADR-137)', () => {
+  const doc = '# Intro\n\nintro body\n\n## Details\n\ndetail body\n\n# Other\n\nother body\n'
+
+  it('a viewer gets just the requested section (heading line through the next same-or-higher heading)', async () => {
+    const r = await resolveTranscludeRef({ db: db({ b: doc }), fga: fga(true) }, { principal: 'user:u', refPageId: 'b#details' })
+    expect(r).toEqual({ ok: true, content: '## Details\n\ndetail body' })
+  })
+
+  it('a top-level section stops at the next same-level heading (its subsections stay in)', async () => {
+    const r = await resolveTranscludeRef({ db: db({ b: doc }), fga: fga(true) }, { principal: 'user:u', refPageId: 'b#intro' })
+    expect(r).toEqual({ ok: true, content: '# Intro\n\nintro body\n\n## Details\n\ndetail body' })
+  })
+
+  it('an UNKNOWN slug is byte-identical to a denied page (no fragment-existence oracle)', async () => {
+    const r = await resolveTranscludeRef({ db: db({ b: doc }), fga: fga(true) }, { principal: 'user:u', refPageId: 'b#no-such-section' })
+    expect(r).toEqual({ ok: false, reason: 'denied' })
+  })
+
+  it('a `#^id` block fragment is denied in slice 1 (blocks are slice 2 — same placeholder, no oracle)', async () => {
+    const r = await resolveTranscludeRef({ db: db({ b: doc }), fga: fga(true) }, { principal: 'user:u', refPageId: 'b#^para1' })
+    expect(r).toEqual({ ok: false, reason: 'denied' })
+  })
+
+  it('the fragment NEVER smuggles a different identity: cycle/authz key on the bare page id', async () => {
+    // cycle: chain has bare 'b' → a fragment ref to the same page is still the same node.
+    expect(await resolveTranscludeRef({ db: db({ b: doc }), fga: fga(true) }, { principal: 'user:u', refPageId: 'b#intro', chain: ['b'] }))
+      .toEqual({ ok: false, reason: 'cycle' })
+    // authz: a non-viewer of 'b' is denied even with a fragment, and the content is never read.
+    let read = false
+    const tracking = { sql: async () => { read = true; return [{ published_md: doc }] } } as never
+    expect(await resolveTranscludeRef({ db: tracking, fga: fga(false) }, { principal: 'user:u', refPageId: 'b#intro' }))
+      .toEqual({ ok: false, reason: 'denied' })
+    expect(read).toBe(false)
+  })
+})

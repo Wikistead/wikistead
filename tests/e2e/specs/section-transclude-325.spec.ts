@@ -1,0 +1,54 @@
+import { test, expect } from "@playwright/test";
+import { enterEdit, openScratch, sleep } from "../helpers";
+
+// #325 / ADR-137 slice 1: `:::embed-page` with a `pageId#slug` fragment transcludes ONE section (the heading
+// through the next same-or-higher heading), read-only. Real Chromium (the widget resolves via the host-mediated
+// view-gated endpoint and swaps its DOM asynchronously — a synthetic env can't exercise fetch → render).
+
+test("#325: :::embed-page with #slug transcludes just that section, not the whole page", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  // Source page with two top-level sections.
+  const src = await openScratch(page, "sx-src");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("# Alpha\n\nalpha body here\n\n# Beta\n\nbeta body here\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(700);
+
+  // Host page transcludes ONLY the Beta section via the slug fragment.
+  await openScratch(page, "sx-host");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(`host\n\n:::embed-page\n${src}#beta\n:::\n\nbelow\n`);
+  await sleep(400);
+  await page.keyboard.press("Control+End"); // caret away → the atom widget renders
+  await sleep(600);
+
+  // The transcluded fragment shows Beta (heading + body) but NOT Alpha's body.
+  const host = page.locator("[data-pane=preview] .cm-content");
+  await expect(host).toContainText("Beta", { timeout: 10000 });
+  await expect(host).toContainText("beta body here");
+  await expect(host).not.toContainText("alpha body here");
+});
+
+// An unknown slug is byte-identical to a denied page: the existence-hiding placeholder, never a distinct error.
+test("#325: :::embed-page with an unknown #slug renders the denied placeholder (no section oracle)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const src = await openScratch(page, "sx-src2");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("# Only Section\n\nbody\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(700);
+
+  await openScratch(page, "sx-host2");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(`host\n\n:::embed-page\n${src}#no-such-section\n:::\n\nbelow\n`);
+  await sleep(400);
+  await page.keyboard.press("Control+End");
+  await sleep(600);
+  await expect(page.getByTestId("macro-embed-page-denied")).toBeVisible({ timeout: 10000 });
+});

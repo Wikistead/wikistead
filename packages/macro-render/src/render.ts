@@ -44,7 +44,9 @@ const EMPTY_REGISTRY: MacroHtmlRegistry = { fence: () => undefined, directive: (
 // #174 point 4: GFM Table so a pipe table (incl. one nested in columns/tabs/transclude) renders as a real
 // <table> here too — the client md-render gets the same extension, keeping the single source of truth
 // (ADR-085). Cell content goes through the `html` tag (escaped), so this stays inside the XSS boundary.
-const mdParser = parser.configure([directiveExtension, Strikethrough, Table, highlightExtension, footnoteExtension]);
+// Exported so the shared heading extractor (#325 / ADR-137 headings.ts) walks the SAME parse the
+// export renderer uses — one grammar, no second scanner (the drift-proof property the ADR requires).
+export const mdParser = parser.configure([directiveExtension, Strikethrough, Table, highlightExtension, footnoteExtension]);
 type SNode = ReturnType<typeof mdParser.parse>["topNode"];
 
 // Mark/structural nodes whose own text must NOT be emitted.
