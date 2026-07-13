@@ -80,7 +80,7 @@ export async function registerClient(db: TenantDb, tenantId: string, body: Regis
     redirect_uris: redirectUris,
     ...(clientName ? { client_name: clientName } : {}),
     token_endpoint_auth_method: 'none',
-    grant_types: ['authorization_code', 'refresh_token'],
+    grant_types: ['authorization_code'], // refresh_token is a later slice — not offered yet (see /token)
     response_types: ['code'],
     client_id_issued_at: Math.floor(now / 1000),
   }

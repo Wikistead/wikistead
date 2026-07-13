@@ -34,7 +34,9 @@ export function authorizationServerMetadata(req: Pick<FastifyRequest, 'protocol'
     token_endpoint: `${base}/mcp/oauth/token`,
     registration_endpoint: `${base}/mcp/oauth/register`,
     response_types_supported: ['code'],
-    grant_types_supported: ['authorization_code', 'refresh_token'],
+    // Only authorization_code is supported today; refresh_token is a later slice, so it is NOT advertised (a
+    // client that saw it would loop on a failing refresh after token expiry — the connector re-runs authorize).
+    grant_types_supported: ['authorization_code'],
     code_challenge_methods_supported: ['S256'],
     token_endpoint_auth_methods_supported: ['none'],
     scopes_supported: ['read', 'write'],
