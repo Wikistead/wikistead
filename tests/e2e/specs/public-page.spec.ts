@@ -280,3 +280,38 @@ test("#227/standalone /pub/:id — member toggle in the band, NO child tree, sti
   const yAfter = (await anon.getByTestId("public-band").boundingBox())!.y;
   expect(Math.abs(yAfter - yBefore), `band y ${yBefore} → ${yAfter} must stay pinned`).toBeLessThanOrEqual(2);
 });
+
+// #319(review bounce): loading the public reader on the member CM6 engine leaked two
+// editor-only behaviours onto the read-only anonymous surface. A: the 740px reading column didn't apply
+// (the body host lacked data-pane="preview") → full width. B: block macros showed the editor's hover
+// edit-frame (and ✎) even though nothing is editable. Both are display-only (authz/XSS untouched).
+test("#319public reader has the reading column AND no read-only macro edit affordances", async ({ browser }) => {
+  const authed = await (await browser.newContext()).newPage();
+  const id = await openScratch(authed, "pub-readonly-chrome");
+  await enterEdit(authed);
+  await authed.click("[data-pane=preview] .cm-content");
+  await authed.keyboard.insertText("# Wide Heading\n\n```mermaid\nflowchart TD\n  A --> B\n```\n\ntail\n");
+  await sleep(400);
+  await authed.getByTestId("publish-page").click();
+  await sleep(800);
+  await makePublic(id);
+  await setPublicSurface(authed, true);
+
+  const anon = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+  await anon.goto(`/pub/${id}`);
+  await expect(anon.getByTestId("public-title")).toBeVisible();
+  const body = anon.getByTestId("public-body");
+
+  // A: the reading column (740px, centred) applies — the content is NOT full viewport width.
+  const contentW = await body.locator(".cm-content").evaluate((el) => parseFloat(getComputedStyle(el).maxWidth));
+  expect(contentW, `public .cm-content max-width ${contentW}px is the 740px reading column`).toBeLessThanOrEqual(760);
+
+  // B: the block macro renders, but hovering it shows NO edit frame (read-only) and there is NO ✎ edit button.
+  const wrap = body.locator(".cm-lp-macro-wrap").first();
+  await expect(wrap).toBeVisible({ timeout: 10000 });
+  await wrap.hover();
+  await sleep(150);
+  const outline = await wrap.evaluate((el) => getComputedStyle(el).outlineStyle);
+  expect(outline, "a read-only macro shows no hover edit-frame outline").toBe("none");
+  expect(await body.locator("[data-testid=macro-edit]").count(), "no ✎ edit button on a read-only surface").toBe(0);
+});

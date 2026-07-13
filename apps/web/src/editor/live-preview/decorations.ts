@@ -3983,6 +3983,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   // with the selection ring. `:not(.cm-lp-atom-sel)` so the accent selection ring wins when selected.
   // Display-only (never edits/offsets).
   ".cm-lp-macro-wrap:hover:not(.cm-lp-atom-sel)": { outline: "1px solid var(--border, #888)", outlineOffset: "1px", borderRadius: "4px" },
+  // #319 c1587-B: on a READ-ONLY surface (public reader / Reading / template preview = mountPublishedView, whose
+  // .cm-content is contenteditable=false) a macro cannot be edited, so its edit AFFORDANCES are noise — suppress
+  // the hover block-boundary frame AND the atom selection ring (the ✎ edit button is already gated on
+  // !state.readOnly at build time). Higher specificity than the two rules above, so it wins. One rule fixes all
+  // three read-only faces (the #335 read-only-unification axis).
+  ".cm-content[contenteditable=\"false\"] .cm-lp-macro-wrap:hover, .cm-content[contenteditable=\"false\"] .cm-lp-atom-sel": { outline: "none" },
   ".cm-lp-macro": { display: "block", overflowX: "auto" },
   // #255: diagram alignment (mermaid/plantuml/excalidraw). Column flex on the wrap centres/pushes the
   // rendered block (align-items works regardless of the child's display; the absolute ✎ button is
