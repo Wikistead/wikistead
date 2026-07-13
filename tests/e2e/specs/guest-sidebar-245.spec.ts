@@ -40,6 +40,10 @@ test("#245: space-link guest gets the sidebar tree, no member chrome, opens a pa
   await expect(guest.getByTestId("new-page")).toHaveCount(0);
   await expect(guest.getByTestId("new-page-from-template")).toHaveCount(0);
   await expect(guest.getByTestId("space-settings-open")).toHaveCount(0);
+  // #355: the member onboarding banner must NOT appear on a guest surface (dev-token forces status=authed, so
+  // the fix is the member-shell mount gate, not just the inner data gate). #320: nor the member notification bell.
+  await expect(guest.getByTestId("onboarding-banner")).toHaveCount(0);
+  await expect(guest.getByTestId("notification-bell")).toHaveCount(0);
 
   // Clicking a page opens it in the content area (the read-only editor surface).
   await rows.first().click();

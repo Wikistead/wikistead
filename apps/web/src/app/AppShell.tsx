@@ -93,10 +93,12 @@ export function AppShell({
           sidebar) it would be an empty bordered panel column. */}
       {sidebar && <aside className="box-border min-w-0 overflow-hidden border-r border-border bg-panel [grid-area:sidebar]">{sidebar}</aside>}
       <main className="min-h-0 min-w-0 overflow-hidden [grid-area:main]">{children}</main>
-      {/* #289 / ADR-115: the first-run persona enrollment + existing-user banner. Guest safety is
-          the DATA gate inside (member account settings only — a guest session loads none), not this
-          shared shell mount. */}
-      <FirstRunOnboarding />
+      {/* #289 / ADR-115: the first-run persona enrollment + existing-user banner. MEMBER-ONLY (#355):
+          gate on the member-shell signal (onLogout — guest/share/loading shells pass none), NOT just the
+          inner DATA gate. In dev/e2e VITE_DEV_TOKEN forces status="authed" even on a guest share route, so the
+          data gate alone let the member banner leak onto the guest surface (a #289 structure violation). The
+          member banner/modal is now only mounted where a member session actually owns the shell (fail-closed). */}
+      {onLogout && <FirstRunOnboarding />}
     </div>
   );
 }
