@@ -25,13 +25,28 @@ services:
     command: ["valkey-server", "--save", "", "--appendonly", "no"]
     ports: ["6379:6379"]
 
+  # #338 / ADR-128: OpenFGA on the PERSISTENT postgres datastore (dev/prod parity) — state survives
+  # `docker compose down` / reboot, so the pinned .env store/model IDs stop dangling and dev-setup is
+  # genuinely first-run-only. One-shot migrate (idempotent) runs the schema before `run` starts.
+  openfga-migrate:
+    image: openfga/openfga:latest
+    command: migrate
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://postgres:postgres@postgres:5432/openfga?sslmode=disable
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: on-failure
+
   openfga:
     image: openfga/openfga:latest
-    # Dev: in-memory datastore (no migrations). Prod: switch to postgres engine.
     command: run
     environment:
-      OPENFGA_DATASTORE_ENGINE: memory
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://postgres:postgres@postgres:5432/openfga?sslmode=disable
       OPENFGA_PLAYGROUND_ENABLED: "true"
+    depends_on:
+      openfga-migrate: { condition: service_completed_successfully }
     ports: ["8080:8080", "8081:8081", "3000:3000"]
 
   meilisearch:

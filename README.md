@@ -49,13 +49,16 @@ docker-compose.yml        full local middleware stack
 cp .env.example .env
 cp apps/web/.env.example apps/web/.env.local   # web → API on dev.localhost (tenant routing)
 pnpm install
-docker compose up -d           # postgres, valkey, openfga, meilisearch, seaweedfs
+pnpm dev:up                    # up the middleware + idempotently bootstrap OpenFGA (store/model/tuples → .env)
 pnpm --filter @wikistead/server migrate        # apply DB migrations
-pnpm --filter @wikistead/server fga:bootstrap  # prints OPENFGA_STORE_ID / MODEL_ID → paste into .env
-pnpm --filter @wikistead/server fga:seed       # demo FGA tuples (needs the ids above)
 pnpm --filter @wikistead/server db:seed        # demo tenant / space / page
 pnpm dev                       # runs server + collab + web on the host
 ```
+`pnpm dev:up` is `docker compose up -d` + `dev:setup` (the idempotent FGA bootstrap). OpenFGA runs on the
+**persistent postgres datastore** (#338 / ADR-128), so the store + model **survive `docker compose down` /
+reboot** — `dev:setup` is first-run-only and a restart no longer breaks authz. (Upgrading an older in-memory
+setup: `docker compose down -v && pnpm dev:up` once to create the `openfga` DB + run its migration.)
+
 Open **http://localhost:5173/p/demo**. The API resolves the tenant from the Host
 header, so the web calls it on `dev.localhost:4000` (see `apps/web/.env.example`).
 Run app services in containers too: `docker compose --profile apps up -d --build`.

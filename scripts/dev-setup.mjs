@@ -1,17 +1,16 @@
 #!/usr/bin/env node
 // Idempotent dev bootstrap for OpenFGA authorization.
 //
-// The dev OpenFGA runs on the IN-MEMORY datastore (docker-compose.yml:
-// OPENFGA_DATASTORE_ENGINE=memory — chosen so dev needs no FGA migrations). The trade-off:
-// every `docker compose down` / container recreate WIPES its store + authorization model.
-// The OPENFGA_STORE_ID in .env then dangles, so every authz check/write fails and the app
-// shows symptoms like "can't create a space" / "failed to load" — even though Postgres (a
-// persistent volume) still has all the data.
+// #338 / ADR-128: the dev OpenFGA now runs on the PERSISTENT postgres datastore (docker-compose.yml:
+// OPENFGA_DATASTORE_ENGINE=postgres, a dedicated `openfga` DB on the existing postgres) — matching prod. So
+// the store + authorization model SURVIVE `docker compose down` / container recreate / reboot, and the
+// OPENFGA_STORE_ID pinned in .env no longer dangles. This script is therefore genuinely FIRST-RUN-ONLY: on a
+// fresh volume it bootstraps the store + model, rewrites the two OPENFGA_*_ID lines in .env, and seeds the demo
+// tuples; on every subsequent run (same volume) it detects the existing store and does nothing.
 //
-// This script detects a missing/stale store and, only then, re-bootstraps the store + model,
-// rewrites the two OPENFGA_*_ID lines in .env, and re-seeds the demo tuples. It is SAFE TO RUN
-// REPEATEDLY: when the store already exists it does nothing. Run it after `docker compose up -d`
-// and before `pnpm dev` (or any time authz breaks after restarting the containers).
+// It is SAFE TO RUN REPEATEDLY. Run it after `docker compose up -d` on first setup (or after an explicit
+// `docker compose down -v`, which wipes the volume and so re-triggers the one-time bootstrap). A plain
+// restart/reboot no longer needs it — the store persists.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
