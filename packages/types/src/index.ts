@@ -58,6 +58,11 @@ export interface GuestTokenClaims {
   shareLinkId: string;
   resource: ResourceRef;
   capability: Capability;
+  // #331 / ADR-138 (C-6): a pseudonymous per-session identity for an anonymous editor — `anon:<12 hex>`,
+  // HMAC(GUEST_TOKEN_SECRET, CSPRNG nonce). Display/attribution metadata ONLY (the FGA principal stays
+  // `share_link:<id>` — no capability change). Not derived from any PII / raw IP (GDPR). One session = one
+  // pseudonym. Optional so an older token without it still verifies.
+  anonId?: string;
   iat: number;
   exp: number;
 }
