@@ -168,6 +168,7 @@ import { ConfirmDialog } from "../ui/dialogs";
 import { DeleteBacklinkWarning } from "./DeleteBacklinkWarning";
 import { SaveTemplateDialog } from "./SaveTemplateDialog";
 import { TemplatesRoute } from "./TemplatesPage";
+import { RecentChangesRoute } from "./RecentChangesPage";
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport, printPageHtml } from "../data/exportApi";
 import { useActiveSpace } from "./ActiveSpace";
@@ -1236,6 +1237,7 @@ export function AppRoutes() {
       <Route path="/share/:linkId" element={<ShareRoute />} />
       <Route path="/invite" element={<InviteRoute />} />
       <Route path="/templates" element={<TemplatesRoute />} />
+      <Route path="/changes" element={<RecentChangesRoute />} />
       {AdminRoutes()}
       {AccountRoutes()}
       {SpaceSettingsRoutes()}

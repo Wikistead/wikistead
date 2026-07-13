@@ -808,6 +808,15 @@
     "restored": "{{who}} が {{title}} を復元しました",
     "changed": "{{who}} が {{title}} を変更しました"
   },
+  "recentChanges": {
+    "title": "最近の変更",
+    "back": "戻る",
+    "seeAll": "すべての変更を見る",
+    "empty": "変更はまだありません。",
+    "unpatrolledOnly": "未巡回のみ",
+    "markPatrolled": "巡回済みにする",
+    "unmarkPatrolled": "巡回済みを解除"
+  },
   "watch": {
     "watch": "このページをウォッチ",
     "unwatch": "ウォッチを解除"
