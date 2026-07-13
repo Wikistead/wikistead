@@ -78,16 +78,23 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
    never drift. An undefined reference shows a muted `?` (never a dangling link); an unreferenced-but-defined
    note is de-emphasised (content is shown, not dropped). fn-<n>/fnref-<n> anchors are in-document only. */
 .cm-lp-footnote-ref{font-size:0.75em;line-height:1}
-.cm-lp-footnote-ref a{color:var(--link,#4ea1ff);text-decoration:none}
+/* #335②: the ref/back links are display-only jump targets on a read surface — show a pointer, not the
+   editor's I-beam, so they read as clickable (the widget roots are contentEditable=false in the CM widget). */
+.cm-lp-footnote-ref a{color:var(--link,#4ea1ff);text-decoration:none;cursor:pointer}
 .cm-lp-footnote-ref a:hover{text-decoration:underline}
 .cm-lp-footnote-undef{color:var(--fg-dim,#888)}
 .cm-lp-footnotes{padding-top:1.5em;font-size:0.9em;color:var(--fg-dim,#666)}
 .cm-lp-footnotes hr{border:none;border-top:1px solid var(--border,rgba(127,127,127,0.3));margin:0 0 0.6em}
-.cm-lp-footnotes-list{padding-left:1.4em;margin:0}
+/* #335①: list-style:decimal explicitly — inside the CM editor the global `ol{list-style:none}` reset
+   (Tailwind Preflight / CM content) otherwise wins and the numbers vanish, unlike the public reader. The class
+   selector beats the element reset, so numbers show on every read surface. */
+.cm-lp-footnotes-list{padding-left:1.4em;margin:0;list-style:decimal}
 .cm-lp-footnote-item{margin:0.2em 0}
 .cm-lp-footnote-item p{display:inline;margin:0}
-.cm-lp-footnote-unref{opacity:0.65}
-.cm-lp-footnote-back{margin-left:0.4em;text-decoration:none;color:var(--link,#4ea1ff)}
+/* An unreferenced definition carries no number (no fn-<n> id / marker) so the `<ol>` count stays aligned with
+   the referenced items' explicit `value`; it is still shown, de-emphasised (content is never dropped). */
+.cm-lp-footnote-unref{opacity:0.65;list-style:none}
+.cm-lp-footnote-back{margin-left:0.4em;text-decoration:none;color:var(--link,#4ea1ff);cursor:pointer}
 .cm-lp-footnote-back:hover{text-decoration:underline}
 .cm-lp-todo-icon{position:absolute;left:0.65em;top:0.35em;width:1.5em;height:1.5em;background-color:var(--cb-color,var(--accent,#4ea1ff));-webkit-mask:var(--cb-icon) center/contain no-repeat;mask:var(--cb-icon) center/contain no-repeat;pointer-events:none}
 /* #290(4): round the todo BOX like the callout panel (callout-icons.css .cm-lp-callout-panel — keep

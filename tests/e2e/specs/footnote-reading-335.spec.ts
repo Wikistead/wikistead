@@ -32,6 +32,16 @@ test("#335: footnotes aggregate + jump in Reading; edit surface keeps them in pl
   // the `↩` back-links exist on the numbered items.
   await expect(section.locator("li#fn-1 .cm-lp-footnote-back")).toBeVisible();
 
+  // #335①: the list renders decimal markers (the global `ol{list-style:none}` reset would otherwise hide
+  // the numbers inside CM), and the referenced items carry an explicit `value` so the count is pinned.
+  await expect(section.locator("ol.cm-lp-footnotes-list")).toHaveCSS("list-style-type", "decimal");
+  await expect(section.locator("li#fn-1")).toHaveAttribute("value", "1");
+  await expect(section.locator("li#fn-2")).toHaveAttribute("value", "2");
+  // #335②: the section and the refs are non-editable, so a click hits the jump handler (not the caret)
+  // and the browser shows a pointer, not an I-beam.
+  await expect(section).toHaveAttribute("contenteditable", "false");
+  await expect(page.locator("[data-pane=preview] sup#fnref-1")).toHaveAttribute("contenteditable", "false");
+
   // Jump: clicking a numbered ref scrolls without error and the section stays reachable.
   await page.locator("[data-pane=preview] [data-testid=footnote-ref-1]").click();
   await sleep(200);
