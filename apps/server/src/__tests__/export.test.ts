@@ -149,6 +149,24 @@ describe('buildExport', () => {
     expect(res!.contentType).toContain('text/markdown')
     expect(strFromU8(res!.body)).toContain('Child page body')
   })
+
+  // #308 / ADR-132: the round-trip manifest. It carries oldId→dir→title→published for every EXPORTED page —
+  // and ONLY exported pages, so it never becomes a title-leak side channel for a view-filtered page.
+  it('writes a manifest.json mapping oldId→dir→title→published, and NEVER lists a view-filtered page', async () => {
+    const res = await buildExport(db, fgaClient, storage, { userId: USER, rootId: ROOT })
+    const zip = unzipSync(res!.body)
+    expect(Object.keys(zip)).toContain('manifest.json')
+    const manifest = JSON.parse(strFromU8(zip['manifest.json']!)) as { formatVersion: number; pages: { oldId: string; dir: string; title: string; published: boolean }[] }
+    expect(manifest.formatVersion).toBe(1)
+    const byId = new Map(manifest.pages.map((p) => [p.oldId, p]))
+    // the two viewable pages are mapped with EXACT titles + their zip dir (the lossless round-trip payload).
+    expect(byId.get(ROOT)).toMatchObject({ title: 'Root Page', published: true })
+    expect(byId.get(CHILD)).toMatchObject({ title: 'Child Page', published: true })
+    expect(byId.get(ROOT)!.dir).toBe(Object.keys(zip).find((k) => k.endsWith('/index.md') && /Root/.test(k))!.replace(/\/index\.md$/, ''))
+    // the unviewable secret child is absent from the manifest too — no title leak via the round-trip file.
+    expect(byId.has(HIDDEN)).toBe(false)
+    expect(strFromU8(zip['manifest.json']!)).not.toContain('Secret Child')
+  })
 })
 
 // #309: whole-space / whole-tenant Markdown ZIP export. Reuses the per-page collect+bundle path (so the
@@ -227,10 +245,22 @@ describe('buildSpaceExport / buildTenantExport (#309)', () => {
     expect(entries).not.toContain(PAGE2)
   })
 
-  it('buildTenantExport for a user who can view nothing yields an empty archive (no leak)', async () => {
+  it('buildTenantExport for a user who can view nothing yields an empty archive (no leak, no manifest)', async () => {
     const res = await buildTenantExport(db, fgaClient, storage, { userId: 'nobody-xyz' })
     const entries = Object.keys(unzipSync(res.body))
-    expect(entries.length).toBe(0)
+    expect(entries.length).toBe(0) // not even a manifest.json — an empty export carries nothing
+  })
+
+  // #308 / ADR-132: the space manifest must NOT list private/restricted pages either — the manifest is built
+  // from the SAME view-filtered tree, so its titles never become a side channel around the view cut.
+  it('the space export manifest omits PRIVATE and RESTRICTED pages (no title leak via the round-trip file)', async () => {
+    const res = await buildSpaceExport(db, fgaClient, storage, { userId: SPACE_USER, spaceId: SPACE })
+    const zip = unzipSync(res!.body)
+    const manifest = JSON.parse(strFromU8(zip['manifest.json']!)) as { pages: { title: string }[] }
+    const titles = manifest.pages.map((p) => p.title)
+    expect(titles).toContain('Root Page')
+    expect(titles).not.toContain('Private Page')
+    expect(titles).not.toContain('Restricted Page')
   })
 })
 
