@@ -17,6 +17,68 @@ import { authenticateMcpRequest, type McpPrincipal } from '../auth/mcp-request-a
 const PROTOCOL_VERSION = '2024-11-05'
 const SERVER_INFO = { name: 'wikistead', version: '0.1.0' }
 
+// #373: the Wikistead authoring-syntax reference a connected LLM reads before writing page/comment bodies, so it
+// uses the real notation instead of guessing. Wikistead is Open-formats first (CommonMark / GFM), and its macros
+// are standard-ish `:::` directives / fenced code — everything round-trips to plain Markdown. This is PUBLIC
+// spec info (no authz), served through the same authenticated tool surface. Keep it in sync with the macro
+// registry (apps/web/src/editor/macros) — the mcp-syntax test pins that every macro form here is present.
+const SYNTAX_REFERENCE = `# Wikistead authoring syntax
+
+Bodies are **CommonMark + GitHub-Flavored Markdown** (headings, **bold**, *italic*, \`code\`, lists, tables,
+task lists \`- [ ]\`, links \`[text](/p/<pageId>)\` for internal pages). On top of that, these macros are available
+(all are plain-text \`:::\` directives or fenced code — they round-trip losslessly to Markdown):
+
+## Callouts (admonitions)
+\`\`\`
+:::note
+Body markdown.
+:::
+\`\`\`
+Types: \`note\`, \`info\`, \`tip\`, \`warning\`, \`danger\`.
+
+## Collapsible & layout
+- Details/disclosure: \`:::details[Summary]\` … \`:::\`
+- Columns: \`:::columns\` with inner \`:::column\` items … \`:::\`
+- Tabs: \`:::tabs\` with inner \`:::tab[Label]\` items … \`:::\`
+
+## Task list with a progress ring
+\`\`\`
+:::todo[My tasks]
+- [ ] a task
+- [x] done
+:::
+\`\`\`
+(Plain GFM \`- [ ]\` task lists also work without the wrapper.)
+
+## Diagrams (fenced code)
+- Mermaid: \`\`\`\`mermaid\`\`\` … flowchart/sequence/etc. … closing fence.
+- PlantUML: \`\`\`\`plantuml\`\`\` … \`@startuml\` … \`@enduml\` … closing fence.
+- Excalidraw: \`\`\`\`excalidraw\`\`\` (drawn in the editor).
+
+## Dynamic lists (read-only)
+\`\`\`
+:::query
+children
+:::
+\`\`\`
+Body is one of: \`backlinks\` (pages linking here), \`tag <pageId>\` (a tag page's members), \`children\` (this
+page's child pages). Also \`:::backlinks\` for the pages linking to the current page.
+
+## Embeds & transclusion
+- Embed another page's content: \`:::embed-page\` … \`<pageId>\` … \`:::\`
+- Embed an allowlisted external URL: \`:::embed-external\` … \`<url>\` … \`:::\`
+
+## Tables (rich)
+Standard GFM tables work. For HTML-bodied tables: \`:::table\` … HTML … \`:::\`.
+
+## Inline
+- Highlight: \`==highlighted==\`
+- Footnotes: a reference \`[^1]\` and a definition line \`[^1]: the note\`.
+- Math: \`$$ … $$\` (block).
+
+Prefer plain CommonMark/GFM where it suffices; reach for a macro only when you need its behavior. Never invent
+notation not listed here.`
+
 // The v1 read tool set. Each declares its required scope (read/write ceiling) and a thin broker.
 interface McpTool {
   name: string
@@ -115,6 +177,16 @@ const TOOLS: McpTool[] = [
     },
   },
   {
+    name: 'get_syntax_reference',
+    description: 'Get the Wikistead authoring-syntax reference (CommonMark/GFM + the supported `:::` macros and fenced diagrams). Call this before writing a page or comment body so you use the real notation.',
+    scope: 'read',
+    inputSchema: { type: 'object', properties: {} },
+    async run() {
+      // Static PUBLIC spec — no db/authz needed (still behind the authenticated tool surface).
+      return SYNTAX_REFERENCE
+    },
+  },
+  {
     name: 'create_page',
     description: 'Create a new draft page in a space (requires edit access to the space). Returns the new page id.',
     scope: 'write',
@@ -158,7 +230,7 @@ const TOOLS: McpTool[] = [
   },
   {
     name: 'create_comment',
-    description: 'Add a page-level comment to a page (requires comment access). Returns the thread id.',
+    description: 'Add a page-level comment to a page (requires comment access). The body is CommonMark/GFM and supports Wikistead macros — call get_syntax_reference for the notation. Returns the thread id.',
     scope: 'write',
     inputSchema: { type: 'object', properties: { pageId: { type: 'string' }, body: { type: 'string' } }, required: ['pageId', 'body'] },
     async run(req, app, principal, args) {
