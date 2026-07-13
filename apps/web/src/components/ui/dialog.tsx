@@ -69,7 +69,13 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          // #365: keep a 4rem total (2rem/side) gutter so a dialog never reaches the screen edge. Set it via
+          // WIDTH, not a narrow max-width: a per-dialog `sm:max-w-*` (e.g. the wide pickers' `sm:max-w-5xl`)
+          // overrides the base max-width at `sm+`, so a base max-width cap can't hold the gutter for them at a
+          // mid width (700–1000px, below 5xl). `w-[calc(100vw-4rem)]` is width, which the per-dialog max-widths
+          // only CAP (never widen) — so the effective width is min(100vw-4rem, that dialog's max), giving every
+          // dialog the gutter at narrow/mid widths while the `sm:max-w-*` maxima still govern on wide screens.
+          "fixed left-[50%] z-50 grid w-[calc(100vw-4rem)] translate-x-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           position === "top" ? "top-[10%] translate-y-0" : "top-[50%] translate-y-[-50%]", // #344: top-pin vs center
           className
         )}
