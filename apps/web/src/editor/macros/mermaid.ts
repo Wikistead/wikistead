@@ -127,13 +127,19 @@ export const mermaidMacro: FenceMacro = {
       if (painting) return;
       painting = true;
       const id = nextId(); // fresh id per paint so a re-paint can't collide with the previous svg's id (#191)
+      // #352capture the layout width SYNCHRONOUSLY, before the async render. The store decision must key
+      // on the width we ACTUALLY rendered at — not on `el.clientWidth` read AFTER the await, which a fast scroll
+      // can have dropped back to 0 (the widget re-left the viewport), leaving a perfectly good real-width render
+      // uncached → a permanent cache miss every round-trip (the top diagram in the report). A render at a real
+      // width is always cacheable, on BOTH the first-paint and the ResizeObserver re-paint paths.
+      const renderWidth = el.clientWidth;
       void loadMermaid(ctx.theme).then(async (mermaid) => {
         try {
           // #282: measure in an off-flow sandbox at the element's real width, so the window never overflows.
-          const { svg } = await renderMermaidOffscreen(mermaid, id, code, el.clientWidth);
+          const { svg } = await renderMermaidOffscreen(mermaid, id, code, renderWidth);
           fig.innerHTML = svg; // sanitized by mermaid (securityLevel: strict)
-          paintedWidth = el.clientWidth;
-          if (paintedWidth > 0) svgCacheSet(cacheKey, svg); // #352: cache a real-width render for scroll re-entry
+          paintedWidth = renderWidth;
+          if (renderWidth > 0) svgCacheSet(cacheKey, svg); // #352: cache any real-width render for scroll re-entry
         } catch {
           el.classList.add("cm-lp-macro-error");
           fig.textContent = "Invalid mermaid diagram"; // in-macro only (suppressErrorRendering stops the body bomb)
