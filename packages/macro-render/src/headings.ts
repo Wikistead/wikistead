@@ -76,3 +76,35 @@ export function sliceSectionBySlug(md: string, slug: string): string | null {
   }
   return md.slice(heads[idx]!.from, end).replace(/\s+$/, "");
 }
+
+// #325 / ADR-137 slice 2: extract ONE block by its explicit `^id` anchor (Obsidian block ref). The marker is a
+// trailing ` ^<id>` on the block's last line (id: [a-z0-9-]{3,24}) — ordinary text in the single Y.Text. The
+// enclosing "block" is the paragraph / list item / fenced code that carries it: on the shared Lezer parse, the
+// innermost block node whose parent is the Document or a List (so a list item resolves to the ITEM, keeping its
+// `-`, not the inner paragraph; a standalone paragraph / fenced code resolves to itself). The returned slice has
+// the ` ^id` marker stripped (the transcluded fragment shows clean content). Duplicate ids resolve to the FIRST
+// match (documented). Returns null for an unknown/invalid id — the SAME existence-hiding placeholder as a denied
+// page (no fragment-existence oracle), never a parse error.
+const BLOCK_REF_PARENTS = new Set(["Document", "BulletList", "OrderedList"]);
+const BLOCK_REF_NODES = new Set(["Paragraph", "ListItem", "FencedCode", "CodeBlock", "Blockquote", "Table", "HTMLBlock"]);
+export function sliceBlockByAnchor(md: string, id: string): string | null {
+  if (!/^[a-z0-9-]{3,24}$/.test(id)) return null; // invalid id shape → same as unknown
+  const esc = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const markerRe = new RegExp(`[ \\t]\\^${esc}(?![\\w-])`);
+  const m = markerRe.exec(md);
+  if (!m) return null;
+  const markerPos = m.index; // the whitespace just before `^`
+  const tree = mdParser.parse(md);
+  let best: { from: number; to: number } | null = null;
+  tree.iterate({
+    enter: (node) => {
+      if (!BLOCK_REF_NODES.has(node.name)) return;
+      if (!BLOCK_REF_PARENTS.has(node.node.parent?.name ?? "")) return; // top-level block OR a list item only
+      if (node.from <= markerPos && node.to >= markerPos) {
+        if (!best || node.to - node.from < best.to - best.from) best = { from: node.from, to: node.to };
+      }
+    },
+  });
+  if (!best) return null;
+  return md.slice((best as { from: number; to: number }).from, (best as { from: number; to: number }).to).replace(markerRe, "").replace(/\s+$/, "");
+}

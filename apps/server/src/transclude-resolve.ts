@@ -1,6 +1,6 @@
 import type { OpenFgaClient } from '@openfga/sdk'
 import type { CheckContext } from '@wikistead/authz'
-import { sliceSectionBySlug } from '@wikistead/macro-render'
+import { sliceSectionBySlug, sliceBlockByAnchor } from '@wikistead/macro-render'
 import { canViewPage } from './page-view-gate.js'
 import type { TenantDb } from './db/index.js'
 
@@ -55,8 +55,10 @@ export async function resolveTranscludeRef(
 
   // A fragment resolves ONLY after the page gate, so an unknown/unsupported fragment leaks nothing: it
   // returns the SAME 'denied' placeholder as an unviewable page (byte-identical — no fragment oracle).
-  // slice 1 = `#<slug>` sections; `#^<id>` block refs are slice 2 (until then they resolve to 'denied').
-  const sliced = fragment.startsWith('^') ? null : sliceSectionBySlug(row.published_md, fragment)
+  // `#<slug>` = a section (slice 1); `#^<id>` = a block ref (slice 2). An unknown slug/id → denied.
+  const sliced = fragment.startsWith('^')
+    ? sliceBlockByAnchor(row.published_md, fragment.slice(1))
+    : sliceSectionBySlug(row.published_md, fragment)
   if (sliced == null) return { ok: false, reason: 'denied' }
   return { ok: true, content: sliced }
 }

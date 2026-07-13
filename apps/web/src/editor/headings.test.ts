@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { EditorState } from "@codemirror/state";
 import { markdownExtension } from "./markdown-config";
 import { slugify, extractHeadings } from "./headings";
-import { extractHeadingsFromMarkdown, sliceSectionBySlug } from "@wikistead/macro-render";
+import { extractHeadingsFromMarkdown, sliceSectionBySlug, sliceBlockByAnchor } from "@wikistead/macro-render";
 
 const stateOf = (doc: string) => EditorState.create({ doc, extensions: [markdownExtension()] });
 
@@ -87,5 +87,29 @@ describe("sliceSectionBySlug (#325 / ADR-137 — section boundaries)", () => {
   });
   it("returns null for an unknown slug (caller renders the denied placeholder — no oracle)", () => {
     expect(sliceSectionBySlug(doc, "nope")).toBeNull();
+  });
+});
+
+describe("sliceBlockByAnchor (#325 / ADR-137 slice 2 — block refs)", () => {
+  const doc = "para one\n\nsecond para ^abc\n\n- item a\n- item b ^item2\n\n```js\ncode ^infence\n```\n";
+
+  it("resolves a paragraph block by its ^id, with the marker stripped", () => {
+    expect(sliceBlockByAnchor(doc, "abc")).toBe("second para");
+  });
+  it("resolves a LIST ITEM (keeps the `-`, not the whole list nor the inner paragraph)", () => {
+    expect(sliceBlockByAnchor(doc, "item2")).toBe("- item b");
+  });
+  it("resolves a fenced code block including its fences", () => {
+    expect(sliceBlockByAnchor(doc, "infence")).toBe("```js\ncode\n```");
+  });
+  it("returns null for an unknown id (denied placeholder — no oracle)", () => {
+    expect(sliceBlockByAnchor(doc, "missing")).toBeNull();
+  });
+  it("returns null for an invalid id shape (too short / illegal chars) — treated as unknown", () => {
+    expect(sliceBlockByAnchor(doc, "ab")).toBeNull();
+    expect(sliceBlockByAnchor(doc, "Bad_Id")).toBeNull();
+  });
+  it("a duplicate id resolves to the FIRST match", () => {
+    expect(sliceBlockByAnchor("first ^dup\n\nsecond ^dup\n", "dup")).toBe("first");
   });
 });
