@@ -981,7 +981,7 @@ class AttachmentChipWidget extends WidgetType {
 // a server-sniffed PDF within the inline cap additionally mounts the sandboxed viewer
 // an <iframe sandbox> (NO allow-scripts — the ADR-120 contract) whose src is a blob: URL of
 // the PROXIED inline bytes (authoritative Content-Type + nosniff + CSP; see the resolver).
-type AtDom = HTMLElement & { __atRo?: ResizeObserver; __atKey?: string };
+type AtDom = HTMLElement & { __atRo?: ResizeObserver; __atKey?: string; __atPdfMsg?: (e: MessageEvent) => void };
 class AttachmentCardWidget extends WidgetType {
   private ro?: ResizeObserver;
   constructor(readonly id: string, readonly name: string, readonly selected: boolean) { super(); }
@@ -1023,16 +1023,33 @@ class AttachmentCardWidget extends WidgetType {
       // v1 inline kind: PDF only (ADR-120 review). The server enforces the kind + the 25MB cap
       // (415/413 → inlineUrl resolves null → the card stays a plain download card).
       if (m.inlineKind === "pdf") {
-        void resolver.inlineUrl(this.id).then((url) => {
+        // #273 / ADR-120 (Option B): render the sniffed-PDF bytes with OUR pdf.js inside an
+        // OPAQUE-ORIGIN iframe — `sandbox="allow-scripts"` (so pdf.js runs) but NO `allow-same-origin`
+        // (the frame can't reach the app origin / cookies / storage). Chromium's native PDF viewer refused
+        // a fully-empty sandbox (#1447), and PDF-embedded JS must never run against an app that will accept
+        // anonymous-editor attachments (#274), so pdf.js (v6, no eval, byte→canvas) in an opaque frame is
+        // the containment. The parent (which already view-gate-fetched the bytes) posts them IN — a blob
+        // URL is origin-scoped and unreadable by the opaque frame, so we transfer the ArrayBuffer instead.
+        void resolver.inlineUrl(this.id).then(async (url) => {
           if (!url || !wrap.isConnected) return;
+          const bytes = await fetch(url).then((r) => r.arrayBuffer()).catch(() => null);
+          URL.revokeObjectURL(url); // the bytes are captured; drop the blob URL
+          if (!bytes || !wrap.isConnected) return;
           const frame = document.createElement("iframe");
-          // Fully sandboxed — NO allow-scripts (the ADR-120 / review-condition contract). The
-          // blob holds proxy-served bytes whose type the SERVER sniffed; the frame can't run script.
-          frame.setAttribute("sandbox", "");
+          frame.setAttribute("sandbox", "allow-scripts"); // opaque origin; NO allow-same-origin
           frame.className = "cm-lp-attachment-frame";
           frame.title = this.name || "attachment";
           frame.setAttribute("data-testid", "attachment-inline-frame");
-          frame.src = url;
+          frame.src = "/pdf-frame.html";
+          // Hand the bytes over once the frame signals ready; size the frame to the rendered content.
+          const onMsg = (e: MessageEvent) => {
+            if (e.source !== frame.contentWindow) return;
+            const d = e.data as { type?: string; height?: number };
+            if (d?.type === "pdf-frame:ready") { try { frame.contentWindow?.postMessage(bytes, "*", [bytes]); } catch { /* frame gone */ } }
+            else if (d?.type === "pdf-frame:rendered" && typeof d.height === "number") { frame.style.height = `${Math.min(d.height + 4, 800)}px`; }
+          };
+          window.addEventListener("message", onMsg);
+          wrap.__atPdfMsg = onMsg; // removed in destroy() (below) so it never outlives the widget DOM
           wrap.appendChild(frame);
         });
       }
@@ -1072,7 +1089,11 @@ class AttachmentCardWidget extends WidgetType {
     dom.classList.toggle("cm-lp-atom-sel", this.selected);
     return true;
   }
-  destroy(dom: HTMLElement) { (dom as AtDom).__atRo?.disconnect(); }
+  destroy(dom: HTMLElement) {
+    (dom as AtDom).__atRo?.disconnect();
+    const h = (dom as AtDom).__atPdfMsg; // #273: the PDF frame's postMessage bridge must not outlive the DOM
+    if (h) window.removeEventListener("message", h);
+  }
   ignoreEvent() { return false; }
 }
 
