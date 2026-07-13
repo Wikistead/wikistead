@@ -84,9 +84,22 @@ describe("buildEmbedElement", () => {
     expect(el.getAttribute("rel")).toContain("nofollow");
   });
 
-  it("degrades a javascript: URL to a link, never an iframe", () => {
-    const el = buildEmbedElement("javascript:alert(1)", allow);
-    expect(el.tagName).toBe("A"); // never an iframe
+  // #319 (anon-XSS gate): a dangerous scheme in the body must NEVER become a clickable href — the
+  // degrade `<a>` is a LIVE element (unlike the textContent degrade of the public reader today), so a raw
+  // `javascript:` href would be a one-click stored XSS once this DOM is the anonymous public reader.
+  it("degrades a javascript: URL to INERT PLAIN TEXT — never an iframe, never a clickable href", () => {
+    const el = buildEmbedElement("javascript:alert(document.cookie)", allow);
+    expect(el.tagName).toBe("SPAN"); // not an <a> — no dangerous href to click
+    expect(el.getAttribute("href")).toBeNull();
+    expect(el.textContent).toBe("javascript:alert(document.cookie)"); // shown as text, harmless
+  });
+
+  it("degrades data:/vbscript:/file: schemes to inert text too (shared safeHref policy)", () => {
+    for (const bad of ["data:text/html,<script>alert(1)</script>", "vbscript:msgbox(1)", "file:///etc/passwd", "java\tscript:alert(1)"]) {
+      const el = buildEmbedElement(bad, allow);
+      expect(el.tagName, `${bad} must not be a link`).toBe("SPAN");
+      expect(el.getAttribute("href")).toBeNull();
+    }
   });
 
   it("degrades the app's own origin to a link even if allowlisted (#108 comment 643)", () => {

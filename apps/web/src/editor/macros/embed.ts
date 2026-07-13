@@ -1,6 +1,7 @@
 import type { DirectiveMacro } from "./registry";
 import { embedHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender shared (degrades to a link)
 import i18n from "../../i18n"; // #174 comment 911: empty-state text localized (en/ja)
+import { safeHref } from "./md-render"; // #319 one shared scheme check for the degrade href (no js:/data:)
 
 // :::embed-external — embed an external resource by URL (the body is the URL). #108 / ADR-071 (551)
 // #205 renamed `:::embed` → `:::embed-external` to namespace with `:::embed-page` (embed-<what>).
@@ -82,12 +83,25 @@ export function buildEmbedElement(url: string, allowlist: readonly string[]): HT
     iframe.setAttribute("allowfullscreen", "");
     return iframe;
   }
-  // Degrade: a plain link (Open formats). nofollow + noreferrer keeps it inert and private.
+  // Degrade to a plain link (Open formats) — but ONLY for a safe scheme. #319 (anon-XSS gate): the
+  // body is arbitrary user text, and this DOM becomes a LIVE `<a>` (unlike renderMarkdownToDom's textContent
+  // degrade), so an un-checked `javascript:`/`data:`/`vbscript:`/`file:` body would be a one-click stored XSS
+  // once this surface is the anonymous public reader (#319) — and is already a latent hole on the member
+  // edit surface. Route the href through the SAME shared `safeHref` scheme check every other link uses; an
+  // unsafe scheme degrades further to inert plain TEXT (never a clickable dangerous href).
+  const href = safeHref(trimmed);
+  if (!href) {
+    const span = document.createElement("span");
+    span.className = "cm-lp-embed-degrade";
+    span.setAttribute("data-testid", "macro-embed-degrade");
+    span.textContent = trimmed || "(empty embed)";
+    return span;
+  }
   const a = document.createElement("a");
   a.className = "cm-lp-embed-degrade";
   a.setAttribute("data-testid", "macro-embed-degrade");
-  a.href = trimmed;
-  a.textContent = trimmed || "(empty embed)";
+  a.href = href;
+  a.textContent = trimmed || "(empty embed)"; // show the original text; only the href is sanitized
   a.target = "_blank";
   a.rel = "noopener noreferrer nofollow";
   return a;
