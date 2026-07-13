@@ -86,6 +86,26 @@ test("#313the anchor icon scales with the heading level (h1 icon > h3 icon)", as
     const fontSize = await svg.evaluate((el) => parseFloat(getComputedStyle(el).fontSize)); // inherited heading size
     return { height, fontSize };
   };
+  //(review bounce — the icon-position pendulum): the icon must sit ON the text, not float above it
+  // NOR drop below the baseline into the descender, NOR sit too far right. Measure the icon svg vs the heading
+  // TEXT glyph box (a Range over the text run, excluding the widget) and pin all three, so a nudge in either
+  // direction re-fails. Both surfaces use the same seat (vertical-align: baseline).
+  const geom = await page.evaluate(() => {
+    const line = [...document.querySelectorAll(".cm-line")].find((l) => l.textContent?.includes("Big Heading"))!;
+    const svg = line.querySelector("[data-testid=heading-anchor-copy] svg")!.getBoundingClientRect();
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+    let node: Node | null = null; while ((node = walker.nextNode())) { if (node.textContent?.includes("Big Heading")) break; }
+    const r = document.createRange(); r.selectNodeContents(node!); const tr = r.getBoundingClientRect();
+    const fs = parseFloat(getComputedStyle(line as Element).fontSize);
+    return { svg: { top: svg.top, bottom: svg.bottom, left: svg.left }, text: { top: tr.top, right: tr.right }, fs };
+  });
+  // no TOP overflow: the icon top does not clear the heading text-box top.
+  expect(geom.svg.top, `icon top ${geom.svg.top} ≥ text top ${geom.text.top}`).toBeGreaterThanOrEqual(geom.text.top - 0.5);
+  // no BOTTOM overflow: the icon bottom rests at/above the baseline (≤ the em-box bottom = text.top + font-size).
+  // The old -0.1em nudge dropped it a further ~5px into the descender (bottom ≈ text.top + 1.13×fs) → this fails.
+  expect(geom.svg.bottom, `icon bottom ${geom.svg.bottom} ≤ baseline≈${geom.text.top + geom.fs}`).toBeLessThanOrEqual(geom.text.top + geom.fs);
+  // not too far RIGHT: the gap from the last glyph to the icon is ≤ 0.2em.
+  expect(geom.svg.left - geom.text.right, `right gap ${(geom.svg.left - geom.text.right).toFixed(1)}px ≤ 0.2em (${(geom.fs * 0.2).toFixed(1)}px)`).toBeLessThanOrEqual(geom.fs * 0.2);
   const h1 = await iconMetrics("Big Heading");
   const h3 = await iconMetrics("Small Heading");
   expect(h1.height, `h1 icon ${h1.height}px should be larger than a fixed 14px`).toBeGreaterThan(20);
