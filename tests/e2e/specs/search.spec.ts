@@ -141,3 +141,15 @@ test("#285: the search modal shows a preview pane (meta + body excerpt + draft b
   // #285(B): a draft (no published body) shows an explicit placeholder, not a broken empty pane.
   await expect(preview.getByTestId("search-preview-unpublished")).toBeVisible();
 });
+
+// #285(review bounce): the 2-pane search modal was cramped at max-w-3xl (768px). Widened to
+// max-w-5xl — pin the rendered dialog width on a wide viewport (fails at 3xl).
+test("#285the search modal is wide enough for the 2-pane layout", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+  await openDemo(page);
+  await typeSearch(page, "the");
+  const dialog = page.locator("[data-slot=dialog-content]");
+  await expect(dialog).toBeVisible();
+  const w = (await dialog.boundingBox())!.width;
+  expect(w, `search modal width ${w}px should be the wide 2-pane size (>900px, not the old 768px)`).toBeGreaterThan(900);
+});
