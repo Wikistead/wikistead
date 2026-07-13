@@ -91,6 +91,20 @@ services:
     image: axllent/mailpit:latest
     ports: ["1025:1025", "8025:8025"]
 
+  # #341 / ADR-074: self-hosted PlantUML rendering via a Kroki gateway. OPT-IN (`--profile diagrams`) and OFF by
+  # default — with no PLANTUML_RENDER_URL set the app degrades a diagram to its source (zero external dependency,
+  # no broken embed). PlantUML is GPL (ADR-011/ADR-074), so it runs OUT-OF-PROCESS in THIS separate,
+  # operator-deployed container; Wikistead bundles only the HTTP client, never the GPL engine (the license
+  # boundary holds because the operator opts into pulling this image — it is not part of the Wikistead
+  # distribution). To enable: `docker compose --profile diagrams up -d` and set for the server
+  # PLANTUML_RENDER_URL=http://kroki:8000/. NEVER point PLANTUML_RENDER_URL at the public kroki.io in production —
+  # private diagram source would be sent to a third party (Knowledge-First / self-host privacy). See README.
+  kroki:
+    image: yuzutech/kroki:latest
+    profiles: ["diagrams"]
+    ports: ["8000:8000"]
+    restart: unless-stopped
+
 volumes:
   pgdata:
   meilidata:

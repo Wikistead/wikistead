@@ -63,6 +63,23 @@ Open **http://localhost:5173/p/demo**. The API resolves the tenant from the Host
 header, so the web calls it on `dev.localhost:4000` (see `apps/web/.env.example`).
 Run app services in containers too: `docker compose --profile apps up -d --build`.
 
+### PlantUML diagrams (self-hosted rendering)
+
+PlantUML rendering is **off by default** — a `plantuml` code block **degrades to its source** unless the
+operator points `PLANTUML_RENDER_URL` at a Kroki-compatible endpoint (ADR-074: the GPL PlantUML engine runs
+**out-of-process** in a separate container, so the Wikistead distribution bundles only the HTTP client — see
+ADR-011). To enable it, run your **own** Kroki gateway and set the URL:
+
+```bash
+docker compose --profile diagrams up -d        # starts a local Kroki on :8000
+# then set for the server (compose: http://kroki:8000/ · host: http://localhost:8000/):
+PLANTUML_RENDER_URL=http://kroki:8000/
+```
+
+**Never set `PLANTUML_RENDER_URL` to the public `kroki.io` in production** — diagram source can contain private
+content, and sending it to a third party breaks the self-host privacy guarantee (Knowledge-First). Use your own
+in-cluster / on-host Kroki. Kubernetes/Cloud: deploy Kroki in-cluster and point the URL at its internal Service.
+
 The server integration tests run against their **own isolated stack** (separate
 containers, ports, and volumes — dev data is never touched):
 ```bash
