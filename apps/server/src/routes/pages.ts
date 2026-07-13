@@ -1578,12 +1578,12 @@ export async function pagesPlugin(app: FastifyInstance) {
   // PlantUML render (#140 / ADR-074): host-mediated server render of a plantuml fence's source via
   // the operator's Kroki/PlantUML endpoint. page-view gated (member or view-guest). 200 image/png on
   // success; 204 = degrade-to-source (unconfigured / endpoint failure) so the macro shows the fence.
-  app.post<{ Params: { pageId: string }; Body: { source?: string } }>('/pages/:pageId/plantuml/render', { config: { guest: 'view' } }, async (req, reply) => {
+  app.post<{ Params: { pageId: string }; Body: { source?: string; theme?: string } }>('/pages/:pageId/plantuml/render', { config: { guest: 'view' } }, async (req, reply) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
     await assertPageViewable(app.fga, subject, req.params.pageId, context) // 404 not-found if not a viewer (#280)
     const source = req.body?.source
     if (typeof source !== 'string' || !source.trim()) return reply.code(400).send({ error: 'source is required' })
-    const png = await renderPlantuml(source)
+    const png = await renderPlantuml(source, { dark: req.body?.theme === 'dark' }) // #342: dark → built-in !theme
     if (!png) return reply.code(204).send() // degrade: caller renders the source fence
     return reply.header('content-type', 'image/png').send(png)
   })

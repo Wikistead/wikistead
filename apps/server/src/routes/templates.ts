@@ -170,12 +170,12 @@ export async function templatesPlugin(app: FastifyInstance) {
   // to see (its own template preview) — it is handed to the SAME `renderPlantuml` (operator Kroki/PlantUML,
   // existing SSRF/allowlist guard), so this adds NO new existence exposure and NO new external-fetch surface.
   // 200 image/png on success; 204 = degrade-to-source (unconfigured / endpoint failure), same as the page.
-  app.post<{ Params: { id: string }; Body: { source?: string } }>('/templates/:id/plantuml/render', async (req, reply) => {
+  app.post<{ Params: { id: string }; Body: { source?: string; theme?: string } }>('/templates/:id/plantuml/render', async (req, reply) => {
     if (!req.user) return reply.code(401).send({ error: 'unauthorized' })
     if (!(await canView(app.fga, req.user.sub, req.params.id))) return reply.code(404).send({ error: 'not found' }) // existence-hidden
     const source = req.body?.source
     if (typeof source !== 'string' || !source.trim()) return reply.code(400).send({ error: 'source is required' })
-    const png = await renderPlantuml(source)
+    const png = await renderPlantuml(source, { dark: req.body?.theme === 'dark' }) // #342: dark → built-in !theme
     if (!png) return reply.code(204).send() // degrade: caller renders the source fence
     return reply.header('content-type', 'image/png').send(png)
   })

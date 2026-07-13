@@ -608,7 +608,7 @@ export const attachmentResolver = Facet.define<AttachmentResolver, AttachmentRes
 // the macro (host-API is {theme} only — ADR-024); the HOST resolves the source to image bytes via
 // this injected renderer (it holds pageId/token and calls the gated, SSRF-guarded server endpoint).
 // null ⇒ degrade-to-source (the widget keeps the source fence — Open formats, never a broken embed).
-export type DiagramRenderer = (lang: string, source: string) => Promise<Blob | null>;
+export type DiagramRenderer = (lang: string, source: string, theme?: MacroTheme) => Promise<Blob | null>;
 const noopDiagramRenderer: DiagramRenderer = async () => null;
 export const diagramRenderer = Facet.define<DiagramRenderer, DiagramRenderer>({
   combine: (values) => values[0] ?? noopDiagramRenderer,
@@ -1957,7 +1957,7 @@ class MacroWidget extends WidgetType {
       // the widget while name+body are stable, so there's no churn / re-fetch on every keystroke).
       const renderDiagram = view.state.facet(diagramRenderer);
       if (HOST_RENDERABLE.has(this.name) && renderDiagram !== noopDiagramRenderer) {
-        void renderDiagram(this.name, this.body).then((blob) => {
+        void renderDiagram(this.name, this.body, this.theme).then((blob) => {
           if (this.destroyed || !blob) return; // torn down mid-fetch, or degrade → leave the source
           this.objectUrl = URL.createObjectURL(blob);
           (wrap as MwDom).__mwObjUrl = this.objectUrl; // #221: travel with the DOM for updateDOM reuse

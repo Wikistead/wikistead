@@ -15,7 +15,7 @@ type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 // The endpoint URL (page- vs template-scoped) is the only thing that varies; the request/response contract
 // and the degrade rules are identical, so page and template previews cannot drift.
 function makeRenderer(url: string, token: string, fetcher: Fetcher): DiagramRenderer {
-  return async (lang, source) => {
+  return async (lang, source, theme) => {
     if (lang !== "plantuml") return null; // only plantuml is host-rendered today
     if (!source.trim()) return null; // empty fence → nothing to render (the empty placeholder shows)
     try {
@@ -23,7 +23,9 @@ function makeRenderer(url: string, token: string, fetcher: Fetcher): DiagramRend
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ source }),
+        // #342: forward the theme so a dark render gets a built-in `!theme` injected server-side. The
+        // widget rebuilds on a theme switch (#200 — theme is in its eq() key), so this re-fetches for free.
+        body: JSON.stringify({ source, theme }),
       });
       if (res.status !== 200) return null; // 204 = degrade-to-source; 4xx/5xx → keep the source too
       if (!(res.headers.get("content-type") ?? "").startsWith("image/")) return null; // raster only
