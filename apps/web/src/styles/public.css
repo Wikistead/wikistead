@@ -4,6 +4,14 @@
  * prose style so the public reader matches the in-app Reading surface. Theme tokens only (light/dark aware);
  * no new colour system. Scoped to `.wks-public [data-testid=public-body]` so it never leaks into chrome. */
 
+/* #319: the public reader body IS the CM6 read view (mountPublishedView). It fills the box and OWNS the
+ * scrolling (its `.cm-scroller` virtualizes), the member surface pattern — so the frosted band can be an
+ * absolute overlay the content scrolls under (cleared by `.lp-editor-host .cm-content { padding-top:
+ * var(--wks-band-h) }`, tokens.css). The CM editor/host must fill the box for the internal scroller to work. */
+.wks-public [data-testid="public-body"],
+.wks-public [data-testid="public-body"] .lp-editor-host,
+.wks-public [data-testid="public-body"] .cm-editor { height: 100%; }
+
 .wks-public [data-testid="public-body"] {
   color: var(--fg);
   line-height: 1.65;

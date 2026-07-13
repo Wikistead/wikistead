@@ -5,6 +5,7 @@ import { headingsExtension, extractHeadings, type Heading } from "./headings";
 import { taskProgressExtension, type TaskProgress } from "./task-progress"; // #290: page task-progress ring
 import { connect, connectEphemeral } from "./collab";
 import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayModeContent } from "./editor-livepreview";
+import { wireToc } from "./toc-wiring"; // #319: extracted so the public reader shares the CM TOC wiring
 import type { DisplayMode, MacroTheme, BacklinksSource } from "./live-preview/decorations";
 import { redrawMacros, taskStatePosAt } from "./live-preview/decorations";
 import i18n from "../i18n"; // #307: strings for the host-owned :::backlinks source (i18n stays out of the CM layer)
@@ -145,75 +146,6 @@ function tint(color: string): string {
 // (initial + on-edit), a jump function (scroll to a heading offset), and scroll-spy (report the topmost
 // visible heading). All display-only. Returns a cleanup. Adds the headings listener via appendConfig so
 // the mount functions don't need to know about the TOC.
-function wireToc(
-  view: EditorView,
-  opts: { onHeadings?: (h: Heading[]) => void; onActiveHeading?: (from: number | null) => void; onScrollActivity?: () => void; tocJumpRef?: MutableRefObject<((from: number) => void) | null>; onTaskProgress?: (p: TaskProgress) => void },
-): () => void {
-  const cleanups: (() => void)[] = [];
-  if (opts.onHeadings) view.dispatch({ effects: StateEffect.appendConfig.of(headingsExtension(opts.onHeadings)) });
-  if (opts.onTaskProgress) view.dispatch({ effects: StateEffect.appendConfig.of(taskProgressExtension(opts.onTaskProgress)) }); // #290
-  if (opts.tocJumpRef) {
-    const ref = opts.tocJumpRef;
-    ref.current = (from: number) => {
-      const pos = Math.min(from, view.state.doc.length);
-      // #345: tag the jump as `select.jump` so the #306 scrolloff listener SKIPS it. A TOC/anchor jump's
-      // contract is "land the heading flush under the band" (bandScrollMargins handles that); the scrolloff's
-      // "keep the caret in the 25% band" correction fights it and dragged the landing ~55px too low, so the
-      // scroll-spy then highlighted the PREVIOUS heading (the #304 off-by-one regression, toc-304 red).
-      view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "start" }), userEvent: "select.jump" });
-      if (!view.state.readOnly) view.focus();
-      // #304 (3): report the jumped-to heading as active IMMEDIATELY — don't wait for the scroll event's
-      // recompute (which would otherwise, for a frame, keep the previous section highlighted). The scroll
-      // recompute converges to the same result via the band-aware sample below.
-      opts.onActiveHeading?.(from);
-    };
-    cleanups.push(() => { ref.current = null; });
-  }
-  if (opts.onActiveHeading || opts.onScrollActivity) {
-    const report = opts.onActiveHeading;
-    const activity = opts.onScrollActivity;
-    let raf = 0;
-    const compute = () => {
-      raf = 0;
-      if (!report) return;
-      // #192 (bounce): find the heading whose section contains the TOP of the viewport. Resolve the DOC
-      // POSITION at the top band once (posAtCoords) and compare heading doc offsets — this is robust for
-      // headings scrolled ABOVE the viewport, whose per-position coordsAtPos returns null. The previous
-      // impl called coordsAtPos on EACH heading AND defaulted `active` to the FIRST heading: once you
-      // scrolled a long section past the top, that section's heading (now off-screen) returned null, no
-      // heading updated `active`, and it stayed on the FIRST heading (the reported "highlights the TOC
-      // top heading while I'm deep in a section" bug).
-      const rect = view.scrollDOM.getBoundingClientRect();
-      const hs = extractHeadings(view.state);
-      // #304 (1): sample at the frosted title band's REAL height, not a fixed 48px. A 2-line title makes the
-      // band taller than 48px, and tocJump lands a heading just BELOW the band; a fixed-48 sample point then
-      // sits ABOVE the landed heading, so the PREVIOUS heading matched (h.from <= topPos) — the clicked item
-      // never lit. The band height is the content's padding-top (--wks-band-h); 0 on bandless routes.
-      const bandH = parseFloat(getComputedStyle(view.contentDOM).paddingTop) || 0;
-      const topPos = view.posAtCoords({ x: rect.left + rect.width / 2, y: rect.top + bandH + 8 });
-      let active: number | null = null;
-      if (topPos != null) {
-        for (const h of hs) {
-          if (h.from <= topPos) active = h.from; // last heading at/above the viewport top → current section
-          else break; // headings are in doc order
-        }
-      }
-      // #304 (2): at the very bottom, a final section shorter than the viewport can never reach the sample
-      // line, so its heading would never activate. Clamp: when scrolled to the end, the LAST heading is active.
-      const sc = view.scrollDOM;
-      if (hs.length && sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2) active = hs[hs.length - 1].from;
-      report(active);
-    };
-    const onScroll = () => {
-      activity?.(); // #192: drive the narrow-screen TOC overlay's "visible while scrolling"
-      if (report && !raf) raf = requestAnimationFrame(compute);
-    };
-    view.scrollDOM.addEventListener("scroll", onScroll, { passive: true });
-    cleanups.push(() => { view.scrollDOM.removeEventListener("scroll", onScroll); if (raf) cancelAnimationFrame(raf); });
-    if (report) raf = requestAnimationFrame(compute); // initial active
-  }
-  return () => cleanups.forEach((c) => c());
-}
 
 export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, onHeadings, onActiveHeading, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);

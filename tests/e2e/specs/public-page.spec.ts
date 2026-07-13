@@ -44,7 +44,9 @@ test("#227: an anonymous visitor renders a public page at /pub/:id (title + sani
   await anon.goto(`/pub/${id}`);
   await expect(anon.getByTestId("public-title")).toBeVisible();
   const body = anon.getByTestId("public-body");
-  await expect(body.locator("h1")).toHaveText("Public Heading"); // markdown rendered
+  // #319: rendered by the member CM6 engine — a heading is a `.cm-lp-h1` line (not an <h1> tag), same as the
+  // real page; the markdown `#` marker is hidden on the read surface.
+  await expect(body.locator(".cm-lp-h1")).toContainText("Public Heading");
   await expect(body).toContainText("public body text");
   // XSS: the raw <script> degrades to escaped text — never a live element.
   expect(await body.locator("script").count()).toBe(0);
@@ -82,23 +84,27 @@ test("#227 review: the public page has the member title band and a working TOC",
   // #227①: the TOC rail must stay VIEWPORT-FIXED — scrolling the content must NOT carry the rail
   // off-screen (the bug: the rail sat in the scroll container, so scrollTop 800 pushed its items to top<0).
   const firstItemTopBefore = await items.first().evaluate((el) => el.getBoundingClientRect().top);
-  await anon.locator(".wks-public > div").first().evaluate((el) => { el.scrollTop = 800; });
+  await anon.locator("[data-testid=public-body] .cm-scroller").evaluate((el) => { el.scrollTop = 800; });
   await sleep(200);
   const firstItemTopAfter = await items.first().evaluate((el) => el.getBoundingClientRect().top);
   expect(firstItemTopAfter).toBeGreaterThan(0); // still on screen after scrolling
   expect(Math.abs(firstItemTopAfter - firstItemTopBefore)).toBeLessThan(24); // barely moved (fixed, not scrolled away)
 
+  // #227② / #319: a public code block gets a copy button — now the CM engine's own `.cm-lp-code-copy`
+  // (no <pre> wrapper on the CM surface), parity with the member Reading view. Checked BEFORE the jump below,
+  // while the top-of-doc code fence is still in the CM viewport (the CM read surface VIRTUALIZES, so after a
+  // jump to the bottom the top fence is unmounted — that is correct virtualization, not a missing button).
+  await anon.locator("[data-testid=public-body] .cm-scroller").evaluate((el) => { el.scrollTop = 0; });
+  await expect(anon.getByTestId("public-body").locator(".cm-lp-code-copy")).toHaveCount(1);
+
   // #227②: clicking a section jumps to it and the heading lands BELOW the frosted band, not behind it
   // (the bug: scrollIntoView with no scroll-margin put the heading at top≈40px, inside the blurred band).
   await items.filter({ hasText: "Charlie" }).click();
   await sleep(600); // smooth-scroll settle
-  const headingTop = await anon.getByTestId("public-body").locator("h2", { hasText: "Charlie Section" }).evaluate((el) => el.getBoundingClientRect().top);
+  const headingTop = await anon.getByTestId("public-body").locator(".cm-lp-h2", { hasText: "Charlie Section" }).evaluate((el) => el.getBoundingClientRect().top);
   const bandBottom = await anon.getByTestId("public-band").evaluate((el) => el.getBoundingClientRect().bottom);
   expect(headingTop).toBeLessThan(300); // it DID scroll near the top…
   expect(headingTop).toBeGreaterThanOrEqual(bandBottom - 6); // …but clears the band (not hidden behind the blur)
-
-  // #227②: a public code block gets a copy button (parity with the editor fence header).
-  await expect(anon.getByTestId("public-body").locator("pre .cm-lp-code-copy")).toHaveCount(1);
 
   // #227①: a TOC on/off toggle hides/shows the rail (device-local pref, parity with the member view).
   await expect(anon.getByTestId("toc")).toBeVisible(); // on by default (useTocPref default ON)
@@ -136,7 +142,7 @@ test("#227the public TOC works on a narrow screen (toggle + scroll overlay, memb
   // ② the overlay TOC exists (tocOn default) and fades IN while scrolling (member overlay behaviour).
   const overlay = anon.locator('[data-testid=toc][data-variant=overlay]');
   await expect(overlay).toHaveCount(1);
-  await anon.locator(".wks-public > div").first().evaluate((el) => { el.scrollTop = 500; });
+  await anon.locator("[data-testid=public-body] .cm-scroller").evaluate((el) => { el.scrollTop = 500; });
   await sleep(150);
   await expect(overlay).toHaveCSS("opacity", "1"); // visible while scrolling
   await expect(overlay.getByTestId("toc-item")).toHaveCount(4);
@@ -169,10 +175,10 @@ test("#267 波及: the public reader shows the callout box + centers a mermaid d
   const box = await panel.evaluate((el) => { const cs = getComputedStyle(el); return { bg: cs.backgroundColor, bar: parseFloat(cs.borderLeftWidth) }; });
   expect(box.bg).not.toBe("rgba(0, 0, 0, 0)");
   expect(box.bar).toBeGreaterThan(0);
-  // the mermaid diagram is centered by default (#255), matching the editor.
-  const mermaid = body.locator(".cm-lp-mermaid").first();
-  await expect(mermaid).toHaveClass(/cm-lp-align-center/);
-  expect(await mermaid.evaluate((el) => getComputedStyle(el).alignItems)).toBe("center");
+  // #319: the mermaid diagram RENDERS on the public reader (was a raw ```mermaid source dump before) and is
+  // centered by default (#255) — the align class sits on the widget wrapper (decorations.ts), same as the editor.
+  await expect(anon.getByTestId("macro-mermaid")).toBeVisible();
+  await expect(body.locator(".cm-lp-align-center")).toHaveCount(1);
 });
 
 test("#227: a NON-public page shows not-found to an anonymous visitor (existence hidden)", async ({ browser }) => {
@@ -269,7 +275,7 @@ test("#227/standalone /pub/:id — member toggle in the band, NO child tree, sti
   await expect(anon.locator(`[data-testid=public-child-${childId}]`)).toHaveCount(0);
   // ③ sticky: scrolling the content keeps the band pinned at the viewport top (①).
   const yBefore = (await anon.getByTestId("public-band").boundingBox())!.y;
-  await anon.locator(".wks-public > div").first().evaluate((el) => { el.scrollTop = 800; });
+  await anon.locator("[data-testid=public-body] .cm-scroller").evaluate((el) => { el.scrollTop = 800; });
   await sleep(200);
   const yAfter = (await anon.getByTestId("public-band").boundingBox())!.y;
   expect(Math.abs(yAfter - yBefore), `band y ${yBefore} → ${yAfter} must stay pinned`).toBeLessThanOrEqual(2);
