@@ -28,23 +28,29 @@ test("floating controls + title clamp (view) / full (edit)", async ({ browser })
   expect(await lineClamp(page)).toBe("2");
 });
 
-// #368: in view mode the Watch + Share buttons take NO width when idle and slide out (grid 0fr→1fr) on hover of
-// the bottom-right cluster; Edit stays always-visible. Real Chromium — a width geometry assert.
-test("#368: Watch/Share collapse to zero width and slide out on cluster hover", async ({ browser }) => {
+// #368 (redesign): the slide-out was scrapped — hovering to reach Edit tripped the reveal and the
+// expanding cluster shoved the always-present Edit button around. View mode is now a FIXED [Edit][⋯]; Watch +
+// Share moved INTO the ⋯ overflow menu. Real Chromium — assert the standalone buttons are gone, Edit's x is
+// stable on hover, and Watch/Share are reachable from the menu.
+test("#368: view actions are a fixed [Edit][⋯] with Watch + Share in the ⋯ menu", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "collapse-controls");
   await expect(page.getByTestId("edit-toggle")).toBeVisible(); // Edit is always shown
-  const secondary = page.getByTestId("page-actions-secondary");
-  await expect(secondary).toBeAttached(); // the collapsible Watch/Share wrapper exists in view mode
+  // No standalone slide-out Watch/Share round buttons anymore (the wrapper + the view-mode Share button are gone).
+  await expect(page.getByTestId("page-actions-secondary")).toHaveCount(0);
+  await expect(page.getByTestId("share-open")).toHaveCount(0);
 
-  const width = async () => (await secondary.boundingBox())?.width ?? -1;
-  const idle = await width();
-  expect(idle).toBeLessThan(6); // grid-cols-[0fr] → ~zero width when idle (no reserved space)
-
-  // Hover the always-visible Edit button (inside the same cluster group) → the secondary slides open.
+  // Edit's x position is stable — nothing expands the cluster on hover (the old slide pushed Edit leftward).
+  const editX = async () => (await page.getByTestId("edit-toggle").boundingBox())!.x;
+  const before = await editX();
   await page.getByTestId("edit-toggle").hover();
-  await expect.poll(width, { timeout: 3000, intervals: [150, 250, 400] }).toBeGreaterThan(28); // Watch + Share now take width
-  await expect(page.getByTestId("share-open")).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(Math.abs((await editX()) - before)).toBeLessThan(1);
+
+  // Watch + Share are reachable from the ⋯ overflow menu (member view surface has a real pageId → watch shows).
+  await page.getByTestId("page-overflow-trigger").click();
+  await expect(page.getByTestId("watch-toggle")).toBeVisible();
+  await expect(page.getByTestId("share-page")).toBeVisible();
 });
 
 test("narrow viewport collapses the groups into one bottom-right ⋯", async ({ browser }) => {

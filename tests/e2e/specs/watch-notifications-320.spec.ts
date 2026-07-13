@@ -12,20 +12,32 @@ test("#320 the page watch toggle persists a subscription (POST then DELETE /watc
   await page.goto(`/p/${id}`);
   await page.waitForSelector("[data-testid=sidebar]");
 
-  const toggle = page.getByTestId("watch-toggle");
-  await expect(toggle).toBeVisible();
-  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  // #368: the watch control is a ⋯-overflow-menu ITEM now (an aria-checked toggle with the Eye glyph), not a
+  // standalone round button — open the ⋯ menu to reach it. Selecting it closes the menu, so re-open to verify.
+  const openMenu = () => page.getByTestId("page-overflow-trigger").click();
+  const watchItem = () => page.getByTestId("watch-toggle");
+  const reopenAfterReload = async () => { await page.reload(); await page.waitForSelector("[data-testid=sidebar]"); await openMenu(); };
+  // Selecting the item closes the menu AND fires the mutation; wait for the /watches round-trip to settle
+  // before reloading (reloading mid-request aborts it). We toggle inside an already-open menu, then reload to
+  // re-open a fresh menu — never Escape-then-reopen (Radix swallows the immediate re-open click after Escape).
+  const clickWatch = (method: "POST" | "DELETE") => Promise.all([
+    page.waitForResponse((r) => r.url().includes("/watches") && r.request().method() === method && r.ok(), { timeout: 8000 }),
+    watchItem().click(),
+  ]);
 
-  // Watch → the button reflects the active state, and it survives a reload (server-persisted).
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-pressed", "true", { timeout: 8000 });
-  await page.reload();
-  await page.waitForSelector("[data-testid=sidebar]");
-  await expect(page.getByTestId("watch-toggle")).toHaveAttribute("aria-pressed", "true", { timeout: 8000 });
+  await openMenu();
+  await expect(watchItem()).toBeVisible();
+  await expect(watchItem()).toHaveAttribute("aria-checked", "false");
 
-  // Unwatch → back to inactive, persisted.
-  await page.getByTestId("watch-toggle").click();
-  await expect(page.getByTestId("watch-toggle")).toHaveAttribute("aria-pressed", "false", { timeout: 8000 });
+  // Watch (POST) → survives a reload (server-persisted).
+  await clickWatch("POST");
+  await reopenAfterReload();
+  await expect(watchItem()).toHaveAttribute("aria-checked", "true", { timeout: 8000 });
+
+  // Unwatch (DELETE) → back to inactive, persisted.
+  await clickWatch("DELETE");
+  await reopenAfterReload();
+  await expect(watchItem()).toHaveAttribute("aria-checked", "false", { timeout: 8000 });
 });
 
 test("#320 the header notification bell opens its inbox (empty state for a fresh member)", async ({ browser }) => {
