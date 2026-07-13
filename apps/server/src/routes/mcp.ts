@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { filterAuthorized } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
-import { getPublished, listPages, getBacklinks, createPage } from './pages.js'
+import { getPublished, listPages, getBacklinks, createPage, publishPage } from './pages.js'
 import { listSpaces } from './spaces.js'
 import { fillAuthorizedPage, SEARCH_CANDIDATE_LIMIT } from '../search/paginate.js'
 import { authenticateMcpRequest, type McpPrincipal } from '../auth/mcp-request-auth.js'
@@ -131,6 +131,26 @@ const TOOLS: McpTool[] = [
       } catch (e) {
         const sc = (e as { statusCode?: number }).statusCode
         if (sc === 403 || sc === 404) throw toolError('cannot create a page in that space')
+        throw e
+      }
+    },
+  },
+  {
+    name: 'publish_page',
+    description: "Publish a page's current draft (requires edit access). Records a revision; a no-op if nothing changed.",
+    scope: 'write',
+    inputSchema: { type: 'object', properties: { pageId: { type: 'string' } }, required: ['pageId'] },
+    async run(req, app, principal, args) {
+      const pageId = typeof args.pageId === 'string' ? args.pageId : ''
+      if (!pageId) throw toolError('pageId is required')
+      // Thin broker: publishPage gates FGA `edit` on the page FIRST (403 for a non-editor → uniform message,
+      // existence-hiding). Publishes the current single-Y.Text draft (never a raw content overwrite).
+      try {
+        const r = await publishPage(req.db, app.fga, app.searchDriver, app.storageDriver, { pageId, subject: `user:${principal.sub}`, createdBy: `user:${principal.sub}` })
+        return r.noop ? 'no changes to publish' : `published page ${pageId}${r.revisionId ? ` (revision ${r.revisionId})` : ''}`
+      } catch (e) {
+        const sc = (e as { statusCode?: number }).statusCode
+        if (sc === 403 || sc === 404) throw toolError('cannot publish that page')
         throw e
       }
     },
