@@ -112,4 +112,18 @@ test("#323: [[...]] is NOT a syntax — inserted (pasted) text renders as plain 
   expect(await line.locator("a").count()).toBe(0);
   expect(await line.locator(".cm-lp-link").count(), "a bare [text] must not be link-styled").toBe(0);
   expect(await line.innerText(), "the [[ ]] brackets stay literal (not hidden)").toContain("[[not a link]]");
+  // (review bounce): the bug was NOT a decoration — the SYNTAX HIGHLIGHTER tinted the `[not a link]`
+  // Link node blue even after. Measure the COMPUTED colour (a `.cm-lp-link` class assert can't catch a
+  // highlight-span colour): the bracketed text must be the SAME body colour as a plain word on the line, not the
+  // link blue.
+  const colours = await line.evaluate((lineEl: Element) => {
+    const walker = document.createTreeWalker(lineEl, NodeFilter.SHOW_TEXT);
+    let linkEl: Element | null = null, plainEl: Element | null = null, n: Node | null = null;
+    while ((n = walker.nextNode())) {
+      if (!linkEl && n.textContent?.includes("not")) linkEl = n.parentElement;
+      if (!plainEl && n.textContent?.includes("plain")) plainEl = n.parentElement;
+    }
+    return { link: linkEl ? getComputedStyle(linkEl).color : null, plain: plainEl ? getComputedStyle(plainEl).color : null };
+  });
+  expect(colours.link, "the bare [text] is body-coloured, not the syntax link blue").toBe(colours.plain);
 });
