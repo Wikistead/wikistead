@@ -59,7 +59,10 @@ export function SearchModal({ open, onOpenChange }: { open: boolean; onOpenChang
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) setInput(""); onOpenChange(o); }}>
-      <DialogContent className="max-w-3xl overflow-hidden p-0" showCloseButton={false} position="top">
+      {/* #285 widen to 5xl (1024px) so the 2-pane list + rich preview isn't cramped — the preview
+          pane's reading line-length drove the choice. A narrow viewport still shrinks it (max-w caps, not sets);
+          the mobile 1-column layout is unchanged. */}
+      <DialogContent className="sm:max-w-5xl overflow-hidden p-0" showCloseButton={false} position="top">
         <DialogHeader className="sr-only"><DialogTitle>{t("search.placeholder")}</DialogTitle></DialogHeader>
         <Command
           shouldFilter={false}
