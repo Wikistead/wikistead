@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Copy, Eye, Code, BookOpen, Sparkles, List, FileStack, Link as LinkIcon } from "lucide-react";
+import { WatchButton } from "../notifications/WatchButton";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui/Button";
 import { ToggleButton } from "../ui/ToggleButton";
@@ -28,6 +29,9 @@ export interface PageControlsProps {
   editing: boolean;
   onEdit: () => void;
   onDone: () => void;
+  // #320 / ADR-126: the current page id — enables the watch (🔔) toggle in the view-mode actions. Undefined
+  // (a scratch/preview surface with no real page) hides it.
+  pageId?: string;
   publishState?: "draft" | "unpublished" | null;
   canPublish?: boolean;
   onPublish?: () => void;
@@ -232,6 +236,7 @@ export function PageActions(p: PageControlsProps) {
       ) : (
         <>
           {p.canEdit && <RoundBtn label={t("page.edit")} testId="edit-toggle" primary onClick={p.onEdit} icon={<Pencil size={16} />} />}
+          {p.pageId && <WatchButton pageId={p.pageId} className={`${ROUND} ${ROUND_BG}`} />}
           {p.onShare && <RoundBtn label={t("page.share")} testId="share-open" onClick={p.onShare} icon={<Share2 size={16} />} />}
         </>
       )}

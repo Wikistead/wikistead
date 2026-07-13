@@ -788,6 +788,19 @@
     "forbidden": "You don't have permission to import into this space.",
     "invalid": "That file isn't a valid Wikistead export ZIP."
   },
+  "notifications": {
+    "title": "Notifications",
+    "empty": "You're all caught up",
+    "loading": "Loading…",
+    "guest": "Guest",
+    "untitled": "a page",
+    "published": "{{who}} published {{title}}",
+    "changed": "{{who}} changed {{title}}"
+  },
+  "watch": {
+    "watch": "Watch this page",
+    "unwatch": "Unwatch this page"
+  },
   "onboarding": {
     "title": "Set up your editor",
     "q1": "Do you use vim keybindings?",

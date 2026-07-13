@@ -22,6 +22,7 @@ import { revokeResourceShareLinks } from './share-links.js'
 import { getTemplate } from './templates.js'
 import { getSpaceInfo } from './spaces.js'
 import { deletePinsForResources } from './pins.js'
+import { fanOutFeedEvent, sweepWatchesForResources } from './notifications.js'
 import { enqueueWebhookOutbox } from './webhooks.js'
 
 // #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames
@@ -448,6 +449,9 @@ export async function publishPage(
     // delivers). Thin payload (ids/actor only). The drain applies the private/draft existence-hiding
     // filter at send time (by then page#space is written below, so a published page is deliverable).
     await enqueueWebhookOutbox(tx, { tenantId: draft.tenant_id, eventType: 'page.published', payload: { pageId: args.pageId, revisionId, actorId: args.createdBy, occurredAt: new Date().toISOString() } })
+    // #320 / ADR-126: in-tx feed event + notification fan-out to watchers (page-watch OR space-watch), actor
+    // excluded. publishedAt is non-null here (we just published), so the emission guard passes. Set-based, capped.
+    await fanOutFeedEvent(tx, { tenantId: draft.tenant_id, eventType: 'page.published', pageId: args.pageId, spaceId: draft.space_id, actor: args.createdBy, publishedAt })
   })
   // AFTER the DB commit (fail-closed: a tx failure above leaves the page gated)
   // release space inheritance, THEN reindex so buildSearchDoc sees the published
@@ -1243,6 +1247,7 @@ export async function deletePage(
     // #284 / ADR-119: best-effort pin cleanup (page + descendants). The pin display
     // gate drops orphans regardless — this is row hygiene, not correctness.
     await deletePinsForResources(tx, ids)
+    await sweepWatchesForResources(tx, ids) // #320 / ADR-126: same row-hygiene sweep for watches (display gate is the backstop)
     await tx`DELETE FROM pages WHERE id = ${args.pageId}` // cascade deletes descendants
   })
   for (const o of outboxIds) processOutboxAsync(driver, o.id, { tenantId, pageId: o.pageId, operation: 'delete' })

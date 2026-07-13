@@ -35,6 +35,7 @@ import { publicPlugin } from './routes/public.js'
 import { apiKeysPlugin } from './routes/api-keys.js'
 import { shareLinksPlugin } from './routes/share-links.js'
 import { pinsPlugin } from './routes/pins.js'
+import { notificationsPlugin } from './routes/notifications.js'
 import { webhooksPlugin } from './routes/webhooks.js'
 import { authPlugin } from './routes/auth.js'
 import { accountPlugin } from './routes/account.js'
@@ -364,6 +365,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(apiKeysPlugin)
   await app.register(shareLinksPlugin)
   await app.register(pinsPlugin) // #284: member pins (member-only — no guest opt-in)
+  await app.register(notificationsPlugin) // #320 / ADR-126: watch / notifications / feed (member-only)
 
   // #178 / ADR-084: EE feature mount seam. A CE / self-host build registers nothing → no-op. The EE
   // composition root (packages/ee-server/src/main.ts — the entrypoint that may import @wikistead-ee/*)
