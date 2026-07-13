@@ -5,6 +5,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { check, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { docName } from '@wikistead/types'
+import { resolveDirectiveRanges } from '@wikistead/macro-render' // #353: scan `:::query` blocks for the anon snapshot
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import type { StorageDriver } from '../storage/index.js'
@@ -403,6 +404,13 @@ export async function publishPage(
   if (!draft) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const md = decodeYdocContent(draft.ydoc)
 
+  // #353 / ADR-134 rev2 (Hole A): bake the anonymous static snapshot for this page's `:::query` blocks. Resolved
+  // as `user:anonymous` (member-only pages dropped by the per-item view-filter — never in the public snapshot).
+  // Refreshed on EVERY publish (incl. the no-op path below): the resolved list depends on OTHER pages' publish/
+  // grant state, so a re-publish is the natural refresh point even when THIS page's text is unchanged. Computed
+  // BEFORE the tx (like storeRevisionYdoc) — it reads only already-committed pages, never this in-flight update.
+  const querySnapshot = JSON.stringify(await bakeQuerySnapshot(db, fga, { pageId: args.pageId, md }))
+
   // No-op guard (server is the accurate gate): if the draft text equals what is
   // already published, do NOT create a revision — that would be meaningless history.
   // The UI's enable/disable uses the cheap over-approximated flag; this is the exact
@@ -410,7 +418,7 @@ export async function publishPage(
   // Still RELEASE space inheritance (idempotent) — covers a re-publish and the
   // repair case where a prior publish's page#space write failed; reindex if it wrote.
   if (md === draft.published_md) {
-    await db.sql`UPDATE pages SET has_unpublished_changes = false WHERE id = ${args.pageId}`
+    await db.sql`UPDATE pages SET has_unpublished_changes = false, published_query_snapshot = ${querySnapshot}::jsonb WHERE id = ${args.pageId}`
     const wrote = await ensurePageSpaceLink(fga, args.pageId, draft.space_id)
     if (wrote) {
       const oid = await db.tx(async (tx) => enqueueOutbox(tx, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' }))
@@ -439,7 +447,7 @@ export async function publishPage(
     const [p] = await tx<[{ published_at: Date }]>`
       UPDATE pages SET published_md = ${md}, published_revision_id = ${rev.id}, published_at = now(),
         has_unpublished_changes = false, updated_by = ${args.subject.replace(/^user:/, '')},
-        task_done = ${tp.done}, task_total = ${tp.total}
+        task_done = ${tp.done}, task_total = ${tp.total}, published_query_snapshot = ${querySnapshot}::jsonb
       WHERE id = ${args.pageId}
       RETURNING published_at
     `
@@ -563,16 +571,24 @@ export async function getPublished(
   // #318: title rides along so a view-capable GUEST (whose only page read is this route) can render the
   // title band. Minimal-field policy (the #270 space-info precedent): nothing beyond what the surface
   // shows — no space/creator/member data is added here.
-  const [row] = await db.sql<[{ title: string; published_md: string | null; published_at: Date | null; ydoc: Buffer | null }]>`
-    SELECT title, published_md, published_at, ydoc FROM pages WHERE id = ${args.pageId}
+  const [row] = await db.sql<[{ title: string; published_md: string | null; published_at: Date | null; ydoc: Buffer | null; published_query_snapshot: string | null }]>`
+    SELECT title, published_md, published_at, ydoc, published_query_snapshot FROM pages WHERE id = ${args.pageId}
   `
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const hasUnpublishedChanges = decodeYdocContent(row.ydoc) !== (row.published_md ?? '')
+  // #353 / ADR-134 rev2 (Hole A): a GUEST (share_link principal) gets the same anonymous static `:::query`
+  // snapshot as the public surface — a guest NEVER triggers a live per-viewer reverse-lookup (the #244 re-entry
+  // class). A MEMBER (user:<sub>) keeps the literal `:::query` so the editor's macro resolves it live and
+  // viewer-scoped via the member-only /query route. So substitute the baked list ONLY for guests.
+  const isGuest = args.subject.startsWith('share_link:')
+  const publishedMd = isGuest && row.published_md != null
+    ? substituteQuerySnapshots(row.published_md, row.published_query_snapshot ? (JSON.parse(row.published_query_snapshot) as QuerySnapshot) : null)
+    : row.published_md
   // canComment (#100): does THIS principal (member or view-guest) have the comment capability on the
   // page (comment_open on + view, an explicit comment grant, or edit)? The guest page uses it to show
   // the comment composer. Convenience only — the comment routes re-check FGA (fortress).
   const canComment = await check(fga, args.subject, 'comment', { type: 'page', id: args.pageId }, args.context)
-  return { title: row.title, publishedMd: row.published_md, publishedAt: row.published_at, hasUnpublishedChanges, canComment }
+  return { title: row.title, publishedMd, publishedAt: row.published_at, hasUnpublishedChanges, canComment }
 }
 
 // ── per-page access grant/revoke/list (Phase 4b) ────────────────────────────
@@ -1437,6 +1453,71 @@ export async function resolveAnonymousQuerySnapshot(
     if ((e as { statusCode?: number }).statusCode === 404) return [] // target not publicly viewable → empty snapshot
     throw e
   }
+}
+
+// The baked snapshot stored on `pages.published_query_snapshot` (#353 / ADR-134 rev2 Hole A). One entry per
+// `:::query` block in the published markdown, IN DOCUMENT ORDER (resolveDirectiveRanges' query blocks) — the
+// public route re-scans the SAME published_md and aligns i-th block ↔ i-th snapshot entry. `spec` is kept for
+// debuggability only; alignment is positional, so a spec drift can never mis-attribute another block's results.
+export interface QuerySnapshot {
+  readonly v: 1
+  readonly blocks: { readonly spec: string; readonly results: Backlink[] }[]
+}
+
+// Bake the anonymous snapshot for EVERY `:::query` block in `md` (any nesting depth), in document order. Called
+// at publish (both the real and no-op paths — a re-publish refreshes the public list even when THIS page's text
+// is unchanged, since results depend on OTHER pages' publish/grant state). Each block resolves as
+// `user:anonymous`, so a member-only match is dropped by the per-item view-filter (never in the public snapshot).
+export async function bakeQuerySnapshot(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { pageId: string; md: string },
+): Promise<QuerySnapshot> {
+  const queryDirs = resolveDirectiveRanges(args.md).filter((d) => d.name === 'query') // document order (sorted by `from`)
+  const blocks: { spec: string; results: Backlink[] }[] = []
+  for (const d of queryDirs) {
+    const body = args.md.slice(d.bodyFrom, d.bodyTo)
+    const specLine = body.split('\n').map((l) => l.trim()).find((l) => l.length > 0) ?? ''
+    const spec = parseQuerySpec(body)
+    // Unparseable spec → 0 results (never an error — the body is authoring free-text, ADR-134 §2). A parseable
+    // spec resolves anonymously (target/parent not publicly viewable → uniform 404 → [] inside the resolver).
+    const results = spec ? await resolveAnonymousQuerySnapshot(db, fga, { pageId: args.pageId, spec }) : []
+    blocks.push({ spec: specLine, results })
+  }
+  return { v: 1, blocks }
+}
+
+// Escape the four characters that would break out of a Markdown link's `[text]` / `(url)` — a page title is
+// arbitrary text and must not be able to inject markup into the substituted list (the public render sanitizes
+// HTML too, but keep the generated Markdown well-formed). The id is an internal uuid (safe in the URL).
+function escapeMdLinkText(s: string): string {
+  return s.replace(/[\\\[\]]/g, '\\$&').replace(/[\r\n]+/g, ' ')
+}
+
+// Render one baked block's results as a static Markdown bullet list of internal links (the ADR-134 §2 "degrade to
+// a static snapshot" form). Empty results → empty string (the block renders NOTHING, matching the member read
+// surface — no empty box).
+export function renderQuerySnapshotList(results: readonly Backlink[]): string {
+  if (results.length === 0) return ''
+  return results.map((r) => `- [${escapeMdLinkText(r.title)}](/p/${r.id})`).join('\n')
+}
+
+// Substitute every `:::query` directive in `md` with its baked anonymous list — the public/guest render pipeline
+// calls this so the anonymous surface shows a STATIC list (no live per-viewer resolution, Hole A rev2). Replaces
+// END→START so earlier offsets stay valid. Alignment is positional against the SAME md the snapshot was baked
+// from; a missing snapshot, a shorter snapshot, or a count mismatch collapses the unmatched block to nothing
+// (fail-safe: a query never renders a live/unauthorized list on the public surface). Pure — no I/O.
+export function substituteQuerySnapshots(md: string, snapshot: QuerySnapshot | null | undefined): string {
+  const queryDirs = resolveDirectiveRanges(md).filter((d) => d.name === 'query') // same filter+order as bake
+  if (queryDirs.length === 0) return md
+  let out = md
+  for (let i = queryDirs.length - 1; i >= 0; i--) {
+    const d = queryDirs[i]!
+    const block = snapshot?.v === 1 ? snapshot.blocks[i] : undefined
+    const replacement = block ? renderQuerySnapshotList(block.results) : '' // no snapshot / mismatch → render nothing
+    out = out.slice(0, d.from) + replacement + out.slice(d.to)
+  }
+  return out
 }
 
 // ── #224 / ADR-104: title dictionary + excerpt (auto internal links) ─────────

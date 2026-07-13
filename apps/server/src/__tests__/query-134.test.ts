@@ -11,7 +11,7 @@ import type { TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, deletePage, getQueryResults, parseQuerySpec, resolveAnonymousQuerySnapshot } from '../routes/pages.js'
+import { createPage, deletePage, getQueryResults, getPublished, parseQuerySpec, resolveAnonymousQuerySnapshot, bakeQuerySnapshot, substituteQuerySnapshots, type QuerySnapshot } from '../routes/pages.js'
 import type { Tenant } from '@wikistead/types'
 
 const driver = new LogicalSearchDriver()
@@ -178,5 +178,106 @@ describe('resolveAnonymousQuerySnapshot (#353 / ADR-134 rev2 Hole A)', () => {
     // snapshot", never a leak or an error surfaced to the public reader).
     const rows = await resolveAnonymousQuerySnapshot(db, fgaClient, { pageId: tagPage, spec: { type: 'tag', target: tagPage } })
     expect(rows).toEqual([])
+  })
+
+  // bakeQuerySnapshot + substituteQuerySnapshots end-to-end (the shape the publish baker stores and the public
+  // route substitutes). The baked list is the ANONYMOUS subset, so a member-only match is absent from the
+  // substituted public markdown too — the binding property, verified through the whole pipeline.
+  it('bake + substitute: a `:::query` block becomes a static list of the PUBLIC members only', async () => {
+    const md = `# Hub\n\n:::query\ntag ${anonTag}\n:::\n\ntail`
+    const snapshot = await bakeQuerySnapshot(db, fgaClient, { pageId: anonTag, md })
+    expect(snapshot.blocks).toHaveLength(1)
+    expect(snapshot.blocks[0]!.results.map((r) => r.id)).toContain(pubMember)
+    expect(snapshot.blocks[0]!.results.map((r) => r.id)).not.toContain(memberOnly)
+
+    const out = substituteQuerySnapshots(md, snapshot)
+    expect(out).not.toContain(':::query') // the directive is gone — no live-resolution hook on the public surface
+    expect(out).toContain(`(/p/${pubMember})`) // the public member is a static internal link
+    expect(out).not.toContain(`/p/${memberOnly}`) // the member-only page's id/title never reaches the public markdown
+    expect(out).not.toContain('Secret Member')
+  })
+})
+
+// substituteQuerySnapshots / renderQuerySnapshotList — pure, no I/O. The public/guest render substitutes a baked
+// snapshot; a MISSING or count-mismatched snapshot must fail SAFE (render nothing), never leave a live directive.
+describe('substituteQuerySnapshots (#353 / ADR-134 rev2 — pure)', () => {
+  const snap = (blocks: { spec: string; results: { id: string; title: string }[] }[]): QuerySnapshot => ({ v: 1, blocks })
+
+  it('replaces each `:::query` block with its bullet list, in document order', () => {
+    const md = `a\n\n:::query\nchildren\n:::\n\nb\n\n:::query\nbacklinks\n:::\n`
+    const out = substituteQuerySnapshots(md, snap([
+      { spec: 'children', results: [{ id: 'p1', title: 'One' }] },
+      { spec: 'backlinks', results: [{ id: 'p2', title: 'Two' }, { id: 'p3', title: 'Three' }] },
+    ]))
+    expect(out).toBe(`a\n\n- [One](/p/p1)\n\nb\n\n- [Two](/p/p2)\n- [Three](/p/p3)\n`)
+  })
+
+  it('an EMPTY result renders nothing (no empty box)', () => {
+    const out = substituteQuerySnapshots(`x\n:::query\nchildren\n:::\ny`, snap([{ spec: 'children', results: [] }]))
+    expect(out).toBe(`x\n\ny`)
+  })
+
+  it('a MISSING snapshot collapses every query block to nothing (fail-safe — never a live directive on public)', () => {
+    const md = `:::query\nchildren\n:::`
+    expect(substituteQuerySnapshots(md, null)).toBe('')
+    expect(substituteQuerySnapshots(md, undefined)).toBe('')
+  })
+
+  it('a count-mismatched snapshot collapses the unmatched block (positional alignment, fail-safe)', () => {
+    const md = `:::query\nchildren\n:::\n:::query\nbacklinks\n:::`
+    const out = substituteQuerySnapshots(md, snap([{ spec: 'children', results: [{ id: 'p1', title: 'One' }] }]))
+    expect(out).toContain('- [One](/p/p1)')
+    expect(out).not.toContain(':::query') // the second (unmatched) block collapses to nothing, not a live directive
+  })
+
+  it('escapes Markdown-link metacharacters in a title (no injection into the static list)', () => {
+    const out = substituteQuerySnapshots(`:::query\nchildren\n:::`, snap([{ spec: 'children', results: [{ id: 'p1', title: 'a] (x) [b\\c' }] }]))
+    expect(out).toBe('- [a\\] (x) \\[b\\\\c](/p/p1)')
+  })
+
+  it('leaves markdown with no query blocks untouched', () => {
+    const md = `# title\n\n:::note\nhi\n:::\n`
+    expect(substituteQuerySnapshots(md, null)).toBe(md)
+  })
+})
+
+// getPublished substitutes the snapshot for a GUEST (share_link) but leaves `:::query` literal for a MEMBER
+// (who resolves it live + viewer-scoped via the member-only /query route). The guest sees the same anonymous
+// static list as the public surface — no live per-viewer reverse-lookup for a guest (#244 re-entry class).
+describe('getPublished guest vs member :::query (#353 / ADR-134 rev2 Hole A)', () => {
+  let anonTag2!: string
+  let pubMember2!: string
+  let guestDoc!: string
+  const grants: { user: string; relation: string; object: string }[] = []
+
+  beforeAll(async () => {
+    anonTag2 = await mkPage('public-tag-2', 'the tag')
+    pubMember2 = await mkPage('Public Member 2', `tagged [x](/p/${anonTag2})`)
+    guestDoc = await mkPage('Guest Doc', null)
+    const md = `# Guest Doc\n\n:::query\ntag ${anonTag2}\n:::\n`
+    grants.push(
+      { user: 'user:*', relation: 'view_base', object: `page:${anonTag2}` },
+      { user: 'user:*', relation: 'view_base', object: `page:${pubMember2}` },
+      { user: 'user:member-g', relation: 'view_base', object: `page:${guestDoc}` }, // a member who can view guestDoc
+      { user: 'share_link:qlink-g', relation: 'view_base', object: `page:${guestDoc}` }, // a view guest on guestDoc
+    )
+    await writeTuples(fgaClient, grants)
+    const snap = await bakeQuerySnapshot(db, fgaClient, { pageId: guestDoc, md })
+    await adminPool`UPDATE pages SET published_md = ${md}, published_at = now(), published_query_snapshot = ${JSON.stringify(snap)}::jsonb WHERE id = ${guestDoc}`
+  }, 60_000)
+
+  afterAll(async () => {
+    await deleteTuples(fgaClient, grants).catch(() => {})
+  }, 60_000)
+
+  it('a MEMBER gets the literal `:::query` (resolves live + viewer-scoped via /query)', async () => {
+    const r = await getPublished(db, fgaClient, { pageId: guestDoc, subject: 'user:member-g' })
+    expect(r.publishedMd).toContain(':::query') // untouched — the editor macro resolves it live
+  })
+
+  it('a GUEST gets the static anonymous list, no `:::query` directive, no member-only leak', async () => {
+    const r = await getPublished(db, fgaClient, { pageId: guestDoc, subject: 'share_link:qlink-g' })
+    expect(r.publishedMd).not.toContain(':::query') // substituted → no live-resolution hook for a guest
+    expect(r.publishedMd).toContain(`(/p/${pubMember2})`) // the public member is a static link
   })
 })
