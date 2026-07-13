@@ -453,9 +453,9 @@ body {
 }
 .lp-palette-row {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
+  /* #357: center-align so the leading icon lines up with the label; the alias is pushed right (margin-auto). */
+  align-items: center;
+  gap: var(--space-2);
   font: inherit;
   text-align: left;
   padding: 4px 8px;
@@ -469,6 +469,13 @@ body {
 .lp-palette-row.is-selected {
   background: color-mix(in srgb, var(--accent) 14%, var(--panel-2));
 }
+/* #357: the leading type icon — flex-none 16px box, dimmed so it doesn't compete with the label; currentColor
+   inside follows the row's theme. */
+.lp-palette-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--fg-dim);
+}
 .lp-palette-name {
   font-size: 13px;
 }
@@ -476,6 +483,7 @@ body {
   font-size: 11px;
   color: var(--fg-dim);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-left: auto; /* push the alias to the right edge (icon + name stay grouped left) */
 }
 
 /* M0-4 right-click context menu: a small vertical menu in the (fixed) tooltip layer. */

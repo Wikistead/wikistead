@@ -6,6 +6,7 @@ import { INLINE_FORMATS, insertImage, insertLink, type InlineFormat, type ImageU
 import { orderByRecency, recordUse } from "./palette-recency";
 import { contextHintTooltip } from "./hint";
 import { registeredMacros } from "../macros";
+import { paletteIcon } from "./palette-icons";
 
 // Slash command palette (Step I / M0-1 — see ADR-017). Triggered by `/` at a line
 // start OR after whitespace while editing. Lists block insert/toggle commands (layer
@@ -24,6 +25,7 @@ interface PaletteCommand {
   insert: string; // the Markdown template inserted in place of the "/query" token
   caret: number | [number, number]; // caret offset (or selection range) within `insert`
   action?: (view: EditorView) => void; // custom action instead of a template insert (e.g. image picker)
+  icon?: string; // #357: optional inline-SVG override; when absent, paletteIcon(id) supplies a per-kind icon
 }
 
 // Holds the image-insert trigger (opening the host's file picker), supplied by
@@ -378,13 +380,18 @@ function paletteTooltip(field: StateField<PaletteState | null>, from: number): T
           row.className = "lp-palette-row" + (i === v.index ? " is-selected" : "");
           row.setAttribute("data-testid", `slash-item-${cmd.id}`);
           if (i === v.index) { row.setAttribute("data-selected", "true"); selectedRow = row; }
+          // #357: a leading type icon (inline SVG, currentColor → theme-follow) so the kind reads at a glance.
+          const icon = document.createElement("span");
+          icon.className = "lp-palette-icon";
+          icon.setAttribute("aria-hidden", "true");
+          icon.innerHTML = cmd.icon ?? paletteIcon(cmd.id); // trusted constant SVG (no user input)
           const name = document.createElement("span");
           name.className = "lp-palette-name";
           name.textContent = cmd.label();
           const alias = document.createElement("span");
           alias.className = "lp-palette-alias";
           alias.textContent = cmd.alias;
-          row.append(name, alias);
+          row.append(icon, name, alias);
           // mousedown (not click) + preventDefault keeps editor focus/selection intact
           row.addEventListener("mousedown", (e) => { e.preventDefault(); applyAt(view, cmd); });
           dom.appendChild(row);
