@@ -204,7 +204,6 @@ class FootnoteSectionWidget extends WidgetType {
   ignoreEvent() { return false; }
 }
 const inlineCodeMark = Decoration.mark({ class: "cm-lp-inline-code" });
-const linkMark = Decoration.mark({ class: "cm-lp-link" });
 const hide = Decoration.replace({});
 
 const headingLine = (level: number) =>
@@ -456,7 +455,7 @@ class OrderedWidget extends WidgetType {
 }
 // The runtime node is a real @lezer SyntaxNodeRef (fuller than RenderNode's minimal typing), so we reach
 // .parent/.prevSibling here for the tree walks.
-type TreeNode = { readonly name: string; readonly prevSibling: TreeNode | null; readonly parent: TreeNode | null };
+type TreeNode = { readonly name: string; readonly from: number; readonly to: number; readonly prevSibling: TreeNode | null; readonly parent: TreeNode | null };
 const asTree = (node: RenderNode): TreeNode => node.node as unknown as TreeNode;
 // The item's 1-based position within its immediate list (independent per nesting level — a nested list
 // starts at 1). Counts preceding ListItem siblings in the syntax tree, so "wrong" source numbers still
@@ -3100,11 +3099,26 @@ const RENDERERS: BlockRenderer[] = [
         ctx.addAtomic(Decoration.replace({ widget: new AttachmentChipWidget(aRef.id, aRef.name) }), node.from, node.to);
         return;
       }
+      // #323 a bare `[text]` shortcut with NO resolvable destination is literal CommonMark text
+      // render it plain (no cm-lp-link), matching the reader (md-render makes a <span>, an <a> only for a
+      // real href). Its `[ ]` markers stay visible (the LinkMark visitor below). Only `[text](url)` (a
+      // resolvable href) gets the clickable link mark.
       const href = linkHref(src);
-      ctx.add(href ? Decoration.mark({ class: "cm-lp-link", attributes: { "data-href": href } }) : linkMark, node.from, node.to);
+      if (!href) return;
+      ctx.add(Decoration.mark({ class: "cm-lp-link", attributes: { "data-href": href } }), node.from, node.to);
     },
   },
-  { match: (n) => n === "LinkMark", enter: (node, ctx) => ctx.hideMarker(node.from, node.to) },
+  { match: (n) => n === "LinkMark", enter: (node, ctx) => {
+    // #323 hide the `[ ]` only for a link that actually RENDERS as a link/atom — a real
+    // `[text](url)` (resolvable href) or an attachment chip/card. A bare `[text]` with no destination keeps
+    // its brackets (literal text, reader parity) instead of collapsing to a link-looking `text`.
+    const p = asTree(node).parent;
+    if (p?.name === "Link") {
+      const src = ctx.state.doc.sliceString(p.from, p.to);
+      if (!linkHref(src) && !parseAttachmentLinkRef(src)) return; // bare shortcut → keep [ ] visible
+    }
+    ctx.hideMarker(node.from, node.to);
+  } },
   {
     // #223: a URL node is hidden ONLY when it is a link's DESTINATION (parent is Link → the `(url)` part,
     // which the [text] label replaces). A STANDALONE URL — a bare autolink, or the URL used AS a link's

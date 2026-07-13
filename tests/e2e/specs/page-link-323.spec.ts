@@ -103,8 +103,13 @@ test("#323: [[...]] is NOT a syntax — inserted (pasted) text renders as plain 
   await page.keyboard.insertText("plain [[not a link]] text\n");
   await sleep(400);
   await expect(page.getByTestId("embed-picker-input")).toHaveCount(0);
-  // rendered surface: the bracketed text stays visible as-is and produces NO anchor.
+  // rendered surface (caret rests on the trailing line, so this line renders, not raw): the bracketed text
+  // stays literal and is NOT a link. #323 a bare `[text]` with no destination must NOT be styled as
+  // a link — no `<a>` AND no `.cm-lp-link` (the bug rendered the inner text link-like), and the `[ ]`
+  // brackets stay visible (reader parity — a plain <span>, not a collapsed link-looking `not a link`).
   const line = page.locator("[data-pane=preview] .cm-line", { hasText: "not a link" }).first();
   await expect(line).toBeVisible();
   expect(await line.locator("a").count()).toBe(0);
+  expect(await line.locator(".cm-lp-link").count(), "a bare [text] must not be link-styled").toBe(0);
+  expect(await line.innerText(), "the [[ ]] brackets stay literal (not hidden)").toContain("[[not a link]]");
 });
