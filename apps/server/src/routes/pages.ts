@@ -1307,6 +1307,17 @@ export const MAX_LINK_STATUS_IDS = 256
 // by an FGA `view` check for the viewer — so a backlink from a page the viewer can't see is never
 // leaked ("confirm via OpenFGA before display", like listSpaces / the search stage-2 guard).
 export interface Backlink { id: string; title: string }
+
+// #353 / ADR-027 (authorized-hit gap, Hole C): the reverse-lookup lists (backlinks / tag / children) must not
+// DROP viewable results at the raw-fetch boundary. The naive shape — `LIMIT N` raw → per-item view-filter
+// silently loses authorized rows when the first N by rank include non-viewable ones (safe = no leak, but the
+// list is short of N genuine hits). Fix: OVER-FETCH by rank well past the display cap, view-filter in rank
+// order, and stop at the display cap — so the list is the "top DISPLAY_N VIEWABLE by rank", not "the viewable
+// subset of the top-N raw". The per-item FGA loop early-exits at DISPLAY_N (rank-ordered → the rest are lower
+// rank and would not display anyway), so the cost stays ~DISPLAY_N checks, not the whole over-fetch.
+const QUERY_DISPLAY_N = 200 // the visible cap (unchanged from the prior raw LIMIT — the displayed count)
+const QUERY_OVER_FETCH = 600 // rank-ordered candidates fetched so view-filtering still yields up to DISPLAY_N
+
 export async function getBacklinks(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -1332,11 +1343,12 @@ export async function getBacklinks(
       AND published_md IS NOT NULL
       AND published_md LIKE ${'%' + args.pageId + '%'}
     ORDER BY updated_at DESC
-    LIMIT 200
+    LIMIT ${QUERY_OVER_FETCH}
   `
   const candidates = rows.filter((r) => refRe.test(r.published_md))
   const out: Backlink[] = []
   for (const c of candidates) {
+    if (out.length >= QUERY_DISPLAY_N) break // top-N VIEWABLE by rank reached (Hole C — no boundary drop)
     const ok = await check(fga, args.subject, 'view', { type: 'page', id: c.id }, args.context)
     if (ok) out.push({ id: c.id, title: c.title })
   }
@@ -1390,10 +1402,11 @@ export async function getQueryResults(
     WHERE parent_id = ${pageId}
       AND published_at IS NOT NULL
     ORDER BY position ASC, updated_at DESC
-    LIMIT 200
+    LIMIT ${QUERY_OVER_FETCH}
   `
   const out: Backlink[] = []
   for (const r of rows) {
+    if (out.length >= QUERY_DISPLAY_N) break // top-N VIEWABLE by rank (Hole C — over-fetch past the display cap)
     if (await check(fga, subject, 'view', { type: 'page', id: r.id }, context)) out.push({ id: r.id, title: r.title })
   }
   return out
