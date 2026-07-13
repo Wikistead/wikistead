@@ -1,5 +1,5 @@
 import { EditorView, showTooltip, type Tooltip, type TooltipView } from "@codemirror/view";
-import { StateField, StateEffect, EditorSelection, Prec, type EditorState, type Extension } from "@codemirror/state";
+import { StateField, StateEffect, EditorSelection, Facet, Prec, type EditorState, type Extension } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 import i18n from "../../i18n";
 import { INLINE_FORMATS } from "./commands";
@@ -19,7 +19,14 @@ import type { FenceAlign } from "@wikistead/macro-render";
 
 type MenuKind = "selection" | "link" | "plain";
 interface LinkRange { from: number; to: number; urlFrom: number; urlTo: number }
-interface MenuState { pos: number; kind: MenuKind; link?: LinkRange; diagramFrom?: number; imageFrom?: number }
+// #325 / ADR-137 slice 2b: the block-reference target for a "Copy block reference" entry — the line-end
+// offset to append the marker at, plus any id already present on that line (so a repeat copy is idempotent).
+interface BlockRef { lineTo: number; existingId: string | null }
+interface MenuState { pos: number; kind: MenuKind; link?: LinkRange; diagramFrom?: number; imageFrom?: number; blockRef?: BlockRef }
+
+// #325 / ADR-137 slice 2b: the current page's id, provided by the mount (member surface only). Absent on
+// guest / template-preview surfaces — the block-reference entry is then hidden (a ref needs a `pageId#^id`).
+const selfPageIdFacet = Facet.define<string | undefined, string | undefined>({ combine: (v) => v[0] });
 
 const openMenu = StateEffect.define<MenuState>();
 const closeMenu = StateEffect.define<null>();
@@ -156,6 +163,55 @@ function doInsert(view: EditorView): void {
   view.focus();
 }
 
+// #325 / ADR-137 slice 2b — "Copy block reference". A block reference is a trailing ` ^<id>` marker
+// (id: [a-z0-9-]{3,24}) on a block's line — ordinary text in the single Y.Text (Open formats; it round-trips).
+// The affordance targets the CLICKED LINE: a paragraph / list item / heading / blockquote line resolves to
+// exactly that block via sliceBlockByAnchor (a list item → the item, not the whole list). It is OUT OF SCOPE
+// for atom blocks (fenced code / table / `:::` macro): a marker cannot live cleanly inside them, so the entry
+// is hidden when the caret is inside one (the block-ref grammar stays a text-block feature). The clipboard gets
+// `pageId#^id` — the exact string an `:::embed-page` body takes to transclude just that block.
+const BLOCK_REF_LINE_RE = /[ \t]\^([a-z0-9-]{3,24})$/; // an existing ` ^<id>` already at this line's end
+const ATOM_ANCESTORS = new Set(["FencedCode", "CodeBlock", "CodeText", "Table", "HTMLBlock"]); // no in-atom markers
+
+// The block-ref target for a right-click at `pos`, or null when unavailable (no page id → no ref possible;
+// a blank line → nothing to reference; inside an atom → out of scope). Pure (reads state only).
+function blockRefTarget(state: EditorState, pos: number, selfPageId: string | undefined): BlockRef | null {
+  if (!selfPageId) return null;
+  const line = state.doc.lineAt(pos);
+  if (line.text.trim() === "") return null;
+  // Reject atoms: walk the resolved node's ancestors for a fenced-code / table / HTML block.
+  for (let n: ReturnType<ReturnType<typeof syntaxTree>["resolveInner"]> | null = syntaxTree(state).resolveInner(pos, 0); n; n = n.parent)
+    if (ATOM_ANCESTORS.has(n.name)) return null;
+  const m = BLOCK_REF_LINE_RE.exec(line.text);
+  return { lineTo: line.to, existingId: m ? m[1]! : null };
+}
+
+// A short block id: 6 chars of [a-z0-9] (satisfies the [a-z0-9-]{3,24} grammar). Regenerated on the rare
+// clash with an id already in the doc (sliceBlockByAnchor resolves the FIRST match, so ids must be unique).
+function genBlockId(doc: string): string {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  for (let attempt = 0; attempt < 20; attempt++) {
+    let id = "";
+    for (let i = 0; i < 6; i++) id += alphabet[Math.floor(Math.random() * alphabet.length)];
+    if (!new RegExp(`[ \\t]\\^${id}(?![\\w-])`).test(doc)) return id;
+  }
+  return `b${Date.now().toString(36)}`.slice(0, 24); // deterministic fallback (astronomically unlikely)
+}
+
+// Ensure the target line carries a ` ^<id>` marker (append one in a SINGLE offset-invariant edit if absent —
+// the insert is at the line END so no live caret/offset before it moves), then copy `pageId#^id` to the
+// clipboard. Idempotent: a line that already has a marker reuses its id (no duplicate append).
+function doCopyBlockRef(view: EditorView, target: BlockRef, selfPageId: string): void {
+  let id = target.existingId;
+  if (!id) {
+    id = genBlockId(view.state.doc.toString());
+    view.dispatch({ changes: { from: target.lineTo, insert: ` ^${id}` } });
+  }
+  const ref = `${selfPageId}#^${id}`;
+  void navigator.clipboard?.writeText(ref).catch(() => { /* clipboard unavailable / denied — best effort */ });
+  close(view);
+}
+
 function menuTooltip(v: MenuState): Tooltip {
   return {
     pos: v.pos,
@@ -196,6 +252,12 @@ function menuTooltip(v: MenuState): Tooltip {
       } else {
         item("paste", i18n.t("contextMenu.paste"), () => doPaste(view));
         item("insert", i18n.t("contextMenu.insert"), () => doInsert(view));
+        // #325 / ADR-137 slice 2b: copy a `pageId#^id` reference to the block under the cursor (member
+        // surface with a page id, text block only — see blockRefTarget). Appends the ` ^id` marker if absent.
+        if (v.blockRef) {
+          const selfPageId = view.state.facet(selfPageIdFacet);
+          if (selfPageId) { sep(); item("copyblockref", i18n.t("contextMenu.copyBlockRef"), () => doCopyBlockRef(view, v.blockRef!, selfPageId)); }
+        }
       }
 
       // #255: a rendered diagram fence adds alignment entries (left / center / right). Robust right-click
@@ -266,7 +328,9 @@ const menuEvents = Prec.highest(
       if (wrapEl) { try { wrapPos = view.posAtDOM(wrapEl); } catch { wrapPos = null; } }
       const diagramFrom = diagramFenceAt(view.state, pos) ?? (wrapPos != null ? diagramFenceAt(view.state, wrapPos) : null) ?? undefined;
       const imageFrom = imageAlignAt(view.state, pos) ?? (wrapPos != null ? imageAlignAt(view.state, wrapPos) : null) ?? undefined; // #255: standalone image alignment
-      view.dispatch({ effects: openMenu.of({ pos, kind, link, diagramFrom, imageFrom }) });
+      // #325 slice 2b: on a plain (no-selection, no-link) right-click, offer "Copy block reference" for the block under the cursor.
+      const blockRef = kind === "plain" ? (blockRefTarget(view.state, pos, view.state.facet(selfPageIdFacet)) ?? undefined) : undefined;
+      view.dispatch({ effects: openMenu.of({ pos, kind, link, diagramFrom, imageFrom, blockRef }) });
       e.preventDefault();
       return true;
     },
@@ -281,6 +345,6 @@ const menuEvents = Prec.highest(
   }),
 );
 
-export function contextMenu(): Extension {
-  return [menuField, menuEvents];
+export function contextMenu(opts: { selfPageId?: string } = {}): Extension {
+  return [menuField, menuEvents, selfPageIdFacet.of(opts.selfPageId)];
 }

@@ -647,6 +647,7 @@
     "editLink": "Edit link",
     "clearFormat": "Clear formatting",
     "insert": "Insert…",
+    "copyBlockRef": "Copy block reference",
     "alignLeft": "Align left",
     "alignCenter": "Align center",
     "alignRight": "Align right"
