@@ -13,6 +13,7 @@ import { storeRevisionYdoc } from './revision-ydoc.js'
 import type { TenantDb } from '../db/index.js'
 import { flushDraft } from '../collab-flush.js'
 import { countTodoTasks } from '../task-progress.js' // #290: :::todo aggregate for the sidebar ring
+import { evaluatePublishAbuse } from '../abuse-filter.js' // #328 / ADR-140: publish-boundary abuse filter
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { resolveEmbed, EmbedDeniedError } from '../embed-resolve.js'
@@ -403,6 +404,18 @@ export async function publishPage(
   `
   if (!draft) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const md = decodeYdocContent(draft.ydoc)
+
+  // #328 / ADR-140: the publish-boundary abuse filter (increment 1). The edit gate above has passed; now check
+  // the CONTENT against the tenant's moderation policy (mass-delete shrink + banned words on added content).
+  // Defaults are all-permissive, so this is a no-op (and a single cheap SELECT) until an admin opts in. A
+  // rejection is a 422 with a STATIC reason code — the CRDT/Y.Text is never touched (decide-only).
+  const [ab] = await db.sql<[{ abuse_shrink_ratio: number | null; abuse_banned_words: string[] }?]>`
+    SELECT abuse_shrink_ratio, abuse_banned_words FROM tenant_settings WHERE tenant_id = ${draft.tenant_id}
+  `
+  if (ab && (ab.abuse_shrink_ratio != null || (ab.abuse_banned_words?.length ?? 0) > 0)) {
+    const verdict = evaluatePublishAbuse(draft.published_md, md, { shrinkRatio: ab.abuse_shrink_ratio, bannedWords: ab.abuse_banned_words ?? [] })
+    if (!verdict.ok) throw Object.assign(new Error('publish rejected by the abuse filter'), { statusCode: 422, reason: verdict.reason })
+  }
 
   // #353 / ADR-134 rev2 (Hole A): bake the anonymous static snapshot for this page's `:::query` blocks. Resolved
   // as `user:anonymous` (member-only pages dropped by the per-item view-filter — never in the public snapshot).
@@ -1689,14 +1702,22 @@ export async function pagesPlugin(app: FastifyInstance) {
 
   // Publish the current draft as the new published version (edit-gated). Members or
   // an edit-capable guest (share-link) — same FGA `edit` check either way.
-  app.post<{ Params: { pageId: string } }>('/pages/:pageId/publish', { config: { guest: 'edit' } }, async (req) => {
+  app.post<{ Params: { pageId: string } }>('/pages/:pageId/publish', { config: { guest: 'edit' } }, async (req, reply) => {
     const p = principalForPage(req, req.params.pageId)
     // Flush the live draft to pages.ydoc BEFORE snapshotting, so a publish issued
     // right after typing (within the collab debounce window) includes those edits and
     // does not leave them behind as "unpublished changes". Best-effort: never blocks
     // longer than the timeout, and is a no-op when collab isn't running (e.g. tests).
     await flushDraft(app.valkey, docName(req.tenant.id, req.params.pageId))
-    return publishPage(req.db, app.fga, app.searchDriver, app.storageDriver, { pageId: req.params.pageId, ...p })
+    try {
+      return await publishPage(req.db, app.fga, app.searchDriver, app.storageDriver, { pageId: req.params.pageId, ...p })
+    } catch (e) {
+      // #328 / ADR-140: surface the abuse-filter rejection as a 422 with the STATIC reason code so the client
+      // can show a specific message (mass_delete / banned_content) — never the offending content (no oracle).
+      const reason = (e as { reason?: string }).reason
+      if ((e as { statusCode?: number }).statusCode === 422 && reason) return reply.code(422).send({ error: 'publish rejected', reason })
+      throw e
+    }
   })
 
   // Toggle a single task checkbox on the published page WITHOUT creating a revision
