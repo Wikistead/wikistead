@@ -24,6 +24,23 @@ test("#261: /login?error=access shows a VAGUE error (no enumeration hint)", asyn
   await expect(err).not.toContainText(/not found|no such|unknown user/i);
 });
 
+// #371: clicking sign-in navigates top-level to /auth/login (then the IdP) — show a spinner + lock the buttons
+// so the click reads as "working". Hold the navigation (route hangs) so the login screen stays up and the
+// spinner is observable.
+test("#371: clicking sign-in shows a spinner and disables the button", async ({ page }) => {
+  // Answer the top-level nav to /auth/login with 204 No Content — the browser keeps the current login document
+  // (a 204 navigation is a no-op), so the spinner (committed from the click's setState, navigated from an effect)
+  // stays observable instead of the page unloading.
+  await page.route("**/auth/login**", (route) => route.fulfill({ status: 204, body: "" }));
+  await page.goto("/login");
+  const btn = page.getByTestId("login-signin");
+  await expect(btn).toBeVisible();
+  await expect(page.getByTestId("login-spinner")).toHaveCount(0); // no spinner before the click
+  await btn.click();
+  await expect(page.getByTestId("login-spinner")).toBeVisible(); // spinner appears (rendered before the nav)
+  await expect(btn).toBeDisabled(); // the button locks so it can't be re-triggered
+});
+
 test("#261: /login?error=seat_full shows the seat-limit message (distinct from the vague one)", async ({ page }) => {
   await page.goto("/login?error=access");
   await sleep(150);
