@@ -699,19 +699,41 @@ export const backlinksSource = Facet.define<BacklinksSource | null, BacklinksSou
   combine: (v) => (v.length ? v[v.length - 1]! : null),
 });
 
-// The optional `[label]` on a `:::backlinks[]` open line (renders only alongside a non-empty list).
-function backlinksLabel(openLine: string): string | null {
-  const m = /^\s*:::+\s*backlinks\s*\[([^\]]*)\]/.exec(openLine);
+// #324 / ADR-134: the host seam for `:::query` — a read-only dynamic list resolved by the VIEWER's principal.
+// Same trust boundary as BacklinksSource: the macro never fetches; the host binds a `fetch(spec)` to the
+// member-only, view-filtered `GET /pages/:id/query?spec=...`. `spec` is the raw directive body (the resolver
+// parses it server-side — the CM layer stays dumb). Absent on anonymous/template surfaces (member-only,
+// Hole A rev2), so `:::query` renders nothing there.
+export interface QuerySource {
+  readonly fetch: (spec: string) => Promise<{ id: string; title: string }[] | null>;
+  readonly navigate: (pageId: string) => void;
+  readonly emptyLabel: string; // dim edit-surface placeholder (a 0-height read-surface widget shows nothing)
+  readonly untitledLabel: string; // fallback text for a result page with no title
+}
+export const querySource = Facet.define<QuerySource | null, QuerySource | null>({
+  combine: (v) => (v.length ? v[v.length - 1]! : null),
+});
+
+// The optional `[label]` on a `:::backlinks[]` / `:::query[]` open line (renders only alongside a
+// non-empty list). `name` selects which directive's label to read.
+function directiveLabel(openLine: string, name: string): string | null {
+  const m = new RegExp(`^\\s*:::+\\s*${name}\\s*\\[([^\\]]*)\\]`).exec(openLine);
   return m && m[1]!.trim() ? m[1]!.trim() : null;
 }
 
-// Build the rendered backlinks DOM: an optional label + a list of view-authorized sources. Each row navigates
-// through the host seam (never hardcoded routing — the destination re-confirms view). Text via textContent
-// (no innerHTML) — the titles came from the view-gated endpoint and are treated as untrusted here regardless.
-function buildBacklinksList(items: { id: string; title: string }[], label: string | null, src: BacklinksSource): HTMLElement {
+// Build a rendered list-of-pages DOM (shared by `:::backlinks` and `:::query`): an optional label + a list of
+// view-authorized pages. Each row navigates through the host seam (never hardcoded routing — the destination
+// re-confirms view). Text via textContent (no innerHTML) — the titles came from the view-gated endpoint and are
+// treated as untrusted here regardless. `variant` selects the test-id namespace; the CSS classes are shared.
+function buildLinkList(
+  items: { id: string; title: string }[],
+  label: string | null,
+  src: { navigate: (id: string) => void; untitledLabel: string },
+  variant: "backlinks" | "query",
+): HTMLElement {
   const box = document.createElement("div");
   box.className = "cm-lp-backlinks";
-  box.setAttribute("data-testid", "macro-backlinks");
+  box.setAttribute("data-testid", `macro-${variant}`);
   if (label) {
     const h = document.createElement("div");
     h.className = "cm-lp-backlinks-label";
@@ -724,7 +746,7 @@ function buildBacklinksList(items: { id: string; title: string }[], label: strin
     const li = document.createElement("li");
     const a = document.createElement("a");
     a.className = "cm-lp-backlinks-item";
-    a.setAttribute("data-testid", `macro-backlink-${it.id}`);
+    a.setAttribute("data-testid", `macro-${variant}-item-${it.id}`);
     a.href = `/p/${it.id}`; // real href (middle-click / open-in-new-tab work); left-click is SPA-routed below
     a.textContent = it.title || src.untitledLabel;
     // mousedown: keep the caret out of the atom / don't let CM handle it. click: SPA-navigate and preventDefault
@@ -2053,8 +2075,8 @@ class MacroWidget extends WidgetType {
                 wrap.style.display = "none"; // read surface: render nothing (§3 — collapse to zero height)
               }
             } else {
-              const label = backlinksLabel(view.state.doc.lineAt(this.from).text);
-              rendered.appendChild(buildBacklinksList(items, label, src));
+              const label = directiveLabel(view.state.doc.lineAt(this.from).text, "backlinks");
+              rendered.appendChild(buildLinkList(items, label, src, "backlinks"));
             }
             view.requestMeasure();
           };
@@ -2066,6 +2088,40 @@ class MacroWidget extends WidgetType {
           const target: string | null | undefined = lines.length === 0 ? null : lines.length === 1 ? lines[0] : undefined;
           if (target === undefined) renderResult(null); // invalid body → same as 0 results
           else void src.fetch(target).then(renderResult);
+        }
+      }
+      // #324 / ADR-134: host-mediated `:::query`. Same shape as `:::backlinks` (the macro can't fetch — narrow
+      // host-API); the host resolves the VIEWER-authorized list for the body spec and the widget renders it, or
+      // renders NOTHING per surface when empty (read surface collapses to zero height; edit surface keeps a dim
+      // one-line placeholder so the atom stays selectable/deletable). The host resolver is MEMBER-ONLY (absent on
+      // anonymous/template surfaces, Hole A rev2), so a public/guest surface renders nothing here. Height changes
+      // as the async result lands → view.requestMeasure (block-widget motion rule).
+      if (this.name === "query") {
+        const src = view.state.facet(querySource);
+        if (src) {
+          const editable = !view.state.readOnly;
+          const renderResult = (items: { id: string; title: string }[] | null) => {
+            if (this.destroyed) return;
+            rendered.replaceChildren();
+            if (!items || items.length === 0) {
+              if (editable) {
+                const ph = document.createElement("div");
+                ph.className = "cm-lp-backlinks-empty";
+                ph.setAttribute("data-testid", "macro-query-empty");
+                ph.textContent = src.emptyLabel;
+                rendered.appendChild(ph);
+              } else {
+                wrap.style.display = "none"; // read surface: render nothing (§3 — collapse to zero height)
+              }
+            } else {
+              const label = directiveLabel(view.state.doc.lineAt(this.from).text, "query");
+              rendered.appendChild(buildLinkList(items, label, src, "query"));
+            }
+            view.requestMeasure();
+          };
+          // The raw body IS the spec — the server parses it (`backlinks` / `tag <id>` / `children`); an
+          // unrecognised spec resolves to 0 results (never a parse error). A denied/absent target → null → nothing.
+          void src.fetch(this.body).then(renderResult);
         }
       }
     }

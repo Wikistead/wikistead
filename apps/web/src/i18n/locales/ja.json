@@ -622,6 +622,7 @@
     "insertTemplate": "テンプレートを挿入",
     "pageLink": "ページリンク",
     "backlinks": "バックリンク（このページへのリンク）",
+    "query": "クエリ（動的リスト：タグ／子ページ／被リンク）",
     "highlight": "マーカー"
   },
   "calloutEdit": {
@@ -726,7 +727,8 @@
     "excalidrawEmpty": "空の図 — 左上の ✎ ボタンで編集",
     "embedEmpty": "空の埋め込み — ✎ ボタンで URL を追加",
     "pageEmbedEmpty": "空のページ埋め込み — ✎ ボタンでページを追加",
-    "backlinksEmpty": "被リンクはまだありません"
+    "backlinksEmpty": "被リンクはまだありません",
+    "queryEmpty": "一致するページはありません"
   },
   "templates": {
     "title": "テンプレート",
