@@ -156,6 +156,10 @@ class FootnoteRefWidget extends WidgetType {
   toDOM(view: EditorView) {
     const sup = document.createElement("sup");
     sup.className = "cm-lp-footnote-ref";
+    // #335②: mark the widget non-editable. Reading keeps `EditorView.editable` true (#165 focusable), so
+    // without this the sup is treated as editable text — the caret lands inside on click (eating the ref's
+    // mousedown → no jump) and the cursor shows an I-beam. The other display-only widgets already do this.
+    sup.contentEditable = "false";
     if (this.n == null) { sup.classList.add("cm-lp-footnote-undef"); sup.textContent = "?"; return sup; }
     sup.id = `fnref-${this.n}`;
     const a = document.createElement("a");
@@ -178,13 +182,19 @@ class FootnoteSectionWidget extends WidgetType {
     const section = document.createElement("section");
     section.className = "cm-lp-footnotes";
     section.setAttribute("data-testid", "footnotes");
+    // #335②: non-editable, same as the ref widget — otherwise the `↩` back-links land the caret instead
+    // of firing their jump, and the whole section reads as editable text (I-beam) on a read surface.
+    section.contentEditable = "false";
     section.appendChild(document.createElement("hr"));
     const ol = document.createElement("ol");
     ol.className = "cm-lp-footnotes-list";
     for (const it of this.items) {
       const li = document.createElement("li");
       li.className = it.unref ? "cm-lp-footnote-item cm-lp-footnote-unref" : "cm-lp-footnote-item";
-      if (!it.unref) li.id = `fn-${it.n}`;
+      // #335①: pin the marker number explicitly. The `<ol>` auto-count would number the trailing
+      // unreferenced items too (they carry no `fn-N` id); setting `value` on the referenced items — and hiding
+      // the unref marker in CSS — keeps the visible numbers aligned with `fn-N` / `fnref-N`.
+      if (!it.unref) { li.id = `fn-${it.n}`; li.value = it.n; }
       const bodySrc = view.state.doc.sliceString(it.from, it.to).replace(/^\[\^[^\]\s]+\]:[ \t]?/, ""); // drop `[^label]: `
       li.appendChild(renderMarkdownToDom(bodySrc)); // sanitized DOM (no innerHTML), inline styled by CSS
       if (!it.unref && it.refPos != null) {
