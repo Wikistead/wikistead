@@ -127,3 +127,41 @@ test("#323: [[...]] is NOT a syntax — inserted (pasted) text renders as plain 
   });
   expect(colours.link, "the bare [text] is body-coloured, not the syntax link blue").toBe(colours.plain);
 });
+
+// #323colour reflects SEMANTICS, not the tokenizer — a bare `[text]` (no destination) is body-coloured
+// on EVERY surface: caret-away, caret-IN (revealed), and Source mode. A REAL `[text](url)` keeps its link
+// colour on reveal/Source. Measure computed colour (a class assert can't catch a highlight-span colour).
+const colourOf = (line: import("@playwright/test").Locator, needle: string) =>
+  line.evaluate((el: Element, s: string) => {
+    const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let n: Node | null = null;
+    while ((n = w.nextNode())) if (n.textContent?.includes(s)) return getComputedStyle(n.parentElement!).color;
+    return null;
+  }, needle);
+
+test("#323a bare [text] is body-coloured on reveal AND in Source; a real link stays link-coloured", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const targetId = await createScratchPage(page, "Real Target 636");
+  await openScratch(page, "pagelink-semantic-colour");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(`plain [[not a link]] and [go](/p/${targetId}) done\n\ntail\n`);
+  await sleep(400);
+
+  const bareLine = page.locator("[data-pane=preview] .cm-line", { hasText: "not a link" }).first();
+
+  // (a) caret-IN (reveal): put the caret ON the bracketed line → it renders raw markdown, but a bare [text]
+  // must STILL be body-coloured (dropped the old caret-away-only gate).
+  await page.getByText("not a link").click();
+  await sleep(200);
+  expect(await colourOf(bareLine, "not a link"), "bare [text] is body colour while revealed").toBe(await colourOf(bareLine, "plain"));
+  // …but the REAL link on the same line keeps its link colour (not over-suppressed).
+  expect(await colourOf(bareLine, "go"), "a real [text](url) keeps its link colour on reveal").not.toBe(await colourOf(bareLine, "plain"));
+
+  // (b) Source mode: fully raw — the bare [text] is still body-coloured, the real link still link-coloured.
+  await page.getByTestId("displaymode-source").click();
+  await sleep(300);
+  const srcLine = page.locator("[data-pane=preview] .cm-line", { hasText: "not a link" }).first();
+  expect(await colourOf(srcLine, "not a link"), "bare [text] is body colour in Source").toBe(await colourOf(srcLine, "plain"));
+  expect(await colourOf(srcLine, "go"), "a real [text](url) keeps its link colour in Source").not.toBe(await colourOf(srcLine, "plain"));
+});

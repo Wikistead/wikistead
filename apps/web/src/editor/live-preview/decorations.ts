@@ -3192,11 +3192,14 @@ const RENDERERS: BlockRenderer[] = [
       // resolvable href) gets the clickable link mark.
       const href = linkHref(src);
       if (!href) {
-        // #323a bare `[text]` is literal CommonMark text — but the SYNTAX HIGHLIGHTER still tints the
-        // Link node blue (tags.link), so at caret-AWAY the literal `[text]` reads as a link. Override it to the
-        // body colour so it looks like plain text (reader parity). At caret-in (revealed line) the syntax colour
-        // is fine — like any other raw markdown being edited — so only override when NOT revealed.
-        if (!lineRevealed(ctx.state, node.from)) ctx.add(Decoration.mark({ class: "cm-lp-link-plain" }), node.from, node.to);
+        // #323/a bare `[text]` is literal CommonMark text — but the SYNTAX HIGHLIGHTER tints the
+        // Link node blue (tags.link), so the literal `[text]` reads as a link. Override it to the body colour so
+        // it looks like plain text (reader parity). ALWAYS — colour should reflect the SEMANTICS (does this
+        // actually render as a link?), not the tokenizer's guess: lezer makes a bare shortcut a Link node, but it
+        // has no destination, so it's plain text whether revealed, caret-away, or in Source. A REAL `[text](url)`
+        // (resolvable href) keeps its syntax colour on reveal/Source (falls through below).dropped the old
+        // `!lineRevealed` gate that left it blue on the revealed line and in Source mode.
+        ctx.add(Decoration.mark({ class: "cm-lp-link-plain" }), node.from, node.to);
         return;
       }
       ctx.add(Decoration.mark({ class: "cm-lp-link", attributes: { "data-href": href } }), node.from, node.to);
