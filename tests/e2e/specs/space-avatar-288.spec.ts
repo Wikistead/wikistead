@@ -36,3 +36,25 @@ test("#288: a digit+CJK space name renders a single-glyph, square, non-wrapping 
   const wrapped = await chip.evaluate((el) => el.scrollHeight > el.clientHeight + 2);
   expect(wrapped).toBe(false);
 });
+
+// #284a space chip must be a clean proportional scale at every call-site size. The Avatar font size
+// was Math.round(size*0.42), so the font/box ratio drifted (0.40–0.444) and the same space's chip looked
+// different at 14px (pin row) vs 18/20px (switcher). Removing the round makes the ratio EXACTLY constant.
+test("#284space chip font/box ratio is constant across sizes (no rounding drift)", async ({ page }) => {
+  await openDemo(page);
+  await page.waitForSelector("[data-testid=space-switcher]");
+  await page.click("[data-testid=space-switcher]");
+  await expect(page.getByTestId("space-menu")).toBeVisible();
+  await sleep(200);
+  // Every initials chip (role=img with text — not an uploaded <img>) across the switcher (trigger size vs
+  // option-row size are different) must share ONE font/box ratio.
+  const ratios = await page.locator("[role=img]").evaluateAll((els) =>
+    els
+      .filter((el) => (el.textContent ?? "").trim().length > 0)
+      .map((el) => { const cs = getComputedStyle(el); return parseFloat(cs.fontSize) / parseFloat(cs.height); })
+      .filter((r) => isFinite(r) && r > 0),
+  );
+  expect(ratios.length, "at least two initials chips are on screen").toBeGreaterThanOrEqual(2);
+  const spread = Math.max(...ratios) - Math.min(...ratios);
+  expect(spread, `font/box ratios [${ratios.map((r) => r.toFixed(3)).join(", ")}] must be constant`).toBeLessThan(0.01);
+});

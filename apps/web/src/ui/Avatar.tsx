@@ -33,7 +33,10 @@ export function Avatar({ name, src, seed, glyph, size = 24, shape = "circle", ti
   const style: CSSProperties = {
     width: size,
     height: size,
-    fontSize: Math.round(size * (glyph ? 0.55 : 0.42)),
+    // #284NO Math.round — rounding made the font/box ratio drift per size (0.40–0.444), so the same
+    // space's chip wasn't a clean scaled version across call-sites (14px pin row vs 18px switcher). A fractional
+    // px keeps the ratio EXACTLY constant (0.42 / 0.55 glyph) at every size, so every chip is a proportional scale.
+    fontSize: size * (glyph ? 0.55 : 0.42),
     background: showImg ? undefined : colorFromString(seed ?? name),
   };
   const cls = cn(
