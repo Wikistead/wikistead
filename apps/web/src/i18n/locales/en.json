@@ -623,6 +623,8 @@
     "pageLink": "Page link",
     "backlinks": "Backlinks (pages that link here)",
     "query": "Query (dynamic list: tag / children / backlinks)",
+    "queryChildren": "Child pages (list)",
+    "queryTag": "Tag members (list)…",
     "highlight": "Highlight"
   },
   "calloutEdit": {

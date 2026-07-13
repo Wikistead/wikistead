@@ -623,6 +623,8 @@
     "pageLink": "ページリンク",
     "backlinks": "バックリンク（このページへのリンク）",
     "query": "クエリ（動的リスト：タグ／子ページ／被リンク）",
+    "queryChildren": "子ページ一覧",
+    "queryTag": "タグのメンバー一覧…",
     "highlight": "マーカー"
   },
   "calloutEdit": {
