@@ -29,6 +29,11 @@ export interface Pin {
   resourceId: string
   title: string
   position: number
+  // #284 for a PAGE pin, which space it lives in (so the sidebar can show a space icon + name —
+  // a deep page's pin is ambiguous without it). Absent for space pins. No new authz surface: the page is
+  // already view-confirmed and its owning space is structurally viewable (view_base_from_space), so
+  // surfacing that space's name/icon leaks nothing.
+  space?: { id: string; name: string; iconImageUrl: string | null }
 }
 
 interface PinRow {
@@ -39,6 +44,10 @@ interface PinRow {
   // Joined live-resource columns — NULL when the resource row is gone (display gate 1).
   space_name: string | null
   page_title: string | null
+  // #284 a PAGE pin's owning space (joined via pages.space_id). NULL for space pins / missing pages.
+  page_space_id: string | null
+  page_space_name: string | null
+  page_space_icon_key: string | null
 }
 
 // The view-confirmed pin list. Order: per type by position (the member's own order).
@@ -50,10 +59,15 @@ export async function listPins(
   const rows = await db.sql<PinRow[]>`
     SELECT mp.id, mp.resource_type, mp.resource_id, mp.position,
            s.name  AS space_name,
-           p.title AS page_title
+           p.title AS page_title,
+           s2.id              AS page_space_id,
+           s2.name            AS page_space_name,
+           ss2.icon_image_key AS page_space_icon_key
     FROM member_pins mp
     LEFT JOIN spaces s ON mp.resource_type = 'space' AND s.id = mp.resource_id
     LEFT JOIN pages  p ON mp.resource_type = 'page'  AND p.id = mp.resource_id
+    LEFT JOIN spaces s2 ON mp.resource_type = 'page' AND s2.id = p.space_id
+    LEFT JOIN space_settings ss2 ON ss2.space_id = s2.id
     WHERE mp.member_sub = ${args.memberSub}
     ORDER BY mp.resource_type, mp.position, mp.created_at
   `
@@ -70,7 +84,12 @@ export async function listPins(
   for (const r of live) {
     if (r.resource_type === 'page') {
       if (!viewablePages.has(r.resource_id)) continue
-      out.push({ id: r.id, resourceType: 'page', resourceId: r.resource_id, title: r.page_title ?? '', position: r.position })
+      // #284 attach the owning space (name + icon) for the sidebar. iconImageUrl mirrors the spaces
+      // list shape (`/spaces/<id>/icon-image` when a key is set) so the pin's icon renders identically.
+      const space = r.page_space_id
+        ? { id: r.page_space_id, name: r.page_space_name ?? '', iconImageUrl: r.page_space_icon_key ? `/spaces/${r.page_space_id}/icon-image` : null }
+        : undefined
+      out.push({ id: r.id, resourceType: 'page', resourceId: r.resource_id, title: r.page_title ?? '', position: r.position, space })
     } else {
       const ok = await check(fga, subject, 'view', { type: 'space', id: r.resource_id })
       if (!ok) continue

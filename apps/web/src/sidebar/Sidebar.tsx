@@ -6,6 +6,7 @@ import type { NodeApi } from "react-arborist";
 import { ChevronDown, ChevronUp, FilePlus, FileText, PinOff, Settings } from "lucide-react";
 import { PageTree, type PageTreeNode } from "./PageTree";
 import { SpaceSwitcher } from "./SpaceSwitcher";
+import { SpaceIcon } from "../ui/SpaceIcon"; // #284 show a page pin's owning space
 import {
   useSpaces,
   useCreateSpace,
@@ -264,8 +265,19 @@ export function Sidebar() {
               data-testid="pinned-page"
               onClick={() => navigate(`/p/${pin.resourceId}`)}
             >
+              {/* #284 which space this pinned page lives in — a space icon (hover = space name) left of
+                  the file icon, so a deep page's pin isn't ambiguous. Only page pins carry `space`. */}
+              {pin.space && (
+                <span className="flex-none inline-flex" title={pin.space.name} data-testid="pinned-page-space">
+                  <SpaceIcon id={pin.space.id} name={pin.space.name} image={pin.space.iconImageUrl} size={14} />
+                </span>
+              )}
               <FileText size={14} className="flex-none text-fg-dim" />
-              <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{pin.title || t("common.untitled")}</span>
+              {/* #284 / #219: native tooltip ONLY when the title is truncated (checked at hover). */}
+              <span
+                className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
+                onMouseEnter={(e) => { const el = e.currentTarget; el.title = el.scrollWidth > el.clientWidth ? (pin.title || t("common.untitled")) : ""; }}
+              >{pin.title || t("common.untitled")}</span>
               <span
                 className="flex flex-none gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
                 onClick={(e) => e.stopPropagation()}
