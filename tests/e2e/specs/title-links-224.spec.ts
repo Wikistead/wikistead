@@ -86,7 +86,9 @@ test("#224 hover card: the excerpt card appears in the tooltip layer (view-re-co
   await page.goto(`/p/${targetId}?edit=1`);
   await page.waitForSelector("[data-pane=preview] .cm-content");
   await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.type("hover excerpt body 224");
+  // #351: the excerpt now renders as MARKDOWN in the card — author bold + a raw <script> to prove rich render
+  // AND XSS-inert (the shared DOM-safe renderMarkdownToDom).
+  await page.keyboard.type("hover excerpt body 224 with **strong words** and <script>alert(1)</script>");
   await publishAndWait(page, targetId, "hover excerpt body 224"); // #354: poll the published body, not a fixed sleep
 
   await openScratch(page, "title-links-hover");
@@ -102,6 +104,11 @@ test("#224 hover card: the excerpt card appears in the tooltip layer (view-re-co
   await expect(card).toBeVisible({ timeout: 5000 });
   await expect(card).toContainText(target);
   await expect(card).toContainText("hover excerpt body 224", { timeout: 5000 });
+  // #351: markdown is RENDERED (bold → <strong>), not shown as raw `**` source.
+  await expect(card.locator("strong")).toContainText("strong words", { timeout: 5000 });
+  // XSS: the raw <script> is inert (escaped text, never a live element).
+  expect(await card.locator("script").count()).toBe(0);
+  await expect(card).toContainText("<script>alert(1)</script>");
 });
 
 test("#224 anti-test 4 (security-timing): a RENAME makes the stale colored link disappear WITHOUT a reload", async ({ browser }) => {
