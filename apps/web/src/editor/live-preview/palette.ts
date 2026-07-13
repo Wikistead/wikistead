@@ -305,13 +305,23 @@ function openQueryTagPicker(view: EditorView, open: PageEmbedPicker): void {
 
 // #210 bounce: open the host URL modal (seeded empty) and, on submit, insert `:::embed-external\n<url>\n:::`.
 // Cancel/empty leaves the doc untouched. Same seam the ⇆ retarget uses, so insert + retarget share the modal.
+// #366: embed-external is now atomSelectable (like embed-page) — the modal completes the URL, so the caret lands
+// on the atom START (card renders SELECTED, not raw), vim drops to NORMAL, and a second-frame re-pin keeps the
+// blank-fatcursor class through CM's focus className rebuild. Mirrors openEmbedPagePicker exactly.
 function openEmbedExternalPrompt(view: EditorView, prompt: EmbedUrlPrompt): void {
   prompt("", (url) => {
     if (url == null || url.trim() === "") { view.focus(); return; }
     const at = view.state.selection.main.head;
-    const insert = `:::embed-external\n${url.trim()}\n:::`;
-    view.dispatch({ changes: { from: at, insert }, selection: EditorSelection.cursor(at + insert.length), scrollIntoView: true });
-    view.focus();
+    const needsNl = at < view.state.doc.length && view.state.doc.sliceString(at, at + 1) !== "\n";
+    const insert = `:::embed-external\n${url.trim()}\n:::${needsNl ? "\n" : ""}`;
+    view.dispatch({ changes: { from: at, insert }, selection: EditorSelection.cursor(at), scrollIntoView: true });
+    const cm = getCM(view);
+    if (cm?.state.vim?.insertMode) { try { Vim.handleKey(cm, "<Esc>", "mapping"); } catch { /* vim unavailable */ } }
+    view.dispatch({ selection: EditorSelection.cursor(at) }); // pin the caret on the atom start (a vim Esc moves it left)
+    requestAnimationFrame(() => {
+      view.focus();
+      requestAnimationFrame(() => { if (!view.dom.isConnected) return; view.dispatch({ selection: EditorSelection.cursor(Math.min(at, view.state.doc.length)) }); });
+    });
   });
 }
 
