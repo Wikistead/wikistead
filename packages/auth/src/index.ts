@@ -7,9 +7,20 @@
 // authz graph (delete the share_link tuple) + short token TTL + silent refresh.
 
 import { SignJWT, jwtVerify, createRemoteJWKSet } from "jose";
+import { createHmac, randomBytes } from "node:crypto";
 import type { GuestTokenClaims, Principal, Capability, ResourceRef } from "@wikistead/types";
 
 const enc = new TextEncoder();
+
+// #331 / ADR-138 (C-6): derive a pseudonymous per-session id for an anonymous editor — `anon:<12 hex>` =
+// HMAC-SHA256(secret, CSPRNG nonce), truncated to 12 hex (48 bits — well past the birthday domain for a
+// tenant's guest sessions, so C-2 rollback-by-actor keys don't collide). NOT derived from any PII / raw IP
+// (GDPR — the nonce is fresh randomness, keyed by the guest secret so it can't be enumerated). Irreversible;
+// the correlation window is the session (token TTL). One session = one pseudonym.
+export function deriveAnonId(secret: string): string {
+  const digest = createHmac("sha256", secret).update(randomBytes(16)).digest("hex");
+  return `anon:${digest.slice(0, 12)}`;
+}
 
 export interface GuestTokenConfig {
   secret: string;
@@ -19,7 +30,10 @@ export interface GuestTokenConfig {
 /** Mint a short-lived guest token bound to a single share link + resource. */
 export async function mintGuestToken(
   cfg: GuestTokenConfig,
-  args: { tenantId: string; shareLinkId: string; resource: ResourceRef; capability: Capability },
+  // #331 / ADR-138: `anonId` is minted here (at share-link token exchange) and embedded in the claim. A caller
+  // that silently REFRESHES a still-live session passes the EXISTING anonId so the pseudonym is stable across
+  // the refresh (one session = one pseudonym); a fresh exchange omits it → a new pseudonym.
+  args: { tenantId: string; shareLinkId: string; resource: ResourceRef; capability: Capability; anonId?: string },
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   return new SignJWT({
@@ -27,6 +41,7 @@ export async function mintGuestToken(
     shareLinkId: args.shareLinkId,
     resource: args.resource,
     capability: args.capability,
+    anonId: args.anonId ?? deriveAnonId(cfg.secret),
   })
     .setProtectedHeader({ alg: "HS256", typ: "guest+jwt" })
     .setIssuedAt(now)
