@@ -315,3 +315,35 @@ test("#319public reader has the reading column AND no read-only macro edit affor
   expect(outline, "a read-only macro shows no hover edit-frame outline").toBe("none");
   expect(await body.locator("[data-testid=macro-edit]").count(), "no ✎ edit button on a read-only surface").toBe(0);
 });
+
+// #319the public reader is now the SAME mountPublishedView engine as the editor, but a leftover
+// renderMarkdownToDom prose rule (`.wks-public [data-testid=public-body] table { width:100% }`) still matched
+// the CM `.cm-lp-table` and stretched a public table to full width while the editor's stayed content-width.
+// Removing the stale prose rules makes both surfaces inherit the baseTheme identically. Real Chromium geometry.
+test("#319a table renders at the SAME (content) width in the editor and the public reader", async ({ browser }) => {
+  const authed = await (await browser.newContext({ viewport: { width: 1300, height: 900 } })).newPage();
+  const id = await openScratch(authed, "pub-table-width");
+  await enterEdit(authed);
+  await authed.click("[data-pane=preview] .cm-content");
+  await authed.keyboard.insertText("| A | B |\n| --- | --- |\n| 1 | 2 |\n\ntail\n");
+  await sleep(400);
+  await authed.getByTestId("publish-page").click();
+  await sleep(800);
+  await makePublic(id);
+  await setPublicSurface(authed, true);
+
+  // editor view (mountPublishedView) — the rendered table's width.
+  await authed.goto(`/p/${id}`);
+  await authed.waitForSelector("[data-pane=preview] .cm-lp-table", { timeout: 10000 });
+  const editW = (await authed.locator("[data-pane=preview] .cm-lp-table").first().boundingBox())!.width;
+
+  // public reader — the SAME table.
+  const anon = await (await browser.newContext({ viewport: { width: 1300, height: 900 } })).newPage();
+  await anon.goto(`/pub/${id}`);
+  await anon.waitForSelector("[data-testid=public-body] .cm-lp-table", { timeout: 10000 });
+  const pubW = (await anon.locator("[data-testid=public-body] .cm-lp-table").first().boundingBox())!.width;
+
+  expect(Math.abs(editW - pubW), `table width editor ${editW} vs public ${pubW} must match (public was full-width before)`).toBeLessThanOrEqual(2);
+  // …and it is content-width, not stretched to the 740px reading column.
+  expect(pubW, `public table ${pubW}px should be content-width, not the full reading column`).toBeLessThan(600);
+});
