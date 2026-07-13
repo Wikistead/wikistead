@@ -38,6 +38,7 @@ export interface AuthCode {
   redirectUri: string
   codeChallenge: string
   scopes: string[]
+  groups: string[] // the member's groups at consent time (carried into the token for group-granted tool access)
 }
 
 export async function savePendingAuthorize(valkey: IORedis, id: string, data: PendingAuthorize): Promise<void> {

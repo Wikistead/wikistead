@@ -92,14 +92,17 @@ export interface McpAccessClaims {
   tenantId: string;
   sub: string;
   scopes: string[];
+  // The member's groups, carried so a tool (e.g. search) can honour group-granted access without a
+  // reverse lookup. Identity metadata only — OpenFGA remains the authority per operation.
+  groups: string[];
 }
 
 export async function mintMcpAccessToken(
   cfg: GuestTokenConfig,
-  args: { tenantId: string; sub: string; scopes: string[] },
+  args: { tenantId: string; sub: string; scopes: string[]; groups: string[] },
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  return new SignJWT({ tenantId: args.tenantId, sub: args.sub, scopes: args.scopes })
+  return new SignJWT({ tenantId: args.tenantId, sub: args.sub, scopes: args.scopes, groups: args.groups })
     .setProtectedHeader({ alg: "HS256", typ: "mcp+jwt" })
     .setIssuedAt(now)
     .setExpirationTime(now + cfg.ttlSeconds)

@@ -29,7 +29,7 @@ afterAll(async () => { await app.close(); await valkey.quit() })
 
 const CODE_BINDING: AuthCode = {
   sub: 'user-1', tenantId: 'tenant_dev', clientId: 'mcp_x', redirectUri: 'https://claude.ai/cb',
-  codeChallenge: CHALLENGE, scopes: ['read', 'write'],
+  codeChallenge: CHALLENGE, scopes: ['read', 'write'], groups: [],
 }
 async function issueCode(code: string, over: Partial<AuthCode> = {}) {
   await saveAuthCode(valkey, code, { ...CODE_BINDING, ...over })

@@ -36,7 +36,7 @@ describe('pending-authorize store — consume-once (#311 / ADR-131 slice 3b)', (
 describe('auth-code store — consume-once (#311 / ADR-131 slice 3b)', () => {
   it('save → consume returns the code binding; a second consume returns null', async () => {
     const code = `t_${Date.now()}_c`
-    await saveAuthCode(valkey, code, { sub: 'u1', tenantId: 'tenant_dev', clientId: 'mcp_x', redirectUri: 'https://c/cb', codeChallenge: 'ch', scopes: ['read', 'write'] })
+    await saveAuthCode(valkey, code, { sub: 'u1', tenantId: 'tenant_dev', clientId: 'mcp_x', redirectUri: 'https://c/cb', codeChallenge: 'ch', scopes: ['read', 'write'], groups: [] })
     const first = await consumeAuthCode(valkey, code)
     expect(first).toMatchObject({ sub: 'u1', clientId: 'mcp_x', codeChallenge: 'ch', scopes: ['read', 'write'] })
     expect(await consumeAuthCode(valkey, code)).toBeNull() // one-time
