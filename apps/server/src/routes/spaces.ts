@@ -11,6 +11,7 @@ import type { SearchDriver } from '../search/index.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { deletePinsForResources } from './pins.js'
+import { sweepWatchesForResources } from './notifications.js'
 import { importArchive, ImportTooLargeError, ImportInvalidError } from '../import/index.js'
 import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
@@ -257,6 +258,7 @@ export async function deleteSpace(
     // #284 / ADR-119: best-effort pin cleanup (space + its pages). Correctness does
     // not depend on this — the pin display gate drops orphans — it's row hygiene.
     await deletePinsForResources(tx, [args.spaceId, ...pages.map((p) => p.id)])
+    await sweepWatchesForResources(tx, [args.spaceId, ...pages.map((p) => p.id)]) // #320 / ADR-126: watch row hygiene
     await tx`DELETE FROM spaces WHERE id = ${args.spaceId}`
   })
 

@@ -787,6 +787,19 @@
     "forbidden": "このスペースにインポートする権限がありません。",
     "invalid": "有効な Wikistead エクスポート ZIP ではありません。"
   },
+  "notifications": {
+    "title": "通知",
+    "empty": "新しい通知はありません",
+    "loading": "読み込み中…",
+    "guest": "ゲスト",
+    "untitled": "ページ",
+    "published": "{{who}} が {{title}} を公開しました",
+    "changed": "{{who}} が {{title}} を変更しました"
+  },
+  "watch": {
+    "watch": "このページをウォッチ",
+    "unwatch": "ウォッチを解除"
+  },
   "onboarding": {
     "title": "エディタの初期設定",
     "q1": "vim キーバインドで操作しますか？",

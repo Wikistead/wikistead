@@ -447,6 +447,7 @@ function PageRoute() {
     editing,
     onEdit: () => setEditing(true),
     onDone: () => setEditing(false),
+    pageId, // #320 / ADR-126: enables the watch (🔔) toggle (member surface only — the guest shell omits it)
     publishState,
     canPublish: !!published?.hasUnpublishedChanges,
     onPublish: canEdit ? publishPage : undefined,

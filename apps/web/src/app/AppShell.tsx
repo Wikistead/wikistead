@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "./ThemeToggle";
 import { LanguageToggle } from "./LanguageToggle";
 import { UserMenu } from "./UserMenu";
+import { NotificationBell } from "../notifications/NotificationBell";
 import { WikisteadMark } from "./BrandLockup";
 import { FirstRunOnboarding } from "./EditorOnboarding";
 import { useBranding } from "../data/queries";
@@ -83,6 +84,9 @@ export function AppShell({
         {search && <div className="flex justify-end">{search}</div>}
         <LanguageToggle />
         <ThemeToggle />
+        {/* #320 / ADR-126: the notification bell is member-only (guests have no inbox); onLogout marks a
+            member shell (guest/loading shells pass none), so it gates the bell without a separate prop. */}
+        {onLogout && <NotificationBell />}
         {onLogout && <UserMenu onLogout={onLogout} />}
       </header>
       {/* Only render the sidebar panel when there IS one; on settings screens (no
