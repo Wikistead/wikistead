@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { filterAuthorized } from '@wikistead/authz'
-import { getPublished, listPages, getBacklinks } from './pages.js'
+import { resolveEntitlements } from '@wikistead/entitlements'
+import { getPublished, listPages, getBacklinks, createPage } from './pages.js'
 import { listSpaces } from './spaces.js'
 import { fillAuthorizedPage, SEARCH_CANDIDATE_LIMIT } from '../search/paginate.js'
 import { authenticateMcpRequest, type McpPrincipal } from '../auth/mcp-request-auth.js'
@@ -112,6 +113,28 @@ const TOOLS: McpTool[] = [
       return results.map((r) => `- ${r.title} (${r.id})`).join('\n')
     },
   },
+  {
+    name: 'create_page',
+    description: 'Create a new draft page in a space (requires edit access to the space). Returns the new page id.',
+    scope: 'write',
+    inputSchema: { type: 'object', properties: { spaceId: { type: 'string' }, title: { type: 'string' } }, required: ['spaceId'] },
+    async run(req, app, principal, args) {
+      const spaceId = typeof args.spaceId === 'string' ? args.spaceId : ''
+      if (!spaceId) throw toolError('spaceId is required')
+      const title = typeof args.title === 'string' ? args.title : undefined
+      // Thin broker: createPage gates the destination space with FGA `edit` FIRST (403 for a non-editor). The
+      // draft is creator-only until published (ADR phase-4 visibility). We report a uniform "cannot create here"
+      // for a denied space (no distinction from a missing one).
+      try {
+        const page = await createPage(req.db, app.fga, app.searchDriver, { tenantId: principal.tenantId, spaceId, userId: principal.sub, title })
+        return `created page ${page.id}`
+      } catch (e) {
+        const sc = (e as { statusCode?: number }).statusCode
+        if (sc === 403 || sc === 404) throw toolError('cannot create a page in that space')
+        throw e
+      }
+    },
+  },
 ]
 
 // A tool-level error carried back as an MCP tool result with isError:true (not a JSON-RPC protocol error).
@@ -156,6 +179,12 @@ export async function mcpPlugin(app: FastifyInstance) {
         if (!tool) return rpcError(id, -32602, `unknown tool: ${name}`)
         // Enforce the token's scopes as a ceiling (read-only token cannot call a write tool).
         if (!principal.scopes.includes(tool.scope)) return rpcResult(id, { content: [{ type: 'text', text: `error: missing '${tool.scope}' scope` }], isError: true })
+        // WRITE tools are additionally entitlement-gated (ADR-131 write = Cloud/EE via the `mcpWrite`
+        // entitlement; read is all-plans). Resolved in the one entitlement seam, never `if (plan)`. OpenFGA
+        // still gates the specific resource inside the broker (two layers).
+        if (tool.scope === 'write' && !resolveEntitlements(req.tenant.plan).mcpWrite) {
+          return rpcResult(id, { content: [{ type: 'text', text: 'error: MCP write access is not available on this plan' }], isError: true })
+        }
         try {
           const text = await tool.run(req, app, principal, (body.params?.arguments ?? {}) as Record<string, unknown>)
           return rpcResult(id, { content: [{ type: 'text', text }] })
