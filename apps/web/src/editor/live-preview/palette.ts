@@ -132,6 +132,17 @@ function macroCommands(): PaletteCommand[] {
     }));
 }
 
+// #357every id the palette can EVER show — the built-ins, the four picker/uploader-gated commands, and
+// the registry-derived macro commands (ignoring state gating; the coverage test wants the full universe). The
+// `palette-icons.test` asserts each of these has an explicit icon, so nothing ships as a generic square.
+export function allPaletteCommandIdsForCoverage(): string[] {
+  return [
+    ...COMMANDS.map((c) => c.id),
+    QUERY_TAG_COMMAND.id, IMAGE_COMMAND.id, PAGE_LINK_COMMAND.id, INSERT_TEMPLATE_COMMAND.id,
+    ...macroCommands().map((c) => c.id),
+  ];
+}
+
 // The effective command list for a state: the image command is appended only when an
 // uploader is wired (the facet is set), so it never appears for uploader-less surfaces.
 function commandList(state: EditorState): PaletteCommand[] {
