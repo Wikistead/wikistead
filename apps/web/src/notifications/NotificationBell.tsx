@@ -1,33 +1,15 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 import { useNavigate } from "react-router-dom";
 import { Bell } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator } from "../components/ui/dropdown-menu";
 import { useUnreadCount, useNotifications, useMarkNotificationRead, type FeedItem } from "./useNotifications";
-import { authorLabel, isGuestSub } from "../comments/AuthorChip";
+import { eventLabel } from "./feedLabels";
 
 // #320 / ADR-126: the header notification bell. The badge is the raw unread count (a bare number leaks
 // nothing); the popover list is the server-view-filtered inbox — a notification about a page the member can no
-// longer view simply isn't in the list. Clicking an item marks it read and navigates to the page.
-
-// The actor is an opaque string. `user:<sub>` shows the sub; a guest actor (`guest:<id>` / #331 `anon:<id>`)
-// shows the short "Guest 7f3a" pseudonym via the shared authorLabel — the raw share-link id / anon hex NEVER
-// reaches the screen in full (ADR-126 §2 correction 5; ADR-138 C-6 reviewer condition 3).
-function actorLabel(actor: string, t: TFunction): string {
-  if (actor.startsWith("user:")) return actor.slice(5);
-  if (isGuestSub(actor)) return authorLabel(actor, t("notifications.guest"));
-  return t("notifications.guest"); // unknown actor shape → generic, never leak
-}
-function eventLabel(e: FeedItem, t: TFunction): string {
-  const who = actorLabel(e.actor, t);
-  const title = e.title ?? t("notifications.untitled");
-  switch (e.eventType) {
-    case "page.published": return t("notifications.published", { who, title });
-    case "page.restored": return t("notifications.restored", { who, title }); // #327 / ADR-143 C-2
-    default: return t("notifications.changed", { who, title });
-  }
-}
+// longer view simply isn't in the list. Clicking an item marks it read and navigates to the page. The actor
+// labelling (guest pseudonym, never the raw id) lives in the shared feedLabels module (also used by #326).
 
 export function NotificationBell() {
   const { t } = useTranslation();
@@ -85,6 +67,17 @@ export function NotificationBell() {
             </button>
           ))}
         </div>
+        <DropdownMenuSeparator />
+        {/* #326: the cross-space Recent Changes activity view (the personal inbox above is per-member; this is
+            the space-wide feed + the moderation patrol surface). */}
+        <button
+          type="button"
+          onClick={() => { setOpen(false); navigate("/changes"); }}
+          data-testid="notification-see-all"
+          className="w-full px-3 py-2 text-center text-sm text-[var(--link)] hover:bg-panel-2"
+        >
+          {t("recentChanges.seeAll")}
+        </button>
       </DropdownMenuContent>
     </DropdownMenu>
   );

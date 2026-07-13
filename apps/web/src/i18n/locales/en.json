@@ -809,6 +809,15 @@
     "restored": "{{who}} restored {{title}}",
     "changed": "{{who}} changed {{title}}"
   },
+  "recentChanges": {
+    "title": "Recent Changes",
+    "back": "Back",
+    "seeAll": "See all changes",
+    "empty": "No changes yet.",
+    "unpatrolledOnly": "Unpatrolled only",
+    "markPatrolled": "Mark as reviewed",
+    "unmarkPatrolled": "Unmark reviewed"
+  },
   "watch": {
     "watch": "Watch this page",
     "unwatch": "Unwatch this page"
