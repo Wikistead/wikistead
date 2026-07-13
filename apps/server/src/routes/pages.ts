@@ -1487,9 +1487,11 @@ export async function bakeQuerySnapshot(
   return { v: 1, blocks }
 }
 
-// Escape the four characters that would break out of a Markdown link's `[text]` / `(url)` — a page title is
-// arbitrary text and must not be able to inject markup into the substituted list (the public render sanitizes
-// HTML too, but keep the generated Markdown well-formed). The id is an internal uuid (safe in the URL).
+// Escape the characters that would break out of a Markdown link's `[text]` label — a page title is arbitrary
+// text and must not inject markup into the substituted list (the public render sanitizes HTML too, but keep the
+// generated Markdown well-formed). Backslash first, then the brackets that close the label; newlines fold to a
+// space. `(`/`)` need no escaping here — they sit in the label, where they cannot start the `(url)` part. The id
+// is an internal uuid (safe in the URL).
 function escapeMdLinkText(s: string): string {
   return s.replace(/[\\\[\]]/g, '\\$&').replace(/[\r\n]+/g, ' ')
 }
