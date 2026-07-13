@@ -58,3 +58,41 @@ describe("validateMacroSubmission (#310 / ADR-136)", () => {
     expect((r as { errors: string[] }).errors.length).toBeGreaterThanOrEqual(5);
   });
 });
+
+import { buildRegistryIndex, type AcceptedVersion } from "./macro-registry";
+
+const accepted = (id: string, version: string, over: Partial<AcceptedVersion["meta"]> = {}): AcceptedVersion => ({
+  manifest: { id, version, license: "MIT", capabilities: ["theme"], contentHash: `h-${id}-${version}` },
+  meta: { name: `${id} ${version}`, description: "d", ...over },
+  signatureKeyId: "author-key-1", publishedAt: "2026-07-13T00:00:00Z",
+});
+
+describe("buildRegistryIndex (#310 / ADR-136 slice 2)", () => {
+  it("groups by id, sorts versions newest-first, sets latest, and takes discovery meta from the latest", () => {
+    const idx = buildRegistryIndex([accepted("alpha", "1.0.0", { name: "old" }), accepted("alpha", "1.2.0", { name: "new" }), accepted("beta", "0.1.0")]);
+    expect(idx.formatVersion).toBe(1);
+    const alpha = idx.macros.find((m) => m.id === "alpha")!;
+    expect(alpha.latest).toBe("1.2.0");
+    expect(alpha.versions.map((v) => v.version)).toEqual(["1.2.0", "1.0.0"]); // newest-first
+    expect(alpha.name).toBe("new"); // discovery meta from the latest version
+    expect(idx.macros.map((m) => m.id)).toEqual(["alpha", "beta"]); // stable id sort (deterministic)
+  });
+
+  it("drops revoked versions and re-picks latest; a macro with all versions revoked disappears", () => {
+    const idx = buildRegistryIndex(
+      [accepted("alpha", "1.0.0"), accepted("alpha", "2.0.0"), accepted("gone", "1.0.0")],
+      new Set(["alpha@2.0.0", "gone@1.0.0"]),
+    );
+    const alpha = idx.macros.find((m) => m.id === "alpha")!;
+    expect(alpha.latest).toBe("1.0.0"); // 2.0.0 revoked → latest falls back
+    expect(idx.macros.find((m) => m.id === "gone")).toBeUndefined(); // all versions revoked → dropped
+  });
+
+  it("carries the integrity + tier-deriving fields per version (contentHash + signatureKeyId), no content", () => {
+    const idx = buildRegistryIndex([accepted("m", "1.0.0")]);
+    const v = idx.macros[0]!.versions[0]!;
+    expect(v.contentHash).toBe("h-m-1.0.0");
+    expect(v.signatureKeyId).toBe("author-key-1");
+    expect(v).not.toHaveProperty("content"); // the index never ships the code, only its hash
+  });
+});
