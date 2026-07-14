@@ -11,16 +11,19 @@ import type { TenantDb } from '../db/index.js'
 export interface OAuthClient {
   clientId: string
   redirectUris: string[]
+  // The DCR-supplied display name — UNTRUSTED free text (register only length-caps it). Anything rendering it
+  // (the #391 consent page) MUST escape it (ADR-148: an XSS on the consent origin defeats the CSRF defense).
+  clientName: string | null
 }
 
 // Resolve a registered client within the tenant (RLS). Null when unknown (the caller must then NOT redirect —
 // an unknown client_id is a DIRECT error, RFC 6749 §4.1.2.1, never a redirect to an unvalidated URI).
 export async function resolveClient(db: TenantDb, clientId: string): Promise<OAuthClient | null> {
   if (!clientId) return null
-  const rows = await db.sql<{ client_id: string; redirect_uris: string[] }[]>`
-    SELECT client_id, redirect_uris FROM mcp_oauth_clients WHERE client_id = ${clientId} LIMIT 1`
+  const rows = await db.sql<{ client_id: string; redirect_uris: string[]; client_name: string | null }[]>`
+    SELECT client_id, redirect_uris, client_name FROM mcp_oauth_clients WHERE client_id = ${clientId} LIMIT 1`
   const row = rows[0]
-  return row ? { clientId: row.client_id, redirectUris: row.redirect_uris } : null
+  return row ? { clientId: row.client_id, redirectUris: row.redirect_uris, clientName: row.client_name ?? null } : null
 }
 
 export interface AuthorizeParams {
