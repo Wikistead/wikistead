@@ -533,6 +533,7 @@ export interface PageMeta {
   capability: "view" | "edit";
   hasUnpublishedChanges?: boolean;
   canManage?: boolean; // gates the per-page permission UI (server re-checks)
+  canModerate?: boolean; // #330: gates moderation affordances (freeze/patrol/revert) for non-manager moderators
   canComment?: boolean; // #100: comment capability (comment_open/grant/edit) — gates the comment composer
   private?: boolean; // #109 Fix B: allowlist-only — drives the lock badge beside the title
   // #329 / ADR-139: freeze level (staged edit lock) — drives the freeze badge beside the title and the
@@ -550,7 +551,7 @@ export interface PageMeta {
 }
 
 // ── per-page access (Phase 4) ──────────────────────────────────────────────
-export type PageRelation = "view" | "comment" | "edit" | "manage"; // #100: per-member page comment grant
+export type PageRelation = "view" | "comment" | "edit" | "manage" | "moderate"; // #100 comment grant; #330 moderate
 export interface PageGrant { grantee: string; relation: PageRelation; groupName?: string }
 
 export function usePageAccess(pageId: string, enabled = true) {

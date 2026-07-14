@@ -43,6 +43,12 @@ type space
     define tenant: [tenant]
     define manager: [user, group#member] or admin from tenant
     define editor: [user, group#member] or manager
+    # #330 / ADR-141: moderator — MORE than editor in moderation power, LESS than manager. Grants the page
+    # `moderate` verb (revert / freeze / patrol + edit-with-bypass) via moderate_from_space; a manager always
+    # moderates (`or manager`). It does NOT confer manage (grants/delete/settings stay manage-gated) and does
+    # NOT inherit space#editor (no viewer_member / template#view; not in the search denorm — a ruled v1
+    # under-permission, ADR-141). Guests can never be moderators (no share_link type).
+    define moderator: [user, group#member] or manager
     # #258 / ADR-110: viewer_member = space members who can view (NO public wildcard, NO share_link). It is
     # the MEMBER-ONLY subset of viewer, used by template#view so a public/shared space never exposes its
     # space-scoped templates to guests/anon. Kept as a DIRECT-assignable relation (its own tuples) so the
@@ -141,9 +147,17 @@ type page
     define frozen_guests: [share_link:*]
     define edit_no_guests: edit_permitted but not frozen_guests
     define edit_unfrozen: edit_no_guests but not frozen
-    # The role bypass sits ABOVE every subtraction: manage always edits (a manager fixes a frozen page).
-    # #330 (C-5) later adds `moderate` here (`edit: manage or moderate or edit_unfrozen`).
-    define edit: manage or edit_unfrozen
+    # #330 / ADR-141: the moderate verb (revert C-2 / freeze C-4 / patrol C-1 + edit via the bypass below).
+    # PRIVATE-GUARDED like every other `... from space` inheritance (ADR-098 no-back-door): a space
+    # moderator NOT on a private page's allowlist gets NO edit and NO view — same as a manager. The direct
+    # type ([user, group#member] — the ruling) closes the asymmetry with manage_direct: a moderator
+    # can be appointed onto a PRIVATE page individually. moderate bypasses freeze/restricted (role-
+    # bypassable denies) by joining the bypass line; private (an allowlist, not a deny) it respects.
+    define moderate_from_space: moderator from space but not private
+    define moderate: [user, group#member] or moderate_from_space
+    # The role bypass sits ABOVE every subtraction: manage and moderate always edit (they fix/unfreeze a
+    # frozen page — that is the point of the roles). ADR-139 (C-4) landed manage; ADR-141 (C-5) adds moderate.
+    define edit: manage or moderate or edit_unfrozen
 
     # Commenting authorization (#100 / ADR-029 Option B) — a RESOURCE SETTING, not a link capability.
     # view_direct: direct member/group/link view grants (WRITE TARGET + cascading leaf). user:* (public page)

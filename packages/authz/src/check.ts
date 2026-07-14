@@ -16,15 +16,17 @@ export interface CheckContext {
 // Space relations differ (OpenFGA model uses "viewer/editor/manager").
 const RELATION: Record<ResourceRef['type'], Partial<Record<Capability, string>>> = {
   page: {
-    view:    'view',
-    comment: 'comment',
-    edit:    'edit',
-    manage:  'manage',
+    view:     'view',
+    comment:  'comment',
+    edit:     'edit',
+    manage:   'manage',
+    moderate: 'moderate', // #330 / ADR-141: the moderation verb (freeze/revert/patrol; edit via the bypass)
   },
   space: {
-    view:   'viewer',
-    edit:   'editor',
-    manage: 'manager',
+    view:     'viewer',
+    edit:     'editor',
+    manage:   'manager',
+    moderate: 'moderator', // #330: a space-level moderator appointment
     // comment: not defined on space
   },
 }

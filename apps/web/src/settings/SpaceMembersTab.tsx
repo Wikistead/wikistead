@@ -14,7 +14,8 @@ import { notify } from "../ui/toast";
 import { Switch } from "../ui/Switch";
 
 interface SpaceCtx { spaceId: string; name: string }
-const CAPS: PageRelation[] = ["view", "edit", "manage"];
+// #330 / ADR-141: `moderate` → space#moderator (revert/freeze/patrol + edit; grants/settings stay manage-only).
+const CAPS: PageRelation[] = ["view", "edit", "moderate", "manage"];
 
 // Space Members & Permissions (Phase 5b). manage-gated end-to-end: the screen is
 // only reachable by a manager (SpaceSettingsLayout), and every grant/revoke/list

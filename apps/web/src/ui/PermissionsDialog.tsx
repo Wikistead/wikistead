@@ -235,6 +235,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               { value: "view", label: t("permissions.view") },
               { value: "comment", label: t("permissions.comment") }, // #100: per-member comment grant
               { value: "edit", label: t("permissions.edit") },
+              { value: "moderate", label: t("permissions.moderate") }, // #330: per-page moderator (freeze/revert/patrol; not manage)
               { value: "manage", label: t("permissions.manage") },
             ]}
           />

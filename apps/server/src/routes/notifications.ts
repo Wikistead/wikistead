@@ -200,8 +200,22 @@ async function gatePatrolTarget(
   return item.pageId ? { type: 'page', id: item.pageId } : item.spaceId ? { type: 'space', id: item.spaceId } : null
 }
 
+// #330 / ADR-141: patrol is a MODERATION verb. A page event passes on `moderate` OR `manage` (moderate does
+// not imply page-level manage_direct and vice versa); a space event passes on space `moderator` (which
+// already unions manager — `moderator: [...] or manager`). Gate order unchanged: view-confirm → uniform
+// 404 → capability 403.
+async function canPatrol(fga: OpenFgaClient, subject: string, ref: { type: 'page' | 'space'; id: string }): Promise<boolean> {
+  // space#moderator already unions manager, so the single 'moderate' capability check suffices for spaces.
+  if (ref.type === 'space') return check(fga, subject, 'moderate', ref)
+  const [moderate, manage] = await Promise.all([
+    check(fga, subject, 'moderate', ref),
+    check(fga, subject, 'manage', ref),
+  ])
+  return moderate || manage
+}
+
 // Mark a feed event as patrolled (reviewed). member-only. Gate order (reviewer): view-confirm → uniform 404 →
-// capability 403. Patrol requires `manage` today; #330 (C-5) will widen this to `moderate`. Idempotent upsert.
+// capability 403. Patrol requires `moderate`/`manage` (#330 widened the original manage-only gate). Idempotent upsert.
 export async function markPatrolled(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -209,14 +223,14 @@ export async function markPatrolled(
 ): Promise<void> {
   const ref = await gatePatrolTarget(db, fga, args.subject, args.feedEventId)
   if (!ref) throw Object.assign(new Error('not found'), { statusCode: 404 }) // missing / cross-tenant / not viewable
-  if (!(await check(fga, args.subject, 'manage', ref))) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  if (!(await canPatrol(fga, args.subject, ref))) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
   await db.sql`
     INSERT INTO patrolled_events (tenant_id, feed_event_id, patrolled_by)
     VALUES (${args.tenantId}, ${args.feedEventId}, ${args.memberSub})
     ON CONFLICT (tenant_id, feed_event_id) DO UPDATE SET patrolled_by = ${args.memberSub}, patrolled_at = now()`
 }
 
-// Unmark (remove a patrol). Same gate order (view → 404 → manage 403), then delete.
+// Unmark (remove a patrol). Same gate order (view → 404 → moderate/manage 403), then delete.
 export async function unmarkPatrolled(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -224,7 +238,7 @@ export async function unmarkPatrolled(
 ): Promise<void> {
   const ref = await gatePatrolTarget(db, fga, args.subject, args.feedEventId)
   if (!ref) throw Object.assign(new Error('not found'), { statusCode: 404 })
-  if (!(await check(fga, args.subject, 'manage', ref))) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  if (!(await canPatrol(fga, args.subject, ref))) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
   await db.sql`DELETE FROM patrolled_events WHERE tenant_id = ${args.tenantId} AND feed_event_id = ${args.feedEventId}`
 }
 

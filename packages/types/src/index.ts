@@ -1,7 +1,10 @@
 // Shared domain types. Source of truth for cross-service contracts.
 
 /** A capability a principal may hold on a resource (see ADR: ReBAC/OpenFGA). */
-export type Capability = "view" | "comment" | "edit" | "manage";
+// #330 / ADR-141 adds "moderate" (revert/freeze/patrol + edit via the model bypass; never manage). It is a
+// MEMBER capability only: share-link issuance rejects it (links carry view/edit — share-links.ts), so a
+// guest token can never claim it.
+export type Capability = "view" | "comment" | "edit" | "manage" | "moderate";
 
 /**
  * Branding accent presets (Phase 5c/5d). Branding stores a KEY, not a raw colour,
