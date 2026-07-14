@@ -54,3 +54,38 @@ test("#304/#345: TOC jump = dark active under a 2-line band; the short last sect
   await expect(items.nth(3)).toHaveAttribute("data-active", "");
   await expect(items.nth(2)).not.toHaveAttribute("data-active", "");
 });
+
+// #345the two-layer highlight was imperceptible — the LIGHT set spanned only ~1 item (a narrow band→80%
+// sample range) AND its colour (`text-foreground/80`) was grey-vs-grey with idle. Now the visible set covers the
+// WHOLE on-screen area (≥2 short sections light at once) and the light tier is legibly distinct from idle.
+test("#345several on-screen sections are LIGHT-visible with a legible contrast vs idle", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1360, height: 780 } })).newPage();
+  await openScratch(page, "toc-visible-layers");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  // Many SHORT sections so several are on screen at once (the tall-section case only ever shows 1).
+  await page.keyboard.insertText(Array.from({ length: 9 }, (_, i) => `# Section ${i + 1}\n\npara ${i} lorem ipsum dolor sit amet.`).join("\n\n") + "\n");
+  await sleep(700);
+  const rail = page.locator("[data-testid=toc][data-variant=rail]");
+  await expect(rail).toBeVisible({ timeout: 8000 });
+  const items = rail.getByTestId("toc-item");
+  await expect(items).toHaveCount(9);
+  await sleep(400); // let the initial scroll-spy compute run
+
+  // The full on-screen span lights ≥2 sections (not the old ~1).
+  const visibleCount = await items.evaluateAll((els) => els.filter((e) => e.hasAttribute("data-visible")).length);
+  expect(visibleCount, `light-visible section count ${visibleCount} should be ≥2 (whole on-screen span, not ~1)`).toBeGreaterThanOrEqual(2);
+
+  // A LIGHT (visible, non-active) item is legibly distinct from an IDLE (off-screen) one — different text colour
+  // AND a visible-tier background wash (thecontrast fix; the old grey-vs-grey read as "nothing changed").
+  const contrast = await items.evaluateAll((els) => {
+    const light = els.find((e) => e.hasAttribute("data-visible") && !e.hasAttribute("data-active"));
+    const idle = els.find((e) => !e.hasAttribute("data-visible") && !e.hasAttribute("data-active"));
+    if (!light || !idle) return null;
+    const lc = getComputedStyle(light), ic = getComputedStyle(idle);
+    return { lightColor: lc.color, idleColor: ic.color, lightBg: lc.backgroundColor };
+  });
+  expect(contrast, "there is both a light and an idle item to compare").not.toBeNull();
+  expect(contrast!.lightColor, "the light item's text colour differs from idle").not.toBe(contrast!.idleColor);
+  expect(contrast!.lightBg, "the light item carries a background wash (idle has none)").not.toBe("rgba(0, 0, 0, 0)");
+});
