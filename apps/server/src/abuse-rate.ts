@@ -26,15 +26,53 @@ export function normalizeRateMax(max: number | null | undefined): number {
 
 // True = within budget. Bumps the link bucket and (when the token carries a session id) the session
 // bucket; counting an over-budget attempt is intentional (a rejected try still consumes window budget).
+async function twoBucketAllowed(
+  valkey: IORedis,
+  id: GuestRateIdentity,
+  surface: string,
+  linkMaxRaw: number | null | undefined,
+  sessionMaxRaw: number | null | undefined,
+): Promise<boolean> {
+  const linkMax = normalizeRateMax(linkMaxRaw)
+  const sessionMax = normalizeRateMax(sessionMaxRaw)
+  const okLink = await bumpRateBucket(valkey, `rl:abuse:${surface}:link:${id.tenantId}:${id.shareLinkId}`, linkMax, API_RATE_LIMIT_WINDOW_S)
+  const okSession = id.anonId
+    ? await bumpRateBucket(valkey, `rl:abuse:${surface}:anon:${id.tenantId}:${id.anonId}`, sessionMax, API_RATE_LIMIT_WINDOW_S)
+    : true
+  return okLink && okSession
+}
+
 export async function guestPublishRateAllowed(valkey: IORedis, db: TenantDb, id: GuestRateIdentity): Promise<boolean> {
   const [caps] = await db.sql<[{ abuse_publish_rate_link_max: number | null; abuse_publish_rate_session_max: number | null }?]>`
     SELECT abuse_publish_rate_link_max, abuse_publish_rate_session_max FROM tenant_settings WHERE tenant_id = ${id.tenantId}
   `
-  const linkMax = normalizeRateMax(caps?.abuse_publish_rate_link_max)
-  const sessionMax = normalizeRateMax(caps?.abuse_publish_rate_session_max)
-  const okLink = await bumpRateBucket(valkey, `rl:abuse:pub:link:${id.tenantId}:${id.shareLinkId}`, linkMax, API_RATE_LIMIT_WINDOW_S)
-  const okSession = id.anonId
-    ? await bumpRateBucket(valkey, `rl:abuse:pub:anon:${id.tenantId}:${id.anonId}`, sessionMax, API_RATE_LIMIT_WINDOW_S)
-    : true
-  return okLink && okSession
+  return twoBucketAllowed(valkey, id, 'pub', caps?.abuse_publish_rate_link_max, caps?.abuse_publish_rate_session_max)
+}
+
+// #274 / ADR-135 §3: the guest CREATED-PAGE cap, enforced at the atomic create-publish endpoint. Same
+// two-bucket window shape as publish (business ruling 2 keys it by link AND session; migration 068).
+export async function guestCreatePageRateAllowed(valkey: IORedis, db: TenantDb, id: GuestRateIdentity): Promise<boolean> {
+  const [caps] = await db.sql<[{ abuse_create_page_link_max: number | null; abuse_create_page_session_max: number | null }?]>`
+    SELECT abuse_create_page_link_max, abuse_create_page_session_max FROM tenant_settings WHERE tenant_id = ${id.tenantId}
+  `
+  return twoBucketAllowed(valkey, id, 'create', caps?.abuse_create_page_link_max, caps?.abuse_create_page_session_max)
+}
+
+// #274 / ADR-135 §4: guest attachment count cap — a FIXED-WINDOW rate like every cap here (resets each
+// API_RATE_LIMIT_WINDOW_S), NOT a lifetime total. Bumped at presign — the request that reserves an upload
+// slot; an abandoned presign still consumed window budget, which is the conservative direction.
+export async function guestAttachRateAllowed(valkey: IORedis, db: TenantDb, id: GuestRateIdentity): Promise<boolean> {
+  const [caps] = await db.sql<[{ abuse_attach_count_link_max: number | null; abuse_attach_count_session_max: number | null }?]>`
+    SELECT abuse_attach_count_link_max, abuse_attach_count_session_max FROM tenant_settings WHERE tenant_id = ${id.tenantId}
+  `
+  return twoBucketAllowed(valkey, id, 'attach', caps?.abuse_attach_count_link_max, caps?.abuse_attach_count_session_max)
+}
+
+// #274 / ADR-135 §4: guest per-file SIZE cap, checked at confirm against the authoritative HeadObject
+// size (client-supplied sizes are never trusted). NULL/≤0 = unlimited, mirroring normalizeRateMax.
+export async function guestAttachMaxBytes(db: TenantDb, tenantId: string): Promise<number> {
+  const [caps] = await db.sql<[{ abuse_attach_guest_max_bytes: string | number | null }?]>`
+    SELECT abuse_attach_guest_max_bytes FROM tenant_settings WHERE tenant_id = ${tenantId}
+  `
+  return normalizeRateMax(caps?.abuse_attach_guest_max_bytes == null ? null : Number(caps.abuse_attach_guest_max_bytes))
 }

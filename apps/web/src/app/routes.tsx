@@ -723,6 +723,28 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
   const [space, setSpace] = useState<{ name: string; iconImageUrl: string | null } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
+  const refreshPages = useCallback(() => {
+    apiFetch<Page[]>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
+      .then((r) => setPages(r ?? []))
+      .catch(() => setPages((prev) => prev ?? []));
+  }, [spaceId, token]);
+
+  // #274 / ADR-135: the guest "new page" affordance (edit links only). The page is created PUBLISHED
+  // atomically server-side; open it right away so the guest lands in the editor. 429 = the created-page
+  // cap — surfaced as a static cool-down notice (no limit detail: the server sends a reason code only).
+  const createGuestPage = useCallback(async (title: string) => {
+    try {
+      const page = await apiFetch<Page>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token, {
+        method: "POST",
+        body: JSON.stringify({ title }),
+      });
+      refreshPages();
+      if (page) setOpenId(page.id);
+    } catch (e) {
+      notify.error(t((e as { status?: number }).status === 429 ? "share.newPageRateLimited" : "share.newPageFailed"));
+    }
+  }, [spaceId, token, refreshPages, t]);
+
   useEffect(() => {
     let cancelled = false;
     apiFetch<Page[]>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
@@ -744,7 +766,7 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
     : null;
 
   return (
-    <AppShell sidebar={<GuestSidebar pages={pages ?? []} space={space ?? undefined} openId={openId} onOpen={setOpenId} />}>
+    <AppShell sidebar={<GuestSidebar pages={pages ?? []} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} />}>
       {pageMinted ? (
         // key on the page id so switching pages in the tree remounts the editor cleanly.
         <GuestPageContent key={openId} minted={pageMinted} />

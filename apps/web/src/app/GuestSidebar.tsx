@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, FileText } from "lucide-react";
+import { ChevronRight, FileText, Plus } from "lucide-react";
 import type { Page } from "../data/queries";
 import { SpaceIcon } from "../ui/SpaceIcon";
+import { Input } from "../ui/Input";
 
 // #245 / ADR-112: the guest reader-chrome sidebar. A space share-link guest browses the linked space's
 // page tree exactly like a member — but this is a READ-ONLY, member-chrome-free tree. It renders NO space
@@ -37,9 +38,27 @@ function buildTree(pages: Page[]): TreeNode[] {
     .map((p) => ({ id: p.id, title: p.title, children: subtree(pages, p.id) }));
 }
 
-export function GuestSidebar({ pages, space, openId, onOpen }: { pages: Page[]; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void }) {
+// onCreate (#274 / ADR-135): present ONLY for an EDIT-capability space link — the one write affordance in
+// the guest chrome. The title is asked inline (guests cannot rename afterwards: PATCH /pages/:id is
+// member-only, so the title is fixed at the atomic create-publish). The server stays the fortress: the
+// route re-checks FGA `edit` on the space and applies the created-page cap regardless of this UI.
+export function GuestSidebar({ pages, space, openId, onOpen, onCreate }: { pages: Page[]; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: (title: string) => Promise<void> }) {
   const { t } = useTranslation();
   const tree = buildTree(pages);
+  const [creating, setCreating] = useState(false);
+  const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!onCreate || busy) return;
+    setBusy(true);
+    try {
+      await onCreate(title.trim());
+      setCreating(false);
+      setTitle("");
+    } finally {
+      setBusy(false);
+    }
+  };
   // #270: the header shows the real space name + icon (member-parity), falling back to the generic label
   // only when the space info hasn't loaded. The icon uses the public /spaces/:id/icon-image (guest-readable),
   // and SpaceIcon falls back to an initials chip if there is no uploaded image.
@@ -50,6 +69,36 @@ export function GuestSidebar({ pages, space, openId, onOpen }: { pages: Page[]; 
         {space ? <SpaceIcon id={space.name} name={space.name} image={space.iconImageUrl} size={18} /> : null}
         <span className="truncate">{heading}</span>
       </div>
+      {onCreate && (
+        creating ? (
+          <Input
+            autoFocus
+            inputSize="sm"
+            value={title}
+            aria-label={t("share.newPageTitle")}
+            placeholder={t("share.newPageTitle")}
+            data-testid="guest-new-page-title"
+            disabled={busy}
+            className="mb-1"
+            onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void submit();
+              if (e.key === "Escape") { setCreating(false); setTitle(""); }
+            }}
+            onBlur={() => { if (!busy) { setCreating(false); setTitle(""); } }}
+          />
+        ) : (
+          <button
+            type="button"
+            data-testid="guest-new-page"
+            className="mb-1 flex items-center gap-1.5 rounded px-1 py-1 text-left text-fg-dim hover:bg-panel-2 hover:text-foreground"
+            onClick={() => setCreating(true)}
+          >
+            <Plus size={13} className="flex-none" />
+            <span>{t("share.newPage")}</span>
+          </button>
+        )
+      )}
       {tree.length === 0 ? (
         <div className="px-1 py-2 text-fg-dim" data-testid="guest-sidebar-empty">{t("share.spaceEmpty")}</div>
       ) : (
