@@ -28,7 +28,12 @@ function fmt(iso: string): string {
 // shown in full, ADR-138 C-6 reviewer condition 3; the old `.replace(/^(user|guest):/)` leaked the raw uuid).
 function author(createdBy: string | null, unknown: string, guestWord: string): string {
   if (!createdBy) return unknown;
-  if (createdBy.startsWith("user:")) return createdBy.slice(5);
+  // #379: a member author showed the RAW sub (`createdBy.slice(5)` — a full email / opaque OIDC sub), unlike
+  // the comment/PageMeta author displays which format it via `authorLabel` (email local-part). Route members
+  // through the SAME shared formatter so the history reads consistently ("the owner", not "the owner@…"). NOTE: this
+  // is the client-side label only; resolving to a member's chosen DISPLAY NAME + avatar needs an identity
+  // endpoint (authz-gated) — the remaining, needs-review part of #379.
+  if (createdBy.startsWith("user:")) return authorLabel(createdBy.slice(5), guestWord);
   if (isGuestSub(createdBy)) return authorLabel(createdBy, guestWord);
   return createdBy;
 }
