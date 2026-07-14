@@ -3,11 +3,30 @@ import { parseFenceInfo, highlightExtension, footnoteExtension, safeHref, HEADIN
 import { directiveExtension, parseDirectiveOpen, resolveDirectiveRanges, type ResolvedDirective } from "./directive-parser";
 import { findDirectiveMacro, findFenceMacro } from "./registry";
 import { currentMacroTheme } from "./theme";
+import { parseFrontmatterRange, parseFmTags, type FmTag } from "../live-preview/frontmatter";
 
 // #267: rendered diagram fences default to CENTER (#255) and can carry an align= attribute — mirror the
 // editor's set (decorations.ts) so this out-of-editor render path centers them the same way. Text macros
 // (callout/table/columns) never align.
 const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
+
+// #370 / ADR-145: the read-surface tag-chip row for a leading frontmatter block. Plain DOM + textContent
+// (titles/tags are author text — no innerHTML). Empty tags → an empty row is NOT rendered (null-ish handled
+// by the caller keeping a zero-child wrapper is avoided by returning a row only when there are chips).
+function buildFrontmatterChips(tags: FmTag[]): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "cm-lp-frontmatter wks-prose-frontmatter";
+  row.setAttribute("data-testid", "prose-frontmatter");
+  for (const t of tags) {
+    const chip = document.createElement("span");
+    chip.className = "cm-lp-frontmatter-chip";
+    chip.setAttribute("data-testid", `prose-fm-tag-${t.tag}`);
+    chip.textContent = t.display;
+    row.appendChild(chip);
+  }
+  if (tags.length === 0) row.style.display = "none"; // frontmatter with no tags → nothing visible, fences still hidden
+  return row;
+}
 
 // #90 S0 (A′ shared) — render a Markdown source string to a SANITIZED DOM fragment, for use
 // INSIDE a block-widget macro (columns / tabs) that can't reach CodeMirror's own renderers (the
@@ -399,6 +418,18 @@ export function renderMarkdownToDom(src: string, baseOffset?: number, opts?: { s
   // INHERIT the current mode, so an inner macro can't escape static by being one level deeper.
   if (opts?.staticMacros) staticRender = true;
   renderBase = baseOffset ?? null;
+  // #370 / ADR-145: a TOP-LEVEL leading frontmatter block renders as a tag-chip row, never as raw YAML
+  // (a `---` fence would otherwise render as a thematic break + stray text). Only at the document root
+  // (baseOffset == null — a nested macro-cell render keeps its text literal); the source stays verbatim
+  // in the markdown (Open formats), this is display only.
+  let fmChips: HTMLElement | null = null;
+  if (renderBase == null) {
+    const fm = parseFrontmatterRange(src);
+    if (fm) {
+      fmChips = buildFrontmatterChips(parseFmTags(fm.inner));
+      src = src.slice(fm.to).replace(/^\n/, "");
+    }
+  }
   try {
     const tree = mdParser.parse(src);
     const frag = document.createDocumentFragment();
@@ -411,6 +442,7 @@ export function renderMarkdownToDom(src: string, baseOffset?: number, opts?: { s
     const fn = collect ? collectFootnotes(tree.topNode, src) : null;
     footnoteNumbers = fn ? fn.numbers : null;
     if (collect) footnoteDocActive = true;
+    if (fmChips) frag.appendChild(fmChips); // #370: the tag-chip row heads the rendered document
     renderBlocks(tree.topNode, src, frag);
     if (fn && (fn.order.length > 0 || fn.unreferenced.length > 0)) frag.appendChild(renderFootnoteSection(fn, src));
     return frag;

@@ -11,7 +11,7 @@ describe("palette icons cover every shipped command (#357)", () => {
 
   it("enumerates the full command universe (built-ins + callout types + layout/diagram/embed macros)", () => {
     // Sanity: the callout types + the query lists (the regressed ids) are present.
-    for (const id of ["macro:note", "macro:info", "macro:tip", "macro:warning", "macro:danger", "query-children", "query-tag", "insert-template", "page-link"]) {
+    for (const id of ["macro:note", "macro:info", "macro:tip", "macro:warning", "macro:danger", "page-tags", "insert-template", "page-link"]) {
       expect(ids).toContain(id);
     }
   });

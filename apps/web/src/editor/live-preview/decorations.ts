@@ -14,6 +14,7 @@ export type { MacroTheme }; // #200: re-exported so the Editor can type the redr
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, directiveChainAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen, resolveDirectiveRanges } from "../macros/directive-parser";
+import { parseFrontmatterRange, FrontmatterWidget } from "./frontmatter";
 import { parseFenceLine, parseFenceInfo, serializeFenceInfo, CALLOUT_TYPES, type FenceAlign } from "@wikistead/macro-render"; // #198: code-fence attribute parser; #174: callout types; #255: align rewrite
 // #255: rendered diagram macros are centred by default and take a fence `align=` attribute (others don't).
 const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
@@ -705,50 +706,32 @@ export const transcludeResolver = Facet.define<TranscludeResolver, TranscludeRes
   combine: (values) => values[0] ?? noopTranscludeResolver,
 });
 
-// #307 / ADR-127: host-mediated `:::backlinks`. The macro NEVER fetches (host-API is {theme} only, ADR-024);
-// the HOST supplies a `fetch` bound to THIS page that hits the view-gated `GET /pages/:id/backlinks` (#230),
-// which FGA-view-confirms every source for the caller (no new permission surface, no count leak — an
-// unviewable source is absent from list AND count). `fetch` returns the authorized sources, or null (existence-
-// hiding: denied/network are indistinguishable). `navigate` routes a click (the destination re-confirms view →
-// uniform 404). Strings live on the host (i18n stays out of the CM layer, like titleLinkSource). The facet is
-// absent on template previews / non-page contexts (no pageId) → no fetch, so the ADR-110 boundary is enforced
-// by absence. The Markdown source (`:::backlinks[label]`) is canonical; the list is display-only output.
-export interface BacklinksSource {
-  // #307 / `targetPageId` = the page whose backlinks to fetch; null = THIS page (the resolver's own
-  // bound pageId). A non-viewable / non-existent target yields null (the endpoint 404s uniformly → nothing),
-  // so an author can't probe a page they can't see.
-  readonly fetch: (targetPageId: string | null) => Promise<{ id: string; title: string }[] | null>;
-  readonly navigate: (pageId: string) => void;
-  readonly emptyLabel: string; // dim edit-surface placeholder (a 0-height read-surface widget shows nothing)
-  readonly untitledLabel: string; // fallback text for a source page with no title
-}
-export const backlinksSource = Facet.define<BacklinksSource | null, BacklinksSource | null>({
-  combine: (v) => (v.length ? v[v.length - 1]! : null),
-});
-
-// #324 / ADR-134: the host seam for `:::query` — a read-only dynamic list resolved by the VIEWER's principal.
-// Same trust boundary as BacklinksSource: the macro never fetches; the host binds a `fetch(spec)` to the
-// member-only, view-filtered `GET /pages/:id/query?spec=...`. `spec` is the raw directive body (the resolver
-// parses it server-side — the CM layer stays dumb). Absent on anonymous/template surfaces (member-only,
-// Hole A rev2), so `:::query` renders nothing there.
-export interface QuerySource {
-  readonly fetch: (spec: string) => Promise<{ id: string; title: string }[] | null>;
+// #370 / ADR-145: host-mediated `:::tagged` / `:::children` dynamic lists. The macro NEVER fetches
+// (host-API is {theme} only, ADR-024); the HOST supplies a `fetch(name, body)` bound to THIS page that hits
+// the member-only, view-filtered `GET /pages/:id/list?name=…&body=…` (the server view-gates the host page and
+// FGA-view-confirms every result — an unviewable page is absent from list AND count). `fetch` returns the
+// authorized pages, or null (existence-hiding: denied/network are indistinguishable). `navigate` routes a
+// click (the destination re-confirms view → uniform 404). Strings live on the host (i18n stays out of the CM
+// layer). The facet is absent on anonymous/template surfaces (member-only — a guest surface renders the baked
+// snapshot server-side instead), so the boundary is enforced by absence.
+export interface ListSource {
+  readonly fetch: (name: "tagged" | "children", body: string) => Promise<{ id: string; title: string }[] | null>;
   readonly navigate: (pageId: string) => void;
   readonly emptyLabel: string; // dim edit-surface placeholder (a 0-height read-surface widget shows nothing)
   readonly untitledLabel: string; // fallback text for a result page with no title
 }
-export const querySource = Facet.define<QuerySource | null, QuerySource | null>({
+export const listSource = Facet.define<ListSource | null, ListSource | null>({
   combine: (v) => (v.length ? v[v.length - 1]! : null),
 });
 
-// The optional `[label]` on a `:::backlinks[]` / `:::query[]` open line (renders only alongside a
+// The optional `[label]` on a `:::tagged[]` / `:::children[]` open line (renders only alongside a
 // non-empty list). `name` selects which directive's label to read.
 function directiveLabel(openLine: string, name: string): string | null {
   const m = new RegExp(`^\\s*:::+\\s*${name}\\s*\\[([^\\]]*)\\]`).exec(openLine);
   return m && m[1]!.trim() ? m[1]!.trim() : null;
 }
 
-// Build a rendered list-of-pages DOM (shared by `:::backlinks` and `:::query`): an optional label + a list of
+// Build a rendered list-of-pages DOM (shared by `:::tagged` and `:::children`): an optional label + a list of
 // view-authorized pages. Each row navigates through the host seam (never hardcoded routing — the destination
 // re-confirms view). Text via textContent (no innerHTML) — the titles came from the view-gated endpoint and are
 // treated as untrusted here regardless. `variant` selects the test-id namespace; the CSS classes are shared.
@@ -756,7 +739,7 @@ function buildLinkList(
   items: { id: string; title: string }[],
   label: string | null,
   src: { navigate: (id: string) => void; untitledLabel: string },
-  variant: "backlinks" | "query",
+  variant: "tagged" | "children",
 ): HTMLElement {
   const box = document.createElement("div");
   box.className = "cm-lp-backlinks";
@@ -2147,15 +2130,17 @@ class MacroWidget extends WidgetType {
       if (this.name === "embed-external" && this.body.trim() !== "") {
         rendered.replaceChildren(buildEmbedElement(this.body, view.state.facet(embedAllowlist)));
       }
-      // #307 / ADR-127: host-mediated `:::backlinks`. The macro can't fetch (narrow host-API); the host
-      // resolves this page's view-authorized backlinks and the widget renders the list — or, when EMPTY,
-      // renders NOTHING per surface (§3): on a read surface (view / Reading / readOnly) the widget collapses
-      // to zero height; on the EDIT surface it keeps a dim one-line placeholder so the author can still see,
-      // select and delete the atom they inserted (a 0-height atom is mouse-unreachable). Loading shows nothing
-      // (no skeleton). Fires once per widget instance (eq stable on name + empty body). Height changes as the
-      // async result lands → view.requestMeasure so CM's block ResizeObserver reflows (block-widget motion rule).
-      if (this.name === "backlinks") {
-        const src = view.state.facet(backlinksSource);
+      // #370 / ADR-145: host-mediated `:::tagged` / `:::children`. The macro can't fetch (narrow host-API);
+      // the host resolves the VIEWER-authorized list and the widget renders it — or, when EMPTY, renders
+      // NOTHING per surface: on a read surface (view / Reading / readOnly) the widget collapses to zero
+      // height; on the EDIT surface it keeps a dim one-line placeholder so the author can still see, select
+      // and delete the atom they inserted (a 0-height atom is mouse-unreachable). Loading shows nothing (no
+      // skeleton). The host resolver is MEMBER-ONLY (absent on anonymous/template surfaces — those render the
+      // baked anonymous snapshot server-side). Height changes as the async result lands → view.requestMeasure
+      // so CM's block ResizeObserver reflows (block-widget motion rule).
+      if (this.name === "tagged" || this.name === "children") {
+        const listName = this.name;
+        const src = view.state.facet(listSource);
         if (src) {
           const editable = !view.state.readOnly;
           const renderResult = (items: { id: string; title: string }[] | null) => {
@@ -2165,60 +2150,21 @@ class MacroWidget extends WidgetType {
               if (editable) {
                 const ph = document.createElement("div");
                 ph.className = "cm-lp-backlinks-empty";
-                ph.setAttribute("data-testid", "macro-backlinks-empty");
+                ph.setAttribute("data-testid", `macro-${listName}-empty`);
                 ph.textContent = src.emptyLabel;
                 rendered.appendChild(ph);
               } else {
-                wrap.style.display = "none"; // read surface: render nothing (§3 — collapse to zero height)
+                wrap.style.display = "none"; // read surface: render nothing (collapse to zero height)
               }
             } else {
-              const label = directiveLabel(view.state.doc.lineAt(this.from).text, "backlinks");
-              rendered.appendChild(buildLinkList(items, label, src, "backlinks"));
+              const label = directiveLabel(view.state.doc.lineAt(this.from).text, listName);
+              rendered.appendChild(buildLinkList(items, label, src, listName));
             }
             view.requestMeasure();
           };
-          // #307 / body semantics — empty ⇒ THIS page (null); exactly ONE non-empty line ⇒ that page's
-          // id (a hub page aggregating another page's backlinks, same convention as `:::embed-page`); anything
-          // else (multiple lines / whitespace-only garbage) ⇒ invalid ⇒ render as 0 results (never a parse
-          // error in the body). A non-viewable/absent target id resolves to null via the endpoint's uniform 404.
-          const lines = this.body.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
-          const target: string | null | undefined = lines.length === 0 ? null : lines.length === 1 ? lines[0] : undefined;
-          if (target === undefined) renderResult(null); // invalid body → same as 0 results
-          else void src.fetch(target).then(renderResult);
-        }
-      }
-      // #324 / ADR-134: host-mediated `:::query`. Same shape as `:::backlinks` (the macro can't fetch — narrow
-      // host-API); the host resolves the VIEWER-authorized list for the body spec and the widget renders it, or
-      // renders NOTHING per surface when empty (read surface collapses to zero height; edit surface keeps a dim
-      // one-line placeholder so the atom stays selectable/deletable). The host resolver is MEMBER-ONLY (absent on
-      // anonymous/template surfaces, Hole A rev2), so a public/guest surface renders nothing here. Height changes
-      // as the async result lands → view.requestMeasure (block-widget motion rule).
-      if (this.name === "query") {
-        const src = view.state.facet(querySource);
-        if (src) {
-          const editable = !view.state.readOnly;
-          const renderResult = (items: { id: string; title: string }[] | null) => {
-            if (this.destroyed) return;
-            rendered.replaceChildren();
-            if (!items || items.length === 0) {
-              if (editable) {
-                const ph = document.createElement("div");
-                ph.className = "cm-lp-backlinks-empty";
-                ph.setAttribute("data-testid", "macro-query-empty");
-                ph.textContent = src.emptyLabel;
-                rendered.appendChild(ph);
-              } else {
-                wrap.style.display = "none"; // read surface: render nothing (§3 — collapse to zero height)
-              }
-            } else {
-              const label = directiveLabel(view.state.doc.lineAt(this.from).text, "query");
-              rendered.appendChild(buildLinkList(items, label, src, "query"));
-            }
-            view.requestMeasure();
-          };
-          // The raw body IS the spec — the server parses it (`backlinks` / `tag <id>` / `children`); an
-          // unrecognised spec resolves to 0 results (never a parse error). A denied/absent target → null → nothing.
-          void src.fetch(this.body).then(renderResult);
+          // The raw body rides to the server (`tagged` = a tag name; `children` ignores it); anything
+          // unresolvable is 0 results (never a parse error). A denied/absent host → null → nothing.
+          void src.fetch(listName, this.body).then(renderResult);
         }
       }
     }
@@ -3500,6 +3446,23 @@ function buildDecorations(state: EditorState, themeOverride?: MacroTheme): {
     footnotes: state.readOnly ? collectDocFootnotes(state) : null, // #335 aggregate on read surfaces only
   };
 
+  // #370 / ADR-145 §2: the leading YAML frontmatter block renders as a top-of-page tag-chip widget atom.
+  // Caret inside (blockRevealed) → raw YAML (the always-works edit fallback); source mode → raw. The whole
+  // fence is one atomic block replace, so doc-line motion (gg / j / dd) treats it as a unit like any macro
+  // atom. Position-0-only (parseFrontmatterRange), so a mid-document `---` fence is never captured. This
+  // pass runs BEFORE the tree walk so renderers that respect coveredByBlock (the hr / setext renderers the
+  // fence lines would otherwise hit) skip the covered range instead of shadowing this widget.
+  {
+    const fmr = parseFrontmatterRange(state.doc.toString());
+    if (fmr && fmr.to > fmr.from && !isSourceMode(state) && !blockRevealed(state, fmr.from, fmr.to)) {
+      ctx.addAtomic(
+        Decoration.replace({ widget: new FrontmatterWidget(state.doc.sliceString(fmr.from, fmr.to), !state.readOnly, atomSelected(state, fmr.from, fmr.to)), block: true }),
+        fmr.from, fmr.to,
+      );
+    }
+  }
+
+
   syntaxTree(state).iterate({
     enter: (node) => {
       // Mutually-exclusive matches by node name; descend by default (return void)
@@ -3970,6 +3933,14 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-backlinks": { margin: "0.3em 0", padding: "0.5em 0.75em", border: "1px solid var(--border, rgba(127,127,127,0.3))", borderRadius: "6px", background: "var(--panel-2, rgba(127,127,127,0.05))" },
   ".cm-lp-backlinks-label": { fontSize: "0.85em", fontWeight: "600", color: "var(--fg-dim, #888)", marginBottom: "0.3em" },
   ".cm-lp-backlinks-list": { listStyle: "none", margin: "0", padding: "0", display: "flex", flexDirection: "column", gap: "0.15em" },
+  // #370: the frontmatter properties widget (tag chips). Padding, not margin (block-widget heightMap rule).
+  ".cm-lp-frontmatter": { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "0.4em", padding: "0.35em 0.2em 0.6em", borderBottom: "1px solid var(--border)" },
+  ".cm-lp-frontmatter-label": { fontSize: "0.75em", color: "var(--fg-dim)", textTransform: "uppercase", letterSpacing: "0.04em" },
+  ".cm-lp-frontmatter-chip": { display: "inline-flex", alignItems: "center", gap: "0.25em", fontSize: "0.8em", lineHeight: "1.6", padding: "0 0.55em", borderRadius: "999px", background: "var(--panel-2)", color: "var(--fg)" },
+  ".cm-lp-frontmatter-remove": { border: "none", background: "none", cursor: "pointer", color: "var(--fg-dim)", padding: "0 0.1em", fontSize: "1em", lineHeight: "1" },
+  ".cm-lp-frontmatter-remove:hover": { color: "var(--fg)" },
+  ".cm-lp-frontmatter-empty": { fontSize: "0.8em", color: "var(--fg-dim)" },
+  ".cm-lp-frontmatter-input": { border: "none", outline: "none", background: "transparent", font: "inherit", fontSize: "0.8em", color: "var(--fg)", minWidth: "6em", flex: "0 1 auto" },
   ".cm-lp-backlinks-item": { color: "var(--link, #4ea1ff)", textDecoration: "none", cursor: "pointer" },
   ".cm-lp-backlinks-item:hover": { textDecoration: "underline" },
   ".cm-lp-backlinks-empty": { fontSize: "0.85em", color: "var(--fg-dim, #888)", fontStyle: "italic", padding: "0.2em 0" },

@@ -6,7 +6,7 @@ import { taskProgressExtension, type TaskProgress } from "./task-progress"; // #
 import { connect, connectEphemeral } from "./collab";
 import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayModeContent } from "./editor-livepreview";
 import { wireToc } from "./toc-wiring"; // #319: extracted so the public reader shares the CM TOC wiring
-import type { DisplayMode, MacroTheme, BacklinksSource, QuerySource } from "./live-preview/decorations";
+import type { DisplayMode, MacroTheme, ListSource } from "./live-preview/decorations";
 import { redrawMacros, taskStatePosAt } from "./live-preview/decorations";
 import i18n from "../i18n"; // #307: strings for the host-owned :::backlinks source (i18n stays out of the CM layer)
 import { useTheme } from "../app/ThemeProvider";
@@ -279,48 +279,24 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       opts: { selfPageId: memberPageId },
     };
   }, [memberPageId, apiToken, navigateRouter]);
-  // #307 / ADR-127: the host-mediated `:::backlinks` source. MEMBER surfaces only (gated on pageId — a
-  // template preview / guest surface passes none, so the macro shows the empty-edit placeholder / nothing and
-  // never fetches). `fetch` shares the react-query cache (["backlinks", pageId]) with the RelatedPanel and,
-  // being stale-by-default, refetches on each widget mount → re-entering the page yields fresh backlinks
-  // (ADR-127 §9 remount freshness; push freshness is out of v1 scope). The endpoint FGA-view-confirms every
-  // source for the caller (no new permission surface); navigate re-confirms view at the destination (uniform 404).
-  const backlinks = useMemo<BacklinksSource | undefined>(() => {
+  // #370 / ADR-145: the host-mediated `:::tagged` / `:::children` source. MEMBER surfaces only (gated on
+  // memberPageId — a guest / template preview passes none (#374 pageId alone no longer implies
+  // member), so the macro renders nothing and never fetches; those surfaces get the baked anonymous
+  // snapshot server-side). The raw directive body rides to the member-only, view-filtered
+  // `GET /pages/:id/list?name=…&body=…`. Stale-by-default fetchQuery keyed on (pageId, name, body) →
+  // refetch on each widget mount, so re-entering the page re-resolves the list (member-live per-viewer).
+  const list = useMemo<ListSource | undefined>(() => {
     if (!memberPageId) return undefined; // member-only source (#374)
     return {
-      // #307 / targetPageId=null ⇒ this page; a string ⇒ that page's backlinks (the endpoint view-gates
-      // the target, so a non-viewable/absent id throws → .catch → null → the widget renders nothing).
-      fetch: (targetPageId: string | null) => {
-        const id = targetPageId ?? memberPageId;
-        return queryClient
-          .fetchQuery({
-            queryKey: ["backlinks", id],
-            queryFn: () => apiFetch<{ id: string; title: string }[]>(`/pages/${encodeURIComponent(id)}/backlinks`, apiToken).then((r) => r ?? []),
-          })
-          .catch(() => null);
-      },
-      navigate: (id: string) => navigateRouter(`/p/${id}`),
-      emptyLabel: i18n.t("macro.backlinksEmpty"),
-      untitledLabel: i18n.t("backlinks.untitled"),
-    };
-  }, [memberPageId, apiToken, navigateRouter, queryClient]);
-  // #324 / ADR-134: the host-mediated `:::query` source. MEMBER surfaces only (gated on pageId — a guest /
-  // template preview passes none, so the macro renders nothing and never fetches; Hole A rev2). The raw
-  // directive body is the query spec (parsed server-side); the endpoint is member-only and view-filters every
-  // result (`GET /pages/:id/query?spec=...`). Stale-by-default fetchQuery keyed on (pageId, spec) → refetch on
-  // each widget mount, so re-entering the page re-resolves the list (member-live per-viewer).
-  const query = useMemo<QuerySource | undefined>(() => {
-    if (!memberPageId) return undefined; // member-only source (#374)
-    return {
-      fetch: (spec: string) =>
+      fetch: (name: "tagged" | "children", body: string) =>
         queryClient
           .fetchQuery({
-            queryKey: ["page-query", memberPageId, spec],
-            queryFn: () => apiFetch<{ id: string; title: string }[]>(`/pages/${encodeURIComponent(memberPageId)}/query?spec=${encodeURIComponent(spec)}`, apiToken).then((r) => r ?? []),
+            queryKey: ["page-list", memberPageId, name, body],
+            queryFn: () => apiFetch<{ id: string; title: string }[]>(`/pages/${encodeURIComponent(memberPageId)}/list?name=${name}&body=${encodeURIComponent(body)}`, apiToken).then((r) => r ?? []),
           })
           .catch(() => null),
       navigate: (id: string) => navigateRouter(`/p/${id}`),
-      emptyLabel: i18n.t("macro.queryEmpty"),
+      emptyLabel: i18n.t("macro.listEmpty"),
       untitledLabel: i18n.t("backlinks.untitled"),
     };
   }, [memberPageId, apiToken, navigateRouter, queryClient]);
@@ -410,7 +386,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
             });
           }
         : undefined;
-      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, onToggleTask: onToggleTaskInView, titleLinks, backlinks, query, linkStatus });
+      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, onToggleTask: onToggleTaskInView, titleLinks, list, linkStatus });
       views.push(v);
       previewViewRef.current = v;
       if (anchorGetterRef) anchorGetterRef.current = null;
@@ -457,8 +433,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       // at the macro's anchor while its modal is open (they'd otherwise see this user vanish).
       macroPresence: c.provider.awareness ? makeMacroPresence(c.provider.awareness) : undefined,
       titleLinks, // #224: auto internal links (viewer-scoped dictionary; undefined on guest surfaces)
-      backlinks, // #307 / ADR-127: host-mediated :::backlinks (member surface; undefined without a pageId)
-      query, // #324 / ADR-134: host-mediated :::query (member surface; undefined without a pageId)
+      list, // #370 / ADR-145: host-mediated :::tagged / :::children (member surface; undefined without a pageId)
       linkStatus, // #276 / ADR-117: dead-internal-link strikethrough (member surface; undefined for guests)
       selfPageId: pageId, // #325 / ADR-137 slice 2b: "Copy block reference" builds `pageId#^id` (member surface only)
     });

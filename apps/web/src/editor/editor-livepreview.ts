@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, reAnchorAfterReveal, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, backlinksSource, querySource, linkStatusResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, nestedLivePreviewConfig, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type BacklinksSource, type QuerySource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
+import { livePreview, reAnchorAfterReveal, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, listSource, linkStatusResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, nestedLivePreviewConfig, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type ListSource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
 import { deadLinks } from "./live-preview/dead-links"; // #276 / ADR-117: dead-internal-link strikethrough overlay
 import { blockAnchors } from "./live-preview/block-anchor"; // #325 / ADR-137 slice 2: hide trailing ` ^id` markers
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
@@ -91,8 +91,7 @@ export interface LivePreviewSharedOpts {
   openTemplateInsertPicker?: TemplateInsertPicker;
   uploadImage?: ImageUploader;
   titleLinks?: TitleLinkSource;
-  backlinks?: BacklinksSource;
-  query?: QuerySource;
+  list?: ListSource;
   linkStatus?: LinkStatusResolver;
 }
 
@@ -201,8 +200,7 @@ export function buildLivePreviewExtensions(opts: LivePreviewSharedOpts, env: Liv
     ...(opts.renderDiagram ? [diagramRenderer.of(opts.renderDiagram)] : []),
     // #108: host-mediated transclude (the :::transclude macro never fetches — narrow host-API).
     ...(opts.resolveTransclude ? [transcludeResolver.of(opts.resolveTransclude)] : []),
-    ...(opts.backlinks ? [backlinksSource.of(opts.backlinks)] : []), // #307 / ADR-127: host-mediated :::backlinks
-    ...(opts.query ? [querySource.of(opts.query)] : []), // #324 / ADR-134: host-mediated :::query (member-only)
+    ...(opts.list ? [listSource.of(opts.list)] : []), // #370 / ADR-145: host-mediated :::tagged / :::children (member-only)
     deadLinks, // #276 / ADR-117: dead-internal-link strikethrough (inert without the linkStatus seam)
     blockAnchors, // #325 / ADR-137 slice 2: hide trailing ` ^id` block-ref markers (reveal on the caret line)
     ...(opts.linkStatus ? [linkStatusResolver.of(opts.linkStatus)] : []),
@@ -394,7 +392,7 @@ export function mountPublishedView(
   // A checkbox click calls it; the host flips the live draft over its collab connection
   // and folds the flip into published_md via the no-revision endpoint. Absent → the
   // checkboxes render DISABLED (display only; the server is the bastion regardless).
-  opts: { resolveImageUrl?: ImageResolver; resolveAttachment?: AttachmentResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; onToggleTask?: (index: number, from: number, checked: boolean) => void; titleLinks?: TitleLinkSource; backlinks?: BacklinksSource; query?: QuerySource; linkStatus?: LinkStatusResolver } = {},
+  opts: { resolveImageUrl?: ImageResolver; resolveAttachment?: AttachmentResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; onToggleTask?: (index: number, from: number, checked: boolean) => void; titleLinks?: TitleLinkSource; list?: ListSource; linkStatus?: LinkStatusResolver } = {},
 ): EditorView {
   const view = new EditorView({
     doc: markdown,
@@ -420,8 +418,7 @@ export function mountPublishedView(
       ...(opts.resolveAttachment ? [attachmentResolver.of(opts.resolveAttachment)] : []),
       ...(opts.renderDiagram ? [diagramRenderer.of(opts.renderDiagram)] : []),
       ...(opts.resolveTransclude ? [transcludeResolver.of(opts.resolveTransclude)] : []),
-      ...(opts.backlinks ? [backlinksSource.of(opts.backlinks)] : []), // #307 / ADR-127: host-mediated :::backlinks
-      ...(opts.query ? [querySource.of(opts.query)] : []), // #324 / ADR-134: host-mediated :::query (member-only)
+      ...(opts.list ? [listSource.of(opts.list)] : []), // #370 / ADR-145: host-mediated :::tagged / :::children (member-only)
       deadLinks, // #276 / ADR-117: dead-internal-link strikethrough (inert without the linkStatus seam)
       blockAnchors, // #325 / ADR-137 slice 2: hide trailing ` ^id` block-ref markers (reveal on the caret line)
       ...(opts.linkStatus ? [linkStatusResolver.of(opts.linkStatus)] : []),
