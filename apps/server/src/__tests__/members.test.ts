@@ -8,6 +8,7 @@ import postgres from 'postgres'
 import IORedis from 'ioredis'
 import { pool } from '../db/pool.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { groupFgaId } from '../auth/group-sync.js'
 import { buildApp } from '../app.js'
 import { provisionTenant } from '../auth/provisioning.js'
 import { createSession, SESSION_COOKIE } from '../auth/session.js'
@@ -178,6 +179,32 @@ describe('removal revokes sessions immediately', () => {
     const after = await app.inject({ method: 'GET', url: '/auth/me', headers: { host, cookie: cookie(victimSid) } })
     expect(after.statusCode).toBe(401)
     expect(await hasRel('user:mem-victim', 'member', `tenant:${tenantId}`)).toBe(false)
+  })
+
+  // #378: removing a member must also drop their group-membership tuples. Left behind, they keep granting
+  // group-inherited access (authz leak) AND break a later re-registration of the same sub (syncMemberGroups
+  // re-writes an existing tuple → FGA duplicate error → login tx rollback → permanent login failure).
+  it('#378: removal deletes the member group#member tuples (no leak; re-registration re-writes cleanly)', async () => {
+    const sub = 'mem-grp'
+    const groups = ['Engineering', 'Ops']
+    const gTuple = (g: string) => ({ user: `user:${sub}`, relation: 'member', object: `group:${groupFgaId(tenantId, g)}` })
+    await admin`SELECT set_config('app.tenant_id', ${tenantId}, false)`
+    await admin`INSERT INTO members (tenant_id, sub, role, groups) VALUES (${tenantId}, ${sub}, 'member', ${groups})
+                ON CONFLICT (tenant_id, sub) DO UPDATE SET role='member', groups=EXCLUDED.groups`
+    await writeTuples(fgaClient, [{ user: `user:${sub}`, relation: 'member', object: `tenant:${tenantId}` }, ...groups.map(gTuple)])
+    expect(await hasRel(`user:${sub}`, 'member', `group:${groupFgaId(tenantId, 'Engineering')}`)).toBe(true) // sanity
+
+    const del = await app.inject({ method: 'DELETE', url: `/members/${sub}`, headers: { host, cookie: cookie(adminSid) } })
+    expect(del.statusCode).toBe(204)
+
+    // the group-membership tuples are GONE — no group-inherited capability survives the removal.
+    for (const g of groups) expect(await hasRel(`user:${sub}`, 'member', `group:${groupFgaId(tenantId, g)}`)).toBe(false)
+    expect(await hasRel(`user:${sub}`, 'member', `tenant:${tenantId}`)).toBe(false)
+
+    // re-registration: re-writing the SAME group tuples now succeeds (the stale ones were cleared, so no
+    // FGA duplicate-write error that would roll the login tx back — the permanent-login-failure path is fixed).
+    await expect(writeTuples(fgaClient, groups.map(gTuple))).resolves.toBeUndefined()
+    await deleteTuples(fgaClient, groups.map(gTuple)).catch(() => {}) // cleanup
   })
 })
 

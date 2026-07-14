@@ -5,6 +5,7 @@
 // immediately (the cached session role is cosmetic).
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { writeTuples, deleteTuples } from '@wikistead/authz'
+import { groupFgaId } from '../auth/group-sync.js'
 import { createInvite, revokeInvite, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
 import { auditIfEntitled } from '../audit/outbox.js'
@@ -75,8 +76,8 @@ export async function membersPlugin(app: FastifyInstance) {
   // removal is immediate (not at TTL). Cannot remove the last admin.
   app.delete<{ Params: { sub: string } }>('/members/:sub', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
-    const [existing] = await req.db.sql<[{ role: string }?]>`
-      SELECT role FROM members WHERE sub = ${req.params.sub}`
+    const [existing] = await req.db.sql<[{ role: string; groups: string[] }?]>`
+      SELECT role, groups FROM members WHERE sub = ${req.params.sub}`
     if (!existing) return reply.code(404).send({ error: 'member not found' })
     if (existing.role === 'admin' && (await adminCount(req)) <= 1) {
       return reply.code(409).send({ error: 'cannot remove the last admin' })
@@ -89,6 +90,15 @@ export async function membersPlugin(app: FastifyInstance) {
       const tuples = [{ user: `user:${req.params.sub}`, relation: 'member', object: `tenant:${req.tenant.id}` }]
       if (existing.role === 'admin') tuples.push({ user: `user:${req.params.sub}`, relation: 'admin', object: `tenant:${req.tenant.id}` })
       await deleteTuples(req.server.fga, tuples) // FGA last → rollback on failure
+      // #378: also drop the member's group-membership tuples (group:<id>#member@user:<sub>), derived from
+      // members.groups (the same source syncMemberGroups writes from). Left behind they (a) keep granting
+      // group-inherited access after removal (an authz leak) and (b) break a later RE-registration of the same
+      // sub: syncMemberGroups(prev=[], next=[…]) re-writes tuples that still exist → FGA duplicate-write error →
+      // the login tx rolls back → permanent login failure. Delete each INDIVIDUALLY (ignore a missing one) so
+      // any drift between members.groups and FGA can never block removal or survive it.
+      for (const g of existing.groups ?? []) {
+        await deleteTuples(req.server.fga, [{ user: `user:${req.params.sub}`, relation: 'member', object: `group:${groupFgaId(req.tenant.id, g)}` }]).catch(() => {})
+      }
       // Durable compliance audit (#177), in-tx + EE-gated.
       await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'member.removed', target: `user:${req.params.sub}` })
     })
