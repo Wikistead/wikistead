@@ -76,30 +76,40 @@ export function wireToc(
       const rect = scrollEl().getBoundingClientRect();
       const hs = extractHeadings(view.state);
       const cx = rect.left + rect.width / 2;
-      const topPos = view.posAtCoords({ x: cx, y: rect.top + bandPx() + 8 });
       // #345 sample near the VIEWPORT BOTTOM (not 80% down) so the visible set covers the WHOLE on-screen
-      // area, not just band→80% — the old narrow band left only ~1 light item (the "2 layers don't show" report).
-      // posAtCoords near the very edge can miss, so nudge up 8px; works for both scroll seams (posAtCoords maps
-      // screen y → doc offset for the CM scroller AND the public outer scroller uniformly).
-      const botPos = view.posAtCoords({ x: cx, y: rect.top + rect.height - 8 });
-      // ACTIVE (dark): the last heading at/above the band-top sample. the bottom clamp (#304-2) is GONE —
-      // a short final section is covered by the light layer instead; a jump to it is held by jumpPinned.
-      if (reportActive) {
-        let active: number | null = null;
-        if (topPos != null) for (const h of hs) { if (h.from <= topPos) active = h.from; else break; }
-        if (jumpPinned != null) active = jumpPinned; // jump-intent wins until the user scrolls
-        reportActive(active);
+      // area — the old narrow band left only ~1 light item (the "2 layers don't show" report). posAtCoords near
+      // the very edge can miss, so nudge in 8px; works for both scroll seams (posAtCoords maps screen y → doc
+      // offset for the CM scroller AND the public outer scroller uniformly).
+      let topPos = view.posAtCoords({ x: cx, y: rect.top + bandPx() + 8 });
+      let botPos = view.posAtCoords({ x: cx, y: rect.top + rect.height - 8 });
+      // #345 Issue B: when a sample MISSES (the content is shorter than the viewport, so the bottom sample
+      // lands below the rendered text; or a tall intro pushes a sample off content), fall back to the doc bounds
+      // instead of bailing. The old `topPos != null && botPos != null` guard skipped the visible layer entirely
+      // on a miss, and the active layer went null too — the reported "nothing is highlighted".
+      if (topPos == null) topPos = 0;
+      if (botPos == null) botPos = view.state.doc.length;
+      const lo = Math.min(topPos, botPos), hi = Math.max(topPos, botPos);
+      // VISIBLE (light): every section [h.from, next.from) intersecting [lo, hi]. Diff-apply.
+      const visible: number[] = [];
+      for (let i = 0; i < hs.length; i++) {
+        const end = i + 1 < hs.length ? hs[i + 1]!.from : view.state.doc.length;
+        if (hs[i]!.from <= hi && end >= lo) visible.push(hs[i]!.from);
       }
-      // VISIBLE (light): every section [h.from, next.from) intersecting [topPos, botPos]. Diff-apply.
-      if (reportVisible && topPos != null && botPos != null) {
-        const lo = Math.min(topPos, botPos), hi = Math.max(topPos, botPos);
-        const visible: number[] = [];
-        for (let i = 0; i < hs.length; i++) {
-          const end = i + 1 < hs.length ? hs[i + 1]!.from : view.state.doc.length;
-          if (hs[i]!.from <= hi && end >= lo) visible.push(hs[i]!.from);
-        }
+      if (reportVisible) {
         const key = visible.join(",");
         if (key !== lastVisibleKey) { lastVisibleKey = key; reportVisible(visible); }
+      }
+      // ACTIVE (dark): the last heading at/above the band-top sample. the bottom clamp (#304-2) is GONE —
+      // a short final section is covered by the light layer instead; a jump to it is held by jumpPinned.
+      // Issue B fallback: if NO heading sits above the band (a tall intro before the first heading), light
+      // the TOPMOST on-screen heading so the reader's section is never unlit while a heading is visible. Only a
+      // pure-intro screen (no heading visible at all) stays unlit.
+      if (reportActive) {
+        let active: number | null = null;
+        for (const h of hs) { if (h.from <= topPos) active = h.from; else break; }
+        if (active == null && visible.length) active = visible[0]!;
+        if (jumpPinned != null) active = jumpPinned; // jump-intent wins until the user scrolls
+        reportActive(active);
       }
     };
     const onScroll = () => {

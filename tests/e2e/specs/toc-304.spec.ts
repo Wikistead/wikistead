@@ -89,3 +89,53 @@ test("#345 several on-screen sections are LIGHT-visible with a legible contrast 
   expect(contrast!.lightColor, "the light item's text colour differs from idle").not.toBe(contrast!.idleColor);
   expect(contrast!.lightBg, "the light item carries a background wash (idle has none)").not.toBe("rgba(0, 0, 0, 0)");
 });
+
+// #345 Issue B: when the page opens with a top INTRO (no heading at the very top) but headings on screen
+// below it, the old sampler left BOTH layers empty (active null: no heading above the band; visible empty: the
+// window sat before the first heading) → "nothing is highlighted". Now the active layer FALLS BACK to the
+// topmost on-screen heading, so a visible heading is never unlit.
+test("#345 Issue B: a heading below a top intro still lights (active falls back to the topmost visible)", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1360, height: 720 } })).newPage();
+  await openScratch(page, "toc-intro-fallback");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  // A few intro paragraphs BEFORE the first heading (so the band-top sample lands in the intro, above heading 1),
+  // then headings that are still on screen at the top.
+  const intro = Array.from({ length: 6 }, (_, i) => `Intro paragraph ${i} lorem ipsum dolor sit amet consectetur adipiscing.`).join("\n\n");
+  await page.keyboard.insertText(`${intro}\n\n# First Heading\n\nbody one\n\n# Second Heading\n\nbody two\n\n# Third Heading\n\nbody three\n`);
+  await sleep(600);
+  const rail = page.locator("[data-testid=toc][data-variant=rail]");
+  await expect(rail).toBeVisible({ timeout: 8000 });
+  const items = rail.getByTestId("toc-item");
+  await expect(items).toHaveCount(3);
+  // land at the very top (a real wheel releases any jump pin), where the intro occupies the band-top sample.
+  await page.locator(".cm-scroller").evaluate((el) => { el.dispatchEvent(new WheelEvent("wheel", { bubbles: true })); el.scrollTop = 0; });
+  await sleep(400);
+  // At least one item is highlighted (the reported bug was ZERO), and the first heading — the topmost on-screen —
+  // is the dark active via the fallback, not left unlit.
+  const anyHi = await items.evaluateAll((els) => els.filter((e) => e.hasAttribute("data-active") || e.hasAttribute("data-visible")).length);
+  expect(anyHi, "a visible heading must not be left unlit under a top intro").toBeGreaterThanOrEqual(1);
+  await expect(items.nth(0)).toHaveAttribute("data-active", "");
+});
+
+// #345 Issue A: the narrow-screen OVERLAY TOC now also gets the light (data-visible) layer — it was
+// rail-only (TocChrome passed visibleFroms only to the rail). Real Chromium, narrow viewport, scroll to reveal.
+test("#345 Issue A: the narrow overlay TOC carries the two-layer highlight", async ({ browser }) => {
+  // Set up at a WIDE viewport (the edit toggle lives in the header chrome), then narrow to force the overlay.
+  const page = await (await browser.newContext({ viewport: { width: 1360, height: 720 } })).newPage();
+  await openScratch(page, "toc-overlay-visible");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(Array.from({ length: 9 }, (_, i) => `# Section ${i + 1}\n\npara ${i} lorem ipsum dolor sit amet.`).join("\n\n") + "\n");
+  await sleep(400);
+  await page.setViewportSize({ width: 680, height: 720 }); // narrow → the overlay variant replaces the rail
+  await sleep(400);
+  // The overlay renders while scrolling; a wheel both reveals it and drives the visible-set compute.
+  await page.locator(".cm-scroller").evaluate((el) => { el.dispatchEvent(new WheelEvent("wheel", { bubbles: true })); el.scrollTop = el.scrollHeight / 3; });
+  await sleep(400);
+  const overlay = page.locator("[data-testid=toc][data-variant=overlay]");
+  await expect(overlay).toBeAttached({ timeout: 8000 });
+  const items = overlay.getByTestId("toc-item");
+  const visibleCount = await items.evaluateAll((els) => els.filter((e) => e.hasAttribute("data-visible")).length);
+  expect(visibleCount, "the overlay TOC receives the light-visible layer (was rail-only)").toBeGreaterThanOrEqual(1);
+});
