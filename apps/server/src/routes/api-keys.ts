@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
+import { requireTenantAdmin } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { entitlementDenied } from '../entitlement-ux.js'
 import type { TenantDb } from '../db/index.js'
@@ -30,8 +31,7 @@ export async function setApiKeyMaxScope(
   fga: OpenFgaClient,
   args: { tenantId: string; userId: string; maxScope: ApiScope },
 ): Promise<void> {
-  const { allowed } = await fga.check({ user: `user:${args.userId}`, relation: 'admin', object: `tenant:${args.tenantId}` })
-  if (!allowed) throw Object.assign(new Error('admin only'), { statusCode: 403 })
+  await requireTenantAdmin(fga, args.userId, args.tenantId) // #383: the shared 403 "admin only" gate
   if (args.maxScope !== 'read' && args.maxScope !== 'write') throw Object.assign(new Error('invalid scope'), { statusCode: 400 })
   await db.sql`
     INSERT INTO tenant_settings (tenant_id, api_key_max_scope, updated_at)

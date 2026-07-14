@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
-import { writeTuples, deleteTuples } from '@wikistead/authz'
+import { writeTuples, deleteTuples, requireTenantAdminOr404 } from '@wikistead/authz'
 import type { TenantDb } from '../db/index.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 
@@ -25,11 +25,9 @@ export const CLAIM_TTL_SECONDS = 24 * 60 * 60
 // very existence of the recovery capability is not disclosed.
 
 // 404 (not 403) for non-admins: hide the capability's existence entirely (ADR-061).
-// Exported for the authz-boundary test (the 404 path is security-critical).
-export async function requireTenantAdminOr404(fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> {
-  const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'admin', object: `tenant:${tenantId}` })
-  if (!allowed) throw Object.assign(new Error('not found'), { statusCode: 404 })
-}
+// The gate is the shared one-tenant-admin helper (#383); re-exported for the authz-boundary test
+// (the 404 path is security-critical) so the existing test import keeps resolving here.
+export { requireTenantAdminOr404 }
 
 export interface OrphanDraft { id: string; title: string; createdAt: Date }
 

@@ -1,10 +1,9 @@
 import type { FastifyInstance } from 'fastify'
-import type { OpenFgaClient } from '@openfga/sdk'
 import { randomUUID } from 'node:crypto'
 import { resolveEntitlements, decideAllowance, crossedThresholds } from '@wikistead/entitlements'
 import { getAIProvider } from '@wikistead/hooks'
 import { emit } from '@wikistead/events'
-import { fgaClient } from '@wikistead/authz'
+import { fgaClient, requireTenantAdmin } from '@wikistead/authz'
 import type { TenantDb } from '../db/index.js'
 import { bumpRateBucket } from '../rate-limit.js'
 import { gatherAuthorizedContext } from '../ai/context.js'
@@ -44,11 +43,6 @@ export async function setTenantAiEnabled(db: TenantDb, tenantId: string, enabled
     VALUES (${tenantId}, ${enabled})
     ON CONFLICT (tenant_id) DO UPDATE SET ai_enabled = ${enabled}, updated_at = now()
   `
-}
-
-async function requireTenantAdmin(fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> {
-  const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'admin', object: `tenant:${tenantId}` })
-  if (!allowed) throw Object.assign(new Error('admin only'), { statusCode: 403 })
 }
 
 export async function aiPlugin(app: FastifyInstance) {
