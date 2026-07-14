@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useEnrollment, useSetEnrollPolicy, useAddEnrollDomain, useVerifyEnrollDomain, useRemoveEnrollDomain } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
+import { RadioGroup } from "../ui/RadioGroup";
 import { Input } from "../ui/Input";
-import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
 
 const label = "mb-1 mt-3.5 block text-sm text-fg-dim";
@@ -66,8 +66,16 @@ export function AdminEnrollmentSection() {
       <p className="mt-0 text-sm text-fg-dim">{t("adminEnroll.body")}</p>
 
       <label className={label}>{t("adminEnroll.policyLabel")}</label>
-      <Select value={policy} onChange={setPolicyValue} ariaLabel={t("adminEnroll.policyLabel")} testId="enroll-policy" options={policyOptions} />
-      <p className="mt-1 text-xs text-fg-dim">{t(`adminEnroll.policyHint_${policy}`)}</p>
+      {/* #389 / ADR-146: policy needs a description per option → card radiogroup (was a Select whose
+          hint only showed for the CURRENT pick). Same per-option test-ids (enroll-policy-<value>). */}
+      <RadioGroup
+        variant="card"
+        value={policy}
+        onChange={setPolicyValue}
+        ariaLabel={t("adminEnroll.policyLabel")}
+        testId="enroll-policy"
+        options={policyOptions.map((o) => ({ ...o, description: t(`adminEnroll.policyHint_${o.value}`) }))}
+      />
 
       {policy === "groups" && (
         <>

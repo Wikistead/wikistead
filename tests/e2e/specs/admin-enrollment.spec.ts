@@ -10,11 +10,11 @@ test("#101: enrolment section — policy toggles + add domain shows the DNS chal
   await page.goto("/admin/auth");
   await expect(page.getByTestId("admin-enrollment")).toBeVisible();
 
-  await page.getByTestId("enroll-policy").click();
+  // #389 / ADR-146: the policy picker is a card radiogroup now — options are clicked directly
+  // (no Select trigger to open first).
   await page.getByTestId("enroll-policy-groups").click();
   await expect(page.getByTestId("enroll-groups")).toBeVisible();
 
-  await page.getByTestId("enroll-policy").click();
   await page.getByTestId("enroll-policy-domain").click();
   await expect(page.getByTestId("enroll-domain-input")).toBeVisible();
 

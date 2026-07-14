@@ -4,6 +4,7 @@ import { useTenantOidc, useUpdateTenantOidc, useTestTenantOidc } from "../data/q
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
+import { Switch } from "../ui/Switch";
 import { cn } from "../lib/utils";
 import { AdminEnrollmentSection } from "./AdminEnrollmentSection";
 
@@ -78,7 +79,8 @@ export function AdminAuthTab() {
       <Input value={groupsClaim} onChange={(e) => setGroupsClaim(e.target.value)} placeholder="groups" data-testid="oidc-groups-claim" />
 
       <label className="my-4 mb-1 flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} data-testid="oidc-enabled" />
+        {/* #389 / ADR-146: bare checkbox -> DS Switch (on/off state). */}
+        <Switch checked={enabled} onChange={setEnabled} testId="oidc-enabled" />
         {t("adminAuth.enabled")}
       </label>
 

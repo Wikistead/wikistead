@@ -11,6 +11,7 @@ import {
 import { Button, IconButton } from "../ui/Button";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
+import { Switch } from "../ui/Switch";
 
 interface SpaceCtx { spaceId: string; name: string }
 const CAPS: PageRelation[] = ["view", "edit", "manage"];
@@ -160,12 +161,11 @@ export function SpaceMembersTab() {
           const on = !!commentOpen.data?.[key];
           return (
             <label key={key} className="mb-2 flex items-center gap-2 text-sm">
-              <button type="button" role="switch" aria-checked={on} data-testid={testId} data-on={on}
+              {/* #389 / ADR-146: the hand-rolled role=switch button -> the shared DS Switch. data-on kept
+                  for existing assertions. */}
+              <Switch checked={on} testId={testId} data-on={on}
                 disabled={commentOpen.isLoading || setCommentOpen.isPending}
-                onClick={() => toggleCommentOpen(key, !on)}
-                className={`relative inline-block h-4 w-7 flex-none rounded-full transition-colors ${on ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}>
-                <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${on ? "left-[14px]" : "left-0.5"}`} />
-              </button>
+                onChange={(v) => toggleCommentOpen(key, v)} />
               <span>{lbl}</span>
             </label>
           );

@@ -6,6 +6,8 @@ import { notify } from "./toast";
 import { Select } from "./Select";
 import { Button, IconButton } from "./Button";
 import { Input } from "./Input";
+import { Switch } from "./Switch";
+import { RadioGroup } from "./RadioGroup";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 
 // Per-page permission management (Phase 4c). Shown only to managers (the open page's
@@ -121,11 +123,12 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             listed below can view/edit — and strips public. Nested children do NOT inherit a parent's
             private in v1 (each page is private independently), noted to avoid a manager's false assumption. */}
         <label className="flex items-start gap-2 rounded-md border border-border p-2" data-testid="private-toggle-row">
-          <input type="checkbox" className="mt-0.5" data-testid="private-toggle" checked={!!isPrivate}
+          {/* #389 / ADR-146: on/off state → DS Switch (role=switch). The confirm-before-enable stays. */}
+          <Switch className="mt-0.5" testId="private-toggle" checked={!!isPrivate}
             disabled={setPrivate.isPending}
-            onChange={(e) => {
+            onChange={(checked) => {
               // Turning ON revokes the page's share links (#109 Fix A) — confirm first. Turning OFF is a plain toggle.
-              if (e.target.checked) setConfirmPrivate(true);
+              if (checked) setConfirmPrivate(true);
               else applyPrivate(false);
             }} />
           <span className="min-w-0 flex-1">
@@ -141,9 +144,9 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             <label className="flex items-start gap-2">
               {/* #253 review ①: a DRAFT can't be public (server 400) — disable the toggle and say why, so it's
                   never a click-then-fail. private ⊥ public keeps it disabled while private. */}
-              <input type="checkbox" className="mt-0.5" data-testid="public-toggle" checked={isPublic}
+              <Switch className="mt-0.5" testId="public-toggle" checked={isPublic}
                 disabled={setPublic.isPending || !!isPrivate || !isPublished}
-                onChange={(e) => applyPublic(e.target.checked)} />
+                onChange={applyPublic} />
               <span className="min-w-0 flex-1">
                 <span className="block text-sm text-foreground">{t("permissions.publicTitle")}</span>
                 <span className="block text-xs text-fg-dim">
@@ -178,16 +181,20 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               : frozen === "guests" ? t("permissions.freezeGuestsHint")
               : t("permissions.freezeHint")}
           </span>
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1" role="radiogroup" aria-label={t("permissions.freezeTitle")}>
-            {([["off", null], ["guests", "guests"], ["full", "full"]] as const).map(([key, level]) => (
-              <label key={key} className="flex items-center gap-1.5 text-sm text-foreground">
-                <input type="radio" name="freeze-level" data-testid={`freeze-${key}`}
-                  checked={frozen === level} disabled={setFrozen.isPending}
-                  onChange={() => applyFreeze(level)} />
-                {t(`permissions.freeze${key === "off" ? "Off" : key === "guests" ? "Guests" : "Full"}`)}
-              </label>
-            ))}
-          </div>
+          {/* #389 / ADR-146: 3 short options → segmented radiogroup (DS component, arrow-key focus). */}
+          <RadioGroup
+            variant="segmented"
+            className="mt-2"
+            value={frozen === "full" ? "full" : frozen === "guests" ? "guests" : "off"}
+            onChange={(v) => applyFreeze(v === "off" ? null : (v as "guests" | "full"))}
+            ariaLabel={t("permissions.freezeTitle")}
+            testId="freeze"
+            disabled={setFrozen.isPending}
+            options={(["off", "guests", "full"] as const).map((key) => ({
+              value: key,
+              label: t(`permissions.freeze${key === "off" ? "Off" : key === "guests" ? "Guests" : "Full"}`),
+            }))}
+          />
         </div>
 
         <p className="mt-3 text-xs font-medium text-fg-dim">{isPrivate ? t("permissions.allowlistTitle") : t("permissions.grantTitle")}</p>
