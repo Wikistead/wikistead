@@ -6,6 +6,7 @@ import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import type { Capability, ResourceRef } from '@wikistead/types'
 import { pool } from '../db/pool.js'
+import { withTenantTx } from '../db/index.js' // #382
 import { resolveTenantFromHost, loadTenant } from '../tenant.js'
 import type { TenantDb } from '../db/index.js'
 import { hashSharePassword, verifySharePassword } from './share-link-password.js'
@@ -305,8 +306,7 @@ export async function sweepShareLinkRevokeFailures(fga: OpenFgaClient): Promise<
   let healed = 0
   for (const { id: tenantId } of tenants) {
     try {
-      const rows = await pool.begin(async (tx) => {
-        await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+      const rows = await withTenantTx(tenantId, async (tx) => {
         return tx<Pick<ShareLinkRow, 'id' | 'resource_type' | 'resource_id' | 'capability'>[]>`
           SELECT id, resource_type, resource_id, capability FROM share_links
           WHERE revoke_failed_at IS NOT NULL AND revoked_at IS NULL`
@@ -325,8 +325,7 @@ export async function sweepShareLinkRevokeFailures(fga: OpenFgaClient): Promise<
           if (!String((err as Error)?.message ?? '').includes('did not exist')) continue
         }
         // FGA tuple is gone (deleted now, or already absent): finish the revoke durably and clear the marker.
-        await pool.begin(async (tx) => {
-          await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+        await withTenantTx(tenantId, async (tx) => {
           await tx`UPDATE share_links SET revoked_at = now(), revoke_failed_at = NULL WHERE id = ${row.id} AND revoked_at IS NULL`
         })
         healed++
@@ -385,8 +384,7 @@ export async function mintTokenForShareLink(
 ): Promise<MintResult> {
   // Fast first-pass under RLS (NOT the security gate): cheaply reject obviously
   // dead links before touching FGA.
-  const row = (await pool.begin(async (tx) => {
-    await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+  const row = (await withTenantTx(tenantId, async (tx) => {
     const [r] = await tx<ShareLinkRow[]>`
       SELECT id, tenant_id, resource_type, resource_id, capability, expires_at, created_by, created_at, revoked_at, password_hash
       FROM share_links WHERE id = ${id}

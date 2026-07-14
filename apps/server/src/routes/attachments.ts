@@ -5,7 +5,7 @@ import { assertPageViewable } from '../page-view-gate.js'
 import { resolveEntitlements, decideAllowance } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import { fanOutFeedEvent } from './notifications.js' // #362 / ADR-126 addendum: attachment.confirmed feed event
-import { pool } from '../db/pool.js'
+import { withTenantTx } from '../db/index.js' // #382
 import { makeS3Key } from '../storage/driver.js'
 import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
@@ -279,8 +279,7 @@ export async function deleteAttachment(
   void (async () => {
     try {
       await storage.deleteObject(s3Key)
-      await pool.begin(async (tx) => {
-        await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+      await withTenantTx(tenantId, async (tx) => {
         await tx`DELETE FROM attachments WHERE id = ${args.id}`
       })
     } catch {

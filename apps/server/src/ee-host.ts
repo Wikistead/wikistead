@@ -13,7 +13,7 @@ export { startServer } from './server.js'
 export { buildApp } from './app.js'
 
 export { pool } from './db/pool.js'
-export { acquireTenantDb } from './db/index.js'
+export { acquireTenantDb, withTenantTx } from './db/index.js' // #382: isolation-aware non-request tx (SCIM token verify)
 export type { TenantDb } from './db/index.js'
 
 export { resolveTenantFromHost, loadTenant } from './tenant.js'

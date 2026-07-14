@@ -5,6 +5,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { pool } from '../db/pool.js'
 import type { TenantDb } from '../db/index.js'
+import { withTenantTx } from '../db/index.js' // #382
 import { encryptSecret, decryptSecret } from '../auth/secret-crypto.js'
 import { guardedFetch } from '../safe-fetch.js'
 
@@ -149,8 +150,7 @@ export async function drainWebhookOutbox(fga: OpenFgaClient, opts: { batch?: num
       if (disp === 'not-ready') { await retryOrDrop(row); handled++; continue }
       // Tenant-scoped hook read — a SHORT tx (set_config is tx-local; RLS scopes the SELECT), closed
       // before any delivery starts.
-      const hooks = await pool.begin(async (tx) => {
-        await tx`SELECT set_config('app.tenant_id', ${row.tenant_id}, true)`
+      const hooks = await withTenantTx(row.tenant_id, async (tx) => {
         return tx<{ id: string; url: string; secret_enc: string; event_filter: string[] | null }[]>`
           SELECT id, url, secret_enc, event_filter FROM webhooks WHERE active = TRUE`
       })
@@ -171,8 +171,7 @@ export async function drainWebhookOutbox(fga: OpenFgaClient, opts: { batch?: num
       // Phase 3 — BOOKKEEPING (ONE short tx): failure counters AND the outbox row's fate commit
       // atomically (webhook_outbox has no RLS, so it can share the scoped tx) — a crash can't leave a
       // bumped failure_count with an un-advanced row (which would double-count on the retry).
-      await pool.begin(async (tx) => {
-        await tx`SELECT set_config('app.tenant_id', ${row.tenant_id}, true)`
+      await withTenantTx(row.tenant_id, async (tx) => {
         for (const r of results) {
           if (r.ok) await tx`UPDATE webhooks SET failure_count = 0 WHERE id = ${r.id}`
           else await tx`UPDATE webhooks SET failure_count = failure_count + 1, active = (failure_count + 1 < ${AUTO_DISABLE_FAILURES}) WHERE id = ${r.id}`

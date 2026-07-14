@@ -47,7 +47,10 @@ export async function provisionTenant(
     if (taken.length) throw Object.assign(new Error('slug taken'), { statusCode: 409 })
     const [t] = await tx<{ id: string }[]>`
       INSERT INTO tenants (slug, plan) VALUES (${args.slug}, ${args.plan ?? 'free'}) RETURNING id`
-    // members is tenant-scoped (RLS) — set the context for the new tenant.
+    // members is tenant-scoped (RLS) — set the context for the new tenant. #382: this stays a
+    // hand-written set_config DELIBERATELY: the tenant row was created two statements up IN THIS tx
+    // (not yet visible to the registry/driver), and a brand-new tenant is 'logical' by definition —
+    // this is tenant BOOTSTRAP inside the global-registry tx, not a driver bypass for an existing one.
     await tx`SELECT set_config('app.tenant_id', ${t.id}, true)`
     await tx`
       INSERT INTO members (tenant_id, sub, email, display_name, role)

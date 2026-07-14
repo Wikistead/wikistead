@@ -6,7 +6,7 @@ import { check } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import type { Sql } from 'postgres'
-import { pool } from '../db/pool.js'
+import { withTenantTx } from '../db/index.js' // #382
 import { fanOutFeedEvent } from './notifications.js' // #327 / ADR-143: reliable in-tx restore feed event
 import type { TenantDb } from '../db/index.js'
 import type { StorageDriver } from '../storage/index.js'
@@ -188,8 +188,7 @@ export async function restoreRevision(
 
   // Write new state + always-insert revision so the restored state is immediately
   // visible in history and undoable, AND repoint published_* to it.
-  await pool.begin(async (tx) => {
-    await tx`SELECT set_config('app.tenant_id', ${args.tenantId}, true)`
+  await withTenantTx(args.tenantId, async (tx) => {
     const [newRev] = await tx<[{ id: string }]>`
       INSERT INTO revisions (tenant_id, page_id, ydoc_key, title, created_by)
       VALUES (${args.tenantId}, ${args.pageId}, ${newRevKey}, ${current.title}, ${`user:${args.userId}`})
