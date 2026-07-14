@@ -9,7 +9,7 @@ import type { FastifyInstance } from 'fastify'
 import { fgaClient, checkRelation } from '@wikistead/authz'
 import { pool } from '../db/pool.js'
 import { resolveTenantFromHost, loadTenant } from '../tenant.js'
-import { substituteQuerySnapshots, type QuerySnapshot } from './pages.js' // #353: bake `:::query` → static list for anon
+import { substituteListSnapshots, type ListSnapshot } from './pages.js' // #353→#370: baked `:::tagged`/`:::children` static lists for anon
 
 // noindex: the page's own flag OR'd with its space's flag (#277 / ADR-116 guardrail 4) — a page
 // reached via space inheritance is noindex if EITHER the page or its space says so.
@@ -168,12 +168,12 @@ export async function publicPlugin(app: FastifyInstance) {
     const page = await loadPublicPage(tenant.id, req.params.pageId)
     if (!page) return reply.code(404).send({ error: 'not found' })
 
-    // #353 / ADR-134 rev2 (Hole A): substitute each `:::query` directive with its baked ANONYMOUS static list
+    // #353→#370 / ADR-145: substitute each `:::tagged`/`:::children` directive with its baked ANONYMOUS static list
     // (resolved as user:anonymous at publish — member-only pages already excluded). The public surface renders a
     // static list, NEVER a live per-viewer reverse-lookup (the #244 re-entry class). A missing/mismatched
-    // snapshot collapses the block to nothing (fail-safe inside substituteQuerySnapshots).
-    const snapshot = page.published_query_snapshot ? (JSON.parse(page.published_query_snapshot) as QuerySnapshot) : null
-    const content = substituteQuerySnapshots(page.published_md ?? '', snapshot)
+    // snapshot collapses the block to nothing (fail-safe inside substituteListSnapshots).
+    const snapshot = page.published_query_snapshot ? (JSON.parse(page.published_query_snapshot) as ListSnapshot) : null
+    const content = substituteListSnapshots(page.published_md ?? '', snapshot)
 
     // noindex enforcement (#124): emit the HTTP X-Robots-Tag header so a crawler that fetches
     // this page is told not to index it — the header is authoritative even before any HTML/SSR

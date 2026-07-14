@@ -61,14 +61,20 @@ Types: \`note\`, \`info\`, \`tip\`, \`warning\`, \`danger\`.
 - PlantUML: \`\`\`\`plantuml\`\`\` … \`@startuml\` … \`@enduml\` … closing fence.
 - Excalidraw: \`\`\`\`excalidraw\`\`\` (drawn in the editor).
 
+## Tags (frontmatter)
+A page's tags live in a leading YAML frontmatter block (first line of the document):
+\`\`\`
+---
+tags: [recipes, dinner]
+---
+\`\`\`
+Tags are plain strings (case-insensitive); no inline #tag notation exists.
+
 ## Dynamic lists (read-only)
-\`\`\`
-:::query
-children
-:::
-\`\`\`
-Body is one of: \`backlinks\` (pages linking here), \`tag <pageId>\` (a tag page's members), \`children\` (this
-page's child pages). Also \`:::backlinks\` for the pages linking to the current page.
+- Pages carrying a tag: \`:::tagged\` … \`<tag name>\` … \`:::\`
+- This page's child pages: \`:::children\` … \`:::\` (empty body)
+Both render auto-updating, read-only lists. (\`:::query\` and \`:::backlinks\` no longer exist; backlinks
+live in the Related side panel.)
 
 ## Embeds & transclusion
 - Embed another page's content: \`:::embed-page\` … \`<pageId>\` … \`:::\`

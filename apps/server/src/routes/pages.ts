@@ -427,12 +427,12 @@ export async function publishPage(
     if (!verdict.ok) throw Object.assign(new Error('publish rejected by the abuse filter'), { statusCode: 422, reason: verdict.reason })
   }
 
-  // #353 / ADR-134 rev2 (Hole A): bake the anonymous static snapshot for this page's `:::query` blocks. Resolved
+  // #353→#370 / ADR-145: bake the anonymous static snapshot for this page's `:::tagged`/`:::children` blocks. Resolved
   // as `user:anonymous` (member-only pages dropped by the per-item view-filter — never in the public snapshot).
   // Refreshed on EVERY publish (incl. the no-op path below): the resolved list depends on OTHER pages' publish/
   // grant state, so a re-publish is the natural refresh point even when THIS page's text is unchanged. Computed
   // BEFORE the tx (like storeRevisionYdoc) — it reads only already-committed pages, never this in-flight update.
-  const querySnapshot = JSON.stringify(await bakeQuerySnapshot(db, fga, { pageId: args.pageId, md }))
+  const listSnapshot = JSON.stringify(await bakeListSnapshot(db, fga, { pageId: args.pageId, md }))
 
   // No-op guard (server is the accurate gate): if the draft text equals what is
   // already published, do NOT create a revision — that would be meaningless history.
@@ -441,7 +441,7 @@ export async function publishPage(
   // Still RELEASE space inheritance (idempotent) — covers a re-publish and the
   // repair case where a prior publish's page#space write failed; reindex if it wrote.
   if (md === draft.published_md) {
-    await db.sql`UPDATE pages SET has_unpublished_changes = false, published_query_snapshot = ${querySnapshot}::jsonb WHERE id = ${args.pageId}`
+    await db.sql`UPDATE pages SET has_unpublished_changes = false, published_query_snapshot = ${listSnapshot}::jsonb WHERE id = ${args.pageId}`
     const wrote = await ensurePageSpaceLink(fga, args.pageId, draft.space_id)
     if (wrote) {
       const oid = await db.tx(async (tx) => enqueueOutbox(tx, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' }))
@@ -470,7 +470,7 @@ export async function publishPage(
     const [p] = await tx<[{ published_at: Date }]>`
       UPDATE pages SET published_md = ${md}, published_revision_id = ${rev.id}, published_at = now(),
         has_unpublished_changes = false, updated_by = ${args.createdBy.replace(/^user:/, '')},
-        task_done = ${tp.done}, task_total = ${tp.total}, published_query_snapshot = ${querySnapshot}::jsonb
+        task_done = ${tp.done}, task_total = ${tp.total}, published_query_snapshot = ${listSnapshot}::jsonb
       WHERE id = ${args.pageId}
       RETURNING published_at
     `
@@ -478,6 +478,9 @@ export async function publishPage(
     // #322 / ADR-133 §6: refresh this page's outbound link edges from the newly published content, in-tx
     // (derived index moves atomically with published_md). Inert — nothing reads page_links yet.
     await syncPageLinks(tx, draft.tenant_id, args.pageId, md)
+    // #370 / ADR-145: refresh the frontmatter-tag projection from the newly published content, in-tx
+    // (same discipline — the derived index moves atomically with published_md).
+    await syncPageTags(tx, draft.tenant_id, args.pageId, md)
     outboxId = await enqueueOutbox(tx, { tenantId: draft.tenant_id, pageId: args.pageId, operation: 'upsert' })
     // #228 / ADR-108: enqueue the page.published webhook IN this tx (reliable — a commit-then-crash still
     // delivers). Thin payload (ids/actor only). The drain applies the private/draft existence-hiding
@@ -611,13 +614,13 @@ export async function getPublished(
   `
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const hasUnpublishedChanges = decodeYdocContent(row.ydoc) !== (row.published_md ?? '')
-  // #353 / ADR-134 rev2 (Hole A): a GUEST (share_link principal) gets the same anonymous static `:::query`
-  // snapshot as the public surface — a guest NEVER triggers a live per-viewer reverse-lookup (the #244 re-entry
-  // class). A MEMBER (user:<sub>) keeps the literal `:::query` so the editor's macro resolves it live and
-  // viewer-scoped via the member-only /query route. So substitute the baked list ONLY for guests.
+  // #353→#370 / ADR-145: a GUEST (share_link principal) gets the same anonymous static list snapshot as the
+  // public surface — a guest NEVER triggers a live per-viewer reverse-lookup (the #244 re-entry class). A
+  // MEMBER (user:<sub>) keeps the literal `:::tagged`/`:::children` so the editor's macro resolves it live
+  // and viewer-scoped via the member-only /list route. So substitute the baked list ONLY for guests.
   const isGuest = args.subject.startsWith('share_link:')
   const publishedMd = isGuest && row.published_md != null
-    ? substituteQuerySnapshots(row.published_md, row.published_query_snapshot ? (JSON.parse(row.published_query_snapshot) as QuerySnapshot) : null)
+    ? substituteListSnapshots(row.published_md, row.published_query_snapshot ? (JSON.parse(row.published_query_snapshot) as ListSnapshot) : null)
     : row.published_md
   // canComment (#100): does THIS principal (member or view-guest) have the comment capability on the
   // page (comment_open on + view, an explicit comment grant, or edit)? The guest page uses it to show
@@ -1630,6 +1633,95 @@ export async function syncPageLinks(tx: Sql, tenantId: string, fromPageId: strin
   }
 }
 
+// ── #370 / ADR-145: frontmatter tags ─────────────────────────────────────────
+
+// A page's tags live in its leading YAML frontmatter block (`---\ntags: [a, b]\n---`) — plain text inside
+// the single Y.Text (Open formats; every SSG reads it). This extracts them with a deliberately MINIMAL
+// YAML subset (no YAML dependency): the `tags:` field as an inline array, a dash list, or a single scalar.
+// Tag identity is case-insensitive (user ruling): `tag` is the lowercased key, `display` the first-seen
+// original casing. Anything unparseable yields no tags — authoring free-text never errors.
+export interface PageTag { tag: string; display: string }
+
+const TAG_MAX_LEN = 100
+const TAGS_MAX_COUNT = 50
+
+// The leading frontmatter block of `md`: full fence bounds + inner lines, or null when the document does
+// not START with a `---` fence line (frontmatter is position-0-only, like every SSG).
+export function parseFrontmatterBlock(md: string): { from: number; to: number; inner: string } | null {
+  if (!/^---[ \t]*(\r?\n|$)/.test(md)) return null
+  const lines = md.split('\n')
+  for (let i = 1; i < lines.length; i++) {
+    if (/^(---|\.\.\.)[ \t]*\r?$/.test(lines[i]!)) {
+      const from = 0
+      const to = lines.slice(0, i + 1).join('\n').length
+      const inner = lines.slice(1, i).join('\n')
+      return { from, to, inner }
+    }
+  }
+  return null // unterminated fence → not frontmatter
+}
+
+function cleanTag(raw: string): string {
+  let s = raw.trim()
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) s = s.slice(1, -1).trim()
+  return s.slice(0, TAG_MAX_LEN)
+}
+
+export function extractFrontmatterTags(md: string): PageTag[] {
+  const fm = parseFrontmatterBlock(md)
+  if (!fm) return []
+  const lines = fm.inner.split('\n')
+  const raw: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^tags[ \t]*:[ \t]*(.*)$/.exec(lines[i]!)
+    if (!m) continue
+    const rest = m[1]!.trim()
+    if (rest.startsWith('[')) {
+      // inline array — tolerate a missing `]` (take the rest of the line)
+      const inner = rest.endsWith(']') ? rest.slice(1, -1) : rest.slice(1)
+      raw.push(...inner.split(','))
+    } else if (rest === '') {
+      // dash list on the following lines
+      for (let j = i + 1; j < lines.length; j++) {
+        const dm = /^[ \t]*-[ \t]+(.*)$/.exec(lines[j]!)
+        if (!dm) break
+        raw.push(dm[1]!)
+      }
+    } else {
+      raw.push(rest) // single scalar
+    }
+    break // first `tags:` wins
+  }
+  const out: PageTag[] = []
+  const seen = new Set<string>()
+  for (const r of raw) {
+    const display = cleanTag(r)
+    if (!display) continue
+    const tag = display.toLowerCase()
+    if (seen.has(tag)) continue
+    seen.add(tag)
+    out.push({ tag, display })
+    if (out.length >= TAGS_MAX_COUNT) break
+  }
+  return out
+}
+
+// Replace a page's tag rows with the set derived from its just-published markdown. DERIVED + idempotent
+// (delete-then-insert), called INSIDE the publish tx next to syncPageLinks so the projection moves with
+// published_md atomically. The projection is a stage-1 candidate set ONLY — every read view-confirms each
+// page at display time (ADR-145 §4).
+export async function syncPageTags(tx: Sql, tenantId: string, pageId: string, md: string | null): Promise<void> {
+  await tx`DELETE FROM page_tags WHERE page_id = ${pageId}`
+  const tags = md ? extractFrontmatterTags(md) : []
+  for (const t of tags) {
+    await tx`
+      INSERT INTO page_tags (tenant_id, page_id, tag, display)
+      VALUES (${tenantId}, ${pageId}, ${t.tag}, ${t.display})
+      ON CONFLICT DO NOTHING
+    `
+  }
+}
+
 // #322 / ADR-133 §2/§3: 2-hop RELATED pages. Intermediates = the pages the target P links to; related pages
 // = OTHER pages that ALSO link to the same intermediate, grouped by that shared link (Scrapbox-style). Both
 // endpoints (the intermediate AND the related page) are view-filtered for the caller in a SINGLE pass, so a
@@ -1793,55 +1885,62 @@ export async function getLocalGraph(
   }
 }
 
-// #324 / ADR-134: the query spec carried in a `:::query` directive body. The body is authoring free-text,
-// so an unrecognised spec parses to `null` and renders 0 results (never a parse error, §2). Three v1 query
-// types, each resolving to a view-filtered list of pages
-// - `backlinks` → the pages that link to THIS page (a tag page's members, when this IS a tag page).
-// - `tag <pageId>` → the pages that link to <pageId> (list another tag page's members from a hub page).
-// - `children` → the direct child pages of THIS page in the tree.
-export type QuerySpec =
-  | { type: 'backlinks' }
-  | { type: 'tag'; target: string }
-  | { type: 'children' }
+// #370 / ADR-145: the two read-only DYNAMIC LIST directives (they replace ADR-134's `:::query`)
+// - `:::tagged` — body's first non-empty line is a TAG NAME (a string, never a page id); lists the
+// published pages whose frontmatter `tags` include it (case-insensitive, user ruling).
+// - `:::children` — no body; lists the direct child pages of THIS page in the tree (kept tag-independent,
+// user ruling — the `:::query` teardown does not take it down).
+// The body is authoring free-text, so anything unresolvable yields 0 results (never a parse error).
+export type ListDirectiveName = 'tagged' | 'children'
+export const LIST_DIRECTIVE_NAMES: readonly ListDirectiveName[] = ['tagged', 'children']
 
-export function parseQuerySpec(body: string): QuerySpec | null {
+export function parseTaggedBody(body: string): string | null {
   const line = body.split('\n').map((l) => l.trim()).find((l) => l.length > 0)
   if (!line) return null
-  if (line === 'backlinks') return { type: 'backlinks' }
-  if (line === 'children') return { type: 'children' }
-  // `tag <id>` or `tag:<id>` — a single token target. A missing/multi-token target parses to null (0 results).
-  const m = /^tag[\s:]+(\S+)$/.exec(line)
-  if (m) return { type: 'tag', target: m[1]! }
-  return null
+  const tag = line.toLowerCase().slice(0, TAG_MAX_LEN) // the index key is the lowercased name (user ruling)
+  return tag || null
 }
 
-// #324 / ADR-134: resolve a read-only `:::query` list FOR THE VIEWER. Every branch is view-filtered and
-// existence-hiding (ADR-134 §3, the search-leak class): `backlinks`/`tag` reuse getBacklinks (which view-gates
-// the target page AND FGA-view-confirms every source — an unviewable source is absent from list AND count);
-// `children` view-gates the parent first (a caller who can't see the parent can't enumerate its children →
-// uniform 404) then FGA-view-confirms each child (omit-on-deny, no count leak). PUBLISHED-only throughout (the
-// published graph, §3 — a draft child/backlink is absent until publish, consistent with export/backlinks).
-// Called ONLY from the member route (no guest config), so a share_link principal never triggers a live
-// reverse-lookup (Hole A rev2); the anonymous/public surface renders the static snapshot instead (②b).
-export async function getQueryResults(
+// #370 / ADR-145 §4: resolve a dynamic list FOR THE VIEWER. Both branches are view-filtered and
+// existence-hiding (the search-leak class, carried over verbatim from ADR-134 §3): the HOST page is
+// view-gated first (a caller who can't see the page can't use it as a probe → uniform 404), then every
+// candidate is FGA-view-confirmed (omit-on-deny — an unviewable page is absent from list AND count).
+// PUBLISHED-only throughout (a draft's tags/children are absent until publish). page_tags is a stage-1
+// CANDIDATE set only; the FGA view check here is the authority. Called ONLY from the member route (no
+// guest config), so a share_link principal never triggers a live reverse-lookup (the ADR-134 Hole A
+// discipline); the anonymous/public surface renders the baked static snapshot instead.
+export async function getListResults(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { pageId: string; spec: QuerySpec; subject: string; context?: { current_time: string } },
+  args: { pageId: string; name: ListDirectiveName; body: string; subject: string; context?: { current_time: string } },
 ): Promise<Backlink[]> {
-  const { pageId, spec, subject, context } = args
-  if (spec.type === 'backlinks') return getBacklinks(db, fga, { pageId, subject, context })
-  if (spec.type === 'tag') return getBacklinks(db, fga, { pageId: spec.target, subject, context })
-  // children: view-gate the PARENT (existence-hiding, same as getBacklinks' target gate), then per-child view.
+  const { pageId, name, body, subject, context } = args
+  // View-gate the HOST page (existence-hiding, same as getBacklinks' target gate).
   if (!(await check(fga, subject, 'view', { type: 'page', id: pageId }, context))) {
     throw Object.assign(new Error('not found'), { statusCode: 404 })
   }
-  const rows = await db.sql<{ id: string; title: string }[]>`
-    SELECT id, title FROM pages
-    WHERE parent_id = ${pageId}
-      AND published_at IS NOT NULL
-    ORDER BY position ASC, updated_at DESC
-    LIMIT ${QUERY_OVER_FETCH}
-  `
+  let rows: { id: string; title: string }[]
+  if (name === 'tagged') {
+    const tag = parseTaggedBody(body)
+    if (!tag) return []
+    rows = await db.sql<{ id: string; title: string }[]>`
+      SELECT pt.page_id AS id, p.title FROM page_tags pt
+      JOIN pages p ON p.id = pt.page_id
+      WHERE pt.tag = ${tag}
+        AND pt.page_id <> ${pageId}
+        AND p.published_at IS NOT NULL
+      ORDER BY p.updated_at DESC
+      LIMIT ${QUERY_OVER_FETCH}
+    `
+  } else {
+    rows = await db.sql<{ id: string; title: string }[]>`
+      SELECT id, title FROM pages
+      WHERE parent_id = ${pageId}
+        AND published_at IS NOT NULL
+      ORDER BY position ASC, updated_at DESC
+      LIMIT ${QUERY_OVER_FETCH}
+    `
+  }
   const out: Backlink[] = []
   for (const r of rows) {
     if (out.length >= QUERY_DISPLAY_N) break // top-N VIEWABLE by rank (Hole C — over-fetch past the display cap)
@@ -1850,60 +1949,65 @@ export async function getQueryResults(
   return out
 }
 
-// #353 / ADR-134 rev2 (Hole A): resolve a `:::query` as the ANONYMOUS principal for a PUBLIC snapshot. The live
-// `:::query` is MEMBER-only (guest 401) — a per-viewer reverse-lookup is never handed to an anonymous surface
-// (that would be the #244 re-entry hole). Instead, at PUBLISH a page's queries are resolved ONCE as
-// `user:anonymous` and the results are baked into the published page; the public/guest reader renders that static
-// snapshot. This is the security-critical primitive: it MUST resolve as the anonymous principal (NOT the
-// publisher — resolving with the publisher's grants would leak member-only titles into the public snapshot), so
-// every branch's existing per-item `view` filter drops any page not publicly viewable. Same view-filter,
-// existence-hiding, and published-only rules as getQueryResults; only the subject differs.
+// #353→#370 / ADR-145 §4: resolve a dynamic list as the ANONYMOUS principal for a PUBLIC snapshot. The live
+// list is MEMBER-only (guest 401) — a per-viewer reverse-lookup is never handed to an anonymous surface
+// (that would be the #244 re-entry hole). Instead, at PUBLISH a page's `:::tagged`/`:::children` blocks are
+// resolved ONCE as `user:anonymous` and the results are baked into the published page; the public/guest
+// reader renders that static snapshot. This is the security-critical primitive: it MUST resolve as the
+// anonymous principal (NOT the publisher — resolving with the publisher's grants would leak member-only
+// titles into the public snapshot), so the per-item `view` filter drops any page not publicly viewable.
+// Same view-filter, existence-hiding, and published-only rules as getListResults; only the subject differs.
 export const PUBLIC_ANON_SUBJECT = 'user:anonymous' // user:* in GRANT tuples ≠ user:anonymous in CHECK (public.ts)
 
-export async function resolveAnonymousQuerySnapshot(
+export async function resolveAnonymousListSnapshot(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { pageId: string; spec: QuerySpec; context?: { current_time: string } },
+  args: { pageId: string; name: ListDirectiveName; body: string; context?: { current_time: string } },
 ): Promise<Backlink[]> {
   // Resolve with the anonymous subject: only pages granted `view` to user:anonymous (a `view_base@user:*` grant
   // AND published) survive the per-item filter — a member-only page is dropped, so its title never enters the
-  // public snapshot. A non-publicly-viewable TARGET/parent throws the same uniform 404 (no public existence
+  // public snapshot. A non-publicly-viewable HOST page throws the same uniform 404 (no public existence
   // oracle); the caller (the publish baker) treats that as "no snapshot" (empty), never a leak.
   try {
-    return await getQueryResults(db, fga, { pageId: args.pageId, spec: args.spec, subject: PUBLIC_ANON_SUBJECT, context: args.context })
+    return await getListResults(db, fga, { pageId: args.pageId, name: args.name, body: args.body, subject: PUBLIC_ANON_SUBJECT, context: args.context })
   } catch (e) {
-    if ((e as { statusCode?: number }).statusCode === 404) return [] // target not publicly viewable → empty snapshot
+    if ((e as { statusCode?: number }).statusCode === 404) return [] // host not publicly viewable → empty snapshot
     throw e
   }
 }
 
-// The baked snapshot stored on `pages.published_query_snapshot` (#353 / ADR-134 rev2 Hole A). One entry per
-// `:::query` block in the published markdown, IN DOCUMENT ORDER (resolveDirectiveRanges' query blocks) — the
-// public route re-scans the SAME published_md and aligns i-th block ↔ i-th snapshot entry. `spec` is kept for
-// debuggability only; alignment is positional, so a spec drift can never mis-attribute another block's results.
-export interface QuerySnapshot {
+// The baked snapshot stored on `pages.published_query_snapshot` (#353→#370; the column name predates the
+// ADR-145 rename of the directives and is kept to avoid a data migration). One entry per `:::tagged` /
+// `:::children` block in the published markdown, IN DOCUMENT ORDER (resolveDirectiveRanges, both names,
+// sorted by `from`) — the public route re-scans the SAME published_md and aligns i-th block ↔ i-th snapshot
+// entry. `spec` is kept for debuggability only; alignment is positional, so a spec drift can never
+// mis-attribute another block's results.
+export interface ListSnapshot {
   readonly v: 1
   readonly blocks: { readonly spec: string; readonly results: Backlink[] }[]
 }
 
-// Bake the anonymous snapshot for EVERY `:::query` block in `md` (any nesting depth), in document order. Called
+// The `:::tagged`/`:::children` blocks of `md` in document order — the ONE filter bake and substitute must
+// share (positional alignment breaks if they ever diverge).
+function listDirectiveRanges(md: string) {
+  return resolveDirectiveRanges(md).filter((d) => (LIST_DIRECTIVE_NAMES as readonly string[]).includes(d.name))
+}
+
+// Bake the anonymous snapshot for EVERY list block in `md` (any nesting depth), in document order. Called
 // at publish (both the real and no-op paths — a re-publish refreshes the public list even when THIS page's text
 // is unchanged, since results depend on OTHER pages' publish/grant state). Each block resolves as
 // `user:anonymous`, so a member-only match is dropped by the per-item view-filter (never in the public snapshot).
-export async function bakeQuerySnapshot(
+export async function bakeListSnapshot(
   db: TenantDb,
   fga: OpenFgaClient,
   args: { pageId: string; md: string },
-): Promise<QuerySnapshot> {
-  const queryDirs = resolveDirectiveRanges(args.md).filter((d) => d.name === 'query') // document order (sorted by `from`)
+): Promise<ListSnapshot> {
+  const listDirs = listDirectiveRanges(args.md)
   const blocks: { spec: string; results: Backlink[] }[] = []
-  for (const d of queryDirs) {
+  for (const d of listDirs) {
     const body = args.md.slice(d.bodyFrom, d.bodyTo)
-    const specLine = body.split('\n').map((l) => l.trim()).find((l) => l.length > 0) ?? ''
-    const spec = parseQuerySpec(body)
-    // Unparseable spec → 0 results (never an error — the body is authoring free-text, ADR-134 §2). A parseable
-    // spec resolves anonymously (target/parent not publicly viewable → uniform 404 → [] inside the resolver).
-    const results = spec ? await resolveAnonymousQuerySnapshot(db, fga, { pageId: args.pageId, spec }) : []
+    const specLine = `${d.name} ${body.split('\n').map((l) => l.trim()).find((l) => l.length > 0) ?? ''}`.trim()
+    const results = await resolveAnonymousListSnapshot(db, fga, { pageId: args.pageId, name: d.name as ListDirectiveName, body })
     blocks.push({ spec: specLine, results })
   }
   return { v: 1, blocks }
@@ -1918,27 +2022,28 @@ function escapeMdLinkText(s: string): string {
   return s.replace(/[\\\[\]]/g, '\\$&').replace(/[\r\n]+/g, ' ')
 }
 
-// Render one baked block's results as a static Markdown bullet list of internal links (the ADR-134 §2 "degrade to
-// a static snapshot" form). Empty results → empty string (the block renders NOTHING, matching the member read
-// surface — no empty box).
-export function renderQuerySnapshotList(results: readonly Backlink[]): string {
+// Render one baked block's results as a static Markdown bullet list of internal links (the ADR-145 §3
+// "degrade to a static snapshot" form). Empty results → empty string (the block renders NOTHING, matching
+// the member read surface — no empty box).
+export function renderListSnapshot(results: readonly Backlink[]): string {
   if (results.length === 0) return ''
   return results.map((r) => `- [${escapeMdLinkText(r.title)}](/p/${r.id})`).join('\n')
 }
 
-// Substitute every `:::query` directive in `md` with its baked anonymous list — the public/guest render pipeline
-// calls this so the anonymous surface shows a STATIC list (no live per-viewer resolution, Hole A rev2). Replaces
-// END→START so earlier offsets stay valid. Alignment is positional against the SAME md the snapshot was baked
-// from; a missing snapshot, a shorter snapshot, or a count mismatch collapses the unmatched block to nothing
-// (fail-safe: a query never renders a live/unauthorized list on the public surface). Pure — no I/O.
-export function substituteQuerySnapshots(md: string, snapshot: QuerySnapshot | null | undefined): string {
-  const queryDirs = resolveDirectiveRanges(md).filter((d) => d.name === 'query') // same filter+order as bake
-  if (queryDirs.length === 0) return md
+// Substitute every `:::tagged`/`:::children` directive in `md` with its baked anonymous list — the
+// public/guest render pipeline calls this so the anonymous surface shows a STATIC list (no live per-viewer
+// resolution, the ADR-134 Hole A discipline carried over). Replaces END→START so earlier offsets stay valid.
+// Alignment is positional against the SAME md the snapshot was baked from; a missing snapshot, a shorter
+// snapshot, or a count mismatch collapses the unmatched block to nothing (fail-safe: a list never renders a
+// live/unauthorized list on the public surface). Pure — no I/O.
+export function substituteListSnapshots(md: string, snapshot: ListSnapshot | null | undefined): string {
+  const listDirs = listDirectiveRanges(md) // same filter+order as bake
+  if (listDirs.length === 0) return md
   let out = md
-  for (let i = queryDirs.length - 1; i >= 0; i--) {
-    const d = queryDirs[i]!
+  for (let i = listDirs.length - 1; i >= 0; i--) {
+    const d = listDirs[i]!
     const block = snapshot?.v === 1 ? snapshot.blocks[i] : undefined
-    const replacement = block ? renderQuerySnapshotList(block.results) : '' // no snapshot / mismatch → render nothing
+    const replacement = block ? renderListSnapshot(block.results) : '' // no snapshot / mismatch → render nothing
     out = out.slice(0, d.from) + replacement + out.slice(d.to)
   }
   return out
@@ -2183,15 +2288,16 @@ export async function pagesPlugin(app: FastifyInstance) {
     return getLocalGraph(req.db, app.fga, { pageId: req.params.pageId, depth, subject, context })
   })
 
-  // #324 / ADR-134: resolve a member-live `:::query` list. MEMBER-ONLY — the route deliberately omits
-  // `config.guest`, so a share_link token is rejected (a guest never triggers a live reverse-lookup, Hole A
-  // rev2; the anonymous/public surface renders the static snapshot instead, ②b). An unrecognised spec returns
-  // an empty list (never an error — the body is authoring free-text). getQueryResults view-filters every branch.
-  app.get<{ Params: { pageId: string }; Querystring: { spec?: string } }>('/pages/:pageId/query', async (req) => {
+  // #370 / ADR-145: resolve a member-live `:::tagged` / `:::children` list. MEMBER-ONLY — the route
+  // deliberately omits `config.guest`, so a share_link token is rejected (a guest never triggers a live
+  // reverse-lookup, the ADR-134 Hole A discipline; the anonymous/public surface renders the static snapshot
+  // instead). An unknown directive name returns an empty list (never an error — the client passes the raw
+  // directive through). getListResults view-gates the host page and view-filters every result.
+  app.get<{ Params: { pageId: string }; Querystring: { name?: string; body?: string } }>('/pages/:pageId/list', async (req) => {
+    const name = req.query.name
+    if (name !== 'tagged' && name !== 'children') return [] as Backlink[]
     const { subject, context } = principalForPage(req, req.params.pageId)
-    const spec = parseQuerySpec(req.query.spec ?? '')
-    if (!spec) return [] as Backlink[]
-    return getQueryResults(req.db, app.fga, { pageId: req.params.pageId, spec, subject, context })
+    return getListResults(req.db, app.fga, { pageId: req.params.pageId, name, body: req.query.body ?? '', subject, context })
   })
 
   // #224 / ADR-104: the viewer-scoped title dictionary for auto internal links. The :pageId only
