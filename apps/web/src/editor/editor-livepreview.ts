@@ -1,12 +1,12 @@
 import { EditorView, minimalSetup } from "codemirror";
 import { tooltips, keymap } from "@codemirror/view";
-import { EditorState, Prec, type Compartment } from "@codemirror/state";
+import { EditorState, Prec, type Compartment, type Extension } from "@codemirror/state";
 import { vim, getCM } from "@replit/codemirror-vim";
 import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, reAnchorAfterReveal, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, backlinksSource, querySource, linkStatusResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type BacklinksSource, type QuerySource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
+import { livePreview, reAnchorAfterReveal, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, backlinksSource, querySource, linkStatusResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, nestedLivePreviewConfig, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type BacklinksSource, type QuerySource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
 import { deadLinks } from "./live-preview/dead-links"; // #276 / ADR-117: dead-internal-link strikethrough overlay
 import { blockAnchors } from "./live-preview/block-anchor"; // #325 / ADR-137 slice 2: hide trailing ` ^id` markers
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
@@ -76,6 +76,147 @@ function headerBandPx(view: EditorView): number {
 // TOC/anchor jump lands the heading flush under the band.
 const bandScrollMargins = EditorView.scrollMargins.of((view) => ({ top: headerBandPx(view), bottom: 72 }));
 
+// ADR-122 addendum (b) / #278: the options consumed by the SHARED decoration/keymap layer (layer i) —
+// the subset of the mount options that configure rendering/editing behaviour, as opposed to collab/
+// presence (layer ii) or host chrome (layer iii). buildLivePreviewExtensions reads only these.
+export interface LivePreviewSharedOpts {
+  readOnly?: boolean;
+  resolveImageUrl?: ImageResolver;
+  resolveAttachment?: AttachmentResolver;
+  renderDiagram?: DiagramRenderer;
+  resolveTransclude?: TranscludeResolver;
+  embedProviders?: readonly string[];
+  openPageEmbedPicker?: PageEmbedPicker;
+  openEmbedUrlPrompt?: EmbedUrlPrompt;
+  openTemplateInsertPicker?: TemplateInsertPicker;
+  uploadImage?: ImageUploader;
+  titleLinks?: TitleLinkSource;
+  backlinks?: BacklinksSource;
+  query?: QuerySource;
+  linkStatus?: LinkStatusResolver;
+}
+
+// ADR-122 addendum (b) / #278: how the shared layer is being mounted. `nested: true` = a nested markdown
+// editor (the slot-edit island): page-structure affordances (block drag) and host action seams (image
+// upload / pickers on the slash palette) are dropped, and vim/displayMode are pinned as static facets —
+// the island is short-lived and remounts, while the OUTER surface owns them via Compartments instead
+// (so a toggle reconfigures in place and never drops collab/presence).
+export interface LivePreviewLayerEnv {
+  nested: boolean;
+  vim?: boolean;
+  displayMode?: DisplayMode;
+  container?: HTMLElement; // the slash palette's stable DOM host (outer surface only)
+}
+
+// The live-preview DECORATION/KEYMAP layer (ADR-122 addendum (b)): built by ONE factory and shared
+// verbatim between the outer editing surface and any nested markdown editor (the slot island), so the
+// island's reveal / vim-atom / WYSIWYG marker-hide / nested-macro render can never drift from the outer
+// surface (the per-nested "manual facet mirror" this replaces was the whack-a-mole source).
+//
+// This is layer (i) ONLY. Deliberately NOT here:
+//   (ii) collab/presence — yCollab / ephemeralCollab / macroPresence. A nested mount must NEVER carry
+//        these: a second live binding to the canonical Y.Text is the echo-loop / dual-CRDT the single-
+//        Y.Text invariant forbids (the island writes via commit-on-blur replaceSource, ADR-025).
+//   (iii) host integration — floating toolbar / context menu / vim ex-commands / file drop / the dev
+//        probe: page-surface chrome, wrong inside a nested cell.
+// The outer mount adds (ii)+(iii) itself; the island gets this factory via nestedLivePreviewConfig.
+export function buildLivePreviewExtensions(opts: LivePreviewSharedOpts, env: LivePreviewLayerEnv): Extension {
+  const readOnly = env.nested ? false : !!opts.readOnly; // the island only ever mounts on an editable surface (the click gate refuses Reading/readOnly)
+  return [
+    // Nested mounts pin vim/displayMode for the island's lifetime (no Compartments — see LivePreviewLayerEnv).
+    // Reading never reaches an island and Source containers never render widgets, so only live/wysiwyg apply.
+    ...(env.nested ? [vimEnabled.of(!!env.vim), displayMode.of(env.displayMode ?? "live")] : []),
+    // #286: minimalSetup omits allowMultipleSelections (basicSetup includes it). Without it, vim's
+    // blockwise visual (Ctrl+V) — which codemirror-vim implements as one selection RANGE per line — has
+    // its extra ranges collapsed to the main one, so a rectangle selects only the caret line. Enable it so
+    // the block selection survives; drawSelection (in minimalSetup) already renders every range. This is
+    // LOCAL, display-only selection state — the single-Y.Text doc / remote presence are untouched.
+    EditorState.allowMultipleSelections.of(true),
+    // GFM base (tables) + fenced-code highlighting. The doc stays plain markdown.
+    markdownExtension(),
+    // #158-C2: Everforest code highlighting (after minimalSetup's default → takes precedence).
+    everforestHighlight,
+    livePreviewTheme,
+    livePreview,
+    // #243: re-anchor the caret after a revealed diagram re-mounts as an atom and settles taller
+    // (async SVG), so leaving a mermaid/plantuml block by `j` never pushes the caret off-screen. Editable
+    // surface only — the read-only view never reveals macros (no caret-in), so the transition can't occur.
+    reAnchorAfterReveal,
+    mathField, // #158-C3: KaTeX math ($…$ / $$…$$), reveal-on-cursor atoms
+    // Macro blocks (ADR-022): code-fence macros (```mermaid) render via the registry;
+    // folding collapses a block to its summary line (vim za/zo). Editable surface only
+    // — the fold affordance is an editing control; the published view just renders.
+    macroFold,
+    // Inline macro edit state + Esc-exit (entered by clicking a macro — Part 11).
+    macroEdit,
+    // ADR-024: Ctrl+Enter "enters" the macro atom at the caret (modal / inline cell-edit
+    // / source reveal). High prec so it beats vim's default Enter handling. event.key
+    // "Enter" is JIS-safe. Mouse users enter by clicking (decorations MacroWidget).
+    Prec.high(keymap.of([{ key: "Ctrl-Enter", run: enterMacroCommand }])),
+    // #215 / ADR-100 (Consumer 4): with a nested macro selected, Backspace/Delete remove ONLY its range
+    // (one Y.Text change via nestedDeleteChange — the same range vim `dd` uses). Falls through (returns
+    // false) when nothing nested is selected, so normal Backspace/Delete is untouched everywhere else.
+    ...(readOnly ? [] : [Prec.high(keymap.of((["Backspace", "Delete"]).map((key) => ({ key, run: (view) => {
+      const sel = view.state.field(nestedSelectionField, false);
+      if (!sel) return false;
+      const ch = nestedDeleteChange(view.state, sel.anchor);
+      if (!ch) return false;
+      view.dispatch({ changes: ch, effects: setNestedSelection.of(null), userEvent: "delete" });
+      view.focus();
+      return true;
+    } })))) ]),
+    // #202: list-editing keys (Tab/Shift-Tab indent, Enter continuation) — editable surface only.
+    ...(readOnly ? [] : [listEditing]),
+    // #223: paste a URL / rich link → Markdown [text](url) (editable surface only; Ctrl+Shift+V pastes plain).
+    ...(readOnly ? [] : [pasteLinkify()]),
+    // #224 / ADR-104: auto internal links. The decoration plugin is always present but INERT until the host
+    // injects `titleLinks` — a dictionary already filtered to the viewer's authorized pages (the authz lives
+    // there, not here) plus a navigate callback that re-confirms `view` at the destination. No source → no
+    // dictionary → no links (safe default), so mounting it unconditionally never leaks.
+    titleLinkDecorations(),
+    titleLinkHover(), // #224: the excerpt hover card (tooltip layer) — inert without a source/excerpt seam
+    ...(opts.titleLinks ? [titleLinkSource.of(opts.titleLinks)] : []),
+    // Task checkboxes are interactive on the editable surface: a click flips the
+    // `[ ]`/`[x]` char directly in the doc (in a slot island: the ISLAND doc, committed on blur).
+    ...(readOnly ? [] : [checkboxControl.of({ mode: "edit" })]),
+    linkClicks,
+    // ADR-024 atom motion: every block decoration is a single motion-stop — a one-line
+    // key lands ON the atom, the next steps past it (macros stay rendered; non-macro
+    // blocks reveal on landing). motionKeyTracker gates the overshoot clamp. Editable only.
+    ...(readOnly ? [] : [motionKeyTracker, blockEntry, wysiwygInlineSkip, atomDelete, atomYank, vimWysiwygCaretGuard]),
+    // #84: a left-gutter grip per top-level block; drag it to reorder (one Yjs op). Display-only gutter +
+    // drop indicator; editable surface only. NOT in a nested island — block reorder is a page-structure
+    // affordance, and a drag crossing the island boundary has no defined target.
+    ...(readOnly || env.nested ? [] : [blockDrag]),
+    // #313: hover 🔗 on heading lines — copies the heading's anchor URL (display-only widget).
+    headingAnchors,
+    // Inline-comment anchor highlights (display-only; fed via setCommentRanges — inert without data).
+    commentHighlightTheme,
+    commentHighlights,
+    // Resolves wks-attachment image ids → fresh presigned URLs (member only).
+    ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
+    // #273: resolves [name](wks-attachment:id) file links -> chip / download card / inline viewer.
+    ...(opts.resolveAttachment ? [attachmentResolver.of(opts.resolveAttachment)] : []),
+    // #140: host-mediated plantuml render (the macro never fetches — narrow host-API).
+    ...(opts.renderDiagram ? [diagramRenderer.of(opts.renderDiagram)] : []),
+    // #108: host-mediated transclude (the :::transclude macro never fetches — narrow host-API).
+    ...(opts.resolveTransclude ? [transcludeResolver.of(opts.resolveTransclude)] : []),
+    ...(opts.backlinks ? [backlinksSource.of(opts.backlinks)] : []), // #307 / ADR-127: host-mediated :::backlinks
+    ...(opts.query ? [querySource.of(opts.query)] : []), // #324 / ADR-134: host-mediated :::query (member-only)
+    deadLinks, // #276 / ADR-117: dead-internal-link strikethrough (inert without the linkStatus seam)
+    blockAnchors, // #325 / ADR-137 slice 2: hide trailing ` ^id` block-ref markers (reveal on the caret line)
+    ...(opts.linkStatus ? [linkStatusResolver.of(opts.linkStatus)] : []),
+    ...(opts.embedProviders ? [embedAllowlist.of(opts.embedProviders)] : []),
+    // #210 bounce: host seam for the in-app :::embed-external URL modal (retarget button → modal, not window.prompt).
+    ...(opts.openEmbedUrlPrompt ? [embedUrlPrompt.of(opts.openEmbedUrlPrompt)] : []),
+    // Slash command palette (editable surface only; view guests don't get it). The `/` palette owns image
+    // insert (P): uploadImage + the container (the host, so the hidden file input survives CM's DOM
+    // reconcile) — HOST actions, so a nested island gets the bare palette (image/embed/template no-op
+    // gracefully; headings·lists·todo·quote·code·divider·link work on the island's own doc).
+    ...(readOnly ? [] : [slashPalette(env.nested ? {} : { uploadImage: opts.uploadImage, container: env.container, openPageEmbedPicker: opts.openPageEmbedPicker, openTemplateInsertPicker: opts.openTemplateInsertPicker })]),
+  ];
+}
+
 // The single editing surface (Group C / Step I): Obsidian-style live preview bound to
 // the canonical Y.Text. Rendered by default; the line/block under the cursor reveals
 // raw markdown (reveal-on-cursor in decorations.ts) so it's editable in place. vim is
@@ -87,7 +228,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: { readOnly?: boolean; resolveImageUrl?: ImageResolver; resolveAttachment?: AttachmentResolver; renderDiagram?: DiagramRenderer; resolveTransclude?: TranscludeResolver; embedProviders?: readonly string[]; openPageEmbedPicker?: PageEmbedPicker; openEmbedUrlPrompt?: EmbedUrlPrompt; openTemplateInsertPicker?: TemplateInsertPicker; uploadImage?: ImageUploader; vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; titleLinks?: TitleLinkSource; backlinks?: BacklinksSource; query?: QuerySource; linkStatus?: LinkStatusResolver; selfPageId?: string } = {},
+  opts: LivePreviewSharedOpts & { vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; selfPageId?: string } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -98,12 +239,6 @@ export function mountLivePreview(
       // switch it in place (no remount → collab/presence untouched), like vim.
       ...(opts.displayModeCompartment ? [opts.displayModeCompartment.of(displayModeContent(opts.displayMode ?? "live"))] : [displayMode.of(opts.displayMode ?? "live")]),
       minimalSetup,
-      // #286: minimalSetup omits allowMultipleSelections (basicSetup includes it). Without it, vim's
-      // blockwise visual (Ctrl+V) — which codemirror-vim implements as one selection RANGE per line — has
-      // its extra ranges collapsed to the main one, so a rectangle selects only the caret line. Enable it so
-      // the block selection survives; drawSelection (in minimalSetup) already renders every range. This is
-      // LOCAL, display-only selection state — the single-Y.Text doc / remote presence are untouched.
-      EditorState.allowMultipleSelections.of(true),
       // position:fixed so the palette/bubble/hint escape overflow:hidden ancestors and
       // CM flips them above/below + shifts horizontally to stay within the viewport.
       tooltips({ position: "fixed" }),
@@ -154,54 +289,10 @@ export function mountLivePreview(
           view.dispatch({ effects: EditorView.scrollIntoView(Math.min(head, view.state.doc.length), { y: "nearest", yMargin }) });
         });
       }),
-      // GFM base (tables) + fenced-code highlighting. The doc stays plain markdown.
-      markdownExtension(),
-      // #158-C2: Everforest code highlighting (after minimalSetup's default → takes precedence).
-      everforestHighlight,
-      livePreviewTheme,
-      livePreview,
-      // #243: re-anchor the caret after a revealed diagram re-mounts as an atom and settles taller
-      // (async SVG), so leaving a mermaid/plantuml block by `j` never pushes the caret off-screen. Editable
-      // surface only — the read-only view never reveals macros (no caret-in), so the transition can't occur.
-      reAnchorAfterReveal,
-      mathField, // #158-C3: KaTeX math ($…$ / $$…$$), reveal-on-cursor atoms
-      // Macro blocks (ADR-022): code-fence macros (```mermaid) render via the registry;
-      // folding collapses a block to its summary line (vim za/zo). Editable surface only
-      // — the fold affordance is an editing control; the published view just renders.
-      macroFold,
-      // Inline macro edit state + Esc-exit (entered by clicking a macro — Part 11).
-      macroEdit,
-      // ADR-024: Ctrl+Enter "enters" the macro atom at the caret (modal / inline cell-edit
-      // / source reveal). High prec so it beats vim's default Enter handling. event.key
-      // "Enter" is JIS-safe. Mouse users enter by clicking (decorations MacroWidget).
-      Prec.high(keymap.of([{ key: "Ctrl-Enter", run: enterMacroCommand }])),
-      // #215 / ADR-100 (Consumer 4): with a nested macro selected, Backspace/Delete remove ONLY its range
-      // (one Y.Text change via nestedDeleteChange — the same range vim `dd` uses). Falls through (returns
-      // false) when nothing nested is selected, so normal Backspace/Delete is untouched everywhere else.
-      ...(opts.readOnly ? [] : [Prec.high(keymap.of((["Backspace", "Delete"]).map((key) => ({ key, run: (view) => {
-        const sel = view.state.field(nestedSelectionField, false);
-        if (!sel) return false;
-        const ch = nestedDeleteChange(view.state, sel.anchor);
-        if (!ch) return false;
-        view.dispatch({ changes: ch, effects: setNestedSelection.of(null), userEvent: "delete" });
-        view.focus();
-        return true;
-      } })))) ]),
-      // #202: list-editing keys (Tab/Shift-Tab indent, Enter continuation) — editable surface only.
-      ...(opts.readOnly ? [] : [listEditing]),
-      // #223: paste a URL / rich link → Markdown [text](url) (editable surface only; Ctrl+Shift+V pastes plain).
-      ...(opts.readOnly ? [] : [pasteLinkify()]),
-      // #224 / ADR-104: auto internal links. The decoration plugin is always present but INERT until the host
-      // injects `titleLinks` — a dictionary already filtered to the viewer's authorized pages (the authz lives
-      // there, not here) plus a navigate callback that re-confirms `view` at the destination. No source → no
-      // dictionary → no links (safe default), so mounting it unconditionally never leaks.
-      titleLinkDecorations(),
-      titleLinkHover(), // #224: the excerpt hover card (tooltip layer) — inert without a source/excerpt seam
-      ...(opts.titleLinks ? [titleLinkSource.of(opts.titleLinks)] : []),
-      // Task checkboxes are interactive on the editable surface: a click flips the
-      // `[ ]`/`[x]` char directly in the Y.Text (a normal draft edit). (Read-only →
-      // disabled; the view surface wires its own no-revision persist below.)
-      ...(opts.readOnly ? [] : [checkboxControl.of({ mode: "edit" })]),
+      // ADR-122 addendum (b) / #278: the shared decoration/keymap layer — ONE factory builds this surface
+      // AND the nested slot island's config (via nestedLivePreviewConfig below), so island behaviour
+      // (reveal / vim-atom / WYSIWYG marker-hide / nested-macro render) can never drift from the outer surface.
+      buildLivePreviewExtensions(opts, { nested: false, container: parent }),
       // DEV-only probe: expose the caret's doc line + selection offsets so e2e can
       // assert motion / selection extent. Stripped from prod builds.
       ...(import.meta.env.DEV ? [EditorView.updateListener.of((u) => {
@@ -252,35 +343,8 @@ export function mountLivePreview(
           (w as unknown as { __lpLineTops?: unknown }).__lpLineTops = tops;
         } catch { /* coords unavailable (not laid out) */ }
       })] : []),
-      linkClicks,
-      // ADR-024 atom motion: every block decoration is a single motion-stop — a one-line
-      // key lands ON the atom, the next steps past it (macros stay rendered; non-macro
-      // blocks reveal on landing). motionKeyTracker gates the overshoot clamp. Editable only.
-      ...(opts.readOnly ? [] : [motionKeyTracker, blockEntry, wysiwygInlineSkip, atomDelete, atomYank, vimWysiwygCaretGuard]),
-      // #84: a left-gutter grip per top-level block; drag it to reorder (one Yjs op).
-      // Display-only gutter + drop indicator; editable surface only.
-      ...(opts.readOnly ? [] : [blockDrag]),
-      // #313: hover 🔗 on heading lines — copies the heading's anchor URL (display-only widget).
-      headingAnchors,
-      // Inline-comment anchor highlights (display-only; fed via setCommentRanges).
-      commentHighlightTheme,
-      commentHighlights,
-      // Resolves wks-attachment image ids → fresh presigned URLs (member only).
-      ...(opts.resolveImageUrl ? [imageResolver.of(opts.resolveImageUrl)] : []),
-      // #273: resolves [name](wks-attachment:id) file links -> chip / download card / inline viewer.
-      ...(opts.resolveAttachment ? [attachmentResolver.of(opts.resolveAttachment)] : []),
-      // #140: host-mediated plantuml render (the macro never fetches — narrow host-API).
-      ...(opts.renderDiagram ? [diagramRenderer.of(opts.renderDiagram)] : []),
-      // #108: host-mediated transclude (the :::transclude macro never fetches — narrow host-API).
-      ...(opts.resolveTransclude ? [transcludeResolver.of(opts.resolveTransclude)] : []),
-      ...(opts.backlinks ? [backlinksSource.of(opts.backlinks)] : []), // #307 / ADR-127: host-mediated :::backlinks
-      ...(opts.query ? [querySource.of(opts.query)] : []), // #324 / ADR-134: host-mediated :::query (member-only)
-      deadLinks, // #276 / ADR-117: dead-internal-link strikethrough (inert without the linkStatus seam)
-      blockAnchors, // #325 / ADR-137 slice 2: hide trailing ` ^id` block-ref markers (reveal on the caret line)
-      ...(opts.linkStatus ? [linkStatusResolver.of(opts.linkStatus)] : []),
-      ...(opts.embedProviders ? [embedAllowlist.of(opts.embedProviders)] : []),
-      // #210 bounce: host seam for the in-app :::embed-external URL modal (retarget button → modal, not window.prompt).
-      ...(opts.openEmbedUrlPrompt ? [embedUrlPrompt.of(opts.openEmbedUrlPrompt)] : []),
+      // Layer (ii): collab/presence — OUTER surface only (a nested island must never live-bind the
+      // canonical Y.Text; see buildLivePreviewExtensions).
       // #92: host ephemeral-collab seam for a collab-capable modal (excalidraw); {theme} stays narrow.
       ...(opts.ephemeralCollab ? [ephemeralCollab.of(opts.ephemeralCollab)] : []),
       // #92 presence: bridge "editing a macro's modal" onto the page awareness (read by the overlay below).
@@ -290,12 +354,13 @@ export function mountLivePreview(
       // #92 comment 982 (②③): macro-presence as an outline + top-right avatar on EVERY occupied macro block
       // (modal-editing OR remote caret on the atom). Read-only overlay AFTER yCollab (it reads its awareness).
       ...(opts.macroPresence ? [macroPresenceOverlay] : []),
-      // Slash command palette + floating selection toolbar (editable surface only; view
-      // guests get neither). The `/` palette owns image insert (P): uploadImage + the
-      // container (the host, so the hidden file input survives CM's DOM reconcile) go
-      // here. The bubble is decoration-only (A). slashPalette FIRST so its vimVisualField
-      // precedes the toolbar's bubble (which reads it to suppress itself in vim visual).
-      ...(!opts.readOnly ? [slashPalette({ uploadImage: opts.uploadImage, container: parent, openPageEmbedPicker: opts.openPageEmbedPicker, openTemplateInsertPicker: opts.openTemplateInsertPicker }), floatingToolbar(), contextMenu({ selfPageId: opts.selfPageId }), vimExCommands({ exitEdit: opts.onExitEdit, publish: opts.onPublish })] : []),
+      // Layer (iii): host chrome (editable surface only; view guests get none). The slash palette itself
+      // lives in the shared layer (its vimVisualField still precedes the toolbar's bubble, which reads it
+      // to suppress itself in vim visual — the factory sits earlier in this array).
+      ...(!opts.readOnly ? [floatingToolbar(), contextMenu({ selfPageId: opts.selfPageId }), vimExCommands({ exitEdit: opts.onExitEdit, publish: opts.onPublish })] : []),
+      // ADR-122 addendum (b): the nested-editor seam — the slot island builds its decoration/keymap layer
+      // from the SAME factory (same opts closure), with nested:true (collab/presence/host chrome excluded).
+      nestedLivePreviewConfig.of((env) => buildLivePreviewExtensions(opts, { nested: true, ...env })),
       ...(opts.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
     ],
   });

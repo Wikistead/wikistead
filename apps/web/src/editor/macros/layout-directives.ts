@@ -80,6 +80,16 @@ export const detailsMacro: DirectiveMacro = {
 // the same reason as the render-depth counter — rendering is fully synchronous.
 const tabActiveIndex = new Map<number, number>();
 
+// #278 item 1 (island lifecycle): the slot-island host (decorations.ts) commits + closes an open
+// island when the user switches tabs. Its commit REBUILDS the widget, and the rebuild restores the active
+// tab from this map — so the host must be able to record the CLICKED tab before it commits (it cannot rely
+// on the tab button's own mousedown having run: with native events, microtasks fire between listeners, so
+// the commit can rebuild the widget before activate ever runs). Display-only state, same discipline as
+// the map itself.
+export function setActiveTabIndex(base: number, i: number): void {
+  tabActiveIndex.set(base, i);
+}
+
 export function tabsLiveRender(body: string): HTMLElement {
   const base = takePendingBaseOffset(); // #215 / ADR-100: absolute base of `body` (null = untagged render)
   const items = parseLayoutItems(body, "tab");
