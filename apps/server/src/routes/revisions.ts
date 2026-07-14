@@ -11,7 +11,7 @@ import { fanOutFeedEvent } from './notifications.js' // #327 / ADR-143: reliable
 import type { TenantDb } from '../db/index.js'
 import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc, readRevisionYdoc } from './revision-ydoc.js'
-import { reconcileTaskChecks } from './pages.js' // #316 / ADR-123: restore-time checkbox reconciliation
+import { reconcileTaskChecks, requireModerate } from './pages.js' // #316 checkbox reconciliation; #330 the moderation gate
 
 interface RevisionRow {
   id: string; tenant_id: string; page_id: string
@@ -227,6 +227,49 @@ export async function restoreRevision(
   return { documentName }
 }
 
+// #327 / ADR-143 (increment 2): per-actor bulk revert — ONE forward restore to the revision just before the
+// actor's LATEST CONTIGUOUS run. Moderation-gated (moderate OR manage, #330); the restore itself reuses
+// restoreRevision verbatim (forward-only append, #316 checkbox reconcile, in-tx feed event, S3-first) — a
+// moderator holds `edit` via the model bypass, so the inner edit gate passes by construction.
+//
+// HONESTY BOUNDS (the ADR's whole point — never a silent destructive mass-revert):
+//   'not-latest'  — the actor's revisions are NOT the most recent run (someone else edited after them).
+//                   One click can't isolate their changes → 409; the client routes to the GUIDED MANUAL
+//                   path (increment 3: highlight the actor's revisions, diff each, restore a chosen point).
+//   'no-baseline' — the run reaches the very first (retention-visible) revision, so there is no pre-run
+//                   revision to restore to → 409, guided manual.
+//   'no-revisions'— nothing to revert (no visible revisions at all) → 409.
+// The client precomputes the same run from the revision list it already shows; this service re-derives it
+// server-side (the fortress) so a stale/forged client can never widen the revert.
+export async function revertActorRun(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  valkey: IORedis,
+  storage: StorageDriver,
+  args: { tenantId: string; pageId: string; actor: string; userId: string; plan: string },
+): Promise<{ restoredToRevisionId: string; revertedCount: number }> {
+  await requireModerate(fga, args.userId, args.pageId) // #330: a moderation verb — editors never pass
+  // The same retention-gated window the history list exposes: the run and its baseline must both be
+  // visible on this plan (a baseline hidden by retention → 'no-baseline', matching what the UI can show).
+  const revs = await db.sql<RevisionRow[]>`
+    SELECT id, tenant_id, page_id, title, created_by, created_at
+    FROM revisions WHERE page_id = ${args.pageId} AND created_at >= ${retentionCutoff(args.plan)}
+    ORDER BY created_at DESC
+  `
+  if (revs.length === 0) throw Object.assign(new Error('no revisions to revert'), { statusCode: 409, reason: 'no-revisions' })
+  if (revs[0]!.created_by !== args.actor) {
+    throw Object.assign(new Error("the actor's revisions are not the latest run"), { statusCode: 409, reason: 'not-latest' })
+  }
+  let runLen = 0
+  while (runLen < revs.length && revs[runLen]!.created_by === args.actor) runLen++
+  const baseline = revs[runLen]
+  if (!baseline) throw Object.assign(new Error('no revision precedes the run'), { statusCode: 409, reason: 'no-baseline' })
+  await restoreRevision(db, fga, valkey, storage, {
+    tenantId: args.tenantId, pageId: args.pageId, revId: baseline.id, userId: args.userId, plan: args.plan,
+  })
+  return { restoredToRevisionId: baseline.id, revertedCount: runLen }
+}
+
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function revisionsPlugin(app: FastifyInstance) {
@@ -253,6 +296,29 @@ export async function revisionsPlugin(app: FastifyInstance) {
         plan: req.tenant.plan,
       })
       return reply.code(204).send()
+    },
+  )
+
+  // #327 / ADR-143 (increment 2): one-click per-actor revert of the latest contiguous run. MEMBER-ONLY
+  // (no `config.guest` — a guest is rejected before the handler) + moderate/manage inside the service.
+  // 409 carries a `reason` (not-latest / no-baseline / no-revisions) so the client routes honestly to the
+  // guided manual path instead of pretending a one-click was possible.
+  app.post<{ Params: { pageId: string }; Body: { actor?: string } }>(
+    '/pages/:pageId/revisions/revert-actor',
+    async (req, reply) => {
+      const actor = req.body?.actor ?? ''
+      if (!/^(user|guest|anon):[^\s]+$/.test(actor)) {
+        return reply.code(400).send({ error: 'actor must be user:<sub>, guest:<id> or anon:<id>' })
+      }
+      try {
+        return await revertActorRun(req.db, app.fga, app.valkey, app.storageDriver, {
+          tenantId: req.tenant.id, pageId: req.params.pageId, actor, userId: req.user.sub, plan: req.tenant.plan,
+        })
+      } catch (err) {
+        const e = err as { statusCode?: number; reason?: string; message?: string }
+        if (e.statusCode === 409 && e.reason) return reply.code(409).send({ error: e.message, reason: e.reason })
+        throw err
+      }
     },
   )
 }

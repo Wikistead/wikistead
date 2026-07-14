@@ -684,7 +684,7 @@ async function requireManage(fga: OpenFgaClient, userId: string, pageId: string)
 // manage (a page creator's manage_direct is not a moderator), and manage_direct holders are not in
 // space#moderator, so BOTH relations are checked. Used by the moderation verbs (freeze C-4, per-actor revert
 // C-2, patrol C-1) — never by grants/delete/settings, which stay requireManage (moderate ≠ manage).
-async function requireModerate(fga: OpenFgaClient, userId: string, pageId: string): Promise<void> {
+export async function requireModerate(fga: OpenFgaClient, userId: string, pageId: string): Promise<void> {
   const target = { type: 'page' as const, id: pageId }
   const [canModerate, canManage] = await Promise.all([
     check(fga, `user:${userId}`, 'moderate', target),
