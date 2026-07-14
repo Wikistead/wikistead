@@ -4,6 +4,7 @@ import { highlightExtension } from "./highlight-ext.js"; // #334 / ADR-129: `==`
 import { footnoteExtension } from "./footnote-ext.js"; // #335 / ADR-130: `[^1]` / `[^1]:` grammar
 import { SafeHtml, html, joinSafe, unsafeHtml } from "./safe-html.js";
 import { safeHref } from "./url-safety.js"; // #384: the single shared URL-scheme XSS judge
+import { HEADINGS, footnoteRefLabel } from "./md-nodes.js"; // #384: shared heading-tag map + footnote-label extractor
 
 // #85 / ADR-059 + ADR-085: the SERVER-SIDE, DOM-FREE markdown → HTML renderer for published / static
 // export. It is the string counterpart of the editor's DOM renderer (apps/web md-render.ts): the SAME
@@ -65,12 +66,6 @@ const MARKS = new Set([
 // stays a muted `?` (ADR-130 §A) — never a dangling link. Mirrors apps/web md-render.ts (ADR-085 single truth).
 let footnoteNumbers: Map<string, number> | null = null;
 // The label inside `[^label]` (a FootnoteRef node spans `[^` … `]`).
-const footnoteRefLabel = (src: string, from: number, to: number): string => src.slice(from + 2, to - 1);
-
-const HEADINGS: Record<string, string> = {
-  ATXHeading1: "h1", ATXHeading2: "h2", ATXHeading3: "h3", ATXHeading4: "h4", ATXHeading5: "h5", ATXHeading6: "h6",
-  SetextHeading1: "h1", SetextHeading2: "h2",
-};
 
 // #384: the URL-scheme XSS judgment is now a SINGLE shared function (url-safety.ts) used by both markdown
 // sinks — no more hand-mirrored copy to keep in sync with apps/web md-render.ts.
