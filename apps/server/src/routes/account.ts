@@ -53,11 +53,16 @@ export interface AccountSettings {
   // (null = the two-question flow has not been seen → the client fires it once).
   editorChrome: EditorChromeVisibility | null
   onboardingCompletedAt: string | null
+  // #362 / ADR-126 addendum: member notification defaults (emission-narrowing only — the feed/inbox
+  // display gates are the sole permission authority). notificationsEnabled=false = global kill switch;
+  // defaultEventMask applies to watches whose own mask is empty ([] = all types).
+  notificationsEnabled: boolean
+  defaultEventMask: string[]
 }
 
 export async function getAccountSettings(db: TenantDb, args: { subject: string }): Promise<AccountSettings> {
-  const [m] = await db.sql<[{ display_name: string | null; display_name_override: string | null; avatar_image_key: string | null; editor_keymap: string | null; editor_display_mode: string | null; keybindings: unknown; editor_chrome: unknown; onboarding_completed_at: Date | string | null }?]>`
-    SELECT display_name, display_name_override, avatar_image_key, editor_keymap, editor_display_mode, keybindings, editor_chrome, onboarding_completed_at
+  const [m] = await db.sql<[{ display_name: string | null; display_name_override: string | null; avatar_image_key: string | null; editor_keymap: string | null; editor_display_mode: string | null; keybindings: unknown; editor_chrome: unknown; onboarding_completed_at: Date | string | null; notifications_enabled: boolean | null; default_event_mask: string[] | null }?]>`
+    SELECT display_name, display_name_override, avatar_image_key, editor_keymap, editor_display_mode, keybindings, editor_chrome, onboarding_completed_at, notifications_enabled, default_event_mask
     FROM members WHERE sub = ${args.subject} LIMIT 1`
   if (!m) throw Object.assign(new Error('no member row'), { statusCode: 404 })
   // JSONB comes back as a raw JSON string from this pg driver — parse it (null → {}).
@@ -73,6 +78,8 @@ export async function getAccountSettings(db: TenantDb, args: { subject: string }
     hasAvatar: !!m.avatar_image_key,
     editorChrome: chromeRaw as EditorChromeVisibility | null,
     onboardingCompletedAt: m.onboarding_completed_at == null ? null : new Date(m.onboarding_completed_at).toISOString(),
+    notificationsEnabled: m.notifications_enabled ?? true,
+    defaultEventMask: m.default_event_mask ?? [],
   }
 }
 
@@ -81,7 +88,7 @@ export async function getAccountSettings(db: TenantDb, args: { subject: string }
 // only display_name, so the override set here survives re-login (ADR-020 D2).
 export async function updateAccountSettings(
   db: TenantDb,
-  args: { subject: string; displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean },
+  args: { subject: string; displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[] },
 ): Promise<AccountSettings> {
   if (args.editorKeymap !== undefined && !(KEYMAP_MODES as string[]).includes(args.editorKeymap)) {
     throw Object.assign(new Error('invalid keymap'), { statusCode: 400 })
@@ -115,6 +122,16 @@ export async function updateAccountSettings(
   }
   if (args.onboardingCompleted === true) {
     await db.sql`UPDATE members SET onboarding_completed_at = COALESCE(onboarding_completed_at, now()), updated_at = now() WHERE sub = ${args.subject}`
+  }
+  // #362: notification defaults (self-scope like everything here; emission-narrowing only).
+  if (args.notificationsEnabled !== undefined) {
+    if (typeof args.notificationsEnabled !== 'boolean') throw Object.assign(new Error('invalid notificationsEnabled'), { statusCode: 400 })
+    await db.sql`UPDATE members SET notifications_enabled = ${args.notificationsEnabled}, updated_at = now() WHERE sub = ${args.subject}`
+  }
+  if (args.defaultEventMask !== undefined) {
+    if (!Array.isArray(args.defaultEventMask)) throw Object.assign(new Error('invalid defaultEventMask'), { statusCode: 400 })
+    const mask = args.defaultEventMask.map(String).slice(0, 32)
+    await db.sql`UPDATE members SET default_event_mask = ${mask}::text[], updated_at = now() WHERE sub = ${args.subject}`
   }
   return getAccountSettings(db, { subject: args.subject })
 }
@@ -150,8 +167,8 @@ export async function accountPlugin(app: FastifyInstance) {
   // All member-gated (the default guard requires req.user; guests/unauth are rejected).
   app.get('/me/settings', async (req) => getAccountSettings(req.db, { subject: req.user.sub }))
 
-  app.patch<{ Body: { displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean } }>('/me/settings', async (req) =>
-    updateAccountSettings(req.db, { subject: req.user.sub, displayNameOverride: req.body?.displayNameOverride, editorKeymap: req.body?.editorKeymap, editorDisplayMode: req.body?.editorDisplayMode, keybindings: req.body?.keybindings, editorChrome: req.body?.editorChrome, onboardingCompleted: req.body?.onboardingCompleted }),
+  app.patch<{ Body: { displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[] } }>('/me/settings', async (req) =>
+    updateAccountSettings(req.db, { subject: req.user.sub, displayNameOverride: req.body?.displayNameOverride, editorKeymap: req.body?.editorKeymap, editorDisplayMode: req.body?.editorDisplayMode, keybindings: req.body?.keybindings, editorChrome: req.body?.editorChrome, onboardingCompleted: req.body?.onboardingCompleted, notificationsEnabled: req.body?.notificationsEnabled, defaultEventMask: req.body?.defaultEventMask }),
   )
 
   app.put<{ Body: { data?: string } }>('/me/avatar', { bodyLimit: AVATAR_BODY_LIMIT }, async (req, reply) => {

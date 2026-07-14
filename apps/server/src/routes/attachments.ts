@@ -4,6 +4,7 @@ import { check } from '@wikistead/authz'
 import { assertPageViewable } from '../page-view-gate.js'
 import { resolveEntitlements, decideAllowance } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
+import { fanOutFeedEvent } from './notifications.js' // #362 / ADR-126 addendum: attachment.confirmed feed event
 import { pool } from '../db/pool.js'
 import { makeS3Key } from '../storage/driver.js'
 import type { StorageDriver } from '../storage/index.js'
@@ -141,11 +142,19 @@ export async function confirmAttachment(
     inlineKind = sniffInlineKind(await storage.getObjectHead(row.s3_key, SNIFF_BYTES))
   } catch { /* unreadable head → 'none' (fail closed) */ }
 
-  await db.sql`
-    UPDATE attachments
-    SET status = 'confirmed', size_bytes = ${sizeBytes}, confirmed_at = now(), inline_kind = ${inlineKind}
-    WHERE id = ${args.id}
-  `
+  // #362 / ADR-126 addendum: emit the feed event IN the same tx as the confirm flip. Confirm is
+  // edit-gated but publish-independent — the shared helper's published_at NULL-skip enforces the
+  // published-only emission rule (a draft page's attachment activity never becomes a feed row).
+  const [pg] = await db.sql<[{ published_at: Date | null; space_id: string }?]>`
+    SELECT published_at, space_id FROM pages WHERE id = ${row.page_id}`
+  await db.tx(async (tx) => {
+    await tx`
+      UPDATE attachments
+      SET status = 'confirmed', size_bytes = ${sizeBytes}, confirmed_at = now(), inline_kind = ${inlineKind}
+      WHERE id = ${args.id}
+    `
+    await fanOutFeedEvent(tx, { tenantId: args.tenantId, eventType: 'attachment.confirmed', pageId: row.page_id, spaceId: pg?.space_id ?? null, actor: `user:${args.userId}`, publishedAt: pg?.published_at ?? null })
+  })
   const downloadUrl = await storage.presignGet(row.s3_key, { ttlSeconds: GET_TTL, disposition: { type: 'attachment', filename: row.filename } })
   emit({ type: 'attachment.confirmed', tenantId: args.tenantId, attachmentId: row.id, pageId: row.page_id, actorId: args.userId })
   return { id: row.id, filename: row.filename, contentType: row.content_type, sizeBytes, createdAt: row.created_at, downloadUrl }
