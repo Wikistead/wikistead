@@ -66,6 +66,51 @@ test("#273: a sniffed PDF renders in a sandboxed (allow-scripts, NO allow-same-o
   expect(pdfCursor).not.toBe("pointer");
 });
 
+// #273 clicking a PDF card's body opens it LARGE in an in-app lightbox that reuses the SAME containment
+// (opaque sandbox="allow-scripts", NO allow-same-origin, /pdf-frame.html). Escape closes it. Real Chromium.
+test("#273 the PDF card opens a lightbox with the same containment; Escape closes it", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const pageId = await openScratch(page, "pdf-lightbox-273"); // isolated page (no shared-demo card accumulation)
+  await enterEdit(page);
+  const name = `e2e-lb-${Date.now().toString(36)}.pdf`;
+  const pdfId = await uploadAttachment(page, pageId, name, "application/pdf", MINIMAL_PDF);
+
+  const linkName = `lb-${Date.now().toString(36)}.pdf`;
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Control+End");
+  await page.keyboard.insertText(`\n[${linkName}](wks-attachment:${pdfId})\n`);
+  await page.keyboard.press("ArrowUp");
+  await sleep(700);
+
+  const pdfCard = page.locator("[data-pane=preview] [data-testid=attachment-card]").filter({ hasText: linkName });
+  await expect(pdfCard.locator("[data-testid=attachment-inline-frame]")).toHaveCount(1, { timeout: 8000 });
+
+  // the hover overlay marks the "open large" affordance (cursor:zoom-in) and captures the expand click.
+  const expand = pdfCard.locator("[data-testid=attachment-expand]");
+  await pdfCard.hover();
+  // the overlay flips to pointer-events:auto + cursor:zoom-in on wrap:hover (the visible affordance)…
+  const hovered = await expand.evaluate((el) => ({ cursor: getComputedStyle(el).cursor, pe: getComputedStyle(el).pointerEvents }));
+  expect(hovered.cursor).toBe("zoom-in");
+  expect(hovered.pe).toBe("auto");
+  // …and clicking it opens the lightbox (dispatch the click directly — Playwright's actionability races the
+  // pointer-events transition, but the affordance is proven above).
+  await expand.evaluate((el) => (el as HTMLElement).click());
+
+  // the lightbox opens with the SAME containment sandbox (allow-scripts, NOT allow-same-origin) and renders.
+  const lb = page.locator("[data-testid=attachment-lightbox]");
+  await expect(lb).toHaveCount(1, { timeout: 8000 });
+  const lbFrame = lb.locator("[data-testid=attachment-lightbox-frame]");
+  const sandbox = await lbFrame.getAttribute("sandbox");
+  expect(sandbox).toBe("allow-scripts");
+  expect(sandbox).not.toContain("allow-same-origin");
+  expect(await lbFrame.getAttribute("src")).toContain("/pdf-frame.html");
+  await expect(page.frameLocator("[data-testid=attachment-lightbox-frame]").locator("canvas")).toHaveCount(1, { timeout: 20000 });
+
+  // Escape closes it.
+  await page.keyboard.press("Escape");
+  await expect(lb).toHaveCount(0, { timeout: 4000 });
+});
+
 // Upload an attachment to `pageId` via the panel and return its id. mimeType drives the server sniff (a real
 // PDF → inline; octet-stream / non-PDF bytes → inline_kind "none" → a download card).
 async function uploadAttachment(page: import("@playwright/test").Page, pageId: string, name: string, mimeType: string, buffer: Buffer): Promise<string> {
