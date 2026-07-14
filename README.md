@@ -44,6 +44,12 @@ deploy/                   Kustomize base + dev/prod overlays + ArgoCD app-of-app
 docker-compose.yml        full local middleware stack
 ```
 
+## Self-hosting
+
+The full deployment guide — single-host Docker Compose, production Kubernetes
+(Kustomize/ArgoCD), reverse-proxy and TLS rules, configuration reference, and
+operations — is **[docs/self-hosting.md](docs/self-hosting.md)**.
+
 ## Local development
 ```
 cp .env.example .env
