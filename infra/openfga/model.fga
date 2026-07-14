@@ -123,9 +123,27 @@ type page
     define edit_inherited: edit_from_parent and published
     define edit_base: edit_direct or edit_from_space or edit_inherited
     # #218 / ADR-103 (A5-5): edit is gated by the monotonic deny too (a folder EDIT-link guest must be
-    # excludable from a child), via a helper split. #329 (freeze) later inserts `but not frozen*` on edit_base.
+    # excludable from a child), via a helper split.
     define edit_permitted: edit_base but not restricted
-    define edit: manage or edit_permitted
+    # #329 / ADR-139: page FREEZE — a staged edit lock as a top-level subtraction with a role bypass.
+    # Two marker relations, two lock levels; an unfrozen page has both empty (subtraction is a no-op):
+    #   frozen        — FULL lock. A [user:*, share_link:*] PAIR (the #244 typed-wildcard lesson: a marker
+    #                   must enumerate every principal type it stops), written/deleted together.
+    #   frozen_guests — MEMBERS-ONLY lock: share_link:* alone, so only guest (share-link) edit is cut.
+    # Subtracting BELOW the manage bypass but ABOVE edit_permitted cuts direct AND inherited edit —
+    # including a direct edit@share_link tuple (edit_direct feeds edit_base) — which a private-type freeze
+    # could not do. `restricted` (per-principal deny) stays independent inside edit_permitted. Each
+    # subtraction is its own helper (OpenFGA forbids mixing `or`/`but not` at one level). NOTE the
+    # deliberate breadth (ADR-139): an EDIT-ONLY-link guest holds no view_base, so a full freeze removes
+    # their view/comment/collab-join too (anti-vandalism denial); members degrade to read-only; a
+    # view+comment-link guest keeps view+comment (`view_base and comment_open` is edit-independent).
+    define frozen: [user:*, share_link:*]
+    define frozen_guests: [share_link:*]
+    define edit_no_guests: edit_permitted but not frozen_guests
+    define edit_unfrozen: edit_no_guests but not frozen
+    # The role bypass sits ABOVE every subtraction: manage always edits (a manager fixes a frozen page).
+    # #330 (C-5) later adds `moderate` here (`edit: manage or moderate or edit_unfrozen`).
+    define edit: manage or edit_unfrozen
 
     # Commenting authorization (#100 / ADR-029 Option B) — a RESOURCE SETTING, not a link capability.
     # view_direct: direct member/group/link view grants (WRITE TARGET + cascading leaf). user:* (public page)

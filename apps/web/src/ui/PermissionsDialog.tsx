@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, usePublished, useTenantGroups, useShareLinks, type PageRelation } from "../data/queries";
+import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, usePublished, useTenantGroups, useShareLinks, useSetFrozen, type PageRelation } from "../data/queries";
 import { ConfirmDialog } from "./dialogs";
 import { notify } from "./toast";
 import { Select } from "./Select";
@@ -62,6 +62,14 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
     try { await navigator.clipboard.writeText(publicUrl); notify.success(t("toast.copied")); }
     catch { notify.error(t("toast.actionFailed")); }
   };
+  // #329 / ADR-139: FREEZE (staged edit lock). The level rides on the page payload; the server is the
+  // fortress (manage-gated, and the FGA model cuts every edit path). Reversible, so no confirm dialog.
+  const frozen = page?.frozen ?? null;
+  const setFrozen = useSetFrozen(pageId);
+  const applyFreeze = (level: "full" | "guests" | null) => setFrozen.mutate(level, {
+    onSuccess: () => notify.success(t("toast.saved")),
+    onError: () => notify.error(t("toast.actionFailed")),
+  });
   const [mode, setMode] = useState<"user" | "group">("user");
   const [sub, setSub] = useState("");
   const [groupName, setGroupName] = useState("");
@@ -159,6 +167,28 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             )}
           </div>
         )}
+
+        {/* #329 / ADR-139: FREEZE (staged edit lock) — off / guests-only / everyone-below-manager.
+            Explicit radios (the #389 direction: no highlight-square selection). Managers always edit;
+            commenting stays open for principals holding view (edit-independent path). */}
+        <div className="mt-2 rounded-md border border-border p-2" data-testid="freeze-row">
+          <span className="block text-sm text-foreground">{t("permissions.freezeTitle")}</span>
+          <span className="block text-xs text-fg-dim">
+            {frozen === "full" ? t("permissions.freezeFullHint")
+              : frozen === "guests" ? t("permissions.freezeGuestsHint")
+              : t("permissions.freezeHint")}
+          </span>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1" role="radiogroup" aria-label={t("permissions.freezeTitle")}>
+            {([["off", null], ["guests", "guests"], ["full", "full"]] as const).map(([key, level]) => (
+              <label key={key} className="flex items-center gap-1.5 text-sm text-foreground">
+                <input type="radio" name="freeze-level" data-testid={`freeze-${key}`}
+                  checked={frozen === level} disabled={setFrozen.isPending}
+                  onChange={() => applyFreeze(level)} />
+                {t(`permissions.freeze${key === "off" ? "Off" : key === "guests" ? "Guests" : "Full"}`)}
+              </label>
+            ))}
+          </div>
+        </div>
 
         <p className="mt-3 text-xs font-medium text-fg-dim">{isPrivate ? t("permissions.allowlistTitle") : t("permissions.grantTitle")}</p>
         <div className="flex items-center gap-2">

@@ -535,6 +535,9 @@ export interface PageMeta {
   canManage?: boolean; // gates the per-page permission UI (server re-checks)
   canComment?: boolean; // #100: comment capability (comment_open/grant/edit) — gates the comment composer
   private?: boolean; // #109 Fix B: allowlist-only — drives the lock badge beside the title
+  // #329 / ADR-139: freeze level (staged edit lock) — drives the freeze badge beside the title and the
+  // permissions-dialog control. Visible to any viewer (freeze only removes access, so it leaks nothing).
+  frozen?: "full" | "guests" | null;
   // #222: title-bar metadata row. createdBy = creator sub, updatedBy = last-publisher sub (option A),
   // updatedAt = last change time. Resolved to name/avatar via AuthorChip; null when unrecorded.
   createdAt?: string;
@@ -636,6 +639,21 @@ export function useSetPrivate(pageId: string) {
       qc.invalidateQueries({ queryKey: ["page", pageId] });
       qc.invalidateQueries({ queryKey: ["pages"] });
     },
+  });
+}
+
+// #329 / ADR-139 — page FREEZE toggle (manage-gated server-side; the model is the fortress). level null =
+// unfreeze (DELETE). The current level rides on the page payload (usePage().frozen) — no separate GET.
+export function useSetFrozen(pageId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (level: "full" | "guests" | null) =>
+      level == null
+        ? apiFetch<null>(`/pages/${encodeURIComponent(pageId)}/freeze`, token, { method: "DELETE" })
+        : apiFetch<null>(`/pages/${encodeURIComponent(pageId)}/freeze`, token, { method: "POST", body: JSON.stringify({ level }) }),
+    // The badge (usePage) and the edit affordance (capability) both change with the freeze level.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["page", pageId] }),
   });
 }
 

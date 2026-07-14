@@ -22,6 +22,9 @@ export type DomainEvent =
   // #253 / ADR-113: per-page anonymous public toggle (view_base@user:* grant/revoke; noindex forced on).
   | { type: 'page.made_public'; tenantId: string; pageId: string; actorId: string }
   | { type: 'page.made_non_public'; tenantId: string; pageId: string; actorId: string }
+  // #329 / ADR-139: page freeze (staged edit lock; carries the level, never content)
+  | { type: 'page.frozen'; tenantId: string; pageId: string; level: 'full' | 'guests'; actorId: string }
+  | { type: 'page.unfrozen'; tenantId: string; pageId: string; actorId: string }
   // ── Spaces ───────────────────────────────────────────────────────────
   | { type: 'space.created';  tenantId: string; spaceId: string; actorId: string }
   | { type: 'space.updated';  tenantId: string; spaceId: string; actorId: string }

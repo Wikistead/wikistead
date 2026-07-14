@@ -27,6 +27,8 @@ export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   'page.made_non_private': 'A page was made non-private (space inheritance resumed).',
   'page.made_public': 'A published page was made anonymously public (view_base@user:* granted; noindex on).',
   'page.made_non_public': 'A page was made non-public (the anonymous view_base@user:* grant revoked).',
+  'page.frozen': 'A page was frozen (staged edit lock: full = everyone below manage, guests = share-link guests only).',
+  'page.unfrozen': 'A page was unfrozen (both freeze markers cleared; every edit path restored).',
   // Spaces
   'space.created': 'A space was created.',
   'space.updated': 'A space was updated.',
