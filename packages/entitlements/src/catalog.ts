@@ -154,6 +154,13 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     enforcedAt: 'the /mcp tools/call handler (write-scope tools) — checked alongside the token write scope',
     downgrade: 'write tools gated; read tools + previously-created pages keep working',
   },
+  spaceEditLink: {
+    title: 'Space edit share-links',
+    summary: 'Whether the tenant may ISSUE a space-wide EDIT share-link (anonymous collaborative wiki, #274 / ADR-135). Cloud = paid tiers only; self-host unlimited. OpenFGA still gates every page the link reaches.',
+    unit: 'boolean',
+    enforcedAt: 'share-link issuance (createShareLink, space+edit) — 402 with a static reason; existing links unaffected',
+    downgrade: 'issuance gated; already-issued links keep working (revocation policy: #127)',
+  },
   apiRateLimit: {
     title: 'API rate limit',
     summary: 'Authenticated API-key request rate per window — perKey (per-key fairness) and perTenant (all-keys ceiling), evaluated AND (the stricter trips first → 429) (#175 / ADR-063).',

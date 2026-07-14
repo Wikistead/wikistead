@@ -42,7 +42,16 @@ type space
   relations
     define tenant: [tenant]
     define manager: [user, group#member] or admin from tenant
-    define editor: [user, group#member] or manager
+    # #274 / ADR-135: the editor SPLIT. `editor_member` = member/manager grants (the write target for
+    # member edit grants since #274; viewer_member and template#view reference THIS relation, so a
+    # share-link principal can never reach space-scoped templates — the #258/ADR-110 hard boundary).
+    # `editor` = editor_member PLUS space EDIT share-links (permanent + time-bounded twin); it is what
+    # page#edit_from_space inherits, so one space edit-link tuple grants edit on every published,
+    # non-private page in the space (the anonymous-wiki use case). Revoke = delete that one tuple.
+    # Migration from the pre-split store (editor held the member types directly) is the two-step
+    # fga:migrate-editor sequence — ADR-135 §1a/§1b; a FRESH bootstrap lands this final model directly.
+    define editor_member: [user, group#member] or manager
+    define editor: [share_link, share_link with non_expired] or editor_member
     # #330 / ADR-141: moderator — MORE than editor in moderation power, LESS than manager. Grants the page
     # `moderate` verb (revert / freeze / patrol + edit-with-bypass) via moderate_from_space; a manager always
     # moderates (`or manager`). It does NOT confer manage (grants/delete/settings stay manage-gated) and does
@@ -55,7 +64,10 @@ type space
     # space-grant write path writes it for member grants; wildcards/share_link go to `viewer` only. viewer
     # keeps its own direct types too (backward compat — #100 write-ripple: don't strip a direct-assign type)
     # and unions viewer_member in, so page inheritance (view_base_from_space = viewer from space) is unchanged.
-    define viewer_member: [user, group#member] or editor
+    # #274 / ADR-135: viewer_member references editor_MEMBER (never `editor`) — a space EDIT share-link
+    # guest must not inherit viewer_member, or template#view would leak space templates to anonymous
+    # guests (the leak the editor split exists to prevent; anti-test-pinned).
+    define viewer_member: [user, group#member] or editor_member
     # user:* here means public space — only set this tuple intentionally.
     # space-scoped share links: one tuple (space:S#viewer@share_link:Y) grants
     # view access to every page in S. Revoke = delete that tuple (1 op).

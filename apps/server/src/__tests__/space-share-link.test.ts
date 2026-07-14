@@ -114,10 +114,15 @@ describe('#104 space share-link issuance', () => {
     }
   })
 
-  it('rejects an EDIT space link (space links are view-only)', async () => {
-    await expect(
-      createShareLink(db, fgaClient, { tenantId, plan: 'free', userId: OWNER, resource: { type: 'space', id: spaceA }, capability: 'edit', expiresInSeconds: null }),
-    ).rejects.toMatchObject({ statusCode: 400 })
+  it('#274: an EDIT space link now ISSUES (writes the one space#editor tuple; the old view-only 400 is gone)', async () => {
+    // ADR-135 (user-approved 2026-07-15) supersedes ADR-038's view-only rule: a space edit link is the
+    // anonymous-wiki face. Self-host default resolver = UNLIMITED, so no entitlement 402 here (the
+    // Cloud-free 402 + the full authz matrix live in editor-split-274.test.ts).
+    const link = await createShareLink(db, fgaClient, { tenantId, plan: 'free', userId: OWNER, resource: { type: 'space', id: spaceA }, capability: 'edit', expiresInSeconds: null })
+    expect(link.capability).toBe('edit')
+    expect((await fgaClient.check({ user: `share_link:${link.id}`, relation: 'editor', object: `space:${spaceA}` })).allowed).toBe(true)
+    await revokeShareLink(db, fgaClient, { tenantId, userId: OWNER, id: link.id })
+    expect((await fgaClient.check({ user: `share_link:${link.id}`, relation: 'editor', object: `space:${spaceA}` })).allowed).toBe(false)
   })
 
   it('requires space manage (a non-manager is 403)', async () => {

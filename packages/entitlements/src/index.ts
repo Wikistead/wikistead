@@ -112,6 +112,10 @@ export interface Entitlements {
   // READ tools are all-plans (not gated here); this gates WRITE only. Self-host UNLIMITED on; Cloud = paid
   // tiers (write = Cloud/EE — free off, pro/team on), resolved in the one entitlement seam (never `if(plan)`).
   mcpWrite: boolean
+  // #274 / ADR-135: may the tenant ISSUE a space EDIT share-link (the anonymous-wiki face)? Issuance
+  // only — already-issued links keep working on a downgrade (revocation policy is a #127 pricing call).
+  // Self-host UNLIMITED on; Cloud = paid tiers (free off), resolved here (never `if(plan)` in routes).
+  spaceEditLink: boolean
 }
 
 // Self-host / Community edition: never plan-limited.
@@ -134,6 +138,7 @@ export const UNLIMITED: Entitlements = {
   apiRateLimit: { perKey: Infinity, perTenant: Infinity },
   userMacros: true,
   mcpWrite: true,
+  spaceEditLink: true,
 }
 
 // NOTE (ADR-069 / #132): the Cloud plan table (`CLOUD_PLANS`) and its resolver

@@ -299,8 +299,13 @@ export async function updateSpace(
 export type SpaceCapability = 'view' | 'edit' | 'moderate' | 'manage'
 const SPACE_CAPS: SpaceCapability[] = ['view', 'edit', 'moderate', 'manage']
 // Capability vocabulary (shared with page access) → the space's FGA relations.
-const CAP_TO_RELATION: Record<SpaceCapability, string> = { view: 'viewer', edit: 'editor', moderate: 'moderator', manage: 'manager' }
-const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', editor: 'edit', moderator: 'moderate', manager: 'manage' }
+// #274 / ADR-135: a member EDIT grant writes `editor_member` (the member-only leaf viewer_member /
+// template#view reference); `editor` itself now carries only space edit SHARE-LINKS. The reverse map
+// keeps `editor` → 'edit' so a pre-migration store's legacy member tuples still LIST correctly during
+// the Step-A window (listSpaceAccess filters principals to user/group, so post-migration the mapping
+// only ever sees share_link tuples there — which that filter drops).
+const CAP_TO_RELATION: Record<SpaceCapability, string> = { view: 'viewer', edit: 'editor_member', moderate: 'moderator', manage: 'manager' }
+const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', editor: 'edit', editor_member: 'edit', moderator: 'moderate', manager: 'manage' }
 
 // #258 / ADR-110: a member VIEW grant writes BOTH `viewer` (unchanged — pages inherit view via
 // view_base_from_space = viewer from space, and existing readers of `viewer` are untouched) AND

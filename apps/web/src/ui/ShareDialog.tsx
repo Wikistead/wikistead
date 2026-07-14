@@ -50,8 +50,9 @@ export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | nu
         )}
 
         <div className="flex items-center gap-2">
-          {/* Space links are view-only; only page links choose view vs edit. */}
-          {!isSpace && (
+          {/* #274 / ADR-135: SPACE links choose view/edit too now — an EDIT space link is the anonymous
+              wiki (every published, non-private page editable via the one link). The server is the
+              fortress (manage-gated issuance + the spaceEditLink entitlement → 402 on gated plans). */}
           <Select
             value={capability}
             onChange={(v) => setCapability(v as "view" | "edit")}
@@ -63,7 +64,6 @@ export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | nu
               { value: "edit", label: t("shareDialog.canEdit") },
             ]}
           />
-          )}
           <Select
             value={String(expiry)}
             onChange={(v) => setExpiry(v === "null" ? null : Number(v))}
@@ -85,7 +85,7 @@ export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | nu
             size="sm"
             data-testid="create-link"
             disabled={!resource || create.isPending}
-            onClick={() => resource && create.mutate({ resource, capability: isSpace ? "view" : capability, expiresInSeconds: expiry, password: password.trim() || null }, {
+            onClick={() => resource && create.mutate({ resource, capability, expiresInSeconds: expiry, password: password.trim() || null }, {
               onSuccess: () => { notify.success(t("toast.linkCreated")); setPassword(""); },
               onError: () => notify.error(t("toast.actionFailed")),
             })}

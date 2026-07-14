@@ -76,7 +76,7 @@ beforeAll(async () => {
     // from createPage doesn't have one — publish writes it; simulate the published state).
     { user: `space:${spaceId}`, relation: 'space', object: `page:${pageId}` },
     { user: `user:${MOD}`, relation: 'moderator', object: `space:${spaceId}` },
-    { user: `user:${ED}`, relation: 'editor', object: `space:${spaceId}` },
+    { user: `user:${ED}`, relation: 'editor_member', object: `space:${spaceId}` },
   ]
   await writeTuples(fgaClient, authz)
 })

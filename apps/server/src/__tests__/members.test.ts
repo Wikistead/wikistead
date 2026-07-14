@@ -224,7 +224,7 @@ describe('removal revokes sessions immediately', () => {
     await admin`INSERT INTO pages (id, tenant_id, space_id, title, published_md, published_at)
                 VALUES ('m396-page', ${tenantId}, 'm396-space', 'p', 'body', now())`
     const grants = [
-      { user: `user:${sub}`, relation: 'editor', object: 'space:m396-space' },
+      { user: `user:${sub}`, relation: 'editor_member', object: 'space:m396-space' },
       { user: `user:${sub}`, relation: 'view_direct', object: 'page:m396-page' },
       { user: `user:${sub}`, relation: 'moderate', object: 'page:m396-page' }, // #330's new grant class sweeps too
     ]
