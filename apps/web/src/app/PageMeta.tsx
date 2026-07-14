@@ -24,11 +24,13 @@ export function PageMeta({ createdBy, updatedBy, updatedAt }: { createdBy?: stri
   const time = updatedAt ? relTime(updatedAt, i18n.language) : null;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[0.72rem] text-fg-dim" data-testid="page-meta">
+      {/* min-w-0 lets the flex chain shrink these below their content width, so the AuthorChip
+          label's truncate takes effect instead of the byline overflowing the title column (#415). */}
       {createdBy && (
-        <span className="flex items-center gap-1">{t("pageMeta.created")}<AuthorChip sub={createdBy} /></span>
+        <span className="flex min-w-0 items-center gap-1">{t("pageMeta.created")}<AuthorChip sub={createdBy} /></span>
       )}
       {updatedBy && (
-        <span className="flex items-center gap-1">{t("pageMeta.updated")}<AuthorChip sub={updatedBy} /></span>
+        <span className="flex min-w-0 items-center gap-1">{t("pageMeta.updated")}<AuthorChip sub={updatedBy} /></span>
       )}
       {time && (
         <time dateTime={updatedAt} title={time.abs} data-testid="page-meta-time">{time.rel}</time>

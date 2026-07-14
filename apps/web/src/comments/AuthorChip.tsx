@@ -72,8 +72,10 @@ export function AuthorChip({ sub }: { sub: string }) {
           {initial}
         </span>
       )}
-      {/* full identity stays inspectable on hover; authz is unaffected (display-only). */}
-      <span className="truncate text-[0.8em] font-semibold text-fg-dim" title={sub}>{label}</span>
+      {/* full identity stays inspectable on hover; authz is unaffected (display-only).
+          max-w caps pathological labels (a 64-hex OIDC sub, a very long display name) so `truncate`
+          actually engages — without a bound the span grows to its content before any clipping (#415). */}
+      <span className="max-w-[18ch] truncate text-[0.8em] font-semibold text-fg-dim" title={sub}>{label}</span>
     </span>
   );
 }
