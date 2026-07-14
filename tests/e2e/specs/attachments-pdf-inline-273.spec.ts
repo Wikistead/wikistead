@@ -59,6 +59,11 @@ test("#273: a sniffed PDF renders in a sandboxed (allow-scripts, NO allow-same-o
   const pdfFrame = page.frameLocator("[data-testid=attachment-inline-frame]");
   await expect(pdfFrame.locator("canvas")).toHaveCount(1, { timeout: 20000 });
   await expect(pdfFrame.locator("#msg")).toBeHidden();
+
+  // #273 an INLINE viewer card's body is NOT the download affordance, so it must not advertise one —
+  // no pointer cursor on the card once the frame is mounted (the header ⤓ button keeps its own pointer).
+  const pdfCursor = await pdfCard.locator(".cm-lp-attachment-card").evaluate((el) => getComputedStyle(el).cursor);
+  expect(pdfCursor).not.toBe("pointer");
 });
 
 // Upload an attachment to `pageId` via the panel and return its id. mimeType drives the server sniff (a real
@@ -131,6 +136,15 @@ test("#273 a download card downloads on a full-body click", async ({ browser }) 
   const card = page.locator("[data-pane=preview] [data-testid=attachment-card]").filter({ hasText: linkName });
   await expect(card).toBeVisible();
   await expect(card.locator("[data-testid=attachment-inline-frame]")).toHaveCount(0); // a download card, no viewer
+
+  // #273 the full-surface-clickable download card must LOOK clickable — pointer cursor on the card
+  // body and a visibly stronger background wash on hover (light/dark both come from currentColor color-mix).
+  const cardBody = card.locator(".cm-lp-attachment-card");
+  expect(await cardBody.evaluate((el) => getComputedStyle(el).cursor)).toBe("pointer");
+  const restingBg = await cardBody.evaluate((el) => getComputedStyle(el).backgroundColor);
+  await cardBody.hover();
+  const hoverBg = await cardBody.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(hoverBg).not.toBe(restingBg);
 
   // clicking the card BODY (the name label, not the ⤓ button) triggers the download.
   const [download] = await Promise.all([
