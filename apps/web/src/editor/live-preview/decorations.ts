@@ -995,6 +995,69 @@ function triggerAttachmentDownload(view: EditorView, id: string): void {
   });
 }
 
+// #273open a PDF attachment LARGE in an in-app lightbox. It reuses the EXACT same containment as the
+// inline card — an opaque-origin `sandbox="allow-scripts"` (NO allow-same-origin) iframe rendering pdf.js from
+// bytes the parent view-gate-fetched (`resolver.inlineUrl`, the existing route → no new authz surface). A raw
+// new tab is deliberately NOT used: it wouldn't carry a share-link guest's token, and it would drop out of the
+// opaque-frame containment. The lightbox is appended to <body> (OUTSIDE .cm-editor), so its styles are INLINE
+// (the CM baseTheme is editor-scoped and would not reach it). Escape / ✕ / a backdrop click close it.
+function openAttachmentLightbox(view: EditorView, id: string, name: string): void {
+  if (document.querySelector("[data-testid=attachment-lightbox]")) return; // one at a time
+  const resolver = view.state.facet(attachmentResolver);
+  const backdrop = document.createElement("div");
+  backdrop.setAttribute("data-testid", "attachment-lightbox");
+  backdrop.style.cssText = "position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.6);backdrop-filter:blur(2px)";
+  const panel = document.createElement("div");
+  panel.style.cssText = "display:flex;flex-direction:column;width:min(900px,92vw);height:min(90vh,100%);background:var(--panel,#fff);color:var(--fg,#111);border:1px solid var(--border,rgba(128,128,128,.35));border-radius:10px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.35)";
+  const bar = document.createElement("div");
+  bar.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border,rgba(128,128,128,.25))";
+  const title = document.createElement("span");
+  title.style.cssText = "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500";
+  title.textContent = `📎 ${name || "attachment"}`;
+  const btnCss = "border:none;background:transparent;cursor:pointer;padding:2px 8px;font-size:1.05em;color:inherit;opacity:.75;border-radius:6px";
+  const dl = document.createElement("button");
+  dl.type = "button"; dl.style.cssText = btnCss; dl.title = "Download"; dl.textContent = "⤓";
+  dl.setAttribute("data-testid", "attachment-lightbox-download");
+  const close = document.createElement("button");
+  close.type = "button"; close.style.cssText = btnCss; close.title = "Close"; close.textContent = "✕";
+  close.setAttribute("data-testid", "attachment-lightbox-close");
+  bar.append(title, dl, close);
+  const frame = document.createElement("iframe");
+  frame.setAttribute("sandbox", "allow-scripts"); // opaque origin; NO allow-same-origin — same containment as the card
+  frame.setAttribute("data-testid", "attachment-lightbox-frame");
+  frame.title = name || "attachment";
+  frame.src = "/pdf-frame.html";
+  frame.style.cssText = "flex:1;width:100%;min-height:0;border:none;background:#fff";
+  panel.append(bar, frame);
+  backdrop.appendChild(panel);
+
+  let onMsg: ((e: MessageEvent) => void) | null = null;
+  const teardown = () => {
+    if (onMsg) window.removeEventListener("message", onMsg);
+    window.removeEventListener("keydown", onKey);
+    backdrop.remove();
+  };
+  const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); teardown(); } };
+  dl.addEventListener("click", (e) => { e.stopPropagation(); triggerAttachmentDownload(view, id); });
+  close.addEventListener("click", (e) => { e.stopPropagation(); teardown(); });
+  backdrop.addEventListener("mousedown", (e) => { if (e.target === backdrop) teardown(); }); // click outside the panel closes
+  window.addEventListener("keydown", onKey);
+  document.body.appendChild(backdrop);
+
+  // Fetch the bytes fresh (view-gated; the resolver caches the blob URL). The card's copy was transferred to
+  // its own frame and is neutered, so the lightbox needs its own ArrayBuffer. Hand them to the opaque frame on ready.
+  void resolver.inlineUrl(id).then(async (url) => {
+    if (!url || !backdrop.isConnected) return;
+    const bytes = await fetch(url).then((r) => r.arrayBuffer()).catch(() => null);
+    if (!bytes || !backdrop.isConnected) return;
+    onMsg = (e: MessageEvent) => {
+      if (e.source !== frame.contentWindow) return;
+      if ((e.data as { type?: string })?.type === "pdf-frame:ready") { try { frame.contentWindow?.postMessage(bytes, "*", [bytes]); } catch { /* frame gone */ } }
+    };
+    window.addEventListener("message", onMsg);
+  });
+}
+
 // #273 / ADR-120: INLINE file-attachment chip — [name](wks-attachment:id) with other text on
 // the line. Renders 📎 name (+ size once resolved) with a small download button. The chip
 // body passes clicks through (caret lands → the line reveals raw, like the inline image);
@@ -1164,7 +1227,24 @@ class AttachmentCardWidget extends WidgetType {
         };
         window.addEventListener("message", onMsg);
         wrap.__atPdfMsg = onMsg; // removed in destroy() (below) so it never outlives the widget DOM
-        wrap.appendChild(frame);
+        // #273the inline PDF is a PREVIEW — wrap it so a hover overlay reveals it opens LARGE. The
+        // sandboxed iframe swallows its own pointer events, so a sibling overlay (shown on wrap:hover) captures
+        // the expand click and marks the affordance (cursor:zoom-in + a ⤢ hint). Reuses the same containment.
+        const frameBox = document.createElement("div");
+        frameBox.className = "cm-lp-attachment-framebox";
+        frameBox.appendChild(frame);
+        const expand = document.createElement("div");
+        expand.className = "cm-lp-attachment-expand";
+        expand.setAttribute("data-testid", "attachment-expand");
+        expand.title = "Open";
+        const hint = document.createElement("span");
+        hint.className = "cm-lp-attachment-expand-hint";
+        hint.textContent = "⤢";
+        expand.appendChild(hint);
+        expand.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
+        expand.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); openAttachmentLightbox(view, this.id, this.name); });
+        frameBox.appendChild(expand);
+        wrap.appendChild(frameBox);
       });
     });
   }
@@ -4114,6 +4194,8 @@ export const livePreviewTheme = EditorView.baseTheme({
     fontSize: "0.95em", lineHeight: "inherit", color: "inherit", opacity: "0.75",
   },
   ".cm-lp-attachment-dl:hover": { opacity: "1" },
+  // #273hovering anywhere on the card makes its operations prominent (the ⤓ was too faint at 0.75).
+  ".cm-lp-attachment-wrap:hover .cm-lp-attachment-dl": { opacity: "1" },
   ".cm-lp-attachment-wrap": { padding: "2px 0" },
   ".cm-lp-attachment-card": {
     display: "flex", alignItems: "center", gap: "6px", padding: "8px 10px",
@@ -4130,9 +4212,28 @@ export const livePreviewTheme = EditorView.baseTheme({
     background: "color-mix(in srgb, currentColor 11%, transparent)",
     borderColor: "color-mix(in srgb, currentColor 50%, transparent)",
   },
+  // #273the frame lives in a relative box so the hover "open large" overlay can sit over it.
+  ".cm-lp-attachment-framebox": { position: "relative", marginTop: "6px" },
   ".cm-lp-attachment-frame": {
-    display: "block", width: "100%", height: "480px", marginTop: "6px",
+    display: "block", width: "100%", height: "480px",
     border: "1px solid var(--wks-border, rgba(128,128,128,.35))", borderRadius: "8px", background: "#fff",
+  },
+  // #273an overlay over the inline PDF preview — invisible until the card is hovered, then it dims the
+  // preview slightly and shows a ⤢ hint with a zoom-in cursor. Clicking it opens the lightbox (the sandboxed
+  // iframe can't bubble its own clicks, so this captures the expand intent). Not shown for non-PDF (no frame).
+  ".cm-lp-attachment-expand": {
+    position: "absolute", inset: "0", display: "flex", alignItems: "flex-start", justifyContent: "flex-end",
+    padding: "8px", borderRadius: "8px", cursor: "zoom-in", opacity: "0", pointerEvents: "none",
+    background: "color-mix(in srgb, #000 0%, transparent)", transition: "opacity 120ms, background 120ms",
+  },
+  ".cm-lp-attachment-wrap:hover .cm-lp-attachment-expand": {
+    opacity: "1", pointerEvents: "auto", background: "color-mix(in srgb, #000 8%, transparent)",
+  },
+  ".cm-lp-attachment-expand-hint": {
+    display: "inline-flex", alignItems: "center", justifyContent: "center", width: "26px", height: "26px",
+    borderRadius: "6px", fontSize: "1.05em", lineHeight: "1",
+    background: "var(--wks-panel, rgba(20,20,20,.82))", color: "var(--wks-fg, #fff)",
+    border: "1px solid var(--wks-border, rgba(128,128,128,.4))",
   },
   // #305: a TRULY inline image (text shares its line) renders as a line-height thumbnail so it flows WITH the
   // text instead of forcing a wrap (a large natural size used to occupy the whole line width, pushing the
