@@ -44,3 +44,26 @@ export async function deleteObjectTuples(fga: OpenFgaClient, object: string): Pr
     .filter((k): k is TupleKeyWithoutCondition => !!k?.user && !!k?.relation && !!k?.object)
   if (keys.length > 0) await fga.write({ deletes: keys })
 }
+
+// #396: enumerate every tuple a USER principal holds on a given object TYPE (`page:` / `space:` —
+// OpenFGA's Read supports a user + type-prefix query), paginated to completion. This is the
+// user-origin listing the member-removal sweep needs: no reverse index and no full-resource scan.
+// NOTE (multi-tenant): the shared store spans tenants, so the CALLER must filter the returned
+// objects to its own tenant's resources before deleting anything.
+export async function readUserTuplesByType(
+  fga: OpenFgaClient,
+  user: string,
+  typePrefix: `${string}:`,
+): Promise<{ user: string; relation: string; object: string }[]> {
+  const out: { user: string; relation: string; object: string }[] = []
+  let continuationToken: string | undefined
+  do {
+    const res = await fga.read({ user, object: typePrefix }, { ...(continuationToken ? { continuationToken } : {}) })
+    for (const t of res.tuples ?? []) {
+      const k = t.key
+      if (k?.user && k.relation && k.object) out.push({ user: k.user, relation: k.relation, object: k.object })
+    }
+    continuationToken = res.continuation_token || undefined
+  } while (continuationToken)
+  return out
+}

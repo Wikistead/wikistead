@@ -206,6 +206,47 @@ describe('removal revokes sessions immediately', () => {
     await expect(writeTuples(fgaClient, groups.map(gTuple))).resolves.toBeUndefined()
     await deleteTuples(fgaClient, groups.map(gTuple)).catch(() => {}) // cleanup
   })
+
+  // #396 (#378 follow-up): removal must also sweep the member's DIRECT space/page grants — left behind,
+  // they wake up if the same sub ever re-enrolls (the residual authz leak). Bounds pinned here: the sweep
+  // is TENANT-SCOPED (the shared FGA store spans tenants — a same-sub grant on another tenant's resource
+  // survives) and `restricted` DENIES are kept (a re-enrolled sub stays restricted where it was).
+  it('#396: removal sweeps direct space/page grants — this tenant only, denies kept', async () => {
+    const sub = 'mem-direct'
+    await seedMember(sub, 'member')
+    await admin`SELECT set_config('app.tenant_id', ${tenantId}, false)`
+    // fresh rows every run: provisionTenant mints a NEW tenant id per run, so an ON CONFLICT DO NOTHING
+    // leftover from an aborted earlier run would keep the OLD tenant_id and hide the rows from this run's
+    // RLS-scoped sweep (exactly the bug this test would then falsely report).
+    await admin`DELETE FROM pages WHERE id = 'm396-page'`
+    await admin`DELETE FROM spaces WHERE id = 'm396-space'`
+    await admin`INSERT INTO spaces (id, tenant_id, name) VALUES ('m396-space', ${tenantId}, 'm396')`
+    await admin`INSERT INTO pages (id, tenant_id, space_id, title, published_md, published_at)
+                VALUES ('m396-page', ${tenantId}, 'm396-space', 'p', 'body', now())`
+    const grants = [
+      { user: `user:${sub}`, relation: 'editor', object: 'space:m396-space' },
+      { user: `user:${sub}`, relation: 'view_direct', object: 'page:m396-page' },
+      { user: `user:${sub}`, relation: 'moderate', object: 'page:m396-page' }, // #330's new grant class sweeps too
+    ]
+    const restrictedDeny = { user: `user:${sub}`, relation: 'restricted', object: 'page:m396-page' }
+    // The shared-store hazard: the SAME sub granted on a resource this tenant does NOT own (no DB row
+    // under this tenant's RLS) — the sweep must not touch it.
+    const foreignGrant = { user: `user:${sub}`, relation: 'view_direct', object: 'page:m396-foreign' }
+    // idempotent re-run hygiene: a prior aborted run may have left any of these tuples behind.
+    for (const t of [...grants, restrictedDeny, foreignGrant]) await deleteTuples(fgaClient, [t]).catch(() => {})
+    await writeTuples(fgaClient, [...grants, restrictedDeny, foreignGrant])
+
+    const del = await app.inject({ method: 'DELETE', url: `/members/${sub}`, headers: { host, cookie: cookie(adminSid) } })
+    expect(del.statusCode).toBe(204)
+
+    for (const g of grants) expect(await hasRel(g.user, g.relation, g.object)).toBe(false) // grants swept
+    expect(await hasRel(restrictedDeny.user, 'restricted', restrictedDeny.object)).toBe(true) // deny kept
+    expect(await hasRel(foreignGrant.user, 'view_direct', foreignGrant.object)).toBe(true) // other tenant untouched
+
+    await deleteTuples(fgaClient, [restrictedDeny, foreignGrant]).catch(() => {}) // cleanup
+    await admin`DELETE FROM pages WHERE id = 'm396-page'`.catch(() => {})
+    await admin`DELETE FROM spaces WHERE id = 'm396-space'`.catch(() => {})
+  })
 })
 
 // ── last-admin lockout guard (run last: it demotes the spare admin) ──────────

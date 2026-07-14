@@ -4,7 +4,12 @@
 // is OpenFGA (tenant#admin), re-checked per request, so a demotion takes effect
 // immediately (the cached session role is cosmetic).
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
-import { writeTuples, deleteTuples, isTenantAdmin } from '@wikistead/authz'
+import type { OpenFgaClient } from '@openfga/sdk'
+import { writeTuples, deleteTuples, readUserTuplesByType, isTenantAdmin } from '@wikistead/authz'
+import type { TenantDb } from '../db/index.js'
+import type { SearchDriver } from '../search/index.js'
+import { enqueueOutbox, processOutboxAsync } from '../search/outbox.js'
+import { reindexPublishedPages } from './spaces.js'
 import { groupFgaId } from '../auth/group-sync.js'
 import { createInvite, revokeInvite, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
@@ -25,6 +30,63 @@ async function adminCount(req: FastifyRequest): Promise<number> {
   const [{ n }] = await req.db.sql<[{ n: number }]>`
     SELECT count(*)::int AS n FROM members WHERE role = 'admin'`
   return n
+}
+
+// #396 (#378 follow-up): sweep a removed member's DIRECT space/page grants. OpenFGA's Read supports a
+// user + object-type query (readUserTuplesByType), so the removed sub's grants are enumerated in two
+// paginated queries — no reverse index, no full scan. The shared FGA store spans TENANTS, so only
+// tuples on resources this tenant owns are deleted (the RLS-scoped id filter below; a same-sub grant
+// in another tenant is untouched). `restricted` tuples are DENIES, not grants — they are deliberately
+// KEPT, so a later re-enrollment of the same sub stays restricted where it was. Deletes are per-tuple
+// + idempotent (the #378 discipline: drift can never block a removal), and every touched resource is
+// reindexed through the outbox (permission REVOCATION must reach search synchronously — the invariant).
+// Runs post-commit: membership/tenant tuples + sessions are already gone (the hard cutoff); this sweep
+// removes the residual grants that would otherwise wake up on a re-enrollment (the authz leak).
+export async function sweepMemberDirectGrants(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { tenantId: string; sub: string },
+): Promise<void> {
+  const user = `user:${args.sub}`
+  const [spaceTuples, pageTuples] = await Promise.all([
+    readUserTuplesByType(fga, user, 'space:'),
+    readUserTuplesByType(fga, user, 'page:'),
+  ])
+  const id = (object: string) => object.slice(object.indexOf(':') + 1)
+  // Tenant-ownership filter: req.db is RLS-scoped, so these SELECTs return ONLY this tenant's ids.
+  const spaceIds = [...new Set(spaceTuples.map((t) => id(t.object)))]
+  const pageIds = [...new Set(pageTuples.map((t) => id(t.object)))]
+  const ownedSpaces = new Set(
+    spaceIds.length ? (await db.sql<{ id: string }[]>`SELECT id FROM spaces WHERE id = ANY(${spaceIds})`).map((r) => r.id) : [],
+  )
+  const ownedPages = new Set(
+    pageIds.length ? (await db.sql<{ id: string }[]>`SELECT id FROM pages WHERE id = ANY(${pageIds})`).map((r) => r.id) : [],
+  )
+  const doomed = [
+    ...spaceTuples.filter((t) => ownedSpaces.has(id(t.object))),
+    ...pageTuples.filter((t) => ownedPages.has(id(t.object)) && t.relation !== 'restricted'),
+  ]
+  for (const t of doomed) {
+    await deleteTuples(fga, [t]).catch((err) => {
+      // Never silent (an undeleted grant is the leak this exists to close) — but never blocking either.
+      console.error('[members:sweep] direct-grant delete failed (residual grant remains)', { tuple: t, err })
+    })
+  }
+  // Synchronous reindex of everything whose viewer set may have changed: touched pages directly,
+  // touched spaces via their published pages (the revokeSpaceAccess pattern).
+  const touchedPages = doomed.filter((t) => t.object.startsWith('page:')).map((t) => id(t.object))
+  if (touchedPages.length) {
+    const entries: { oid: string; pageId: string }[] = []
+    await db.tx(async (tx) => {
+      for (const pageId of new Set(touchedPages)) {
+        entries.push({ oid: await enqueueOutbox(tx, { tenantId: args.tenantId, pageId, operation: 'upsert' }), pageId })
+      }
+    })
+    for (const e of entries) processOutboxAsync(driver, e.oid, { tenantId: args.tenantId, pageId: e.pageId, operation: 'upsert' })
+  }
+  const touchedSpaces = new Set(doomed.filter((t) => t.object.startsWith('space:')).map((t) => id(t.object)))
+  for (const spaceId of touchedSpaces) await reindexPublishedPages(db, driver, args.tenantId, spaceId)
 }
 
 export async function membersPlugin(app: FastifyInstance) {
@@ -100,6 +162,9 @@ export async function membersPlugin(app: FastifyInstance) {
       await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'member.removed', target: `user:${req.params.sub}` })
     })
     await destroyMemberSessions(req.server.valkey, req.tenant.id, req.params.sub)
+    // #396: post-commit residual sweep — the removed sub's direct space/page grants (this tenant only)
+    // + the synchronous search reindex. Failures are logged per-tuple, never block the removal.
+    await sweepMemberDirectGrants(req.db, req.server.fga, req.server.searchDriver, { tenantId: req.tenant.id, sub: req.params.sub })
     emit({ type: 'member.removed', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: req.params.sub })
     return reply.code(204).send()
   })

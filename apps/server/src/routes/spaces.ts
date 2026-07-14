@@ -360,7 +360,7 @@ export async function listAdminSpaces(
 // when page#space is present = published) must be refreshed for each. Drafts have
 // no page#space, so they neither inherit nor need reindexing. Same reliable outbox
 // path as deleteSpace; stage-2 FGA stays authoritative during any reindex lag.
-async function reindexPublishedPages(db: TenantDb, driver: SearchDriver, tenantId: string, spaceId: string): Promise<void> {
+export async function reindexPublishedPages(db: TenantDb, driver: SearchDriver, tenantId: string, spaceId: string): Promise<void> {
   const pages = await db.sql<{ id: string }[]>`
     SELECT id FROM pages WHERE space_id = ${spaceId} AND published_at IS NOT NULL
   `
