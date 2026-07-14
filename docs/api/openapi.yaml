@@ -343,6 +343,14 @@ paths:
     patch: { summary: Update a template, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Updated } } }
     delete: { summary: Delete a template, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Deleted } } }
   # ── Personal state (watches, pins, notifications, feed) ─────────────────
+  /members/identities:
+    # #379 / ADR-150: display-identity resolution — CUSTOMIZED members only (present ⟺ member AND
+    # (override OR avatar)); absent is ambiguous (non-member / cross-tenant / un-customized — no
+    # membership oracle). Member-only; never email/role.
+    post:
+      summary: Resolve author subs to display identity (customized members only)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { subs: { type: array, maxItems: 200, items: { type: string } } }, required: [subs] } } } }
+      responses: { "200": { description: "identities keyed by sub (displayName, hasAvatar)" } }
   /watches:
     get: { summary: List the caller's watches, responses: { "200": { description: Watches } } }
     post: { summary: Watch a page/space, responses: { "201": { description: Watching } } }
