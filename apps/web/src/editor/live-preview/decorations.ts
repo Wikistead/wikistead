@@ -803,6 +803,21 @@ export const embedUrlPrompt = Facet.define<EmbedUrlPrompt | null, EmbedUrlPrompt
   combine: (vals) => vals.find((v) => v != null) ?? null,
 });
 
+// #413 / ADR-145 §5: viewer-scoped tag suggestions for the frontmatter chip editor. The host binds a
+// member-only fetch to GET /tags/suggest (the server offers a tag only when the caller can view ≥1 page
+// carrying it — a tag name is content). Absent on guest/template surfaces → no suggestions, input still works.
+export type TagSuggestSource = (q: string) => Promise<{ tag: string; display: string }[] | null>;
+export const tagSuggestSource = Facet.define<TagSuggestSource | null, TagSuggestSource | null>({
+  combine: (v) => (v.length ? v[v.length - 1]! : null),
+});
+
+// #413: the host seam that opens a TAG PICKER for `:::tagged` insertion (a modal with the same
+// view-filtered suggestions). null tag = cancelled. Mirrors embedUrlPrompt.
+export type TagPrompt = (onSubmit: (tag: string | null) => void) => void;
+export const tagPrompt = Facet.define<TagPrompt | null, TagPrompt | null>({
+  combine: (v) => (v.length ? v[v.length - 1]! : null),
+});
+
 // #210: compute the single canonical Y.Text edit that re-targets an embed block at `pos` to `value`.
 // The offset is derived from the atom's DIRECTIVE range (directiveMacroAt), so the write lands on the
 // real block, not a display-only mutation. Returns null when `pos` is not the named embed directive

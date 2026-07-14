@@ -254,6 +254,20 @@ export function useRelated(pageId: string | null, enabled = true) {
   });
 }
 
+// #413 / ADR-145 §5: viewer-scoped tag suggestions (frontmatter chip editor + the :::tagged picker).
+// Member-only; the server offers a tag only when the viewer can see ≥1 page carrying it (a tag name is
+// content — the autocomplete must not reveal what invisible pages are about).
+export interface TagSuggestion { tag: string; display: string }
+export function useTagSuggestions(q: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["tag-suggest", q],
+    queryFn: () => apiFetch<TagSuggestion[]>(`/tags/suggest?q=${encodeURIComponent(q)}`, token).then((r) => r ?? []),
+    enabled,
+    staleTime: 10_000,
+  });
+}
+
 // #394 / ADR-147: the local link graph around a page (mini = depth 1, modal = depth 2). Member-only; the
 // server returns an edge only when the viewer can see BOTH endpoints (an unviewable page is absent as a
 // node — never client-filtered here). hiddenCount reports viewable nodes dropped by the server node cap.

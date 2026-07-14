@@ -51,7 +51,7 @@ const templateInsertPicker = Facet.define<TemplateInsertPicker | null, TemplateI
 // seams) so the post-insert "change target" affordance reuses it too. When absent (guests /
 // picker-less surfaces) the embed-page command falls back to inserting the raw `:::embed-page`
 // template so the id can still be typed by hand.
-import { pageEmbedPicker, embedUrlPrompt, type PageEmbedPicker, type EmbedUrlPrompt } from "./decorations";
+import { pageEmbedPicker, embedUrlPrompt, type PageEmbedPicker, type EmbedUrlPrompt, tagPrompt, type TagPrompt } from "./decorations";
 import { escLinkText } from "./paste-linkify"; // #323: the page-link insert escapes the title the same way
 export type { PageEmbedPicker };
 
@@ -155,6 +155,7 @@ export function allPaletteCommandIdsForCoverage(): string[] {
 function commandList(state: EditorState): PaletteCommand[] {
   const picker = state.facet(pageEmbedPicker);
   const urlPrompt = state.facet(embedUrlPrompt);
+  const tPrompt = state.facet(tagPrompt);
   const macros = macroCommands().map((c) => {
     // #205 part 2: when the host wired a page picker, the embed-page command opens it (title search →
     // insert the chosen id) instead of dropping a raw template. Without the seam it stays a template.
@@ -162,6 +163,9 @@ function commandList(state: EditorState): PaletteCommand[] {
     // #210 bounce: embed-external insert opens the SAME in-app URL modal (embedUrlPrompt) as the ⇆
     // retarget, so the URL + allowlist warning are entered up front instead of dropping a raw template.
     if (urlPrompt && c.id === "macro:embed-external") return { ...c, action: (view: EditorView) => openEmbedExternalPrompt(view, urlPrompt) };
+    // #413 / ADR-145 §5: when the host wired the tag picker, the tagged command opens it (view-filtered
+    // suggestions → insert a COMPLETE atom that renders immediately) instead of dropping a raw template.
+    if (tPrompt && c.id === "macro:tagged") return { ...c, action: (view: EditorView) => openTaggedPrompt(view, tPrompt) };
     return c;
   });
   const base = [...COMMANDS, ...macros];
@@ -309,6 +313,25 @@ function openEmbedExternalPrompt(view: EditorView, prompt: EmbedUrlPrompt): void
       view.focus();
       requestAnimationFrame(() => { if (!view.dom.isConnected) return; view.dispatch({ selection: EditorSelection.cursor(Math.min(at, view.state.doc.length)) }); });
     });
+  });
+}
+
+// #413 / ADR-145 §5: open the host tag picker and, on selection, insert `:::tagged\n<tag>\n:::` at the
+// caret (where applyAt already removed the "/tagged" token) — a complete atom that renders immediately.
+// Cancel leaves the doc untouched. One offset-invariant Y.Text edit; mirrors openEmbedExternalPrompt.
+function openTaggedPrompt(view: EditorView, prompt: TagPrompt): void {
+  prompt((tag) => {
+    if (tag == null || tag.trim() === "") { view.focus(); return; }
+    const at = view.state.selection.main.head;
+    // Always end with a newline and land the caret on the line AFTER the block: tagged is
+    // revealOnCursor (not atomSelectable), so a caret anywhere on the block — including the end of the
+    // closing fence line — would keep the raw source revealed instead of rendering the list.
+    const insert = `:::tagged\n${tag.trim()}\n:::\n`;
+    const after = at + insert.length;
+    view.dispatch({ changes: { from: at, insert }, selection: EditorSelection.cursor(after), scrollIntoView: true });
+    const cm = getCM(view);
+    if (cm?.state.vim?.insertMode) { try { Vim.handleKey(cm, "<Esc>", "mapping"); } catch { /* vim unavailable */ } }
+    requestAnimationFrame(() => view.focus());
   });
 }
 

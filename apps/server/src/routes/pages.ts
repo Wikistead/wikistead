@@ -1901,6 +1901,62 @@ export function parseTaggedBody(body: string): string | null {
   return tag || null
 }
 
+// #413 / ADR-145 §5: viewer-scoped TAG SUGGESTIONS for the frontmatter chip editor / `:::tagged` insert.
+// SECURITY (the §4/§5 leak class): a tag name used ONLY on pages the caller cannot view must never be
+// suggested — the tag string itself is an existence leak. So a tag is offered only when ≥1 of its pages is
+// FGA-view-confirmed for the caller: over-fetch candidate (tag, page) rows by prefix, then walk tags in
+// order, view-checking their pages (memoized across tags) until one passes. Published-only (draft tags are
+// never in page_tags). Member-only route (no guest config). page_tags stays a stage-1 candidate set.
+export interface TagSuggestion { tag: string; display: string }
+
+const TAG_SUGGEST_N = 20        // suggestions returned
+const TAG_SUGGEST_OVER_FETCH = 400 // candidate rows fetched past the display cap (ADR-027)
+const TAG_SUGGEST_CHECKS_MAX = 200 // hard bound on FGA checks per request (existence-hiding stays intact)
+
+const escapeLike = (s: string) => s.replace(/[\\%_]/g, '\\$&')
+
+export async function getSuggestedTags(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { q: string; subject: string; context?: { current_time: string } },
+): Promise<TagSuggestion[]> {
+  const prefix = args.q.trim().toLowerCase().slice(0, TAG_MAX_LEN)
+  const rows = await db.sql<{ tag: string; display: string; page_id: string }[]>`
+    SELECT pt.tag, pt.display, pt.page_id FROM page_tags pt
+    JOIN pages p ON p.id = pt.page_id
+    WHERE p.published_at IS NOT NULL
+      AND pt.tag LIKE ${escapeLike(prefix) + '%'}
+    ORDER BY pt.tag ASC, pt.page_id ASC
+    LIMIT ${TAG_SUGGEST_OVER_FETCH}
+  `
+  // group candidate pages per tag, first-seen display wins (rows arrive tag-ordered)
+  const byTag = new Map<string, { display: string; pages: string[] }>()
+  for (const r of rows) {
+    let g = byTag.get(r.tag)
+    if (!g) { g = { display: r.display, pages: [] }; byTag.set(r.tag, g) }
+    g.pages.push(r.page_id)
+  }
+  const out: TagSuggestion[] = []
+  const viewCache = new Map<string, boolean>() // page id → viewable (memoized across tags)
+  let checks = 0
+  for (const [tag, g] of byTag) {
+    if (out.length >= TAG_SUGGEST_N) break
+    let visible = false
+    for (const pid of g.pages) {
+      let ok = viewCache.get(pid)
+      if (ok === undefined) {
+        if (checks >= TAG_SUGGEST_CHECKS_MAX) break // bounded work; a dropped suggestion is a UX gap, never a leak
+        checks++
+        ok = await check(fga, args.subject, 'view', { type: 'page', id: pid }, args.context)
+        viewCache.set(pid, ok)
+      }
+      if (ok) { visible = true; break }
+    }
+    if (visible) out.push({ tag, display: g.display })
+  }
+  return out
+}
+
 // #370 / ADR-145 §4: resolve a dynamic list FOR THE VIEWER. Both branches are view-filtered and
 // existence-hiding (the search-leak class, carried over verbatim from ADR-134 §3): the HOST page is
 // view-gated first (a caller who can't see the page can't use it as a probe → uniform 404), then every
@@ -2298,6 +2354,12 @@ export async function pagesPlugin(app: FastifyInstance) {
     if (name !== 'tagged' && name !== 'children') return [] as Backlink[]
     const { subject, context } = principalForPage(req, req.params.pageId)
     return getListResults(req.db, app.fga, { pageId: req.params.pageId, name, body: req.query.body ?? '', subject, context })
+  })
+
+  // #413 / ADR-145 §5: viewer-scoped tag suggestions. MEMBER-ONLY (no guest config) — a tag name is itself
+  // page content, so getSuggestedTags offers a tag only when the caller can view ≥1 page carrying it.
+  app.get<{ Querystring: { q?: string } }>('/tags/suggest', async (req) => {
+    return getSuggestedTags(req.db, app.fga, { q: req.query.q ?? '', subject: `user:${req.user.sub}` })
   })
 
   // #224 / ADR-104: the viewer-scoped title dictionary for auto internal links. The :pageId only

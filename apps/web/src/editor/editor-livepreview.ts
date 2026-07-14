@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, reAnchorAfterReveal, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, listSource, linkStatusResolver, embedAllowlist, embedUrlPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, nestedLivePreviewConfig, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type ListSource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt } from "./live-preview/decorations";
+import { livePreview, reAnchorAfterReveal, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, listSource, linkStatusResolver, embedAllowlist, embedUrlPrompt, tagSuggestSource, tagPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, nestedLivePreviewConfig, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type ListSource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt, type TagSuggestSource, type TagPrompt } from "./live-preview/decorations";
 import { deadLinks } from "./live-preview/dead-links"; // #276 / ADR-117: dead-internal-link strikethrough overlay
 import { blockAnchors } from "./live-preview/block-anchor"; // #325 / ADR-137 slice 2: hide trailing ` ^id` markers
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
@@ -88,6 +88,8 @@ export interface LivePreviewSharedOpts {
   embedProviders?: readonly string[];
   openPageEmbedPicker?: PageEmbedPicker;
   openEmbedUrlPrompt?: EmbedUrlPrompt;
+  tagSuggest?: TagSuggestSource; // #413: view-filtered tag suggestions (member surfaces)
+  openTagPrompt?: TagPrompt; // #413: the :::tagged tag picker
   openTemplateInsertPicker?: TemplateInsertPicker;
   uploadImage?: ImageUploader;
   titleLinks?: TitleLinkSource;
@@ -207,6 +209,8 @@ export function buildLivePreviewExtensions(opts: LivePreviewSharedOpts, env: Liv
     ...(opts.embedProviders ? [embedAllowlist.of(opts.embedProviders)] : []),
     // #210 bounce: host seam for the in-app :::embed-external URL modal (retarget button → modal, not window.prompt).
     ...(opts.openEmbedUrlPrompt ? [embedUrlPrompt.of(opts.openEmbedUrlPrompt)] : []),
+    ...(opts.tagSuggest ? [tagSuggestSource.of(opts.tagSuggest)] : []), // #413
+    ...(opts.openTagPrompt ? [tagPrompt.of(opts.openTagPrompt)] : []), // #413
     // Slash command palette (editable surface only; view guests don't get it). The `/` palette owns image
     // insert (P): uploadImage + the container (the host, so the hidden file input survives CM's DOM
     // reconcile) — HOST actions, so a nested island gets the bare palette (image/embed/template no-op

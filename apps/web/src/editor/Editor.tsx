@@ -18,6 +18,7 @@ import { makeLinkStatusResolver } from "./link-status";
 import { makeTranscludeResolver } from "./transclude-resolver";
 import { PageEmbedPicker } from "./PageEmbedPicker";
 import { EmbedUrlModal } from "./EmbedUrlModal";
+import { TagPickerModal } from "./TagPickerModal";
 import { TemplatePickerDialog } from "../sidebar/TemplatePickerDialog";
 import type { PageEmbedPicker as PageEmbedPickerFn, TemplateInsertPicker as TemplateInsertPickerFn } from "./live-preview/palette";
 import type { EmbedUrlPrompt as EmbedUrlPromptFn } from "./live-preview/decorations";
@@ -231,6 +232,20 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
     embedUrlResolve.current = null;
     r?.(url);
   }, []);
+  // #413 / ADR-145 §5: the `:::tagged` tag picker (same stash/open/resolve pattern). Suggestions inside
+  // the modal are the member-only, view-filtered /tags/suggest.
+  const [tagPromptOpen, setTagPromptOpen] = useState(false);
+  const tagPromptResolve = useRef<((tag: string | null) => void) | null>(null);
+  const openTagPrompt = useCallback((onSubmit: (tag: string | null) => void) => {
+    tagPromptResolve.current = onSubmit;
+    setTagPromptOpen(true);
+  }, []);
+  const handleTagPick = useCallback((tag: string | null) => {
+    setTagPromptOpen(false);
+    const r = tagPromptResolve.current;
+    tagPromptResolve.current = null;
+    r?.(tag);
+  }, []);
   // #251 / ADR-110: the "/"-palette "Insert template" picker. Same stash/open/resolve pattern as the embed
   // picker; on selection we fetch the chosen template's body (view-gated by the server) and resolve the CM
   // callback with it (the palette inserts it at the caret). Cancel resolves null (doc untouched).
@@ -260,6 +275,12 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
   const navigateRouter = useNavigate();
   const queryClient = useQueryClient();
   const memberPageId = guestSurface ? undefined : pageId; // the member-only-source gate (#374)
+  // #413: the view-filtered tag-suggest fetch for the frontmatter chip editor (member surfaces only).
+  const tagSuggest = useMemo(() => {
+    if (!memberPageId) return undefined;
+    return (q: string) =>
+      apiFetch<{ tag: string; display: string }[]>(`/tags/suggest?q=${encodeURIComponent(q)}`, apiToken).catch(() => null);
+  }, [memberPageId, apiToken]);
   const titleDictQ = useTitleDictionary(memberPageId);
   const titleDictRef = useRef<readonly TitleEntry[]>([]);
   useEffect(() => {
@@ -411,6 +432,8 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       embedProviders,
       openPageEmbedPicker,
       openEmbedUrlPrompt,
+      tagSuggest, // #413
+      openTagPrompt, // #413
       openTemplateInsertPicker,
       uploadImage: onUploadImage,
       vim,
@@ -460,7 +483,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
     };
     // vim excluded (Compartment reconfigure, not a remount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, openPageEmbedPicker, openEmbedUrlPrompt, openTemplateInsertPicker, onUploadImage, titleLinks]);
+  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, openPageEmbedPicker, openEmbedUrlPrompt, openTemplateInsertPicker, onUploadImage, titleLinks, tagSuggest, openTagPrompt]);
 
   // vim on/off: reconfigure the Compartment IN PLACE (no remount → collab/presence
   // untouched). Only meaningful on the edit surface.
@@ -541,6 +564,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       {/* #205 part 2: the :::embed-page title-search picker (opened from the slash command). */}
       <PageEmbedPicker open={embedPickerOpen} onPick={handleEmbedPick} />
       <EmbedUrlModal open={embedUrlState.open} current={embedUrlState.current} onSubmit={handleEmbedUrl} />
+      <TagPickerModal open={tagPromptOpen} onSubmit={handleTagPick} />
       {/* #251: "/"-palette Insert template picker. spaceId is null here (the page's space isn't threaded
           into the editor), so the "This space" group shows all space-scope templates the user can view. */}
       <TemplatePickerDialog open={tplInsertOpen} spaceId={null} onClose={() => handleTemplateInsertPick(null)} onPick={handleTemplateInsertPick} />

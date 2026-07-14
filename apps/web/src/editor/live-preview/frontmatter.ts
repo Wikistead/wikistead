@@ -1,5 +1,6 @@
 import { WidgetType, type EditorView } from "@codemirror/view";
 import i18n from "../../i18n";
+import { tagSuggestSource } from "./decorations";
 
 // #370 / ADR-145 §2: the document frontmatter subsystem — the leading `---\n…\n---` YAML fence of the SAME
 // single Y.Text (no second CRDT, no metadata store). The block renders as a compact top-of-page "properties"
@@ -159,6 +160,32 @@ export class FrontmatterWidget extends WidgetType {
       input.className = "cm-lp-frontmatter-input";
       input.setAttribute("data-testid", "fm-tag-input");
       input.placeholder = i18n.t("frontmatter.addTag");
+      // #413 / ADR-145 §5: existing-tag autocomplete via a native <datalist>, fed by the host's
+      // view-filtered suggest seam (absent on guest/template surfaces → plain input). Debounced.
+      const suggest = view.state.facet(tagSuggestSource);
+      if (suggest) {
+        const listId = `fm-tag-datalist-${Math.random().toString(36).slice(2, 8)}`;
+        const datalist = document.createElement("datalist");
+        datalist.id = listId;
+        datalist.setAttribute("data-testid", "fm-tag-datalist");
+        input.setAttribute("list", listId);
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        input.addEventListener("input", () => {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => {
+            void suggest(input.value).then((items) => {
+              if (!items) return;
+              datalist.replaceChildren();
+              for (const it of items) {
+                const opt = document.createElement("option");
+                opt.value = it.display;
+                datalist.appendChild(opt);
+              }
+            });
+          }, 200);
+        });
+        wrap.appendChild(datalist);
+      }
       input.addEventListener("mousedown", (e) => { e.stopPropagation(); });
       input.addEventListener("keydown", (e) => {
         e.stopPropagation(); // typing in the input must never reach CM keymaps (incl. vim)
