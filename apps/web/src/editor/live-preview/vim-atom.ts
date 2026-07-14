@@ -124,6 +124,14 @@ function atomChordTarget(view: EditorView, operator: "yank" | "delete"): { from:
 // Without this, both pasted an EMPTY macro (vim's register held only the atom's first ::: line).
 export const atomYank: Extension = ViewPlugin.define((view) => {
   const onKeydown = (e: KeyboardEvent) => {
+    // #278point 3: a NESTED editor (slot island / editUI source pane) lives INSIDE this
+    // contentDOM, so its keys reach this capture listener too — while the OUTER caret is parked on
+    // the container atom. An island `o` was then handled HERE (outer "open line after the atom"),
+    // rewriting the outer doc and rebuilding the container widget → the island died mid-keystroke
+    // (the reported "vim o on the island's bottom line can't add a line"). Keys that originate in a
+    // nested editor belong to that editor's own vim — ignore them here.
+    const src = e.target as HTMLElement | null;
+    if (src && src !== view.contentDOM && src.closest(".cm-content") !== view.contentDOM) return;
     // #216 comment 802: in vim mode, Enter (incl. Ctrl+Enter) is consumed by codemirror-vim's keydown
     // BEFORE the CM Ctrl-Enter keymap runs, so a vim user has NO way to reach a macro/table RichUI (the
     // editUI edit button is #174-gated). Intercept Ctrl/Cmd+Enter in CAPTURE phase (before vim) and route

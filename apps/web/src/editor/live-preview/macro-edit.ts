@@ -76,8 +76,14 @@ export const nestedEditActiveField = StateField.define<NestedSelection | null>({
     let v = value;
     if (tr.docChanged) v = mapNested(v, tr);
     if (tr.selection) {
+      // #278point 3: clear only when the head actually MOVED. A same-position selection
+      // re-assert (consumeReAnchor's stale-caret redraw, #340 — fired by the shared block
+      // ResizeObserver when the ISLAND's own growth resizes the container) is not the user
+      // leaving; with the outer caret parked outside the container (a slot click never moves
+      // it), that re-assert used to clear this field and kill the island mid-keystroke. A real
+      // leave moves the head (click / motion), and the island blur-commit path also closes it.
       const h = tr.newSelection.main.head;
-      if (h < v.container.from || h > v.container.to) return null;
+      if (h !== tr.startState.selection.main.head && (h < v.container.from || h > v.container.to)) return null;
     }
     return v;
   },
@@ -98,8 +104,14 @@ export const slotEditField = StateField.define<SlotEdit | null>({
     let v = value;
     if (tr.docChanged) v = { ...v, container: { from: tr.changes.mapPos(v.container.from, 1), to: tr.changes.mapPos(v.container.to, -1) } };
     if (tr.selection) {
+      // #278point 3: clear only when the head actually MOVED. A same-position selection
+      // re-assert (consumeReAnchor's stale-caret redraw, #340 — fired by the shared block
+      // ResizeObserver when the ISLAND's own growth resizes the container) is not the user
+      // leaving; with the outer caret parked outside the container (a slot click never moves
+      // it), that re-assert used to clear this field and kill the island mid-keystroke. A real
+      // leave moves the head (click / motion), and the island blur-commit path also closes it.
       const h = tr.newSelection.main.head;
-      if (h < v.container.from || h > v.container.to) return null;
+      if (h !== tr.startState.selection.main.head && (h < v.container.from || h > v.container.to)) return null;
     }
     return v;
   },
