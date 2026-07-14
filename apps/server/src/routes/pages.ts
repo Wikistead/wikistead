@@ -73,7 +73,7 @@ export async function setEmbedProviders(
 }
 
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean; created_by?: string | null; updated_by?: string | null; task_done?: number; task_total?: number }
-export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean; canComment?: boolean; private?: boolean; frozen?: 'full' | 'guests' | null; createdBy?: string | null; updatedBy?: string | null; taskDone?: number; taskTotal?: number }
+export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean; canModerate?: boolean; canComment?: boolean; private?: boolean; frozen?: 'full' | 'guests' | null; createdBy?: string | null; updatedBy?: string | null; taskDone?: number; taskTotal?: number }
 function toPage(r: PageRow): Page {
   // hasUnpublishedChanges + published are only present when the SELECT included the
   // columns (listPages); together they drive the sidebar's 3-state badge
@@ -342,6 +342,9 @@ export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: 
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
   // canManage gates the permission UI (server re-checks on the access endpoints).
   const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: args.pageId })
+  // #330 / ADR-141: canModerate gates the moderation affordances (freeze control, patrol, revert) for a
+  // moderator who is NOT a manager. Convenience only — every moderation route re-checks FGA (requireModerate).
+  const canModerate = canManage || (await check(fga, `user:${args.userId}`, 'moderate', { type: 'page', id: args.pageId }))
   // canComment gates the comment COMPOSER (#100): true for edit, an explicit comment grant, OR a
   // viewer when the space's comment_open is on (view_base and comment_open). view/edit is capability;
   // comment is a distinct capability the UI needs to show the composer to comment-capable viewers.
@@ -353,7 +356,7 @@ export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: 
   // any viewer (freeze only removes access — the flag reveals nothing; non-viewers 404 above). A frozen
   // member's `capability` already resolves to 'view' via checkMemberAccess (the model subtracts edit).
   const frozen = await readPageFrozen(fga, args.pageId)
-  return { ...toPage(row), capability: access.readOnly ? 'view' : 'edit', canManage, canComment, private: isPrivate, frozen }
+  return { ...toPage(row), capability: access.readOnly ? 'view' : 'edit', canManage, canModerate, canComment, private: isPrivate, frozen }
 }
 
 // Update title. Outbox entry written in the same tx as the UPDATE.
@@ -632,16 +635,21 @@ export async function getPublished(
 // User-facing page capabilities. #100/ADR-029 adds `comment` (a per-member comment grant, member
 // granularity). NOTE: `view` is a COMPUTED FGA relation now (view_base or comment) — a direct view
 // grant is written to `view_base`, so the API capability ('view') maps to the FGA relation below.
-export type PageRelation = 'view' | 'comment' | 'edit' | 'manage'
-const PAGE_RELATIONS: PageRelation[] = ['view', 'comment', 'edit', 'manage']
+// #330 / ADR-141 adds `moderate` — a direct per-page moderation grant (theruling: the only way to
+// appoint a moderator onto a PRIVATE page, whose space inheritance is private-guarded).
+export type PageRelation = 'view' | 'comment' | 'edit' | 'manage' | 'moderate'
+const PAGE_RELATIONS: PageRelation[] = ['view', 'comment', 'edit', 'manage', 'moderate']
 
 // capability → FGA relation to WRITE. #218 / ADR-103: member/group/link direct grants go to the `*_direct`
 // LEAVES (view_direct / edit_direct / manage_direct) so they cascade down the parent chain; `edit`/`manage` are
 // purely computed now (a direct write to them fails "type not allowed"). `comment` keeps its own direct types.
-function fgaRelationForCap(cap: PageRelation): 'view_direct' | 'comment' | 'edit_direct' | 'manage_direct' {
+// `moderate` (#330) has its own direct type on the relation itself ([user, group#member]) — no leaf split
+// needed (it does not cascade down parents; a per-page appointment is deliberate and page-scoped).
+function fgaRelationForCap(cap: PageRelation): 'view_direct' | 'comment' | 'edit_direct' | 'manage_direct' | 'moderate' {
   if (cap === 'view') return 'view_direct'
   if (cap === 'edit') return 'edit_direct'
   if (cap === 'manage') return 'manage_direct'
+  if (cap === 'moderate') return 'moderate'
   return 'comment'
 }
 // FGA relation (as stored/read) → user-facing capability; null for non-grant relations (space/parent/
@@ -651,12 +659,13 @@ function capForFgaRelation(rel: string): PageRelation | null {
   if (rel === 'edit_direct') return 'edit'
   if (rel === 'manage_direct') return 'manage'
   if (rel === 'comment') return 'comment'
+  if (rel === 'moderate') return 'moderate'
   return null
 }
 
 function validateGrant(grantee: string, relation: string): asserts relation is PageRelation {
   if (!PAGE_RELATIONS.includes(relation as PageRelation)) {
-    throw Object.assign(new Error('relation must be view, comment, edit, or manage'), { statusCode: 400 })
+    throw Object.assign(new Error('relation must be view, comment, edit, manage, or moderate'), { statusCode: 400 })
   }
   // Only real principals: a member or a group's member-set. NOT share_link, user:*,
   // page:, space: — those are not hand-grantable per-page access.
@@ -668,6 +677,19 @@ function validateGrant(grantee: string, relation: string): asserts relation is P
 async function requireManage(fga: OpenFgaClient, userId: string, pageId: string): Promise<void> {
   const canManage = await check(fga, `user:${userId}`, 'manage', { type: 'page', id: pageId })
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+}
+
+// #330 / ADR-141: the MODERATION gate — `moderate` OR `manage` passes. `moderate` does not imply page-level
+// manage (a page creator's manage_direct is not a moderator), and manage_direct holders are not in
+// space#moderator, so BOTH relations are checked. Used by the moderation verbs (freeze C-4, per-actor revert
+// C-2, patrol C-1) — never by grants/delete/settings, which stay requireManage (moderate ≠ manage).
+async function requireModerate(fga: OpenFgaClient, userId: string, pageId: string): Promise<void> {
+  const target = { type: 'page' as const, id: pageId }
+  const [canModerate, canManage] = await Promise.all([
+    check(fga, `user:${userId}`, 'moderate', target),
+    check(fga, `user:${userId}`, 'manage', target),
+  ])
+  if (!canModerate && !canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 }
 
 export async function grantPageAccess(
@@ -925,7 +947,8 @@ export async function setPageFrozen(
   fga: OpenFgaClient,
   args: { pageId: string; tenantId: string; userId: string; level: PageFreezeLevel; plan?: string },
 ): Promise<void> {
-  await requireManage(fga, args.userId, args.pageId)
+  // #330 / ADR-141: freeze is a MODERATION verb — moderate or manage (was manage-only in C-4, the planned widening).
+  await requireModerate(fga, args.userId, args.pageId)
   const current = await readPageFrozen(fga, args.pageId)
   if (current === args.level) return // idempotent — re-freezing at the same level is a no-op
   await db.tx(async (tx) => {
@@ -947,7 +970,8 @@ export async function unsetPageFrozen(
   fga: OpenFgaClient,
   args: { pageId: string; tenantId: string; userId: string; plan?: string },
 ): Promise<void> {
-  await requireManage(fga, args.userId, args.pageId)
+  // #330 / ADR-141: unfreeze is the same moderation verb (moderate or manage).
+  await requireModerate(fga, args.userId, args.pageId)
   await db.tx(async (tx) => {
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.unfrozen', target: `page:${args.pageId}` })

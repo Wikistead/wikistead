@@ -295,11 +295,12 @@ export async function updateSpace(
 // list/grant/revoke, so the permission structure is never shown to — or handed out
 // by — someone without authority. Grantees are members (user:<sub>) or groups
 // (group:<id>#member); share_link / wildcard are not hand-grantable.
-export type SpaceCapability = 'view' | 'edit' | 'manage'
-const SPACE_CAPS: SpaceCapability[] = ['view', 'edit', 'manage']
+// #330 / ADR-141 adds `moderate` → space#moderator (revert/freeze/patrol + page edit via the bypass; NOT manage).
+export type SpaceCapability = 'view' | 'edit' | 'moderate' | 'manage'
+const SPACE_CAPS: SpaceCapability[] = ['view', 'edit', 'moderate', 'manage']
 // Capability vocabulary (shared with page access) → the space's FGA relations.
-const CAP_TO_RELATION: Record<SpaceCapability, string> = { view: 'viewer', edit: 'editor', manage: 'manager' }
-const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', editor: 'edit', manager: 'manage' }
+const CAP_TO_RELATION: Record<SpaceCapability, string> = { view: 'viewer', edit: 'editor', moderate: 'moderator', manage: 'manager' }
+const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', editor: 'edit', moderator: 'moderate', manager: 'manage' }
 
 // #258 / ADR-110: a member VIEW grant writes BOTH `viewer` (unchanged — pages inherit view via
 // view_base_from_space = viewer from space, and existing readers of `viewer` are untouched) AND
@@ -314,7 +315,7 @@ function spaceGrantTuples(grantee: string, relation: string, spaceId: string): {
 
 function validateSpaceGrant(grantee: string, capability: string): asserts capability is SpaceCapability {
   if (!SPACE_CAPS.includes(capability as SpaceCapability)) {
-    throw Object.assign(new Error('relation must be view, edit, or manage'), { statusCode: 400 })
+    throw Object.assign(new Error('relation must be view, edit, moderate, or manage'), { statusCode: 400 })
   }
   if (!/^user:[^*\s]+$/.test(grantee) && !/^group:[^\s]+#member$/.test(grantee)) {
     throw Object.assign(new Error('grantee must be user:<sub> or group:<id>#member'), { statusCode: 400 })
