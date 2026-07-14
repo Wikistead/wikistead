@@ -49,7 +49,6 @@
     "@wikistead/auth": "workspace:*",
     "@wikistead/authz": "workspace:*",
     "@wikistead/entitlements": "workspace:^",
-    "@wikistead/entitlements-cloud": "workspace:^",
     "@wikistead/events": "workspace:^",
     "@wikistead/hooks": "workspace:^",
     "@wikistead/macro-render": "workspace:^",
@@ -68,6 +67,7 @@
   },
   "devDependencies": {
     "@openfga/syntax-transformer": "^0.2.1",
+    "@wikistead/entitlements-cloud": "workspace:^",
     "@types/node": "^22.0.0",
     "@types/nodemailer": "^8.0.1",
     "jose": "^5.9.0",

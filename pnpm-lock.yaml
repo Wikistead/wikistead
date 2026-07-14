@@ -90,9 +90,6 @@ importers:
       '@wikistead/entitlements':
         specifier: workspace:^
         version: link:../../packages/entitlements
-      '@wikistead/entitlements-cloud':
-        specifier: workspace:^
-        version: link:../../packages/entitlements-cloud
       '@wikistead/events':
         specifier: workspace:^
         version: link:../../packages/events
@@ -148,6 +145,9 @@ importers:
       '@types/nodemailer':
         specifier: ^8.0.1
         version: 8.0.1
+      '@wikistead/entitlements-cloud':
+        specifier: workspace:^
+        version: link:../../packages/entitlements-cloud
       jose:
         specifier: ^5.9.0
         version: 5.10.0
