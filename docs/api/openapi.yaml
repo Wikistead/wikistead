@@ -109,9 +109,21 @@ paths:
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
       responses: { "200": { description: Page }, "404": { description: Not viewable or absent (uniform) } }
     delete:
-      summary: Delete a page (and its subtree)
+      summary: Move a page (and its subtree) to the trash
+      description: Soft delete — the subtree disappears from every surface but stays restorable for 30 days (then it is purged permanently). Requires manage on the page.
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "204": { description: Deleted } }
+      responses: { "204": { description: Moved to trash } }
+  /pages/{pageId}/restore:
+    post:
+      summary: Restore a trashed page (a trash root and everything trashed with it)
+      description: Access comes back exactly as before the trash (grants are never rewritten). If the original parent is gone the root re-parents to the space root (`reparented: true`). Requires manage; a non-root or unknown id is a uniform 404.
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "200": { description: "{ reparented }" }, "404": { description: Not a trash root, not manageable, or absent (uniform) } }
+  /pages/{pageId}/purge:
+    delete:
+      summary: Permanently delete a trashed page (a trash root) before its retention expires
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "204": { description: Purged }, "404": { description: Not a trash root, not manageable, or absent (uniform) } }
   /pages/{pageId}/published:
     get:
       summary: Get the published markdown (the read surface)
@@ -305,6 +317,12 @@ paths:
       summary: Minimal space info for a viewer
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
       responses: { "200": { description: "{ id, name, … }" } }
+  /spaces/{spaceId}/trash:
+    get:
+      summary: List the space's trash (roots only)
+      description: Each entry is a trashed root with its descendant count. Only entries the caller can manage are listed (others are silently absent). Member-only.
+      parameters: [ { $ref: "#/components/parameters/spaceId" } ]
+      responses: { "200": { description: "[{ id, title, deletedAt, deletedBy, descendants }]" }, "404": { description: Space not viewable or absent (uniform) } }
   /spaces/{spaceId}/export:
     get:
       summary: Export the space as a Markdown ZIP
