@@ -51,13 +51,16 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
     <Dialog open={open} onOpenChange={(o) => { if (!o) close(null); }}>
       {/* #348: widen to a 2-pane picker (list + rich preview), like the search modal; a narrow viewport keeps
           the single-column list (the preview pane is md:block only). */}
-      <DialogContent className="sm:max-w-5xl overflow-hidden p-0" showCloseButton={false} position="top">
+      {/* #366FIXED modal height (centered, equal top/bottom margins) so navigating hits — which changes
+          the preview body height — no longer stretches/shrinks the modal (the jitter). Each pane scrolls on its
+          own within that fixed box. Small screens keep the single-column, content-height list. */}
+      <DialogContent className="sm:max-w-5xl overflow-hidden p-0 flex flex-col h-[min(72vh,44rem)]" showCloseButton={false}>
         <DialogHeader className="sr-only"><DialogTitle>{t("embedPicker.title")}</DialogTitle></DialogHeader>
         <Command
           shouldFilter={false}
           value={selected}
           onValueChange={setSelected}
-          className="bg-transparent"
+          className="flex min-h-0 flex-1 flex-col bg-transparent"
           onKeyDown={(e) => {
             // #366any MANUAL list nav pins the user's selection (so a query-change auto-select can't yank it).
             if (e.key === "ArrowDown" || e.key === "ArrowUp" || (e.ctrlKey && (e.key === "j" || e.key === "k"))) userNavRef.current = true;
@@ -75,8 +78,8 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
             placeholder={t("embedPicker.placeholder")}
             autoFocus
           />
-          <div className="flex min-h-0">
-            <CommandList className="min-w-0 flex-1 md:max-w-xs md:border-r md:border-border">
+          <div className="flex min-h-0 flex-1">
+            <CommandList className="min-w-0 flex-1 min-h-0 max-h-none overflow-y-auto md:max-w-xs md:border-r md:border-border">
               <CommandEmpty>{t("embedPicker.empty")}</CommandEmpty>
               {(hits ?? []).map((h) => (
                 <CommandItem key={h.id} value={h.id} onSelect={() => close(h.id, h.title || null)} data-testid="embed-picker-item">
