@@ -105,28 +105,22 @@ describe("macro registry", () => {
     expect(noteCalloutMacro.htmlRender("<img src=x onerror=1>").toString()).not.toContain("<img");
   });
 
-  // #307 / ADR-127: the :::backlinks directive macro is host-mediated — export DEGRADES (the list is derived,
-  // not content) and its web htmlRender is a type-contract stub (empty; the server export doesn't register it).
-  // The liveRender placeholder + the host resolve/collapse behaviour are exercised in the real-browser e2e
-  // (this suite runs in node — no DOM — so it checks the declarative contract only).
-  it("registers the :::backlinks directive macro as degrade with an empty htmlRender stub", () => {
-    const m = findDirectiveMacro("backlinks");
-    expect(m).toBeTruthy();
-    expect(m!.exportFidelity).toBe("degrade");
-    expect(registeredDirectiveNames()).toContain("backlinks");
-    expect(m!.htmlRender && m!.htmlRender("").toString()).toBe(""); // empty output — export emits nothing
-  });
-
-  // #324 / ADR-134: :::query — same host-mediated contract as :::backlinks (degrade, empty htmlRender stub;
-  // the server export doesn't register it, so off-platform it emits nothing). The member-live resolve/collapse
-  // is exercised in e2e.
-  it("registers the :::query directive macro as degrade with an empty htmlRender stub", () => {
-    const m = findDirectiveMacro("query");
-    expect(m).toBeTruthy();
-    expect(m!.exportFidelity).toBe("degrade");
-    expect(m!.revealOnCursor).toBe(true);
-    expect(registeredDirectiveNames()).toContain("query");
-    expect(m!.htmlRender && m!.htmlRender("").toString()).toBe(""); // empty output — export emits nothing
+  // #370 / ADR-145: the :::tagged / :::children directive macros are host-mediated — export DEGRADES (the
+  // list is derived, not content; the public surface substitutes the baked snapshot) and their web htmlRender
+  // is a type-contract stub (empty; the server export doesn't register them). The liveRender placeholder +
+  // the host resolve/collapse behaviour are exercised in the real-browser e2e (this suite runs in node — no
+  // DOM — so it checks the declarative contract only). :::query and :::backlinks no longer exist.
+  it("registers :::tagged and :::children as degrade with empty htmlRender stubs; query/backlinks are gone", () => {
+    for (const name of ["tagged", "children"] as const) {
+      const m = findDirectiveMacro(name);
+      expect(m).toBeTruthy();
+      expect(m!.exportFidelity).toBe("degrade");
+      expect(m!.revealOnCursor).toBe(true);
+      expect(registeredDirectiveNames()).toContain(name);
+      expect(m!.htmlRender && m!.htmlRender("").toString()).toBe(""); // empty output — export emits nothing
+    }
+    expect(findDirectiveMacro("query")).toBeUndefined();
+    expect(findDirectiveMacro("backlinks")).toBeUndefined();
   });
 });
 

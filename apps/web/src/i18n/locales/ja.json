@@ -640,10 +640,10 @@
     "insertTemplate": "テンプレートを挿入",
     "pageLink": "ページリンク",
     "backlinks": "バックリンク（このページへのリンク）",
-    "query": "クエリ（動的リスト：タグ／子ページ／被リンク）",
-    "queryChildren": "子ページ一覧",
-    "queryTag": "タグのメンバー一覧…",
-    "highlight": "マーカー"
+    "highlight": "マーカー",
+    "tagged": "タグのページ一覧（動的）",
+    "children": "子ページ一覧（動的）",
+    "pageTags": "ページのタグ（frontmatter）"
   },
   "calloutEdit": {
     "title": "コールアウトを編集",
@@ -760,8 +760,7 @@
     "excalidrawEmpty": "空の図 — 左上の ✎ ボタンで編集",
     "embedEmpty": "空の埋め込み — ✎ ボタンで URL を追加",
     "pageEmbedEmpty": "空のページ埋め込み — ✎ ボタンでページを追加",
-    "backlinksEmpty": "被リンクはまだありません",
-    "queryEmpty": "一致するページはありません"
+    "listEmpty": "該当ページはまだありません。"
   },
   "templates": {
     "title": "テンプレート",
@@ -862,5 +861,10 @@
     "bannerText": "新機能：書き方に合わせてエディタを最適化できます。",
     "bannerCta": "設定する",
     "skippedNote": "バランス型のエディタ表示にしました（vim オフ・WYSIWYG あり）。設定または「最初の質問をやり直す」でいつでも変更できます。"
+  },
+  "frontmatter": {
+    "tagsLabel": "タグ",
+    "addTag": "タグを追加…",
+    "empty": "タグなし"
   }
 }

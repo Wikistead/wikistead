@@ -27,8 +27,8 @@ const LINK = svg('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.7
 const IMAGE = svg('<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>');
 const FILE_SYMLINK = svg('<path d="m10 18 3-3-3-3"/><path d="M4 11V4a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2h-6"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>'); // page-link (internal): a page + a link arrow, vs the plain URL chain
 const FILE_STACK = svg('<path d="M21 7h-3a2 2 0 0 1-2-2V2"/><path d="M21 6v6.5c0 .8-.7 1.5-1.5 1.5h-7c-.8 0-1.5-.7-1.5-1.5v-9c0-.8.7-1.5 1.5-1.5H17Z"/><path d="M7 8v8.8c0 .3.2.6.4.8.2.2.5.4.8.4H15"/><path d="M3 12v8.8c0 .3.2.6.4.8.2.2.5.4.8.4H11"/>'); // insert-template: matches TemplatePickerDialog / TemplatesPage
-const LIST_TREE = svg('<path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/>'); // query-children: a hierarchy/tree
-const TAG = svg('<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/>'); // query-tag: a tag
+const LIST_TREE = svg('<path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/>'); // children: a hierarchy/tree
+const TAG = svg('<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/>'); // tagged / page-tags: a tag
 
 // ── callout types: the SAME glyphs the callout panel paints (callout-icons.css) ──
 const CALLOUT_NOTE = svg('<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>'); // pencil
@@ -48,8 +48,6 @@ const NETWORK = svg('<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2
 const DRAW = svg('<path d="m12 19 7-7 3 3-7 7-3-3z"/><path d="m18 13-1.5-7.5L2 2l3.5 14.5L13 18z"/><path d="m2 2 7.586 7.586"/><circle cx="11" cy="11" r="2"/>'); // excalidraw: pen
 const FILE_INPUT = svg('<path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M2 15h10"/><path d="m9 18 3-3-3-3"/><path d="M14.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/>'); // embed-page: content flowing into a page (transclude)
 const GLOBE = svg('<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'); // embed-external: the web
-const BACKLINKS = svg('<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/>');
-const QUERY = svg('<path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/>'); // list-filter
 
 const FALLBACK = svg('<rect width="16" height="16" x="4" y="4" rx="2"/>'); // future/unmapped ids ONLY (see the coverage test)
 
@@ -60,7 +58,7 @@ const ICONS: Record<string, string> = {
   todo: CHECK_SQUARE, "todo-ring": CIRCLE_CHECK,
   quote: QUOTE, code: CODE, table: TABLE, divider: DIVIDER,
   link: LINK, image: IMAGE, "page-link": FILE_SYMLINK, "insert-template": FILE_STACK,
-  "query-children": LIST_TREE, "query-tag": TAG,
+  "page-tags": TAG,
   // callout types (macro:<type>) — the panel's own glyphs
   "macro:note": CALLOUT_NOTE, "macro:info": CALLOUT_INFO, "macro:tip": CALLOUT_TIP,
   "macro:warning": CALLOUT_WARNING, "macro:danger": CALLOUT_DANGER,
@@ -68,7 +66,7 @@ const ICONS: Record<string, string> = {
   "macro:columns": COLUMNS, "macro:tabs": TABS, "macro:details": DETAILS,
   "macro:mermaid": WORKFLOW, "macro:plantuml": NETWORK, "macro:excalidraw": DRAW,
   "macro:embed-page": FILE_INPUT, "macro:embed-external": GLOBE,
-  "macro:backlinks": BACKLINKS, "macro:query": QUERY,
+  "macro:tagged": TAG, "macro:children": LIST_TREE,
 };
 
 // The icon SVG string for a palette command id (built-in or `macro:<name>`); a generic block glyph otherwise.

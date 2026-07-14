@@ -10,8 +10,8 @@ import { tableMacro } from "./table";
 import { columnsMacro, tabsMacro, detailsMacro } from "./layout-directives";
 import { transcludeMacro } from "./transclude";
 import { embedMacro } from "./embed";
-import { backlinksMacro } from "./backlinks";
-import { queryMacro } from "./query";
+import { taggedMacro } from "./tagged";
+import { childrenMacro } from "./children";
 import { todoMacro } from "./todo";
 
 registerMacro(mermaidMacro);
@@ -24,8 +24,8 @@ registerMacro(tabsMacro); // M2 layout directive (#90)
 registerMacro(detailsMacro); // M2 layout directive (#90)
 registerMacro(transcludeMacro); // #108 internal transclude (host-mediated; ADR-071)
 registerMacro(embedMacro); // #108 external embed (host-mediated sandboxed iframe; ADR-071 comment 551)
-registerMacro(backlinksMacro); // #307 / ADR-127: :::backlinks (host-mediated backlink list; empty renders nothing)
-registerMacro(queryMacro); // #324 / ADR-134: :::query (host-mediated read-only dynamic list; member-only, empty renders nothing)
+registerMacro(taggedMacro); // #370 / ADR-145: :::tagged (host-mediated frontmatter-tag list; member-only, empty renders nothing)
+registerMacro(childrenMacro); // #370 / ADR-145: :::children (host-mediated child-page list; member-only, empty renders nothing)
 registerMacro(todoMacro); // #290 / ADR-114: :::todo (promoted GFM task list + progress ring)
 
 export { macroFold } from "./fold";

@@ -640,10 +640,10 @@
     "insertTemplate": "Insert template",
     "pageLink": "Page link",
     "backlinks": "Backlinks (pages that link here)",
-    "query": "Query (dynamic list: tag / children / backlinks)",
-    "queryChildren": "Child pages (list)",
-    "queryTag": "Tag members (list)…",
-    "highlight": "Highlight"
+    "highlight": "Highlight",
+    "tagged": "Tagged pages (dynamic list)",
+    "children": "Child pages (dynamic list)",
+    "pageTags": "Page tags (frontmatter)"
   },
   "calloutEdit": {
     "title": "Edit callout",
@@ -761,8 +761,7 @@
     "excalidrawEmpty": "Empty drawing — click the ✎ button to edit",
     "embedEmpty": "Empty embed — click the ✎ button to add a URL",
     "pageEmbedEmpty": "Empty page embed — click the ✎ button to add a page",
-    "backlinksEmpty": "No backlinks yet",
-    "queryEmpty": "No matching pages"
+    "listEmpty": "No pages yet."
   },
   "templates": {
     "title": "Templates",
@@ -863,5 +862,10 @@
     "bannerText": "New: tailor the editor to how you write.",
     "bannerCta": "Set it up",
     "skippedNote": "We set up a balanced editor for you (vim off, with WYSIWYG). You can change this any time in Settings, or with “redo the questions”."
+  },
+  "frontmatter": {
+    "tagsLabel": "Tags",
+    "addTag": "Add tag…",
+    "empty": "No tags"
   }
 }

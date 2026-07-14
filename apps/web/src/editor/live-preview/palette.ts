@@ -82,24 +82,31 @@ const COMMANDS: PaletteCommand[] = [
   // an empty selection inserts "[](url)" with "url" selected (URL insert); with a selection
   // it link-ifies it — reached via the bubble / `\` / `/`-on-selection / right-click.
   { id: "link", label: () => i18n.t("palette.link"), alias: "link", keywords: "url href anchor hyperlink", insert: "", caret: 0, action: (view) => insertLink(view) },
-  // #356: discoverable named presets for `:::query` so the spec syntax need not be hand-written. "Child pages"
-  // is a complete atom (no picker, no id) — the caret lands AFTER the block so it renders immediately (a
-  // caret inside would reveal the raw source). "Backlinks" is already reachable via the :::backlinks macro and
-  // "Tag members" is a separate picker-gated command below (it needs a page id — never hand-typed, #356).
-  { id: "query-children", label: () => i18n.t("palette.queryChildren"), alias: "child pages", keywords: "query children child pages tree list dynamic 子ページ 一覧 動的 クエリ", insert: ":::query\nchildren\n:::", caret: 9 },
 ];
 
-// #356: "Tag members" — a `:::query\ntag <id>\n:::` list of another tag page's members. Picker-gated (like
-// embed-page / page-link): the tag page is CHOSEN from the host page picker (view-gated title search), never
-// written as a raw id. Absent on picker-less surfaces. The generated source is the existing ADR-134 spec (no
-// notation change — the `:::backlinks` alias / normalization question stays out of this discoverability slice).
-const QUERY_TAG_COMMAND: PaletteCommand = {
-  id: "query-tag",
-  label: () => i18n.t("palette.queryTag"),
-  alias: "tag members",
-  keywords: "query tag members list dynamic タグ メンバー 一覧 動的 クエリ",
+// #370 / ADR-145: "Page tags" — jump to / create this page's frontmatter `tags:` block. Frontmatter is
+// position-0-only, so this is an ACTION (never a template at the caret): when a leading frontmatter block
+// exists the caret moves into it (the block reveals raw for editing); otherwise an empty
+// `---\ntags: []\n---` block is inserted at the document start (one offset-invariant Y.Text edit) and the
+// caret lands on the `tags:` line.
+const PAGE_TAGS_COMMAND: PaletteCommand = {
+  id: "page-tags",
+  label: () => i18n.t("palette.pageTags"),
+  alias: "tags",
+  keywords: "tags tag frontmatter properties label タグ ラベル プロパティ",
   insert: "",
   caret: 0,
+  action: (view) => {
+    const doc = view.state.doc.toString();
+    if (/^---[ \t]*\r?\n/.test(doc)) {
+      // move the caret onto line 2 (inside the fence) → the frontmatter reveals raw for editing
+      const pos = view.state.doc.line(Math.min(2, view.state.doc.lines)).from;
+      view.dispatch({ selection: EditorSelection.cursor(Math.min(pos, view.state.doc.length)), scrollIntoView: true });
+    } else {
+      view.dispatch({ changes: { from: 0, insert: "---\ntags: []\n---\n" }, selection: EditorSelection.cursor(11), scrollIntoView: true });
+    }
+    requestAnimationFrame(() => view.focus());
+  },
 };
 
 // Image insert (layer P). Moved here from the selection bubble (was M0-5, pulled forward)
@@ -138,7 +145,7 @@ function macroCommands(): PaletteCommand[] {
 export function allPaletteCommandIdsForCoverage(): string[] {
   return [
     ...COMMANDS.map((c) => c.id),
-    QUERY_TAG_COMMAND.id, IMAGE_COMMAND.id, PAGE_LINK_COMMAND.id, INSERT_TEMPLATE_COMMAND.id,
+    PAGE_TAGS_COMMAND.id, IMAGE_COMMAND.id, PAGE_LINK_COMMAND.id, INSERT_TEMPLATE_COMMAND.id,
     ...macroCommands().map((c) => c.id),
   ];
 }
@@ -162,10 +169,9 @@ function commandList(state: EditorState): PaletteCommand[] {
   // standard `[title]/p/id)` link. Present only when the host wired the picker (never for guests /
   // picker-less surfaces). Sits next to the generic /link (URL template) as its internal sibling.
   const withPageLink = picker ? [...base, { ...PAGE_LINK_COMMAND, action: (view: EditorView) => openPageLinkPicker(view, picker) }] : base;
-  // #356: "Tag members" query rides the SAME picker seam (view-gated title search → no hand-typed id). Present
-  // only when the host wired the picker (member surface) — a guest / picker-less surface never sees it.
-  const withQueryTag = picker ? [...withPageLink, { ...QUERY_TAG_COMMAND, action: (view: EditorView) => openQueryTagPicker(view, picker) }] : withPageLink;
-  const withImage = state.facet(imageUploader) ? [...withQueryTag, IMAGE_COMMAND] : withQueryTag;
+  // #370: "Page tags" (frontmatter) is a plain action — present on every editable surface.
+  const withPageTags = [...withPageLink, PAGE_TAGS_COMMAND];
+  const withImage = state.facet(imageUploader) ? [...withPageTags, IMAGE_COMMAND] : withPageTags;
   // #251: append "Insert template" only when the host wired the picker seam (uploader-less/guest surfaces
   // never see it). Its action opens the picker and inserts the chosen body at the caret.
   const tplPicker = state.facet(templateInsertPicker);
@@ -281,25 +287,6 @@ export function pageLinkTrigger(): Extension {
     if (u.state.sliceDoc(sel.head - 2, sel.head) !== "[[") return;
     if (sel.head >= 3 && u.state.sliceDoc(sel.head - 3, sel.head - 2) === "[") return; // `[[[` — already fired
     openPageLinkPicker(u.view, picker, { from: sel.head - 2, to: sel.head });
-  });
-}
-
-// #356: open the host page picker and, on selection, insert `:::query\ntag <id>\n:::` at the caret (where
-// applyAt already removed the "/query" token) — a dynamic list of the chosen tag page's members. The tag page
-// is picked by view-gated title search, never a hand-typed id (#356's discoverability goal). Same picker seam
-// as embed-page / page-link; cancel leaves the doc untouched. One offset-invariant Y.Text edit. The caret lands
-// on the block start (the macro reveals raw there; moving off renders the list) — a completed atom, nothing to type.
-function openQueryTagPicker(view: EditorView, open: PageEmbedPicker): void {
-  open((pageId) => {
-    if (!pageId) { view.focus(); return; }
-    const at = view.state.selection.main.head;
-    const needsNl = at < view.state.doc.length && view.state.doc.sliceString(at, at + 1) !== "\n";
-    const insert = `:::query\ntag ${pageId}\n:::${needsNl ? "\n" : ""}`;
-    view.dispatch({ changes: { from: at, insert }, selection: EditorSelection.cursor(at), scrollIntoView: true });
-    const cm = getCM(view);
-    if (cm?.state.vim?.insertMode) { try { Vim.handleKey(cm, "<Esc>", "mapping"); } catch { /* vim unavailable */ } }
-    view.dispatch({ selection: EditorSelection.cursor(at) }); // pin caret on the atom start (a vim Esc moves it left)
-    requestAnimationFrame(() => view.focus());
   });
 }
 
