@@ -25,6 +25,7 @@
     "db:seed": "tsx --env-file=../../.env ../../infra/db/seed.ts",
     "storage:gc": "tsx --env-file=../../.env src/storage/gc.ts",
     "search:sync": "tsx --env-file=../../.env src/search-sync.ts",
+    "ledger:verify": "tsx --env-file=../../.env src/audit/operator-ledger-cli.ts",
     "tenant:oidc-disable": "tsx --env-file=../../.env src/scripts/oidc-disable.ts",
     "tenant:saml-disable": "tsx --env-file=../../.env src/scripts/saml-disable.ts",
     "orphan:sweep": "tsx --env-file=../../.env src/scripts/orphan-claim-sweep.ts",
