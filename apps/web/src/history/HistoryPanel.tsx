@@ -6,6 +6,7 @@ import { ConfirmDialog } from "../ui/dialogs";
 import { RightPanel } from "../ui/RightPanel";
 import { notify } from "../ui/toast";
 import { authorLabel, isGuestSub } from "../comments/AuthorChip";
+import { useMemberIdentities } from "../data/queries"; // #379 / ADR-150: resolve member authors
 
 // Page history: lists the snapshot revisions (newest first) and, for edit-capable
 // users, restores the page to a chosen one. Backend (GET list / POST restore) has
@@ -34,14 +35,15 @@ function fmt(iso: string): string {
 // created_by is stored as the FGA subject / actor: "user:<sub>" (show the sub), or a guest actor
 // "guest:<id>" / #331 `anon:<id>` (show the short "Guest 7f3a" pseudonym — the raw id / anon hex must NEVER be
 // shown in full, ADR-138 C-6 reviewer condition 3; the old `.replace(/^(user|guest):/)` leaked the raw uuid).
-function author(createdBy: string | null, unknown: string, guestWord: string): string {
+// #379 / ADR-150: a member author resolves to their CHOSEN display name when customized (the shared
+// /members/identities contract; `identities` is the batch-resolved map keyed by bare sub). Fallback =
+// the client-side label (email local-part / sub) exactly as before; guests keep "Guest 7f3a".
+function author(createdBy: string | null, unknown: string, guestWord: string, identities?: Record<string, { displayName: string | null }>): string {
   if (!createdBy) return unknown;
-  // #379: a member author showed the RAW sub (`createdBy.slice(5)` — a full email / opaque OIDC sub), unlike
-  // the comment/PageMeta author displays which format it via `authorLabel` (email local-part). Route members
-  // through the SAME shared formatter so the history reads consistently ("the owner", not "the owner@…"). NOTE: this
-  // is the client-side label only; resolving to a member's chosen DISPLAY NAME + avatar needs an identity
-  // endpoint (authz-gated) — the remaining, needs-review part of #379.
-  if (createdBy.startsWith("user:")) return authorLabel(createdBy.slice(5), guestWord);
+  if (createdBy.startsWith("user:")) {
+    const sub = createdBy.slice(5);
+    return identities?.[sub]?.displayName ?? authorLabel(sub, guestWord);
+  }
   if (isGuestSub(createdBy)) return authorLabel(createdBy, guestWord);
   return createdBy;
 }
@@ -78,8 +80,10 @@ export function HistoryPanel({
   // #327 increment 3 (guided manual): the highlighted actor. Toggled by clicking an author name.
   const [focusActor, setFocusActor] = useState<string | null>(null);
 
+  // #379: one batch resolution for every member author in the visible history (cached by sub set).
+  const identities = useMemberIdentities((revisions ?? []).map((r) => r.createdBy?.startsWith("user:") ? r.createdBy.slice(5) : "").filter(Boolean));
   const run = canModerate ? latestRun(revisions ?? []) : null;
-  const runAuthor = run ? author(run.actor, t("history.unknown"), t("common.guest")) : "";
+  const runAuthor = run ? author(run.actor, t("history.unknown"), t("common.guest"), identities.data) : "";
   // The focused actor's edits are interleaved when they are NOT (entirely) the latest run.
   const focusInterleaved = focusActor !== null && (run === null || focusActor !== run.actor);
 
@@ -124,10 +128,10 @@ export function HistoryPanel({
                   data-testid="revision-author"
                   onClick={() => setFocusActor((cur) => (cur === rev.createdBy ? null : rev.createdBy))}
                 >
-                  {author(rev.createdBy, t("history.unknown"), t("common.guest"))}
+                  {author(rev.createdBy, t("history.unknown"), t("common.guest"), identities.data)}
                 </button>
               ) : (
-                <span className="text-[0.75em] text-fg-dim">{author(rev.createdBy, t("history.unknown"), t("common.guest"))}</span>
+                <span className="text-[0.75em] text-fg-dim">{author(rev.createdBy, t("history.unknown"), t("common.guest"), identities.data)}</span>
               )}
             </div>
             <div className="flex flex-none gap-1.5">

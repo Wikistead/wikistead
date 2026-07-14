@@ -432,6 +432,43 @@ export interface AccountSettings {
   notificationsEnabled: boolean; // #362: global notification kill switch (emission-narrowing only)
   defaultEventMask: string[]; // #362: default event mask for mask-less watches ([] = all types)
 }
+// #379 / ADR-150: resolve author subs to display identity (customized members only — the server omits
+// non-members / cross-tenant / un-customized identically, no membership oracle). Cached PER SUB (the
+// ADR's implementation contract) so every surface shares one resolution; member sessions only (guests
+// keep the pseudonymous formatting — the endpoint 401s them anyway; the client just never asks).
+export interface MemberIdentity { displayName: string | null; hasAvatar: boolean }
+export function useMemberIdentity(sub: string | null | undefined) {
+  const { token, status } = useSession();
+  const memberSub = sub && !sub.startsWith("guest:") && !sub.startsWith("anon:") ? sub : null;
+  return useQuery({
+    queryKey: ["member-identity", memberSub],
+    enabled: status === "authed" && !!memberSub,
+    staleTime: 300_000,
+    queryFn: () =>
+      apiFetch<{ identities: Record<string, MemberIdentity> }>("/members/identities", token, {
+        method: "POST",
+        body: JSON.stringify({ subs: [memberSub] }),
+      }).then((r) => r?.identities?.[memberSub!] ?? null),
+  });
+}
+
+// #379: the batch form for list surfaces (history). Key = the sorted member-sub set; same server
+// contract (customized-only). Small lists (history page ≤ tens of authors) — one request per set.
+export function useMemberIdentities(subs: readonly string[]) {
+  const { token, status } = useSession();
+  const memberSubs = [...new Set(subs.filter((s) => s && !s.startsWith("guest:") && !s.startsWith("anon:")))].sort();
+  return useQuery({
+    queryKey: ["member-identities", memberSubs.join("\u0000")],
+    enabled: status === "authed" && memberSubs.length > 0,
+    staleTime: 300_000,
+    queryFn: () =>
+      apiFetch<{ identities: Record<string, MemberIdentity> }>("/members/identities", token, {
+        method: "POST",
+        body: JSON.stringify({ subs: memberSubs }),
+      }).then((r) => r?.identities ?? {}),
+  });
+}
+
 export function useAccountSettings() {
   const { token, status } = useSession();
   return useQuery({

@@ -1,5 +1,7 @@
 import { Link2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useMemberIdentity } from "../data/queries";
+import { assetUrl } from "../data/apiClient";
 
 // #208: the comment author display. The stored identity is the raw `authorSub` (a member OIDC sub or
 // `guest:<uuid>`) — used for authz server-side and NEVER changed here; this only formats how it READS.
@@ -34,7 +36,13 @@ function hue(s: string): number {
 export function AuthorChip({ sub }: { sub: string }) {
   const { t } = useTranslation();
   const guest = isGuestSub(sub);
-  const label = authorLabel(sub, t("common.guest"));
+  // #379 / ADR-150: resolve a member sub to their CHOSEN identity (customized members only; the hook
+  // no-ops for guests/anon and on guest sessions). Absent → today's formatting stays (a member with no
+  // override/avatar, a deleted member, a guest surface). Display-only; authz untouched.
+  const identity = useMemberIdentity(guest ? null : sub);
+  const resolvedName = identity.data?.displayName ?? null;
+  const hasAvatar = identity.data?.hasAvatar === true;
+  const label = resolvedName ?? authorLabel(sub, t("common.guest"));
   const initial = (label.trim()[0] ?? "?").toUpperCase();
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -43,6 +51,17 @@ export function AuthorChip({ sub }: { sub: string }) {
         <span className="inline-flex h-5 w-5 flex-none items-center justify-center rounded-full bg-panel-2 text-fg-dim" data-testid="comment-avatar-guest" title={t("common.guest")}>
           <Link2 size={12} aria-hidden />
         </span>
+      ) : hasAvatar ? (
+        // The uploaded avatar. ADR-150 §3 contract (the #372 mix-up class must not reappear here):
+        // keyed by THIS sub, and the src is /members/<thisSub>/avatar-image — never another sub's.
+        <img
+          key={sub}
+          src={assetUrl(`/members/${encodeURIComponent(sub)}/avatar-image`)}
+          alt=""
+          className="h-5 w-5 flex-none rounded-full object-cover"
+          data-testid="comment-avatar-img"
+          referrerPolicy="no-referrer"
+        />
       ) : (
         <span
           className="inline-flex h-5 w-5 flex-none items-center justify-center rounded-full text-[10px] font-semibold text-white"

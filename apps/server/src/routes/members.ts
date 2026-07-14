@@ -99,6 +99,31 @@ export async function membersPlugin(app: FastifyInstance) {
     return { members: rows }
   })
 
+  // #379 / ADR-150: resolve a SPECIFIC set of author subs to display identity — any tenant MEMBER may
+  // call (not admin-only; no `config.guest` → guests/anon are structurally 401, the public surface never
+  // resolves). Returns ONLY the subs that are members of the CALLER'S tenant (RLS) AND have CUSTOMIZED
+  // their identity (display_name_override OR an uploaded avatar): `present ⟺ (member AND customized)`,
+  // so an ABSENT sub is ambiguous (non-member / cross-tenant / un-customized member — all omitted
+  // IDENTICALLY, no membership-confirmation oracle) while a PRESENT sub only confirms what the caller
+  // already sees as an author. displayName = override ?? OIDC display_name — NEVER email or an
+  // email-local-part (an avatar-only customizer's displayName is their IdP name, not a chosen one — the
+  // client may still prefer its own label). No role/email/session data — those stay admin-only.
+  app.post<{ Body: { subs?: string[] } }>('/members/identities', async (req, reply) => {
+    const raw = Array.isArray(req.body?.subs) ? req.body.subs : null
+    if (!raw) return reply.code(400).send({ error: 'subs required' })
+    // Cap the batch (ADR anti-test: enforced, not silent) + drop obvious non-member principals so a
+    // guest/anon pseudonym never even reaches the query.
+    if (raw.length > 200) return reply.code(400).send({ error: 'too many subs (max 200)' })
+    const subs = [...new Set(raw.map(String).filter((s) => s && !s.startsWith('guest:') && !s.startsWith('anon:')))]
+    if (subs.length === 0) return { identities: {} }
+    const rows = await req.db.sql<{ sub: string; display_name: string | null; display_name_override: string | null; avatar_image_key: string | null }[]>`
+      SELECT sub, display_name, display_name_override, avatar_image_key FROM members
+      WHERE sub = ANY(${subs}) AND (display_name_override IS NOT NULL OR avatar_image_key IS NOT NULL)`
+    const identities: Record<string, { displayName: string | null; hasAvatar: boolean }> = {}
+    for (const r of rows) identities[r.sub] = { displayName: r.display_name_override ?? r.display_name ?? null, hasAvatar: r.avatar_image_key != null }
+    return { identities }
+  })
+
   // Change a member's role (admin ↔ member). ADR-003: DB first, FGA last, inside one
   // tx → a FGA failure rolls the role change back. Cannot demote the last admin
   // (that would lock the tenant out of its own administration).
