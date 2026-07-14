@@ -21,7 +21,6 @@ import { macroFold } from "./macros";
 import { registerVimFold } from "./live-preview/vim-fold";
 import { atomDelete, atomYank, vimWysiwygCaretGuard } from "./live-preview/vim-atom";
 import { blockDrag } from "./live-preview/block-drag";
-import { m1Spike } from "./live-preview/m1-spike";
 import { everforestHighlight } from "./everforest-highlight";
 import { mathField } from "./live-preview/math";
 import { macroEdit, nestedSelectionField, setNestedSelection } from "./live-preview/macro-edit";
@@ -253,9 +252,6 @@ export function mountLivePreview(
           (w as unknown as { __lpLineTops?: unknown }).__lpLineTops = tops;
         } catch { /* coords unavailable (not laid out) */ }
       })] : []),
-      // M1 focus-delegation SPIKE (#153 / ADR-054) — DEV/e2e only, never in prod. Activated by the
-      // literal token `@SPIKE@` in the doc. Strip from prod builds.
-      ...(import.meta.env.DEV ? [m1Spike] : []),
       linkClicks,
       // ADR-024 atom motion: every block decoration is a single motion-stop — a one-line
       // key lands ON the atom, the next steps past it (macros stay rendered; non-macro
