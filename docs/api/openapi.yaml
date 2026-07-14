@@ -1,0 +1,386 @@
+# Wikistead member REST API — OpenAPI 3.1 (#407).
+#
+# HAND-MAINTAINED against the Fastify routes (which carry no JSON schemas to generate from); the
+# api-inventory-407 test extracts every route from source and fails the build when a member-API route is
+# neither documented here nor explicitly listed in its exclusions — so this file cannot silently drift.
+#
+# Conventions this API keeps everywhere (see docs/api-reference.md):
+#   - The tenant is addressed by HOST (each tenant has its own (sub)domain); there is no tenant id in paths.
+#   - Authentication: `Authorization: Bearer <api key>` (create keys in the app under Settings → API keys).
+#     A `read`-scoped key may only use GET/HEAD; `write` unlocks mutating methods. Browser sessions use a
+#     cookie instead — this spec documents the API-key surface.
+#   - A resource you may not view is a uniform 404 (indistinguishable from absent — existence hiding);
+#     permission-denied on a resource you can see is 403. Content moderation rejections are 422.
+#   - Responses are JSON unless noted. Errors: `{ "message": string }` (+ optional machine fields).
+openapi: 3.1.0
+info:
+  title: Wikistead API
+  version: 0.1.0
+  description: >
+    Member REST API for a Wikistead tenant. Every request is scoped to the tenant addressed by the
+    request Host. All list endpoints return only what the caller may view (server-side authorization —
+    OpenFGA — filters every item; counts never leak hidden resources).
+servers:
+  - url: https://{tenantHost}/api
+    variables:
+      tenantHost:
+        default: your-tenant.example.com
+security:
+  - apiKey: []
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: An API key created in Settings → API keys. Scope `read` = GET/HEAD only.
+  schemas:
+    Error:
+      type: object
+      properties: { message: { type: string } }
+    Page:
+      type: object
+      description: A page row (fields beyond these may appear; treat unknown fields as additive).
+      properties:
+        id: { type: string, format: uuid }
+        spaceId: { type: string }
+        title: { type: string }
+        parentId: { type: [string, "null"] }
+    PageRef:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+    Space:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        capability: { type: string, enum: [view, edit, manage], description: The caller's capability on this space. }
+    SearchHit:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        spaceId: { type: string }
+        snippet: { type: [string, "null"] }
+    LocalGraph:
+      type: object
+      properties:
+        center: { type: string }
+        nodes: { type: array, items: { $ref: "#/components/schemas/PageRef" } }
+        edges:
+          type: array
+          items:
+            type: object
+            properties:
+              from: { type: string }
+              to: { type: string }
+              type: { type: string, enum: [link, embed] }
+        hiddenCount: { type: integer, description: Viewable nodes dropped by the server node cap. }
+  parameters:
+    pageId:
+      { name: pageId, in: path, required: true, schema: { type: string } }
+    spaceId:
+      { name: spaceId, in: path, required: true, schema: { type: string } }
+paths:
+  # ── Pages ────────────────────────────────────────────────────────────────
+  /spaces/{spaceId}/pages:
+    get:
+      summary: List the space's pages (tree rows) the caller can view
+      parameters: [ { $ref: "#/components/parameters/spaceId" } ]
+      responses: { "200": { description: Authorized page rows } }
+    post:
+      summary: Create a page
+      parameters: [ { $ref: "#/components/parameters/spaceId" } ]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                parentId: { type: [string, "null"] }
+                fromPageId: { type: [string, "null"], description: Seed the body from an existing page (view-gated). }
+                templateId: { type: [string, "null"], description: Seed from a template snapshot (view-gated). }
+      responses: { "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Page" } } } } }
+  /pages/{pageId}:
+    get:
+      summary: Get a page's metadata
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "200": { description: Page }, "404": { description: Not viewable or absent (uniform) } }
+    delete:
+      summary: Delete a page (and its subtree)
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "204": { description: Deleted } }
+  /pages/{pageId}/published:
+    get:
+      summary: Get the published markdown (the read surface)
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "200": { description: "{ title, publishedMd, publishedAt, … }" } }
+  /pages/{pageId}/publish:
+    post:
+      summary: Publish the current draft (creates a revision; no-op when unchanged)
+      description: May return 422 when the tenant's abuse filter rejects the content (mass deletion / banned words).
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "200": { description: "{ publishedAt, revisionId, noop }" }, "422": { description: Rejected by the abuse filter } }
+  /pages/{pageId}/revisions:
+    get:
+      summary: List revisions (explicit publishes)
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "200": { description: Revision metadata list } }
+  /pages/{pageId}/revisions/{revId}/content:
+    get:
+      summary: Get one revision's content
+      parameters:
+        - { $ref: "#/components/parameters/pageId" }
+        - { name: revId, in: path, required: true, schema: { type: string } }
+      responses: { "200": { description: Revision content } }
+  /pages/{pageId}/move:
+    post:
+      summary: Move a page (reparent / reorder within the tree)
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "200": { description: Moved } }
+  /pages/{pageId}/revisions/{revId}/restore:
+    post:
+      summary: Restore a revision as the current draft
+      parameters:
+        - { $ref: "#/components/parameters/pageId" }
+        - { name: revId, in: path, required: true, schema: { type: string } }
+      responses: { "200": { description: Restored } }
+  /pages/{pageId}/export:
+    get:
+      summary: Export the page as Markdown
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "200": { description: Markdown } }
+  /pages/{pageId}/export.html:
+    get:
+      summary: Export the page as HTML
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "200": { description: HTML } }
+  # ── Discovery (all results server-side view-filtered) ────────────────────
+  /search:
+    get:
+      summary: Full-text search (two-stage; every hit re-authorized before return)
+      parameters: [ { name: q, in: query, required: true, schema: { type: string } } ]
+      responses:
+        "200":
+          description: Authorized hits
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/SearchHit" } } } }
+  /pages/{pageId}/backlinks:
+    get:
+      summary: Pages that link to this page
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "200": { description: "PageRef[]" } }
+  /pages/{pageId}/related:
+    get:
+      summary: 2-hop related pages, grouped by the shared link
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "200": { description: "{ groups, truncated }" } }
+  /pages/{pageId}/graph:
+    get:
+      summary: The local link graph around this page
+      parameters:
+        - { $ref: "#/components/parameters/pageId" }
+        - { name: depth, in: query, schema: { type: integer, enum: [1, 2], default: 1 } }
+      responses:
+        "200": { description: Graph, content: { application/json: { schema: { $ref: "#/components/schemas/LocalGraph" } } } }
+  /pages/{pageId}/list:
+    get:
+      summary: Resolve a dynamic list directive (`:::tagged` / `:::children`)
+      parameters:
+        - { $ref: "#/components/parameters/pageId" }
+        - { name: name, in: query, required: true, schema: { type: string, enum: [tagged, children] } }
+        - { name: body, in: query, schema: { type: string, description: The tag name for `tagged`. } }
+      responses: { "200": { description: "PageRef[] (unknown name → [])" } }
+  /tags/suggest:
+    get:
+      summary: Tag-name suggestions (only tags carried by ≥1 page the caller can view)
+      parameters: [ { name: q, in: query, schema: { type: string } } ]
+      responses: { "200": { description: "{ tag, display }[]" } }
+  /pages/{pageId}/excerpt:
+    get:
+      summary: Title + published excerpt (hover previews)
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "200": { description: "{ title, excerpt }" } }
+  /pages/{pageId}/transclude/{refId}:
+    get:
+      summary: Resolve an `:::embed-page` reference (page / #section / #^block)
+      parameters:
+        - { $ref: "#/components/parameters/pageId" }
+        - { name: refId, in: path, required: true, schema: { type: string } }
+      responses: { "200": { description: Resolved markdown }, "404": { description: Denied/absent (uniform) } }
+  # ── Comments ─────────────────────────────────────────────────────────────
+  /pages/{pageId}/comments:
+    get:
+      summary: List the page's comment threads
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "200": { description: Threads } }
+    post:
+      summary: Start a thread (page-level or anchored inline)
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string }
+                kind: { type: string }
+                anchorStart: { type: string }
+                anchorEnd: { type: string }
+                quotedText: { type: string }
+                mentions: { type: array, items: { type: string } }
+      responses: { "201": { description: Created } }
+  /comments/threads/{threadId}/comments:
+    post:
+      summary: Reply in a thread
+      parameters: [ { name: threadId, in: path, required: true, schema: { type: string } } ]
+      requestBody: { content: { application/json: { schema: { type: object, required: [body], properties: { body: { type: string }, mentions: { type: array, items: { type: string } } } } } } }
+      responses: { "201": { description: Created } }
+  /comments/{commentId}:
+    patch:
+      summary: Edit own comment
+      parameters: [ { name: commentId, in: path, required: true, schema: { type: string } } ]
+      responses: { "200": { description: Updated } }
+    delete:
+      summary: Delete own comment (or moderate)
+      parameters: [ { name: commentId, in: path, required: true, schema: { type: string } } ]
+      responses: { "204": { description: Deleted } }
+  # ── Attachments ──────────────────────────────────────────────────────────
+  /spaces/{spaceId}/pages/{pageId}/attachments/presign:
+    post:
+      summary: Presign a browser/direct upload (PUT the file to the returned URL, then confirm)
+      parameters:
+        - { $ref: "#/components/parameters/spaceId" }
+        - { $ref: "#/components/parameters/pageId" }
+      requestBody: { content: { application/json: { schema: { type: object, required: [filename, contentType], properties: { filename: { type: string }, contentType: { type: string } } } } } }
+      responses: { "201": { description: "{ id, uploadUrl, … }" } }
+  /spaces/{spaceId}/pages/{pageId}/attachments:
+    get:
+      summary: List the page's attachments
+      parameters:
+        - { $ref: "#/components/parameters/spaceId" }
+        - { $ref: "#/components/parameters/pageId" }
+      responses: { "200": { description: Attachments } }
+  /attachments/{id}/confirm:
+    post:
+      summary: Confirm a completed upload
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      responses: { "200": { description: Confirmed } }
+  /attachments/{id}/download:
+    get:
+      summary: Download (redirects/streams; page-view gated)
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      responses: { "200": { description: File } }
+  /attachments/{id}/inline:
+    get:
+      summary: Inline view variant (page-view gated)
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      responses: { "200": { description: File } }
+  /attachments/{id}:
+    delete:
+      summary: Delete an attachment
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      responses: { "204": { description: Deleted } }
+  # ── Spaces ───────────────────────────────────────────────────────────────
+  /spaces:
+    get:
+      summary: List spaces the caller can view (with their capability)
+      responses: { "200": { description: Spaces, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Space" } } } } } }
+    post:
+      summary: Create a space
+      responses: { "201": { description: Created } }
+  /spaces/{spaceId}:
+    patch:
+      summary: Rename / update a space
+      parameters: [ { $ref: "#/components/parameters/spaceId" } ]
+      responses: { "200": { description: Updated } }
+    delete:
+      summary: Delete a space
+      parameters: [ { $ref: "#/components/parameters/spaceId" } ]
+      responses: { "204": { description: Deleted } }
+  /spaces/{spaceId}/info:
+    get:
+      summary: Minimal space info for a viewer
+      parameters: [ { $ref: "#/components/parameters/spaceId" } ]
+      responses: { "200": { description: "{ id, name, … }" } }
+  /spaces/{spaceId}/export:
+    get:
+      summary: Export the space as a Markdown ZIP
+      parameters: [ { $ref: "#/components/parameters/spaceId" } ]
+      responses: { "200": { description: ZIP } }
+  /spaces/{spaceId}/import:
+    post:
+      summary: Import Markdown content into a space (ZIP / files)
+      parameters: [ { $ref: "#/components/parameters/spaceId" } ]
+      responses: { "201": { description: Imported pages } }
+  /export:
+    get:
+      summary: Export the whole tenant as a Markdown ZIP (admin)
+      responses: { "200": { description: ZIP } }
+  # ── Sharing & permissions (page/space grants, share links) ──────────────
+  /pages/{pageId}/access:
+    get: { summary: List the page's grants, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "200": { description: Grants } } }
+    post: { summary: Grant a capability, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "200": { description: Granted } } }
+    delete: { summary: Revoke a grant, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "204": { description: Revoked } } }
+  /pages/{pageId}/share-links:
+    get: { summary: List share links, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "200": { description: Links } } }
+    post: { summary: Create a share link (view/comment/edit; optional expiry), parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "201": { description: Created } } }
+  /share-links:
+    get: { summary: List share links the caller manages, responses: { "200": { description: Links } } }
+  /share-links/{id}:
+    delete: { summary: Revoke a share link (one tuple delete — immediate), parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Revoked } } }
+  /spaces/{spaceId}/share-links:
+    get: { summary: List space share links, parameters: [ { $ref: "#/components/parameters/spaceId" } ], responses: { "200": { description: Links } } }
+    post: { summary: Create a space share link (view-only), parameters: [ { $ref: "#/components/parameters/spaceId" } ], responses: { "201": { description: Created } } }
+  # ── Templates ────────────────────────────────────────────────────────────
+  /templates:
+    get: { summary: List templates visible to the caller, responses: { "200": { description: Templates } } }
+    post: { summary: Save a page as a template, responses: { "201": { description: Created } } }
+  /templates/{id}:
+    get: { summary: Get a template, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Template } } }
+    patch: { summary: Update a template, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Updated } } }
+    delete: { summary: Delete a template, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Deleted } } }
+  # ── Personal state (watches, pins, notifications, feed) ─────────────────
+  /watches:
+    get: { summary: List the caller's watches, responses: { "200": { description: Watches } } }
+    post: { summary: Watch a page/space, responses: { "201": { description: Watching } } }
+  /watches/{id}:
+    patch: { summary: Update a watch, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Updated } } }
+    delete: { summary: Unwatch, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Removed } } }
+  /pins:
+    get: { summary: List the caller's pins, responses: { "200": { description: Pins } } }
+    post: { summary: Pin a page/space, responses: { "201": { description: Pinned } } }
+  /pins/{id}:
+    delete: { summary: Unpin, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Removed } } }
+  /pins/reorder:
+    patch: { summary: Reorder pins, responses: { "200": { description: Reordered } } }
+  /notifications:
+    get: { summary: List notifications, responses: { "200": { description: Notifications } } }
+  /notifications/unread-count:
+    get: { summary: Unread count, responses: { "200": { description: "{ count }" } } }
+  /notifications/{id}/read:
+    post: { summary: Mark one read, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Read } } }
+  /notifications/read-all:
+    post: { summary: Mark all read, responses: { "200": { description: Read } } }
+  /feed:
+    get:
+      summary: The tenant activity feed (every event view-authorized for the caller)
+      parameters: [ { name: unpatrolled, in: query, schema: { type: boolean } } ]
+      responses: { "200": { description: Events } }
+  /feed/{eventId}/patrol:
+    post: { summary: Mark an event patrolled (manage/moderate), parameters: [ { name: eventId, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Marked } } }
+    delete: { summary: Unmark, parameters: [ { name: eventId, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Unmarked } } }
+  # ── Account/tenant meta ──────────────────────────────────────────────────
+  /api-keys:
+    get: { summary: List own API keys, responses: { "200": { description: Keys } } }
+    post: { summary: Create an API key (scope read/write; the secret is returned exactly once), responses: { "201": { description: Created } } }
+  /api-keys/{id}:
+    delete: { summary: Revoke an API key, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Revoked } } }
+  /entitlements:
+    get: { summary: The tenant's resolved entitlements (plan limits/features), responses: { "200": { description: Entitlements } } }
+  /members:
+    get: { summary: List tenant members, responses: { "200": { description: Members } } }
+  /embed/providers:
+    get: { summary: The tenant's external-embed host allowlist, responses: { "200": { description: "{ providers }" } } }
