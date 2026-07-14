@@ -21,7 +21,7 @@ export function TocChrome({
 }: {
   headings: Heading[];
   activeFrom: number | null;
-  visibleFroms?: number[]; // #345the light-layer visible set (rail only)
+  visibleFroms?: number[]; // #345/the light-layer visible set (both rail and overlay)
   depth: number;
   onJump: (from: number) => void;
   subscribeScroll?: (fn: () => void) => () => void;
@@ -51,7 +51,9 @@ export function TocChrome({
         </div>
       )}
       {!isWide && tocOn && (
-        <Toc headings={headings} activeFrom={activeFrom} depth={depth} onJump={onJump} variant="overlay" subscribeScroll={subscribeScroll} />
+        // #345Issue A: the overlay gets the two-layer highlight too (was rail-only). Presentation is
+        // variant-independent; auto-follow stays rail-only (the overlay is pointer-events-none).
+        <Toc headings={headings} activeFrom={activeFrom} visibleFroms={visibleFroms} depth={depth} onJump={onJump} variant="overlay" subscribeScroll={subscribeScroll} />
       )}
     </>
   );

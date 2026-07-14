@@ -81,33 +81,46 @@ export function Toc({
 
   if (shown.length === 0) return null; // no headings → no rail/overlay clutter
 
+  // #345Issue C: draw a CONSECUTIVE run of highlighted items (visible and/or active) as ONE smooth
+  // shape instead of a stack of separate rounded rectangles. A highlighted row rounds its top only when the row
+  // ABOVE isn't highlighted, and its bottom only when the row BELOW isn't — so a run reads as a single pill with
+  // rounded ends and seamless middles, while each row keeps its own tier colour (idle < visible < active).
+  const isHi = (i: number): boolean => visible.has(shown[i]!.from) || activeFrom === shown[i]!.from;
   const list = (
     <ul className="m-0 list-none p-0">
-      {shown.map((h) => (
-        <li key={h.slug}>
-          <button
-            type="button"
-            ref={activeFrom === h.from ? activeRef : undefined}
-            onClick={() => onJump(h.from)}
-            data-testid="toc-item"
-            data-active={activeFrom === h.from ? "" : undefined}
-            data-visible={visible.has(h.from) ? "" : undefined}
-            style={{ paddingLeft: `${6 + (h.level - minLevel) * 12}px` }}
-            className={cn(
-              "block w-full cursor-pointer truncate rounded py-1 pr-2 text-left text-[length:var(--text-xs)] text-fg-dim transition-colors duration-[120ms] hover:text-foreground",
-              // #345/LIGHT layer — a section on screen but not the current one.measured that
-              // the old `text-foreground/80` was grey-vs-grey with idle `text-fg-dim` (imperceptible). Make three
-              // legible tiers: idle (fg-dim) < visible (FULL foreground + a faint NEUTRAL wash) < active (accent
-              // text + accent wash). The neutral wash reads clearly against idle without competing with active.
-              visible.has(h.from) && activeFrom !== h.from && "text-foreground bg-[color-mix(in_srgb,var(--fg)_8%,transparent)]",
-              // #192 / #345: DARK layer — the single active heading: accent text PLUS a faint accent-tinted
-              // background wash on the whole row (low opacity via color-mix), so the current section stands out.
-              activeFrom === h.from && "font-medium text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]",
-            )}
-            title={h.text}
-          >{h.text || t("common.untitled")}</button>
-        </li>
-      ))}
+      {shown.map((h, i) => {
+        const hi = isHi(i);
+        const roundTop = hi && !(i > 0 && isHi(i - 1));
+        const roundBottom = hi && !(i < shown.length - 1 && isHi(i + 1));
+        return (
+          <li key={h.slug}>
+            <button
+              type="button"
+              ref={activeFrom === h.from ? activeRef : undefined}
+              onClick={() => onJump(h.from)}
+              data-testid="toc-item"
+              data-active={activeFrom === h.from ? "" : undefined}
+              data-visible={visible.has(h.from) ? "" : undefined}
+              style={{ paddingLeft: `${6 + (h.level - minLevel) * 12}px` }}
+              className={cn(
+                "block w-full cursor-pointer truncate py-1 pr-2 text-left text-[length:var(--text-xs)] text-fg-dim transition-colors duration-[120ms] hover:text-foreground",
+                // #345round only the ENDS of a highlighted run so consecutive rows merge into one shape.
+                roundTop && "rounded-t",
+                roundBottom && "rounded-b",
+                // #345/LIGHT layer — a section on screen but not the current one.measured that
+                // the old `text-foreground/80` was grey-vs-grey with idle `text-fg-dim` (imperceptible). Make three
+                // legible tiers: idle (fg-dim) < visible (FULL foreground + a faint NEUTRAL wash) < active (accent
+                // text + accent wash). The neutral wash reads clearly against idle without competing with active.
+                visible.has(h.from) && activeFrom !== h.from && "text-foreground bg-[color-mix(in_srgb,var(--fg)_8%,transparent)]",
+                // #192 / #345: DARK layer — the single active heading: accent text PLUS a faint accent-tinted
+                // background wash on the whole row (low opacity via color-mix), so the current section stands out.
+                activeFrom === h.from && "font-medium text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]",
+              )}
+              title={h.text}
+            >{h.text || t("common.untitled")}</button>
+          </li>
+        );
+      })}
     </ul>
   );
 
