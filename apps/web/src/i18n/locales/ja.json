@@ -704,7 +704,12 @@
     "backlinks": "リンク元",
     "related": "関連ページ",
     "via": "共通リンク:",
-    "empty": "関連ページはまだありません。"
+    "empty": "関連ページはまだありません。",
+    "graph": "ローカルグラフ",
+    "graphEmpty": "描画するリンクがまだありません。",
+    "graphExpand": "グラフを拡大",
+    "graphMore": "+{{count}} 件 — 全体グラフを開く",
+    "graphTopN": "接続の多い {{count}} ページを表示しています。"
   },
   "template": {
     "saveAsTemplate": "テンプレートとして保存",

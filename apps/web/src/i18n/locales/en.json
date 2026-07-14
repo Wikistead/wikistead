@@ -704,7 +704,12 @@
     "backlinks": "Backlinks",
     "related": "Related pages",
     "via": "via",
-    "empty": "No related pages yet."
+    "empty": "No related pages yet.",
+    "graph": "Local graph",
+    "graphEmpty": "No links to draw yet.",
+    "graphExpand": "Expand graph",
+    "graphMore": "+{{count}} more — open the full graph",
+    "graphTopN": "Showing the {{count}} most connected pages."
   },
   "template": {
     "saveAsTemplate": "Save as template",
