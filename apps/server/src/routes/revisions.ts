@@ -233,10 +233,13 @@ export async function restoreRevision(
 //
 // HONESTY BOUNDS (the ADR's whole point — never a silent destructive mass-revert):
 //   'not-latest'  — the actor's revisions are NOT the most recent run (someone else edited after them).
-//                   One click can't isolate their changes → 409; the client routes to the GUIDED MANUAL
-//                   path (increment 3: highlight the actor's revisions, diff each, restore a chosen point).
+//                   One click can't isolate their changes → 409; the client falls back to the plain
+//                   per-revision diff + restore buttons (manual path).
+//   'not-a-run'   — the latest run is a SINGLE revision (review ruling): reverting "one
+//                   edit in bulk" restores whatever buried version precedes it — the exact footgun the
+//                   feature removes — so 2+ contiguous revisions are required, matching the UI guard.
 //   'no-baseline' — the run reaches the very first (retention-visible) revision, so there is no pre-run
-//                   revision to restore to → 409, guided manual.
+//                   revision to restore to → 409, manual path.
 //   'no-revisions'— nothing to revert (no visible revisions at all) → 409.
 // The client precomputes the same run from the revision list it already shows; this service re-derives it
 // server-side (the fortress) so a stale/forged client can never widen the revert.
@@ -261,6 +264,10 @@ export async function revertActorRun(
   }
   let runLen = 0
   while (runLen < revs.length && revs[runLen]!.created_by === args.actor) runLen++
+  //(#327 review ruling): a single revision is NOT a run — the endpoint contract matches the
+  // UI guard (bulk revert exists for 2+ contiguous revisions only), so a hand-crafted API call can't turn
+  // one edit into a "bulk" revert that restores whatever buried version lies beneath it.
+  if (runLen < 2) throw Object.assign(new Error('a single revision is not a run'), { statusCode: 409, reason: 'not-a-run' })
   const baseline = revs[runLen]
   if (!baseline) throw Object.assign(new Error('no revision precedes the run'), { statusCode: 409, reason: 'no-baseline' })
   await restoreRevision(db, fga, valkey, storage, {

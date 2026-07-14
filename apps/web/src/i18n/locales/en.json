@@ -603,11 +603,10 @@
     "noChanges": "No changes since this version.",
     "backToList": "Back to history",
     "revertRun": "Revert run",
-    "revertRunLabel": "Latest run: {{author}} ({{count}} revisions)",
-    "revertRunConfirmTitle": "Revert this editor's latest run",
-    "revertRunConfirm": "Revert {{author}}'s latest {{count}} revisions in one step? The page is restored to just before their run; their revisions stay in history, and checkbox states follow the current live values.",
-    "revertRunNoBaseline": "All visible revisions are by {{author}} — there is no earlier revision to revert to. Review the diffs and restore a version manually.",
-    "revertGuidedHint": "Other editors changed the page in between, so a one-click revert would clobber their work. The highlighted revisions are this editor's — compare each and restore the version you choose."
+    "revertRunLabel": "This guest's edits: {{author}} ({{count}} revisions)",
+    "revertRunConfirmTitle": "Revert this guest's edits",
+    "revertRunConfirm": "Revert {{author}}'s latest {{count}} revisions in one step? The page is restored to just before their edits; their revisions stay in history, and checkbox states follow the current live values.",
+    "revertRunNoBaseline": "All visible revisions are by {{author}} — there is no earlier revision to revert to. Review the diffs and restore a version manually."
   },
   "attachments": {
     "header": "Attachments ({{count}})",
