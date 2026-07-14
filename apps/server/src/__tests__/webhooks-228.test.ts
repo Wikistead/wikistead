@@ -132,3 +132,35 @@ describe('#228 drain — existence-hiding + SSRF', () => {
     await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id}` // tidy leftover rescheduled rows
   })
 })
+
+describe('#385 drain — the lease (claim → deliver outside tx → bookkeep)', () => {
+  it('a freshly CLAIMED row is not re-drained within the stale window; a stale claim IS re-claimed', async () => {
+    await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id}`
+    await db.tx(async (tx) => { await enqueueWebhookOutbox(tx, { tenantId: tenant.id, eventType: 'member.joined', payload: { actor: 'user:x' } }) })
+    // simulate another worker's FRESH claim → this drain must skip it (disjoint batches)
+    await admin`UPDATE webhook_outbox SET claimed_at = now() WHERE tenant_id = ${tenant.id}`
+    expect(await drainWebhookOutbox(fgaClient)).toBe(0)
+    expect(await outboxCount(tenant.id)).toBe(1) // untouched
+    // age the claim past the stale window → re-claimed and processed (no hooks → delivered/deleted)
+    await admin`UPDATE webhook_outbox SET claimed_at = now() - interval '3 minutes' WHERE tenant_id = ${tenant.id}`
+    expect(await drainWebhookOutbox(fgaClient)).toBe(1)
+    expect(await outboxCount(tenant.id)).toBe(0)
+  })
+
+  it('a failed delivery RELEASES the claim with backoff (claimed_at NULL, attempts+1, future retry)', async () => {
+    await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id}`
+    // an SSRF-blocked hook → delivery fails → the row must be rescheduled, not stuck under a live claim
+    const hook = await createWebhook(db, { tenantId: tenant.id, plan: 'business', userId: 'dev-user', url: 'https://127.0.0.1/blocked-385', eventFilter: null })
+    hookIds.push(hook.id)
+    await db.tx(async (tx) => { await enqueueWebhookOutbox(tx, { tenantId: tenant.id, eventType: 'member.joined', payload: { actor: 'user:x' } }) })
+    expect(await drainWebhookOutbox(fgaClient)).toBe(1)
+    const [row] = await admin<{ claimed_at: string | null; attempts: number; due: boolean }[]>`
+      SELECT claimed_at, attempts, next_attempt_at > now() AS due FROM webhook_outbox WHERE tenant_id = ${tenant.id}`
+    expect(row).toBeTruthy()
+    expect(row!.claimed_at).toBeNull() // the claim is RELEASED — backoff (not the stale window) times the retry
+    expect(row!.attempts).toBe(1)
+    expect(row!.due).toBe(true) // rescheduled into the future
+    await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id}`
+    await admin`UPDATE webhooks SET active = FALSE WHERE id = ${hook.id}`
+  })
+})

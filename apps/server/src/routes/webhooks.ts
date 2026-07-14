@@ -103,39 +103,61 @@ async function pageEventDisposition(fga: OpenFgaClient, payload: Record<string, 
 
 const signBody = (secret: string, ts: string, body: string) => `sha256=${createHmac('sha256', secret).update(`${ts}.${body}`).digest('hex')}`
 
-// Drain a batch of due outbox rows and deliver each to every matching, active hook of its tenant. Claims
-// via FOR UPDATE SKIP LOCKED (disjoint across workers), sets app.tenant_id per row (RLS reads its hooks).
-// A failure reschedules with exponential backoff and bumps the hook's failure_count (auto-disable at N);
-// a 2xx clears it. A 3xx/4xx/5xx (guardedFetch never follows redirects) is a FAILURE. Returns rows handled.
+// Drain a batch of due outbox rows and deliver each to every matching, active hook of its tenant.
+//
+// #385: the LEASE pattern, identical to the audit/search outboxes (the repo's established reliability
+// shape): a SHORT claim UPDATE (`claimed_at = now`, FOR UPDATE SKIP LOCKED — disjoint across workers,
+// stale claims re-claimed after 2 minutes) — then ALL external HTTP happens OUTSIDE any transaction (the
+// old shape held a pooled connection + row locks across every 10s-timeout delivery round-trip), and
+// bookkeeping (hook failure counts, outbox delete/reschedule) commits in a second short tx per row.
+// A failure reschedules with exponential backoff (releasing the claim, so the backoff — not the stale
+// window — decides the retry time) and bumps the hook's failure_count (auto-disable at N); a 2xx clears
+// it. A 3xx/4xx/5xx (guardedFetch never follows redirects) is a FAILURE. A crash mid-row leaves the
+// claim to age out and the row retries (reliable, never best-effort). Returns rows handled.
 export async function drainWebhookOutbox(fga: OpenFgaClient, opts: { batch?: number } = {}): Promise<number> {
   const batch = opts.batch ?? 20
   const send = guardedFetch({ maxBytes: 8 * 1024, timeoutMs: 10_000 })
-  return pool.begin(async (tx) => {
-    const rows = await tx<WebhookOutboxRow[]>`
-      SELECT id, tenant_id, event_type, payload, attempts FROM webhook_outbox
-      WHERE claimed_at IS NULL AND next_attempt_at <= now()
-      ORDER BY next_attempt_at LIMIT ${batch} FOR UPDATE SKIP LOCKED`
-    for (const row of rows) {
+  // Phase 1 — CLAIM (short statement, no long tx).
+  const rows = await pool<WebhookOutboxRow[]>`
+    UPDATE webhook_outbox SET claimed_at = now()
+    WHERE id IN (
+      SELECT id FROM webhook_outbox
+      WHERE (claimed_at IS NULL OR claimed_at < now() - interval '2 minutes')
+        AND next_attempt_at <= now()
+      ORDER BY next_attempt_at
+      LIMIT ${batch}
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING id, tenant_id, event_type, payload, attempts
+  `
+  // Reschedule with backoff (or drop once exhausted), RELEASING the claim so next_attempt_at — not the
+  // 2-minute stale window — controls when the row runs again.
+  const retryOrDrop = async (row: WebhookOutboxRow) => {
+    if (row.attempts + 1 >= MAX_ATTEMPTS) { await pool`DELETE FROM webhook_outbox WHERE id = ${row.id}`; return }
+    const backoff = BACKOFF_BASE_S * Math.pow(2, row.attempts)
+    await pool`UPDATE webhook_outbox SET attempts = attempts + 1, claimed_at = NULL, next_attempt_at = now() + (${backoff} || ' seconds')::interval WHERE id = ${row.id}`
+  }
+  let handled = 0
+  for (const row of rows) {
+    try {
       // Instance-level existence-hiding (tri-state). A private page → drop now (never deliver). A page whose
       // page#space link hasn't landed yet (publish writes it just after the tx) → RETRY, don't permanently
       // drop a legitimate page.published (#228 review 2); dropped only once attempts are exhausted, and it
       // never delivers while unlinked so a genuine draft stays hidden.
       const disp = await pageEventDisposition(fga, row.payload)
-      if (disp === 'suppress') { await tx`DELETE FROM webhook_outbox WHERE id = ${row.id}`; continue }
-      if (disp === 'not-ready') {
-        if (row.attempts + 1 >= MAX_ATTEMPTS) { await tx`DELETE FROM webhook_outbox WHERE id = ${row.id}` }
-        else {
-          const backoff = BACKOFF_BASE_S * Math.pow(2, row.attempts)
-          await tx`UPDATE webhook_outbox SET attempts = attempts + 1, next_attempt_at = now() + (${backoff} || ' seconds')::interval WHERE id = ${row.id}`
-        }
-        continue
-      }
-      await tx`SELECT set_config('app.tenant_id', ${row.tenant_id}, true)`
-      const hooks = await tx<{ id: string; url: string; secret_enc: string; event_filter: string[] | null }[]>`
-        SELECT id, url, secret_enc, event_filter FROM webhooks WHERE active = TRUE`
+      if (disp === 'suppress') { await pool`DELETE FROM webhook_outbox WHERE id = ${row.id}`; handled++; continue }
+      if (disp === 'not-ready') { await retryOrDrop(row); handled++; continue }
+      // Tenant-scoped hook read — a SHORT tx (set_config is tx-local; RLS scopes the SELECT), closed
+      // before any delivery starts.
+      const hooks = await pool.begin(async (tx) => {
+        await tx`SELECT set_config('app.tenant_id', ${row.tenant_id}, true)`
+        return tx<{ id: string; url: string; secret_enc: string; event_filter: string[] | null }[]>`
+          SELECT id, url, secret_enc, event_filter FROM webhooks WHERE active = TRUE`
+      })
       const body = JSON.stringify({ id: row.id, type: row.event_type, ...row.payload })
       const ts = String(Math.floor(Date.now() / 1000))
-      let allOk = true
+      // Phase 2 — DELIVER, outside any transaction (the whole point of the lease).
+      const results: { id: string; ok: boolean }[] = []
       for (const h of hooks) {
         if (h.event_filter && !h.event_filter.includes(row.event_type)) continue // filtered out
         let ok = false
@@ -143,22 +165,29 @@ export async function drainWebhookOutbox(fga: OpenFgaClient, opts: { batch?: num
           const res = await send(h.url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wikistead-signature': signBody(decryptSecret(h.secret_enc), ts, body), 'x-wikistead-timestamp': ts }, body })
           ok = res.status >= 200 && res.status < 300 // 3xx/4xx/5xx = failure (no redirect follow)
         } catch { ok = false }
-        if (ok) {
-          await tx`UPDATE webhooks SET failure_count = 0 WHERE id = ${h.id}`
-        } else {
-          allOk = false
-          await tx`UPDATE webhooks SET failure_count = failure_count + 1, active = (failure_count + 1 < ${AUTO_DISABLE_FAILURES}) WHERE id = ${h.id}`
+        results.push({ id: h.id, ok })
+      }
+      const allOk = results.every((r) => r.ok)
+      // Phase 3 — BOOKKEEPING (second short tx): failure counters + the outbox row's fate.
+      await pool.begin(async (tx) => {
+        await tx`SELECT set_config('app.tenant_id', ${row.tenant_id}, true)`
+        for (const r of results) {
+          if (r.ok) await tx`UPDATE webhooks SET failure_count = 0 WHERE id = ${r.id}`
+          else await tx`UPDATE webhooks SET failure_count = failure_count + 1, active = (failure_count + 1 < ${AUTO_DISABLE_FAILURES}) WHERE id = ${r.id}`
         }
-      }
+      })
       if (allOk || row.attempts + 1 >= MAX_ATTEMPTS) {
-        await tx`DELETE FROM webhook_outbox WHERE id = ${row.id}` // delivered (or exhausted → dropped)
+        await pool`DELETE FROM webhook_outbox WHERE id = ${row.id}` // delivered (or exhausted → dropped)
       } else {
-        const backoff = BACKOFF_BASE_S * Math.pow(2, row.attempts)
-        await tx`UPDATE webhook_outbox SET attempts = attempts + 1, next_attempt_at = now() + (${backoff} || ' seconds')::interval WHERE id = ${row.id}`
+        await retryOrDrop(row)
       }
+      handled++
+    } catch {
+      // Crash mid-row: leave the row claimed — the claim ages past the stale window and it is retried
+      // with its attempts count unchanged (a crash is not a delivery failure; same as the search drain).
     }
-    return rows.length
-  }) as Promise<number>
+  }
+  return handled
 }
 
 // Poll-loop worker (mirrors startAuditDrainWorker). A per-instance in-flight guard prevents overlap; FOR
