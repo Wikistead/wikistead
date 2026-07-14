@@ -20,7 +20,7 @@ const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset } from "../macros/md-render";
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
-import { countTasks, renderProgressRing } from "../macros/progress"; // #290: :::todo header progress ring
+import { countTasks, renderProgressRing, updateProgressRing } from "../macros/progress"; // #290: :::todo header progress ring
 import { calloutTypeOption } from "../macros/callout-type-ui";
 import { renderCellInline } from "../macros/table-cell-dom";
 import { openMacroModal } from "./macro-modal";
@@ -380,6 +380,10 @@ class TodoRingWidget extends WidgetType {
   // #290 (1)(2): completion is expressed by COLOUR alone (the arc turns green at 100% — a class
   // renderProgressRing sets); the centre-checkmark + its arm window are gone (user re-ruling).
   toDOM() { return renderProgressRing(this.done, this.total) ?? document.createElement("span"); }
+  // #361: on a count change (eq false), update the SAME ring DOM in place so the arc `<circle>` is retained
+  // and its stroke-dashoffset transition animates — matching the React ring in the title band. Falling back to a
+  // rebuild (return false) if the DOM isn't an updatable ring (e.g. the empty-span placeholder).
+  updateDOM(dom: HTMLElement) { return dom instanceof HTMLSpanElement && updateProgressRing(dom, this.done, this.total); }
   ignoreEvent() { return true; } // display-only — clicks pass through to the line
 }
 
@@ -554,27 +558,41 @@ class CheckboxWidget extends WidgetType {
     box.checked = this.checked;
     box.className = "cm-lp-checkbox";
     box.setAttribute("data-testid", "task-checkbox");
+    box.dataset.from = String(this.from); // #361: the listener reads position from the ELEMENT (see updateDOM)
     const ctl = view.state.facet(checkboxControl);
     box.disabled = this.disabled; // computed at build (#300/#314): !ctl — NOT view.readOnly, NOT Reading
     if (ctl && !this.disabled) {
       // mousedown + preventDefault: keep editor focus/selection and drive the toggle
       // ourselves (so the rendered state always follows the document, never the native
       // input). The doc/host update re-renders the widget with the new checked state.
+      // #361: read the CURRENT state (box.checked + box.dataset.from) rather than the constructor closure, so a
+      // widget whose DOM was kept + updated in place (updateDOM) still toggles the right box at the right offset.
       box.addEventListener("mousedown", (e) => {
         e.preventDefault();
+        const from = Number(box.dataset.from);
+        const cur = box.checked;
         if (ctl.mode === "edit") {
           // editable surface: flipping the doc re-renders the widget immediately.
-          view.dispatch({ changes: { from: this.from + 1, to: this.from + 2, insert: this.checked ? " " : "x" } });
+          view.dispatch({ changes: { from: from + 1, to: from + 2, insert: cur ? " " : "x" } });
         } else {
           // read-only published surface: the doc here is NOT the draft, so it won't re-render until the host
           // refetches — flip the SAME box for responsiveness.
-          box.checked = !this.checked;
-          const index = taskIndexAt(view.state.doc.toString(), this.from);
-          ctl.onToggle(index, this.from, this.checked);
+          box.checked = !cur;
+          const index = taskIndexAt(view.state.doc.toString(), from);
+          ctl.onToggle(index, from, cur);
         }
       });
     }
     return box;
+  }
+  // #361: on a pure CHECKED flip (the common toggle) keep the SAME <input> and update it in place — a rebuild
+  // re-mounts the element and shows a one-frame bounce (old state → new). Only rebuild when `disabled` changed
+  // (a display-mode/control change), which must re-bind the listener with the fresh control facet.
+  updateDOM(dom: HTMLElement) {
+    if (!(dom instanceof HTMLInputElement) || dom.disabled !== this.disabled) return false;
+    dom.checked = this.checked;
+    dom.dataset.from = String(this.from);
+    return true;
   }
   // Let the widget receive its own pointer events (it is interactive, unlike the bullet).
   ignoreEvent() {
