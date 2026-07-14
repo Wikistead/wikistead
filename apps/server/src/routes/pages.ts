@@ -355,7 +355,8 @@ export async function guestCreatePublishPage(
                          published_md, published_at, has_unpublished_changes, task_done, task_total, published_query_snapshot)
       VALUES (${args.tenantId}, ${args.spaceId}, ${parentId}, ${args.title ?? ''}, ${position}, ${createdBy},
               ${''}, now(), false, 0, 0, ${listSnapshot}::jsonb)
-      RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
+      RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at,
+                (published_at IS NOT NULL) AS published, created_by, has_unpublished_changes, task_done, task_total
     `
     const [rev] = await tx<[{ id: string }]>`
       INSERT INTO revisions (tenant_id, page_id, ydoc_key, title, created_by)

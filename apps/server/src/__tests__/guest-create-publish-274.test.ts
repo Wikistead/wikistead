@@ -93,9 +93,10 @@ describe('#274 guest create-publish (ADR-135 §3)', () => {
     const tok = await mkSpaceTok(await mkSpaceLink('edit'), 'edit', anonId)
     const r = await createAsGuest(tok, { title: 'wiki page' })
     expect(r.statusCode, r.body).toBe(201)
-    const page = r.json() as { id: string; title: string }
+    const page = r.json() as { id: string; title: string; published: boolean }
     createdPages.push(page.id)
     expect(page.title).toBe('wiki page')
+    expect(page.published).toBe(true) // the RESPONSE reflects the published birth too (not just the row)
 
     // Published from birth: row state + the FGA release tuples are all present.
     const [row] = await admin`SELECT published_at, published_md, published_revision_id, created_by FROM pages WHERE id = ${page.id}`
