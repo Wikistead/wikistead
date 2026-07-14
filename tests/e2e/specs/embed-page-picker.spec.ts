@@ -233,7 +233,7 @@ test("#366 a single-token query keeps the first REAL hit selected, not the raw-i
 
 // #344: the picker dialog is TOP-PINNED, so its top input never shifts vertically as the candidate list
 // grows/shrinks (the "input jumps while typing" bug on center-aligned dialogs with variable content).
-test("#344: the picker input stays put vertically as the candidate list changes", async ({ browser }) => {
+test("#344/#366 the picker input stays put vertically as the candidate list changes", async ({ browser }) => {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   await page.goto("/p/demo");
@@ -249,18 +249,55 @@ test("#344: the picker input stays put vertically as the candidate list changes"
 
   const input = page.getByTestId("embed-picker-input");
   await expect(input).toBeVisible();
+  await sleep(350); // #366 let the open zoom animation settle before measuring (else scale artifacts)
+  // #366 FIXED height + centered (replacing the #344 top-pin). The input still sits in the upper third
+  // because the box is a tall (72vh) centered panel; the load-bearing guarantee below is that it does NOT move
+  // when the candidate list changes size (the fixed height no longer reflows the box).
   const vh = page.viewportSize()!.height;
-  // Top-pinned: the dialog sits near the top (top-[10%]), so the input is well within the upper third —
-  // a center-aligned dialog would put it near the middle.
   const y0 = (await input.boundingBox())!.y;
-  expect(y0, "the input is top-pinned, not vertically centered").toBeLessThan(vh * 0.35);
+  expect(y0, "the input is in the upper third of the tall centered panel").toBeLessThan(vh * 0.35);
 
   // Grow the candidate list (the raw-id item appears; the empty state disappears) → the input must NOT move.
   await input.fill(targetId);
   await expect(page.getByTestId("embed-picker-raw")).toBeVisible();
   await sleep(150);
   const y1 = (await input.boundingBox())!.y;
-  // Top-pinned → the input barely moves (a couple sub-pixels of reflow); a center-aligned dialog would
-  // shift it by ~half the list-height delta. The top-third assertion above is the primary top-pin proof.
+  // Fixed-height box → the input doesn't shift when the list grows (a content-sized box would reflow it).
   expect(Math.abs(y1 - y0), "the input does not shift when the list changes size").toBeLessThan(5);
+});
+
+// #366 the picker modal height is FIXED (centered), so navigating hits — which changes the preview body
+// height — no longer stretches/shrinks the modal (the reported jitter), and each pane scrolls on its own.
+test("#366 the embed picker modal height stays fixed as the query/preview changes; panes scroll independently", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1360, height: 900 } })).newPage();
+  await page.goto("/p/demo");
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await openScratch(page, "embed-fixed-height");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("/embed");
+  await expect(page.getByTestId("slash-palette")).toBeVisible();
+  await page.click('[data-testid="slash-item-macro:embed-page"]');
+  await expect(page.getByTestId("embed-picker-input")).toBeVisible();
+  await sleep(350); // let the open zoom animation settle so height measurements are stable
+
+  const dialog = page.getByRole("dialog").filter({ has: page.getByTestId("embed-picker-input") });
+  const h0 = (await dialog.boundingBox())!.height;
+
+  // a query with real hits → the preview pane renders a body (tall); the modal must NOT grow.
+  await page.getByTestId("embed-picker-input").fill("demo");
+  await sleep(600);
+  const h1 = (await dialog.boundingBox())!.height;
+
+  // a long raw-id query → different candidate set / empty preview; the modal must NOT shrink.
+  await page.getByTestId("embed-picker-input").fill("some-long-raw-page-id-1234567890abcdef");
+  await sleep(400);
+  const h2 = (await dialog.boundingBox())!.height;
+
+  expect(Math.abs(h1 - h0), `modal height jittered with hits (${h0}→${h1})`).toBeLessThanOrEqual(1);
+  expect(Math.abs(h2 - h0), `modal height jittered on the raw row (${h0}→${h2})`).toBeLessThanOrEqual(1);
+
+  // both panes scroll on their own (overflow-y:auto), so a short/tall preview never resizes the box.
+  const previewOverflow = await page.getByTestId("embed-picker-preview").evaluate((el) => getComputedStyle(el).overflowY);
+  expect(previewOverflow).toBe("auto");
 });

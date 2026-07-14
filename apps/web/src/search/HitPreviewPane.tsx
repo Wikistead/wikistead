@@ -13,7 +13,7 @@ export function HitPreviewPane({ pageId, testid = "hit-preview" }: { pageId: str
   const pageQ = usePage(pageId);
   const publishedQ = usePublished(pageId);
   return (
-    <div className="hidden max-h-[60vh] flex-1 overflow-y-auto p-4 md:block" data-testid={testid}>
+    <div className="hidden h-full min-h-0 flex-1 overflow-y-auto p-4 md:block" data-testid={testid}>
       {pageId && pageQ.data ? (
         <>
           <div className="flex items-center gap-2">
