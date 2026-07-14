@@ -344,8 +344,13 @@ body {
    Display-only (padding/max-width/centring on .cm-content); offsets are measured live,
    so presence/caret math is unaffected. Targets the data attributes Editor.tsx sets,
    so it does NOT depend on the (hashed) CSS-module class names.
-   The scroller keeps full width (the column centres within it). */
-[data-pane="preview"] .cm-content {
+   The scroller keeps full width (the column centres within it).
+   ADR-122 addendum (a) / #278: scoped to the TOP-LEVEL surface via the direct-child chain
+   (.lp-editor-host > .cm-editor > .cm-scroller > .cm-content) — a NESTED editor's .cm-content
+   (slot island / editUI panes; their .cm-editor sits deeper, inside a widget div in the outer
+   .cm-content) must inherit NEITHER the reading measure nor its padding (the ③
+   "text jumps right when the island opens" leak). */
+[data-pane="preview"] .lp-editor-host > .cm-editor > .cm-scroller > .cm-content {
   max-width: 740px;
   margin-inline: auto;
   padding: var(--space-6) var(--space-5);
@@ -353,7 +358,7 @@ body {
 }
 /* Split (vim power-user) keeps the preview full-width — the column would waste the
    half-pane. data-mode lives on the .editor ancestor. */
-[data-mode="split"] [data-pane="preview"] .cm-content {
+[data-mode="split"] [data-pane="preview"] .lp-editor-host > .cm-editor > .cm-scroller > .cm-content {
   max-width: none;
   margin-inline: 0;
   padding: var(--space-3);
@@ -547,42 +552,31 @@ body {
    bottom-corner floating controls (VIM toggle / ACTIONS, ~52px band). This must match the
    editor's bottom scrollMargin (72px) — the margin lifts the caret above the band, and
    this padding gives the scroll room to do so on the last line (scrollMargin alone can't,
-   as there's nothing below the last line to scroll into view). #6. */
-.lp-editor-host .cm-content { padding-bottom: 4.5rem; }
+   as there's nothing below the last line to scroll into view). #6.
+   ADR-122 addendum (a) / #278: direct-child chain = TOP-LEVEL surface only. A nested editor's
+   .cm-editor hangs off a widget div inside the outer .cm-content, so the chain breaks there and
+   the clearances (this rule + the band offset below) never reach a nested .cm-content — the ① "one-line slot inflated to a huge empty box" / D "1-line mermaid source at
+   ~208px" leaks. The per-nested cancel rules this replaces are retired: a new nested editor is
+   clean by construction (mountLivePreview appends .cm-editor straight under .lp-editor-host).
+   The [data-pane] variant is NOT redundant: the reading-column rule above sets a padding
+   SHORTHAND at (0,5,0) specificity, so these clearances need an equal-specificity form declared
+   LATER to keep winning padding-top/bottom on the editor pane (the pre-addendum rules won by
+   source order at equal specificity — preserve that). */
+[data-pane="preview"] .lp-editor-host > .cm-editor > .cm-scroller > .cm-content,
+.lp-editor-host > .cm-editor > .cm-scroller > .cm-content { padding-bottom: 4.5rem; }
 /* #212 bounce 3: the header band is an absolute frosted overlay at the editor's top, so the first line
    must clear it — pad the content top by the band's measured height (--wks-band-h, published by bandRef).
    Falls back to 0 before the var is set (e.g. a header-less route). This gives the backdrop-blur real
    content to blur as the document scrolls up behind the band. */
-.lp-editor-host .cm-content { padding-top: var(--wks-band-h, 0px); }
-/* #278 rev4 (①): the slot-edit island is a NESTED editor inside the host surface, so HOST-only
-   .cm-content rules also matched ITS .cm-content: the clearances above (bottom floating-controls room,
-   header-band offset) inflated a one-line slot into a huge empty box, and the reading-column rule
-   ([data-pane="preview"] .cm-content, ~line 348) indented the island text by its horizontal padding
-   (24px — the ③ "text jumps right when the island opens"). Neutralize ALL of them: the island
-   text must sit exactly where the rendered slot text sat (no jump on open, either axis). */
-.lp-editor-host .cm-lp-slot-edit-island .cm-content,
-[data-pane="preview"] .cm-lp-slot-edit-island .cm-content {
-  max-width: none;
-  margin-inline: 0;
-  padding: 0;
-}
-/* #278 D: the SAME clearances (bottom 4.5rem, header-band top) also leak into the mermaid/plantuml
-   editUI panel's nested editor — a 1-line source inflated to ~208px. The rule above only scopes the slot
-   island; neutralize the VERTICAL clearances for ANY editor nested inside another editor (a .cm-content whose
-   editor is itself inside a .cm-editor), so an editUI source pane hugs its content too. Only top/bottom (the
-   nested editor keeps its own horizontal padding); the slot island's own rule still zeroes its L/R for the
-   no-x-jump requirement. */
-.lp-editor-host .cm-editor .cm-editor .cm-content,
-[data-pane="preview"] .cm-editor .cm-editor .cm-content {
-  padding-top: 0;
-  padding-bottom: 0;
-}
+[data-pane="preview"] .lp-editor-host > .cm-editor > .cm-scroller > .cm-content,
+.lp-editor-host > .cm-editor > .cm-scroller > .cm-content { padding-top: var(--wks-band-h, 0px); }
 
 /* #267 the template preview mounts the editor's read-only surface in a BOUNDED box (picker pane /
    manage panel). The page-level clearances above (72px floating-controls room, header-band offset) don't
    exist there — neutralize them, keep a compact padding, and bound the editor to the pane so the CM
-   scroller (engine parity) owns the scrolling. */
-.wks-template-preview .lp-editor-host .cm-content { padding: 0.5rem 0.75rem 0.75rem; }
+   scroller (engine parity) owns the scrolling. (Same direct-child chain: the clearances it overrides are
+   top-level-scoped now, and the longer chain keeps this override's specificity above theirs.) */
+.wks-template-preview .lp-editor-host > .cm-editor > .cm-scroller > .cm-content { padding: 0.5rem 0.75rem 0.75rem; }
 .wks-template-preview .cm-editor { height: 100%; }
 
 /* #204: custom thin, subtle scrollbars app-wide (light/dark via --fg + color-mix). A track-less slim
