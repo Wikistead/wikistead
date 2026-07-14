@@ -168,19 +168,22 @@ export async function drainWebhookOutbox(fga: OpenFgaClient, opts: { batch?: num
         results.push({ id: h.id, ok })
       }
       const allOk = results.every((r) => r.ok)
-      // Phase 3 — BOOKKEEPING (second short tx): failure counters + the outbox row's fate.
+      // Phase 3 — BOOKKEEPING (ONE short tx): failure counters AND the outbox row's fate commit
+      // atomically (webhook_outbox has no RLS, so it can share the scoped tx) — a crash can't leave a
+      // bumped failure_count with an un-advanced row (which would double-count on the retry).
       await pool.begin(async (tx) => {
         await tx`SELECT set_config('app.tenant_id', ${row.tenant_id}, true)`
         for (const r of results) {
           if (r.ok) await tx`UPDATE webhooks SET failure_count = 0 WHERE id = ${r.id}`
           else await tx`UPDATE webhooks SET failure_count = failure_count + 1, active = (failure_count + 1 < ${AUTO_DISABLE_FAILURES}) WHERE id = ${r.id}`
         }
+        if (allOk || row.attempts + 1 >= MAX_ATTEMPTS) {
+          await tx`DELETE FROM webhook_outbox WHERE id = ${row.id}` // delivered (or exhausted → dropped)
+        } else {
+          const backoff = BACKOFF_BASE_S * Math.pow(2, row.attempts)
+          await tx`UPDATE webhook_outbox SET attempts = attempts + 1, claimed_at = NULL, next_attempt_at = now() + (${backoff} || ' seconds')::interval WHERE id = ${row.id}`
+        }
       })
-      if (allOk || row.attempts + 1 >= MAX_ATTEMPTS) {
-        await pool`DELETE FROM webhook_outbox WHERE id = ${row.id}` // delivered (or exhausted → dropped)
-      } else {
-        await retryOrDrop(row)
-      }
       handled++
     } catch {
       // Crash mid-row: leave the row claimed — the claim ages past the stale window and it is retried
