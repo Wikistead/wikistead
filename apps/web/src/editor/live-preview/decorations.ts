@@ -18,6 +18,7 @@ import { parseFenceLine, parseFenceInfo, serializeFenceInfo, CALLOUT_TYPES, type
 // #255: rendered diagram macros are centred by default and take a fence `align=` attribute (others don't).
 const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset } from "../macros/md-render";
+import { setActiveTabIndex } from "../macros/layout-directives"; // #278 item 1: record the clicked tab before the island's commit rebuilds the tabs widget
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
 import { countTasks, renderProgressRing, updateProgressRing } from "../macros/progress"; // #290: :::todo header progress ring
@@ -26,8 +27,6 @@ import { renderCellInline } from "../macros/table-cell-dom";
 import { openMacroModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost, nestedSelectionField, setNestedSelection, nestedEditActiveField, setNestedEditActive, slotEditField, setSlotEditActive, type NestedSelection, type SlotEdit } from "./macro-edit";
 import { mountSourceEditor } from "../macros/source-editor";
-import { slashPalette } from "./palette"; // #278 §2b: the slash palette, mounted on the inline slot island (host-side wiring)
-import { markdownExtension } from "../markdown-config"; // #278 rev4: the slot island runs the full live-preview pipeline
 import { tableInlineEditor } from "./table-edit";
 import { tableTier } from "../macros/table";
 import type { InlineController } from "../macros/registry";
@@ -1830,6 +1829,18 @@ function findNestedSlot(root: HTMLElement, anchor: number): HTMLElement | null {
 // only: the island still holds its own plain document and still commits on blur exactly as above.
 type SlotHost = HTMLElement & { __slotHandle?: { destroy(): void } };
 
+// ADR-122 addendum (b) / #278: the HOST supplies the shared live-preview decoration/keymap layer for
+// nested markdown editors. mountLivePreview provides its buildLivePreviewExtensions closure here (the
+// SAME factory — and the same opts/resolvers — its own surface is built from), so the slot island
+// renders and edits EXACTLY like the page; collab/presence and host chrome are excluded by the factory
+// itself (single Y.Text: the island never live-binds the page doc — it commits on blur). This facet is
+// the seam that replaces the island's former hand-mirrored facet list (the config-drift source,).
+// Null (no host factory — a bare test mount) → the island opens with no shared layer (plain text).
+export type NestedLivePreviewEnv = { vim: boolean; displayMode: DisplayMode };
+export const nestedLivePreviewConfig = Facet.define<(env: NestedLivePreviewEnv) => Extension, ((env: NestedLivePreviewEnv) => Extension) | null>({
+  combine: (v) => (v.length ? v[v.length - 1]! : null),
+});
+
 // #278 rev4 (① +): the island's typography = the RENDERED surface's typography. Everything
 // inherits from the page (16px proportional body, not the 13px code face the default source-editor theme
 // uses for code-source macros), and there is NO fixed min-height — the box hugs its content (an empty
@@ -1845,7 +1856,7 @@ const slotIslandTheme = EditorView.theme({
   ".cm-scroller": { fontFamily: "inherit", lineHeight: "inherit" },
   "&.cm-focused": { outline: "none" },
 });
-function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { from: number; to: number }, index: number, childName: "column" | "tab", dark: boolean): boolean {
+function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { from: number; to: number }, index: number, childName: "column" | "tab", dark: boolean, bodyFrom: number): boolean {
   const doc = view.state.doc;
   const items = resolveDirectiveRanges(doc.toString()).filter((r) => r.name === childName && r.from >= container.from && r.to <= container.to);
   const it = items[index];
@@ -1871,46 +1882,38 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
   host.setAttribute("data-testid", "slot-edit-island");
   host.addEventListener("mousedown", (e) => e.stopPropagation()); // #265: the outer atom must not steal the caret
   let committed = false;
+  const commitNow = (value: string) => {
+    if (committed) return; // blur / tab-switch / field-clear can race; write exactly once, never after destroy
+    committed = true;
+    view.dispatch({ changes: { from: insFrom, to: insTo, insert: shape(value) }, effects: setSlotEditActive.of(null) });
+    view.focus();
+  };
+  // ADR-122 addendum (b): the island's decoration/keymap layer comes from the HOST's shared factory
+  // the very buildLivePreviewExtensions the outer surface is built from (same resolvers/seams closure),
+  // so reveal / vim-atom motion / WYSIWYG marker-hide / nested-macro render / the slash palette behave
+  // exactly like the page. Collab/presence/host chrome are excluded by the factory (nested mount): the
+  // island holds its OWN doc and commits on blur — never a second live Y.Text binding. This replaces the
+  // hand-mirrored facet list (the config-drift sourcediagnosed). It reaches the macro-side helper
+  // as opaque extensions — the ADR-023 sandbox boundary is unchanged (the §2b pattern).
+  // displayMode: the island FOLLOWS the outer mode (①; #164: wysiwyg stays syntax-free). Reading
+  // never reaches here (the click gate refuses) and Source containers never render widgets.
+  const factory = view.state.facet(nestedLivePreviewConfig);
   const handle = mountSourceEditor({
     parent: host,
     doc: bodyText,
     dark,
     testid: "slot-edit-src",
     vim: view.state.facet(vimEnabled),
-    // #278 §2b + rev4 (②③): the island's own state carries (a) the slash palette — inserts markdown
-    // snippets into the island's OWN doc (no host action providers passed, so /image·/embed·/template
-    // gracefully no-op; headings·lists·todo·quote·code·divider·link work locally) — and (b) the SAME
-    // live-preview pipeline as the host surface (language + livePreview field + its theme), so the slot
-    // renders in place and only the caret's surroundings reveal syntax — no separate preview pane (§2c
-    // retired). Host wiring (resolvers / allowlist / vim gating) is MIRRORED from the outer view so slot
-    // content renders exactly like the page. All of this is HOST-side wiring reaching the macro-side
-    // helper as opaque extensions — the ADR-023 sandbox boundary is unchanged (the §2b pattern).
-    extraExtensions: [
-      slashPalette(),
-      markdownExtension(),
-      livePreview,
-      livePreviewTheme,
-      vimEnabled.of(view.state.facet(vimEnabled)), // reveal gating must see the outer editor's vim state
-      //①: the island FOLLOWS the outer display mode — a WYSIWYG surface must stay syntax-free
-      // inside the island too (#164 invariant: wysiwyg never reveals markers). Reading never reaches
-      // here (the click gate refuses to open the island there); source containers never render widgets.
-      displayMode.of(view.state.facet(displayMode) === "wysiwyg" ? "wysiwyg" : "live"),
-      checkboxControl.of({ mode: "edit" }), // task boxes in a slot flip the ISLAND doc (committed on blur)
-      imageResolver.of(view.state.facet(imageResolver)),
-      diagramRenderer.of(view.state.facet(diagramRenderer)),
-      transcludeResolver.of(view.state.facet(transcludeResolver)),
-      embedAllowlist.of(view.state.facet(embedAllowlist)),
-    ],
+    extraExtensions: factory
+      ? [factory({ vim: view.state.facet(vimEnabled), displayMode: view.state.facet(displayMode) === "wysiwyg" ? "wysiwyg" : "live" })]
+      : [],
     theme: slotIslandTheme, // rev4: body typography, not the code face — see slotIslandTheme
     onInput: () => {}, // rev4: the island renders itself (livePreview) — still NO doc write until blur
-    onCommit: (value) => {
-      if (committed) return; // blur can fire alongside the field-clear re-render; write exactly once
-      committed = true;
-      view.dispatch({ changes: { from: insFrom, to: insTo, insert: shape(value) }, effects: setSlotEditActive.of(null) });
-      view.focus();
-    },
+    onCommit: commitNow,
   });
-  host.__slotHandle = handle; // disposed by MacroWidget.destroy(dom) on any unmount path
+  // Disposed by MacroWidget.destroy(dom) on any unmount path. Marking `committed` on destroy also pins
+  // the deferred tab-switch commit (below) against stale offsets: once the island is gone, no write.
+  host.__slotHandle = { destroy: () => { committed = true; handle.destroy(); } };
   //②: the island's keys must NEVER reach the outer editor. The island DOM lives INSIDE the outer
   // contentDOM, so every keydown bubbled into the outer CM — whose vim (normal mode) treated island keys
   // as ITS OWN motions/edits: an island `o`/`e`/`w` moved the outer selection, which clears slotEditField
@@ -1933,6 +1936,28 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
     e.stopPropagation();
   });
   cell.replaceWith(host); // for columns: the column cell; for tabs: the active panel
+  // #278item 1 (island lifecycle): switching tabs is DISPLAY-ONLY (class toggles + tabActiveIndex),
+  // so the island — bound to the OLD tab's body range — used to stay mounted: the preview showed the new
+  // tab while the island still edited the old one. Commit+close on a tab switch: capture-phase on the tab
+  // bar records the CLICKED tab (setActiveTabIndex — it can't rely on the button's own mousedown: with
+  // native events, microtasks run between listeners, so a deferred commit rebuilt the widget BEFORE
+  // activate ever ran) and commits synchronously — the rebuild then renders the NEW active tab with no
+  // island; the old button's late activate is a no-op on detached DOM. The `committed` flag (set by
+  // commitNow AND by destroy) keeps every other unmount path race-safe (never a stale-offset dispatch).
+  // Clicking the edited tab's own header keeps editing; the `×` keeps its own doc-edit path.
+  if (childName === "tab") {
+    const bar = host.closest(".cm-lp-tabs")?.querySelector(".cm-lp-tabbar");
+    bar?.addEventListener("mousedown", (e) => {
+      const t = e.target as HTMLElement;
+      if (t.closest(".cm-lp-tab-remove")) return;
+      const btn = t.closest(".cm-lp-tab");
+      if (!btn) return;
+      const clicked = Array.from(bar.querySelectorAll(".cm-lp-tab")).indexOf(btn);
+      if (clicked === index) return;
+      setActiveTabIndex(bodyFrom, clicked); // the rebuild (below) restores the active tab from this
+      commitNow(handle.getValue());
+    }, true);
+  }
   // Focus AFTER CM attaches this widget DOM to the document — focusing during toDOM (DOM not yet in the tree)
   // is a no-op, which left the island unfocused so a single click opened but couldn't type (reviewer B).
   requestAnimationFrame(() => handle.focus());
@@ -2318,7 +2343,7 @@ class MacroWidget extends WidgetType {
           // island never mounts/unmounts — the same reason nested-host forces a rebuild).
           wrap.classList.add("cm-lp-slot-edit-host");
           const slotCell = wrap.querySelectorAll<HTMLElement>(contentSel)[this.slotEdit.index];
-          if (slotCell) mountSlotEditIsland(view, slotCell, { from: this.from, to: this.to }, this.slotEdit.index, child, this.theme === "dark");
+          if (slotCell) mountSlotEditIsland(view, slotCell, { from: this.from, to: this.to }, this.slotEdit.index, child, this.theme === "dark", this.bodyFrom);
         } else {
         const cells = wrap.querySelectorAll<HTMLElement>(this.name === "columns" ? ".cm-lp-column" : ".cm-lp-tab");
         cells.forEach((cell: HTMLElement, i: number) => {
@@ -4245,13 +4270,15 @@ export const livePreviewTheme = EditorView.baseTheme({
   // #278F: destructive affordances (the column/tab `×`) use the semantic danger token, not fg-dim
   // delete reads as delete. Hover deepens (danger-tinted fill / full-strength colour). Token-referenced, not
   // hardcoded, so it tracks light/dark (tokens.css --danger).
-  ".cm-lp-layout-item-remove": { position: "absolute", top: "2px", right: "2px", zIndex: "3", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.4em", height: "1.4em", border: "1px solid color-mix(in srgb, var(--danger, #cf222e) 45%, transparent)", borderRadius: "4px", background: "var(--panel, #fff)", color: "var(--danger, #cf222e)", cursor: "pointer", fontSize: "0.85em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms, background 120ms" },
+  ".cm-lp-layout-item-remove": { position: "absolute", top: "2px", right: "2px", zIndex: "3", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.4em", height: "1.4em", border: "1px solid color-mix(in srgb, var(--danger, #cf222e) 45%, transparent)", borderRadius: "4px", background: "var(--panel, #fff)", color: "var(--danger, #cf222e)", cursor: "pointer", fontSize: "0.85em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms, filter 120ms" },
   ".cm-lp-column:hover .cm-lp-layout-item-remove": { opacity: "1" },
-  ".cm-lp-layout-item-remove:hover": { background: "color-mix(in srgb, var(--danger, #cf222e) 15%, var(--panel, #fff))", borderColor: "var(--danger, #cf222e)" },
+  // #278item 6: hover BRIGHTENS the × (thedarker/deeper hover read as a heavier action and
+  // invited mis-clicks — the user ruled the opposite). brightness tracks light/dark without new tokens.
+  ".cm-lp-layout-item-remove:hover": { filter: "brightness(1.3)", borderColor: "color-mix(in srgb, var(--danger, #cf222e) 70%, transparent)" },
   // #278G: absolute (top-right of the tab) so it never adds flow width — hover-revealed, danger red.
-  ".cm-lp-tab-remove": { position: "absolute", top: "50%", right: "0.25em", transform: "translateY(-50%)", border: "none", background: "transparent", color: "var(--danger, #cf222e)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
+  ".cm-lp-tab-remove": { position: "absolute", top: "50%", right: "0.25em", transform: "translateY(-50%)", border: "none", background: "transparent", color: "var(--danger, #cf222e)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms, filter 120ms" },
   ".cm-lp-tab:hover .cm-lp-tab-remove, .cm-lp-tabbar:hover .cm-lp-tab-remove": { opacity: "0.75" },
-  ".cm-lp-tab-remove:hover": { opacity: "1", color: "var(--danger, #cf222e)" },
+  ".cm-lp-tab-remove:hover": { opacity: "1", filter: "brightness(1.3)" },
   ".cm-lp-layout-item-add": { flex: "0 0 auto", alignSelf: "flex-start", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.6em", height: "1.6em", border: "1px dashed var(--border, #888)", borderRadius: "4px", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
   ".cm-lp-macro-wrap:hover .cm-lp-layout-item-add, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-layout-item-add": { opacity: "1" },
   // #278 §2a (rev4): the inline CM6 slot-edit island — an accent-ringed box that replaces the slot's
