@@ -169,7 +169,10 @@ type page
     define moderate: [user, group#member] or moderate_from_space
     # The role bypass sits ABOVE every subtraction: manage and moderate always edit (they fix/unfreeze a
     # frozen page — that is the point of the roles). ADR-139 (C-4) landed manage; ADR-141 (C-5) adds moderate.
-    define edit: manage or moderate or edit_unfrozen
+    define edit_live: manage or moderate or edit_unfrozen
+    # #411 / ADR-153: TRASH cuts edit for EVERYONE including manage (a trashed page is not editable —
+    # restore first). manage itself stays UNsubtracted below: it is the trash-listing/restore/purge authority.
+    define edit: edit_live but not trashed
 
     # Commenting authorization (#100 / ADR-029 Option B) — a RESOURCE SETTING, not a link capability.
     # view_direct: direct member/group/link view grants (WRITE TARGET + cascading leaf). user:* (public page)
@@ -184,7 +187,13 @@ type page
     define comment_open: [user:*, share_link:*] or comment_open from space
     # explicit per-principal comment grant (member/group granularity)  ∪  edit  ∪  the audience gate.
     # A specific member may be granted comment even when the audience toggle is off.
-    define comment: [user, group#member] or edit or (view_base and comment_open)
+    # #411 / ADR-153: `comment` was the DIRECT WRITE TARGET (fgaRelationForCap) — turning it computed
+    # requires the leaf split (the #100 write-ripple lesson). Existing `comment@user/group` tuples are
+    # migrated to comment_direct (infra/openfga/migrate-comment-direct.ts). comment_live uses edit_live
+    # (pre-subtraction) so the trash subtraction happens exactly once, at `comment`.
+    define comment_direct: [user, group#member]
+    define comment_live: comment_direct or edit_live or (view_base and comment_open)
+    define comment: comment_live but not trashed
     # #109 / ADR-072 · #218 / ADR-103 (A5-1): per-page MONOTONIC DENY. `restricted` gains share_link
     # (UNCONDITIONAL — a `with non_expired` deny would be non-monotonic) so a folder-share-link guest can be
     # excluded from a specific child. NOT share_link:* (that over-denies every link). Deny wins over every grant
@@ -196,7 +205,15 @@ type page
     define viewable: view_base or comment
     # view = viewable MINUS restricted (monotonic deny). Every `view` check (routes, revisions, search
     # stage-2, public anon) inherits the deny.
-    define view: viewable but not restricted
+    define view_live: viewable but not restricted
+    # #411 / ADR-153: the TRASH marker — a [user:*, share_link:*] PAIR (#244 typed-wildcard lesson),
+    # written/deleted together for a whole trashed subtree. Subtracted from view/edit/comment so a trashed
+    # page is INVISIBLE everywhere through the existing per-item checks (uniform 404 — byte-identical to
+    # absent), while every underlying grant tuple survives in place: restore = delete the pair, and the
+    # page comes back with exactly its prior direct access. manage/moderate are NOT subtracted (they are
+    # the restore authority; the trash LISTING view-filters per-entry on manage).
+    define trashed: [user:*, share_link:*]
+    define view: view_live but not trashed
 
 # #241 / ADR-110: page templates. A template is a snapshot (the row lives in the `templates` table with
 # tenant RLS); THIS type carries the audience authorization. Scope is expressed by which tuples exist —

@@ -28,7 +28,7 @@ const grant = (sub: string, relation: string) => ({ user: `user:${sub}`, relatio
 const fgaFixture = [
   { user: `tenant:${TENANT}`, relation: 'tenant', object: `space:${SPACE}` }, // tenant admin ⇒ space admin ⇒ page comment/view
   { user: `space:${SPACE}`, relation: 'space', object: `page:${PAGE}` },
-  grant('cmt-author', 'comment'), // ⇒ also view
+  grant('cmt-author', 'comment_direct'), // ⇒ also view (#411 / ADR-153: `comment` is computed now; writes land on the leaf)
   grant('cmt-viewer', 'view_direct'), // #218: direct view grant → view_direct leaf (view is computed)
 ]
 
