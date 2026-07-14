@@ -38,33 +38,35 @@ const LEAF: Record<string, string> = { manage: 'manage_direct', edit: 'edit_dire
     // #218 / ADR-103 addendum (DRAFT GATE): a PUBLISHED page (has a `page#space` link) must carry the
     // `published` marker PAIR so its PUBLISHED children keep INHERITING folder grants after the flip
     // (`*_inherited = *_from_parent and published`). A draft (no page#space) gets NONE — it stays creator-only.
-    let hasSpace = false
-    let hasPublishedUser = false
-    let hasPublishedLink = false
-    for (const t of (tuples ?? []) as { key?: { user?: string; relation?: string; object?: string; condition?: Cond } }[]) {
-      const k = t.key
-      if (!k?.user || !k.relation || !k.object) continue
-      if (k.relation === 'space') hasSpace = true
-      if (k.relation === 'published' && k.user === 'user:*') hasPublishedUser = true
-      if (k.relation === 'published' && k.user === 'share_link:*') hasPublishedLink = true
+    const keys = (tuples ?? []).map((t: { key?: { user?: string; relation?: string; object?: string; condition?: Cond } }) => t.key)
+      .filter((k): k is { user: string; relation: string; object: string; condition?: Cond } => !!k?.user && !!k?.relation && !!k?.object)
+    // FIRST pass — index EVERY existing tuple so `write-if-absent` sees the whole set regardless of read order
+    // (building it incrementally would miss a leaf that appears AFTER the old grant it dedupes against). This
+    // keeps the one-shot fully idempotent on a mixed / partly-migrated store — OpenFGA 400s a duplicate write.
+    const existing = new Set(keys.map((k) => `${k.user}|${k.relation}|${k.object}`))
+    const hasSpace = keys.some((k) => k.relation === 'space')
+    // SECOND pass — move each old grant relation to its `*_direct` leaf (skipping any leaf that already exists).
+    for (const k of keys) {
       const leaf = LEAF[k.relation]
-      if (!leaf) continue // not a grant relation (private/restricted/space/parent/comment/comment_open) — skip
+      if (!leaf) continue // not a grant relation (private/restricted/space/parent/comment/comment_open/*_direct) — skip
       // view_base@user:* is the PUBLIC grant — keep it on view_base (user:* stays a direct type there).
       if (k.relation === 'view_base' && k.user === 'user:*') continue
-      // Anything left on manage/edit/view_base is a member/group/share-link direct grant → move to the leaf.
-      // PRESERVE the `non_expired` condition: a time-bounded share link carries `condition` on the old grant;
-      // dropping it would turn an expiring link into a PERMANENT one (a monotonic over-permit — collab
-      // authenticate checks `view/edit` with `current_time`, so a condition-less leaf admits past expiry).
-      writes.push({ user: k.user, relation: leaf, object: k.object, ...(k.condition ? { condition: k.condition } : {}) })
-      deletes.push({ user: k.user, relation: k.relation, object: k.object })
+      // Move to the leaf, PRESERVING the `non_expired` condition (dropping it would turn an expiring share link
+      // into a PERMANENT one — a monotonic over-permit; collab authenticate checks with `current_time`).
+      if (!existing.has(`${k.user}|${leaf}|${k.object}`)) {
+        writes.push({ user: k.user, relation: leaf, object: k.object, ...(k.condition ? { condition: k.condition } : {}) })
+      }
+      deletes.push({ user: k.user, relation: k.relation, object: k.object }) // remove the stale (now typeless) grant
     }
-    if (hasSpace && !hasPublishedUser) writes.push({ user: 'user:*', relation: 'published', object: `page:${id}` })
-    if (hasSpace && !hasPublishedLink) writes.push({ user: 'share_link:*', relation: 'published', object: `page:${id}` })
+    if (hasSpace && !existing.has(`user:*|published|page:${id}`)) writes.push({ user: 'user:*', relation: 'published', object: `page:${id}` })
+    if (hasSpace && !existing.has(`share_link:*|published|page:${id}`)) writes.push({ user: 'share_link:*', relation: 'published', object: `page:${id}` })
     const publishedWrites = writes.filter((w) => w.relation === 'published').length
-    if (writes.length === 0) continue
-    // Write the new leaves + published markers first, then delete the stale grants (a crash leaves a superset,
+    if (writes.length === 0 && deletes.length === 0) continue
+    // Write the new leaves + published markers first, THEN delete the stale grants (a crash leaves a superset,
     // never a gap — the extra published marker is harmless, the un-migrated grant would only be a temporary loss).
-    await fga.write({ writes }).catch((e: unknown) => { console.error(`write failed for page:${id}`, e); throw e })
+    // Deletes run even when there is nothing to write (a mixed-state store where the leaf already exists but the
+    // stale old-relation tuple — now typeless under the flipped model — still needs removing).
+    if (writes.length) await fga.write({ writes }).catch((e: unknown) => { console.error(`write failed for page:${id}`, e); throw e })
     if (deletes.length) await fga.write({ deletes }).catch((e: unknown) => { console.error(`delete failed for page:${id}`, e); throw e })
     moved += writes.length - publishedWrites
     published += publishedWrites
