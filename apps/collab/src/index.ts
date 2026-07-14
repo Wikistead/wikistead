@@ -12,8 +12,13 @@ import { docName } from "@wikistead/types";
 import { fgaClient, check } from "@wikistead/authz";
 import { loadYdoc, storeYdoc, compactIfBloated } from "./ydoc.js";
 import { authenticate, parseDocName } from "./authenticate.js";
+import { readConnectCaps, guestConnectRateAllowed } from "./abuse-rate.js"; // #328 / ADR-140 increment 2
 import { selectGuestConnectionsToClose, parseRevokeMessage } from "./revoke.js";
 import { planBodyEdit, EditApplyError, parseMcpEditRequest } from "./mcp-edit-apply.js";
+
+// #328: a NORMAL-mode Valkey client for the connect rate buckets (the pub/sub clients below are in
+// subscriber mode and cannot run INCR).
+const rateValkey = new IORedis(process.env.VALKEY_URL ?? "redis://localhost:6379");
 
 const server = new Hocuspocus({
   port: Number(process.env.COLLAB_PORT ?? 4100),
@@ -85,7 +90,21 @@ const server = new Hocuspocus({
   ],
 
   async onAuthenticate({ token, documentName }: onAuthenticatePayload) {
-    return authenticate({ token, documentName });
+    const result = await authenticate({ token, documentName });
+    // #328 / ADR-140 increment 2: guest connect/reconnect rate cap (per share link + per #331 session —
+    // never raw IP). AFTER authenticate so an unauthorized token never reaches a bucket (no pre-auth
+    // probe), and members are never capped. Defaults (NULL) short-circuit with zero Valkey I/O. This is
+    // the ADR-140 I4 seam: the share-link id and the session id are both in hand exactly here.
+    if (result.principal.kind === "guest") {
+      const caps = await readConnectCaps(result.principal.tenantId);
+      const allowed = await guestConnectRateAllowed(rateValkey, caps, {
+        tenantId: result.principal.tenantId,
+        shareLinkId: result.principal.shareLinkId,
+        anonId: result.principal.anonId,
+      });
+      if (!allowed) throw new Error("forbidden: connection rate limited"); // static reason — no content/limit echo
+    }
+    return result;
   },
 });
 
