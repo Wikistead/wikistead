@@ -7,7 +7,7 @@
 // anonymous visitors are NOT admitted to collaboration rooms here.
 import type { FastifyInstance } from 'fastify'
 import { fgaClient, checkRelation } from '@wikistead/authz'
-import { pool } from '../db/pool.js'
+import { withTenantTx } from '../db/index.js' // #382
 import { resolveTenantFromHost, loadTenant } from '../tenant.js'
 import { substituteListSnapshots, type ListSnapshot } from './pages.js' // #353→#370: baked `:::tagged`/`:::children` static lists for anon
 
@@ -36,8 +36,7 @@ async function resolveTenantForRequest(host: string) {
 // so turning it back ON restores every public page (like the non-destructive billing freeze). The server is
 // the fortress here: the hidden toggle UI is convenience; this gate is the guarantee.
 async function tenantPublicEnabled(tenantId: string): Promise<boolean> {
-  return pool.begin(async (tx) => {
-    await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+  return withTenantTx(tenantId, async (tx) => {
     const [r] = await tx<{ public_enabled: boolean }[]>`SELECT public_enabled FROM tenant_settings WHERE tenant_id = ${tenantId}`
     return r?.public_enabled === true
   }) as Promise<boolean>
@@ -50,8 +49,7 @@ async function tenantPublicEnabled(tenantId: string): Promise<boolean> {
 // treated as absent → 404), alongside the FGA view check. The public surface exposes only the PUBLISHED
 // snapshot, never a draft's mere existence.
 async function loadPublicPage(tenantId: string, pageId: string): Promise<PublicPageRow | null> {
-  return pool.begin(async (tx) => {
-    await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+  return withTenantTx(tenantId, async (tx) => {
     const [r] = await tx<PublicPageRow[]>`
       SELECT p.id, p.title, p.published_md, (p.noindex OR s.noindex) AS noindex, p.published_query_snapshot
       FROM pages p JOIN spaces s ON s.id = p.space_id
@@ -73,8 +71,7 @@ const MAX_TREE_DEPTH = 6
 const MAX_CHILDREN_PER_NODE = 200
 
 async function loadDirectChildren(tenantId: string, parentId: string): Promise<{ id: string; title: string }[]> {
-  return pool.begin(async (tx) => {
-    await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+  return withTenantTx(tenantId, async (tx) => {
     return tx<{ id: string; title: string }[]>`
       SELECT id, title FROM pages WHERE parent_id = ${parentId}
         AND published_at IS NOT NULL
@@ -107,8 +104,7 @@ export async function loadPublicChildTree(
 // individually ANON-view-checked by the caller before it (and its public subtree) enters the tree — a
 // non-public/unpublished root and its whole subtree never appear, with no observable gap.
 async function loadPublicSpaceRoots(tenantId: string, spaceId: string): Promise<{ id: string; title: string }[]> {
-  return pool.begin(async (tx) => {
-    await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+  return withTenantTx(tenantId, async (tx) => {
     return tx<{ id: string; title: string }[]>`
       SELECT id, title FROM pages WHERE space_id = ${spaceId} AND parent_id IS NULL
         AND published_at IS NOT NULL
@@ -135,8 +131,7 @@ export async function publicPlugin(app: FastifyInstance) {
     // The FGA viewer check is GLOBAL across the shared store; also require the space to belong to THIS
     // tenant (RLS) so a cross-tenant public-space UUID is a uniform 404 too — not a 200 empty tree that
     // confirms "this UUID is a public space somewhere" (existence-hiding, review note).
-    const spaceRow = await pool.begin(async (tx) => {
-      await tx`SELECT set_config('app.tenant_id', ${tenant.id}, true)`
+    const spaceRow = await withTenantTx(tenant.id, async (tx) => {
       const [r] = await tx<{ id: string; noindex: boolean }[]>`SELECT id, noindex FROM spaces WHERE id = ${req.params.spaceId}`
       return r ?? null
     }) as { id: string; noindex: boolean } | null
@@ -216,8 +211,7 @@ export async function publicPlugin(app: FastifyInstance) {
     const pageIds = (objects ?? []).map((o: string) => o.replace(/^page:/, ''))
     if (pageIds.length === 0) return reply.send([])
 
-    const pages = await pool.begin(async (tx) => {
-      await tx`SELECT set_config('app.tenant_id', ${tenant.id}, true)`
+    const pages = await withTenantTx(tenant.id, async (tx) => {
       return tx<{ id: string; title: string }[]>`
         SELECT id, title FROM pages
         WHERE id = ANY(${pageIds})

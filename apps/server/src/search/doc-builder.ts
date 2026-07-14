@@ -2,6 +2,7 @@ import type { Sql } from 'postgres'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { checkRelation } from '@wikistead/authz'
 import type { SearchDoc } from '@wikistead/types'
+import { withTenantTx } from '../db/index.js' // #382
 
 // #218 / ADR-103: how deep the inherited-grant walk goes (matches MAX_PAGE_DEPTH — the create/move depth guard),
 // so a member granted on an ancestor folder is denormalised as a viewer of a deep descendant.
@@ -40,9 +41,8 @@ export async function buildSearchDoc(
   pageId: string,
   tenantId: string,
 ): Promise<SearchDoc | null> {
-  // Use pool.begin with SET LOCAL so RLS filters to the correct tenant.
-  const page = await (pool.begin(async (tx) => {
-    await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+  // #382: the isolation-aware driver tx (logical = SET LOCAL RLS, namespace = schema search_path).
+  const page = await (withTenantTx(tenantId, async (tx) => {
     const [r] = await tx<PageRow[]>`
       SELECT id, tenant_id, space_id, title, published_md, updated_at FROM pages WHERE id = ${pageId}
     `

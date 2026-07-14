@@ -7,6 +7,7 @@
 //   3. Last-used update is fire-and-forget so the hot path is never blocked.
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { pool } from './db/pool.js'
+import { withTenantTx } from './db/index.js' // #382
 
 interface ApiKeyRow { id: string; owner_user_id: string; key_hash: string; scope: string | null }
 
@@ -27,8 +28,7 @@ export async function verifyApiKey(
 
   // DB lookup. revoked_at IS NULL is mandatory — this is the revocation gate.
   // RLS (app.tenant_id) provides tenant isolation: wrong-tenant keys return 0 rows.
-  const row = await (pool.begin(async (tx) => {
-    await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+  const row = await (withTenantTx(tenantId, async (tx) => {
     const [r] = await tx<ApiKeyRow[]>`
       SELECT id, owner_user_id, key_hash, scope
       FROM api_keys

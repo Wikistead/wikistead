@@ -6,6 +6,7 @@ import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import { namespaceSchema, provisionNamespaceSchema, promoteTenantToNamespace, acquireNamespace } from '../db/namespace.js'
+import { withTenantTx } from '../db/with-tenant.js' // #382
 
 // Pure — no DB. The schema name is derived from an arbitrary tenant id TEXT and spliced into DDL, so
 // its sanitization + injection guard is the first line of the boundary.
@@ -130,6 +131,18 @@ describe('namespace driver + promotion (integration)', () => {
     } finally {
       await db.release()
     }
+  })
+
+  // #382: the non-request helper must make the SAME dispatch the request driver makes — a namespace
+  // tenant's withTenantTx reads its schema rows (the doc-builder/outbox class of callers would
+  // otherwise read public.* → zero rows → e.g. search-doc deletion on promotion).
+  it('withTenantTx dispatches on isolation: the namespace tenant sees its schema rows', async () => {
+    const viaHelper = await withTenantTx(promoted, async (tx) => tx<{ name: string }[]>`SELECT name FROM spaces ORDER BY name`)
+    expect(viaHelper.map((r) => r.name)).toEqual(expect.arrayContaining([spaceA, spaceB]))
+    expect(viaHelper.some((r) => r.name === devSpace), 'another tenant\'s rows stay invisible').toBe(false)
+    // and the logical path stays byte-identical to the old hand-written sites (RLS SET LOCAL).
+    const logical = await withTenantTx({ ...tenant, isolation: 'logical' as const }, async (tx) => tx<{ name: string }[]>`SELECT name FROM spaces WHERE name IN (${spaceA}, ${spaceB})`)
+    expect(logical.length, 'logical dispatch reads the public rows under RLS').toBe(2)
   })
 
   it('promotion is idempotent (a second call on an already-namespace tenant is a no-op)', async () => {

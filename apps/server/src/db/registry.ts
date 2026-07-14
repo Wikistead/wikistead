@@ -17,9 +17,22 @@ interface CacheEntry { tenant: Tenant; expiresAt: number }
 export class TenantRegistry {
   private readonly bySlug   = new Map<string, CacheEntry>()
   private readonly byDomain = new Map<string, CacheEntry>()
+  private readonly byId     = new Map<string, CacheEntry>() // #382: withTenantTx resolves isolation by id
   private readonly ttl = 30_000
 
   constructor(private readonly sql: Sql) {}
+
+  // #382: id lookup for the non-request contexts (outbox drains, doc-builder, token exchange…) that
+  // only hold a tenantId. Same cache/TTL semantics as the slug/domain lookups.
+  async findById(id: string): Promise<Tenant | null> {
+    const hit = this.fromCache(this.byId, id)
+    if (hit !== undefined) return hit
+    const [row] = await this.sql<Row[]>`
+      SELECT id, slug, custom_domain, isolation, plan, pending_plan, pending_plan_at
+      FROM tenants WHERE id = ${id}
+    `
+    return this.store(row ?? null)
+  }
 
   async findBySlug(slug: string): Promise<Tenant | null> {
     const hit = this.fromCache(this.bySlug, slug)
@@ -59,6 +72,7 @@ export class TenantRegistry {
     }
     const entry: CacheEntry = { tenant, expiresAt: Date.now() + this.ttl }
     this.bySlug.set(tenant.slug, entry)
+    this.byId.set(tenant.id, entry) // #382: keep the id cache warm from any lookup path
     if (tenant.customDomain) this.byDomain.set(tenant.customDomain, entry)
     return tenant
   }
