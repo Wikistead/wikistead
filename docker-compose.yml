@@ -1,74 +1,52 @@
 # Local development stack. Brings up all middleware so `pnpm dev` (or the app
 # containers) can run against real services. Production uses k8s (see deploy/).
+# #388: the middleware service definitions live in docker-compose.middleware.yml (shared with the
+# isolated e2e/server-test stacks); this file carries the dev diffs (default host ports, dev volumes,
+# the playground flag, the 5173 web origin for S3 CORS) plus the dev-only extras (apps profile, kroki).
 services:
   postgres:
-    image: postgres:16
-    environment:
-      # postgres = superuser (migration runner only). App runtime uses the
-      # restricted 'app' role created by infra/db/init/001_app_role.sql.
-      # If upgrading from an older setup: docker compose down -v && docker compose up -d
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: app
+    extends: { file: docker-compose.middleware.yml, service: postgres }
+    # If upgrading from an older setup: docker compose down -v && docker compose up -d
     ports: ["5432:5432"]
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./infra/db/init:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
-      timeout: 3s
       retries: 10
 
   valkey:
-    image: valkey/valkey:8
-    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    extends: { file: docker-compose.middleware.yml, service: valkey }
     ports: ["6379:6379"]
 
   # #338 / ADR-128: OpenFGA on the PERSISTENT postgres datastore (dev/prod parity) — state survives
   # `docker compose down` / reboot, so the pinned .env store/model IDs stop dangling and dev-setup is
   # genuinely first-run-only. One-shot migrate (idempotent) runs the schema before `run` starts.
   openfga-migrate:
-    image: openfga/openfga:latest
-    command: migrate
-    environment:
-      OPENFGA_DATASTORE_ENGINE: postgres
-      OPENFGA_DATASTORE_URI: postgres://postgres:postgres@postgres:5432/openfga?sslmode=disable
+    extends: { file: docker-compose.middleware.yml, service: openfga-migrate }
     depends_on:
       postgres: { condition: service_healthy }
-    restart: on-failure
 
   openfga:
-    image: openfga/openfga:latest
-    command: run
+    extends: { file: docker-compose.middleware.yml, service: openfga }
     environment:
-      OPENFGA_DATASTORE_ENGINE: postgres
-      OPENFGA_DATASTORE_URI: postgres://postgres:postgres@postgres:5432/openfga?sslmode=disable
       OPENFGA_PLAYGROUND_ENABLED: "true"
     depends_on:
       openfga-migrate: { condition: service_completed_successfully }
     ports: ["8080:8080", "8081:8081", "3000:3000"]
 
   meilisearch:
-    image: getmeili/meilisearch:v1.10
-    environment:
-      MEILI_MASTER_KEY: dev_master_key_change_me
-      MEILI_ENV: development
+    extends: { file: docker-compose.middleware.yml, service: meilisearch }
     ports: ["7700:7700"]
     volumes: ["meilidata:/meili_data"]
 
-  # S3-compatible object storage: SeaweedFS (Apache-2.0, pure OSS, actively
-  # maintained). Replaces MinIO (community edition development stalled — see
-  # ADR-014). S3 gateway (container :8333) on host :9000 so S3_ENDPOINT is
-  # unchanged; identity from s3.json. -s3.allowedOrigins must list the web origin
-  # so the browser presigned-PUT/GET (CORS) works on the actual response.
+  # S3 gateway (container :8333) on host :9000 so S3_ENDPOINT is unchanged; identity from s3.json.
+  # -s3.allowedOrigins must list the web origin so the browser presigned-PUT/GET (CORS) works.
   seaweedfs:
-    image: chrislusf/seaweedfs:latest
+    extends: { file: docker-compose.middleware.yml, service: seaweedfs }
     command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://dev.localhost:5173"
     ports: ["9000:8333"]
     volumes:
       - seaweeddata:/data
-      - ./infra/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
 
   # Optional: run the app services in-compose too. For tight dev loops, prefer
   # running them on the host via `pnpm dev` against the middleware above.
@@ -86,9 +64,8 @@ services:
     ports: ["4100:4100"]
     profiles: ["apps"]
 
-  # Local mail catcher (P1.3). SMTP on 1025, web UI + HTTP API on 8025.
   mailpit:
-    image: axllent/mailpit:latest
+    extends: { file: docker-compose.middleware.yml, service: mailpit }
     ports: ["1025:1025", "8025:8025"]
 
   # #341 / ADR-074: self-hosted PlantUML rendering via a Kroki gateway. OPT-IN (`--profile diagrams`) and OFF by

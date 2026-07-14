@@ -4,72 +4,49 @@
 #   - distinct host ports => can run alongside the dev stack
 # Storage is SeaweedFS S3 (the MinIO → SeaweedFS swap is complete — see the storage decision note); the
 # server-test stack uses the same image/config on a distinct port.
+# #388: the service definitions live in docker-compose.middleware.yml (shared with dev/server-test);
+# this file carries ONLY the e2e diffs (host ports, e2e_* volumes, the web origin for S3 CORS).
 name: wikistead-e2e
 
 services:
   postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: app
+    extends: { file: docker-compose.middleware.yml, service: postgres }
     ports: ["5433:5432"]
     volumes:
       - e2e_pgdata:/var/lib/postgresql/data
-      - ./infra/db/init:/docker-entrypoint-initdb.d
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 3s
-      timeout: 3s
-      retries: 20
 
   valkey:
-    image: valkey/valkey:8
-    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    extends: { file: docker-compose.middleware.yml, service: valkey }
     ports: ["6380:6379"]
 
   # #338 / ADR-128: postgres datastore (parity with dev + prod). Ephemeral by design — the e2e teardown
   # `down -v` wipes the volume, so isolation is preserved; the migrate just re-runs on the fresh volume.
   openfga-migrate:
-    image: openfga/openfga:latest
-    command: migrate
-    environment:
-      OPENFGA_DATASTORE_ENGINE: postgres
-      OPENFGA_DATASTORE_URI: postgres://postgres:postgres@postgres:5432/openfga?sslmode=disable
+    extends: { file: docker-compose.middleware.yml, service: openfga-migrate }
     depends_on:
       postgres: { condition: service_healthy }
-    restart: on-failure
 
   openfga:
-    image: openfga/openfga:latest
-    command: run
-    environment:
-      OPENFGA_DATASTORE_ENGINE: postgres
-      OPENFGA_DATASTORE_URI: postgres://postgres:postgres@postgres:5432/openfga?sslmode=disable
+    extends: { file: docker-compose.middleware.yml, service: openfga }
     depends_on:
       openfga-migrate: { condition: service_completed_successfully }
     ports: ["8090:8080", "8091:8081"]
 
   meilisearch:
-    image: getmeili/meilisearch:v1.10
-    environment:
-      MEILI_MASTER_KEY: dev_master_key_change_me
-      MEILI_ENV: development
+    extends: { file: docker-compose.middleware.yml, service: meilisearch }
     ports: ["7701:7700"]
     volumes: ["e2e_meilidata:/meili_data"]
 
-  # Storage: SeaweedFS S3 on host :9002 (matches the server-test stack's storage choice; replaced MinIO —
-  # its community edition stalled). The browser direct-upload attachment e2e runs against this store.
+  # SeaweedFS S3 on host :9002; -s3.allowedOrigins carries the e2e web origin (browser direct-upload CORS).
   seaweedfs:
-    image: chrislusf/seaweedfs:latest
+    extends: { file: docker-compose.middleware.yml, service: seaweedfs }
     command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://dev.localhost:5180"
     ports: ["9002:8333"]
     volumes:
       - e2e_seaweeddata:/data
-      - ./infra/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
 
   mailpit:
-    image: axllent/mailpit:latest
+    extends: { file: docker-compose.middleware.yml, service: mailpit }
     ports: ["1026:1025", "8026:8025"] # distinct host ports so dev + e2e coexist
 
 volumes:
