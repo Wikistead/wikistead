@@ -347,3 +347,53 @@ test("#319 a table renders at the SAME (content) width in the editor and the pub
   // …and it is content-width, not stretched to the 740px reading column.
   expect(pubW, `public table ${pubW}px should be content-width, not the full reading column`).toBeLessThan(600);
 });
+
+// #335 footnote (and real) links must look IDENTICAL on the public reader /pub) and the member Reading
+// view /p) — both are the same CM6 read engine now (#319). A stale `.wks-public [data-testid=public-body] a`
+// rule in public.css (accent + underline) used to override the shared `.cm-lp-footnote-ref a` (var(--link), no
+// underline) ONLY on the public surface; removing the stale prose CSS (with #319) restores parity. Pin
+// the COMPUTED colour + text-decoration-line on both surfaces. Real Chromium.
+test("#335 footnote + real links match between the public reader and member Reading", async ({ browser }) => {
+  const authed = await (await browser.newContext({ viewport: { width: 1300, height: 900 } })).newPage();
+  const id = await openScratch(authed, "fn-link-parity");
+  await enterEdit(authed);
+  await authed.click("[data-pane=preview] .cm-content");
+  await authed.keyboard.insertText("A body with a note[^1] and a [real link](https://example.com).\n\n[^1]: the note body\n");
+  await sleep(400);
+  await authed.getByTestId("publish-page").click();
+  await sleep(800);
+  await makePublic(id);
+  await setPublicSurface(authed, true);
+
+  // measure the footnote ref link + a real link's computed color + underline on a given page/root.
+  const linkStyles = (page: import("@playwright/test").Page, root: string) => page.evaluate((root) => {
+    const scope = document.querySelector(root) as HTMLElement;
+    const fn = scope?.querySelector(".cm-lp-footnote-ref a") as HTMLElement | null;
+    const real = scope?.querySelector('a[href="https://example.com"], a[data-href="https://example.com"]') as HTMLElement | null;
+    const read = (el: HTMLElement | null) => (el ? { color: getComputedStyle(el).color, deco: getComputedStyle(el).textDecorationLine } : null);
+    return { fn: read(fn), real: read(real) };
+  }, root);
+
+  // member Reading view /p → enter edit → the Reading display mode is read-only rendering).
+  await authed.goto(`/p/${id}`);
+  await authed.waitForSelector("[data-pane=preview] .cm-content");
+  await enterEdit(authed);
+  await authed.getByTestId("displaymode-reading").click();
+  await authed.waitForSelector("[data-pane=preview] .cm-lp-footnote-ref a", { timeout: 10000 });
+  const member = await linkStyles(authed, "[data-pane=preview] .cm-content");
+
+  // public reader /pub).
+  const anon = await (await browser.newContext({ viewport: { width: 1300, height: 900 } })).newPage();
+  await anon.goto(`/pub/${id}`);
+  await anon.waitForSelector("[data-testid=public-body] .cm-lp-footnote-ref a", { timeout: 10000 });
+  const pub = await linkStyles(anon, "[data-testid=public-body]");
+
+  expect(member.fn, "footnote ref link exists on both").not.toBeNull();
+  expect(pub.fn, "footnote ref link exists on both").not.toBeNull();
+  expect(pub.fn!.color, `footnote link colour public ${pub.fn!.color} vs member ${member.fn!.color}`).toBe(member.fn!.color);
+  expect(pub.fn!.deco, `footnote link underline public ${pub.fn!.deco} vs member ${member.fn!.deco}`).toBe(member.fn!.deco);
+  if (member.real && pub.real) {
+    expect(pub.real.color, `real link colour public ${pub.real.color} vs member ${member.real.color}`).toBe(member.real.color);
+    expect(pub.real.deco, `real link underline public ${pub.real.deco} vs member ${member.real.deco}`).toBe(member.real.deco);
+  }
+});
