@@ -9,9 +9,11 @@ import { Redis } from "@hocuspocus/extension-redis";
 import { Database } from "@hocuspocus/extension-database";
 import IORedis from "ioredis";
 import { docName } from "@wikistead/types";
+import { fgaClient, check } from "@wikistead/authz";
 import { loadYdoc, storeYdoc, compactIfBloated } from "./ydoc.js";
 import { authenticate, parseDocName } from "./authenticate.js";
 import { selectGuestConnectionsToClose, parseRevokeMessage } from "./revoke.js";
+import { planBodyEdit, EditApplyError, parseMcpEditRequest } from "./mcp-edit-apply.js";
 
 const server = new Hocuspocus({
   port: Number(process.env.COLLAB_PORT ?? 4100),
@@ -155,6 +157,95 @@ flushSub.on("pmessage", async (_pattern: string, channel: string, reqId: string)
     // Ack regardless: a store error or a not-open doc both mean "proceed" (pages.ydoc
     // is the best available snapshot). The API also has a timeout as a backstop.
     flushPub.publish(`wks:flushack:${reqId}`, "1").catch(() => {});
+  }
+});
+
+// ── MCP edit_body subscriber (#369 / ADR-144) ──────────────────────────────
+//
+// The MCP HTTP API is OUT OF BAND from the process that owns the live Y.Doc, so it never touches Yjs itself.
+// To write a page body it publishes wks:mcpedit:<docName> with the CONTENT + the resolved principal; the collab
+// tier applies the edit AS A `Y.Text` OP on the canonical doc — the single-writer path (like restore), so it
+// merges with any concurrent editor and broadcasts. NEVER a published_md overwrite, NEVER a second CRDT.
+//
+// One-applier election: ALL pods psubscribe, so a per-doc Valkey lock (SET NX PX) elects exactly ONE applier —
+// no double-apply. The winner uses openDirectConnection(docName), which REUSES the doc if it is resident on this
+// pod (freshest state) or loads it via the same Hocuspocus load/store lane otherwise (no fork). A pod that does
+// not win the lock does nothing. If NO collab pod is running the API's PUBLISH returns 0 subscribers and the
+// HTTP tool rejects (retryable) — never a headless API-side write (ADR-144 §1, review-corrected).
+//
+// Two-sided authz (ADR-144 §3): `wks:mcpedit` carries the content body (bigger blast radius than flush/restore),
+// so the pod RE-CHECKS FGA `edit` on the request's `user` before applying, and rejects a tenant mismatch. The
+// HTTP gate already checked; this is defense-in-depth on the trusted-Valkey boundary.
+//
+// Multi-pod caveat: if the doc is resident on pod A but pod B wins the lock, B's openDirectConnection may load
+// the last-PERSISTED state (Redis sync is eventual), the same cross-pod "which pod holds it" limitation ADR-040
+// documents for compaction/zero-connections. Single-pod (the self-host default) is exact. Ack carries the result
+// so the HTTP tool reports success/refusal precisely.
+// Per-doc applier-election lock TTL. Must be SHORTER than the API's ack timeout (collab-mcpedit.ts) so an API
+// timeout implies the elected applier did not complete (no double-apply on a client retry). Long enough to cover
+// a cold openDirectConnection load + transact + store.
+const MCP_EDIT_LOCK_TTL_MS = 8000;
+const mcpEditSub = new IORedis(process.env.VALKEY_URL ?? "redis://localhost:6379");
+const mcpEditLock = new IORedis(process.env.VALKEY_URL ?? "redis://localhost:6379");
+const mcpEditPub = new IORedis(process.env.VALKEY_URL ?? "redis://localhost:6379");
+
+mcpEditSub.psubscribe("wks:mcpedit:*", (err) => {
+  if (err) console.error("[mcpedit:sub] subscribe failed:", err);
+});
+
+mcpEditSub.on("pmessage", async (_pattern: string, channel: string, data: string) => {
+  const documentName = channel.replace("wks:mcpedit:", "");
+  let reqId = "";
+  let acked = false;
+  const ack = (ok: boolean, error?: string) => {
+    if (acked) return;
+    acked = true;
+    mcpEditPub.publish(`wks:mcpeditack:${reqId}`, JSON.stringify({ ok, error })).catch(() => {});
+  };
+  const lockKey = `wks:mcpeditlock:${documentName}`;
+  let holdLock = false;
+  try {
+    const request = parseMcpEditRequest(data); // throws EditApplyError on malformed input
+    reqId = request.reqId;
+    // Elect ONE applier across all pods. NX = only the first pod to arrive proceeds; PX TTL frees the lock if
+    // that pod crashes mid-apply (the HTTP timeout is the backstop). A pod that loses the lock is silent. The
+    // API's ack timeout (collab-mcpedit.ts, 10s) is deliberately LONGER than this TTL, so an API timeout implies
+    // the applier did not run to completion — a client retry cannot double-apply a non-idempotent `append`.
+    const got = await mcpEditLock.set(lockKey, reqId, "PX", MCP_EDIT_LOCK_TTL_MS, "NX");
+    if (got !== "OK") return; // another pod owns this request
+    holdLock = true;
+
+    const { tenantId, pageId } = parseDocName(documentName);
+    if (request.tenant !== tenantId) return ack(false, "forbidden"); // tenant-bound: the message must match the room
+    // Two-sided authz: re-derive `edit` on the resolved principal against OpenFGA (existence-hiding upstream).
+    const allowed = await check(fgaClient, request.user, "edit", { type: "page", id: pageId });
+    if (!allowed) return ack(false, "forbidden");
+
+    // Apply as ONE offset-invariant Y.Text transaction on the canonical doc (reused if resident, else loaded).
+    const connection = await server.openDirectConnection(documentName);
+    try {
+      let applyError: string | undefined;
+      await connection.transact((document) => {
+        const ytext = document.getText("content");
+        let plan;
+        try {
+          plan = planBodyEdit(ytext.toString(), request.op);
+        } catch (e) {
+          applyError = e instanceof EditApplyError ? e.message : "edit failed";
+          return; // leave the doc untouched
+        }
+        if (plan.deleteCount > 0) ytext.delete(plan.from, plan.deleteCount);
+        if (plan.insert) ytext.insert(plan.from, plan.insert);
+      });
+      if (applyError) return ack(false, applyError);
+    } finally {
+      await connection.disconnect().catch(() => {});
+    }
+    ack(true);
+  } catch (e) {
+    ack(false, e instanceof EditApplyError ? e.message : "edit failed");
+  } finally {
+    if (holdLock) await mcpEditLock.del(lockKey).catch(() => {});
   }
 });
 

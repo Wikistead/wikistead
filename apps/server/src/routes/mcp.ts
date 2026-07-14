@@ -1,11 +1,17 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { filterAuthorized } from '@wikistead/authz'
+import { filterAuthorized, check } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
+import { docName } from '@wikistead/types'
 import { getPublished, listPages, getBacklinks, createPage, publishPage } from './pages.js'
 import { listSpaces } from './spaces.js'
 import { createPageComment } from './comments.js'
+import { mcpEditDraft, CollabUnavailableError } from '../collab-mcpedit.js'
 import { fillAuthorizedPage, SEARCH_CANDIDATE_LIMIT } from '../search/paginate.js'
 import { authenticateMcpRequest, type McpPrincipal } from '../auth/mcp-request-auth.js'
+
+// #369 / ADR-144: an edit_body body is a DRAFT edit, not a bulk import — cap it (defense-in-depth; the size
+// travels to the pod which re-enforces it). 256k chars is ample for a page body and refuses an abusive payload.
+const MAX_EDIT_BODY_CHARS = 256_000
 
 // #311 / ADR-131 slice 5: the MCP endpoint — a minimal Streamable-HTTP (JSON-RPC 2.0 over POST) transport with a
 // READ-first tool surface (v1). Every request is Bearer-authenticated (slice 4 token) + tenant-bound
@@ -226,6 +232,56 @@ const TOOLS: McpTool[] = [
         if (sc === 403 || sc === 404) throw toolError('cannot publish that page')
         throw e
       }
+    },
+  },
+  {
+    name: 'edit_body',
+    description:
+      "Edit a page's DRAFT body (requires edit access). op 'append' adds a block at the end; op 'replace_section' " +
+      'replaces the section under a heading (by heading text) with new markdown. The content is CommonMark/GFM ' +
+      'with Wikistead macros — call get_syntax_reference for the notation. Edits the live draft (visible to ' +
+      'editors immediately); it does NOT publish — call publish_page to record a public revision.',
+    scope: 'write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string' },
+        op: { type: 'string', enum: ['append', 'replace_section'] },
+        content: { type: 'string' },
+        heading: { type: 'string', description: 'target heading text (required for replace_section)' },
+      },
+      required: ['pageId', 'op', 'content'],
+    },
+    async run(req, app, principal, args) {
+      const pageId = typeof args.pageId === 'string' ? args.pageId : ''
+      const op = args.op === 'append' || args.op === 'replace_section' ? args.op : null
+      const content = typeof args.content === 'string' ? args.content : ''
+      const heading = typeof args.heading === 'string' ? args.heading : undefined
+      if (!pageId) throw toolError('pageId is required')
+      if (!op) throw toolError("op must be 'append' or 'replace_section'")
+      if (!content.trim()) throw toolError('content is required')
+      if (op === 'replace_section' && !heading?.trim()) throw toolError('heading is required for replace_section')
+      if (content.length > MAX_EDIT_BODY_CHARS) throw toolError('content is too large')
+      // Layer 3 of the write gate: OpenFGA `edit` on the page, on user:<sub>, BEFORE any collab dispatch. A
+      // non-editor (or a missing page) is a uniform "cannot edit that page" (existence-hiding). The collab pod
+      // RE-CHECKS this (two-sided authz, ADR-144 §3) — the HTTP gate is not the only guard on the content write.
+      const allowed = await check(app.fga, `user:${principal.sub}`, 'edit', { type: 'page', id: pageId })
+      if (!allowed) throw toolError('cannot edit that page')
+      // The edit is applied to the canonical single Y.Text by a collab pod (never here). NEVER a published_md
+      // overwrite; publishing is the separate publish_page tool (ADR-019 / ADR-144 §2).
+      let result
+      try {
+        result = await mcpEditDraft(app.valkey, docName(principal.tenantId, pageId), {
+          op, content, heading, user: `user:${principal.sub}`, tenant: principal.tenantId, sizeCap: MAX_EDIT_BODY_CHARS,
+        })
+      } catch (e) {
+        if (e instanceof CollabUnavailableError) throw toolError('the page is not open for editing right now; please retry')
+        throw e
+      }
+      if (!result.ok) throw toolError(result.error === 'forbidden' ? 'cannot edit that page' : result.error ?? 'edit failed')
+      return op === 'append'
+        ? `appended to the draft of page ${pageId}`
+        : `replaced section "${heading}" in the draft of page ${pageId}`
     },
   },
   {
