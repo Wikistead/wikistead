@@ -31,10 +31,23 @@ export function Toc({
   const visible = useMemo(() => new Set(visibleFroms ?? []), [visibleFroms]);
   // #345/ auto-follow — keep the current item in view as the reader scrolls a long TOC (no-op for a
   // short rail). issue 1: `block:"nearest"` let the active item stick to the rail's BOTTOM edge and clip
-  // off as the reader progressed → `block:"center"` keeps it mid-rail (the rail is overflow-y-auto). Only the
-  // rail (not the pointer-events-none overlay) follows.
+  // off as the reader progressed → keep it mid-rail (the rail is overflow-y-auto). Only the rail (not the
+  // pointer-events-none overlay) follows.
+  // REGRESSION FIX: do NOT use Element.scrollIntoview — it scrolls EVERY scrollable ancestor, which on a
+  // publish→view surface transition hijacked the CONTENT scroller (the long doc no longer landed at the top,
+  // heading-anchor-313 went red). Scroll ONLY the rail nav container: center the active button within the nav by
+  // setting nav.scrollTop directly, touching no ancestor. Short rail (content fits) = no-op.
   const activeRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => { if (variant === "rail") activeRef.current?.scrollIntoView({ block: "center" }); }, [activeFrom, variant]);
+  const railRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (variant !== "rail") return;
+    const nav = railRef.current, btn = activeRef.current;
+    if (!nav || !btn || nav.scrollHeight <= nav.clientHeight) return; // no active item, or rail doesn't overflow
+    const navRect = nav.getBoundingClientRect(), btnRect = btn.getBoundingClientRect();
+    const btnTopInNav = btnRect.top - navRect.top + nav.scrollTop; // active button's offset within the scroll area
+    const target = btnTopInNav - nav.clientHeight / 2 + btnRect.height / 2; // center it in the rail
+    nav.scrollTop = Math.max(0, Math.min(target, nav.scrollHeight - nav.clientHeight));
+  }, [activeFrom, variant]);
 
   // Overlay visibility: each scroll shows it and resets a fade timer; it hides ~1.2s after scrolling
   // stops. setScrolling(true) during a continuous scroll is a no-op re-render (React bails on an
@@ -119,6 +132,7 @@ export function Toc({
   // rail: blends into the background — no panel bg, no border; the active item is the only accent.
   return (
     <nav
+      ref={railRef}
       aria-label={t("toc.title")}
       data-testid="toc"
       data-variant="rail"
