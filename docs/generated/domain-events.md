@@ -16,7 +16,9 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 |---|---|
 | `page.created` | A page was created. |
 | `page.updated` | A page body was updated (published). |
-| `page.deleted` | A page was deleted. |
+| `page.deleted` | A page was permanently deleted (purged from the trash, or swept by retention). |
+| `page.trashed` | A page (and its subtree) was moved to the trash. |
+| `page.trash_restored` | A page (and its subtree) was restored from the trash. |
 | `page.restored` | A page was restored from a prior revision. |
 | `page.published` | A page revision was published. |
 | `page.access_granted` | A principal was granted a relation on a page. |
