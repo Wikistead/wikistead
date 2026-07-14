@@ -25,10 +25,15 @@ import { everforestHighlight } from "./everforest-highlight";
 import { mathField } from "./live-preview/math";
 import { macroEdit, nestedSelectionField, setNestedSelection } from "./live-preview/macro-edit";
 import { headingAnchors } from "./live-preview/heading-anchor"; // #313: hover 🔗 per heading line
+import { search, searchKeymap } from "@codemirror/search"; // #402: in-page find & replace (non-vim + Reading)
 
 // vim Compartment content: the keymap AND a vimEnabled flag (so the decoration builder
 // can be mode-aware — ADR-022 Part 11). Reused by mount + the Editor's vim toggle.
-export const vimCompartmentContent = (on: boolean) => (on ? [vim(), vimEnabled.of(true)] : [vimEnabled.of(false)]);
+// #402: the NON-vim branch carries the find/replace keymap (Mod-f / F3 / Mod-g). Vim keeps its own `/`
+// and ex `:%s` — mounting the CM panel keymap under vim would fight its bindings. Living inside the SAME
+// Compartment, a vim toggle swaps keymaps in place (never re-mounts → collab/presence stay attached).
+export const vimCompartmentContent = (on: boolean) =>
+  (on ? [vim(), vimEnabled.of(true)] : [vimEnabled.of(false), keymap.of(searchKeymap)]);
 
 // Display-mode Compartment content (ADR-056 / #164). Reused by mount + the Editor's mode toggle.
 // Reading is READ-ONLY but stays EDITABLE-focusable (#165): it uses EditorState.readOnly (blocks doc
@@ -211,6 +216,7 @@ export function buildLivePreviewExtensions(opts: LivePreviewSharedOpts, env: Liv
     ...(opts.openEmbedUrlPrompt ? [embedUrlPrompt.of(opts.openEmbedUrlPrompt)] : []),
     ...(opts.tagSuggest ? [tagSuggestSource.of(opts.tagSuggest)] : []), // #413
     ...(opts.openTagPrompt ? [tagPrompt.of(opts.openTagPrompt)] : []), // #413
+    search({ top: true }), // #402: find/replace panel config (opened by the non-vim keymap above)
     // Slash command palette (editable surface only; view guests don't get it). The `/` palette owns image
     // insert (P): uploadImage + the container (the host, so the hidden file input survives CM's DOM
     // reconcile) — HOST actions, so a nested island gets the bare palette (image/embed/template no-op
