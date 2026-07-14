@@ -40,7 +40,9 @@ const CALLOUT_DANGER = svg('<path d="M12 16h.01"/><path d="M12 8v4"/><path d="M1
 // ── layout / diagram / embed macros ──────────────────────────────────────────
 const COLUMNS = svg('<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>');
 const TABS = svg('<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 8h20"/><path d="M6 4v4"/><path d="M10 4v4"/>'); // app-window: a panel with top tabs (not the old briefcase)
-const DETAILS = svg('<rect width="18" height="18" x="3" y="3" rx="2"/><path d="m16 10-4 4-4-4"/>'); // square-chevron-down: a disclosure/collapsible
+// #357 list-collapse (rows + a collapse chevron), NOT square-chevron-down — the boxed chevron read too
+// close to the todo SquareCheck. ListCollapse's list rows make "a collapsible list" unambiguous.
+const DETAILS = svg('<path d="m3 10 2.5-2.5L3 5"/><path d="m3 19 2.5-2.5L3 14"/><path d="M10 6h11"/><path d="M10 12h11"/><path d="M10 18h11"/>');
 const WORKFLOW = svg('<circle cx="12" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/><path d="M12 7v4"/><path d="M12 11 6 17"/><path d="m12 11 6 6"/>'); // mermaid: connected nodes
 const NETWORK = svg('<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/>'); // plantuml: UML boxes
 const DRAW = svg('<path d="m12 19 7-7 3 3-7 7-3-3z"/><path d="m18 13-1.5-7.5L2 2l3.5 14.5L13 18z"/><path d="m2 2 7.586 7.586"/><circle cx="11" cy="11" r="2"/>'); // excalidraw: pen
