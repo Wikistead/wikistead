@@ -887,7 +887,11 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
                 {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}
               </div>
             </div>
-            <Editor key={docName} docName={docName} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onToggleTask={canEdit ? onToggleTask : undefined} />
+            {/* #374 / ADR-149 §1: pass pageId so the guest resolvers (server diagram render, transclude) build
+                their URL and fetch with the SHARE TOKEN — the /pages/:id/plantuml/render + /attachments routes are
+                already `guest: 'view'` gated, so no new authz surface; it just lights up the macros the member
+                surface renders. mermaid is pure-client and needs no token. */}
+            <Editor key={docName} docName={docName} pageId={pageId} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #227 the shared TocChrome (rail on wide / overlay on narrow); yields to the comments
                 panel when open (shared right zone — no pointer overlap). */}
