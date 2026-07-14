@@ -11,8 +11,13 @@ import type { TenantDb } from '../db/index.js'
 // per event AND requires the live resource row (the double gate) so a feed/notification never leaks an
 // unviewable change or a stale title. All routes are member-only (no `config.guest` → guests are 401'd).
 
-export type WatchResourceType = 'page' | 'space'
+// #362 / ADR-126 addendum: 'subtree' = an ancestor-page watch matching every descendant page event
+// (pages.parent_id chain). Emission scope only — the display gate is unchanged.
+export type WatchResourceType = 'page' | 'space' | 'subtree'
 const FANOUT_CAP = 2000
+// #362: the recursive ancestor walk is bounded so a (theoretically) cyclic parent chain can never
+// spin the publish tx — real trees are a few levels deep.
+const SUBTREE_MAX_DEPTH = 64
 
 // ── Watches (subscriptions) ──────────────────────────────────────────────────
 
@@ -25,16 +30,18 @@ export async function createWatch(
   fga: OpenFgaClient,
   args: { tenantId: string; memberSub: string; resourceType: WatchResourceType; resourceId: string },
 ): Promise<Watch> {
-  if (args.resourceType !== 'page' && args.resourceType !== 'space') {
+  if (args.resourceType !== 'page' && args.resourceType !== 'space' && args.resourceType !== 'subtree') {
     throw Object.assign(new Error('invalid resource type'), { statusCode: 400 })
   }
   const notFound = () => Object.assign(new Error('not found'), { statusCode: 404 })
+  // #362: a 'subtree' watch targets a PAGE id (the ancestor) — same existence + view gate as a page watch.
   const [resource] =
     args.resourceType === 'space'
       ? await db.sql<{ id: string }[]>`SELECT id FROM spaces WHERE id = ${args.resourceId}`
       : await db.sql<{ id: string }[]>`SELECT id FROM pages WHERE id = ${args.resourceId}`
   if (!resource) throw notFound()
-  if (!(await check(fga, `user:${args.memberSub}`, 'view', { type: args.resourceType, id: args.resourceId }))) throw notFound()
+  const fgaType = args.resourceType === 'space' ? 'space' : 'page' // subtree anchors are pages
+  if (!(await check(fga, `user:${args.memberSub}`, 'view', { type: fgaType, id: args.resourceId }))) throw notFound()
 
   const [row] = await db.sql<{ id: string }[]>`
     INSERT INTO watches (tenant_id, member_sub, resource_type, resource_id)
@@ -98,13 +105,32 @@ export async function fanOutFeedEvent(
   const eventId = ev!.id
   // Exclude the actor when it is a member (user:<sub>); a guest/anon actor matches no member row.
   const actorSub = args.actor.startsWith('user:') ? args.actor.slice(5) : null
+  // #362 / ADR-126 addendum: STILL one set-based statement. The added predicates only NARROW emission
+  // (mute, member kill switch, event-type masks, subtree scope) — never an authorization input; the
+  // display double-gate stays the sole permission authority. The ancestor CTE resolves the event
+  // page's parent chain for 'subtree' watches (bounded — SUBTREE_MAX_DEPTH beats a cyclic chain).
+  // Mask precedence: a watch's own mask wins; an empty watch mask falls back to the member default;
+  // both empty = all types (the permissive pre-#362 behavior).
   const inserted = await tx`
+    WITH RECURSIVE ancestors AS (
+      SELECT p.id, p.parent_id, 1 AS depth FROM pages p WHERE p.id = ${args.pageId}
+      UNION ALL
+      SELECT p.id, p.parent_id, a.depth + 1 FROM pages p JOIN ancestors a ON p.id = a.parent_id
+      WHERE a.depth < ${SUBTREE_MAX_DEPTH}
+    )
     INSERT INTO notifications (tenant_id, member_sub, event_id)
     SELECT DISTINCT ${args.tenantId}, w.member_sub, ${eventId}
     FROM watches w
+    LEFT JOIN members m ON m.tenant_id = w.tenant_id AND m.sub = w.member_sub
     WHERE w.tenant_id = ${args.tenantId}
-      AND ((w.resource_type = 'page'  AND w.resource_id = ${args.pageId})
-        OR (w.resource_type = 'space' AND w.resource_id = ${args.spaceId}))
+      AND ((w.resource_type = 'page'    AND w.resource_id = ${args.pageId})
+        OR (w.resource_type = 'space'   AND w.resource_id = ${args.spaceId})
+        OR (w.resource_type = 'subtree' AND ${args.pageId}::text IS NOT NULL AND w.resource_id IN (SELECT id FROM ancestors)))
+      AND w.muted IS NOT TRUE
+      AND COALESCE(m.notifications_enabled, true)
+      AND (CASE WHEN cardinality(w.event_mask) > 0 THEN ${args.eventType} = ANY(w.event_mask)
+                WHEN m.default_event_mask IS NOT NULL AND cardinality(m.default_event_mask) > 0 THEN ${args.eventType} = ANY(m.default_event_mask)
+                ELSE true END)
       AND (${actorSub}::text IS NULL OR w.member_sub <> ${actorSub})
     LIMIT ${FANOUT_CAP}`
   if (inserted.count >= FANOUT_CAP) {
@@ -112,6 +138,32 @@ export async function fanOutFeedEvent(
     warn({ eventId, eventType: args.eventType, cap: FANOUT_CAP }, 'notification fan-out hit the cap (truncated)')
   }
   return eventId
+}
+
+// #362 / ADR-126 addendum: mention fan-out — NOTIFICATION-ONLY (listFeed excludes 'mention' rows) and
+// DELIBERATELY draft-inclusive (no published guard): every recipient is already view-confirmed
+// (`mentionableViewers` ∩ the mentioned subs — never a client-sent list), so no existence leak is
+// possible, and it matches the existing mention email's draft behavior. Member kill switch + default
+// event mask still apply (watch masks don't — a mention is a direct address, not a subscription).
+export async function fanOutMention(
+  tx: Sql,
+  args: { tenantId: string; pageId: string; spaceId: string | null; actor: string; recipientSubs: string[] },
+): Promise<string | null> {
+  const actorSub = args.actor.startsWith('user:') ? args.actor.slice(5) : null
+  const recipients = args.recipientSubs.filter((s) => s !== actorSub)
+  if (recipients.length === 0) return null
+  const [ev] = await tx<{ id: string }[]>`
+    INSERT INTO feed_events (tenant_id, event_type, page_id, space_id, actor)
+    VALUES (${args.tenantId}, 'mention', ${args.pageId}, ${args.spaceId}, ${args.actor})
+    RETURNING id`
+  await tx`
+    INSERT INTO notifications (tenant_id, member_sub, event_id)
+    SELECT DISTINCT ${args.tenantId}, m.sub, ${ev!.id}
+    FROM members m
+    WHERE m.tenant_id = ${args.tenantId} AND m.sub = ANY(${recipients})
+      AND COALESCE(m.notifications_enabled, true)
+      AND (cardinality(m.default_event_mask) = 0 OR 'mention' = ANY(m.default_event_mask))`
+  return ev!.id
 }
 
 // ── Read path (double-gated: live row JOIN + per-event FGA view) ──────────────
@@ -253,21 +305,31 @@ export async function listFeed(
 ): Promise<FeedItem[]> {
   const limit = Math.min(args.limit ?? 30, 100)
   const overfetch = limit * 4
-  const before = args.before || null
   const unpatrolled = args.unpatrolledOnly === true
+  // #362 E2: the cursor pages on the ORDER BY tuple (created_at, id) — `id < before` alone is
+  // non-monotonic for TEXT uuids (rows dropped/duplicated past page 1). The API still passes the last
+  // item's id; resolve its created_at here. An unknown id = no cursor (first page).
+  const before = args.before || null
+  const [cur] = before ? await db.sql<{ created_at: Date }[]>`SELECT created_at FROM feed_events WHERE id = ${before}` : []
+  const curAt = cur?.created_at ?? null
   const rows = args.spaceId
     ? await db.sql<RawRow[]>`
         SELECT fe.id, fe.event_type, fe.page_id, fe.space_id, fe.actor, fe.created_at, pe.patrolled_at
         FROM feed_events fe LEFT JOIN patrolled_events pe ON pe.feed_event_id = fe.id
-        WHERE fe.space_id = ${args.spaceId} AND (${before}::text IS NULL OR fe.id < ${before})
+        WHERE fe.space_id = ${args.spaceId}
+          AND (${curAt}::timestamptz IS NULL OR (fe.created_at, fe.id) < (${curAt}, ${before}))
           AND (${unpatrolled}::bool IS NOT TRUE OR pe.patrolled_at IS NULL)
+          AND fe.event_type <> 'mention'
         ORDER BY fe.created_at DESC, fe.id DESC LIMIT ${overfetch}`
     : await db.sql<RawRow[]>`
         SELECT fe.id, fe.event_type, fe.page_id, fe.space_id, fe.actor, fe.created_at, pe.patrolled_at
         FROM feed_events fe LEFT JOIN patrolled_events pe ON pe.feed_event_id = fe.id
-        WHERE (${before}::text IS NULL OR fe.id < ${before})
+        WHERE (${curAt}::timestamptz IS NULL OR (fe.created_at, fe.id) < (${curAt}, ${before}))
           AND (${unpatrolled}::bool IS NOT TRUE OR pe.patrolled_at IS NULL)
+          AND fe.event_type <> 'mention'
         ORDER BY fe.created_at DESC, fe.id DESC LIMIT ${overfetch}`
+  // #362: `mention` rows are NOTIFICATION-ONLY (personal, not space activity) — excluded above in BOTH
+  // branches; listNotifications keeps them (and still double-gates them like everything else).
   return (await gateEvents(db, fga, args.subject, rows)).slice(0, limit)
 }
 
@@ -279,14 +341,88 @@ export async function listNotifications(
   args: { memberSub: string; before?: string | null; limit?: number },
 ): Promise<FeedItem[]> {
   const limit = Math.min(args.limit ?? 30, 100)
+  // #362 E2: tuple cursor on the ORDER BY (n.created_at, n.id) — same non-monotonic-id fix as listFeed.
   const before = args.before || null
+  const [cur] = before
+    ? await db.sql<{ created_at: Date }[]>`SELECT created_at FROM notifications WHERE id = ${before} AND member_sub = ${args.memberSub}`
+    : []
+  const curAt = cur?.created_at ?? null
   const rows = await db.sql<RawRow[]>`
     SELECT n.id AS notification_id, n.read_at, e.id, e.event_type, e.page_id, e.space_id, e.actor, e.created_at
     FROM notifications n JOIN feed_events e ON e.id = n.event_id
-    WHERE n.member_sub = ${args.memberSub} AND (${before}::text IS NULL OR n.id < ${before})
+    WHERE n.member_sub = ${args.memberSub}
+      AND (${curAt}::timestamptz IS NULL OR (n.created_at, n.id) < (${curAt}, ${before}))
     ORDER BY n.created_at DESC, n.id DESC LIMIT ${limit * 4}`
   // The caller gates against their own view (a notification is per-member; subject = the member).
   return (await gateEvents(db, fga, `user:${args.memberSub}`, rows)).slice(0, limit)
+}
+
+// #362: the watch-LIST surface (bell → "watching"). Titles resolve at display from the live rows and
+// are VIEW-FILTERED (the pins discipline): a watch whose target the member can no longer view renders
+// untitled/inert (title null) — never a title oracle; unwatch stays possible. member_sub predicate =
+// the isolation boundary.
+export interface ResolvedWatch { id: string; resourceType: WatchResourceType; resourceId: string; eventMask: string[]; muted: boolean; title: string | null }
+export async function listWatchesResolved(db: TenantDb, fga: OpenFgaClient, args: { memberSub: string }): Promise<ResolvedWatch[]> {
+  const rows = await db.sql<{ id: string; resource_type: WatchResourceType; resource_id: string; event_mask: string[]; muted: boolean }[]>`
+    SELECT id, resource_type, resource_id, event_mask, muted FROM watches WHERE member_sub = ${args.memberSub} ORDER BY created_at DESC`
+  const pageIds = [...new Set(rows.filter((r) => r.resource_type !== 'space').map((r) => r.resource_id))]
+  const spaceIds = [...new Set(rows.filter((r) => r.resource_type === 'space').map((r) => r.resource_id))]
+  const pageTitles = new Map<string, string>()
+  if (pageIds.length) for (const p of await db.sql<{ id: string; title: string }[]>`SELECT id, title FROM pages WHERE id = ANY(${pageIds})`) pageTitles.set(p.id, p.title)
+  const spaceTitles = new Map<string, string>()
+  if (spaceIds.length) for (const s of await db.sql<{ id: string; name: string }[]>`SELECT id, name FROM spaces WHERE id = ANY(${spaceIds})`) spaceTitles.set(s.id, s.name)
+  const subject = `user:${args.memberSub}`
+  const viewablePages = pageIds.length ? new Set(await filterAuthorized(fga, subject, 'view', [...pageTitles.keys()])) : new Set<string>()
+  const viewableSpaces = new Set<string>()
+  for (const sid of spaceTitles.keys()) if (await check(fga, subject, 'view', { type: 'space', id: sid })) viewableSpaces.add(sid)
+  return rows.map((r) => ({
+    id: r.id,
+    resourceType: r.resource_type,
+    resourceId: r.resource_id,
+    eventMask: r.event_mask,
+    muted: r.muted,
+    title: r.resource_type === 'space'
+      ? (viewableSpaces.has(r.resource_id) ? spaceTitles.get(r.resource_id) ?? null : null)
+      : (viewablePages.has(r.resource_id) ? pageTitles.get(r.resource_id) ?? null : null),
+  }))
+}
+
+// #362: "mark all read" — the badge's self-service reset (also mops up gate-dropped residue after a
+// revocation). member_sub predicate = the isolation boundary; touches ONLY the caller's rows.
+export async function markAllNotificationsRead(db: TenantDb, args: { memberSub: string }): Promise<number> {
+  const r = await db.sql`UPDATE notifications SET read_at = now() WHERE member_sub = ${args.memberSub} AND read_at IS NULL`
+  return r.count
+}
+
+// #362 E1: revocation watch sweep. When view is REVOKED (grant removal / restrict / private toggle /
+// member removal), the member's watch rows would otherwise keep inflating their unread badge forever
+// (fan-out keeps inserting; the gated list stays empty). For each watch on the affected resources,
+// re-check the watcher's `view` and delete ONLY the losers — a watcher whose view survives via another
+// path (group, public, direct grant) keeps their watch. Hygiene, not authz: the display double-gate
+// remains the correctness bastion, so an over/under-sweep can never leak. Distinct from the BLIND
+// `sweepWatchesForResources` (resource DELETION — every watch dies with the resource). Bounded + logged.
+const SWEEP_CAP = 500
+export async function sweepUnviewableWatches(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  resourceIds: string[],
+  log?: { warn: (o: object, msg: string) => void },
+): Promise<number> {
+  if (resourceIds.length === 0) return 0
+  const rows = await db.sql<{ id: string; member_sub: string; resource_type: WatchResourceType; resource_id: string }[]>`
+    SELECT id, member_sub, resource_type, resource_id FROM watches
+    WHERE resource_id = ANY(${resourceIds}) LIMIT ${SWEEP_CAP + 1}`
+  if (rows.length > SWEEP_CAP) {
+    const warn = log?.warn ?? ((o: object, m: string) => console.warn(m, o))
+    warn({ resourceIds: resourceIds.length, cap: SWEEP_CAP }, 'watch sweep hit the cap; remainder left to the display gate')
+  }
+  const lost: string[] = []
+  for (const w of rows.slice(0, SWEEP_CAP)) {
+    const fgaType = w.resource_type === 'space' ? 'space' : 'page' // subtree anchors are pages
+    if (!(await check(fga, `user:${w.member_sub}`, 'view', { type: fgaType, id: w.resource_id }))) lost.push(w.id)
+  }
+  if (lost.length) await db.sql`DELETE FROM watches WHERE id = ANY(${lost})`
+  return lost.length
 }
 
 // The bell badge count. RAW per-member unread count (a bare number names no resource → not a leak; correction
@@ -313,9 +449,21 @@ export async function notificationsPlugin(app: FastifyInstance) {
     if (req.query.resourceType && req.query.resourceId) {
       return isWatching(req.db, { memberSub: req.user.sub, resourceType: req.query.resourceType, resourceId: req.query.resourceId })
     }
-    const rows = await req.db.sql<{ id: string; resource_type: WatchResourceType; resource_id: string }[]>`
-      SELECT id, resource_type, resource_id FROM watches WHERE member_sub = ${req.user.sub} ORDER BY created_at DESC`
-    return rows.map((r) => ({ id: r.id, resourceType: r.resource_type, resourceId: r.resource_id }))
+    return listWatchesResolved(req.db, app.fga, { memberSub: req.user.sub })
+  })
+
+  // #362: per-watch preferences — mute + event mask. member_sub predicate = the isolation boundary
+  // (another member's watch id → 0 rows → 404). Emission-narrowing only; no authz surface.
+  app.patch<{ Params: { id: string }; Body: { muted?: boolean; eventMask?: string[] } }>('/watches/:id', async (req, reply) => {
+    const muted = typeof req.body?.muted === 'boolean' ? req.body.muted : null
+    const mask = Array.isArray(req.body?.eventMask) ? req.body.eventMask.map(String).slice(0, 32) : null
+    const r = await req.db.sql`
+      UPDATE watches SET
+        muted = COALESCE(${muted}, muted),
+        event_mask = COALESCE(${mask}::text[], event_mask)
+      WHERE id = ${req.params.id} AND member_sub = ${req.user.sub}`
+    if (r.count === 0) return reply.code(404).send({ error: 'not found' })
+    return reply.code(204).send()
   })
 
   app.post<{ Body: { resourceType: WatchResourceType; resourceId: string } }>('/watches', async (req, reply) => {
@@ -368,4 +516,7 @@ export async function notificationsPlugin(app: FastifyInstance) {
     if (!ok) return reply.code(404).send({ error: 'not found' })
     return reply.code(204).send()
   })
+
+  // #362: badge self-service reset — caller's rows only (member_sub predicate inside).
+  app.post('/notifications/read-all', async (req) => ({ marked: await markAllNotificationsRead(req.db, { memberSub: req.user.sub }) }))
 }

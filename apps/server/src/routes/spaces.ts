@@ -11,7 +11,7 @@ import type { SearchDriver } from '../search/index.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { deletePinsForResources } from './pins.js'
-import { sweepWatchesForResources } from './notifications.js'
+import { sweepWatchesForResources, sweepUnviewableWatches } from './notifications.js'
 import { importArchive, ImportTooLargeError, ImportInvalidError } from '../import/index.js'
 import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
@@ -444,6 +444,10 @@ export async function revokeSpaceAccess(
     await deleteTuples(fga, spaceGrantTuples(args.grantee, relation, args.spaceId))
   })
   await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
+  // #362 E1: revocation watch sweep (post-FGA, best-effort; per-watcher view re-check inside — a watcher
+  // whose view survives via another path keeps their watch). Space-scoped: sweeps watches ON the space id
+  // (page-level fallout is covered by the display gate; page grants have their own sweep).
+  void sweepUnviewableWatches(db, fga, [args.spaceId]).catch(() => {})
   emit({ type: 'space.access_revoked', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
 }
 

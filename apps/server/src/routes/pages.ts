@@ -25,7 +25,7 @@ import { revokeResourceShareLinks } from './share-links.js'
 import { getTemplate } from './templates.js'
 import { getSpaceInfo } from './spaces.js'
 import { deletePinsForResources } from './pins.js'
-import { fanOutFeedEvent, sweepWatchesForResources } from './notifications.js'
+import { fanOutFeedEvent, sweepWatchesForResources, sweepUnviewableWatches } from './notifications.js'
 import { enqueueWebhookOutbox } from './webhooks.js'
 
 // #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames
@@ -738,6 +738,9 @@ export async function revokePageAccess(
   // Reindex so the revoked grantee drops out of the search viewer set immediately
   // (FGA-derived surfaces — tree/comments/attachments/collab — drop on next request).
   processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+  // #362 E1: revocation watch sweep (post-FGA, best-effort — the display gate is the bastion). Per-watcher
+  // view re-check inside, so a watcher whose view survives via another path keeps their watch.
+  void sweepUnviewableWatches(db, fga, [args.pageId]).catch(() => {})
   emit({ type: 'page.access_revoked', tenantId: args.tenantId, pageId: args.pageId, grantee: args.grantee, relation: args.relation, actorId: args.userId })
 }
 
@@ -772,6 +775,7 @@ export async function restrictPageAccess(
   })
   // Reindex so the restricted principal drops out of FGA-derived surfaces on the next request.
   processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+  void sweepUnviewableWatches(db, fga, [args.pageId]).catch(() => {}) // #362 E1 (per-watcher re-check inside)
   emit({ type: 'page.access_restricted', tenantId: args.tenantId, pageId: args.pageId, grantee: args.principal, relation: 'restricted', actorId: args.userId })
 }
 
@@ -880,6 +884,7 @@ export async function setPagePrivate(
   }
   // Reindex the whole subtree so is_public flips false (view_base@user:* gone) + space members drop from stage-1.
   subtree.forEach((id, i) => processOutboxAsync(driver, oids[i]!, { tenantId: args.tenantId, pageId: id, operation: 'upsert' }))
+  void sweepUnviewableWatches(db, fga, [args.pageId]).catch(() => {}) // #362 E1: privatise cuts inherited view
   emit({ type: 'page.made_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
   // comment 785 #2: emit share_link.revoked ONLY after the DB revoke committed (never on a rolled-back tx).
   for (const link of revoked) emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: link.id, pageId: link.pageId, actorId: args.userId })
@@ -1017,6 +1022,10 @@ export async function setPagePublic(
     // crawler-indexed by default (opt-in indexing is a future ticket — ADR-113 decision 3).
     await tx`UPDATE pages SET noindex = true WHERE id = ${args.pageId}`
     const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+    // #362 / ADR-126 addendum: page.made_public feed event, in-tx. published_at is non-NULL here (the
+    // published-only 400 above), so the shared guard passes by construction.
+    const [sp] = await tx<[{ space_id: string }?]>`SELECT space_id FROM pages WHERE id = ${args.pageId}`
+    await fanOutFeedEvent(tx, { tenantId: args.tenantId, eventType: 'page.made_public', pageId: args.pageId, spaceId: sp?.space_id ?? null, actor: `user:${args.userId}`, publishedAt: p.published_at })
     await writeTuples(fga, [PUBLIC_GRANT(args.pageId)]) // view_base@user:* — is_public flips true on reindex
     return o
   })
@@ -1045,6 +1054,10 @@ export async function unsetPagePublic(
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.made_non_public', target: `page:${args.pageId}` })
     }
     const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+    // #362 / ADR-126 addendum: page.made_non_public feed event, in-tx (published-only via the shared guard
+    // un-publicing a draft is a no-op event-wise).
+    const [pg] = await tx<[{ published_at: Date | null; space_id: string }?]>`SELECT published_at, space_id FROM pages WHERE id = ${args.pageId}`
+    await fanOutFeedEvent(tx, { tenantId: args.tenantId, eventType: 'page.made_non_public', pageId: args.pageId, spaceId: pg?.space_id ?? null, actor: `user:${args.userId}`, publishedAt: pg?.published_at ?? null })
     // Remove the anonymous grant (idempotent — the page may not be public). Exactly one tuple, so no orphan.
     await deleteTuples(fga, [PUBLIC_GRANT(args.pageId)]).catch(() => {})
     return o

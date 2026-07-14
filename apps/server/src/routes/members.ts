@@ -79,6 +79,9 @@ export async function membersPlugin(app: FastifyInstance) {
 
     await req.db.tx(async (tx) => {
       await tx`DELETE FROM members WHERE sub = ${req.params.sub}`
+      // #362 E1: the removed member's watches go with them (BLIND delete is correct here — the member is
+      // gone, unlike the per-watcher-checked revocation sweep). Stops their inbox rows from ever growing.
+      await tx`DELETE FROM watches WHERE member_sub = ${req.params.sub}`
       // Remove the membership grants. Only delete the admin tuple if it exists —
       // FGA rejects the whole batch if asked to delete a non-existent tuple.
       const tuples = [{ user: `user:${req.params.sub}`, relation: 'member', object: `tenant:${req.tenant.id}` }]
