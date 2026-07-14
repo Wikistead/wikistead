@@ -57,8 +57,9 @@ export async function setEmbedProviders(
   fga: OpenFgaClient,
   args: { tenantId: string; userId: string; providers: unknown },
 ): Promise<string[]> {
-  // Raw FGA check (like branding's requireTenantAdmin) — `admin` on `tenant:` isn't a capability the
-  // `check` helper maps; the tenant-admin relation is checked directly.
+  // Raw FGA check — `admin` on `tenant:` isn't a capability the `check` helper maps; the tenant-admin
+  // relation is checked directly. NOT folded into the shared `requireTenantAdmin` (#383) on purpose
+  // this gate returns 'forbidden', not 'admin only' — folding would change the error shape.
   const { allowed } = await fga.check({ user: `user:${args.userId}`, relation: 'admin', object: `tenant:${args.tenantId}` })
   if (!allowed) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
   const providers = normalizeEmbedProviders(args.providers)

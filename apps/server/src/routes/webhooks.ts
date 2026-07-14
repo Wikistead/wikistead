@@ -181,6 +181,9 @@ export function startWebhookDrainWorker(fga: OpenFgaClient, intervalMs = 5000): 
 
 export async function webhooksPlugin(app: FastifyInstance) {
   // All admin-gated: issuing/curating a webhook is a tenant-admin act (egress config).
+  // NOT folded into the shared `requireTenantAdmin` (#383) on purpose: this gate returns 'forbidden',
+  // not 'admin only' — the shared helper would change the error shape. Keep it local unless the API
+  // contract is deliberately unified.
   const requireAdmin = async (req: { user: { sub: string }; tenant: { id: string } }) => {
     const { allowed } = await app.fga.check({ user: `user:${req.user.sub}`, relation: 'admin', object: `tenant:${req.tenant.id}` })
     if (!allowed) throw Object.assign(new Error('forbidden'), { statusCode: 403 })

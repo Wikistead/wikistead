@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
+import { requireTenantAdmin } from '@wikistead/authz' // #383
 import type { FastifyInstance } from 'fastify'
-import type { OpenFgaClient } from '@openfga/sdk'
 import type { TenantDb } from '../db/index.js'
 import { CHALLENGE_PREFIX, txtChallengePresent, type ResolveTxt } from './dns-challenge.js'
 import { ENROLL_POLICIES, isEnrollPolicy, type EnrollPolicy } from './enroll-policy.js'
@@ -112,11 +112,6 @@ export async function setEnrollPolicy(db: TenantDb, args: { tenantId: string; po
 // Admin routes for enrolment configuration (tenant-admin gated). The login-path ENFORCEMENT
 // (session.ts auto-enrol via enrollEligible + the seat fortress) is a later slice — these manage the
 // config it reads. Mirrors the custom-domains admin workflow (add → DNS TXT challenge → verify).
-async function requireTenantAdmin(fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> {
-  const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'admin', object: `tenant:${tenantId}` })
-  if (!allowed) throw Object.assign(new Error('admin only'), { statusCode: 403 })
-}
-
 export async function enrollmentPlugin(app: FastifyInstance) {
   app.get('/admin/enrollment', async (req) => {
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)

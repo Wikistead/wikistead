@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
+import { requireTenantAdmin } from '@wikistead/authz' // #383
 import type { FastifyInstance } from 'fastify'
-import type { OpenFgaClient } from '@openfga/sdk'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import { entitlementDenied } from '../entitlement-ux.js'
@@ -14,11 +14,6 @@ import { CHALLENGE_PREFIX, txtChallengePresent, type ResolveTxt } from '../auth/
 // challenge → verify → activate (mirror to tenants.custom_domain, which host→tenant resolution
 // already reads, ADR-016) → revoke. The cert-manager `Certificate` lifecycle is infra (#148);
 // a Certificate is only ever created for a `verified` row.
-
-async function requireTenantAdmin(fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> {
-  const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'admin', object: `tenant:${tenantId}` })
-  if (!allowed) throw Object.assign(new Error('admin only'), { statusCode: 403 })
-}
 
 // Basic hostname validation: lowercased FQDN, no scheme/path/port, ≤253 chars.
 function normalizeDomain(raw: string): string {

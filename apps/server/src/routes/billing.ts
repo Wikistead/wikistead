@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { requireTenantAdmin } from '@wikistead/authz' // #383
 import type { OpenFgaClient } from '@openfga/sdk'
 import Stripe from 'stripe'
 import { pool } from '../db/pool.js'
@@ -112,11 +113,6 @@ export async function processWebhookEvent(event: Stripe.Event): Promise<void> {
 // Services take the Stripe client (injected) so tests can drive a fake without a
 // real key. tenant#admin gated. Only self-serve plans (Pro) are checkout-able;
 // Team is contact-sales (no self-serve price).
-async function requireTenantAdmin(fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> {
-  const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'admin', object: `tenant:${tenantId}` })
-  if (!allowed) throw Object.assign(new Error('admin only'), { statusCode: 403 })
-}
-
 const SELF_SERVE_PRICE: Record<string, string | undefined> = { get pro() { return process.env.STRIPE_PRICE_PRO } }
 
 export async function createCheckoutSession(

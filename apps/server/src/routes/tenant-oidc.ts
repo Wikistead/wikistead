@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { requireTenantAdmin } from '@wikistead/authz' // #383
 import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
 import { encryptSecret } from '../auth/secret-crypto.js'
@@ -19,11 +20,6 @@ import type { TenantDb } from '../db/index.js'
 export interface TenantOidcView {
   issuer: string; clientId: string; scopes: string; redirectUri: string; enabled: boolean; hasSecret: boolean
   groupsClaim: string | null // #102: id_token claim for groups (null → default 'groups')
-}
-
-async function requireTenantAdmin(fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> {
-  const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'admin', object: `tenant:${tenantId}` })
-  if (!allowed) throw Object.assign(new Error('admin only'), { statusCode: 403 })
 }
 
 // Fetch the issuer's OIDC discovery doc and confirm the core endpoints. Returns null on success, or

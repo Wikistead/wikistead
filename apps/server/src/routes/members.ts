@@ -4,7 +4,7 @@
 // is OpenFGA (tenant#admin), re-checked per request, so a demotion takes effect
 // immediately (the cached session role is cosmetic).
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
-import { writeTuples, deleteTuples } from '@wikistead/authz'
+import { writeTuples, deleteTuples, isTenantAdmin } from '@wikistead/authz'
 import { groupFgaId } from '../auth/group-sync.js'
 import { createInvite, revokeInvite, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
@@ -13,18 +13,12 @@ import { emit } from '@wikistead/events'
 
 const ROLES: InviteRole[] = ['admin', 'member']
 
-// Admin gate. tenant#admin is the authority (raw relation, not a Capability).
+// Admin gate — the Fastify (req, reply) shape over the shared tenant-admin predicate (#383). tenant#admin is the
+// authority (raw relation, not a Capability). Returns false + sends 403 so a route can early-return.
 async function requireTenantAdmin(req: FastifyRequest, reply: FastifyReply): Promise<boolean> {
-  const { allowed } = await req.server.fga.check({
-    user: `user:${req.user.sub}`,
-    relation: 'admin',
-    object: `tenant:${req.tenant.id}`,
-  })
-  if (!allowed) {
-    await reply.code(403).send({ error: 'admin only' })
-    return false
-  }
-  return true
+  if (await isTenantAdmin(req.server.fga, req.user.sub, req.tenant.id)) return true
+  await reply.code(403).send({ error: 'admin only' })
+  return false
 }
 
 async function adminCount(req: FastifyRequest): Promise<number> {

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { requireTenantAdmin } from '@wikistead/authz' // #383
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { resolveEntitlements } from '@wikistead/entitlements'
@@ -54,10 +55,6 @@ export async function getTenantBranding(db: TenantDb, plan: string): Promise<Ten
   }
 }
 
-async function requireTenantAdmin(fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> {
-  const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'admin', object: `tenant:${tenantId}` })
-  if (!allowed) throw Object.assign(new Error('admin only'), { statusCode: 403 })
-}
 function requireBrandingEntitlement(plan: string): void {
   if (!resolveEntitlements(plan).branding) {
     throw Object.assign(new Error('branding requires an upgrade'), { statusCode: 403, code: 'upgrade_required' })

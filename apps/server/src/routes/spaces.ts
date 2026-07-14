@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
+import { check, writeTuples, deleteTuples, deleteObjectTuples, requireTenantAdmin } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
@@ -324,11 +324,6 @@ function validateSpaceGrant(grantee: string, capability: string): asserts capabi
 async function requireSpaceManage(fga: OpenFgaClient, userId: string, spaceId: string): Promise<void> {
   const canManage = await check(fga, `user:${userId}`, 'manage', { type: 'space', id: spaceId })
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
-}
-
-async function requireTenantAdmin(fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> {
-  const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'admin', object: `tenant:${tenantId}` })
-  if (!allowed) throw Object.assign(new Error('admin only'), { statusCode: 403 })
 }
 
 // Tenant-wide spaces overview for the admin console (Phase 5 #4). tenant#admin
