@@ -50,6 +50,15 @@ export async function consumePendingAuthorize(valkey: IORedis, id: string): Prom
   if (!raw) return null
   try { return JSON.parse(raw) as PendingAuthorize } catch { return null }
 }
+// #391 / ADR-148: NON-destructive read of a pending authorize request. The consent GET renders the page from
+// this peek (an abandoned consent page leaves the pending to die on its TTL — no code, no replay window); only
+// the approve/deny POST consumes it, atomically, via the GETDEL above (a double-approve finds nothing → 400).
+export async function peekPendingAuthorize(valkey: IORedis, id: string): Promise<PendingAuthorize | null> {
+  if (!id) return null
+  const raw = await valkey.get(pendingKey(id))
+  if (!raw) return null
+  try { return JSON.parse(raw) as PendingAuthorize } catch { return null }
+}
 
 export async function saveAuthCode(valkey: IORedis, code: string, data: AuthCode): Promise<void> {
   await valkey.set(codeKey(code), JSON.stringify(data), 'EX', CODE_TTL_S)

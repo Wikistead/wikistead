@@ -21,7 +21,7 @@ afterAll(async () => {
   await db.release(); await admin.end(); await pool.end()
 }, 30_000)
 
-const client: OAuthClient = { clientId: 'mcp_x', redirectUris: ['https://claude.ai/cb', 'http://localhost:9000/cb'] }
+const client: OAuthClient = { clientId: 'mcp_x', redirectUris: ['https://claude.ai/cb', 'http://localhost:9000/cb'], clientName: null }
 const ok = { clientId: 'mcp_x', redirectUri: 'https://claude.ai/cb', responseType: 'code', codeChallenge: 'abc123', codeChallengeMethod: 'S256', scope: 'read write', state: 's1' }
 
 describe('validateAuthorizeRequest — open-redirect defense (#311 / ADR-131 slice 3a)', () => {
