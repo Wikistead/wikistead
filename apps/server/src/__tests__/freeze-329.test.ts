@@ -26,7 +26,7 @@ import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, deletePage, getPage, setPageFrozen, unsetPageFrozen } from '../routes/pages.js'
+import { createPage, deletePage, getPage, listPages, setPageFrozen, unsetPageFrozen } from '../routes/pages.js'
 import type { Tenant } from '@wikistead/types'
 import { buildApp } from '../app.js'
 
@@ -204,6 +204,15 @@ describe('#329 freeze — write path + HTTP (real PG + OpenFGA + Fastify)', () =
     await unsetPageFrozen(db, fgaClient, { pageId, tenantId: tenant.id, userId: 'dev-user' })
     expect(await checkRelation(fgaClient, 'share_link:__frz__', 'frozen_guests', page(pageId))).toBe(false)
     expect((await getPage(db, fgaClient, { pageId, userId: 'dev-user' })).frozen).toBe(null)
+  })
+
+  it('#329 rework: listPages carries the freeze level (tree badge), same exposure as private', async () => {
+    await setPageFrozen(db, fgaClient, { pageId, tenantId: tenant.id, userId: 'dev-user', level: 'full' })
+    const frozenTree = await listPages(db, fgaClient, { spaceId, subject: 'user:dev-user' })
+    expect(frozenTree.find((p) => p.id === pageId)?.frozen).toBe('full')
+    await unsetPageFrozen(db, fgaClient, { pageId, tenantId: tenant.id, userId: 'dev-user' })
+    const thawedTree = await listPages(db, fgaClient, { spaceId, subject: 'user:dev-user' })
+    expect(thawedTree.find((p) => p.id === pageId)?.frozen).toBe(null)
   })
 
   it('freeze/unfreeze is manage-gated (403 for a non-manager)', async () => {

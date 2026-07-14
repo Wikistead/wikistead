@@ -37,6 +37,9 @@ export interface Page {
   // and next to the title. Exposed only to viewers of the page (non-viewers 404), so it
   // leaks nothing. `restrict`-only (deny) pages are NOT private and show no lock.
   private?: boolean;
+  // #329 rework: freeze level on the tree list too, so the sidebar can pair a snowflake with the
+  // lock (same exposure rule as `private` — viewers only, reveals nothing).
+  frozen?: "full" | "guests" | null;
   // #290 / ADR-114: the page's :::todo checkbox aggregate (published). taskTotal > 0 ⟺ the page has a
   // :::todo with tasks → the sidebar shows a progress ring. Display-only.
   taskDone?: number;

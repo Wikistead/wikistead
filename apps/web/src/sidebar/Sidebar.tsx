@@ -32,14 +32,7 @@ import { ShareDialog } from "../ui/ShareDialog";
 import { TemplatePickerDialog } from "./TemplatePickerDialog";
 import { downloadSpaceExport, importSpaceArchive } from "../data/exportApi"; // #309 export / #308 import
 
-// One space at a time (Notion/Outline style): the sidebar shows ONLY the active
-// space's page tree; the space itself is chosen in the switcher, not a tree root.
-function buildPageNodes(pages: Page[], parentId: string | null, pinnedPageIds: ReadonlySet<string>): PageTreeNode[] {
-  return pages
-    .filter((p) => p.parentId === parentId)
-    .sort((a, b) => a.position - b.position)
-    .map((p) => ({ id: `page:${p.id}`, name: p.title, pageId: p.id, spaceId: p.spaceId, published: p.published ?? false, unpublished: p.hasUnpublishedChanges ?? false, private: p.private ?? false, taskDone: p.taskDone ?? 0, taskTotal: p.taskTotal ?? 0, pinned: pinnedPageIds.has(p.id), children: buildPageNodes(pages, p.id, pinnedPageIds) }));
-}
+import { buildPageNodes } from "./page-nodes";
 
 export function Sidebar() {
   const { t } = useTranslation();
