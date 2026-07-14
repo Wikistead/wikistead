@@ -19,7 +19,7 @@ import type { Tenant } from '@wikistead/types'
 
 const NEW_OWNER = 'orphan-new-owner-sub'
 const canManage = async (sub: string, pageId: string) =>
-  (await fgaClient.check({ user: `user:${sub}`, relation: 'manage', object: `page:${pageId}` })).allowed === true
+  (await fgaClient.check({ user: `user:${sub}`, relation: 'manage_direct', object: `page:${pageId}` })).allowed === true
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const driver = new LogicalSearchDriver()
@@ -78,7 +78,7 @@ describe('listOrphanDrafts (#99 / ADR-061 read side)', () => {
     const orphan = await mkPage('orphan-stale-grant')
     await deleteObjectTuples(fgaClient, `page:${orphan}`)
     // A leftover grant for a user who is NOT a tenant member must not count as "reachable".
-    await writeTuples(fgaClient, [{ user: 'user:ghost-deleted-creator', relation: 'manage', object: `page:${orphan}` }])
+    await writeTuples(fgaClient, [{ user: 'user:ghost-deleted-creator', relation: 'manage_direct', object: `page:${orphan}` }])
     expect(await ids()).toContain(orphan)
   })
 
@@ -89,7 +89,7 @@ describe('listOrphanDrafts (#99 / ADR-061 read side)', () => {
     // and a live VIEWER (non-creator path): creator tuple gone but a live member holds view
     const shared = await mkPage('live-viewer')
     await deleteObjectTuples(fgaClient, `page:${shared}`)
-    await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'view_base', object: `page:${shared}` }]) // dev-user is live
+    await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'view_direct', object: `page:${shared}` }]) // dev-user is live
     expect(await ids()).not.toContain(shared)
   })
 

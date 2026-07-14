@@ -33,7 +33,7 @@ async function mk(title: string): Promise<string> {
   return p.id
 }
 async function grantView(subject: string, ...pageIds: string[]) {
-  await writeTuples(fgaClient, pageIds.map((id) => ({ user: subject, relation: 'view_base', object: `page:${id}` })))
+  await writeTuples(fgaClient, pageIds.map((id) => ({ user: subject, relation: 'view_direct', object: `page:${id}` })))
 }
 
 beforeAll(async () => {

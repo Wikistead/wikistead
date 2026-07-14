@@ -94,21 +94,28 @@ describe('getQueryResults children (#324 / ADR-134)', () => {
   })
 
   // The per-child omit-on-deny loop: a caller who can VIEW the parent but NOT a given child gets that child
-  // ABSENT from the list (and from the count) — the child's existence/title never leaks. Grant `member-b`
-  // view on the parent + childPub1 only; childPub2 is omitted.
+  // ABSENT from the list (and from the count) — the child's existence/title never leaks. #218 / ADR-103: a
+  // direct grant on the PARENT now CASCADES to its children (view_direct from parent), so the way to make a
+  // child un-viewable while the parent is viewable is the monotonic `restricted` deny (which wins over the
+  // inherited grant), not "grant only some children". Grant `member-b` view on the parent (→ both children
+  // inherit) then RESTRICT childPub2 → childPub2 is omitted; childPub1 stays.
   it('authz: a caller who can view the parent but NOT a child gets that child OMITTED (no title/count leak)', async () => {
-    // `view_base` is the writable leaf (direct view grants); `view` itself is computed (fga-computed-relation
-    // write-ripple), so grants must land on the leaf.
     const grants = [
-      { user: 'user:member-b', relation: 'view_base', object: `page:${parent}` },
-      { user: 'user:member-b', relation: 'view_base', object: `page:${childPub1}` },
+      { user: 'user:member-b', relation: 'view_direct', object: `page:${parent}` }, // cascades to child1 + child2
+      { user: 'user:member-b', relation: 'restricted', object: `page:${childPub2}` }, // ...but child2 is denied (deny wins)
+      // #218 / ADR-103 addendum (DRAFT GATE): the parent-grant cascade is `view_base_from_parent AND published`,
+      // so a child only INHERITS the parent grant once PUBLISHED. These children carry published_md (raw UPDATE in
+      // mkPage) but that shortcut skips the FGA markers publishPage writes — add the `published@user:*` marker so
+      // the cascade reaches them, matching a really-published child.
+      { user: 'user:*', relation: 'published', object: `page:${childPub1}` },
+      { user: 'user:*', relation: 'published', object: `page:${childPub2}` },
     ]
     await writeTuples(fgaClient, grants)
     try {
       const rows = await getQueryResults(db, fgaClient, { pageId: parent, spec: { type: 'children' }, subject: 'user:member-b' })
       const found = rows.map((r) => r.id)
-      expect(found).toContain(childPub1)
-      expect(found).not.toContain(childPub2) // not granted → omitted, not merely hidden in the UI
+      expect(found).toContain(childPub1) // inherited the parent grant → visible
+      expect(found).not.toContain(childPub2) // restricted (deny) → omitted, not merely hidden in the UI
     } finally {
       await deleteTuples(fgaClient, grants).catch(() => {})
     }
@@ -258,8 +265,8 @@ describe('getPublished guest vs member :::query (#353 / ADR-134 rev2 Hole A)', (
     grants.push(
       { user: 'user:*', relation: 'view_base', object: `page:${anonTag2}` },
       { user: 'user:*', relation: 'view_base', object: `page:${pubMember2}` },
-      { user: 'user:member-g', relation: 'view_base', object: `page:${guestDoc}` }, // a member who can view guestDoc
-      { user: 'share_link:qlink-g', relation: 'view_base', object: `page:${guestDoc}` }, // a view guest on guestDoc
+      { user: 'user:member-g', relation: 'view_direct', object: `page:${guestDoc}` }, // a member who can view guestDoc
+      { user: 'share_link:qlink-g', relation: 'view_direct', object: `page:${guestDoc}` }, // a view guest on guestDoc
     )
     await writeTuples(fgaClient, grants)
     const snap = await bakeQuerySnapshot(db, fgaClient, { pageId: guestDoc, md })

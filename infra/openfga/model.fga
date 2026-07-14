@@ -88,45 +88,65 @@ type page
     # guests; a lone share_link:* over-denies members). `share_link:*` precedent: space#comment_open (:59).
     # public⊥private is a WRITE-BOUNDARY invariant (setting private strips view_base@user:* → is_public
     # false), enforced in the write path, not here — the model can't subtract the DIRECT user:* grant.
-    # (#218 will extend this line to `... or private from parent` for nested-page inheritance; rebase onto
-    # this pair when it lands.)
-    define private: [user:*, share_link:*]
+    # #218 / ADR-103: private CASCADES down the parent chain (`or private from parent`) so a private folder
+    # makes its whole subtree private (monotonic, downward-only; reparent-out is the only escape).
+    define private: [user:*, share_link:*] or private from parent
 
-    # Each `... from space` inheritance is gated by `but not private` via a helper (OpenFGA forbids mixing
-    # `or` and `but not` at one level). Private → the helper is empty → only direct grants survive.
+    # #218 / ADR-103: nested-page (folder) grant inheritance. Direct member/group/link grants split into
+    # `*_direct` LEAVES so they cascade DOWN the parent chain (a grant on a folder reaches its children) WITHOUT
+    # dragging user:* (public) or space inheritance along — `*_from_parent` recurses the LEAF only. user:* stays
+    # a DIRECT type on view_base (never cascades → #100 nested-public preserved). The `*_direct` leaves are the
+    # WRITE TARGETS for direct grants (manage/edit are purely computed now → a direct write to them fails; the
+    # grant write-path writes the leaf — see fgaRelationForCap). Each `... from space` inheritance is still gated
+    # by `but not private` via a helper (OpenFGA forbids mixing `or`/`but not` at one level).
+    #
+    # #218 / ADR-103 addendum (DRAFT GATE): the folder grant-cascade applies ONLY to PUBLISHED pages. `published`
+    # is a marker PAIR ([user:*, share_link:*], written at publish alongside page#space) — an UNPUBLISHED draft
+    # under a shared/linked folder must stay creator-only (Phase-4 visibility gate: unpublished = creator-only).
+    # The `*_from_parent` recursion stays UNGATED (structural walk — it still propagates a grant DOWN through a
+    # draft intermediate to a published descendant); the `and published` gate is applied per-page at the point
+    # the inherited grant enters `manage`/`edit_base`/`view_base` via a `*_inherited` helper (no or/and mixing at
+    # one level). private (more-restrictive) is NOT gated by published — it cascades to drafts too, which is safe.
+    define published: [user:*, share_link:*]
+    define manage_direct: [user, group#member]
     define manage_from_space: manager from space but not private
-    define manage: [user, group#member] or manage_from_space
+    define manage_from_parent: manage_direct from parent or manage_from_parent from parent
+    define manage_inherited: manage_from_parent and published
+    define manage: manage_direct or manage_from_space or manage_inherited
     # share_link entries appear twice per relation:
     #   share_link             — permanent link (tuple written without condition)
     #   share_link with non_expired — time-bounded link (tuple written with condition)
     # OpenFGA requires both to be declared to allow either form.
+    define edit_direct: [user, group#member, share_link, share_link with non_expired]
     define edit_from_space: editor from space but not private
-    define edit: [user, group#member, share_link, share_link with non_expired] or manage or edit_from_space
+    define edit_from_parent: edit_direct from parent or edit_from_parent from parent
+    define edit_inherited: edit_from_parent and published
+    define edit_base: edit_direct or edit_from_space or edit_inherited
+    # #218 / ADR-103 (A5-5): edit is gated by the monotonic deny too (a folder EDIT-link guest must be
+    # excludable from a child), via a helper split. #329 (freeze) later inserts `but not frozen*` on edit_base.
+    define edit_permitted: edit_base but not restricted
+    define edit: manage or edit_permitted
 
     # Commenting authorization (#100 / ADR-029 Option B) — a RESOURCE SETTING, not a link capability.
-    # Split view into `view_base` (the direct view grants — the leaf) so `comment` can intersect on it
-    # without the view→comment→view cycle. Links carry view/edit ONLY; a guest comments via a VIEW
-    # link + comments being open (view_base and comment_open), never via a comment link.
-    #
-    # view_base: direct view grants ONLY (user:* here = public page — keep in sync with search is_public).
-    # The `viewer from space` inheritance is cut when the page is private (ADR-098) — only the direct
-    # grants above (the allow list) remain. Backward compatible when private is empty.
+    # view_direct: direct member/group/link view grants (WRITE TARGET + cascading leaf). user:* (public page)
+    # stays a DIRECT type on view_base itself so it does NOT cascade to children (#100). `viewer from space`
+    # inheritance is cut when the page is private (ADR-098). Backward compatible when private is empty.
+    define view_direct: [user, group#member, share_link, share_link with non_expired]
     define view_base_from_space: viewer from space but not private
-    define view_base: [user, group#member, user:*, share_link, share_link with non_expired] or view_base_from_space
+    define view_base_from_parent: view_direct from parent or view_base_from_parent from parent
+    define view_base_inherited: view_base_from_parent and published
+    define view_base: [user:*] or view_direct or view_base_from_space or view_base_inherited
     # comment audience gate, space-inherited (the write/delete switch lives on space#comment_open).
     define comment_open: [user:*, share_link:*] or comment_open from space
     # explicit per-principal comment grant (member/group granularity)  ∪  edit  ∪  the audience gate.
     # A specific member may be granted comment even when the audience toggle is off.
     define comment: [user, group#member] or edit or (view_base and comment_open)
-    # #109 / ADR-072: per-page MONOTONIC DENY. A principal listed in `restricted` cannot view the page
-    # even if they'd otherwise qualify (space viewer, direct grant, commenter) — deny wins over every
-    # grant path. This is the "space viewer but page restricted → denied" case. Direct view grants stay
-    # on `view_base` (the leaf, so direct writes are unaffected); the search denormaliser reads
-    # view_base/comment (§doc-builder) and is NOT changed by this, while search stage-2 checks `view`
-    # (now excluding restricted), so a restricted user is filtered even from a public / denormalised
-    # page. `viewable` splits the union out because OpenFGA exclusion (`but not`) subtracts from a
-    # single base userset.
-    define restricted: [user, group#member]
+    # #109 / ADR-072 · #218 / ADR-103 (A5-1): per-page MONOTONIC DENY. `restricted` gains share_link
+    # (UNCONDITIONAL — a `with non_expired` deny would be non-monotonic) so a folder-share-link guest can be
+    # excluded from a specific child. NOT share_link:* (that over-denies every link). Deny wins over every grant
+    # path; both `view` (viewable but not) AND `edit` (edit_permitted) subtract it. Direct view grants stay on
+    # `view_direct` (the leaf, so direct writes are unaffected).
+    define restricted: [user, group#member, share_link]
     # viewable = direct viewers OR anyone who can comment (commenters can view). Acyclic:
     # comment → {view_base, comment_open, edit}; viewable → {view_base, comment}; view_base is a leaf.
     define viewable: view_base or comment

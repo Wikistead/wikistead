@@ -46,7 +46,7 @@ const base = [
   { user: 'user:*', relation: 'comment_open', object: `space:${SA}` },
   { user: 'share_link:*', relation: 'comment_open', object: `space:${SA}` },
   // Allow-list entry: a specific member keeps view via a DIRECT grant even though private cut inheritance.
-  { user: `user:${MEMBER}`, relation: 'view_base', object: `page:${PRIV}` },
+  { user: `user:${MEMBER}`, relation: 'view_direct', object: `page:${PRIV}` },
 ]
 // The PRIVATE marker as it must be written — the PAIR.
 const privMarkers = [

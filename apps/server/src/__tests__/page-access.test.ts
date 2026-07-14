@@ -71,7 +71,7 @@ describe('per-page access (grant/revoke/list)', () => {
     const list = await listPageAccess(fgaClient, db, { pageId, tenantId: TENANT, userId: 'dev-user' })
     expect(list).toEqual(expect.arrayContaining([
       { grantee: GRANTEE, relation: 'view' },
-      { grantee: 'user:dev-user', relation: 'manage' }, // the creator grant
+      { grantee: 'user:dev-user', relation: 'manage' }, // the creator grant (listPageAccess returns the CAPABILITY)
     ]))
     await expect(listPageAccess(fgaClient, db, { pageId, tenantId: TENANT, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
   })
@@ -109,7 +109,7 @@ describe('per-page restrict (monotonic deny)', () => {
   const R = 'user:pa-restrictee'
   // A prior test (the audit one) wipes ALL page tuples incl. the creator's `manage`; re-establish it
   // so dev-user can manage the page for these tests.
-  beforeAll(async () => { await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'manage', object: `page:${pageId}` }]).catch(() => {}) })
+  beforeAll(async () => { await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'manage_direct', object: `page:${pageId}` }]).catch(() => {}) })
   afterAll(async () => { await deleteObjectTuples(fgaClient, `page:${pageId}`).catch(() => {}) })
 
   it('restrict makes a granted viewer 404 (view=false); list shows the deny; unrestrict restores', async () => {
@@ -134,11 +134,14 @@ describe('per-page restrict (monotonic deny)', () => {
     await expect(listPageRestrictions(fgaClient, { pageId, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
   })
 
-  it('rejects a wildcard / share_link restrictee (400)', async () => {
+  it('rejects a WILDCARD restrictee (400); a SPECIFIC share_link is a valid restrictee (#218 A5-2)', async () => {
     await expect(restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', principal: 'user:*' }))
       .rejects.toMatchObject({ statusCode: 400 })
-    await expect(restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', principal: 'share_link:x' }))
+    await expect(restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', principal: 'share_link:*' }))
       .rejects.toMatchObject({ statusCode: 400 })
+    // #218 / ADR-103 (A5-2): a specific share_link:<id> CAN now be restricted — a folder-share-link guest can be
+    // excluded from ONE child page. Restricting it succeeds (and is undone in teardown by the object-tuple sweep).
+    await restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', principal: 'share_link:specific-link-218' })
   })
 })
 
@@ -148,13 +151,13 @@ describe('per-page private (ADR-098 allowlist)', () => {
   const publicTuple = () => ({ user: 'user:*', relation: 'view_base', object: `page:${pageId}` })
   const ALLOWED = 'user:pa-allowed'
   // The restrict describe's afterAll wiped the page tuples incl. the creator's `manage`; re-establish it.
-  beforeAll(async () => { await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'manage', object: `page:${pageId}` }]).catch(() => {}) })
+  beforeAll(async () => { await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'manage_direct', object: `page:${pageId}` }]).catch(() => {}) })
   afterAll(async () => { await deleteObjectTuples(fgaClient, `page:${pageId}`).catch(() => {}) })
   afterEach(async () => {
     await unsetPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' }).catch(() => {})
     await deleteObjectTuples(fgaClient, `page:${pageId}`).catch(() => {}) // clear public + direct grants
     // restore the creator's manage grant that deleteObjectTuples wiped, so later tests still pass
-    await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'manage', object: `page:${pageId}` }]).catch(() => {})
+    await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'manage_direct', object: `page:${pageId}` }]).catch(() => {})
   })
 
   it('setPagePrivate marks private, STRIPS public (is_public → false), keeps a direct allow grant', async () => {

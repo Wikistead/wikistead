@@ -94,7 +94,7 @@ describe('#224 title dictionary — viewer scope (anti-tests 1/2/3a)', () => {
       expect(titles(after)).toContain(T_PRIVATE)
     } finally {
       // leave no residue for the guest assertions below
-      await fgaClient.write({ deletes: [{ user: 'user:dict-other', relation: 'view_base', object: `page:${privId}` }] }).catch(() => {})
+      await fgaClient.write({ deletes: [{ user: 'user:dict-other', relation: 'view_direct', object: `page:${privId}` }] }).catch(() => {})
     }
   })
 

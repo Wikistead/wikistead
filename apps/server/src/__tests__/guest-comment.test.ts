@@ -24,7 +24,7 @@ let viewTok: string
 const tuples = [
   { user: `tenant:${TENANT}`, relation: 'tenant', object: `space:${SPACE}` },
   { user: `space:${SPACE}`, relation: 'space', object: `page:${PAGE}` },
-  { user: `share_link:${VLINK}`, relation: 'view_base', object: `page:${PAGE}` }, // a VIEW link (view/edit only)
+  { user: `share_link:${VLINK}`, relation: 'view_direct', object: `page:${PAGE}` }, // a VIEW link (view/edit only)
 ]
 const commentOpenTuple = { user: 'share_link:*', relation: 'comment_open', object: `space:${SPACE}` }
 const setCommentsOpen = (on: boolean) => (on ? writeTuples : deleteTuples)(fgaClient, [commentOpenTuple]).catch(() => {})

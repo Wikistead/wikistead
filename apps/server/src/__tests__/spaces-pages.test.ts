@@ -222,7 +222,7 @@ describe('page lifecycle', () => {
     })
     // Simulate a share_link grant on this page
     await writeTuples(fgaClient, [
-      { user: 'share_link:page-delete-test-link', relation: 'view_base', object: `page:${page.id}` },
+      { user: 'share_link:page-delete-test-link', relation: 'view_direct', object: `page:${page.id}` },
     ])
     expect(await check(fgaClient, 'share_link:page-delete-test-link', 'view', { type: 'page', id: page.id })).toBe(true)
 

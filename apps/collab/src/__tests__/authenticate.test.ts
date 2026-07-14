@@ -38,14 +38,14 @@ describe("collab authenticate — member collab token", () => {
   // collab connection rejects writes server-side. Authority is FGA, not the UI.
   it("admits a view-only member as readOnly (server is the write fortress)", async () => {
     const VIEWER = "collab-viewonly-p3";
-    await writeTuples(fgaClient, [{ user: `user:${VIEWER}`, relation: "view_base", object: "page:demo" }]);
+    await writeTuples(fgaClient, [{ user: `user:${VIEWER}`, relation: "view_direct", object: "page:demo" }]);
     try {
       const token = await mintMemberCollabToken(cfg, { tenantId: "tenant_dev", sub: VIEWER, groups: [] });
       const r = await authenticate({ token, documentName: DOC });
       expect(r.principal).toMatchObject({ kind: "member", userId: VIEWER });
       expect(r.readOnly).toBe(true); // view ⇒ read-only ⇒ Hocuspocus rejects writes
     } finally {
-      await deleteTuples(fgaClient, [{ user: `user:${VIEWER}`, relation: "view_base", object: "page:demo" }]).catch(() => {});
+      await deleteTuples(fgaClient, [{ user: `user:${VIEWER}`, relation: "view_direct", object: "page:demo" }]).catch(() => {});
     }
   });
 });
@@ -58,7 +58,7 @@ describe("collab authenticate — member collab token", () => {
 describe("collab authenticate — guest token, reconnect blocked after revoke", () => {
   const guestCfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 };
   const LINK = "revoke-test-link-106";
-  const tuple = { user: `share_link:${LINK}`, relation: "view_base", object: "page:demo" }; // #100 Option B: view is computed → grant view_base
+  const tuple = { user: `share_link:${LINK}`, relation: "view_direct", object: "page:demo" }; // #100 Option B: view is computed → grant view_base
 
   it("admits a guest while the tuple exists; rejects the SAME token after the tuple is deleted", async () => {
     await writeTuples(fgaClient, [tuple]);
@@ -85,8 +85,8 @@ describe("collab authenticate — guest token, reconnect blocked after revoke", 
 describe("collab authenticate — guest capability ⇒ readOnly (write fortress)", () => {
   const guestCfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 };
   const LINK = "cap-link-collab";
-  const editTuple = { user: `share_link:${LINK}`, relation: "edit", object: "page:demo" };
-  const viewTuple = { user: `share_link:${LINK}`, relation: "view_base", object: "page:demo" };
+  const editTuple = { user: `share_link:${LINK}`, relation: "edit_direct", object: "page:demo" };
+  const viewTuple = { user: `share_link:${LINK}`, relation: "view_direct", object: "page:demo" };
   const mint = (capability: Capability) => mintGuestToken(guestCfg, {
     tenantId: "tenant_dev", shareLinkId: LINK, resource: { type: "page", id: "demo" }, capability,
   });
@@ -104,10 +104,10 @@ describe("collab authenticate — guest capability ⇒ readOnly (write fortress)
     // #100 Option B: a comment guest has view_base@share_link (+ space comment_open, checked over HTTP,
     // not here). The collab layer only distinguishes edit vs non-edit → it checks 'view' (satisfied by
     // view_base) and joins the comment guest read-only. comment@share_link is not directly writable now.
-    await writeTuples(fgaClient, [{ user: `share_link:${LINK}`, relation: "view_base", object: "page:demo" }]);
+    await writeTuples(fgaClient, [{ user: `share_link:${LINK}`, relation: "view_direct", object: "page:demo" }]);
     const r = await authenticate({ token: await mint("comment"), documentName: DOC });
     expect(r.readOnly).toBe(true); // capability !== "edit" ⇒ readOnly
-    await deleteTuples(fgaClient, [{ user: `share_link:${LINK}`, relation: "view_base", object: "page:demo" }]).catch(() => {});
+    await deleteTuples(fgaClient, [{ user: `share_link:${LINK}`, relation: "view_direct", object: "page:demo" }]).catch(() => {});
   });
 
   it("a token that CLAIMS edit but has only VIEW authority is DENIED (intent ≠ authority)", async () => {
@@ -164,7 +164,7 @@ describe("collab authenticate — space share-link token (#104)", () => {
 describe("collab authenticate — ephemeral Excalidraw room (#92)", () => {
   const EX = "t:tenant_dev:p:demo:x:anchor-1"; // ephemeral room for demo's excalidraw macro
   const VO = "collab-exview-92";
-  const voTuple = { user: `user:${VO}`, relation: "view_base", object: "page:demo" };
+  const voTuple = { user: `user:${VO}`, relation: "view_direct", object: "page:demo" };
 
   it("admits an EDIT member (co-editing = edit; dev-user manages demo_space)", async () => {
     const token = await mintMemberCollabToken(cfg, { tenantId: "tenant_dev", sub: "dev-user", groups: [] });

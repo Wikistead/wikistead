@@ -13,7 +13,7 @@ const gid = (n: string) => groupFgaId(T, n)
 // group is not a page/space ResourceRef, so check membership via the raw FGA client.
 const isMember = async (n: string) =>
   (await fgaClient.check({ user: `user:${SUB}`, relation: 'member', object: `group:${gid(n)}` })).allowed === true
-const grantTuple = { user: `group:${gid('Engineering')}#member`, relation: 'view_base', object: `page:${PAGE}` }
+const grantTuple = { user: `group:${gid('Engineering')}#member`, relation: 'view_direct', object: `page:${PAGE}` }
 
 // Deterministic reset (delete each candidate tuple individually so a missing one can't abort a
 // batch — writeTuples/deleteTuples are not idempotent). Run before AND after so a prior run's

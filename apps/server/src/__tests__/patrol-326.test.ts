@@ -52,7 +52,7 @@ beforeAll(async () => {
     // RMGR has a DIRECT manage grant on privPage (survives the private cut) but is also `restricted` → view is
     // subtracted. So RMGR has manage=true / view=false — the strongest existence-oracle case: only a view-FIRST
     // gate returns 404; a capability-first gate would pass manage and leak a 200 (reviewer's coverage note).
-    { user: `user:${RMGR}`, relation: 'manage', object: `page:${privPage}` },
+    { user: `user:${RMGR}`, relation: 'manage_direct', object: `page:${privPage}` },
     { user: `user:${RMGR}`, relation: 'restricted', object: `page:${privPage}` },
   ]
   await writeTuples(fgaClient, pv); tuples.push(...pv)

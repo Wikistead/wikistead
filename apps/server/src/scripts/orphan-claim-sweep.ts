@@ -19,7 +19,7 @@ export async function sweepExpiredClaims(sql: postgres.Sql, fga: OpenFgaClient):
   `
   for (const c of expired) {
     // Revoke the temporary admin grant (idempotent: a non-existent tuple delete is ignored).
-    await deleteTuples(fga, [{ user: `user:${c.admin_sub}`, relation: 'manage', object: `page:${c.page_id}` }]).catch(() => {})
+    await deleteTuples(fga, [{ user: `user:${c.admin_sub}`, relation: 'manage_direct', object: `page:${c.page_id}` }]).catch(() => {}) // #218: manage is computed; the grant lives on manage_direct
     await sql`DELETE FROM orphan_claims WHERE tenant_id = ${c.tenant_id} AND page_id = ${c.page_id}`
     emit({ type: 'orphan_draft.claim_expired', tenantId: c.tenant_id, pageId: c.page_id, adminSub: c.admin_sub })
   }
