@@ -96,7 +96,7 @@ export function PageTree({
     return (
       <div
         ref={dragHandle}
-        className="group box-border h-full w-full min-w-0 overflow-hidden select-none px-1"
+        className="group box-border h-full w-full min-w-0 max-w-[var(--tree-w,260px)] overflow-hidden select-none px-1"
         data-testid="tree-page"
         data-selected={selected ? "" : undefined}
         onClick={() => onOpen(d.pageId)}
@@ -211,7 +211,11 @@ export function PageTree({
   }, [selectedId, canEdit, t, onOpen]);
 
   return (
-    <div ref={treeBox} className="min-h-0 min-w-0 flex-1" data-testid="page-tree">
+    // #398: expose the measured tree width as a CSS var so a row can cap its width to it. react-arborist's
+    // drag preview clones a row into a position:fixed FULL-WIDTH overlay (still inside this DOM subtree, so the
+    // var cascades) where the row's `w-full` would otherwise stretch to the viewport — a selected row (its menu
+    // force-expanded) then produced a viewport-wide ghost. Capping to --tree-w keeps the preview sidebar-width.
+    <div ref={treeBox} className="min-h-0 min-w-0 flex-1" data-testid="page-tree" style={{ "--tree-w": `${size.width || 260}px` } as React.CSSProperties}>
       <Tree<PageTreeNode>
         className="!overflow-x-hidden"
         // #193 bounce: react-arborist forces each row wrapper to a content min-width; we hide horizontal
