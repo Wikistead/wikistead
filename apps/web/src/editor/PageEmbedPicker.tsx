@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from "../components/ui/command";
@@ -31,15 +31,20 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
   // brand-new page not yet indexed). Trimmed; only offered when it looks like a bare token.
   const raw = input.trim();
   const looksLikeId = raw.length > 0 && !/\s/.test(raw);
-  // #332item 4: auto-highlight the FIRST candidate so Enter confirms immediately (and the right preview
-  // shows) without arrowing. cmdk with a controlled value + shouldFilter={false} does NOT re-select when the
-  // result list changes, so when the current highlight falls out of the list we reset it to the first hit (or
-  // the raw-id fallback). Keyboard nav (Ctrl-j/k / arrows) and Escape are unchanged.
+  // #332item 4 / #366auto-highlight the FIRST REAL hit so Enter confirms immediately. cmdk with a
+  // controlled value + shouldFilter={false} does NOT re-select when the list changes, so we drive it.bug:
+  // on a query change hits briefly drops to [] (1 frame), leaving only the raw-id fallback → the old effect
+  // selected it AND then never recovered (raw stays in the list, so `includes(selected)` was true). Fix: the raw
+  // fallback is auto-selected ONLY when there are NO real hits; otherwise the first real hit wins. A MANUAL nav
+  // (arrows / Ctrl-j/k) pins the user's choice (incl. the raw row) until the query changes — tracked by
+  // `userNavRef`, reset whenever the typed query changes.
+  const userNavRef = useRef(false);
+  useEffect(() => { userNavRef.current = false; }, [raw]); // a new query → resume auto-selecting the first hit
   useEffect(() => {
+    if (userNavRef.current) return; // the user picked a row by hand → don't yank it from under them
     const ids = (hits ?? []).map((h) => h.id);
-    const candidates = looksLikeId ? [...ids, `__raw__${raw}`] : ids;
-    if (candidates.length === 0) { if (selected !== "") setSelected(""); return; }
-    if (!candidates.includes(selected)) setSelected(candidates[0]!);
+    const target = ids.length > 0 ? ids[0]! : looksLikeId ? `__raw__${raw}` : "";
+    if (selected !== target) setSelected(target);
   }, [hits, looksLikeId, raw, selected]);
 
   return (
@@ -54,6 +59,8 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
           onValueChange={setSelected}
           className="bg-transparent"
           onKeyDown={(e) => {
+            // #366any MANUAL list nav pins the user's selection (so a query-change auto-select can't yank it).
+            if (e.key === "ArrowDown" || e.key === "ArrowUp" || (e.ctrlKey && (e.key === "j" || e.key === "k"))) userNavRef.current = true;
             // Ctrl-j/k = list nav (the app-wide cmdk convention; Ctrl-n is browser-reserved).
             if (e.ctrlKey && (e.key === "j" || e.key === "k")) {
               e.preventDefault();
