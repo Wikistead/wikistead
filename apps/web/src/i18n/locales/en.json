@@ -867,5 +867,10 @@
     "tagsLabel": "Tags",
     "addTag": "Add tag…",
     "empty": "No tags"
+  },
+  "tagPicker": {
+    "title": "Insert a tagged-pages list",
+    "placeholder": "Tag name…",
+    "insert": "Insert"
   }
 }

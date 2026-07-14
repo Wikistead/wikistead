@@ -866,5 +866,10 @@
     "tagsLabel": "タグ",
     "addTag": "タグを追加…",
     "empty": "タグなし"
+  },
+  "tagPicker": {
+    "title": "タグのページ一覧を挿入",
+    "placeholder": "タグ名…",
+    "insert": "挿入"
   }
 }
