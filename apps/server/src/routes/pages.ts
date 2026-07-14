@@ -1487,20 +1487,24 @@ export async function deletePage(
 // Resolve the request principal (member OR guest) for a page action. Returns the FGA subject,
 // the attribution id, and (guests) the time context for the share_link condition.
 //
-// Guest token binding
-// - a PAGE token is bound to its own page (a token for page A can never read page B).
-// - a SPACE token (#104) is accepted for ANY page — the per-route FGA check re-derives
-// authority (page#view ← viewer from space), so it grants ONLY published pages in that
-// space and never an out-of-space page or a draft. (Space links are view-only, so the
-// edit-gated routes reject the token at the auth hook before this is reached.)
+// Guest tokens carry NO resource pre-binding here (#397; #218/): the token proves WHO
+// (share_link:<id>, tenant-checked + capability-checked in the auth hook), and each route's FGA check
+// decides WHAT — a page token reaches its own page + published descendants (the #218 folder cascade),
+// a space token (#104) the space's published pages; anything else resolves to the normal deny (read
+// paths hide existence with a uniform 404, edit actions 403). Expiry rides on the returned context.
 export function principalForPage(req: FastifyRequest, pageId: string): { subject: string; createdBy: string; context?: { current_time: string } } {
   if (req.user) {
     return { subject: `user:${req.user.sub}`, createdBy: `user:${req.user.sub}` }
   }
   if (req.guest) {
-    const r = req.guest.resource
-    const bound = (r.type === 'page' && r.id === pageId) || r.type === 'space'
-    if (!bound) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+    // #397 (#218/): NO resource-id pre-binding — OpenFGA is the sole authority, exactly like the
+    // attachment routes and batchPrincipal. The old exact-match bind (`r.id === pageId` for a page token)
+    // pre-dated folder links and 403'd a FOLDER link's guest on every DESCENDANT page even though the model
+    // cascades the grant (`*_direct from parent`) — theruling says a folder link covers its subtree.
+    // Delegating means: the token proves WHO (share_link:<id>, tenant-checked in the auth hook); the route's
+    // FGA check (with current_time for expiry) decides WHAT — an unrelated page resolves to a uniform 404 at
+    // the view gate (existence-hiding), a revoked link loses everything (tuple gone). No new authority: the
+    // link's tuples only ever grant its own resource + descendants.
     return {
       subject: `share_link:${req.guest.shareLinkId}`,
       // #331 / ADR-138 (C-6): attribute the revision/feed to the pseudonymous per-session id (unforgeable — it

@@ -111,9 +111,12 @@ describe('guest HTTP path: published read + publish authorization', () => {
     expect(body.publishedMd).toContain(WORD)
   })
 
-  it('resource binding: a token for page A cannot read/publish page B', async () => {
-    expect((await guestGet(viewTok, pageB)).statusCode).toBe(403) // token-scope error (bound to page A) — the guest hook rejects before getPublished; uniform for any page B, so no existence leak (#262 targets the member read path)
-    expect((await guestPublish(editTok, pageB)).statusCode).toBe(403) // publish is an edit ACTION → keeps 403
+  it('a token for page A cannot read/publish page B (FGA denies — the #397 delegation keeps the denial)', async () => {
+    // #397: the exact-match pre-binding is gone (a FOLDER link must reach its descendants); OpenFGA is the
+    // sole gate, so an unrelated page B resolves through the normal gates: the READ hides existence
+    // (uniform 404, page-view-gate), the publish edit ACTION keeps its 403 (action failure ≠ hidden read).
+    expect((await guestGet(viewTok, pageB)).statusCode).toBe(404)
+    expect((await guestPublish(editTok, pageB)).statusCode).toBe(403)
   })
 
   // ── internal-resource (image) resolution: page-view gated, guest principal ──

@@ -139,9 +139,12 @@ describe('#100 guest commenting (view link + comment_open)', () => {
     expect(res.statusCode).toBe(401) // member-only route — no guest config
   })
 
-  it('a guest token for THIS page cannot comment on another page (page-bound)', async () => {
+  it('a guest token for THIS page cannot comment on another page (FGA denies → uniform 404)', async () => {
     const res = await app.inject({ method: 'POST', url: `/pages/some-other-page/comments`, headers: H(viewTok), payload: { body: 'x' } })
-    expect(res.statusCode).toBe(403) // token resource is bound to PAGE
+    // #397: the exact-match token pre-binding (403) is gone — the FGA check is the sole gate (a folder
+    // link must reach its descendants). The DENIAL stays; the status is now the uniform 404 (existence
+    // hidden — strictly less oracle than the old 403).
+    expect(res.statusCode).toBe(404)
   })
 
   // #211: a guest whose VIEW grant is gone (link revoked) must be 404'd — view is the floor, so the
