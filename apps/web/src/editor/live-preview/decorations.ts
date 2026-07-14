@@ -2623,7 +2623,20 @@ export function syntaxRevealsAt(mode: DisplayMode, readOnly: boolean, underSelec
   if (mode === "wysiwyg") return false;
   return underSelection;
 }
+// #358: EXPLICIT entry (Ctrl+Enter / the ✎ pill → enterMacroAt → macroRenderActiveField) reveals the
+// COVERED range in every EDITABLE mode — including WYSIWYG. #164's "wysiwyg never reveals" rule governs
+// the AUTOMATIC caret-in reveal only (syntaxRevealsAt above, unchanged); without this split, every
+// reveal-only macro (details, embed-page, standalone image/attachment, legacy source fences) had NO edit
+// path at all in WYSIWYG (enterMacroAt dispatched the effect, but the reveal predicates ignored it).
+// Containment (not overlap) so an active block never bleeds reveal into its neighbours; readOnly still
+// never reveals (nothing to edit). Esc / caret-out clears the field (escExit) in every mode alike.
+function explicitEntryCovers(state: EditorState, from: number, to: number): boolean {
+  if (state.readOnly) return false;
+  const a = state.field(macroRenderActiveField, false);
+  return !!a && a.from <= from && a.to >= to;
+}
 function rangeRevealed(state: EditorState, from: number, to: number): boolean {
+  if (explicitEntryCovers(state, from, to)) return true; // #358: explicit entry wins in every editable mode
   return syntaxRevealsAt(
     state.facet(displayMode),
     state.readOnly,
@@ -2639,6 +2652,7 @@ function rangeRevealed(state: EditorState, from: number, to: number): boolean {
 // on-selection reveal is the established format-toolbar/vim-decorate behaviour). For a single empty caret this is
 // byte-identical to rangeRevealed, so only visual selections over BLOCK atoms change.
 function blockRevealed(state: EditorState, from: number, to: number): boolean {
+  if (explicitEntryCovers(state, from, to)) return true; // #358: explicit entry wins in every editable mode
   return syntaxRevealsAt(
     state.facet(displayMode),
     state.readOnly,
