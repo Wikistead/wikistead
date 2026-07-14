@@ -513,9 +513,20 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     const v = previewViewRef.current;
     if (!v) return;
     const next = publishedMd ?? "";
-    if (v.state.doc.toString() !== next) {
-      v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: next } });
-    }
+    const cur = v.state.doc.toString();
+    if (cur === next) return;
+    // #361dispatch the MINIMAL diff (shared prefix + suffix), NOT a whole-doc replace. A checkbox
+    // toggle changes only a couple of chars, so CM keeps every surrounding widget and calls updateDOM on the
+    // affected one (the checkbox flips + the :::todo ring animates its stroke-dashoffset in place) instead of
+    // rebuilding every widget — which killed the ring transition and made the box bounce on the reading
+    // surface (the editor surface already gets minimal Yjs changes, so it animated; this makes view match).
+    let s = 0;
+    const maxS = Math.min(cur.length, next.length);
+    while (s < maxS && cur.charCodeAt(s) === next.charCodeAt(s)) s++;
+    let e = 0;
+    const maxE = Math.min(cur.length - s, next.length - s);
+    while (e < maxE && cur.charCodeAt(cur.length - 1 - e) === next.charCodeAt(next.length - 1 - e)) e++;
+    v.dispatch({ changes: { from: s, to: cur.length - e, insert: next.slice(s, next.length - e) } });
   }, [publishedMd, surfaceKey]);
 
   useEffect(() => { pushHighlights(previewViewRef.current); // eslint-disable-next-line react-hooks/exhaustive-deps
