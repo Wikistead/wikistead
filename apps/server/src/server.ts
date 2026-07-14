@@ -4,6 +4,7 @@ import { startOutboxWorker } from './search/index.js'
 import { startAuditDrainWorker } from './audit/outbox.js'
 import { startWebhookDrainWorker } from './routes/webhooks.js'
 import { startShareLinkSweepWorker } from './routes/share-links.js'
+import { startTrashRetentionWorker } from './routes/pages.js'
 import { fgaClient } from '@wikistead/authz'
 import { assertProductionFgaPersistent } from './openfga-guard.js'
 
@@ -43,6 +44,11 @@ export async function startServer(): Promise<FastifyInstance> {
   // each event to matching active hooks via the pinned SSRF-safe client. Started here (not buildApp) so
   // inject-driven tests don't spawn a timer.
   startWebhookDrainWorker(fgaClient, Number(process.env.WEBHOOK_OUTBOX_POLL_MS ?? 5000))
+
+  // Background trash retention purge (#411 / ADR-153): permanently deletes trash entries older than
+  // TRASH_RETENTION_DAYS (30). Hourly is plenty for a 30-day horizon; started here (not buildApp) so
+  // inject-driven tests don't spawn a timer.
+  startTrashRetentionWorker(fgaClient, app.searchDriver, Number(process.env.TRASH_SWEEP_POLL_MS ?? 60 * 60 * 1000))
 
   return app
 }

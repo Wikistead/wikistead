@@ -68,9 +68,11 @@ export async function listOrphanDrafts(
   fga: OpenFgaClient,
   _args: { tenantId: string },
 ): Promise<OrphanDraft[]> {
-  // Candidate drafts: never published. RLS scopes the query to the current tenant.
+  // Candidate drafts: never published. RLS scopes the query to the current tenant. A TRASHED draft is
+  // excluded (#411 / ADR-153): its recovery surface is the trash (restore), not the orphan-drafts claim —
+  // listing it here would leak its title past the trash's per-root manage gate.
   const candidates = await db.sql<{ id: string; title: string; created_at: Date }[]>`
-    SELECT id, title, created_at FROM pages WHERE published_at IS NULL ORDER BY created_at
+    SELECT id, title, created_at FROM pages WHERE published_at IS NULL AND deleted_at IS NULL ORDER BY created_at
   `
   if (candidates.length === 0) return []
   const liveSubs = await liveMemberSubs(db)
@@ -87,10 +89,12 @@ export async function listOrphanDrafts(
 // This is the server-side TOCTOU re-evaluation claim runs (never trusts the client): a live
 // strict-private page (published, or with any live grant) returns false → claim is refused.
 export async function isOrphanPage(db: TenantDb, fga: OpenFgaClient, pageId: string): Promise<boolean> {
-  const [row] = await db.sql<{ published_at: Date | null }[]>`
-    SELECT published_at FROM pages WHERE id = ${pageId}
+  const [row] = await db.sql<{ published_at: Date | null; deleted_at: Date | null }[]>`
+    SELECT published_at, deleted_at FROM pages WHERE id = ${pageId}
   `
-  if (!row || row.published_at != null) return false // unknown page or published → not an orphan
+  // Unknown, published, or trashed (#411 — the trash owns its recovery; a claim here would mint a manage
+  // grant that sidesteps the trash's per-root gate) → not claimable as an orphan.
+  if (!row || row.published_at != null || row.deleted_at != null) return false
   const liveSubs = await liveMemberSubs(db)
   return !(await pageHasLiveAccess(fga, pageId, liveSubs))
 }

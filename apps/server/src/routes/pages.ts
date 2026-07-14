@@ -2,7 +2,7 @@ import * as Y from 'yjs'
 import type { Sql } from 'postgres'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
+import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readUserTuplesByType } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { docName } from '@wikistead/types'
 import { resolveDirectiveRanges } from '@wikistead/macro-render' // #353: scan `:::query` blocks for the anon snapshot
@@ -11,6 +11,7 @@ import type { SearchDriver } from '../search/index.js'
 import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc } from './revision-ydoc.js'
 import type { TenantDb } from '../db/index.js'
+import { pool, registry, acquireTenantDb } from '../db/index.js' // #411: cross-tenant trash retention sweep
 import { flushDraft } from '../collab-flush.js'
 import { countTodoTasks } from '../task-progress.js' // #290: :::todo aggregate for the sidebar ring
 import { evaluatePublishAbuse } from '../abuse-filter.js' // #328 / ADR-140: publish-boundary abuse filter
@@ -244,8 +245,9 @@ export async function createPage(
   if (parentId) {
     // Nesting is structural only and stays within one space; the parent must be
     // a page in the SAME space (the composite FK already blocks cross-tenant).
-    const [p] = await db.sql<{ space_id: string }[]>`SELECT space_id FROM pages WHERE id = ${parentId}`
-    if (!p || p.space_id !== args.spaceId) throw Object.assign(new Error('parent not in space'), { statusCode: 400 })
+    const [p] = await db.sql<{ space_id: string; deleted_at: Date | null }[]>`SELECT space_id, deleted_at FROM pages WHERE id = ${parentId}`
+    // A trashed parent is refused with the SAME error as an absent one (#411 — the trash hides existence).
+    if (!p || p.deleted_at || p.space_id !== args.spaceId) throw Object.assign(new Error('parent not in space'), { statusCode: 400 })
     // #218 / ADR-103 (comment 996 decision 3): cap nesting depth so the inherited-authz parent chain stays
     // resolvable under OpenFGA's resolution-depth limit. The new leaf's depth = parent depth + 1.
     if ((await ancestorDepth(db, parentId)) + 1 > MAX_PAGE_DEPTH) {
@@ -312,7 +314,7 @@ export async function listPages(
   const rows = await db.sql<PageRow[]>`
     SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at,
            has_unpublished_changes, (published_at IS NOT NULL) AS published, task_done, task_total
-    FROM pages WHERE space_id = ${args.spaceId} ORDER BY position, created_at
+    FROM pages WHERE space_id = ${args.spaceId} AND deleted_at IS NULL ORDER BY position, created_at
   `
   const allowed = await filterAuthorized(fga, args.subject, 'view', rows.map((r) => r.id), args.context)
   const visible = rows.filter((r) => allowed.has(r.id))
@@ -651,15 +653,17 @@ const PAGE_RELATIONS: PageRelation[] = ['view', 'comment', 'edit', 'manage', 'mo
 
 // capability → FGA relation to WRITE. #218 / ADR-103: member/group/link direct grants go to the `*_direct`
 // LEAVES (view_direct / edit_direct / manage_direct) so they cascade down the parent chain; `edit`/`manage` are
-// purely computed now (a direct write to them fails "type not allowed"). `comment` keeps its own direct types.
-// `moderate` (#330) has its own direct type on the relation itself ([user, group#member]) — no leaf split
-// needed (it does not cascade down parents; a per-page appointment is deliberate and page-scoped).
-function fgaRelationForCap(cap: PageRelation): 'view_direct' | 'comment' | 'edit_direct' | 'manage_direct' | 'moderate' {
+// purely computed now (a direct write to them fails "type not allowed"). #411 / ADR-153: `comment` joined
+// them — the trash subtraction made it computed, so direct comment grants write the NEW `comment_direct`
+// leaf (existing tuples migrated by infra/openfga/migrate-comment-direct.ts). `moderate` (#330) keeps its
+// own direct type on the relation itself ([user, group#member]) — no leaf split needed (it does not
+// cascade down parents; a per-page appointment is deliberate and page-scoped).
+function fgaRelationForCap(cap: PageRelation): 'view_direct' | 'comment_direct' | 'edit_direct' | 'manage_direct' | 'moderate' {
   if (cap === 'view') return 'view_direct'
   if (cap === 'edit') return 'edit_direct'
   if (cap === 'manage') return 'manage_direct'
   if (cap === 'moderate') return 'moderate'
-  return 'comment'
+  return 'comment_direct'
 }
 // FGA relation (as stored/read) → user-facing capability; null for non-grant relations (space/parent/
 // comment_open/view/view_base). The `*_direct` leaves surface as their capability.
@@ -667,7 +671,7 @@ function capForFgaRelation(rel: string): PageRelation | null {
   if (rel === 'view_direct') return 'view'
   if (rel === 'edit_direct') return 'edit'
   if (rel === 'manage_direct') return 'manage'
-  if (rel === 'comment') return 'comment'
+  if (rel === 'comment_direct') return 'comment'
   if (rel === 'moderate') return 'moderate'
   return null
 }
@@ -1150,7 +1154,7 @@ export async function listSpacePagesOverview(
            count(sl.id) FILTER (WHERE sl.revoked_at IS NULL)::int AS link_count
     FROM pages p
     LEFT JOIN share_links sl ON sl.resource_type = 'page' AND sl.resource_id = p.id
-    WHERE p.space_id = ${args.spaceId}
+    WHERE p.space_id = ${args.spaceId} AND p.deleted_at IS NULL
     GROUP BY p.id, p.title, p.published_at, p.has_unpublished_changes, p.position, p.created_at
     ORDER BY p.position, p.created_at
   `
@@ -1331,17 +1335,20 @@ export async function movePage(
   driver: SearchDriver,
   args: { pageId: string; userId: string; parentId: string | null; afterId: string | null; spaceId?: string | null },
 ): Promise<Page> {
-  const [page] = await db.sql<PageRow[]>`
-    SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
+  const [page] = await db.sql<(PageRow & { deleted_at: Date | null })[]>`
+    SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at, deleted_at
     FROM pages WHERE id = ${args.pageId}
   `
-  if (!page) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  // Trashed ≡ absent (#411): a trashed page can't be moved (the FGA marker would deny anyway, but a 403
+  // there would reveal existence — keep the uniform 404).
+  if (!page || page.deleted_at) throw Object.assign(new Error('not found'), { statusCode: 404 })
 
   const newParent = args.parentId ?? null
   let targetSpace = args.spaceId ?? page.space_id
   if (newParent) {
-    const [p] = await db.sql<{ space_id: string }[]>`SELECT space_id FROM pages WHERE id = ${newParent}`
-    if (!p) throw Object.assign(new Error('parent not found'), { statusCode: 400 })
+    const [p] = await db.sql<{ space_id: string; deleted_at: Date | null }[]>`SELECT space_id, deleted_at FROM pages WHERE id = ${newParent}`
+    // Trashed ≡ absent (#411): nothing can be moved INTO the trash via a stale parent id.
+    if (!p || p.deleted_at) throw Object.assign(new Error('parent not found'), { statusCode: 400 })
     if (args.spaceId != null && p.space_id !== args.spaceId) {
       throw Object.assign(new Error('parent not in target space'), { statusCode: 400 })
     }
@@ -1468,6 +1475,179 @@ export async function movePage(
 
 // Delete order: FGA first → outbox + DB in same tx.
 // Outbox 'delete' entry ensures Meili doc is removed even if Meili is temporarily down.
+// ── #411 / ADR-153: page trash (soft delete) ─────────────────────────────────
+//
+// Trash = write the FGA `trashed` marker PAIR on the whole subtree (view/edit/comment go dark through the
+// existing per-item checks — uniform 404, byte-identical to absent) + stamp the rows
+// (deleted_at/deleted_by/deleted_root_id) for the trash UI and the retention sweep. Every underlying
+// grant tuple SURVIVES: restore = delete the pair + clear the stamps, and access comes back exactly as it
+// was. manage is NOT subtracted by the marker — it is the trash-listing/restore/purge authority.
+// Open collab sessions follow the freeze (#329) posture: the marker cuts `edit`, so writes/reconnects are
+// refused at the collab layer's FGA checks; no forced disconnect broadcast in v1.
+
+export const TRASH_RETENTION_DAYS = 30 // fixed in v1 (approval ruling); a tenant setting is a later seam
+
+const TRASHED_MARKERS = (pageId: string) => [
+  // The #244 typed-wildcard PAIR: a marker must enumerate every principal type it stops.
+  { user: 'user:*', relation: 'trashed', object: `page:${pageId}` },
+  { user: 'share_link:*', relation: 'trashed', object: `page:${pageId}` },
+]
+
+// Move a page (and its whole subtree) to the trash. Marker-FIRST (revoke before anything else — ADR-003
+// ordering), then stamp + search-doc removal (the synchronous-reindex class: trash IS a permission
+// revocation). If the stamp tx fails the markers are COMPENSATED away (best effort) so no "invisible
+// orphan" (view=false, not in the trash) survives a partial failure; the operation is idempotent and
+// retryable either way (already-stamped rows are skipped; marker writes tolerate duplicates).
+export async function trashPage(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; userId: string },
+): Promise<void> {
+  await requireManage(fga, args.userId, args.pageId)
+  const [meta] = await db.sql<[{ tenant_id: string; deleted_root_id: string | null }?]>`
+    SELECT tenant_id, deleted_root_id FROM pages WHERE id = ${args.pageId}
+  `
+  if (!meta) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  if (meta.deleted_root_id) return // already in the trash (its own root or riding an ancestor's) — no-op
+  const subtree = [args.pageId, ...(await descendantIds(db, args.pageId))]
+  // Idempotent scope: only rows not already claimed by an existing trash entry get stamped/marked
+  // a nested OLDER trash root keeps its own deleted_root_id (restore/purge are keyed by it, ADR §2).
+  const fresh = (await db.sql<{ id: string }[]>`
+    SELECT id FROM pages WHERE id = ANY(${subtree}) AND deleted_root_id IS NULL
+  `).map((r) => r.id)
+  if (fresh.length === 0) return
+  for (const id of fresh) {
+    await writeTuples(fga, TRASHED_MARKERS(id)).catch((e) => {
+      // ONLY a duplicate write (retry after a partial failure) is tolerated; anything else must abort
+      // the marker is the authorization change and MUST land before the page "disappears" anywhere else.
+      // (Never key on the generic write_failed_due_to_invalid_input code — a model/relation mismatch
+      // reports the same code, and swallowing that would trash the row with NO revocation = a leak.)
+      if (!String(e).includes('already exists')) throw e
+    })
+  }
+  try {
+    const outboxIds: { id: string; pageId: string }[] = []
+    await db.tx(async (tx) => {
+      await tx`
+        UPDATE pages SET deleted_at = now(), deleted_by = ${args.userId}, deleted_root_id = ${args.pageId}
+        WHERE id = ANY(${fresh})
+      `
+      for (const id of fresh) {
+        outboxIds.push({ id: await enqueueOutbox(tx, { tenantId: meta.tenant_id, pageId: id, operation: 'delete' }), pageId: id })
+      }
+    })
+    for (const o of outboxIds) processOutboxAsync(driver, o.id, { tenantId: meta.tenant_id, pageId: o.pageId, operation: 'delete' })
+  } catch (e) {
+    // Compensate the markers so a stamp failure never leaves an invisible orphan (view=false but absent
+    // from the trash). Compensation is best-effort — on failure the op stays retryable end-to-end.
+    for (const id of fresh) await deleteTuples(fga, TRASHED_MARKERS(id)).catch(() => {})
+    throw e
+  }
+  emit({ type: 'page.trashed', tenantId: meta.tenant_id, pageId: args.pageId, actorId: args.userId })
+}
+
+// Restore a trash ROOT (and the rows that rode into the trash with it — keyed by deleted_root_id, never
+// "descendants of"). Marker deletion FIRST: a crash between marker-delete and stamp-clear leaves the row
+// still listed in the trash (stamps intact) where a retry heals it; the reverse order could strand a page
+// invisible everywhere. A non-existent id, a non-root, or a caller without manage is a uniform 404 (no
+// trash-existence oracle).
+export async function restorePage(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; userId: string },
+): Promise<{ reparented: boolean }> {
+  const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: args.pageId })
+  if (!canManage) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  const [root] = await db.sql<[{ tenant_id: string; parent_id: string | null; deleted_root_id: string | null }?]>`
+    SELECT tenant_id, parent_id, deleted_root_id FROM pages WHERE id = ${args.pageId}
+  `
+  if (!root || root.deleted_root_id !== args.pageId) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  const rows = (await db.sql<{ id: string; published_at: Date | null }[]>`
+    SELECT id, published_at FROM pages WHERE deleted_root_id = ${args.pageId}
+  `)
+  for (const r of rows) {
+    await deleteTuples(fga, TRASHED_MARKERS(r.id)).catch((e) => {
+      // Idempotent: a retry finds the pair already gone ("did not exist"). Any OTHER failure aborts
+      // BEFORE the stamps are cleared — clearing them with markers still up would drop the row from the
+      // trash listing while it stays invisible everywhere (the invisible-orphan state trash must never
+      // produce); aborting here leaves a retryable half-state (still listed, partially visible).
+      if (!String((e as Error)?.message ?? e).includes('did not exist')) throw e
+    })
+  }
+  // Re-parent when the original parent is itself trashed or purged (ADR §2): the restored root moves to
+  // the space root; its own descendants keep their structure.
+  let reparented = false
+  if (root.parent_id) {
+    const [p] = await db.sql<[{ deleted_at: Date | null }?]>`SELECT deleted_at FROM pages WHERE id = ${root.parent_id}`
+    if (!p || p.deleted_at) reparented = true
+  }
+  const outboxIds: { id: string; pageId: string }[] = []
+  await db.tx(async (tx) => {
+    await tx`
+      UPDATE pages SET deleted_at = NULL, deleted_by = NULL, deleted_root_id = NULL
+      WHERE deleted_root_id = ${args.pageId}
+    `
+    if (reparented) await tx`UPDATE pages SET parent_id = NULL WHERE id = ${args.pageId}`
+    // Published pages return to the search index (the anonymous/public and member candidate sets alike);
+    // drafts stay unindexed as always.
+    for (const r of rows) {
+      if (!r.published_at) continue
+      outboxIds.push({ id: await enqueueOutbox(tx, { tenantId: root.tenant_id, pageId: r.id, operation: 'upsert' }), pageId: r.id })
+    }
+  })
+  for (const o of outboxIds) processOutboxAsync(driver, o.id, { tenantId: root.tenant_id, pageId: o.pageId, operation: 'upsert' })
+  emit({ type: 'page.trash_restored', tenantId: root.tenant_id, pageId: args.pageId, actorId: args.userId })
+  return { reparented }
+}
+
+// Permanently delete a trash ROOT — today's physical delete, reachable only THROUGH the trash (the
+// DELETE /pages/:id route trashes; purge is explicit or the retention sweep). Uniform 404 for non-root /
+// non-manage / absent (deletePage re-checks manage; the marker never cut it).
+export async function purgePage(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; userId: string },
+): Promise<void> {
+  const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: args.pageId })
+  if (!canManage) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  const [row] = await db.sql<[{ deleted_root_id: string | null }?]>`SELECT deleted_root_id FROM pages WHERE id = ${args.pageId}`
+  if (!row || row.deleted_root_id !== args.pageId) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  await deletePage(db, fga, driver, { pageId: args.pageId, userId: args.userId })
+}
+
+// The per-space trash listing: ROOT entries only. The space gate is `view` (uniform 404 — a non-member
+// cannot probe a space's trash; the route carries no guest config so a share_link token never reaches
+// here), then every entry is FGA-`manage`-confirmed for the caller, omit-on-deny — a member who cannot
+// manage a trashed page never learns its title or that it existed (no count leak; a private page's entry
+// stays allowlist-only automatically since `private` cuts manage_from_space).
+export interface TrashEntry { id: string; title: string; deletedAt: string; deletedBy: string | null; descendants: number }
+
+export async function listSpaceTrash(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { spaceId: string; userId: string },
+): Promise<TrashEntry[]> {
+  const canView = await check(fga, `user:${args.userId}`, 'view', { type: 'space', id: args.spaceId })
+  if (!canView) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  const rows = await db.sql<{ id: string; title: string; deleted_at: Date; deleted_by: string | null; descendants: number }[]>`
+    SELECT p.id, p.title, p.deleted_at, p.deleted_by,
+           (SELECT COUNT(*)::int - 1 FROM pages c WHERE c.deleted_root_id = p.id) AS descendants
+    FROM pages p
+    WHERE p.space_id = ${args.spaceId} AND p.deleted_root_id = p.id
+    ORDER BY p.deleted_at DESC
+    LIMIT 200
+  `
+  const out: TrashEntry[] = []
+  for (const r of rows) {
+    if (!(await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: r.id }))) continue
+    out.push({ id: r.id, title: r.title, deletedAt: r.deleted_at.toISOString(), deletedBy: r.deleted_by, descendants: r.descendants })
+  }
+  return out
+}
+
 export async function deletePage(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -1476,7 +1656,17 @@ export async function deletePage(
 ): Promise<void> {
   const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: args.pageId })
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  await physicalDeletePage(db, fga, driver, { pageId: args.pageId, actorId: args.userId })
+}
 
+// #411 / ADR-153: the gate-free physical delete — callers authorize (deletePage/purgePage: caller manage;
+// retention sweep: system context, the trash entry itself is the authority). Never routed directly.
+async function physicalDeletePage(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; actorId: string },
+): Promise<void> {
   const [meta] = await db.sql<[{ tenant_id: string }]>`SELECT tenant_id FROM pages WHERE id = ${args.pageId}`
   const tenantId = meta?.tenant_id ?? ''
 
@@ -1499,7 +1689,86 @@ export async function deletePage(
     await tx`DELETE FROM pages WHERE id = ${args.pageId}` // cascade deletes descendants
   })
   for (const o of outboxIds) processOutboxAsync(driver, o.id, { tenantId, pageId: o.pageId, operation: 'delete' })
-  emit({ type: 'page.deleted', tenantId, pageId: args.pageId, actorId: args.userId })
+  emit({ type: 'page.deleted', tenantId, pageId: args.pageId, actorId: args.actorId })
+}
+
+// #411 / ADR-153: purge trash entries older than TRASH_RETENTION_DAYS, across all tenants. Same
+// cross-tenant enumeration as sweepShareLinkRevokeFailures (tenants registry has no RLS); each tenant's
+// rows are read/deleted under its own TenantDb. System context: the expired trash entry IS the deletion
+// authority (the trashing member already held manage at trash time) — no user gate re-check.
+//
+// The sweep doubles as the trash's CRASH RECONCILIATION (ADR-153 §3): a crash between trashPage's marker
+// write and its stamp tx (with the inline compensation ALSO lost) leaves an "invisible orphan" — view=false
+// but in neither the tree nor the trash. Each pass re-stamps any page carrying a `trashed` marker with a
+// NULL deleted_at (as its own root, starting its retention clock, search doc dropped), so the state
+// self-heals with no manual repair path.
+export async function sweepExpiredTrash(fga: OpenFgaClient, driver: SearchDriver): Promise<number> {
+  // All trashed markers, read ONCE (the store spans tenants; RLS scopes the row work per tenant below).
+  const marked = (await readUserTuplesByType(fga, 'user:*', 'page:'))
+    .filter((t) => t.relation === 'trashed')
+    .map((t) => t.object.slice('page:'.length))
+  const tenants = await pool<{ id: string }[]>`SELECT id FROM tenants`
+  let purged = 0
+  for (const { id: tenantId } of tenants) {
+    const tenant = await registry.findById(tenantId)
+    if (!tenant) continue
+    let db: TenantDb | null = null
+    try {
+      db = await acquireTenantDb(tenant)
+      // Reconciliation: marker present, stamp missing → re-stamp into the trash (own root).
+      if (marked.length > 0) {
+        const orphans = (await db.sql<{ id: string }[]>`
+          SELECT id FROM pages WHERE id = ANY(${marked}) AND deleted_at IS NULL
+        `).map((r) => r.id)
+        for (const id of orphans) {
+          const outboxIds: string[] = []
+          await db.tx(async (tx) => {
+            await tx`
+              UPDATE pages SET deleted_at = now(), deleted_by = 'system:trash-reconcile', deleted_root_id = ${id}
+              WHERE id = ${id} AND deleted_at IS NULL
+            `
+            outboxIds.push(await enqueueOutbox(tx, { tenantId, pageId: id, operation: 'delete' }))
+          })
+          for (const o of outboxIds) processOutboxAsync(driver, o, { tenantId, pageId: id, operation: 'delete' })
+        }
+      }
+      // ROOTS only — physicalDeletePage cascades their subtrees; a nested older root that already
+      // expired is picked up by its own row (deleted_root_id = itself) on this or a later pass.
+      const roots = await db.sql<{ id: string }[]>`
+        SELECT id FROM pages
+        WHERE deleted_root_id = id AND deleted_at < now() - make_interval(days => ${TRASH_RETENTION_DAYS})
+      `
+      for (const r of roots) {
+        await physicalDeletePage(db, fga, driver, { pageId: r.id, actorId: 'system:trash-retention' })
+        purged++
+      }
+    } catch {
+      // Leave this tenant's expired rows for the next sweep (transient DB/FGA failure).
+    } finally {
+      await db?.release().catch(() => {})
+    }
+  }
+  return purged
+}
+
+// Start the daily retention sweep (server entry only, NOT buildApp — tests drive sweepExpiredTrash
+// directly). Idempotent across instances: the row-existence check inside physicalDeletePage and the
+// `deleted_at <` predicate make a concurrent double-purge a no-op race, not a fault.
+export function startTrashRetentionWorker(fga: OpenFgaClient, driver: SearchDriver, intervalMs = 60 * 60 * 1000): () => void {
+  let running = false
+  const timer = setInterval(async () => {
+    if (running) return
+    running = true
+    try {
+      await sweepExpiredTrash(fga, driver)
+    } catch {
+      /* next tick retries */
+    } finally {
+      running = false
+    }
+  }, intervalMs)
+  timer.unref?.()
+  return () => clearInterval(timer)
 }
 
 // Resolve the request principal (member OR guest) for a page action. Returns the FGA subject,
@@ -1595,6 +1864,7 @@ export async function getBacklinks(
     SELECT id, title, published_md FROM pages
     WHERE id <> ${args.pageId}
       AND published_at IS NOT NULL
+      AND deleted_at IS NULL
       AND published_md IS NOT NULL
       AND published_md LIKE ${'%' + args.pageId + '%'}
     ORDER BY updated_at DESC
@@ -1775,8 +2045,8 @@ export async function getRelatedPages(
     SELECT pl.to_page_id AS mid, mp.title AS mid_title, pl.from_page_id AS related, rp.title AS related_title
     FROM page_links pl
     JOIN mids ON mids.mid = pl.to_page_id
-    JOIN pages mp ON mp.id = pl.to_page_id
-    JOIN pages rp ON rp.id = pl.from_page_id
+    JOIN pages mp ON mp.id = pl.to_page_id AND mp.deleted_at IS NULL
+    JOIN pages rp ON rp.id = pl.from_page_id AND rp.deleted_at IS NULL
     WHERE pl.from_page_id <> ${args.pageId}
     ORDER BY rp.updated_at DESC
     LIMIT ${RELATED_OVER_FETCH}
@@ -1845,8 +2115,8 @@ export async function getLocalGraph(
         SELECT pl.from_page_id AS from_id, pl.to_page_id AS to_id, pl.type,
                fp.title AS from_title, tp.title AS to_title
         FROM page_links pl
-        JOIN pages fp ON fp.id = pl.from_page_id
-        JOIN pages tp ON tp.id = pl.to_page_id
+        JOIN pages fp ON fp.id = pl.from_page_id AND fp.deleted_at IS NULL
+        JOIN pages tp ON tp.id = pl.to_page_id AND tp.deleted_at IS NULL
         WHERE pl.from_page_id = ${args.pageId} OR pl.to_page_id = ${args.pageId}
         ORDER BY GREATEST(fp.updated_at, tp.updated_at) DESC
         LIMIT ${GRAPH_OVER_FETCH}
@@ -1860,8 +2130,8 @@ export async function getLocalGraph(
         SELECT pl.from_page_id AS from_id, pl.to_page_id AS to_id, pl.type,
                fp.title AS from_title, tp.title AS to_title
         FROM page_links pl
-        JOIN pages fp ON fp.id = pl.from_page_id
-        JOIN pages tp ON tp.id = pl.to_page_id
+        JOIN pages fp ON fp.id = pl.from_page_id AND fp.deleted_at IS NULL
+        JOIN pages tp ON tp.id = pl.to_page_id AND tp.deleted_at IS NULL
         WHERE pl.from_page_id = ${args.pageId} OR pl.to_page_id = ${args.pageId}
            OR pl.from_page_id IN (SELECT id FROM n1) OR pl.to_page_id IN (SELECT id FROM n1)
         ORDER BY GREATEST(fp.updated_at, tp.updated_at) DESC
@@ -1947,6 +2217,7 @@ export async function getSuggestedTags(
     SELECT pt.tag, pt.display, pt.page_id FROM page_tags pt
     JOIN pages p ON p.id = pt.page_id
     WHERE p.published_at IS NOT NULL
+      AND p.deleted_at IS NULL
       AND pt.tag LIKE ${escapeLike(prefix) + '%'}
     ORDER BY pt.tag ASC, pt.page_id ASC
     LIMIT ${TAG_SUGGEST_OVER_FETCH}
@@ -2007,6 +2278,7 @@ export async function getListResults(
       WHERE pt.tag = ${tag}
         AND pt.page_id <> ${pageId}
         AND p.published_at IS NOT NULL
+        AND p.deleted_at IS NULL
       ORDER BY p.updated_at DESC
       LIMIT ${QUERY_OVER_FETCH}
     `
@@ -2015,6 +2287,7 @@ export async function getListResults(
       SELECT id, title FROM pages
       WHERE parent_id = ${pageId}
         AND published_at IS NOT NULL
+        AND deleted_at IS NULL
       ORDER BY position ASC, updated_at DESC
       LIMIT ${QUERY_OVER_FETCH}
     `
@@ -2162,10 +2435,10 @@ export async function getTitleDictionary(
   // (their titles already show in the member sidebar — nothing new is revealed).
   const rows = isGuest
     ? await db.sql<{ id: string; title: string }[]>`
-        SELECT id, title FROM pages WHERE id = ANY(${ids}) AND published_at IS NOT NULL
+        SELECT id, title FROM pages WHERE id = ANY(${ids}) AND published_at IS NOT NULL AND deleted_at IS NULL
         ORDER BY updated_at DESC LIMIT ${DICT_CAP + 1}`
     : await db.sql<{ id: string; title: string }[]>`
-        SELECT id, title FROM pages WHERE id = ANY(${ids})
+        SELECT id, title FROM pages WHERE id = ANY(${ids}) AND deleted_at IS NULL
         ORDER BY updated_at DESC LIMIT ${DICT_CAP + 1}`
   const capped = rows.length > DICT_CAP
   const windowRows = capped ? rows.slice(0, DICT_CAP) : rows
@@ -2287,9 +2560,27 @@ export async function pagesPlugin(app: FastifyInstance) {
     },
   )
 
+  // #411 / ADR-153: DELETE moves the page (and its subtree) to the trash. Physical deletion happens only
+  // through the trash: explicit purge below, or the retention sweep after TRASH_RETENTION_DAYS.
   app.delete<{ Params: { pageId: string } }>('/pages/:pageId', async (req, reply) => {
-    await deletePage(req.db, app.fga, app.searchDriver, { pageId: req.params.pageId, userId: req.user.sub })
+    await trashPage(req.db, app.fga, app.searchDriver, { pageId: req.params.pageId, userId: req.user.sub })
     return reply.code(204).send()
+  })
+
+  app.post<{ Params: { pageId: string } }>('/pages/:pageId/restore', async (req, reply) => {
+    const r = await restorePage(req.db, app.fga, app.searchDriver, { pageId: req.params.pageId, userId: req.user.sub })
+    return reply.code(200).send(r)
+  })
+
+  app.delete<{ Params: { pageId: string } }>('/pages/:pageId/purge', async (req, reply) => {
+    await purgePage(req.db, app.fga, app.searchDriver, { pageId: req.params.pageId, userId: req.user.sub })
+    return reply.code(204).send()
+  })
+
+  // Trash listing is a member-only settings surface (no guest config — a share_link token never lists a
+  // trash even if its own page is in it).
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/trash', async (req) => {
+    return listSpaceTrash(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub })
   })
 
   // Publish the current draft as the new published version (edit-gated). Members or
