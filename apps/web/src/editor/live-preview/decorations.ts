@@ -4083,6 +4083,15 @@ export const livePreviewTheme = EditorView.baseTheme({
     background: "color-mix(in srgb, currentColor 5%, transparent)",
   },
   ".cm-lp-attachment-name": { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: "0", flex: "1" },
+  // #273a DOWNLOAD card is full-surface clickable (c1660-2), so it must LOOK clickable — pointer
+  // cursor + a slightly stronger hover wash/border. Gated on frame ABSENCE via :has, the same condition
+  // the click handler uses (so it also covers a PDF the server refused to inline, and never applies to an
+  // inline viewer card whose body is the pdf.js frame). currentColor color-mix tracks light/dark themes.
+  ".cm-lp-attachment-wrap:not(:has(.cm-lp-attachment-frame)) .cm-lp-attachment-card": { cursor: "pointer" },
+  ".cm-lp-attachment-wrap:not(:has(.cm-lp-attachment-frame)) .cm-lp-attachment-card:hover": {
+    background: "color-mix(in srgb, currentColor 11%, transparent)",
+    borderColor: "color-mix(in srgb, currentColor 50%, transparent)",
+  },
   ".cm-lp-attachment-frame": {
     display: "block", width: "100%", height: "480px", marginTop: "6px",
     border: "1px solid var(--wks-border, rgba(128,128,128,.35))", borderRadius: "8px", background: "#fff",
