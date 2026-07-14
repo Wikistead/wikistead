@@ -3,6 +3,7 @@ import { directiveExtension, parseDirectiveOpen, resolveDirectiveRanges, type Re
 import { highlightExtension } from "./highlight-ext.js"; // #334 / ADR-129: `==` → <mark>
 import { footnoteExtension } from "./footnote-ext.js"; // #335 / ADR-130: `[^1]` / `[^1]:` grammar
 import { SafeHtml, html, joinSafe, unsafeHtml } from "./safe-html.js";
+import { safeHref } from "./url-safety.js"; // #384: the single shared URL-scheme XSS judge
 
 // #85 / ADR-059 + ADR-085: the SERVER-SIDE, DOM-FREE markdown → HTML renderer for published / static
 // export. It is the string counterpart of the editor's DOM renderer (apps/web md-render.ts): the SAME
@@ -71,20 +72,8 @@ const HEADINGS: Record<string, string> = {
   SetextHeading1: "h1", SetextHeading2: "h2",
 };
 
-// C0 controls (U+0000–U+001F) + DEL (U+007F): the chars a browser IGNORES inside a URL. Built from code
-// points so no literal control bytes live in this source file. Matches apps/web md-render.ts safeHref.
-const URL_CONTROL_CHARS = new RegExp(`[${String.fromCharCode(0)}-${String.fromCharCode(0x1f)}${String.fromCharCode(0x7f)}]`, "g");
-
-// Block dangerous schemes; allow everything else. Mirrors apps/web md-render.ts safeHref (same policy):
-// strips a surrounding <…>, removes the control chars a browser ignores inside a URL, then blocklists.
-function safeHref(url: string): string | null {
-  let u = url.trim();
-  if (u.length >= 2 && u.startsWith("<") && u.endsWith(">")) u = u.slice(1, -1);
-  u = u.replace(URL_CONTROL_CHARS, "");
-  if (/^\s*(javascript|data|vbscript|file):/i.test(u)) return null;
-  const trimmed = u.trim();
-  return trimmed || null;
-}
+// #384: the URL-scheme XSS judgment is now a SINGLE shared function (url-safety.ts) used by both markdown
+// sinks — no more hand-mirrored copy to keep in sync with apps/web md-render.ts.
 
 const txt = (src: string, n: SNode): string => src.slice(n.from, n.to);
 

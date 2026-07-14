@@ -1,5 +1,5 @@
 import { parser, Strikethrough, Table } from "@lezer/markdown";
-import { parseFenceInfo, highlightExtension, footnoteExtension } from "@wikistead/macro-render"; // #267 fence align=; #334 highlight; #335 footnote grammar
+import { parseFenceInfo, highlightExtension, footnoteExtension, safeHref } from "@wikistead/macro-render"; // #267 fence align=; #334 highlight; #335 footnote grammar; #384 shared URL-scheme judge
 import { directiveExtension, parseDirectiveOpen, resolveDirectiveRanges, type ResolvedDirective } from "./directive-parser";
 import { findDirectiveMacro, findFenceMacro } from "./registry";
 import { currentMacroTheme } from "./theme";
@@ -113,16 +113,10 @@ const HEADINGS: Record<string, string> = {
 // 2. Remove the control chars a browser IGNORES inside a URL before evaluating the scheme
 // (TAB/LF/CR/NUL + other C0/DEL) — otherwise `java⇥script:` would slip past the blocklist yet
 // execute once the browser drops the tab. Matching the browser's normalization closes that.
-// #223: exported so the paste-linkify helper reuses the SAME scheme check (one XSS judgment, ADR-037).
-export function safeHref(url: string): string | null {
-  let u = url.trim();
-  if (u.length >= 2 && u.startsWith("<") && u.endsWith(">")) u = u.slice(1, -1); // angle-bracket destination
-  // eslint-disable-next-line no-control-regex -- deliberately stripping the control chars browsers ignore in URLs
-  u = u.replace(/[\u0000-\u001F\u007F]/g, ""); // C0 controls + DEL (incl. TAB/LF/CR/NUL)
-  if (/^\s*(javascript|data|vbscript|file):/i.test(u)) return null;
-  const trimmed = u.trim();
-  return trimmed || null;
-}
+// #223 / #384: the URL-scheme XSS judgment is ONE shared function now (@wikistead/macro-render url-safety),
+// imported above and re-exported here so the existing consumers (paste-linkify, cell-inline-format, tests) keep
+// their import path while both markdown sinks share a single scheme judge (ADR-037; one XSS judgment).
+export { safeHref };
 
 const txt = (src: string, n: SNode) => src.slice(n.from, n.to);
 

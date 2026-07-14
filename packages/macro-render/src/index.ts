@@ -3,6 +3,7 @@
 // truth. DOM-free (tsconfig lib excludes DOM): no `document`/`window`, only strings + the SafeHtml
 // XSS boundary. The editor re-exports safe-html / directive-parser from here (zero-churn shims).
 export { SafeHtml, html, joinSafe, unsafeHtml, escapeHtml } from "./safe-html.js";
+export { safeHref } from "./url-safety.js"; // #384: the single URL-scheme XSS judge for both markdown sinks
 export { parseDirectiveOpen, isDirectiveClose, directiveExtension, resolveDirectiveRanges, type ResolvedDirective } from "./directive-parser.js";
 export { highlightExtension } from "./highlight-ext.js"; // #334 / ADR-129: shared `==` → <mark> grammar
 export { footnoteExtension } from "./footnote-ext.js"; // #335 / ADR-130: shared `[^1]` / `[^1]:` grammar
