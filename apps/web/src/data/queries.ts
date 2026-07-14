@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { apiFetch, assetUrl } from "./apiClient";
 import { useSession } from "../session/SessionProvider";
 
@@ -1105,5 +1105,8 @@ export function useSearch(q: string) {
     queryFn: () => apiFetch<SearchHit[]>(`/search?q=${encodeURIComponent(query)}`, token).then((r) => r ?? []),
     enabled: query.length > 0,
     staleTime: 10_000,
+    // #366 keep the previous query's hits while the next query loads, so the list never drops to [] for a
+    // frame (which let the raw-id fallback steal the picker's selection). Smooths the search modal too.
+    placeholderData: keepPreviousData,
   });
 }

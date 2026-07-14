@@ -190,6 +190,47 @@ test("#332 the embed picker auto-selects the first hit (Enter confirms without a
   await expect(page.locator("[data-pane=preview] [data-testid=macro-embed-page]")).toBeVisible();
 });
 
+// #366 a SINGLE-TOKEN query (no spaces) offers the raw-id fallback row too. Typing used to let that raw
+// row STEAL the selection — on the query change hits dropped to [] for a frame, the raw row got auto-selected,
+// and it never recovered (it stayed in the list). Now the first REAL hit stays selected; the raw row is only
+// auto-selected when there are NO real hits. Real Chromium (the cmdk controlled-value race is runtime-only).
+test("#366 a single-token query keeps the first REAL hit selected, not the raw-id fallback", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const token = `embedtok${Date.now().toString(36)}`; // single token → the raw fallback row is offered
+  await page.goto("/p/demo");
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  const targetId = await createScratchPage(page, token);
+  await page.goto(`/p/${targetId}?edit=1`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("token body here");
+  await publishAndWait(page, targetId, "token body here");
+  await sleep(1200); // Meili index
+
+  await openScratch(page, "embed-c1775-host");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.type("/embed");
+  await expect(page.getByTestId("slash-palette")).toBeVisible();
+  await page.click('[data-testid="slash-item-macro:embed-page"]');
+  await expect(page.getByTestId("embed-picker-input")).toBeVisible();
+  // type the token char-by-char (each keystroke changes the query → the frame that used to steal the selection).
+  await page.getByTestId("embed-picker-input").pressSequentially(token, { delay: 40 });
+
+  const firstHit = page.getByTestId("embed-picker-item").first();
+  await expect(firstHit).toBeVisible({ timeout: 10000 });
+  await sleep(500); // let the query settle (and any raw-steal frame pass)
+  // the FIRST REAL hit is selected; the raw-id fallback row (which IS present) is NOT.
+  await expect(firstHit).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("embed-picker-raw")).toBeVisible(); // the raw row exists (single token)…
+  await expect(page.getByTestId("embed-picker-raw")).toHaveAttribute("aria-selected", "false"); // …but is NOT selected
+  // Enter confirms the REAL hit (embeds the page), not the raw id.
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("embed-picker-input")).toHaveCount(0);
+  await sleep(300);
+  await expect(page.locator("[data-pane=preview] [data-testid=macro-embed-page]")).toBeVisible();
+});
+
 // #344: the picker dialog is TOP-PINNED, so its top input never shifts vertically as the candidate list
 // grows/shrinks (the "input jumps while typing" bug on center-aligned dialogs with variable content).
 test("#344: the picker input stays put vertically as the candidate list changes", async ({ browser }) => {
