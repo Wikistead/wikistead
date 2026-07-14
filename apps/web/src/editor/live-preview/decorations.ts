@@ -1497,6 +1497,22 @@ class MacroRawRichuiPill extends WidgetType {
 }
 // The first revealed macro line becomes the pill's positioning context (position: relative).
 const macroRawLead = Decoration.line({ attributes: { class: "cm-lp-macro-raw" } });
+// #278 point 4: the pill is no longer permanently visible while a block is revealed — it shows
+// only while the MOUSE hovers the block or the CARET rests on the block's head line. The zone class
+// marks every body line of the revealed block (the `:has` hover rule keys on it; only one block can
+// be revealed at a time, so a doc-global rule is precise); the head class flags "caret on the head
+// line" so the keyboard path still surfaces the affordance without a mouse.
+const macroRawZone = Decoration.line({ attributes: { class: "cm-lp-macro-raw-zone" } });
+const macroRawHead = Decoration.line({ attributes: { class: "cm-lp-macro-raw-head" } });
+function addRawPillContext(ctx: { add(d: Decoration, pos: number): void; state: EditorState }, from: number, to: number) {
+  const doc = ctx.state.doc;
+  const firstLine = doc.lineAt(from);
+  const lastLine = doc.lineAt(Math.min(to, doc.length));
+  ctx.add(macroRawLead, firstLine.from);
+  const h = ctx.state.selection.main.head;
+  if (h >= firstLine.from && h <= firstLine.to) ctx.add(macroRawHead, firstLine.from);
+  for (let n = firstLine.number + 1; n <= lastLine.number; n++) ctx.add(macroRawZone, doc.line(n).from);
+}
 
 // #154 / ADR-025: in-editor WYSIWYG table editing. When a table block is render-active
 // (macroRenderActiveField, set by a non-vim click/entry — openTableEditing), the table renders
@@ -2986,7 +3002,7 @@ const RENDERERS: BlockRenderer[] = [
         // returned above. Excalidraw (editUI present "modal") is excluded → it stays an atom (modal on enter).
         // The bare caret reveals raw; the pill / Ctrl+Enter (active.raw, handled above) reach source / editUI.
         if (macro.editUI?.present === "inline" && !ctx.state.readOnly && blockRevealed(ctx.state, from, to)) {
-          ctx.add(macroRawLead, from);
+          addRawPillContext(ctx, from, to);
           ctx.add(Decoration.widget({ widget: new MacroRawRichuiPill(from, enterMacroAt, "fence-richui-enter"), side: -1 }), from);
           return; // raw source shows (no widget) — the fence lines stay editable markdown
         }
@@ -3213,20 +3229,27 @@ const RENDERERS: BlockRenderer[] = [
         }
         // CONTAINER directive (callout, caret-in = raw / details revealed): a CSS box over every
         // line; content stays markdown (raw-editable under the cursor).
-        const box = Decoration.line({ attributes: { class: macro.containerClass } });
-        // The OPEN line renders a header when there is a leading [label] (#94) AND/OR the macro
-        // has an icon (#150 typed callouts) — via CSS ::before(attr(data-icon) attr(data-label)),
-        // display-only (the `:::name[label]` text stays the hidden source, reveal-on-cursor to
-        // edit). No widget, so it never fights the DirectiveMark hide.
-        const openLine = (open!.label || macro.icon)
-          ? Decoration.line({ attributes: {
-              class: `${macro.containerClass} cm-lp-directive-label`,
-              'data-label': open!.label ?? '',
-              ...(macro.icon ? { 'data-icon': macro.icon } : {}),
-            } })
-          : box;
-        ctx.add(openLine, first.from);
-        for (let n = first.number + 1; n <= lastLine.number; n++) ctx.add(box, doc.line(n).from);
+        //
+        // #278 point 1: an ICON'D callout reaches this branch ONLY while revealed (caret-in;
+        // otherwise the panel widget above owns the block). Revealed = the writer is editing SOURCE,
+        // so the source shows PLAIN — no tint box, no ::before icon/label header. Mixing the panel
+        // skin with raw `:::` lines was the twice-rejected broken state (cm-lp-callout + cm-lp-macro-raw
+        // on one line); the raw state is now "plain source + the entry pill", nothing else. Non-icon
+        // containers (todo / details / plain boxes) keep their box — it IS their live rendering.
+        if (!macro.icon) {
+          const box = Decoration.line({ attributes: { class: macro.containerClass } });
+          // The OPEN line renders a header when there is a leading [label] (#94) — via CSS
+          // ::before(attr(data-label)), display-only (the `:::name[label]` text stays the hidden
+          // source, reveal-on-cursor to edit). No widget, so it never fights the DirectiveMark hide.
+          const openLine = open!.label
+            ? Decoration.line({ attributes: {
+                class: `${macro.containerClass} cm-lp-directive-label`,
+                'data-label': open!.label ?? '',
+              } })
+            : box;
+          ctx.add(openLine, first.from);
+          for (let n = first.number + 1; n <= lastLine.number; n++) ctx.add(box, doc.line(n).from);
+        }
         // #290 / ADR-114: a :::todo shows a progress ring in its header, computed from the block's own task
         // lines (the body between the fences). Display-only side:1 widget on the open line (offset-invariant);
         // absolutely positioned to the right by CSS. Only when there are tasks (0/0 → no ring).
@@ -3250,7 +3273,7 @@ const RENDERERS: BlockRenderer[] = [
         // enterMacroAt → the callout editUI (type/header/content). macroRawLead adds position:relative to the
         // open line so the pill anchors and floats just above it (never covering the raw `:::type` source).
         if (blockRevealed(ctx.state, first.from, lastLine.to) && ctx.state.facet(displayMode) === "live" && !ctx.state.readOnly) {
-          ctx.add(macroRawLead, first.from);
+          addRawPillContext(ctx, first.from, lastLine.to);
           ctx.add(Decoration.widget({ widget: new MacroRawRichuiPill(first.from, enterMacroAt, "callout-richui-enter"), side: -1 }), first.from);
         }
       }
@@ -3463,7 +3486,7 @@ const RENDERERS: BlockRenderer[] = [
         // rejected). LIVE + editable only: source mode already reveals everything raw, so a pill on every table
         // there would be noise. Mark the first line as the positioning context and float the pill above it.
         if (ctx.state.facet(displayMode) === "live") {
-          ctx.add(macroRawLead, from);
+          addRawPillContext(ctx, from, to);
           ctx.add(Decoration.widget({ widget: new MacroRawRichuiPill(from, openTableEditing, "table-richui-enter"), side: -1 }), from);
         }
         return;
@@ -4365,9 +4388,14 @@ export const livePreviewTheme = EditorView.baseTheme({
   // regression was hover-dependency). Solid panel bg + border are inherited from .cm-lp-macro-edit; this rule
   // must follow .cm-lp-macro-edit in source order so its top/left/opacity/display win at equal specificity.
   ".cm-lp-macro-raw": { position: "relative" },
-  ".cm-lp-macro-richui-raw": { top: "-1.5em", left: "0", zIndex: "4", opacity: "0.8", display: "inline-flex", alignItems: "center", gap: "3px", padding: "1px 5px" },
+  // #278 point 4: the raw-entry pill is HOVER/CARET-gated, not always-on — visible while the
+  // mouse is over any line of the revealed block (head line direct, body lines via the zone `:has`)
+  // or while the caret rests on the block's head line (macroRawHead — the keyboard path). Hidden
+  // otherwise, and pointer-inert so it never blocks clicks on the text above it.
+  ".cm-lp-macro-richui-raw": { top: "-1.5em", left: "0", zIndex: "4", opacity: "0", pointerEvents: "none", display: "inline-flex", alignItems: "center", gap: "3px", padding: "1px 5px", transition: "opacity 120ms" },
   ".cm-lp-macro-richui-key": { fontSize: "0.72em", fontWeight: "600", letterSpacing: "0.02em" },
-  ".cm-lp-macro-richui-raw:hover": { opacity: "1" },
+  ".cm-lp-macro-raw:hover .cm-lp-macro-richui-raw, .cm-content:has(.cm-lp-macro-raw-zone:hover) .cm-lp-macro-richui-raw, .cm-lp-macro-raw-head .cm-lp-macro-richui-raw": { opacity: "0.9", pointerEvents: "auto" },
+  ".cm-lp-macro-richui-raw:hover": { opacity: "1", pointerEvents: "auto" },
   // #254: the LAYOUT-only variant for the ✎+Ctrl+↵ hint on a RENDERED macro. Adds the key's gap but NOT
   // the always-visible opacity of cm-lp-macro-richui-raw, so the button keeps the base opacity:0 and is
   // revealed only by the hover/selection gate (below for macro-wrap; the callout-panel rule for the panel).
@@ -4390,8 +4418,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   // invited mis-clicks — the user ruled the opposite). brightness tracks light/dark without new tokens.
   ".cm-lp-layout-item-remove:hover": { filter: "brightness(1.3)", borderColor: "color-mix(in srgb, var(--danger, #cf222e) 70%, transparent)" },
   // #278 G: absolute (top-right of the tab) so it never adds flow width — hover-revealed, danger red.
-  ".cm-lp-tab-remove": { position: "absolute", top: "50%", right: "0.25em", transform: "translateY(-50%)", border: "none", background: "transparent", color: "var(--danger, #cf222e)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms, filter 120ms" },
-  ".cm-lp-tab:hover .cm-lp-tab-remove, .cm-lp-tabbar:hover .cm-lp-tab-remove": { opacity: "0.75" },
+  // #278 point 2: the tab × gets the SAME box treatment as the column × (1.4em bordered chip on
+  // the panel background) — the borderless bare glyph was too small a target. Placement stays inside
+  // the tab (right-centred; the tab's 1.4em right padding is its slot).
+  ".cm-lp-tab-remove": { position: "absolute", top: "50%", right: "0.15em", transform: "translateY(-50%)", zIndex: "3", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.4em", height: "1.4em", border: "1px solid color-mix(in srgb, var(--danger, #cf222e) 45%, transparent)", borderRadius: "4px", background: "var(--panel, #fff)", color: "var(--danger, #cf222e)", cursor: "pointer", fontSize: "0.85em", lineHeight: "1", padding: "0", opacity: "0", pointerEvents: "none", transition: "opacity 120ms, filter 120ms" },
+  ".cm-lp-tab:hover .cm-lp-tab-remove, .cm-lp-tabbar:hover .cm-lp-tab-remove": { opacity: "0.75", pointerEvents: "auto" },
   ".cm-lp-tab-remove:hover": { opacity: "1", filter: "brightness(1.3)" },
   ".cm-lp-layout-item-add": { flex: "0 0 auto", alignSelf: "flex-start", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.6em", height: "1.6em", border: "1px dashed var(--border, #888)", borderRadius: "4px", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
   ".cm-lp-macro-wrap:hover .cm-lp-layout-item-add, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-layout-item-add": { opacity: "1" },
@@ -4423,6 +4454,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   // position override; the pencil uses the SAME (normal) color as every other macro's edit button — the
   // accent ring already marks the focused macro, so tinting the pencil too was redundant.
   ".cm-lp-nested-macro-edit": { position: "absolute", top: "-0.9em", left: "-0.4em", opacity: "1", zIndex: "5" },
+  // #278 point 5: INSIDE a layout cell / tab panel the floated corner controls (-0.9em / -1.55em
+  // above their slot) stick out past the container's top edge and get cut (the clipped mermaid toolbar
+  // in a tab). Nested contexts pin them INSIDE the slot's top-left corner instead — the container never
+  // clips them and they still sit "at the corner" (the user-suggested in-container placement).
+  ".cm-lp-tabpanel .cm-lp-nested-macro-edit, .cm-lp-column .cm-lp-nested-macro-edit": { top: "2px", left: "2px" },
+  ".cm-lp-tabpanel .cm-lp-macro-btnrow, .cm-lp-column .cm-lp-macro-btnrow": { top: "2px", left: "2px" },
   // #174 comment 1003: the WYSIWYG hover variant. Unlike the selection pencil (drawn only when selected, so
   // opacity:1), this one sits on EVERY editable nested slot, so it must be hover-gated — opacity:0 until the
   // slot itself is hovered. `>` keeps it to the pencil that is a direct child of the hovered [data-mac-pos].
@@ -4469,7 +4506,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   // is the same width with or without the × (Reading vs edit modes match). A little right padding gives the
   // hover-shown × a home at the tab's right edge without overlapping the label; it's on ALL tabs (both modes)
   // so widths stay equal.
-  ".cm-lp-tab": { position: "relative", border: "none", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", padding: "0.3em 1.4em 0.3em 0.7em", fontSize: "0.9em", borderBottom: "2px solid transparent", marginBottom: "-1px" },
+  ".cm-lp-tab": { position: "relative", border: "none", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", padding: "0.3em 1.9em 0.3em 0.7em", fontSize: "0.9em", borderBottom: "2px solid transparent", marginBottom: "-1px" },
   ".cm-lp-tab:hover": { color: "var(--fg, inherit)" },
   ".cm-lp-tab-active": { color: "var(--fg, inherit)", borderBottomColor: "var(--accent, #4ea1ff)", fontWeight: "600" },
   ".cm-lp-tabpanel": { display: "none" },
