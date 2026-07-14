@@ -142,6 +142,18 @@ const titleLinkCardTheme = EditorView.baseTheme({
   },
   ".cm-lp-title-link-card-body :is(h1,h2,h3,h4,h5,h6,p,ul,ol,pre)": { margin: "0.15em 0" },
   ".cm-lp-title-link-card-body :is(h1,h2,h3,h4,h5,h6)": { fontSize: "1em", fontWeight: "700", color: "var(--fg)" },
+  // #351the static-macro placeholder chip (md-render staticMacros mode) — a small muted pill naming
+  // the macro instead of a live widget/fetch. Only ever rendered inside this card (the sole static consumer).
+  ".cm-lp-title-link-card-body .cm-lp-md-macro-chip": {
+    display: "inline-block",
+    padding: "0 0.5em",
+    margin: "0.15em 0",
+    fontSize: "0.9em",
+    border: "1px solid var(--border, #33363b)",
+    borderRadius: "999px",
+    background: "var(--panel-2, rgba(128,128,128,0.08))",
+    color: "var(--fg-dim, #888)",
+  },
 });
 
 export function titleLinkHover(): Extension {
@@ -197,7 +209,10 @@ export function titleLinkHover(): Extension {
           // #351: render the excerpt markdown RICHLY (headings/bold/code/lists) via the shared DOM-safe renderer
           // the SAME `renderMarkdownToDom` the #285 search preview / transclude use (textContent / createTextNode
           // construction, `safeHref`, NO innerHTML), so raw `<script>` / dangerous schemes stay inert.
-          if (excerptMd) body.appendChild(renderMarkdownToDom(excerptMd));
+          //(user ruling): STATIC macros — the card stays light. A macro in the excerpt renders as a
+          // compact chip (fence diagrams, embed/transclude/query/backlinks), never a live widget, and NO
+          // view-gated fetch fires from inside the card; plain markdown renders as before.
+          if (excerptMd) body.appendChild(renderMarkdownToDom(excerptMd, undefined, { staticMacros: true }));
           dom.append(title, body);
           return { dom };
         },

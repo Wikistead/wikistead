@@ -473,3 +473,65 @@ describe("callout panel (#170 案Y — containerClass dispatch + renderCalloutPa
     expect(panel!.querySelector(".cm-lp-callout-panel-body")?.textContent).toContain("click"); // text kept
   });
 });
+
+describe("renderMarkdownToDom — staticMacros mode (#351the hover card stays light)", () => {
+  beforeAll(() => {
+    document.documentElement.dataset.theme = "light";
+    // register a fence + a directive macro whose liveRender would be a "heavy widget / fetch" stand-in
+    // static mode must never call them (the assertion: the marker class never appears, the chip does).
+    registerMacro({
+      kind: "fence", lang: "staticfence", exportFidelity: "degrade", summary: () => "staticfence",
+      htmlRender: () => unsafeHtml(""),
+      liveRender: () => { const d = document.createElement("div"); d.className = "static-heavy-widget"; return d; },
+    });
+    registerMacro({
+      kind: "directive", name: "staticdir", exportFidelity: "degrade",
+      htmlRender: () => unsafeHtml(""),
+      liveRender: () => { const d = document.createElement("div"); d.className = "static-heavy-widget"; return d; },
+    });
+  });
+  const stat = (src: string) => {
+    const d = document.createElement("div");
+    d.appendChild(renderMarkdownToDom(src, undefined, { staticMacros: true }));
+    return d;
+  };
+
+  it("a fence macro renders as a compact chip — liveRender is NEVER called", () => {
+    const d = stat("intro\n\n```staticfence\ngraph TD\n```\n");
+    expect(d.querySelector(".static-heavy-widget"), "no widget mounted").toBeNull();
+    const chip = d.querySelector("[data-testid=static-macro-chip]");
+    expect(chip?.textContent).toContain("staticfence");
+    expect(d.textContent).not.toContain("graph TD"); // the label only, never the (long) source
+  });
+
+  it("a directive macro renders as a chip — liveRender is NEVER called", () => {
+    const d = stat(":::staticdir\npayload\n:::\n");
+    expect(d.querySelector(".static-heavy-widget")).toBeNull();
+    expect(d.querySelector("[data-testid=static-macro-chip]")?.textContent).toContain("staticdir");
+  });
+
+  it("markdown-content containers (tabs) show their PLAIN body — no live widget, content kept", () => {
+    // tabsMacro is already registered by the ADR-085 dispatch suite above (same file, sequential).
+    const d = stat("::::tabs\n:::tab[One]\nAAA body\n:::\n::::");
+    expect(d.querySelector("[data-testid=macro-tabs]"), "no tabs widget in static mode").toBeNull();
+    expect(d.textContent).toContain("AAA body"); // content preserved via the plain fallback
+  });
+
+  it("a macro NESTED in a container body inherits static mode (no escape one level deeper)", () => {
+    const d = stat("::::tabs\n:::tab[One]\n:::staticdir\ndeep\n:::\n:::\n::::");
+    expect(d.querySelector(".static-heavy-widget")).toBeNull();
+    expect(d.querySelector("[data-testid=static-macro-chip]")?.textContent).toContain("staticdir");
+  });
+
+  it("plain markdown still renders richly, and the DEFAULT mode is untouched (widgets dispatch)", () => {
+    const d = stat("# Head\n\n**bold** and `code`\n");
+    expect(d.querySelector("h1")?.textContent).toBe("Head");
+    expect(d.querySelector("strong")?.textContent).toBe("bold");
+    expect(d.querySelector("code")?.textContent).toBe("code");
+    // default (non-static) render of the same fence macro still dispatches liveRender
+    const dflt = document.createElement("div");
+    dflt.appendChild(renderMarkdownToDom("```staticfence\nx\n```\n"));
+    expect(dflt.querySelector(".static-heavy-widget"), "default mode unchanged").not.toBeNull();
+    expect(dflt.querySelector("[data-testid=static-macro-chip]")).toBeNull();
+  });
+});

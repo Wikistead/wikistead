@@ -53,6 +53,23 @@ let pendingBaseOffset: number | null = null;
 export function setPendingBaseOffset(v: number | null): void { pendingBaseOffset = v; }
 export function takePendingBaseOffset(): number | null { const v = pendingBaseOffset; pendingBaseOffset = null; return v; }
 
+// #351STATIC (no-macro) render mode for lightweight surfaces — the title-link hover card.
+// While active, a fence/directive macro is NEVER dispatched to liveRender: no widget/canvas/iframe is
+// mounted and no host fetch can fire from inside the render (the user's ruling: the card stays light).
+// A macro renders instead as a compact placeholder CHIP — except markdown-CONTENT containers
+// (columns/tabs/details), whose body is worth showing and falls through to the plain-content fallback,
+// and icon callouts (no liveRender), whose panel is pure display and keeps rendering. Module singleton
+// like nestedDirectiveDepth (rendering is fully synchronous), so nested bodies inherit the mode.
+let staticRender = false;
+const STATIC_PLAIN_DIRECTIVES = new Set(["columns", "tabs", "details"]);
+function staticMacroChip(label: string): HTMLElement {
+  const chip = document.createElement("span");
+  chip.className = "cm-lp-md-macro-chip";
+  chip.setAttribute("data-testid", "static-macro-chip");
+  chip.textContent = `◇ ${label}`; // a label only — never the macro's resolved content
+  return chip;
+}
+
 // #267: lezer's markdown grammar early-closes a nested `:::tabs` at an inner directive's close, so the
 // Directive node's `to` is wrong and slicing by it truncates a multi-tab/column body. resolveDirectiveRanges
 // (stack-based, Pandoc semantics) is the single truth for `:::` ranges (same fix as fence.ts for the CM
@@ -236,6 +253,9 @@ function renderBlock(node: SNode, src: string, into: Node): number | void {
         const fence = info ? parseFenceInfo(txt(src, info)) : null; // #267: full parse for lang + align=
         const lang = fence ? fence.lang : null;
         const macro = lang ? findFenceMacro(lang) : undefined;
+        // #351static mode never dispatches a fence macro (mermaid/plantuml/excalidraw would mount a
+        // widget / render async) — a compact chip instead of the (long) raw source keeps the card small.
+        if (staticRender && macro?.liveRender) { into.appendChild(staticMacroChip(lang!)); return; }
         if (macro?.liveRender) {
           try {
             const el = macro.liveRender(body, { theme: currentMacroTheme() });
@@ -301,7 +321,16 @@ function renderBlock(node: SNode, src: string, into: Node): number | void {
       // a nested columns/tabs liveRender (pendingBaseOffset) and to renderCalloutPanel so their nested
       // macros tag themselves. null when the surrounding render is untagged (non-nested).
       const nestedBodyBase = renderBase != null ? renderBase + node.from + (nl === -1 ? full.length : nl) + 1 : null;
-      if (!atDepthCap && macro?.liveRender) {
+      // #351static mode never dispatches a directive liveRender. Fetch-backed macros (embed-page /
+      // embed-external / transclude / query / backlinks) and other widget macros render as a compact chip;
+      // markdown-CONTENT containers (columns/tabs/details) fall through to the plain-content fallback below
+      // so their body still shows (light, no widget). Icon callouts have no liveRender and keep their
+      // pure-display panel; its body recursion inherits the static flag (module singleton).
+      if (staticRender && macro?.liveRender && !STATIC_PLAIN_DIRECTIVES.has(parsed!.name)) {
+        into.appendChild(staticMacroChip(parsed!.name));
+        return dirTo;
+      }
+      if (!atDepthCap && !staticRender && macro?.liveRender) {
         const lines = full.split("\n").slice(1); // drop the opening ::: line
         if (lines.length && /^\s*:::+\s*$/.test(lines[lines.length - 1]!)) lines.pop(); // drop close :::
         nestedDirectiveDepth++;
@@ -361,10 +390,14 @@ function renderBlocks(parent: SNode, src: string, into: Node): void {
 // #215 / ADR-100: `baseOffset` (optional) is the absolute doc offset of `src`; when set, nested macros
 // are tagged `data-mac-pos` for the columns/tabs hit-test. Omitted (all existing callers) → byte-identical
 // output. renderBase is saved/restored so nested renderMarkdownToDom calls don't corrupt a parent's base.
-export function renderMarkdownToDom(src: string, baseOffset?: number): DocumentFragment {
+export function renderMarkdownToDom(src: string, baseOffset?: number, opts?: { staticMacros?: boolean }): DocumentFragment {
   const prevBase = renderBase;
   const prevFn = footnoteNumbers;
   const prevDocActive = footnoteDocActive;
+  const prevStatic = staticRender;
+  // #351opt-IN only — a nested re-entry (a container body render) passes no opts and must
+  // INHERIT the current mode, so an inner macro can't escape static by being one level deeper.
+  if (opts?.staticMacros) staticRender = true;
   renderBase = baseOffset ?? null;
   try {
     const tree = mdParser.parse(src);
@@ -381,7 +414,7 @@ export function renderMarkdownToDom(src: string, baseOffset?: number): DocumentF
     renderBlocks(tree.topNode, src, frag);
     if (fn && (fn.order.length > 0 || fn.unreferenced.length > 0)) frag.appendChild(renderFootnoteSection(fn, src));
     return frag;
-  } finally { renderBase = prevBase; footnoteNumbers = prevFn; footnoteDocActive = prevDocActive; }
+  } finally { renderBase = prevBase; footnoteNumbers = prevFn; footnoteDocActive = prevDocActive; staticRender = prevStatic; }
 }
 
 // #335 / ADR-130: the document-scoped footnote pass. Numbers are assigned by FIRST-REFERENCE order; a repeated
