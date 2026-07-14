@@ -1,11 +1,11 @@
 // #353 / ADR-027 (authorized-hit gap, Hole C): the reverse-lookup lists must not DROP viewable results at the
 // raw-fetch boundary. The naive `LIMIT N` raw → per-item view-filter loses authorized rows when the top N by
-// rank include non-viewable ones. getBacklinks / getQueryResults(children) now OVER-FETCH past the display cap,
+// rank include non-viewable ones. getBacklinks / getListResults(children) now OVER-FETCH past the display cap,
 // view-filter in rank order, and stop at the display cap (top-N VIEWABLE by rank). These are FAST unit tests
-// (fake db + fga — the real-Postgres path is covered by backlinks.test.ts / query-134.test.ts): building 600
+// (fake db + fga — the real-Postgres path is covered by backlinks.test.ts / tagged-children-370.test.ts): building 600
 // real pages per run to exercise a boundary is not worth the CI cost, so the boundary/early-exit is pinned here.
 import { describe, it, expect } from 'vitest'
-import { getBacklinks, getQueryResults } from '../routes/pages.js'
+import { getBacklinks, getListResults } from '../routes/pages.js'
 
 const DISPLAY_N = 200
 
@@ -64,12 +64,12 @@ describe('getBacklinks Hole C: over-fetch + rank-drop + top-N (#353 / ADR-027)',
   })
 })
 
-describe('getQueryResults children Hole C: over-fetch + top-N (#353 / ADR-027)', () => {
+describe('getListResults children Hole C: over-fetch + top-N (#353→#370 / ADR-027)', () => {
   const parent = 'PARENT'
   it('returns top DISPLAY_N viewable children by rank and early-exits the view loop', async () => {
     const rows = Array.from({ length: 250 }, (_, i) => ({ id: `c${i}`, title: `C${i}` }))
     const { fga, calls } = fakeFga(() => true)
-    const out = await getQueryResults(fakeDb(rows), fga, { pageId: parent, spec: { type: 'children' }, subject: 'user:u' })
+    const out = await getListResults(fakeDb(rows), fga, { pageId: parent, name: 'children', body: '', subject: 'user:u' })
     expect(out.length).toBe(DISPLAY_N)
     expect(calls.length).toBe(1 + DISPLAY_N) // 1 parent gate + DISPLAY_N child checks (early-exit)
   })
