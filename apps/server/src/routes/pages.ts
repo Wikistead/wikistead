@@ -1596,6 +1596,102 @@ export async function getRelatedPages(
   return { groups, truncated: groupsAll.length > groups.length }
 }
 
+// #394 / ADR-147 (ADR-133 §6 increment ③a): the LOCAL GRAPH around one page — the viewer-scoped edge list
+// the §6 index schema reserved. depth=1 is the mini graph (edges touching the page); depth=2 is the modal
+// (edges touching the page or one of its 1-hop neighbours, including edges AMONG neighbours). The §3/§6
+// authz invariant, verbatim: an edge is returned ONLY when the caller can `view` BOTH endpoints, and a page
+// the caller cannot see is absent as a NODE entirely — no dangling edge, no title leak. A node reachable
+// only THROUGH an unviewable page therefore vanishes with it (it has no surviving edge). The node cap runs
+// AFTER the view-filter (a hidden page never occupies cap room and hiddenCount counts only viewable drops);
+// over-cap is REPORTED via hiddenCount, never silently truncated. MEMBER-only (the route carries no guest
+// config); a public graph over public pages is a later increment (§6).
+export interface LocalGraphNode { id: string; title: string }
+export interface LocalGraphEdge { from: string; to: string; type: PageLinkType }
+export interface LocalGraphResult { center: string; nodes: LocalGraphNode[]; edges: LocalGraphEdge[]; hiddenCount: number }
+
+const GRAPH_OVER_FETCH = 800 // candidate edges fetched so the view-filter still fills the node cap (ADR-027)
+const GRAPH_NODE_CAP = { 1: 30, 2: 120 } as const
+
+export async function getLocalGraph(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { pageId: string; depth: 1 | 2; subject: string; context?: { current_time: string } },
+): Promise<LocalGraphResult> {
+  // View-gate the CENTER first: a non-viewable OR non-existent page is a uniform 404 so its existence /
+  // neighbourhood can't be probed (same guard as getBacklinks / getRelatedPages).
+  if (!(await check(fga, args.subject, 'view', { type: 'page', id: args.pageId }, args.context))) {
+    throw Object.assign(new Error('not found'), { statusCode: 404 })
+  }
+  // Candidate edges (stage 1 — page_links is only ever a candidate source, §6). JOINing pages on BOTH ends
+  // drops dangling targets and is tenant-bounded by RLS twice over (page_links AND pages).
+  type Row = { from_id: string; to_id: string; type: PageLinkType; from_title: string; to_title: string }
+  const rows = args.depth === 1
+    ? await db.sql<Row[]>`
+        SELECT pl.from_page_id AS from_id, pl.to_page_id AS to_id, pl.type,
+               fp.title AS from_title, tp.title AS to_title
+        FROM page_links pl
+        JOIN pages fp ON fp.id = pl.from_page_id
+        JOIN pages tp ON tp.id = pl.to_page_id
+        WHERE pl.from_page_id = ${args.pageId} OR pl.to_page_id = ${args.pageId}
+        ORDER BY GREATEST(fp.updated_at, tp.updated_at) DESC
+        LIMIT ${GRAPH_OVER_FETCH}
+      `
+    : await db.sql<Row[]>`
+        WITH n1 AS (
+          SELECT DISTINCT CASE WHEN pl.from_page_id = ${args.pageId} THEN pl.to_page_id ELSE pl.from_page_id END AS id
+          FROM page_links pl
+          WHERE pl.from_page_id = ${args.pageId} OR pl.to_page_id = ${args.pageId}
+        )
+        SELECT pl.from_page_id AS from_id, pl.to_page_id AS to_id, pl.type,
+               fp.title AS from_title, tp.title AS to_title
+        FROM page_links pl
+        JOIN pages fp ON fp.id = pl.from_page_id
+        JOIN pages tp ON tp.id = pl.to_page_id
+        WHERE pl.from_page_id = ${args.pageId} OR pl.to_page_id = ${args.pageId}
+           OR pl.from_page_id IN (SELECT id FROM n1) OR pl.to_page_id IN (SELECT id FROM n1)
+        ORDER BY GREATEST(fp.updated_at, tp.updated_at) DESC
+        LIMIT ${GRAPH_OVER_FETCH}
+      `
+  // SINGLE-PASS view-filter over every candidate node (stage 2 — the authority), THEN everything else.
+  const nodeIds = [...new Set([args.pageId, ...rows.flatMap((r) => [r.from_id, r.to_id])])]
+  const viewable = await filterAuthorized(fga, args.subject, 'view', nodeIds, args.context)
+  const edges: LocalGraphEdge[] = []
+  const titles = new Map<string, string>()
+  const seen = new Set<string>()
+  for (const r of rows) {
+    if (!viewable.has(r.from_id) || !viewable.has(r.to_id)) continue
+    const key = `${r.from_id} ${r.to_id} ${r.type}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    edges.push({ from: r.from_id, to: r.to_id, type: r.type })
+    titles.set(r.from_id, r.from_title)
+    titles.set(r.to_id, r.to_title)
+  }
+  // The center is always a node, even when isolated (its title then isn't in any surviving row).
+  if (!titles.has(args.pageId)) {
+    const [row] = await db.sql<{ title: string }[]>`SELECT title FROM pages WHERE id = ${args.pageId}`
+    titles.set(args.pageId, row?.title ?? '')
+  }
+  // Node cap — post-filter (only viewable nodes compete), center always kept, rest ranked by degree so the
+  // densest neighbours survive. Edges touching a dropped node are dropped with it; the drop is REPORTED.
+  const cap = GRAPH_NODE_CAP[args.depth]
+  const degree = new Map<string, number>()
+  for (const e of edges) {
+    degree.set(e.from, (degree.get(e.from) ?? 0) + 1)
+    degree.set(e.to, (degree.get(e.to) ?? 0) + 1)
+  }
+  const others = [...titles.keys()].filter((id) => id !== args.pageId)
+  others.sort((a, b) => (degree.get(b) ?? 0) - (degree.get(a) ?? 0))
+  const kept = new Set([args.pageId, ...others.slice(0, cap - 1)])
+  const nodes: LocalGraphNode[] = [...kept].map((id) => ({ id, title: titles.get(id) ?? '' }))
+  return {
+    center: args.pageId,
+    nodes,
+    edges: edges.filter((e) => kept.has(e.from) && kept.has(e.to)),
+    hiddenCount: titles.size - kept.size,
+  }
+}
+
 // #324 / ADR-134: the query spec carried in a `:::query` directive body. The body is authoring free-text,
 // so an unrecognised spec parses to `null` and renders 0 results (never a parse error, §2). Three v1 query
 // types, each resolving to a view-filtered list of pages
@@ -1967,6 +2063,16 @@ export async function pagesPlugin(app: FastifyInstance) {
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/related', async (req) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
     return getRelatedPages(req.db, app.fga, { pageId: req.params.pageId, subject, context })
+  })
+
+  // #394 / ADR-147: the local link graph around a page (mini graph depth=1 / modal depth=2). MEMBER-ONLY
+  // the route deliberately omits `config.guest`, so a share_link token is rejected (a public graph over
+  // public pages is a later increment, ADR-133 §6). getLocalGraph view-gates the center and returns an edge
+  // only when the caller can view BOTH endpoints; an unviewable page is absent as a node entirely.
+  app.get<{ Params: { pageId: string }; Querystring: { depth?: string } }>('/pages/:pageId/graph', async (req) => {
+    const { subject, context } = principalForPage(req, req.params.pageId)
+    const depth = req.query.depth === '2' ? 2 : 1
+    return getLocalGraph(req.db, app.fga, { pageId: req.params.pageId, depth, subject, context })
   })
 
   // #324 / ADR-134: resolve a member-live `:::query` list. MEMBER-ONLY — the route deliberately omits
