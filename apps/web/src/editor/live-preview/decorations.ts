@@ -2660,6 +2660,21 @@ function rangeRevealed(state: EditorState, from: number, to: number): boolean {
   );
 }
 
+// #359: like rangeRevealed, but reveal fires ONLY for an EMPTY CARET inside [from,to] — never for a NON-EMPTY
+// selection overlapping it. Used at the BLOCK-MACRO atom sites (directiveRevealed + the collapsible/icon/nested
+// block renders): a `v`/`V` visual selection dragged across a block widget must NOT flip its atom↔raw, because
+// that churns `EditorView.atomicRanges` mid-selection and warps vim's visual head (the project design notes: vim cursor respects
+// atomicRanges). Inline markers keep the overlap-based `rangeRevealed` (they are not atoms → no vim warp, and the
+// on-selection reveal is the established format-toolbar/vim-decorate behaviour). For a single empty caret this is
+// byte-identical to rangeRevealed, so only visual selections over BLOCK atoms change.
+function blockRevealed(state: EditorState, from: number, to: number): boolean {
+  return syntaxRevealsAt(
+    state.facet(displayMode),
+    state.readOnly,
+    state.selection.ranges.some((r) => r.empty && r.head >= from && r.head <= to),
+  );
+}
+
 // #196 / ADR-092 (innermost-wins reveal): is the caret inside a registered macro that is NESTED
 // STRICTLY within the container [from,to] — a deeper child, not the container at `from` itself? When
 // true, a layout container (columns/tabs) renders a visible frame + descends so ONLY the innermost
@@ -2707,9 +2722,9 @@ function directiveRevealed(state: EditorState, name: string, from: number, to: n
   if (macro?.revealOnCursor && macro.atomSelectable) {
     const active = state.field(macroRenderActiveField, false);
     if (active && active.from <= from && active.to >= to) return true; // Ctrl+Enter / explicit entry
-    return rangeRevealed(state, from, to) && !atomSelected(state, from, to); // empty caret selects, not reveals
+    return blockRevealed(state, from, to) && !atomSelected(state, from, to); // #359: empty-caret only (no visual-selection de-atom)
   }
-  return rangeRevealed(state, from, to);
+  return blockRevealed(state, from, to); // #359: a directive BLOCK reveals on an empty caret, not a visual selection
 }
 
 // #332is `pos` inside a directive block that is an `atomSelectable` atom currently SELECTED (an empty
@@ -2890,7 +2905,7 @@ const RENDERERS: BlockRenderer[] = [
         // editable only: rangeRevealed is false in WYSIWYG / Reading (C2 keeps the atom) and Source already
         // returned above. Excalidraw (editUI present "modal") is excluded → it stays an atom (modal on enter).
         // The bare caret reveals raw; the pill / Ctrl+Enter (active.raw, handled above) reach source / editUI.
-        if (macro.editUI?.present === "inline" && !ctx.state.readOnly && rangeRevealed(ctx.state, from, to)) {
+        if (macro.editUI?.present === "inline" && !ctx.state.readOnly && blockRevealed(ctx.state, from, to)) {
           ctx.add(macroRawLead, from);
           ctx.add(Decoration.widget({ widget: new MacroRawRichuiPill(from, enterMacroAt, "fence-richui-enter"), side: -1 }), from);
           return; // raw source shows (no widget) — the fence lines stay editable markdown
@@ -3081,7 +3096,7 @@ const RENDERERS: BlockRenderer[] = [
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editUI: macro.editUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme, from, to, bodyFrom, nestedSel, nestedEdit, "center", wysiwygNested, slotEdit), block: true }), from, to);
         return macro.revealOnCursor ? false : undefined;
       }
-      if (macro.collapsible && !rangeRevealed(ctx.state, first.from, lastLine.to)) {
+      if (macro.collapsible && !blockRevealed(ctx.state, first.from, lastLine.to)) {
         // #90 details, collapsed: replace the whole block with a "▸ summary" bar (one widget →
         // no per-line decoration conflict). Skip children so the fences aren't double-processed.
         // Caret-in (rangeRevealed) falls through to the container render below = raw editable.
@@ -3106,7 +3121,7 @@ const RENDERERS: BlockRenderer[] = [
         // nested Markdown body (renderCalloutPanel, the shared renderer). Caret-in reveals the raw
         // `:::` source (per-line boxes below) for editing = enter-to-edit, consistent with
         // columns/tabs/details. addAtomic records it as a block for blockEntry motion.
-        if (macro.icon && !rangeRevealed(ctx.state, first.from, lastLine.to)) {
+        if (macro.icon && !blockRevealed(ctx.state, first.from, lastLine.to)) {
           const bodyParts: string[] = [];
           for (let n = first.number + 1; n < lastLine.number; n++) bodyParts.push(doc.line(n).text);
           ctx.addAtomic(
@@ -3154,7 +3169,7 @@ const RENDERERS: BlockRenderer[] = [
         // top-left (the same affordance as the pipe table, #216). Live + editable only. Click / Ctrl+Enter →
         // enterMacroAt → the callout editUI (type/header/content). macroRawLead adds position:relative to the
         // open line so the pill anchors and floats just above it (never covering the raw `:::type` source).
-        if (rangeRevealed(ctx.state, first.from, lastLine.to) && ctx.state.facet(displayMode) === "live" && !ctx.state.readOnly) {
+        if (blockRevealed(ctx.state, first.from, lastLine.to) && ctx.state.facet(displayMode) === "live" && !ctx.state.readOnly) {
           ctx.add(macroRawLead, first.from);
           ctx.add(Decoration.widget({ widget: new MacroRawRichuiPill(first.from, enterMacroAt, "callout-richui-enter"), side: -1 }), first.from);
         }
