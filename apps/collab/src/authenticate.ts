@@ -23,7 +23,11 @@ const verifyMember = makeMemberVerifier({
 export interface AuthResult {
   principal:
     | { kind: "member"; tenantId: string; userId: string; groups: string[] }
-    | { kind: "guest"; tenantId: string; shareLinkId: string; capability: string };
+    // #328 / ADR-140 increment 2: `anonId` (#331 / ADR-138 pseudonymous session id, from the VERIFIED token
+    // claim) rides along so the caller (index.ts) can key the per-session connect rate bucket. Identity
+    // metadata only — it is never an authority (the FGA check above remains the sole gate), and it is
+    // absent on a token minted before #331.
+    | { kind: "guest"; tenantId: string; shareLinkId: string; capability: string; anonId?: string };
   readOnly: boolean;
 }
 
@@ -84,7 +88,7 @@ export async function authenticate(args: { token: string; documentName: string }
     assert(allowed, "share_link access denied or expired");
     if (ephemeral) assert(capability === "edit", "ephemeral room requires an edit link");
     return {
-      principal: { kind: "guest", tenantId, shareLinkId: c.shareLinkId, capability },
+      principal: { kind: "guest", tenantId, shareLinkId: c.shareLinkId, capability, anonId: c.anonId },
       readOnly: capability !== "edit",
     };
   }

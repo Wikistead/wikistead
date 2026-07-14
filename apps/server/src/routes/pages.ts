@@ -14,6 +14,7 @@ import type { TenantDb } from '../db/index.js'
 import { flushDraft } from '../collab-flush.js'
 import { countTodoTasks } from '../task-progress.js' // #290: :::todo aggregate for the sidebar ring
 import { evaluatePublishAbuse } from '../abuse-filter.js' // #328 / ADR-140: publish-boundary abuse filter
+import { guestPublishRateAllowed } from '../abuse-rate.js' // #328 / ADR-140 increment 2: guest publish rate caps
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { resolveEmbed, EmbedDeniedError } from '../embed-resolve.js'
@@ -2112,6 +2113,13 @@ export async function pagesPlugin(app: FastifyInstance) {
   // an edit-capable guest (share-link) — same FGA `edit` check either way.
   app.post<{ Params: { pageId: string } }>('/pages/:pageId/publish', { config: { guest: 'edit' } }, async (req, reply) => {
     const p = principalForPage(req, req.params.pageId)
+    // #328 / ADR-140 increment 2: guest publish rate cap (share-link + #331 session buckets; never raw
+    // IP). Members are not capped. BEFORE flushDraft/publishPage so a flooding guest costs nothing
+    // beyond the caps read; a STATIC reason code only (no content/limit interpolation — same no-oracle
+    // rule as the 422 below, and the caller holds an edit-capable token, so nothing new is revealed).
+    if (req.guest && !(await guestPublishRateAllowed(app.valkey, req.db, { tenantId: req.tenant.id, shareLinkId: req.guest.shareLinkId, anonId: req.guest.anonId }))) {
+      return reply.code(429).send({ error: 'rate limited', reason: 'publish_rate' })
+    }
     // Flush the live draft to pages.ydoc BEFORE snapshotting, so a publish issued
     // right after typing (within the collab debounce window) includes those edits and
     // does not leave them behind as "unpublished changes". Best-effort: never blocks
