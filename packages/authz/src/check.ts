@@ -46,6 +46,12 @@ function resolveRelation(capability: Capability, resource: ResourceRef): string 
 //   beforeCheck: may short-circuit before FGA (approval workflow, advanced RBAC).
 //   afterCheck:  may override FGA result (additional deny conditions, etc.).
 // Both default to no-op when no EE hooks are registered.
+//
+// #383 / ADR-152 §1 (Option B): check() is the ONLY interposed primitive — the hooks' whole scope is
+// this page/space capability seam. checkRelation / checkMemberAccess / the tenant-admin gate /
+// listObjects / search stage-1 are non-interposed BY DESIGN (see authz-hooks.ts for the full list and
+// the DSL-subtraction alternative). Enforced by authz-hook-scope-383.test.ts — do not quietly widen
+// or narrow which functions consult getAuthzHooks() without re-opening ADR-152.
 export async function check(
   fga: OpenFgaClient,
   user: string,
@@ -76,6 +82,8 @@ export async function check(
 // Use only for structural/administrative checks (e.g., verifying that a
 // specific tuple was written correctly in tests). Prefer check() for all
 // application-level authorization — it enforces the type constraint.
+// NON-INTERPOSED (#383 / ADR-152 Option B): EE authz hooks never see this call — which is also what
+// makes it safe for a hook implementation to use for its own FGA reads (no re-entry).
 export async function checkRelation(
   fga: OpenFgaClient,
   user: string,
@@ -122,6 +130,9 @@ export interface MemberAccess {
 //
 // Used in collab onAuthenticate to avoid two sequential FGA requests on the
 // hot path for every WebSocket connection.
+// NON-INTERPOSED (#383 / ADR-152 Option B): EE authz hooks do not run here — the 3-value RW/RO/reject
+// derivation has no single (relation, boolean) for a hook to act on, and the collab hot path stays a
+// pure model evaluation. A deny that must reach collab is a DSL subtraction (freeze/trash pattern).
 export async function checkMemberAccess(
   fga: OpenFgaClient,
   userId: string,
