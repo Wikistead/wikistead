@@ -551,7 +551,10 @@ function PageRoute() {
                       #290 (A): a page-progress ring rides the meta row when the page has any checkboxes. */}
                   <div className="flex items-center gap-2">
                     <PageMeta createdBy={page?.createdBy} updatedBy={page?.updatedBy} updatedAt={page?.updatedAt} />
-                    <ProgressRing done={taskProgress.done} total={taskProgress.total} />
+                    {/* #361 (4): PageMeta carries its own mt-1 top margin; match it on the ring so
+                        items-center aligns the ring to the meta TEXT centre, not the taller margin-box — the ring
+                        rode ~2px high against a SINGLE meta line (the 2-line case already looked centred). */}
+                    <span className="mt-1 inline-flex self-center"><ProgressRing done={taskProgress.done} total={taskProgress.total} /></span>
                   </div>
                 </div>
                 {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}
