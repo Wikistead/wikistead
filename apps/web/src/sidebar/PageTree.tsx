@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
-import { ChevronRight, Copy, FilePen, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Pin, Share2, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, FilePen, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Pin, Share2, Snowflake, Trash2 } from "lucide-react";
 import { ProgressRing } from "../app/ProgressRing"; // #290: sidebar :::todo progress ring
 import { cn } from "../lib/utils";
 
@@ -21,6 +21,7 @@ export interface PageTreeNode {
   published: boolean;
   unpublished: boolean;
   private: boolean;
+  frozen?: "full" | "guests" | null; // #329 rework: freeze level — pairs a snowflake with the lock
   taskDone: number; // #290: :::todo checkbox aggregate (taskTotal>0 → show the ring)
   taskTotal: number;
   pinned?: boolean; // #284: this page is pinned by the CURRENT member (drives the ★ toggle state)
@@ -141,6 +142,13 @@ export function PageTree({
           onMouseEnter={(e) => { const el = e.currentTarget; el.title = el.scrollWidth > el.clientWidth ? (d.name || t("common.untitled")) : ""; }}>{d.name || t("common.untitled")}</span>
         {/* #109 Fix B: private (allowlist-only) lock. Shown only to viewers of the page — non-viewers 404. */}
         {d.private && <Lock size={12} className="mx-0.5 flex-none text-fg-dim" data-testid="tree-private-lock" aria-label={t("sidebar.private")} />}
+        {/* #329 rework: freeze badge, paired with the lock (the title bar shows both, so the tree does too). */}
+        {d.frozen && (
+          <span className="mx-0.5 flex-none inline-flex items-center" data-testid="tree-frozen-badge"
+            title={d.frozen === "full" ? t("page.frozenFull") : t("page.frozenGuests")}>
+            <Snowflake size={12} className="text-fg-dim" aria-label={d.frozen === "full" ? t("page.frozenFull") : t("page.frozenGuests")} />
+          </span>
+        )}
         {/* #290 / ADR-114: a compact :::todo progress ring — only for pages with a :::todo (taskTotal>0). */}
         {/* #361 point 3: animKey lets the ring animate ACROSS the react-arborist row remounts
             (value-changed mounts replay prev→new via the shared CSS transition; see ProgressRing). */}

@@ -321,7 +321,12 @@ export async function listPages(
   const privateFlags = await Promise.all(
     visible.map((r) => readPagePrivate(fga, r.id).catch(() => false)),
   )
-  return visible.map((r, i) => ({ ...toPage(r), private: privateFlags[i] }))
+  // #329 rework: annotate the freeze level the same way so the tree can pair a snowflake with the
+  // lock (frozen only removes access, so showing it to a viewer reveals nothing; fault → no badge).
+  const frozenLevels = await Promise.all(
+    visible.map((r) => readPageFrozen(fga, r.id).catch(() => null)),
+  )
+  return visible.map((r, i) => ({ ...toPage(r), private: privateFlags[i], frozen: frozenLevels[i] }))
 }
 
 export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: string; userId: string }): Promise<Page> {
