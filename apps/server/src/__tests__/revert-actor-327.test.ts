@@ -134,9 +134,22 @@ describe('#327 revertActorRun', () => {
     expect(page.published_md).toBe('fixed by bob')
   })
 
+  it("409 'not-a-run' when the latest run is a SINGLE revision (one edit never bulk-reverts)", async () => {
+    await adminPool`DELETE FROM revisions WHERE page_id = ${pageId}`
+    await addRevision('clean text by alice', 'user:alice')
+    await addRevision('VANDALISED once only', VANDAL)
+    await expect(revertActorRun(db, fgaClient, valkey, storage, {
+      tenantId: tenant.id, pageId, actor: VANDAL, userId: MOD, plan: tenant.plan,
+    })).rejects.toMatchObject({ statusCode: 409, reason: 'not-a-run' })
+    // and nothing changed — the single edit is handled by the plain per-revision restore instead
+    const [page] = await adminPool<[{ published_md: string | null }]>`SELECT published_md FROM pages WHERE id = ${pageId}`
+    expect(page.published_md).toBe('VANDALISED once only')
+  })
+
   it("409 'no-baseline' when the actor's run covers every visible revision", async () => {
     await adminPool`DELETE FROM revisions WHERE page_id = ${pageId}`
     await addRevision('vandal owns all history', VANDAL)
+    await addRevision('vandal owns all history 2', VANDAL) // a real run (2+) with no baseline beneath
     await expect(revertActorRun(db, fgaClient, valkey, storage, {
       tenantId: tenant.id, pageId, actor: VANDAL, userId: MOD, plan: tenant.plan,
     })).rejects.toMatchObject({ statusCode: 409, reason: 'no-baseline' })
@@ -152,6 +165,7 @@ describe('#327 revertActorRun', () => {
   it('is moderation-gated: a plain editor gets 403 (moderate OR manage only)', async () => {
     await addRevision('clean', 'user:alice')
     await addRevision('VANDALISED', VANDAL)
+    await addRevision('VANDALISED more', VANDAL) // 2+ = a real run under the contract
     await expect(revertActorRun(db, fgaClient, valkey, storage, {
       tenantId: tenant.id, pageId, actor: VANDAL, userId: ED, plan: tenant.plan,
     })).rejects.toMatchObject({ statusCode: 403 })
@@ -159,6 +173,6 @@ describe('#327 revertActorRun', () => {
     const res = await revertActorRun(db, fgaClient, valkey, storage, {
       tenantId: tenant.id, pageId, actor: VANDAL, userId: 'dev-user', plan: tenant.plan,
     })
-    expect(res.revertedCount).toBe(1)
+    expect(res.revertedCount).toBe(2)
   })
 })
