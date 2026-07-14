@@ -15,7 +15,7 @@ import { pool, registry, acquireTenantDb } from '../db/index.js' // #411: cross-
 import { flushDraft } from '../collab-flush.js'
 import { countTodoTasks } from '../task-progress.js' // #290: :::todo aggregate for the sidebar ring
 import { evaluatePublishAbuse } from '../abuse-filter.js' // #328 / ADR-140: publish-boundary abuse filter
-import { guestPublishRateAllowed } from '../abuse-rate.js' // #328 / ADR-140 increment 2: guest publish rate caps
+import { guestPublishRateAllowed, guestCreatePageRateAllowed } from '../abuse-rate.js' // #328 / #274: guest publish + create caps
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { resolveEmbed, EmbedDeniedError } from '../embed-resolve.js'
@@ -293,6 +293,95 @@ export async function createPage(
   const page = toPage(row as PageRow)
   processOutboxAsync(driver, outboxId, { tenantId: args.tenantId, pageId: page.id, operation: 'upsert' })
   emit({ type: 'page.created', tenantId: args.tenantId, pageId: page.id, spaceId: args.spaceId, actorId: args.userId })
+  return page
+}
+
+// #274 / ADR-135 §3: a space-EDIT-link guest CREATES a page — created PUBLISHED, atomically. The draft
+// model makes guest drafts impossible-by-construction (an unpublished draft is creator-only via a
+// manage_direct grant, and share_link principals have no manage path and no per-guest identity to grant),
+// so the row + `page#space` + the `published` marker pair + an (empty) publish snapshot land in ONE
+// operation. The guest then co-edits over the normal collab path and publishes content like any editor.
+// - authz: FGA `edit` on the space (share_link → space#editor, with current_time for expiry) — the
+// exact gate createPage uses for members. No resource pre-binding (#397: FGA is the sole authority).
+// - attribution: pages/revisions record the #331 anon session id (`anon:<12hex>`), never a member sub,
+// so #327 per-actor revert and patrol group the guest's pages exactly like their edits.
+// - NO manage_direct grant: a guest owns nothing — edit flows from space#editor via edit_from_space
+// once page#space exists (which is written here, atomically). Deletion stays manage-gated (ADR §3).
+// - seeds: templateId/fromPageId are member-only (template#view has no share_link path; the route never
+// forwards them for a guest) — a guest page always starts empty.
+export async function guestCreatePublishPage(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  storage: StorageDriver,
+  args: { tenantId: string; spaceId: string; shareLinkId: string; anonId?: string; title?: string; parentId?: string | null },
+): Promise<Page> {
+  const subject = `share_link:${args.shareLinkId}`
+  const createdBy = args.anonId ?? `guest:${args.shareLinkId}`
+  const context = { current_time: new Date().toISOString() }
+  const canEdit = await check(fga, subject, 'edit', { type: 'space', id: args.spaceId }, context)
+  if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+
+  const parentId = args.parentId ?? null
+  if (parentId) {
+    // Same structural rules as the member path (same space, bounded depth) PLUS a guest must be able
+    // to VIEW the parent (404 = existence-hiding): without this, a guest could probe/attach under a
+    // private or draft page's id that the member path merely requires to exist.
+    const canViewParent = await check(fga, subject, 'view', { type: 'page', id: parentId }, context)
+    if (!canViewParent) throw Object.assign(new Error('not found'), { statusCode: 404 })
+    const [p] = await db.sql<{ space_id: string }[]>`SELECT space_id FROM pages WHERE id = ${parentId}`
+    if (!p || p.space_id !== args.spaceId) throw Object.assign(new Error('parent not in space'), { statusCode: 400 })
+    if ((await ancestorDepth(db, parentId)) + 1 > MAX_PAGE_DEPTH) {
+      throw Object.assign(new Error(`max nesting depth (${MAX_PAGE_DEPTH}) exceeded`), { statusCode: 400 })
+    }
+  }
+  const [{ pos }] = await db.sql<[{ pos: number | null }]>`
+    SELECT MAX(position) AS pos FROM pages
+    WHERE space_id = ${args.spaceId} AND parent_id IS NOT DISTINCT FROM ${parentId}
+  `
+  const position = positionBetween(pos, null)
+
+  // S3-FIRST (ADR-062): the empty publish snapshot's revision bytes go to storage before the tx, so a
+  // put failure aborts cleanly with no dangling row.
+  const emptyYdoc = Buffer.from(Y.encodeStateAsUpdate(new Y.Doc()))
+  const ydocKey = await storeRevisionYdoc(storage, args.tenantId, emptyYdoc)
+  const listSnapshot = JSON.stringify({ v: 1, blocks: [] }) // empty content has no ::: list directives
+
+  let outboxId!: string
+  let revisionId!: string
+  const row = await db.tx(async (tx) => {
+    const [r] = await tx<PageRow[]>`
+      INSERT INTO pages (tenant_id, space_id, parent_id, title, position, created_by,
+                         published_md, published_at, has_unpublished_changes, task_done, task_total, published_query_snapshot)
+      VALUES (${args.tenantId}, ${args.spaceId}, ${parentId}, ${args.title ?? ''}, ${position}, ${createdBy},
+              ${''}, now(), false, 0, 0, ${listSnapshot}::jsonb)
+      RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
+    `
+    const [rev] = await tx<[{ id: string }]>`
+      INSERT INTO revisions (tenant_id, page_id, ydoc_key, title, created_by)
+      VALUES (${args.tenantId}, ${r.id}, ${ydocKey}, ${r.title}, ${createdBy})
+      RETURNING id
+    `
+    revisionId = rev.id
+    await tx`UPDATE pages SET published_revision_id = ${rev.id} WHERE id = ${r.id}`
+    // The atomic release: page#space + the published marker pair (+ the structural parent tuple) INSIDE
+    // the tx — an FGA failure rolls the row back, so a guest page is never left as an unreachable draft.
+    await writeTuples(fga, [
+      { user: `space:${args.spaceId}`, relation: 'space', object: `page:${r.id}` },
+      ...PUBLISHED_MARKERS(r.id),
+      ...(parentId ? [{ user: `page:${parentId}`, relation: 'parent', object: `page:${r.id}` }] : []),
+    ])
+    outboxId = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: r.id, operation: 'upsert' })
+    // #228 / ADR-108: a guest-created page is published from birth — it is webhook-visible immediately.
+    await enqueueWebhookOutbox(tx, { tenantId: args.tenantId, eventType: 'page.published', payload: { pageId: r.id, revisionId: rev.id, actorId: createdBy, occurredAt: new Date().toISOString() } })
+    // #320 / ADR-126: feed + watcher fan-out (space watchers learn about the new guest page).
+    await fanOutFeedEvent(tx, { tenantId: args.tenantId, eventType: 'page.published', pageId: r.id, spaceId: args.spaceId, actor: createdBy, publishedAt: new Date() })
+    return r
+  })
+  const page = toPage(row as PageRow)
+  processOutboxAsync(driver, outboxId, { tenantId: args.tenantId, pageId: page.id, operation: 'upsert' })
+  emit({ type: 'page.created', tenantId: args.tenantId, pageId: page.id, spaceId: args.spaceId, actorId: createdBy })
+  emit({ type: 'page.published', tenantId: args.tenantId, pageId: page.id, revisionId, actorId: createdBy })
   return page
 }
 
@@ -2472,8 +2561,28 @@ export async function getExcerpt(
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function pagesPlugin(app: FastifyInstance) {
+  // Members create DRAFTS; a space-EDIT-link guest creates a page PUBLISHED, atomically (#274 / ADR-135
+  // §3 — guest drafts are impossible-by-construction). The guest branch never forwards the member-only
+  // seeds (templateId/fromPageId): template#view has no share_link path and the fence stays structural.
   app.post<{ Params: { spaceId: string }; Body: { title?: string; parentId?: string | null; fromPageId?: string | null; templateId?: string | null } }>(
-    '/spaces/:spaceId/pages', async (req, reply) => {
+    '/spaces/:spaceId/pages', { config: { guest: 'edit' } }, async (req, reply) => {
+      if (!req.user) {
+        if (!req.guest) return reply.code(401).send({ error: 'unauthorized' })
+        // #274 / ADR-135 §3: the guest created-page cap (two-bucket link+session window; static reason
+        // code only, same no-oracle rule as publish). BEFORE any work so a flooding guest costs ~nothing.
+        if (!(await guestCreatePageRateAllowed(app.valkey, req.db, { tenantId: req.tenant.id, shareLinkId: req.guest.shareLinkId, anonId: req.guest.anonId }))) {
+          return reply.code(429).send({ error: 'rate limited', reason: 'create_rate' })
+        }
+        const page = await guestCreatePublishPage(req.db, app.fga, app.searchDriver, app.storageDriver, {
+          tenantId: req.tenant.id,
+          spaceId: req.params.spaceId,
+          shareLinkId: req.guest.shareLinkId,
+          anonId: req.guest.anonId,
+          title: req.body.title,
+          parentId: req.body.parentId ?? null,
+        })
+        return reply.code(201).send(page)
+      }
       const page = await createPage(req.db, app.fga, app.searchDriver, {
         tenantId: req.tenant.id,
         spaceId: req.params.spaceId,

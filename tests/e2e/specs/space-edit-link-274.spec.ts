@@ -42,6 +42,14 @@ test("#274: a space EDIT link lets an anonymous guest edit a published page in t
   await sleep(800);
   expect(await paneText(member, "preview")).toContain("from-space-guest");
 
+  // #274 §3: the guest CREATES a page from the sidebar affordance — created published atomically,
+  // it opens in the editor and joins the tree.
+  await guest.getByTestId("guest-new-page").click();
+  await guest.getByTestId("guest-new-page-title").fill("Guest Wiki Page");
+  await guest.keyboard.press("Enter");
+  await guest.waitForSelector("[data-pane=preview] .cm-content", { timeout: 10000 });
+  await expect(guest.getByTestId("guest-tree-page").filter({ hasText: "Guest Wiki Page" })).toBeVisible({ timeout: 10000 });
+
   // revoke → the guest loses the space (uniform denial on the next load).
   const revoke = await member.evaluate(async ({ api, id }) => {
     const res = await fetch(`${api}/share-links/${id}`, { method: "DELETE", headers: { Authorization: "Bearer dev-token" } });
@@ -52,4 +60,21 @@ test("#274: a space EDIT link lets an anonymous guest edit a published page in t
   await sleep(1500);
   const revokedBody = await guest.locator("body").innerText();
   expect(revokedBody).not.toContain("from-space-guest"); // the page content is gone for the revoked link
+});
+
+test("#274: a VIEW space link shows no create affordance", async ({ browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  await openDemo(member);
+  const link = await member.evaluate(async (api) => {
+    const res = await fetch(`${api}/share-links`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "Content-Type": "application/json" },
+      body: JSON.stringify({ resource: { type: "space", id: "demo_space" }, capability: "view", expiresInSeconds: null }),
+    });
+    return (await res.json()) as { id: string };
+  }, API);
+  const guest = await (await browser.newContext()).newPage();
+  await guest.goto(`/share/${link.id}`);
+  await expect(guest.getByTestId("guest-sidebar")).toBeVisible({ timeout: 15000 });
+  await expect(guest.getByTestId("guest-new-page")).toHaveCount(0); // read-only chrome stays write-free
 });

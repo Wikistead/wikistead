@@ -5,6 +5,7 @@ import { assertPageViewable } from '../page-view-gate.js'
 import { resolveEntitlements, decideAllowance } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import { fanOutFeedEvent } from './notifications.js' // #362 / ADR-126 addendum: attachment.confirmed feed event
+import { guestAttachRateAllowed, guestAttachMaxBytes } from '../abuse-rate.js' // #274 / ADR-135 §4: guest attachment caps
 import { withTenantTx } from '../db/index.js' // #382
 import { makeS3Key } from '../storage/driver.js'
 import type { StorageDriver } from '../storage/index.js'
@@ -59,9 +60,14 @@ export async function presignAttachment(
   db: TenantDb,
   storage: StorageDriver,
   fga: OpenFgaClient,
-  args: { tenantId: string; plan: string; pageId: string; userId: string; filename: string; contentType: string },
+  // Exactly one of userId (member) / guest (edit-capable share-link, #274) identifies the uploader.
+  // Either way the FGA `edit` check on the page is the authority (guests are not softer: an edit link
+  // reaches `edit` via edit_from_space, and frozen_guests/expiry cut it — with current_time threaded).
+  args: { tenantId: string; plan: string; pageId: string; userId?: string; guest?: { shareLinkId: string }; filename: string; contentType: string },
 ): Promise<{ attachmentId: string; uploadUrl: string; expiresAt: string }> {
-  const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: args.pageId })
+  const subject = args.userId ? `user:${args.userId}` : `share_link:${args.guest!.shareLinkId}`
+  const context = args.userId ? undefined : { current_time: new Date().toISOString() }
+  const canEdit = await check(fga, subject, 'edit', { type: 'page', id: args.pageId }, context)
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
   // Plan-gated storage quota — the storage consumer of the metered soft-cap substrate (#128 /
@@ -103,7 +109,9 @@ export async function confirmAttachment(
   db: TenantDb,
   storage: StorageDriver,
   fga: OpenFgaClient,
-  args: { id: string; tenantId: string; userId: string },
+  // Member (userId) or edit-link guest (#274) — same shape as presignAttachment; the guest's anonId
+  // (when present) attributes the feed event pseudonymously (never an authority, ADR-138).
+  args: { id: string; tenantId: string; userId?: string; guest?: { shareLinkId: string; anonId?: string } },
 ): Promise<AttachmentSummary & { downloadUrl: string }> {
   const [row] = await db.sql<AttachmentRow[]>`
     SELECT * FROM attachments WHERE id = ${args.id} AND status = 'pending'
@@ -114,7 +122,9 @@ export async function confirmAttachment(
   // Require the SAME permission as presign — `edit` on the target page — so the whole write surface is
   // uniformly gated. A principal without edit gets a 404 (existence-hidden): a pending id is unguessable, but
   // the write path must not be authz-free. Non-regression: the presigner (who has edit) confirms normally.
-  const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: row.page_id })
+  const subject = args.userId ? `user:${args.userId}` : `share_link:${args.guest!.shareLinkId}`
+  const context = args.userId ? undefined : { current_time: new Date().toISOString() }
+  const canEdit = await check(fga, subject, 'edit', { type: 'page', id: row.page_id }, context)
   if (!canEdit) throw Object.assign(new Error('not found'), { statusCode: 404 })
 
   // HeadObject with a short retry: some S3 gateways (e.g. SeaweedFS) are not
@@ -132,6 +142,18 @@ export async function confirmAttachment(
   }
   if (sizeBytes === undefined) {
     throw Object.assign(new Error('upload not found in storage; upload to the presigned URL first'), { statusCode: 400 })
+  }
+
+  // #274 / ADR-135 §4: the guest per-file SIZE cap, against the authoritative HeadObject size (members
+  // are never capped here — their bound is the tenant storage quota at presign). Fail hard: the oversize
+  // object is deleted and the row dropped, so a rejected upload leaves no storage residue. Static 413.
+  if (!args.userId) {
+    const maxBytes = await guestAttachMaxBytes(db, args.tenantId)
+    if (sizeBytes > maxBytes) {
+      await storage.deleteObject(row.s3_key).catch(() => {}) // best-effort; GC sweeps stragglers
+      await db.sql`DELETE FROM attachments WHERE id = ${args.id}`
+      throw Object.assign(new Error('attachment too large for a guest upload'), { statusCode: 413 })
+    }
   }
 
   // #273 / ADR-120: derive the inline classification from the object's LEADING BYTES —
@@ -153,10 +175,12 @@ export async function confirmAttachment(
       SET status = 'confirmed', size_bytes = ${sizeBytes}, confirmed_at = now(), inline_kind = ${inlineKind}
       WHERE id = ${args.id}
     `
-    await fanOutFeedEvent(tx, { tenantId: args.tenantId, eventType: 'attachment.confirmed', pageId: row.page_id, spaceId: pg?.space_id ?? null, actor: `user:${args.userId}`, publishedAt: pg?.published_at ?? null })
+    // Actor: member sub, or the #331 anon session id for a guest (pseudonymous attribution, like publish).
+    const actor = args.userId ? `user:${args.userId}` : (args.guest!.anonId ?? `guest:${args.guest!.shareLinkId}`)
+    await fanOutFeedEvent(tx, { tenantId: args.tenantId, eventType: 'attachment.confirmed', pageId: row.page_id, spaceId: pg?.space_id ?? null, actor, publishedAt: pg?.published_at ?? null })
   })
   const downloadUrl = await storage.presignGet(row.s3_key, { ttlSeconds: GET_TTL, disposition: { type: 'attachment', filename: row.filename } })
-  emit({ type: 'attachment.confirmed', tenantId: args.tenantId, attachmentId: row.id, pageId: row.page_id, actorId: args.userId })
+  emit({ type: 'attachment.confirmed', tenantId: args.tenantId, attachmentId: row.id, pageId: row.page_id, actorId: args.userId ?? args.guest!.anonId ?? `guest:${args.guest!.shareLinkId}` })
   return { id: row.id, filename: row.filename, contentType: row.content_type, sizeBytes, createdAt: row.created_at, downloadUrl }
 }
 
@@ -292,14 +316,20 @@ export async function deleteAttachment(
 
 export async function attachmentsPlugin(app: FastifyInstance) {
   type PresignBody = { filename: string; contentType: string }
+  // Members OR an edit-link guest (#274 / ADR-135 §4). The guest path adds the two-bucket COUNT cap
+  // (bumped here, where the upload slot is reserved) — the per-file SIZE cap lands at confirm, where
+  // the authoritative HeadObject size exists. FGA `edit` on the page stays the shared authority.
   app.post<{ Params: { spaceId: string; pageId: string }; Body: PresignBody }>(
-    '/spaces/:spaceId/pages/:pageId/attachments/presign',
+    '/spaces/:spaceId/pages/:pageId/attachments/presign', { config: { guest: 'edit' } },
     async (req, reply) => {
+      if (!req.user && req.guest && !(await guestAttachRateAllowed(app.valkey, req.db, { tenantId: req.tenant.id, shareLinkId: req.guest.shareLinkId, anonId: req.guest.anonId }))) {
+        return reply.code(429).send({ error: 'rate limited', reason: 'attach_rate' })
+      }
       const result = await presignAttachment(req.db, app.storageDriver, app.fga, {
         tenantId: req.tenant.id,
         plan: req.tenant.plan,
         pageId: req.params.pageId,
-        userId: req.user.sub,
+        ...(req.user ? { userId: req.user.sub } : { guest: { shareLinkId: req.guest!.shareLinkId } }),
         filename: req.body.filename,
         contentType: req.body.contentType,
       })
@@ -312,8 +342,12 @@ export async function attachmentsPlugin(app: FastifyInstance) {
     async (req) => listAttachments(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub }),
   )
 
-  app.post<{ Params: { id: string } }>('/attachments/:id/confirm', async (req) => {
-    return confirmAttachment(req.db, app.storageDriver, app.fga, { id: req.params.id, tenantId: req.tenant.id, userId: req.user.sub })
+  app.post<{ Params: { id: string } }>('/attachments/:id/confirm', { config: { guest: 'edit' } }, async (req) => {
+    return confirmAttachment(req.db, app.storageDriver, app.fga, {
+      id: req.params.id,
+      tenantId: req.tenant.id,
+      ...(req.user ? { userId: req.user.sub } : { guest: { shareLinkId: req.guest!.shareLinkId, anonId: req.guest!.anonId } }),
+    })
   })
 
   // Members OR a guest (view share-link). The principal is resolved here; the FGA
