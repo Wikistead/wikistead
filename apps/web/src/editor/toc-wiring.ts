@@ -77,7 +77,11 @@ export function wireToc(
       const hs = extractHeadings(view.state);
       const cx = rect.left + rect.width / 2;
       const topPos = view.posAtCoords({ x: cx, y: rect.top + bandPx() + 8 });
-      const botPos = view.posAtCoords({ x: cx, y: rect.top + bandPx() + (rect.height - bandPx()) * 0.8 });
+      // #345 sample near the VIEWPORT BOTTOM (not 80% down) so the visible set covers the WHOLE on-screen
+      // area, not just band→80% — the old narrow band left only ~1 light item (the "2 layers don't show" report).
+      // posAtCoords near the very edge can miss, so nudge up 8px; works for both scroll seams (posAtCoords maps
+      // screen y → doc offset for the CM scroller AND the public outer scroller uniformly).
+      const botPos = view.posAtCoords({ x: cx, y: rect.top + rect.height - 8 });
       // ACTIVE (dark): the last heading at/above the band-top sample. the bottom clamp (#304-2) is GONE —
       // a short final section is covered by the light layer instead; a jump to it is held by jumpPinned.
       if (reportActive) {

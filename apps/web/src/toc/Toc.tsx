@@ -29,10 +29,12 @@ export function Toc({
   const shown = headings.filter((h) => h.level <= depth);
   const minLevel = shown.length ? Math.min(...shown.map((h) => h.level)) : 1;
   const visible = useMemo(() => new Set(visibleFroms ?? []), [visibleFroms]);
-  // #345 auto-follow — keep the current item in view as the reader scrolls a long TOC (no-op for a short
-  // rail). block:"nearest" scrolls the minimum; only the rail (not the pointer-events-none overlay) follows.
+  // #345/ auto-follow — keep the current item in view as the reader scrolls a long TOC (no-op for a
+  // short rail). issue 1: `block:"nearest"` let the active item stick to the rail's BOTTOM edge and clip
+  // off as the reader progressed → `block:"center"` keeps it mid-rail (the rail is overflow-y-auto). Only the
+  // rail (not the pointer-events-none overlay) follows.
   const activeRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => { if (variant === "rail") activeRef.current?.scrollIntoView({ block: "nearest" }); }, [activeFrom, variant]);
+  useEffect(() => { if (variant === "rail") activeRef.current?.scrollIntoView({ block: "center" }); }, [activeFrom, variant]);
 
   // Overlay visibility: each scroll shows it and resets a fade timer; it hides ~1.2s after scrolling
   // stops. setScrolling(true) during a continuous scroll is a no-op re-render (React bails on an
@@ -80,9 +82,11 @@ export function Toc({
             style={{ paddingLeft: `${6 + (h.level - minLevel) * 12}px` }}
             className={cn(
               "block w-full cursor-pointer truncate rounded py-1 pr-2 text-left text-[length:var(--text-xs)] text-fg-dim transition-colors duration-[120ms] hover:text-foreground",
-              // #345 LIGHT layer — a section that's on screen but not the current one reads a touch
-              // brighter than idle (a subtle presence cue), below the dark active row.
-              visible.has(h.from) && activeFrom !== h.from && "text-foreground/80",
+              // #345/ LIGHT layer — a section on screen but not the current one. measured that
+              // the old `text-foreground/80` was grey-vs-grey with idle `text-fg-dim` (imperceptible). Make three
+              // legible tiers: idle (fg-dim) < visible (FULL foreground + a faint NEUTRAL wash) < active (accent
+              // text + accent wash). The neutral wash reads clearly against idle without competing with active.
+              visible.has(h.from) && activeFrom !== h.from && "text-foreground bg-[color-mix(in_srgb,var(--fg)_8%,transparent)]",
               // #192 / #345: DARK layer — the single active heading: accent text PLUS a faint accent-tinted
               // background wash on the whole row (low opacity via color-mix), so the current section stands out.
               activeFrom === h.from && "font-medium text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]",
