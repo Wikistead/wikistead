@@ -1,5 +1,5 @@
 import { parser, Strikethrough, Table } from "@lezer/markdown";
-import { parseFenceInfo, highlightExtension, footnoteExtension, safeHref } from "@wikistead/macro-render"; // #267 fence align=; #334 highlight; #335 footnote grammar; #384 shared URL-scheme judge
+import { parseFenceInfo, highlightExtension, footnoteExtension, safeHref, HEADINGS, footnoteRefLabel } from "@wikistead/macro-render"; // #267 fence align=; #334 highlight; #335 footnote grammar; #384 shared URL judge + heading map + footnote label
 import { directiveExtension, parseDirectiveOpen, resolveDirectiveRanges, type ResolvedDirective } from "./directive-parser";
 import { findDirectiveMacro, findFenceMacro } from "./registry";
 import { currentMacroTheme } from "./theme";
@@ -94,15 +94,9 @@ let footnoteNumbers: Map<string, number> | null = null;
 // null → its footnotes stay literal `?` and it never starts its own section (matches the server's renderDoc).
 let footnoteDocActive = false;
 // The label inside `[^label]` (a FootnoteRef node spans `[^` … `]`).
-function footnoteRefLabel(src: string, from: number, to: number): string {
-  return src.slice(from + 2, to - 1);
-}
-
-// Block-level nodes get their own recursion; everything else is inline/text.
-const HEADINGS: Record<string, string> = {
-  ATXHeading1: "h1", ATXHeading2: "h2", ATXHeading3: "h3", ATXHeading4: "h4", ATXHeading5: "h5", ATXHeading6: "h6",
-  SetextHeading1: "h1", SetextHeading2: "h2",
-};
+// #384: HEADINGS (node→tag map) and footnoteRefLabel are shared from @wikistead/macro-render (imported above),
+// so the DOM and SafeHtml sinks read the same markdown-grammar judgments. Block-level nodes get their own
+// recursion; everything else is inline/text.
 
 // Block dangerous schemes; allow everything else (relative, https, mailto, …). Never throws.
 // The blocklist POLICY is unchanged; this normalizes the URL the way a browser does BEFORE checking,
