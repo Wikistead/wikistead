@@ -9,10 +9,12 @@ import { withTenantTx } from '../db/index.js' // #382
 const MAX_ANCESTOR_WALK = 11
 
 // #218 / ADR-103: the DIRECT grant leaves (member/group/link grants live here now — they cascade down the
-// parent chain). `comment` keeps its own direct types. `view_base@user:*` (public) is read separately.
-const DIRECT_GRANT_RELATIONS = ['manage_direct', 'edit_direct', 'view_direct', 'comment']
+// parent chain). #411 / ADR-153: `comment` grants moved to the `comment_direct` leaf (the trash subtraction
+// made `comment` computed) — reading the old name here would silently drop comment-granted members from the
+// search viewer denorm (the Review approval condition). `view_base@user:*` (public) is read separately.
+const DIRECT_GRANT_RELATIONS = ['manage_direct', 'edit_direct', 'view_direct', 'comment_direct']
 
-interface PageRow { id: string; tenant_id: string; space_id: string; title: string; published_md: string | null; updated_at: Date }
+interface PageRow { id: string; tenant_id: string; space_id: string; title: string; published_md: string | null; updated_at: Date; deleted_at: Date | null }
 
 function categorize(
   user: string,
@@ -44,12 +46,15 @@ export async function buildSearchDoc(
   // #382: the isolation-aware driver tx (logical = SET LOCAL RLS, namespace = schema search_path).
   const page = await (withTenantTx(tenantId, async (tx) => {
     const [r] = await tx<PageRow[]>`
-      SELECT id, tenant_id, space_id, title, published_md, updated_at FROM pages WHERE id = ${pageId}
+      SELECT id, tenant_id, space_id, title, published_md, updated_at, deleted_at FROM pages WHERE id = ${pageId}
     `
     return r ?? null
   }) as Promise<PageRow | null>)
 
-  if (!page) return null
+  // #411 / ADR-153: a TRASHED page is treated as absent — the caller issues a search 'delete'. Belt against
+  // a racing outbox 'upsert' (e.g. a collab body flush enqueued just before the trash) re-indexing a page
+  // whose trash-time 'delete' already processed.
+  if (!page || page.deleted_at) return null
 
   const viewerUsers = new Set<string>()
   const viewerGroups = new Set<string>()
