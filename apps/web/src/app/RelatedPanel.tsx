@@ -1,14 +1,17 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { Link as LinkIcon } from "lucide-react";
+import { ChevronRight, Link as LinkIcon, Maximize2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { RightPanel } from "../ui/RightPanel";
-import { useBacklinks, useRelated } from "../data/queries";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { useBacklinks, useLocalGraph, useRelated } from "../data/queries";
+import { LocalGraphCanvas } from "./LocalGraph";
 
 // #322 / ADR-133 increment ①: the right-rail "Related" panel — the IA home for a page's link
 // neighbourhood. It replaces the single-purpose "Backlinks" panel (#230) with a SECTION layout so the
 // later increments slot in without another IA change: §Backlinks (1-hop, here now) → §Related (2-hop,
-// increment ②) → §Local graph / §Tags (separate tickets, ADR-133 §6). Each section is server
+// increment ②) → §Local graph (#394, increment ③a) → §Tags (separate ticket). Each section is server
 // FGA-view-gated at its own endpoint (the panel never client-filters / re-counts). Openable in edit mode.
 function RelatedSection({ title, count, children }: { title: string; count: number; children: ReactNode }) {
   return (
@@ -22,6 +25,35 @@ function RelatedSection({ title, count, children }: { title: string; count: numb
   );
 }
 
+// #394 / ADR-147: the depth-2 graph in a modal (search-modal sizing). Fetched only while open; a node
+// click closes the modal and navigates. Over-cap is reported ("top N"), never silently truncated.
+function LocalGraphModal({ pageId, open, onClose }: { pageId: string; open: boolean; onClose: () => void }) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { data } = useLocalGraph(pageId, 2, open);
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="sm:max-w-5xl" data-testid="local-graph-modal">
+        <DialogHeader>
+          <DialogTitle>{t("related.graph")}</DialogTitle>
+        </DialogHeader>
+        {data && (
+          <LocalGraphCanvas
+            data={data}
+            onOpenPage={(id) => { onClose(); navigate(`/p/${id}`); }}
+            className="h-[65vh] w-full overflow-hidden rounded-md border border-border"
+          />
+        )}
+        {data && data.hiddenCount > 0 && (
+          <p className="text-[12px] text-fg-dim" data-testid="local-graph-topn">
+            {t("related.graphTopN", { count: data.nodes.length })}
+          </p>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function RelatedPanel({ pageId, onClose }: { pageId: string; onClose: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -32,6 +64,11 @@ export function RelatedPanel({ pageId, onClose }: { pageId: string; onClose: () 
   const related = useRelated(pageId);
   const relatedGroups = related.data?.groups ?? [];
   const relatedCount = relatedGroups.reduce((n, g) => n + g.pages.length, 0);
+  // #394 / ADR-147: §Local graph — COLLAPSED by default (sidebar vertical space), lazy (no fetch, no canvas
+  // until opened). The mini square is the 1-hop neighbourhood; the modal expands to depth 2.
+  const [graphOpen, setGraphOpen] = useState(false);
+  const [graphModal, setGraphModal] = useState(false);
+  const miniGraph = useLocalGraph(pageId, 1, graphOpen);
   const linkBtn = (id: string, title: string, testid: string) => (
     <button
       type="button"
@@ -89,9 +126,58 @@ export function RelatedPanel({ pageId, onClose }: { pageId: string; onClose: () 
             </div>
           )}
         </RelatedSection>
-        {/* Reserved for later increments (ADR-133): §Local graph, §Tags. Each will be its own view-gated
-            section under this same panel — no further IA change. */}
+        {/* §Local graph (#394 / ADR-147) — collapsed by default; the square mini canvas draws the 1-hop
+            neighbourhood (server view-filtered both ends), the expand button opens the depth-2 modal. */}
+        <section className="flex flex-col gap-1" data-testid="related-section">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              data-testid="local-graph-toggle"
+              className="inline-flex cursor-pointer items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-fg-dim hover:text-foreground"
+              onClick={() => setGraphOpen((v) => !v)}
+              aria-expanded={graphOpen}
+            >
+              <ChevronRight size={12} className={`transition-transform ${graphOpen ? "rotate-90" : ""}`} aria-hidden />
+              {t("related.graph")}
+            </button>
+            {graphOpen && (
+              <button
+                type="button"
+                data-testid="local-graph-expand"
+                className="inline-flex cursor-pointer items-center rounded-md p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground"
+                aria-label={t("related.graphExpand")}
+                onClick={() => setGraphModal(true)}
+              >
+                <Maximize2 size={13} aria-hidden />
+              </button>
+            )}
+          </div>
+          {graphOpen && (
+            miniGraph.data && miniGraph.data.nodes.length > 1 ? (
+              <div className="flex flex-col gap-1">
+                <LocalGraphCanvas
+                  data={miniGraph.data}
+                  onOpenPage={(id) => navigate(`/p/${id}`)}
+                  className="aspect-square w-full overflow-hidden rounded-md border border-border"
+                />
+                {miniGraph.data.hiddenCount > 0 && (
+                  <button
+                    type="button"
+                    data-testid="local-graph-more"
+                    className="cursor-pointer text-left text-[12px] text-[var(--link)] hover:underline"
+                    onClick={() => setGraphModal(true)}
+                  >
+                    {t("related.graphMore", { count: miniGraph.data.hiddenCount })}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <p className="text-[13px] text-fg-dim" data-testid="local-graph-empty">{t("related.graphEmpty")}</p>
+            )
+          )}
+        </section>
       </div>
+      <LocalGraphModal pageId={pageId} open={graphModal} onClose={() => setGraphModal(false)} />
     </RightPanel>
   );
 }

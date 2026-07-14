@@ -254,6 +254,24 @@ export function useRelated(pageId: string | null, enabled = true) {
   });
 }
 
+// #394 / ADR-147: the local link graph around a page (mini = depth 1, modal = depth 2). Member-only; the
+// server returns an edge only when the viewer can see BOTH endpoints (an unviewable page is absent as a
+// node — never client-filtered here). hiddenCount reports viewable nodes dropped by the server node cap.
+// Lazy: only fetched while the §Local graph section (or the modal) is open.
+export interface LocalGraphNode { id: string; title: string }
+export interface LocalGraphEdge { from: string; to: string; type: "link" | "embed" }
+export interface LocalGraphResult { center: string; nodes: LocalGraphNode[]; edges: LocalGraphEdge[]; hiddenCount: number }
+export function useLocalGraph(pageId: string | null, depth: 1 | 2, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["local-graph", pageId, depth],
+    queryFn: () =>
+      apiFetch<LocalGraphResult>(`/pages/${encodeURIComponent(pageId!)}/graph?depth=${depth}`, token)
+        .then((r) => r ?? { center: pageId!, nodes: [], edges: [], hiddenCount: 0 }),
+    enabled: enabled && pageId != null,
+  });
+}
+
 // #284 / ADR-119: per-member pins (spaces + pages). The server list is view-confirmed
 // (a deleted / no-longer-viewable resource is silently dropped server-side), so this
 // list is authoritative for what may be rendered — never cache-render a stale title.
