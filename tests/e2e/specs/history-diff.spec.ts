@@ -22,7 +22,7 @@ const publish = (p: Page, id: string) =>
     await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
   }, { api: API, id });
 
-test("history split diff: a checkbox flip shows as a left/right change row; overlay keeps the editor mounted; restore rewinds it", async ({ browser }) => {
+test("history split diff: a checkbox flip shows as a left/right change row; overlay keeps the editor mounted; restore keeps live task progress (#316)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   const pageId = await openScratch(page, "hist-diff");
   await enterEdit(page);
@@ -55,10 +55,16 @@ test("history split diff: a checkbox flip shows as a left/right change row; over
   // underneath (not unmounted/replaced), so the collab connection is never dropped.
   await expect(page.locator("[data-pane=preview] .cm-content")).toBeAttached();
 
-  // close the overlay, then restore the revision → published rewinds to unchecked (D7)
+  // close the overlay, then restore revision 1. #316 / ADR-123: restoring the BODY must NOT silently revert
+  // live task PROGRESS — the task composition is unchanged (one "task one"), so the CURRENT checkbox state ([x])
+  // is overlaid onto the restored prose. So the tick is KEPT (published stays "- [x]"), not rewound to "- [ ]".
+  // (The prose-rewind aspect of restore is covered by the D-series revision tests; here the only diff is the
+  // checkbox, which #316 deliberately preserves.)
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("diff-modal")).toHaveCount(0);
   await page.getByTestId("revision-restore").first().click();
   await page.locator("[data-testid=confirm-dialog] [data-testid=confirm-restore]").click();
-  await expect.poll(() => publishedMd(page, pageId), { timeout: 10_000 }).toContain("- [ ] task one");
+  // The restore completes (a new revision is inserted → count 2) and preserves the live task progress.
+  await expect.poll(() => revisionCount(page, pageId), { timeout: 10_000 }).toBe(2);
+  expect(await publishedMd(page, pageId)).toContain("- [x] task one"); // #316: task progress kept, not reverted
 });
