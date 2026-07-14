@@ -107,6 +107,9 @@ export function wireToc(
       if (reportActive) {
         let active: number | null = null;
         for (const h of hs) { if (h.from <= topPos) active = h.from; else break; }
+        ///never leave the active layer empty while a heading is on screen — fall back to the TOPMOST
+        // visible heading (the section the reader is entering). visible is never empty when a heading is on
+        // screen, so this covers both a top-intro screen AND the doc bottom. Only a pure-intro screen stays unlit.
         if (active == null && visible.length) active = visible[0]!;
         if (jumpPinned != null) active = jumpPinned; // jump-intent wins until the user scrolls
         reportActive(active);

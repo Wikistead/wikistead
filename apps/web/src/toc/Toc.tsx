@@ -29,30 +29,46 @@ export function Toc({
   const shown = headings.filter((h) => h.level <= depth);
   const minLevel = shown.length ? Math.min(...shown.map((h) => h.level)) : 1;
   const visible = useMemo(() => new Set(visibleFroms ?? []), [visibleFroms]);
-  // #345/auto-follow — keep the current item in view as the reader scrolls a long TOC (no-op for a
-  // short rail).issue 1: `block:"nearest"` let the active item stick to the rail's BOTTOM edge and clip
-  // off as the reader progressed → keep it mid-rail (the rail is overflow-y-auto). Only the rail (not the
-  // pointer-events-none overlay) follows.
-  //REGRESSION FIX: do NOT use Element.scrollIntoview — it scrolls EVERY scrollable ancestor, which on a
-  // publish→view surface transition hijacked the CONTENT scroller (the long doc no longer landed at the top,
-  // heading-anchor-313 went red). Scroll ONLY the rail nav container: center the active button within the nav by
-  // setting nav.scrollTop directly, touching no ancestor. Short rail (content fits) = no-op.
-  const activeRef = useRef<HTMLButtonElement | null>(null);
-  const railRef = useRef<HTMLElement | null>(null);
+  // #345auto-follow keeps the whole highlighted RUN (active + the light "visible" items) PLUS a couple
+  // of neighbours in view as the reader scrolls a long TOC — a scrolloff band for the table of contents, so the
+  // highlight never scrolls out of the rail/overlay (the old single-active centring let it fall off at the
+  // bottom). Both variants follow now (the overlay is max-h/overflow-y-auto too,Issue 3).REGRESSION
+  // GUARD: scroll ONLY nav.scrollTop, never an ancestor (Element.scrollIntoView hijacked the content scroller).
+  const navRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    if (variant !== "rail") return;
-    const nav = railRef.current, btn = activeRef.current;
-    if (!nav || !btn || nav.scrollHeight <= nav.clientHeight) return; // no active item, or rail doesn't overflow
-    const navRect = nav.getBoundingClientRect(), btnRect = btn.getBoundingClientRect();
-    const btnTopInNav = btnRect.top - navRect.top + nav.scrollTop; // active button's offset within the scroll area
-    const target = btnTopInNav - nav.clientHeight / 2 + btnRect.height / 2; // center it in the rail
-    nav.scrollTop = Math.max(0, Math.min(target, nav.scrollHeight - nav.clientHeight));
-  }, [activeFrom, variant]);
+    const nav = navRef.current;
+    if (!nav || nav.scrollHeight <= nav.clientHeight) return; // short TOC (fits) → nothing to follow
+    const items = Array.from(nav.querySelectorAll<HTMLElement>("[data-testid=toc-item]"));
+    const hi = items.filter((el) => el.hasAttribute("data-active") || el.hasAttribute("data-visible"));
+    if (hi.length === 0) return;
+    const navRect = nav.getBoundingClientRect();
+    const offTop = (el: HTMLElement) => el.getBoundingClientRect().top - navRect.top + nav.scrollTop;
+    const rowH = hi[0]!.getBoundingClientRect().height || 24;
+    const margin = rowH * 2; // keep ~2 neighbours visible on each side of the highlighted run (the scrolloff band)
+    const runTop = offTop(hi[0]!) - margin;
+    const last = hi[hi.length - 1]!;
+    const runBottom = offTop(last) + last.getBoundingClientRect().height + margin;
+    const viewTop = nav.scrollTop, viewBottom = nav.scrollTop + nav.clientHeight;
+    let next = nav.scrollTop;
+    if (runBottom - runTop >= nav.clientHeight) {
+      // the run + margins is taller than the nav → centre the active item (or the run's start) instead
+      const active = items.find((el) => el.hasAttribute("data-active")) ?? hi[0]!;
+      next = offTop(active) - nav.clientHeight / 2 + active.getBoundingClientRect().height / 2;
+    } else if (runTop < viewTop) {
+      next = runTop; // run (with its top margin) sits above the view → scroll up to reveal it
+    } else if (runBottom > viewBottom) {
+      next = runBottom - nav.clientHeight; // run (with its bottom margin) sits below → scroll down to reveal it
+    }
+    nav.scrollTop = Math.max(0, Math.min(next, nav.scrollHeight - nav.clientHeight));
+  }, [activeFrom, visibleFroms]);
 
   // Overlay visibility: each scroll shows it and resets a fade timer; it hides ~1.2s after scrolling
   // stops. setScrolling(true) during a continuous scroll is a no-op re-render (React bails on an
   // unchanged value), so this costs a render only on the show/hide transitions.
   const [scrolling, setScrolling] = useState(false);
+  // #345Issue 3: while the pointer is OVER the overlay, hold it open (cancel the fade) so the reader can
+  // read/scroll the TOC instead of it fading out from under them.
+  const [hovered, setHovered] = useState(false);
   const timer = useRef<number | undefined>(undefined);
   // #192: the overlay must clear the top-right floating control band (the TOC + comments toggles,
   // data-testid="page-status") with ZERO overlap. A calc() guess kept under-shooting the real bottom,
@@ -96,7 +112,6 @@ export function Toc({
           <li key={h.slug}>
             <button
               type="button"
-              ref={activeFrom === h.from ? activeRef : undefined}
               onClick={() => onJump(h.from)}
               data-testid="toc-item"
               data-active={activeFrom === h.from ? "" : undefined}
@@ -127,15 +142,19 @@ export function Toc({
   if (variant === "overlay") {
     return (
       <nav
+        ref={navRef}
         aria-label={t("toc.title")}
         data-testid="toc"
         data-variant="overlay"
         style={{ top: `${overlayTop}px` }}
+        // #345Issue 3: hovering the overlay holds it open (cancels the fade) so it can be read/scrolled.
+        onMouseEnter={() => { if (timer.current) window.clearTimeout(timer.current); setHovered(true); }}
+        onMouseLeave={() => { setHovered(false); if (timer.current) window.clearTimeout(timer.current); timer.current = window.setTimeout(() => setScrolling(false), 1200); }}
         className={cn(
           // #192: `top` is the MEASURED bottom of the control band (see overlayTop) so the overlay never
           // overlaps the TOC/comments buttons. Glass look: translucent panel + backdrop-blur.
-          "pointer-events-none fixed right-3 z-30 max-h-[70vh] w-[240px] overflow-y-auto rounded-lg border border-border/60 bg-panel/70 p-3 shadow-lg backdrop-blur-md transition-opacity duration-200",
-          scrolling ? "pointer-events-auto opacity-100" : "opacity-0",
+          "fixed right-3 z-30 max-h-[70vh] w-[240px] overflow-y-auto rounded-lg border border-border/60 bg-panel/70 p-3 shadow-lg backdrop-blur-md transition-opacity duration-200",
+          scrolling || hovered ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
         )}
       >
         {list}
@@ -143,13 +162,14 @@ export function Toc({
     );
   }
   // rail: blends into the background — no panel bg, no border; the active item is the only accent.
+  // #345Issue 4: py-2 (was py-4) so the rail uses more of its vertical space for the list.
   return (
     <nav
-      ref={railRef}
+      ref={navRef}
       aria-label={t("toc.title")}
       data-testid="toc"
       data-variant="rail"
-      className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-transparent px-3 py-4 text-[length:var(--text-ui)]"
+      className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-transparent px-3 py-2 text-[length:var(--text-ui)]"
     >
       {list}
     </nav>
