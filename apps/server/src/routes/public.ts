@@ -5,11 +5,16 @@
 // see in-progress, unpublished content.
 // Collab WebSocket (Hocuspocus) is a completely separate path;
 // anonymous visitors are NOT admitted to collaboration rooms here.
+import { createHash } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { fgaClient, checkRelation } from '@wikistead/authz'
-import { withTenantTx } from '../db/index.js' // #382
+import { withTenantTx, acquireTenantDb } from '../db/index.js' // #382
 import { resolveTenantFromHost, loadTenant } from '../tenant.js'
 import { substituteListSnapshots, type ListSnapshot } from './pages.js' // #353→#370: baked `:::tagged`/`:::children` static lists for anon
+import { downloadAttachment, inlineAttachment } from './attachments.js' // #376 / ADR-149 §2: public wrappers
+import { resolveTranscludeRef } from '../transclude-resolve.js'
+import { renderPlantuml } from '../plantuml-render.js'
+import { bumpRateBucket, API_RATE_LIMIT_WINDOW_S } from '../rate-limit.js'
 
 // noindex: the page's own flag OR'd with its space's flag (#277 / ADR-116 guardrail 4) — a page
 // reached via space inheritance is noindex if EITHER the page or its space says so.
@@ -112,6 +117,55 @@ async function loadPublicSpaceRoots(tenantId: string, spaceId: string): Promise<
     `
   }) as Promise<{ id: string; title: string }[]>
 }
+
+// ── #376 / ADR-149 §2: public resource gates ─────────────────────────────
+//
+// Every /public/* RESOURCE route runs the SAME ordered gate before touching bytes
+// tenant from Host → tenant public master switch (#253) → FGA ANON view on the OWNING page →
+// `published_at IS NOT NULL` (LOAD-BEARING: the direct `user:*` public toggle carries no `published`
+// requirement in the model, so ANON view alone would leak a public-toggled DRAFT's resources).
+// Everything failing anywhere is a uniform 404 (existence-hiding). Returns the tenant, or null.
+async function publicResourceGate(host: string, pageId: string): Promise<Awaited<ReturnType<typeof resolveTenantForRequest>>> {
+  const tenant = await resolveTenantForRequest(host)
+  if (!tenant) return null
+  if (!(await tenantPublicEnabled(tenant.id))) return null
+  if (!(await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: pageId }))) return null
+  const rows = await withTenantTx(tenant.id, async (tx) =>
+    tx<{ id: string }[]>`SELECT id FROM pages WHERE id = ${pageId} AND published_at IS NOT NULL`) as { id: string }[]
+  if (!rows.length) return null
+  return tenant
+}
+
+// #376: extract the ```plantuml fence BODIES from a published body — the membership set the public
+// render route validates against (an anonymous caller may only render THIS page's own diagrams; any
+// other source is refused before the Kroki fetch — the amplification guard). Tolerant of longer fences
+// and an info-string tail (```plantuml align=left). Normalization (CR-strip + trailing-trim) matches
+// the route's hash normalization.
+export function extractPlantumlFences(md: string): string[] {
+  const out: string[] = []
+  const lines = md.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const open = /^(`{3,})\s*plantuml\b/.exec(lines[i]!)
+    if (!open) continue
+    const fence = open[1]!
+    const body: string[] = []
+    let closed = false
+    for (let j = i + 1; j < lines.length; j++) {
+      if (lines[j]!.startsWith(fence) && lines[j]!.trim() === fence) { i = j; closed = true; break }
+      body.push(lines[j]!)
+    }
+    if (closed) out.push(body.join('\n'))
+  }
+  return out
+}
+const normalizeUml = (s: string) => s.replace(/\r/g, '').trimEnd()
+
+// Abuse bounds for the anonymous render route (ADR-149 §2): the cache absorbs repeat views; on a miss,
+// fixed-window buckets per tenant AND per client IP (this is a PRE-AUTH anonymous surface — IP keying is
+// the sanctioned ADR-107 class here, unlike the authenticated abuse-filter keys of ADR-140).
+const PUBLIC_RENDER_TENANT_MAX = 120
+const PUBLIC_RENDER_IP_MAX = 30
+const PUBLIC_RENDER_CACHE_TTL_S = 600
 
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
@@ -221,5 +275,97 @@ export async function publicPlugin(app: FastifyInstance) {
     }) as { id: string; title: string }[]
 
     return reply.send(pages)
+  })
+
+  // ── #376 / ADR-149 §2: PUBLIC resource resolvers (anonymous; wrappers over the shared services) ──
+
+  // The attachment routes: resolve the attachment's OWNING page under tenant RLS (a cross-tenant id is
+  // a DB no-row → uniform 404, matching the public space route), run the ordered public gate on that
+  // page, then call the SHARED service with subject = user:anonymous (which re-runs its own view gate
+  // defense-in-depth; the member/guest routes are untouched).
+  const publicAttachmentPage = async (tenantId: string, attId: string): Promise<string | null> => {
+    const rows = await withTenantTx(tenantId, async (tx) =>
+      tx<{ page_id: string }[]>`SELECT page_id FROM attachments WHERE id = ${attId}`) as { page_id: string }[]
+    return rows[0]?.page_id ?? null
+  }
+
+  app.get<{ Params: { id: string } }>('/public/attachments/:id/download', async (req, reply) => {
+    const tenant = await resolveTenantForRequest(req.headers.host ?? '')
+    if (!tenant) return reply.code(404).send({ error: 'not found' })
+    if (!(await tenantPublicEnabled(tenant.id))) return reply.code(404).send({ error: 'not found' })
+    const pageId = await publicAttachmentPage(tenant.id, req.params.id)
+    if (!pageId || !(await publicResourceGate(req.headers.host ?? '', pageId))) return reply.code(404).send({ error: 'not found' })
+    const db = await acquireTenantDb(tenant)
+    try {
+      const result = await downloadAttachment(db, app.storageDriver, app.fga, { id: req.params.id, subject: ANON })
+      return reply.send(result)
+    } finally { await db.release() }
+  })
+
+  app.get<{ Params: { id: string } }>('/public/attachments/:id/inline', async (req, reply) => {
+    const tenant = await resolveTenantForRequest(req.headers.host ?? '')
+    if (!tenant) return reply.code(404).send({ error: 'not found' })
+    if (!(await tenantPublicEnabled(tenant.id))) return reply.code(404).send({ error: 'not found' })
+    const pageId = await publicAttachmentPage(tenant.id, req.params.id)
+    if (!pageId || !(await publicResourceGate(req.headers.host ?? '', pageId))) return reply.code(404).send({ error: 'not found' })
+    const db = await acquireTenantDb(tenant)
+    try {
+      const { bytes, contentType, filename } = await inlineAttachment(db, app.storageDriver, app.fga, { id: req.params.id, subject: ANON })
+      // The SAME XSS boundary headers as the member/guest inline proxy (ADR-120): sniffed type,
+      // inline disposition, nosniff, no-execute CSP — kept on the public path too (ADR-149).
+      reply.header('Content-Type', contentType)
+      reply.header('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(filename)}`)
+      reply.header('X-Content-Type-Options', 'nosniff')
+      reply.header('Content-Security-Policy', "default-src 'none'; object-src 'none'; script-src 'none'")
+      reply.header('Cache-Control', 'public, max-age=300') // public bytes — cacheable briefly (unlike the member proxy)
+      return reply.send(Buffer.from(bytes))
+    } finally { await db.release() }
+  })
+
+  // POST /public/pages/:pageId/plantuml/render — the anonymous server-render seam, abuse-bounded.
+  // Gate ORDER (ADR-149, fixed): tenant switch → ANON view → published → SOURCE-MEMBERSHIP (the sent
+  // source must hash-match a ```plantuml fence in THIS page's published_md — refused 400 BEFORE any
+  // Kroki fetch; drift-free, blocks arbitrary-source amplification) → cache lookup → on miss,
+  // per-tenant + per-IP fixed-window rate limit → Kroki. theme is the dark/light flag ONLY and is part
+  // of the cache key. SSRF stays closed (operator-fixed Kroki URL, #341).
+  app.post<{ Params: { pageId: string }; Body: { source?: string; theme?: string } }>('/public/pages/:pageId/plantuml/render', async (req, reply) => {
+    const tenant = await publicResourceGate(req.headers.host ?? '', req.params.pageId)
+    if (!tenant) return reply.code(404).send({ error: 'not found' })
+    const source = req.body?.source
+    if (typeof source !== 'string' || !source.trim()) return reply.code(400).send({ error: 'source is required' })
+    const rows = await withTenantTx(tenant.id, async (tx) =>
+      tx<{ published_md: string | null }[]>`SELECT published_md FROM pages WHERE id = ${req.params.pageId}`) as { published_md: string | null }[]
+    const fences = extractPlantumlFences(rows[0]?.published_md ?? '')
+    const sent = normalizeUml(source)
+    if (!fences.some((f) => normalizeUml(f) === sent)) {
+      return reply.code(400).send({ error: 'source is not a diagram of this page' }) // static reason; pre-fetch refusal
+    }
+    const dark = req.body?.theme === 'dark'
+    const cacheKey = `pub:uml:${tenant.id}:${createHash('sha256').update(sent).update(dark ? '|d' : '|l').digest('hex')}`
+    const hit = await app.valkey.getBuffer(cacheKey).catch(() => null)
+    if (hit && hit.length) return reply.header('content-type', 'image/png').send(hit)
+    const okTenant = await bumpRateBucket(app.valkey, `rl:pubuml:t:${tenant.id}`, PUBLIC_RENDER_TENANT_MAX, API_RATE_LIMIT_WINDOW_S)
+    const okIp = await bumpRateBucket(app.valkey, `rl:pubuml:ip:${req.ip}`, PUBLIC_RENDER_IP_MAX, API_RATE_LIMIT_WINDOW_S)
+    if (!okTenant || !okIp) return reply.code(429).send({ error: 'rate limited' })
+    const png = await renderPlantuml(source, { dark })
+    if (!png) return reply.code(204).send() // degrade: the caller keeps the source fence
+    void app.valkey.set(cacheKey, Buffer.from(png), 'EX', PUBLIC_RENDER_CACHE_TTL_S).catch(() => {})
+    return reply.header('content-type', 'image/png').send(png)
+  })
+
+  // GET /public/pages/:pageId/transclude/:refId — anonymous transclusion. The REF page resolves through
+  // ITS OWN gate inside resolveTranscludeRef (view as user:anonymous + published; unviewable ≡
+  // unpublished ≡ absent = one uniform 'denied' → 404 — the #307 public-surface existence-hiding class).
+  // Depth/cycle guard on the public mount is CLIENT-structural (the transcluded content renders via
+  // renderMarkdownToDom, which never fetches nested embeds — pinned by the unit anti-test).
+  app.get<{ Params: { pageId: string; refId: string } }>('/public/pages/:pageId/transclude/:refId', async (req, reply) => {
+    const tenant = await publicResourceGate(req.headers.host ?? '', req.params.pageId)
+    if (!tenant) return reply.code(404).send({ error: 'not found' })
+    const db = await acquireTenantDb(tenant)
+    try {
+      const r = await resolveTranscludeRef({ db, fga: app.fga }, { principal: ANON, refPageId: req.params.refId })
+      if (r.ok) return { content: r.content }
+      return reply.code(r.reason === 'denied' ? 404 : 422).send({ error: 'transclude not available', reason: r.reason })
+    } finally { await db.release() }
   })
 }

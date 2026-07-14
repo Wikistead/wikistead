@@ -11,12 +11,23 @@ type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 // placeholder (denied / cycle / depth / absent / network error — all indistinguishable to the UI,
 // so a viewer can't probe for pages they can't see). hostPageId scopes the request's page-view gate.
 export function makeTranscludeResolver(token: string, hostPageId: string, fetcher: Fetcher = fetch): TranscludeResolver {
+  return makeResolver(`${API_URL}/pages/${encodeURIComponent(hostPageId)}/transclude`, token, fetcher);
+}
+
+// #376 / ADR-149 §2: the ANONYMOUS public reader's resolver — the /public sibling gates the HOST page
+// (ANON view + published + tenant switch) and re-gates the REF page as user:anonymous inside (uniform
+// 'denied' → 404: unviewable ≡ unpublished ≡ absent — the existence-hiding placeholder here).
+export function makePublicTranscludeResolver(hostPageId: string, fetcher: Fetcher = fetch): TranscludeResolver {
+  return makeResolver(`${API_URL}/public/pages/${encodeURIComponent(hostPageId)}/transclude`, "", fetcher);
+}
+
+function makeResolver(baseUrl: string, token: string, fetcher: Fetcher): TranscludeResolver {
   return async (refId) => {
     const ref = refId.trim();
     if (!ref) return null;
     try {
       const res = await fetcher(
-        `${API_URL}/pages/${encodeURIComponent(hostPageId)}/transclude/${encodeURIComponent(ref)}`,
+        `${baseUrl}/${encodeURIComponent(ref)}`,
         { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} },
       );
       if (res.status !== 200) return null; // 404 denied (#280 existence-hiding) / 422 cycle|depth → placeholder
