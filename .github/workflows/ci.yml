@@ -54,3 +54,33 @@ jobs:
         with: { node-version: 20, cache: pnpm }
       - run: pnpm install --frozen-lockfile=false
       - run: pnpm license:check
+  image-boundary:
+    # #414 / ADR-162 §4: the CE/EE boundary applied to the ARTIFACT. Builds the server image (the one
+    # with a composition risk) and fails if any EE package PATH survives inside it — path-based
+    # (ee-server/, entitlements-cloud/), never a namespace grep (entitlements-cloud lives under the
+    # regular @wikistead/ scope). Also renders the prod overlay and refuses any :latest image pin
+    # (ADR-162 §2 — prod pins are explicit tag+digest).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the CE server image
+        run: docker build -f apps/server/Dockerfile -t ce-boundary-check .
+      - name: Assert no EE paths inside the artifact
+        run: |
+          set -euo pipefail
+          hits=$(docker run --rm --entrypoint sh ce-boundary-check -c \
+            "find /app \( -path '*/ee-server/*' -o -path '*/entitlements-cloud/*' \) -print | head -5" || true)
+          if [ -n "$hits" ]; then
+            echo "::error::CE server image contains EE package paths (ADR-084/ADR-162 boundary):"
+            echo "$hits"
+            exit 1
+          fi
+      - name: Assert the prod overlay renders no :latest wikistead image
+        run: |
+          set -euo pipefail
+          # wikistead images only — the in-cluster infra images (postgres/openfga/…) are convenience
+          # scaffolding the prod overlay replaces with operators/managed services (see PROD NOTES/#423).
+          if kustomize build deploy/k8s/overlays/prod | grep -E 'image: .*wikistead-[a-z]+:latest'; then
+            echo "::error::prod overlay renders a :latest wikistead image — pins must be explicit (ADR-162)"
+            exit 1
+          fi
