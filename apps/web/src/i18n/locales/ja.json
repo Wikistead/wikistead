@@ -73,7 +73,8 @@
     "profile": "プロフィール",
     "editor": "エディタ",
     "theme": "テーマ",
-    "data": "データ"
+    "data": "データ",
+    "notifications": "通知"
   },
   "account": {
     "profileHint": "ワークスペース上のあなたの識別情報＝共同編集者からの見え方。",
@@ -137,7 +138,15 @@
     "chromeVimHidden": "Vim ボタン：非表示",
     "chromeModesHint": "モード切替に出す項目（最低 1 つは表示・非表示のモードは巡回ショートカットからも除外されます）。",
     "chromeRedo": "最初の質問をやり直す",
-    "displayMode_wysiwyg": "常に WYSIWYG で開始"
+    "displayMode_wysiwyg": "常に WYSIWYG で開始",
+    "notifications": {
+      "title": "通知",
+      "desc": "アプリ内インボックスに届く通知を調整します。ここでの設定は受け取る量を減らすだけで、コンテンツへのアクセス制御は常に別途強制されます。",
+      "enabled": "通知を有効にする",
+      "enabledHint": "オフにするとアプリ内通知がすべて止まります（ウォッチ自体は保持されます）。",
+      "defaultMask": "既定のイベント種別",
+      "defaultMaskHint": "種別フィルタを持たないウォッチに適用されます。既定では全種別オンです。"
+    }
   },
   "settings": {
     "back": "アプリに戻る",
@@ -827,7 +836,8 @@
     "untitled": "ページ",
     "published": "{{who}} が {{title}} を公開しました",
     "restored": "{{who}} が {{title}} を復元しました",
-    "changed": "{{who}} が {{title}} を変更しました"
+    "changed": "{{who}} が {{title}} を変更しました",
+    "markAllRead": "すべて既読"
   },
   "recentChanges": {
     "title": "最近の変更",
@@ -840,7 +850,9 @@
   },
   "watch": {
     "watch": "このページをウォッチ",
-    "unwatch": "ウォッチを解除"
+    "unwatch": "ウォッチを解除",
+    "subtree": "ページ＋配下をウォッチ",
+    "space": "このスペースをウォッチ"
   },
   "onboarding": {
     "title": "エディタの初期設定",
@@ -871,5 +883,32 @@
     "title": "タグのページ一覧を挿入",
     "placeholder": "タグ名…",
     "insert": "挿入"
+  },
+  "watches": {
+    "title": "ウォッチ中",
+    "empty": "まだ何もウォッチしていません",
+    "untitled": "（閲覧できないページ）",
+    "mute": "ミュート",
+    "unmute": "ミュート解除",
+    "muted": "ミュート中",
+    "maskEdit": "通知する種別",
+    "scopePage": "ページ",
+    "scopeSubtree": "ページ＋配下",
+    "scopeSpace": "スペース"
+  },
+  "eventTypes": {
+    "page": {
+      "published": "ページの公開",
+      "restored": "ページの復元",
+      "made_public": "ページの一般公開",
+      "made_non_public": "一般公開の解除"
+    },
+    "comment": {
+      "created": "新しいコメント"
+    },
+    "attachment": {
+      "confirmed": "ファイル添付"
+    },
+    "mention": "メンション"
   }
 }

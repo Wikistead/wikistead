@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Navigate, Outlet, Route } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { IdCard, SquarePen, Palette, HardDriveDownload, Loader2 } from "lucide-react";
+import { IdCard, SquarePen, Palette, HardDriveDownload, Loader2, Bell } from "lucide-react";
 import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useSession } from "../session/SessionProvider";
@@ -36,6 +36,9 @@ function useAccountTabs(): SettingsTab[] {
     // #309: the Data section hosts the tenant-wide export. It lives HERE (personal settings), not in
     // the tenant /admin console, because the export is view-filtered per member — every member may
     // take their visible knowledge out (Open formats), so an admin-looking home would misstate it.
+    // #362 notification preferences live in SETTINGS ; the watch LIST lives
+    // off the bell. Both are emission-narrowing member prefs — display authz is server-side regardless.
+    { key: "notifications", label: t("accountNav.notifications"), to: "/settings/account/notifications", icon: Bell },
     { key: "data", label: t("accountNav.data"), to: "/settings/account/data", icon: HardDriveDownload },
   ];
 }
@@ -338,6 +341,68 @@ function EditorTab() {
   );
 }
 
+// #362 / ADR-126 addendum: notification preferences — the global kill switch + the default event mask
+// a mask-less watch inherits (mention included here: it is a direct address, not a subscription, so it
+// has no per-watch mask). Server-side these only NARROW fan-out; display gating is untouched.
+const DEFAULT_MASK_TYPES = [
+  "page.published",
+  "page.restored",
+  "comment.created",
+  "attachment.confirmed",
+  "page.made_public",
+  "page.made_non_public",
+  "mention",
+] as const;
+function NotificationsTab() {
+  const { t } = useTranslation();
+  const settings = useAccountSettings();
+  const update = useUpdateAccountSettings();
+  const enabled = settings.data?.notificationsEnabled ?? true;
+  const mask = settings.data?.defaultEventMask ?? [];
+  const all = mask.length === 0;
+  const toggleType = (type: string) => {
+    const current = all ? [...DEFAULT_MASK_TYPES] : mask;
+    const next = current.includes(type) ? current.filter((x) => x !== type) : [...current, type];
+    update.mutate({ defaultEventMask: next.length === DEFAULT_MASK_TYPES.length ? [] : next });
+  };
+  return (
+    <SettingsPage title={t("account.notifications.title")} description={t("account.notifications.desc")}>
+      <SettingsCard testid="notifications-enabled-card">
+        <label className="flex cursor-pointer items-center justify-between gap-3">
+          <span className="text-[length:var(--text-ui)] text-foreground">{t("account.notifications.enabled")}</span>
+          <input
+            type="checkbox"
+            role="switch"
+            checked={enabled}
+            disabled={update.isPending || settings.isLoading}
+            onChange={(e) => update.mutate({ notificationsEnabled: e.target.checked })}
+            data-testid="notifications-enabled"
+          />
+        </label>
+        <p className="mb-0 mt-1 text-[length:var(--text-xs)] text-fg-dim">{t("account.notifications.enabledHint")}</p>
+      </SettingsCard>
+      <SettingsCard testid="notifications-mask-card">
+        <div className="mb-2 text-[length:var(--text-ui)] text-foreground">{t("account.notifications.defaultMask")}</div>
+        <p className="mb-3 text-[length:var(--text-xs)] text-fg-dim">{t("account.notifications.defaultMaskHint")}</p>
+        <div className="flex flex-col gap-1.5">
+          {DEFAULT_MASK_TYPES.map((type) => (
+            <label key={type} className="inline-flex cursor-pointer items-center gap-2 text-[length:var(--text-ui)] text-foreground">
+              <input
+                type="checkbox"
+                checked={all || mask.includes(type)}
+                disabled={update.isPending || settings.isLoading || !enabled}
+                onChange={() => toggleType(type)}
+                data-testid={`default-mask-${type}`}
+              />
+              {t(`eventTypes.${type}`)}
+            </label>
+          ))}
+        </div>
+      </SettingsCard>
+    </SettingsPage>
+  );
+}
+
 function ThemeTab() {
   const { t } = useTranslation();
   const { theme, setTheme, accent, setAccent } = useTheme(); // device-local: light/dark AND personal accent (#201)
@@ -423,6 +488,7 @@ export function AccountRoutes() {
       <Route index element={<ProfileTab />} />
       <Route path="editor" element={<EditorTab />} />
       <Route path="theme" element={<ThemeTab />} />
+      <Route path="notifications" element={<NotificationsTab />} />
       <Route path="data" element={<DataTab />} />
       <Route path="*" element={<Navigate to="/settings/account" replace />} />
     </Route>

@@ -73,7 +73,8 @@
     "profile": "Profile",
     "editor": "Editor",
     "theme": "Theme",
-    "data": "Data"
+    "data": "Data",
+    "notifications": "Notifications"
   },
   "account": {
     "profileHint": "Your identity across the workspace — how collaborators see you.",
@@ -137,7 +138,15 @@
     "chromeVimHidden": "Vim button: hidden",
     "chromeModesHint": "Modes offered by the display-mode switch (at least one stays on; hidden modes are skipped by the cycle shortcut).",
     "chromeRedo": "Redo the setup questions",
-    "displayMode_wysiwyg": "Always start in WYSIWYG"
+    "displayMode_wysiwyg": "Always start in WYSIWYG",
+    "notifications": {
+      "title": "Notifications",
+      "desc": "Control what lands in your in-app inbox. These only reduce what you receive — access to content is always enforced separately.",
+      "enabled": "Enable notifications",
+      "enabledHint": "Turn off to stop all in-app notifications (your watches are kept).",
+      "defaultMask": "Default event types",
+      "defaultMaskHint": "Applied to watches without their own type filter. All types are on by default."
+    }
   },
   "settings": {
     "back": "Back to app",
@@ -828,7 +837,8 @@
     "untitled": "a page",
     "published": "{{who}} published {{title}}",
     "restored": "{{who}} restored {{title}}",
-    "changed": "{{who}} changed {{title}}"
+    "changed": "{{who}} changed {{title}}",
+    "markAllRead": "Mark all read"
   },
   "recentChanges": {
     "title": "Recent Changes",
@@ -841,7 +851,9 @@
   },
   "watch": {
     "watch": "Watch this page",
-    "unwatch": "Unwatch this page"
+    "unwatch": "Unwatch this page",
+    "subtree": "Watch page + subpages",
+    "space": "Watch this space"
   },
   "onboarding": {
     "title": "Set up your editor",
@@ -872,5 +884,32 @@
     "title": "Insert a tagged-pages list",
     "placeholder": "Tag name…",
     "insert": "Insert"
+  },
+  "watches": {
+    "title": "Watching",
+    "empty": "You are not watching anything yet",
+    "untitled": "(not viewable)",
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "muted": "muted",
+    "maskEdit": "Notification types",
+    "scopePage": "Page",
+    "scopeSubtree": "Page + subpages",
+    "scopeSpace": "Space"
+  },
+  "eventTypes": {
+    "page": {
+      "published": "Page published",
+      "restored": "Page restored",
+      "made_public": "Page made public",
+      "made_non_public": "Page made non-public"
+    },
+    "comment": {
+      "created": "New comment"
+    },
+    "attachment": {
+      "confirmed": "File attached"
+    },
+    "mention": "Mentions"
   }
 }
