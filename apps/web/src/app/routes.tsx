@@ -626,7 +626,7 @@ function PageRoute() {
             { pageId, spaceId },
             {
               // The page is gone — leave it. The home route resolves to a remaining page.
-              onSuccess: () => { notify.success(t("toast.pageDeleted")); navigate("/", { replace: true }); },
+              onSuccess: () => { notify.success(t("toast.pageTrashed")); navigate("/", { replace: true }); },
               onError: () => notify.error(t("toast.actionFailed")),
             },
           );

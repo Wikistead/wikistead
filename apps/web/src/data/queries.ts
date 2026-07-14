@@ -197,6 +197,7 @@ export function useRenamePage() {
   });
 }
 
+// #411 / ADR-153: DELETE now moves to the trash (restorable for 30 days); purge is the permanent path.
 export function useDeletePage() {
   const { token } = useSession();
   const qc = useQueryClient();
@@ -206,6 +207,45 @@ export function useDeletePage() {
     onSuccess: (_p, args) => {
       qc.invalidateQueries({ queryKey: ["pages", args.spaceId] });
       qc.invalidateQueries({ queryKey: ["backlinks"] }); // #307 / ADR-127: a deleted page's outbound links vanish → other pages' backlinks change
+      qc.invalidateQueries({ queryKey: ["space-trash", args.spaceId] });
+    },
+  });
+}
+
+// #411 / ADR-153: the space trash (roots only; entries the caller can manage).
+export interface TrashEntry { id: string; title: string; deletedAt: string; deletedBy: string | null; descendants: number }
+
+export function useSpaceTrash(spaceId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["space-trash", spaceId],
+    queryFn: () => apiFetch<TrashEntry[]>(`/spaces/${encodeURIComponent(spaceId)}/trash`, token).then((r) => r ?? []),
+    enabled: enabled && spaceId.length > 0,
+  });
+}
+
+export function useRestorePage() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { pageId: string; spaceId: string }) =>
+      apiFetch<{ reparented: boolean }>(`/pages/${args.pageId}/restore`, token, { method: "POST" }),
+    onSuccess: (_r, args) => {
+      qc.invalidateQueries({ queryKey: ["space-trash", args.spaceId] });
+      qc.invalidateQueries({ queryKey: ["pages", args.spaceId] }); // the subtree reappears in the tree
+      qc.invalidateQueries({ queryKey: ["backlinks"] });
+    },
+  });
+}
+
+export function usePurgePage() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { pageId: string; spaceId: string }) =>
+      apiFetch<null>(`/pages/${args.pageId}/purge`, token, { method: "DELETE" }),
+    onSuccess: (_r, args) => {
+      qc.invalidateQueries({ queryKey: ["space-trash", args.spaceId] });
     },
   });
 }

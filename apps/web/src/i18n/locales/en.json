@@ -45,7 +45,8 @@
     "taskToggleDirty": "Publish your draft changes first to tick this box",
     "saved": "Saved",
     "spaceDeleted": "Space deleted",
-    "pageDeleted": "Page deleted"
+    "pageDeleted": "Page deleted",
+    "pageTrashed": "Moved to trash"
   },
   "theme": {
     "label": "Theme",
@@ -287,6 +288,7 @@
     "general": "General",
     "members": "Members & permissions",
     "pages": "Pages",
+    "trash": "Trash",
     "theme": "Theme",
     "nameLabel": "Space name",
     "iconLabel": "Space icon",
@@ -308,6 +310,20 @@
     "deleteSpace": "Delete space",
     "deleteConfirmTitle": "Delete this space",
     "deleteConfirm": "Delete space \"{{name}}\" and all of its pages? This cannot be undone."
+  },
+  "spaceTrash": {
+    "title": "Trash",
+    "hint": "Deleted pages stay here for 30 days, then they are removed permanently. Restoring brings back the page, its sub-pages, and its sharing settings exactly as they were.",
+    "empty": "The trash is empty.",
+    "page": "Page",
+    "deletedAt": "Deleted",
+    "withDescendants": "+ {{count}} sub-page(s)",
+    "restore": "Restore",
+    "purge": "Delete forever",
+    "restored": "Page restored",
+    "restoredReparented": "Page restored (moved to the space root — its old parent is gone)",
+    "purgeConfirmTitle": "Delete forever",
+    "purgeConfirm": "Permanently delete \"{{name}}\" and its sub-pages? This cannot be undone."
   },
   "spacePages": {
     "title": "Pages",
@@ -425,7 +441,7 @@
     "createSpace": "Create",
     "spaceSettings": "Space settings",
     "deleteSpace": "Delete space",
-    "deletePageConfirm": "Delete page \"{{name}}\" and its sub-pages?",
+    "deletePageConfirm": "Move page \"{{name}}\" and its sub-pages to the trash? You can restore it from the space settings for 30 days.",
     "newPage": "New page",
     "addSubpage": "Add sub-page",
     "share": "Share",

@@ -343,7 +343,7 @@ export function Sidebar() {
             // page is the one currently OPEN, navigate home so its (now-404) body doesn't linger as a ghost.
             const wasOpen = deleting.id === pageId;
             deletePage.mutate({ pageId: deleting.id, spaceId: current! }, {
-              onSuccess: () => { notify.success(t("toast.pageDeleted")); if (wasOpen) navigate("/", { replace: true }); },
+              onSuccess: () => { notify.success(t("toast.pageTrashed")); if (wasOpen) navigate("/", { replace: true }); },
               onError: () => notify.error(t("toast.actionFailed")),
             });
           }

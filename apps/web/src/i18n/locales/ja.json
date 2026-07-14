@@ -45,7 +45,8 @@
     "taskToggleDirty": "この項目を変更するには、先に下書きの変更を公開してください",
     "saved": "保存しました",
     "spaceDeleted": "スペースを削除しました",
-    "pageDeleted": "ページを削除しました"
+    "pageDeleted": "ページを削除しました",
+    "pageTrashed": "ゴミ箱に移動しました"
   },
   "theme": {
     "label": "テーマ",
@@ -287,6 +288,7 @@
     "general": "一般",
     "members": "メンバーと権限",
     "pages": "ページ",
+    "trash": "ゴミ箱",
     "theme": "テーマ",
     "nameLabel": "スペース名",
     "iconLabel": "スペースアイコン",
@@ -308,6 +310,20 @@
     "deleteSpace": "スペースを削除",
     "deleteConfirmTitle": "このスペースを削除",
     "deleteConfirm": "スペース「{{name}}」と配下のすべてのページを削除しますか？ この操作は元に戻せません。"
+  },
+  "spaceTrash": {
+    "title": "ゴミ箱",
+    "hint": "削除したページは 30 日間ここに保管され、その後完全に削除されます。復元するとページ・サブページ・共有設定が元どおりに戻ります。",
+    "empty": "ゴミ箱は空です。",
+    "page": "ページ",
+    "deletedAt": "削除日",
+    "withDescendants": "＋サブページ {{count}} 件",
+    "restore": "復元",
+    "purge": "完全に削除",
+    "restored": "ページを復元しました",
+    "restoredReparented": "ページを復元しました（元の親ページがないため、スペース直下に移動しました）",
+    "purgeConfirmTitle": "完全に削除",
+    "purgeConfirm": "「{{name}}」とそのサブページを完全に削除しますか？ この操作は元に戻せません。"
   },
   "spacePages": {
     "title": "ページ",
@@ -425,7 +441,7 @@
     "createSpace": "作成",
     "spaceSettings": "スペース設定",
     "deleteSpace": "スペースを削除",
-    "deletePageConfirm": "ページ「{{name}}」とそのサブページを削除しますか？",
+    "deletePageConfirm": "ページ「{{name}}」とそのサブページをゴミ箱に移動しますか？ 30 日以内ならスペース設定から復元できます。",
     "newPage": "新しいページ",
     "addSubpage": "サブページを追加",
     "share": "共有",

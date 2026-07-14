@@ -16,6 +16,7 @@ import { notify } from "../ui/toast";
 import { SettingsShell, SettingsDenied, type SettingsTab } from "./SettingsShell";
 import { SpaceMembersTab } from "./SpaceMembersTab";
 import { SpacePagesTab } from "./SpacePagesTab";
+import { SpaceTrashTab } from "./SpaceTrashTab";
 
 interface SpaceCtx { spaceId: string; name: string; accentKey: string | null; iconImageUrl: string | null }
 
@@ -28,6 +29,7 @@ function useSpaceTabs(spaceId: string): SettingsTab[] {
     { key: "general", label: t("spaceSettings.general"), to: `/spaces/${spaceId}/settings/general` },
     { key: "members", label: t("spaceSettings.members"), to: `/spaces/${spaceId}/settings/members` },
     { key: "pages", label: t("spaceSettings.pages"), to: `/spaces/${spaceId}/settings/pages` },
+    { key: "trash", label: t("spaceSettings.trash"), to: `/spaces/${spaceId}/settings/trash` },
   ];
 }
 
@@ -224,6 +226,7 @@ export function SpaceSettingsRoutes() {
       <Route path="general" element={<SpaceGeneralTab />} />
       <Route path="members" element={<SpaceMembersTab />} />
       <Route path="pages" element={<SpacePagesTab />} />
+      <Route path="trash" element={<SpaceTrashTab />} />
     </Route>
   );
 }
