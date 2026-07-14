@@ -36,8 +36,11 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
   // on a query change hits briefly drops to [] (1 frame), leaving only the raw-id fallback → the old effect
   // selected it AND then never recovered (raw stays in the list, so `includes(selected)` was true). Fix: the raw
   // fallback is auto-selected ONLY when there are NO real hits; otherwise the first real hit wins. A MANUAL nav
-  // (arrows / Ctrl-j/k) pins the user's choice (incl. the raw row) until the query changes — tracked by
-  // `userNavRef`, reset whenever the typed query changes.
+  // (arrows / Ctrl-j/k — AND, #412, mouse hover over the list) pins the user's choice (incl. the raw row) until
+  // the query changes — tracked by `userNavRef`, reset whenever the typed query changes. #412: cmdk hover-selects
+  // the row under the pointer; before the pointer pin, this effect yanked that selection straight back to the
+  // first hit (visible as the highlight snapping away — and, on device, as the reported dead first click until
+  // one Ctrl-j flipped userNavRef). Pointer movement over the list is exactly as manual as an arrow key.
   const userNavRef = useRef(false);
   useEffect(() => { userNavRef.current = false; }, [raw]); // a new query → resume auto-selecting the first hit
   useEffect(() => {
@@ -79,7 +82,12 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
             autoFocus
           />
           <div className="flex min-h-0 flex-1">
-            <CommandList className="min-w-0 flex-1 min-h-0 max-h-none overflow-y-auto md:max-w-xs md:border-r md:border-border">
+            <CommandList
+              className="min-w-0 flex-1 min-h-0 max-h-none overflow-y-auto md:max-w-xs md:border-r md:border-border"
+              // #412: mousing over the list pins the (hover-)selection like an arrow key would. A parked,
+              // motionless cursor fires no pointermove, so results appearing under it still auto-select hit 1.
+              onPointerMove={() => { userNavRef.current = true; }}
+            >
               <CommandEmpty>{t("embedPicker.empty")}</CommandEmpty>
               {(hits ?? []).map((h) => (
                 <CommandItem key={h.id} value={h.id} onSelect={() => close(h.id, h.title || null)} data-testid="embed-picker-item">
