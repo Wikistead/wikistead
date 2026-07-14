@@ -15,7 +15,9 @@ test("#361 on the READING surface a toggle keeps the SAME ring + checkbox (minim
   await sleep(300);
   await page.getByTestId("publish-page").click(); // persist published_md
   await sleep(600);
-  await page.click("[data-testid=edit-toggle]"); // exit edit → the READING surface renders published_md
+  // publish EXITS editing → we are already on the VIEW surface (the Edit button proves view mode; the
+  // earlier version clicked edit-toggle here, which re-ENTERED edit and asserted the live surface instead).
+  await expect(page.getByTestId("edit-toggle")).toBeVisible({ timeout: 8000 });
   await sleep(500);
 
   const ring = page.locator("[data-pane=preview] [data-testid=todo-ring]");
@@ -77,4 +79,50 @@ test("#361: toggling a task keeps the SAME checkbox + ring elements (in-place up
   const offsetAfter = await arc.getAttribute("stroke-dashoffset");
   expect(offsetAfter).not.toBe(offsetBefore); // 1/3 → 2/3 moved the arc
   await expect(ring).toHaveAttribute("data-done", "2");
+});
+
+// #361 point 3: the SIDEBAR ring lives in a react-arborist virtualized row that REMOUNTS on the
+// pages refetch after a toggle, so element identity can NOT survive there (the probe-confirmed structural
+// limit). The fix replays the ring's last→new offset on a value-CHANGED mount, driving the SHARED CSS
+// transition — so the sidebar ring finally ANIMATES (transitionrun fires) even though the element is new,
+// while a value-unchanged remount stays still. Asserted with a capture-phase transitionrun listener (the
+// probe technique) in real Chromium.
+test("#361 c1846-3: the SIDEBAR ring animates across the refetch remount (transitionrun on a value change)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const title = `todo-side-361-${Date.now()}`;
+  await openScratch(page, title);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::todo[Sprint]\n- [x] alpha\n- [ ] beta\n- [ ] gamma\n:::\n\nbelow\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click(); // aggregates land (task_done/total) → the sidebar ring appears
+  await sleep(600);
+  // publish EXITS editing → already on the VIEW surface (the reported repro surface).
+  await expect(page.getByTestId("edit-toggle")).toBeVisible({ timeout: 8000 });
+  await sleep(500);
+
+  // the page's own sidebar row shows the compact ring at 1/3 — this mount records the animation baseline.
+  const row = page.locator("[data-testid=tree-page]", { hasText: title }).first();
+  await row.scrollIntoViewIfNeeded();
+  const sideRing = row.locator("[data-testid=page-task-ring]");
+  await expect(sideRing).toHaveAttribute("data-done", "1", { timeout: 8000 });
+
+  // count transitionrun on ANY sidebar ring arc from here on — capture phase on document, so it counts
+  // even when the arc is a brand-new element (the remount case this fix exists for).
+  await page.evaluate(() => {
+    (window as unknown as { __sideRingRuns?: number }).__sideRingRuns = 0;
+    document.addEventListener("transitionrun", (e) => {
+      const t = e.target as HTMLElement;
+      if (t?.classList?.contains("cm-lp-todo-ring-arc") && t.closest?.("[data-testid=tree-todo-ring]")) {
+        (window as unknown as { __sideRingRuns?: number }).__sideRingRuns!++;
+      }
+    }, true);
+  });
+
+  // toggle beta on the reading surface → server persists → ["pages"] invalidated → sidebar refetch/remount.
+  await page.getByTestId("task-checkbox").nth(1).click();
+  await expect(sideRing).toHaveAttribute("data-done", "2", { timeout: 8000 }); // the aggregate reached the sidebar
+  await sleep(400); // give the replayed transition a beat to start
+  const runs = await page.evaluate(() => (window as unknown as { __sideRingRuns?: number }).__sideRingRuns ?? 0);
+  expect(runs, "the sidebar ring arc played a stroke-dashoffset transition").toBeGreaterThanOrEqual(1);
 });

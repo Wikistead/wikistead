@@ -142,7 +142,9 @@ export function PageTree({
         {/* #109 Fix B: private (allowlist-only) lock. Shown only to viewers of the page — non-viewers 404. */}
         {d.private && <Lock size={12} className="mx-0.5 flex-none text-fg-dim" data-testid="tree-private-lock" aria-label={t("sidebar.private")} />}
         {/* #290 / ADR-114: a compact :::todo progress ring — only for pages with a :::todo (taskTotal>0). */}
-        {d.taskTotal > 0 && <span className="mx-0.5 flex-none inline-flex items-center self-center" data-testid="tree-todo-ring"><ProgressRing done={d.taskDone} total={d.taskTotal} compact /></span>}
+        {/* #361 point 3: animKey lets the ring animate ACROSS the react-arborist row remounts
+            (value-changed mounts replay prev→new via the shared CSS transition; see ProgressRing). */}
+        {d.taskTotal > 0 && <span className="mx-0.5 flex-none inline-flex items-center self-center" data-testid="tree-todo-ring"><ProgressRing done={d.taskDone} total={d.taskTotal} compact animKey={d.id} /></span>}
         {/* #284 / #336 A(4): a PINNED page shows its ★ ALWAYS (click to unpin — the ★ then disappears).
             Unpinned pages have NO standalone pin button; pinning moved into the row menu below, so the row
             stays narrow. Pin is a member-personal action, so still NOT canEdit-gated. */}

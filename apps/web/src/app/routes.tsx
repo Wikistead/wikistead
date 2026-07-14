@@ -562,7 +562,8 @@ function PageRoute() {
                     {/* #361 (4): PageMeta carries its own mt-1 top margin; match it on the ring so
                         items-center aligns the ring to the meta TEXT centre, not the taller margin-box — the ring
                         rode ~2px high against a SINGLE meta line (the 2-line case already looked centred). */}
-                    <span className="mt-1 inline-flex self-center"><ProgressRing done={taskProgress.done} total={taskProgress.total} /></span>
+                    {/* #361 point 3: animKey keeps the band ring animating across surface remounts too. */}
+                    <span className="mt-1 inline-flex self-center"><ProgressRing done={taskProgress.done} total={taskProgress.total} animKey={pageId} /></span>
                   </div>
                 </div>
                 {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}
