@@ -507,6 +507,22 @@ export function useRestoreRevision(pageId: string) {
   });
 }
 
+// #327 / ADR-143 (increment 2): one-click revert of an actor's LATEST CONTIGUOUS run — one forward restore
+// to the revision just before the run. Server-gated on moderate/manage; a 409 carries `reason`
+// (not-latest / no-baseline / no-revisions) and the panel routes to the guided manual path instead.
+export function useRevertActorRun(pageId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (actor: string) =>
+      apiFetch<{ restoredToRevisionId: string; revertedCount: number }>(
+        `/pages/${encodeURIComponent(pageId)}/revisions/revert-actor`, token,
+        { method: "POST", body: JSON.stringify({ actor }) },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["revisions", pageId] }),
+  });
+}
+
 // ── search ───────────────────────────────────────────────────────────────
 // GET /search is two-stage-guarded server-side (Meili candidates -> FGA `view`
 // confirm). It returns ONLY authorized hits. The optional snippet is a cropped
