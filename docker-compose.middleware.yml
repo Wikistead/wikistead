@@ -1,0 +1,67 @@
+# #388: the SHARED middleware definitions the three stacks (dev / e2e / server-test) extend.
+# Each stack file overrides ONLY its per-stack diffs (host ports, named volumes, a couple of env/flag
+# tweaks) via `extends: { file: docker-compose.middleware.yml, service: … }` — so a middleware change
+# lands ONCE instead of being hand-copied three times (the drift this ticket started from: the e2e file
+# still describing MinIO after the SeaweedFS swap). This file is NOT a runnable stack by itself (no
+# ports/volumes); always `up` one of the three stack files.
+#
+# extends merge semantics (Compose spec): mappings merge per-key (a stack's healthcheck.interval wins,
+# the test command is inherited); sequences like ports/volumes APPEND (so the shared bind mounts live
+# here and each stack appends its named data volume). depends_on does not inherit reliably across
+# compose versions, so the stack files declare it themselves.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      # postgres = superuser (migration runner only). App runtime uses the restricted 'app' role
+      # created by infra/db/init/001_app_role.sql.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: app
+    volumes:
+      - ./infra/db/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  valkey:
+    image: valkey/valkey:8
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+
+  # #338 / ADR-128: OpenFGA on the postgres datastore (dev/prod parity). One-shot migrate (idempotent)
+  # runs the schema before `run` starts. dev keeps state across restarts (persistent volume semantics of
+  # its stack); e2e/server-test wipe on teardown (`down -v`) by design.
+  openfga-migrate:
+    image: openfga/openfga:latest
+    command: migrate
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://postgres:postgres@postgres:5432/openfga?sslmode=disable
+    restart: on-failure
+
+  openfga:
+    image: openfga/openfga:latest
+    command: run
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://postgres:postgres@postgres:5432/openfga?sslmode=disable
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.10
+    environment:
+      MEILI_MASTER_KEY: dev_master_key_change_me
+      MEILI_ENV: development
+
+  # S3-compatible object storage: SeaweedFS (Apache-2.0, pure OSS, actively maintained). Replaces MinIO
+  # (community edition development stalled — ADR-014). Each stack overrides `command` only to set its
+  # web origin in -s3.allowedOrigins (browser presigned-PUT/GET CORS) and appends its data volume.
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    volumes:
+      - ./infra/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+
+  # Local mail catcher (P1.3). SMTP on 1025, web UI + HTTP API on 8025 (per-stack host ports).
+  mailpit:
+    image: axllent/mailpit:latest
