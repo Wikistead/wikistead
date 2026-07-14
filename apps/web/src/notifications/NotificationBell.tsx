@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Bell } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator } from "../components/ui/dropdown-menu";
-import { useUnreadCount, useNotifications, useMarkNotificationRead, type FeedItem } from "./useNotifications";
+import { useUnreadCount, useNotifications, useMarkNotificationRead, useMarkAllRead, type FeedItem } from "./useNotifications";
 import { eventLabel } from "./feedLabels";
 
 // #320 / ADR-126: the header notification bell. The badge is the raw unread count (a bare number leaks
@@ -18,6 +18,7 @@ export function NotificationBell() {
   const unread = useUnreadCount();
   const list = useNotifications(open); // fetch the inbox only while the popover is open
   const markRead = useMarkNotificationRead();
+  const markAll = useMarkAllRead(); // #362: badge self-service reset
   const count = unread.data ?? 0;
 
   const openItem = (e: FeedItem) => {
@@ -68,6 +69,28 @@ export function NotificationBell() {
               {!e.read && <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" aria-hidden data-testid="notification-unread-dot" />}
             </button>
           ))}
+        </div>
+        <DropdownMenuSeparator />
+        {/* #362the bell is the WATCH entry point — the "watching" list surface hangs off it, and
+            the badge gets a self-service reset (read-all also mops up gate-dropped residue). */}
+        <div className="flex items-stretch">
+          <button
+            type="button"
+            onClick={() => { setOpen(false); navigate("/watches"); }}
+            data-testid="notification-watching"
+            className="flex-1 px-3 py-2 text-center text-sm text-[var(--link)] hover:bg-panel-2"
+          >
+            {t("watches.title")}
+          </button>
+          <button
+            type="button"
+            onClick={() => markAll.mutate()}
+            disabled={count === 0 || markAll.isPending}
+            data-testid="notification-read-all"
+            className="flex-1 px-3 py-2 text-center text-sm text-[var(--link)] hover:bg-panel-2 disabled:opacity-40"
+          >
+            {t("notifications.markAllRead")}
+          </button>
         </div>
         <DropdownMenuSeparator />
         {/* #326: the cross-space Recent Changes activity view (the personal inbox above is per-member; this is

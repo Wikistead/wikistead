@@ -86,27 +86,93 @@ export function useMarkNotificationRead() {
 
 export interface WatchState { watching: boolean; id: string | null }
 
-export function useWatchState(pageId: string | undefined) {
+// #362: the three watch scopes (page / page+descendants / whole space). Scope narrows EMISSION only —
+// the server's display gates are the permission authority regardless.
+export type WatchScope = "page" | "subtree" | "space";
+
+// #362: the event types a watch mask can select (mention is a direct address, not a subscription — it
+// appears only in the account-level default mask). Kept in sync with the server emitters.
+export const WATCH_EVENT_TYPES = [
+  "page.published",
+  "page.restored",
+  "comment.created",
+  "attachment.confirmed",
+  "page.made_public",
+  "page.made_non_public",
+] as const;
+
+export function useWatchState(pageId: string | undefined, scope: WatchScope = "page") {
   const { token } = useSession();
   return useQuery({
-    queryKey: ["watch", "page", pageId],
-    queryFn: () => apiFetch<WatchState>(`/watches?resourceType=page&resourceId=${encodeURIComponent(pageId!)}`, token),
+    queryKey: ["watch", scope, pageId],
+    queryFn: () => apiFetch<WatchState>(`/watches?resourceType=${scope}&resourceId=${encodeURIComponent(pageId!)}`, token),
     enabled: !!pageId,
   });
 }
 
-// Toggle a page watch. Optimistic-free (cheap round-trip); invalidates the watch state on success.
-export function useToggleWatch(pageId: string | undefined) {
+// Toggle a watch at a scope. Optimistic-free (cheap round-trip); invalidates the scope's state + the list.
+export function useToggleWatch(resourceId: string | undefined, scope: WatchScope = "page") {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (current: WatchState | null | undefined) => {
       if (current?.watching && current.id) {
         await apiFetch(`/watches/${current.id}`, token, { method: "DELETE" });
-      } else if (pageId) {
-        await apiFetch("/watches", token, { method: "POST", body: JSON.stringify({ resourceType: "page", resourceId: pageId }) });
+      } else if (resourceId) {
+        await apiFetch("/watches", token, { method: "POST", body: JSON.stringify({ resourceType: scope, resourceId }) });
       }
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["watch", "page", pageId] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["watch", scope, resourceId] });
+      void qc.invalidateQueries({ queryKey: ["watches"] });
+    },
+  });
+}
+
+// #362: the member's full watch list (bell → "watching"). Titles are server-resolved and VIEW-FILTERED
+// (a no-longer-viewable target comes back title:null — rendered as an inert untitled row).
+export interface WatchRow { id: string; resourceType: WatchScope; resourceId: string; eventMask: string[]; muted: boolean; title: string | null }
+export function useWatchList(enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["watches"],
+    queryFn: () => apiFetch<WatchRow[]>("/watches", token).then((r) => r ?? []),
+    enabled,
+  });
+}
+
+// #362: per-watch preferences (mute / event mask) — member-scoped server-side.
+export function useUpdateWatch() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, muted, eventMask }: { id: string; muted?: boolean; eventMask?: string[] }) =>
+      apiFetch(`/watches/${encodeURIComponent(id)}`, token, { method: "PATCH", body: JSON.stringify({ muted, eventMask }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["watches"] }),
+  });
+}
+
+export function useUnwatch() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch(`/watches/${encodeURIComponent(id)}`, token, { method: "DELETE" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["watches"] });
+      void qc.invalidateQueries({ queryKey: ["watch"] });
+    },
+  });
+}
+
+// #362: badge self-service reset (server touches only the caller's rows).
+export function useMarkAllRead() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch("/notifications/read-all", token, { method: "POST" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["notif-unread"] });
+      void qc.invalidateQueries({ queryKey: ["notif-list"] });
+    },
   });
 }

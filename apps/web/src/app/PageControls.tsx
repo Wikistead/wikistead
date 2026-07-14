@@ -32,6 +32,8 @@ export interface PageControlsProps {
   // #320 / ADR-126: the current page id — enables the watch (🔔) toggle in the view-mode actions. Undefined
   // (a scratch/preview surface with no real page) hides it.
   pageId?: string;
+  // #362: the page's space — enables the space-scope watch item (emission scope only; server-gated).
+  spaceId?: string;
   publishState?: "draft" | "unpublished" | null;
   canPublish?: boolean;
   onPublish?: () => void;
@@ -103,16 +105,24 @@ function RoundBtn({ label, icon, onClick, testId, primary, disabled, badge, acti
 }
 
 // #368: the page watch is a ⋯-menu ITEM now (not a standalone round button). Its async watching state
-// (react-query) is resolved by the caller and passed in so `overflowItems` — a plain builder, no hooks —
+// (react-query) is resolved by the caller and passed in so `overflowItems` — a plain builder, no hooks
 // can reflect it (Eye = watching / EyeOff = not) and flip it on select.
+// #362: three SCOPES (page / subtree / space —), each an independent toggle. All are
+// emission scopes only; the server view-gates the write and the display double-gate stays the authority.
 export interface WatchItem { watching: boolean; toggle: () => void; disabled: boolean }
+export interface WatchItems { page: WatchItem; subtree: WatchItem; space?: WatchItem }
 
-function overflowItems(p: PageControlsProps, t: (k: string) => string, watch?: WatchItem): OverflowItem[] {
+function overflowItems(p: PageControlsProps, t: (k: string) => string, watch?: WatchItems): OverflowItem[] {
   const items: OverflowItem[] = [];
   // #368: Watch lives in the ⋯ menu in VIEW mode (member-only; only for a real page). Eye = watching,
   // EyeOff = not — a toggle item (trailing ✓ when on). Icon is the EYE glyph per the ticket; the
   // notification-feed bell (NotificationBell) is a different control and is untouched.
-  if (!p.editing && p.pageId && watch) items.push({ value: "watch", label: watch.watching ? t("watch.unwatch") : t("watch.watch"), icon: watch.watching ? <Eye size={14} /> : <EyeOff size={14} />, testId: "watch-toggle", checked: watch.watching, disabled: watch.disabled });
+  // #362: the page toggle keeps its slot; subtree/space scopes ride below it (scope selection).
+  if (!p.editing && p.pageId && watch) {
+    items.push({ value: "watch", label: watch.page.watching ? t("watch.unwatch") : t("watch.watch"), icon: watch.page.watching ? <Eye size={14} /> : <EyeOff size={14} />, testId: "watch-toggle", checked: watch.page.watching, disabled: watch.page.disabled });
+    items.push({ value: "watch-subtree", label: t("watch.subtree"), icon: <Eye size={14} />, testId: "watch-subtree-toggle", checked: watch.subtree.watching, disabled: watch.subtree.disabled });
+    if (watch.space) items.push({ value: "watch-space", label: t("watch.space"), icon: <Eye size={14} />, testId: "watch-space-toggle", checked: watch.space.watching, disabled: watch.space.disabled });
+  }
   // #212: comments toggle lives here now (was an always-visible bar button). It's a right-panel toggle
   // exactly like history/attachments, so it shows NO ✓ open-state marker (comment 720): the three
   // right-panel items are visually identical and open/closed is read from the panel itself, not a tick.
@@ -143,8 +153,10 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string, watch?: W
   if (p.onDelete) items.push({ value: "delete", label: t("page.delete"), icon: <Trash2 size={14} />, testId: "delete-page", danger: true });
   return items;
 }
-function runOverflow(p: PageControlsProps, v: string, watch?: WatchItem) {
-  if (v === "watch") { watch?.toggle(); return; }
+function runOverflow(p: PageControlsProps, v: string, watch?: WatchItems) {
+  if (v === "watch") { watch?.page.toggle(); return; }
+  if (v === "watch-subtree") { watch?.subtree.toggle(); return; }
+  if (v === "watch-space") { watch?.space?.toggle(); return; }
   if (v === "duplicate") { p.onDuplicate?.(); return; }
   if (v === "save-template") { p.onSaveTemplate?.(); return; }
   if (v === "related") { p.onRelated?.(); return; }
@@ -230,11 +242,25 @@ export function PageVim(p: PageControlsProps) {
 // #368: resolve the page's async watch state into a plain, serialisable WatchItem the ⋯-menu builder can
 // consume. Hooks run unconditionally (react-query gates on pageId via `enabled`); returns undefined for a
 // surface with no real page so no watch item is offered. Shared by desktop + mobile controls.
-function useWatchItem(pageId: string | undefined): WatchItem | undefined {
-  const state = useWatchState(pageId);
-  const toggle = useToggleWatch(pageId);
+// #362: three independent scope toggles (page / subtree / space) — the space item only when spaceId is known.
+function useWatchItem(pageId: string | undefined, spaceId?: string): WatchItems | undefined {
+  const pageState = useWatchState(pageId, "page");
+  const pageToggle = useToggleWatch(pageId, "page");
+  const subState = useWatchState(pageId, "subtree");
+  const subToggle = useToggleWatch(pageId, "subtree");
+  const spaceState = useWatchState(spaceId, "space");
+  const spaceToggle = useToggleWatch(spaceId, "space");
   if (!pageId) return undefined;
-  return { watching: state.data?.watching ?? false, toggle: () => toggle.mutate(state.data), disabled: toggle.isPending || state.isLoading };
+  const item = (state: ReturnType<typeof useWatchState>, toggle: ReturnType<typeof useToggleWatch>): WatchItem => ({
+    watching: state.data?.watching ?? false,
+    toggle: () => toggle.mutate(state.data),
+    disabled: toggle.isPending || state.isLoading,
+  });
+  return {
+    page: item(pageState, pageToggle),
+    subtree: item(subState, subToggle),
+    space: spaceId ? item(spaceState, spaceToggle) : undefined,
+  };
 }
 
 // ── ACTIONS: bottom-right — round icon buttons (edit/done/publish + ⋯) ─────────────────
@@ -242,7 +268,7 @@ export function PageActions(p: PageControlsProps) {
   const { t } = useTranslation();
   const dirty = useDirty(p.dirtySignal);
   const canPublish = p.canPublish || dirty;
-  const watch = useWatchItem(p.pageId);
+  const watch = useWatchItem(p.pageId, p.spaceId);
   const overflow = overflowItems(p, t, watch);
   return (
     // Outer stays click-through (pointer-events-none) so the empty bottom-right area doesn't eat editor clicks;
@@ -276,7 +302,7 @@ export function PageControlsMobile(p: PageControlsProps) {
   const { t } = useTranslation();
   const dirty = useDirty(p.dirtySignal);
   const canPublish = p.canPublish || dirty;
-  const watch = useWatchItem(p.pageId);
+  const watch = useWatchItem(p.pageId, p.spaceId);
   const overflow = overflowItems(p, t, watch);
   return (
     <div className="absolute right-4 bottom-4 z-10">

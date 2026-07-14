@@ -429,6 +429,8 @@ export interface AccountSettings {
   hasAvatar: boolean;
   editorChrome: EditorChromeVisibility | null; // #289: visibility only (startup mode stays above)
   onboardingCompletedAt: string | null; // #289: null → the first-run two-question flow fires once
+  notificationsEnabled: boolean; // #362: global notification kill switch (emission-narrowing only)
+  defaultEventMask: string[]; // #362: default event mask for mask-less watches ([] = all types)
 }
 export function useAccountSettings() {
   const { token, status } = useSession();
@@ -443,7 +445,7 @@ export function useUpdateAccountSettings() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { displayNameOverride?: string | null; editorKeymap?: "default" | "vim" | "local"; editorDisplayMode?: "live" | "source" | "wysiwyg" | "local"; keybindings?: Record<string, string>; editorChrome?: EditorChromeVisibility | null; onboardingCompleted?: boolean }) =>
+    mutationFn: (body: { displayNameOverride?: string | null; editorKeymap?: "default" | "vim" | "local"; editorDisplayMode?: "live" | "source" | "wysiwyg" | "local"; keybindings?: Record<string, string>; editorChrome?: EditorChromeVisibility | null; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[] }) =>
       apiFetch<AccountSettings>("/me/settings", token, { method: "PATCH", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["account-settings"] }),
   });

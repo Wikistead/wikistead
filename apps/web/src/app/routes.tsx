@@ -169,6 +169,7 @@ import { DeleteBacklinkWarning } from "./DeleteBacklinkWarning";
 import { SaveTemplateDialog } from "./SaveTemplateDialog";
 import { TemplatesRoute } from "./TemplatesPage";
 import { RecentChangesRoute } from "./RecentChangesPage";
+import { WatchListRoute } from "../notifications/WatchListPage"; // #362: bell → watch-management list
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport, printPageHtml } from "../data/exportApi";
 import { useActiveSpace } from "./ActiveSpace";
@@ -452,6 +453,7 @@ function PageRoute() {
     onEdit: () => setEditing(true),
     onDone: () => setEditing(false),
     pageId, // #320 / ADR-126: enables the watch (🔔) toggle (member surface only — the guest shell omits it)
+    spaceId, // #362: enables the space-scope watch item
     publishState,
     canPublish: !!published?.hasUnpublishedChanges,
     onPublish: canEdit ? publishPage : undefined,
@@ -1257,6 +1259,7 @@ export function AppRoutes() {
       <Route path="/invite" element={<InviteRoute />} />
       <Route path="/templates" element={<TemplatesRoute />} />
       <Route path="/changes" element={<RecentChangesRoute />} />
+      <Route path="/watches" element={<WatchListRoute />} /> {/* #362the bell's watch list */}
       {AdminRoutes()}
       {AccountRoutes()}
       {SpaceSettingsRoutes()}
