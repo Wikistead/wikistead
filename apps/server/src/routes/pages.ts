@@ -2,7 +2,7 @@ import * as Y from 'yjs'
 import type { Sql } from 'postgres'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
+import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { docName } from '@wikistead/types'
 import { resolveDirectiveRanges } from '@wikistead/macro-render' // #353: scan `:::query` blocks for the anon snapshot
@@ -270,9 +270,10 @@ export async function createPage(
     // space inheritance. Until then the draft is visible only to the creator + any
     // explicitly-granted users (page direct grants).
     await writeTuples(fga, [
-      { user: `user:${args.userId}`, relation: 'manage', object: `page:${r.id}` },
-      // #218 / ADR-103 prep: structural page#parent tuple (inert until the model change wires it — see
-      // syncPageParentTuple). A new page is a leaf, so it can never introduce a parent cycle.
+      // #218 / ADR-103: `manage` is purely computed now → write the creator grant to the manage_direct LEAF.
+      { user: `user:${args.userId}`, relation: 'manage_direct', object: `page:${r.id}` },
+      // #218 / ADR-103: structural page#parent tuple — the model now cascades private/grants down it. A new
+      // page is a leaf, so it can never introduce a parent cycle.
       ...(parentId ? [{ user: `page:${parentId}`, relation: 'parent', object: `page:${r.id}` }] : []),
     ])
     // #229: seed the draft ydoc with the template body so the editor opens pre-filled (collab loads
@@ -562,11 +563,20 @@ export async function toggleTask(
 
 // Release space inheritance for a page: write `page#space` if absent (idempotent
 // OpenFGA rejects duplicate writes, so we check first). Returns whether it wrote.
+// #218 / ADR-103 addendum: also write the `published` marker PAIR (draft gate — lets the page RECEIVE
+// folder-inherited grants). Both are keyed off "is this page published"; write them together so a page is
+// never space-linked without the published marker (or vice versa). Each is written only if absent. Once
+// published a page stays published (no publish→draft reversion), so there is no deletion counterpart — a
+// cross-space move keeps both (marker is space-independent); deletePage sweeps all page tuples.
 async function ensurePageSpaceLink(fga: OpenFgaClient, pageId: string, spaceId: string): Promise<boolean> {
   const { tuples } = await fga.read({ object: `page:${pageId}` })
-  const linked = (tuples ?? []).some((t) => t.key?.relation === 'space' && t.key?.user === `space:${spaceId}`)
-  if (linked) return false
-  await writeTuples(fga, [{ user: `space:${spaceId}`, relation: 'space', object: `page:${pageId}` }])
+  const has = (relation: string, user: string) => (tuples ?? []).some((t) => t.key?.relation === relation && t.key?.user === user)
+  const writes = [
+    ...(has('space', `space:${spaceId}`) ? [] : [{ user: `space:${spaceId}`, relation: 'space', object: `page:${pageId}` }]),
+    ...PUBLISHED_MARKERS(pageId).filter((m) => !has(m.relation, m.user)),
+  ]
+  if (writes.length === 0) return false
+  await writeTuples(fga, writes)
   return true
 }
 
@@ -620,15 +630,22 @@ export async function getPublished(
 export type PageRelation = 'view' | 'comment' | 'edit' | 'manage'
 const PAGE_RELATIONS: PageRelation[] = ['view', 'comment', 'edit', 'manage']
 
-// capability → FGA relation to WRITE (view → view_base leaf; the rest are identity).
-function fgaRelationForCap(cap: PageRelation): 'view_base' | 'comment' | 'edit' | 'manage' {
-  return cap === 'view' ? 'view_base' : cap
+// capability → FGA relation to WRITE. #218 / ADR-103: member/group/link direct grants go to the `*_direct`
+// LEAVES (view_direct / edit_direct / manage_direct) so they cascade down the parent chain; `edit`/`manage` are
+// purely computed now (a direct write to them fails "type not allowed"). `comment` keeps its own direct types.
+function fgaRelationForCap(cap: PageRelation): 'view_direct' | 'comment' | 'edit_direct' | 'manage_direct' {
+  if (cap === 'view') return 'view_direct'
+  if (cap === 'edit') return 'edit_direct'
+  if (cap === 'manage') return 'manage_direct'
+  return 'comment'
 }
 // FGA relation (as stored/read) → user-facing capability; null for non-grant relations (space/parent/
-// comment_open/view). view_base surfaces as 'view'.
+// comment_open/view/view_base). The `*_direct` leaves surface as their capability.
 function capForFgaRelation(rel: string): PageRelation | null {
-  if (rel === 'view_base') return 'view'
-  if (rel === 'comment' || rel === 'edit' || rel === 'manage') return rel
+  if (rel === 'view_direct') return 'view'
+  if (rel === 'edit_direct') return 'edit'
+  if (rel === 'manage_direct') return 'manage'
+  if (rel === 'comment') return 'comment'
   return null
 }
 
@@ -698,8 +715,11 @@ export async function revokePageAccess(
 // them even if they're a space viewer. Manage-gated + audited + reindexed, like grant/revoke. Only a
 // real member/group (never share_link / wildcard) is restrictable.
 function validateRestrictee(who: string): void {
-  if (!/^user:[^*\s]+$/.test(who) && !/^group:[^\s]+#member$/.test(who)) {
-    throw Object.assign(new Error('restrictee must be user:<sub> or group:<id>#member'), { statusCode: 400 })
+  // #218 / ADR-103 (A5-2): a specific share_link:<id> is now a valid restrictee — so a folder-share-link guest
+  // can be excluded from ONE child page (restricted subtracts from `view` AND `edit`). NOT share_link:* (that
+  // over-denies every link). user:* is still forbidden (a public page is toggled off via the public grant).
+  if (!/^user:[^*\s]+$/.test(who) && !/^group:[^\s]+#member$/.test(who) && !/^share_link:[^*\s]+$/.test(who)) {
+    throw Object.assign(new Error('restrictee must be user:<sub>, group:<id>#member or share_link:<id>'), { statusCode: 400 })
   }
 }
 
@@ -775,6 +795,14 @@ const PRIVATE_MARKERS = (pageId: string) => [
   { user: 'share_link:*', relation: 'private', object: `page:${pageId}` },
 ]
 const PUBLIC_GRANT = (pageId: string) => ({ user: 'user:*', relation: 'view_base', object: `page:${pageId}` })
+// #218 / ADR-103 addendum (DRAFT GATE): the `published` marker PAIR that lets a page RECEIVE folder-inherited
+// grants (`*_inherited = *_from_parent and published`). Written at publish next to page#space; an unpublished
+// draft has neither, so a folder grant never reaches it (creator-only until publish). Pair form mirrors
+// PRIVATE_MARKERS: user:* matches member principals, share_link:* matches guest/link principals.
+const PUBLISHED_MARKERS = (pageId: string) => [
+  { user: 'user:*', relation: 'published', object: `page:${pageId}` },
+  { user: 'share_link:*', relation: 'published', object: `page:${pageId}` },
+]
 
 // Read the private marker WITHOUT a manage gate (#109 Fix B): the lock badge is shown to
 // anyone who can already see the page (sidebar + title). Callers who can view a page ARE its
@@ -792,32 +820,41 @@ export async function setPagePrivate(
   args: { pageId: string; tenantId: string; userId: string; plan?: string },
 ): Promise<void> {
   await requireManage(fga, args.userId, args.pageId)
-  const oid = await db.tx(async (tx) => {
+  // #218 / ADR-103 (decision 2b): privatising a FOLDER makes its whole subtree (effective-)private. The
+  // `private` marker is written on the ROOT only (the model cascades it down the parent chain), but the
+  // public-grant strip, share-link sweep, and reindex must run on EVERY descendant too — the model can't
+  // subtract a descendant's DIRECT `view_base@user:*` (public) or its direct share-link grants, so those would
+  // survive the inherited private as live holes.
+  const subtree = [args.pageId, ...(await descendantIds(db, args.pageId))]
+  const oids = await db.tx(async (tx) => {
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.made_private', target: `page:${args.pageId}` })
     }
-    const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
-    await writeTuples(fga, PRIVATE_MARKERS(args.pageId))
-    // public⊥private invariant: strip the public grant so is_public can't survive privatisation. Idempotent
-    // (ignore "not found" — the page may not be public). This is the write-boundary that closes the leak
-    // where a private page still indexes as public.
-    await deleteTuples(fga, [PUBLIC_GRANT(args.pageId)]).catch(() => {})
-    return o
+    const os: string[] = []
+    for (const id of subtree) os.push(await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: id, operation: 'upsert' }))
+    await writeTuples(fga, PRIVATE_MARKERS(args.pageId)) // marker on the ROOT (cascades to descendants via `private from parent`)
+    return os
   })
-  // #109 Fix A (comment 768) + comment 785: revoke this page's share links AFTER the private-ization commit
-  // above — the marker + public strip + outbox reindex are the security-critical, fail-safe part and must
-  // land first (a revoke failure must NOT roll back the private marker or the reindex, else the page stays
-  // publicly indexed — a worse leak). revokeResourceShareLinks makes the DB revoke atomic and returns which
-  // links were cleared (emit AFTER commit) + which FGA deletes failed (logged, left recoverable).
-  const { revoked, failed } = await revokeResourceShareLinks(db, fga, { type: 'page', id: args.pageId }, args.tenantId, args.userId)
-  // Reindex so is_public flips to false (view_base@user:* gone) + space members drop from stage-1.
-  processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+  // public⊥private invariant, over the whole subtree: strip each page's public grant so is_public can't survive
+  // privatisation. Per-page delete + catch (a batch fails wholesale if any page isn't public — a public
+  // descendant would then keep indexing public). Security-critical + fail-safe: runs AFTER the marker commit.
+  for (const id of subtree) await deleteTuples(fga, [PUBLIC_GRANT(id)]).catch(() => {})
+  // #109 Fix A + ADR-103 2b: revoke the subtree's share links AFTER the marker/strip — the marker + strip +
+  // reindex are the security-critical fail-safe part and land first (a revoke failure must NOT roll back them).
+  const revoked: { id: string; pageId: string }[] = []
+  const failed: unknown[] = []
+  for (const id of subtree) {
+    const r = await revokeResourceShareLinks(db, fga, { type: 'page', id }, args.tenantId, args.userId)
+    revoked.push(...r.revoked); if (r.failed.length) failed.push(...r.failed)
+  }
+  // Reindex the whole subtree so is_public flips false (view_base@user:* gone) + space members drop from stage-1.
+  subtree.forEach((id, i) => processOutboxAsync(driver, oids[i]!, { tenantId: args.tenantId, pageId: id, operation: 'upsert' }))
   emit({ type: 'page.made_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
   // comment 785 #2: emit share_link.revoked ONLY after the DB revoke committed (never on a rolled-back tx).
   for (const link of revoked) emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: link.id, pageId: link.pageId, actorId: args.userId })
   // comment 785 #3: a partial FGA-delete failure is not silent — the page IS private (fail-safe), but these
   // links are still live on FGA until a re-privatise/sweep retries them (they stay revoked_at IS NULL).
-  if (failed.length) console.error('[setPagePrivate] share-link revoke incomplete (private applied; links pending FGA delete)', { pageId: args.pageId, failed })
+  if (failed.length) console.error('[setPagePrivate] subtree share-link revoke incomplete (private applied; links pending FGA delete)', { pageId: args.pageId, failed })
 }
 
 export async function unsetPagePrivate(
@@ -827,19 +864,23 @@ export async function unsetPagePrivate(
   args: { pageId: string; tenantId: string; userId: string; plan?: string },
 ): Promise<void> {
   await requireManage(fga, args.userId, args.pageId)
-  const oid = await db.tx(async (tx) => {
+  // #218 / ADR-103: clearing the ROOT marker resumes space inheritance for the WHOLE subtree (private
+  // cascaded down; removing the root marker un-inherits it), so the whole subtree must be reindexed (space
+  // members re-enter stage-1). We do NOT restore public grants or share-links (safe-side: one-way — a
+  // re-publish or explicit public toggle re-adds them per page if desired).
+  const subtree = [args.pageId, ...(await descendantIds(db, args.pageId))]
+  const oids = await db.tx(async (tx) => {
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.made_non_private', target: `page:${args.pageId}` })
     }
-    const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
-    // Clearing private resumes space inheritance; it does NOT restore public (one-way — a re-publish or
-    // an explicit public toggle re-adds view_base@user:* if desired). Delete each marker INDEPENDENTLY
-    // a legacy page privatised before the #244 backfill has only user:*, and a single batch delete of a
-    // missing share_link:* would fail the whole write and leave the page stuck private.
+    const os: string[] = []
+    for (const id of subtree) os.push(await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: id, operation: 'upsert' }))
+    // Delete each marker INDEPENDENTLY: a legacy page privatised before the #244 backfill has only user:*, and
+    // a single batch delete of a missing share_link:* would fail the whole write and leave the page stuck private.
     await Promise.all(PRIVATE_MARKERS(args.pageId).map((m) => deleteTuples(fga, [m]).catch(() => {})))
-    return o
+    return os
   })
-  processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+  subtree.forEach((id, i) => processOutboxAsync(driver, oids[i]!, { tenantId: args.tenantId, pageId: id, operation: 'upsert' }))
   emit({ type: 'page.made_non_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
 }
 
@@ -995,7 +1036,9 @@ export async function listSpacePagesOverview(
     const { tuples } = await fga.read({ object: `page:${r.id}` })
     let grantCount = 0
     for (const { key } of tuples ?? []) {
-      if (!key || !PAGE_RELATIONS.includes(key.relation as PageRelation)) continue
+      // #218 / ADR-103: direct member/group grants live on the *_direct leaves now (+ comment). capForFgaRelation
+      // recognises exactly those grant relations (null for space/parent/private/restricted/view_base@user:*).
+      if (!key || capForFgaRelation(key.relation) === null) continue
       if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
       grantCount++
     }
@@ -1005,6 +1048,39 @@ export async function listSpacePagesOverview(
 }
 
 // All descendant page ids of root (RLS-scoped to the tenant), via the parent_id tree.
+// #218 / ADR-103: a dummy subject for `check(private)` — private is `[user:*, ...] or private from parent`, so
+// ANY user matches iff the page (or an ancestor) is effectively private. Used to detect a move's private change.
+const MOVE_PRIVATE_PROBE = 'user:__move_private_probe__'
+
+// #218 / ADR-103 Addendum 3: the move write-boundary. When a move makes the subtree (effective-)private, strip
+// each descendant's DIRECT public grant + sweep its share-links (the model can't subtract those, so they'd
+// survive the inherited private as live holes). When the effective-private state changed either way, reindex
+// the subtree (the search denorm/is_public depends on it). `alreadyReindexed` skips the reindex for the
+// cross-space path (which reindexes for the space-denorm change already).
+async function applyMovePrivacyBoundary(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { rootId: string; tenantId: string; userId: string; stripSweep: boolean; reindex: boolean },
+): Promise<void> {
+  const subtree = [args.rootId, ...(await descendantIds(db, args.rootId))]
+  if (args.stripSweep) {
+    for (const id of subtree) await deleteTuples(fga, [PUBLIC_GRANT(id)]).catch(() => {})
+    for (const id of subtree) {
+      const { revoked } = await revokeResourceShareLinks(db, fga, { type: 'page', id }, args.tenantId, args.userId)
+      for (const link of revoked) emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: link.id, pageId: link.pageId, actorId: args.userId })
+    }
+  }
+  if (args.reindex) {
+    const oids = await db.tx(async (tx) => {
+      const os: string[] = []
+      for (const id of subtree) os.push(await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: id, operation: 'upsert' }))
+      return os
+    })
+    subtree.forEach((id, i) => processOutboxAsync(driver, oids[i]!, { tenantId: args.tenantId, pageId: id, operation: 'upsert' }))
+  }
+}
+
 async function descendantIds(db: TenantDb, rootId: string): Promise<string[]> {
   const rows = await db.sql<{ id: string }[]>`
     WITH RECURSIVE d AS (
@@ -1150,7 +1226,16 @@ export async function movePage(
   }
   const crossSpace = targetSpace !== page.space_id
 
-  // Authorization: cross-space is a structural ownership move.
+  // #218 / ADR-103 Addendum 3: a move that CHANGES the page's EFFECTIVE private state — INTO a private folder
+  // (implicit privatise) or OUT of one (implicit un-privatise) — is a manage-level act (setPagePrivate is
+  // manage-gated), so require `manage`, not just `edit`. The page's OWN marker makes it private regardless of
+  // parent; otherwise private is inherited from the (new/old) parent chain. Computed from server state only.
+  const wasPrivate = await checkRelation(fga, MOVE_PRIVATE_PROBE, 'private', { type: 'page', id: args.pageId })
+  const ownMarker = await readPagePrivate(fga, args.pageId)
+  const willBePrivate = ownMarker || (newParent ? await checkRelation(fga, MOVE_PRIVATE_PROBE, 'private', { type: 'page', id: newParent }) : false)
+  const effChanged = wasPrivate !== willBePrivate
+
+  // Authorization: cross-space is a structural ownership move; an effective-private change is manage-level.
   if (crossSpace) {
     const [canManage, canEditDest] = await Promise.all([
       check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: args.pageId }),
@@ -1158,8 +1243,9 @@ export async function movePage(
     ])
     if (!canManage || !canEditDest) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
   } else {
-    const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: args.pageId })
-    if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+    const need = effChanged ? 'manage' : 'edit'
+    const ok = await check(fga, `user:${args.userId}`, need, { type: 'page', id: args.pageId })
+    if (!ok) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
   }
 
   // No cycles: a page cannot be nested under itself or its own descendant.
@@ -1211,7 +1297,10 @@ export async function movePage(
         `
         return row!
       })
-      await syncPageParentTuple(fga, args.pageId, page.parent_id, newParent) // #218 prep (inert until model change)
+      await syncPageParentTuple(fga, args.pageId, page.parent_id, newParent) // #218: re-point the parent tuple (private/grants cascade)
+      // #218 / ADR-103: after the parent tuple is set, apply the private write-boundary if the effective private
+      // state changed (strip/sweep only on the transition INTO private; reindex either way for the denorm).
+      if (effChanged) await applyMovePrivacyBoundary(db, fga, driver, { rootId: args.pageId, tenantId: page.tenant_id, userId: args.userId, stripSweep: willBePrivate, reindex: true })
       emit({ type: 'page.updated', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
       return toPage(r)
     }
@@ -1220,7 +1309,8 @@ export async function movePage(
       WHERE id = ${args.pageId}
       RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
     `
-    await syncPageParentTuple(fga, args.pageId, page.parent_id, newParent) // #218 prep (inert until model change)
+    await syncPageParentTuple(fga, args.pageId, page.parent_id, newParent) // #218: re-point the parent tuple (private/grants cascade)
+    if (effChanged) await applyMovePrivacyBoundary(db, fga, driver, { rootId: args.pageId, tenantId: page.tenant_id, userId: args.userId, stripSweep: willBePrivate, reindex: true })
     emit({ type: 'page.updated', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
     return toPage(r)
   }
@@ -1244,7 +1334,10 @@ export async function movePage(
     await swapSpaceTuples(fga, oldSpace, targetSpace, subtree)
     return r
   })
-  await syncPageParentTuple(fga, args.pageId, page.parent_id, newParent) // #218 prep (inert until model change)
+  await syncPageParentTuple(fga, args.pageId, page.parent_id, newParent) // #218: re-point the parent tuple (private/grants cascade)
+  // #218 / ADR-103: strip/sweep on the transition INTO private BEFORE the reindex runs (so is_public reflects
+  // the stripped public grant). The subtree reindex is already enqueued above (space-denorm change), so reindex:false.
+  if (willBePrivate && effChanged) await applyMovePrivacyBoundary(db, fga, driver, { rootId: args.pageId, tenantId: page.tenant_id, userId: args.userId, stripSweep: true, reindex: false })
   for (const o of outboxIds) processOutboxAsync(driver, o.id, { tenantId: page.tenant_id, pageId: o.pageId, operation: 'upsert' })
   emit({ type: 'page.updated', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
   return toPage(row as PageRow)

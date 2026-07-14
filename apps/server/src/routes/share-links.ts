@@ -77,20 +77,22 @@ function toShareLink(r: ShareLinkRow): ShareLink {
 }
 
 // The FGA relation a share link writes, by resource kind + capability:
-//  - page: view -> 'view_base' (#100/ADR-029: `view` is computed = view_base or comment; direct view
-//    grants go to the view_base leaf), edit -> 'edit'. Links carry view/edit ONLY — commenting is a
+//  - page: view -> 'view_direct', edit -> 'edit_direct' (#218/ADR-103: `view`/`edit` are computed; a direct
+//    grant goes to the cascading `*_direct` leaf). Links carry view/edit ONLY — commenting is a
 //    RESOURCE setting (space#comment_open), NOT a link capability, so a guest comments via a VIEW
 //    link + comments being open, never via a comment link.
 //  - space: view-only -> 'viewer' (ADR-038: a space link opens the whole space READ-only; space#editor
 //    has no share_link, so guests never edit via a space link). An edit space link is rejected.
-function relationForResource(type: ResourceRef['type'], capability: Capability): 'view_base' | 'edit' | 'viewer' {
+function relationForResource(type: ResourceRef['type'], capability: Capability): 'view_direct' | 'edit_direct' | 'viewer' {
   if (type === 'space') {
     if (capability !== 'view') throw Object.assign(new Error('space links are view-only'), { statusCode: 400 })
     return 'viewer'
   }
-  // page: view / edit are shareable; comment is the resource's setting (#100), manage is not.
-  if (capability === 'view') return 'view_base'
-  if (capability === 'edit') return 'edit'
+  // page: view / edit are shareable; comment is the resource's setting (#100), manage is not. #218 / ADR-103:
+  // a page share-link grant is a DIRECT grant → the `*_direct` leaf (so a folder link cascades to children,
+  // and `edit`/`view_base` being computed can't take a direct write). Revoke/sweep read the same leaf.
+  if (capability === 'view') return 'view_direct'
+  if (capability === 'edit') return 'edit_direct'
   throw Object.assign(new Error('capability must be view or edit'), { statusCode: 400 })
 }
 

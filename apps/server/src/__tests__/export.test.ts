@@ -28,10 +28,10 @@ const USER = 'exp-user'
 
 const ydoc = (text: string) => Buffer.from(Y.encodeStateAsUpdate((() => { const d = new Y.Doc(); d.getText('content').insert(0, text); return d })()))
 const grants = [
-  { user: `user:${USER}`, relation: 'view_base', object: `page:${ROOT}` },
-  { user: `user:${USER}`, relation: 'view_base', object: `page:${CHILD}` },
-  { user: `user:${USER}`, relation: 'view_base', object: `page:${XSS}` },
-  { user: `user:${USER}`, relation: 'view_base', object: `page:${DEGRADE}` },
+  { user: `user:${USER}`, relation: 'view_direct', object: `page:${ROOT}` },
+  { user: `user:${USER}`, relation: 'view_direct', object: `page:${CHILD}` },
+  { user: `user:${USER}`, relation: 'view_direct', object: `page:${XSS}` },
+  { user: `user:${USER}`, relation: 'view_direct', object: `page:${DEGRADE}` },
   // NOTE: no grants for HIDDEN or OTHER → not viewable by USER.
 ]
 

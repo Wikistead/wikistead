@@ -18,7 +18,7 @@ beforeAll(async () => {
   await writeTuples(fgaClient, [
     { user: `space:${SPACE}`, relation: 'space', object: `page:${PAGE}` },   // page ← space (inheritance)
     { user: `space:${OSPACE}`, relation: 'space', object: `page:${OTHER}` },
-    { user: `share_link:${VLINK}`, relation: 'view_base', object: `page:${PAGE}` }, // a VIEW link
+    { user: `share_link:${VLINK}`, relation: 'view_direct', object: `page:${PAGE}` }, // a VIEW link
     { user: 'user:*', relation: 'view_base', object: `page:${PAGE}` },        // PAGE is public-viewable
   ]).catch(() => {})
 })
@@ -27,7 +27,7 @@ afterAll(async () => {
   await deleteTuples(fgaClient, [
     { user: `space:${SPACE}`, relation: 'space', object: `page:${PAGE}` },
     { user: `space:${OSPACE}`, relation: 'space', object: `page:${OTHER}` },
-    { user: `share_link:${VLINK}`, relation: 'view_base', object: `page:${PAGE}` },
+    { user: `share_link:${VLINK}`, relation: 'view_direct', object: `page:${PAGE}` },
     { user: 'user:*', relation: 'view_base', object: `page:${PAGE}` },
   ]).catch(() => {})
 })

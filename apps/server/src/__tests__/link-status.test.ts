@@ -108,7 +108,7 @@ describe('POST /pages/link-status (#276 / ADR-117)', () => {
   it('a guest (share-link) sees ONLY the page its link grants — member-only pages are dead to it', async () => {
     const LINK = `ls-link-${Date.now().toString(36)}`
     // a page-view share link grants the guest `view_base` on its bound page (share-links.ts relationForResource)
-    await writeTuples(fgaClient, [{ user: `share_link:${LINK}`, relation: 'view_base', object: `page:${viewable}` }])
+    await writeTuples(fgaClient, [{ user: `share_link:${LINK}`, relation: 'view_direct', object: `page:${viewable}` }])
     try {
       const tok = await mintGuestToken(
         { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 },
@@ -119,7 +119,7 @@ describe('POST /pages/link-status (#276 / ADR-117)', () => {
       // the guest may view its shared page — but the member-only page and the made-up id are BOTH dead to it
       expect(res.json().viewable).toEqual([viewable])
     } finally {
-      await deleteTuples(fgaClient, [{ user: `share_link:${LINK}`, relation: 'view_base', object: `page:${viewable}` }]).catch(() => {})
+      await deleteTuples(fgaClient, [{ user: `share_link:${LINK}`, relation: 'view_direct', object: `page:${viewable}` }]).catch(() => {})
     }
   })
 })

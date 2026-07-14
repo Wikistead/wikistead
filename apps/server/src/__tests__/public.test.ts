@@ -252,7 +252,7 @@ describe('loadPublicChildTree leak safety', () => {
     // the only path to it runs through the private C2.
     await writeTuples(fgaClient, [P, C1, Cpub2, G1, G2].map((id) => ({ user: 'user:*', relation: 'view_base', object: `page:${id}` })))
     // Cshare is genuinely viewable — but only by a share_link principal, never by ANON.
-    await writeTuples(fgaClient, [{ user: SHARE, relation: 'view_base', object: `page:${Cshare}` }])
+    await writeTuples(fgaClient, [{ user: SHARE, relation: 'view_direct', object: `page:${Cshare}` }])
     // #227: the public surface only exposes PUBLISHED pages — publish the tree so the gate passes.
     await adminPool`UPDATE pages SET published_at = now() WHERE id = ANY(${adminPool.array([P, C1, Cmid, Cpub2, Cshare, C2, G1, G3, G2])})`
     // #227 anti-test: Cunpub is public (ANON view) BUT unpublished (published_at NULL) → must NOT appear.
@@ -262,7 +262,7 @@ describe('loadPublicChildTree leak safety', () => {
 
   afterAll(async () => {
     await deleteTuples(fgaClient, [P, C1, Cpub2, G1, G2].map((id) => ({ user: 'user:*', relation: 'view_base', object: `page:${id}` })))
-    await deleteTuples(fgaClient, [{ user: SHARE, relation: 'view_base', object: `page:${Cshare}` }])
+    await deleteTuples(fgaClient, [{ user: SHARE, relation: 'view_direct', object: `page:${Cshare}` }])
     await deleteTuples(fgaClient, [{ user: 'user:*', relation: 'view_base', object: `page:${Cunpub}` }]).catch(() => {})
     await deletePage(db, fgaClient, driver, { pageId: Cunpub, userId: 'dev-user' }).catch(() => {})
     // delete leaves first (children before parents) so the parent_id tree stays consistent

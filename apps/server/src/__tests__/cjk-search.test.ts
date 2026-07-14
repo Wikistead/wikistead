@@ -47,18 +47,18 @@ beforeAll(async () => {
 
   // Authorize dev-user to VIEW only the legitimate docs (NOT the stale one).
   await writeTuples(fgaClient, [
-    { user: 'user:dev-user', relation: 'view_base', object: `page:${HIT}` },
-    { user: 'user:dev-user', relation: 'view_base', object: `page:${ENG}` },
-    { user: 'user:dev-user', relation: 'view_base', object: `page:${MIX}` },
+    { user: 'user:dev-user', relation: 'view_direct', object: `page:${HIT}` },
+    { user: 'user:dev-user', relation: 'view_direct', object: `page:${ENG}` },
+    { user: 'user:dev-user', relation: 'view_direct', object: `page:${MIX}` },
   ])
 })
 
 afterAll(async () => {
   for (const id of [HIT, ENG, MIX, STALE]) await driver.deleteDoc(id).catch(() => {})
   await deleteTuples(fgaClient, [
-    { user: 'user:dev-user', relation: 'view_base', object: `page:${HIT}` },
-    { user: 'user:dev-user', relation: 'view_base', object: `page:${ENG}` },
-    { user: 'user:dev-user', relation: 'view_base', object: `page:${MIX}` },
+    { user: 'user:dev-user', relation: 'view_direct', object: `page:${HIT}` },
+    { user: 'user:dev-user', relation: 'view_direct', object: `page:${ENG}` },
+    { user: 'user:dev-user', relation: 'view_direct', object: `page:${MIX}` },
   ]).catch(() => {})
   await app.close()
   await pool.end()

@@ -60,7 +60,7 @@ describe('Phase 4 visibility gate', () => {
     expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'page', id: draftId })).toBe(true)  // creator (direct manage)
     expect(await check(fgaClient, VIEWER, 'view', { type: 'page', id: draftId })).toBe(false)   // space viewer GATED
     // explicit invite = a direct page grant
-    await writeTuples(fgaClient, [{ user: INVITED, relation: 'view_base', object: `page:${draftId}` }])
+    await writeTuples(fgaClient, [{ user: INVITED, relation: 'view_direct', object: `page:${draftId}` }])
     expect(await check(fgaClient, INVITED, 'view', { type: 'page', id: draftId })).toBe(true)
   })
 

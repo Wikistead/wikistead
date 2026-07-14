@@ -93,7 +93,7 @@ describe('#220 share-link revoke-failure durable marker + sweep', () => {
     const link = await createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: page.id }, capability: 'view', expiresInSeconds: null })
     // Simulate a partial prior failure: marker recorded, but the FGA tuple is already gone.
     await db.sql`UPDATE share_links SET revoke_failed_at = now() WHERE id = ${link.id}`
-    await deleteTuples(fgaClient, [{ user: `share_link:${link.id}`, relation: 'view_base', object: `page:${page.id}` }])
+    await deleteTuples(fgaClient, [{ user: `share_link:${link.id}`, relation: 'view_direct', object: `page:${page.id}` }])
 
     const healed = await sweepShareLinkRevokeFailures(fgaClient)
     expect(healed).toBeGreaterThanOrEqual(1)

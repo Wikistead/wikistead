@@ -29,7 +29,7 @@ const fgaFixture = [
   { user: `tenant:${TENANT}`, relation: 'tenant', object: `space:${SPACE}` }, // tenant admin ⇒ space admin ⇒ page comment/view
   { user: `space:${SPACE}`, relation: 'space', object: `page:${PAGE}` },
   grant('cmt-author', 'comment'), // ⇒ also view
-  grant('cmt-viewer', 'view_base'), // #100: direct view grant → view_base leaf (view is computed)
+  grant('cmt-viewer', 'view_direct'), // #218: direct view grant → view_direct leaf (view is computed)
 ]
 
 beforeAll(async () => {

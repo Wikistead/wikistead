@@ -28,6 +28,11 @@ import type { TupleKey, TupleKeyWithoutCondition } from '@openfga/sdk'
     { user: 'tenant:tenant_dev',  relation: 'tenant',  object: 'space:demo_space'   },
     { user: 'user:dev-user',      relation: 'manager', object: 'space:demo_space'   },
     { user: 'space:demo_space',   relation: 'space',   object: 'page:demo'          },
+    // #218 / ADR-103 addendum: a space-linked (published) page carries the `published` marker PAIR so its
+    // published children inherit folder grants (`*_inherited = *_from_parent and published`). Keep the
+    // space-linked ⟺ published invariant intact in the seed (publishPage/migration write these too).
+    { user: 'user:*',             relation: 'published', object: 'page:demo'        },
+    { user: 'share_link:*',       relation: 'published', object: 'page:demo'        },
   ])
   console.log('wrote: tenant + space + page hierarchy')
 
@@ -35,7 +40,7 @@ import type { TupleKey, TupleKeyWithoutCondition } from '@openfga/sdk'
   // Tuple written WITHOUT condition → link never expires.
   // Revoke by deleting this tuple; enforced at next onAuthenticate call.
   await writeIdempotent([
-    { user: 'share_link:demo_view_perm', relation: 'view_base', object: 'page:demo' }, // #100: direct view grant → view_base leaf
+    { user: 'share_link:demo_view_perm', relation: 'view_direct', object: 'page:demo' }, // #218: direct view grant → view_direct leaf
   ])
   console.log('wrote: non-expiring view share_link (demo_view_perm)')
 
@@ -45,7 +50,7 @@ import type { TupleKey, TupleKeyWithoutCondition } from '@openfga/sdk'
   const expiresAt = new Date(Date.now() + 3600_000).toISOString()
   await writeIdempotent([
     {
-      user: 'share_link:demo_edit_temp', relation: 'edit', object: 'page:demo',
+      user: 'share_link:demo_edit_temp', relation: 'edit_direct', object: 'page:demo', // #218: direct edit grant → edit_direct leaf
       condition: { name: 'non_expired', context: { expires_at: expiresAt } },
     },
   ])
@@ -57,6 +62,8 @@ import type { TupleKey, TupleKeyWithoutCondition } from '@openfga/sdk'
     { user: 'tenant:tenant_acme', relation: 'tenant',  object: 'space:acme_space'   },
     { user: 'user:acme-admin',    relation: 'manager', object: 'space:acme_space'   },
     { user: 'space:acme_space',   relation: 'space',   object: 'page:acme_page'     },
+    { user: 'user:*',             relation: 'published', object: 'page:acme_page'   }, // #218 addendum: space-linked ⟺ published
+    { user: 'share_link:*',       relation: 'published', object: 'page:acme_page'   },
   ])
   console.log('wrote: acme tenant + space + page (cross-tenant isolation tests)')
 })().catch((err) => { console.error(err); process.exit(1) })

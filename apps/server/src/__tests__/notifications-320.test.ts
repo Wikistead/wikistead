@@ -66,7 +66,7 @@ beforeAll(async () => {
   const privTuples = [
     { user: 'user:*', relation: 'private', object: `page:${privPage}` },
     { user: 'share_link:*', relation: 'private', object: `page:${privPage}` },
-    { user: `user:${A}`, relation: 'view_base', object: `page:${privPage}` }, // A allowlisted
+    { user: `user:${A}`, relation: 'view_direct', object: `page:${privPage}` }, // A allowlisted
   ]
   await writeTuples(fgaClient, privTuples); cleanupTuples.push(...privTuples)
 }, 60_000)

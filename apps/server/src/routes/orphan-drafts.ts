@@ -127,7 +127,7 @@ export async function claimOrphanDraft(
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.adminSub}`, action: 'orphan_draft.claimed', target: `page:${args.pageId}` })
     }
-    await writeTuples(fga, [{ user: `user:${args.adminSub}`, relation: 'manage', object: `page:${args.pageId}` }])
+    await writeTuples(fga, [{ user: `user:${args.adminSub}`, relation: 'manage_direct', object: `page:${args.pageId}` }])
     return claim.expires_at.toISOString()
   })
   emit({ type: 'orphan_draft.claimed', tenantId: args.tenantId, actorId: args.adminSub, pageId: args.pageId, expiresAt })
@@ -156,8 +156,8 @@ export async function reassignOrphanDraft(
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.adminSub}`, action: 'orphan_draft.reassigned', target: `page:${args.pageId}` })
     }
-    await writeTuples(fga, [{ user: `user:${args.newOwnerSub}`, relation: 'manage', object: `page:${args.pageId}` }])
-    await deleteTuples(fga, [{ user: `user:${args.adminSub}`, relation: 'manage', object: `page:${args.pageId}` }])
+    await writeTuples(fga, [{ user: `user:${args.newOwnerSub}`, relation: 'manage_direct', object: `page:${args.pageId}` }])
+    await deleteTuples(fga, [{ user: `user:${args.adminSub}`, relation: 'manage_direct', object: `page:${args.pageId}` }])
   })
   emit({ type: 'orphan_draft.reassigned', tenantId: args.tenantId, actorId: args.adminSub, pageId: args.pageId, newOwner: `user:${args.newOwnerSub}` })
 }

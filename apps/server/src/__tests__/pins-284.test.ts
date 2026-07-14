@@ -40,7 +40,7 @@ const fgaFixture = [
   { user: `space:${SPACE}`, relation: 'space', object: `page:${PAGE_C}` },
   // PAGE_HIDDEN deliberately gets NO tuples. ACME_PAGE gets a DIRECT view grant for alice —
   // the cross-tenant 404 must come from the RLS row-existence gate, not from a missing grant.
-  { user: 'user:pin-alice', relation: 'view_base', object: `page:${ACME_PAGE}` },
+  { user: 'user:pin-alice', relation: 'view_direct', object: `page:${ACME_PAGE}` },
 ]
 // PAGE_B's space tuple is deleted mid-suite (the revoke case), so it is tracked separately.
 const pageBTuple = [{ user: `space:${SPACE}`, relation: 'space', object: `page:${PAGE_B}` }]

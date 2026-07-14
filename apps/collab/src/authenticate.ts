@@ -57,14 +57,14 @@ export async function authenticate(args: { token: string; documentName: string }
   if (looksLikeGuestToken(token)) {
     const c = await verifyGuestToken(guestCfg, token);
     assert(c.tenantId === tenantId, "tenant mismatch");
-    // A PAGE token is bound to exactly one page. A SPACE token (ADR-038 / #104) admits the
-    // guest to ANY page that inherits view from the space (i.e. a published page in that
-    // space) — so we do NOT assert a page-id match for it; the OpenFGA check below is the
-    // authority (page#view ← viewer from space). A space link is view-only.
-    if (c.resource.type === "page") {
-      assert(c.resource.id === pageId, "resource mismatch");
-    } else {
-      assert(c.resource.type === "space", "unsupported resource");
+    // #218 / ADR-103 (A5-4): a PAGE token admits to its page AND — for a FOLDER link — its DESCENDANT docs,
+    // because the share_link's view/edit grant cascades down the parent chain in the model. So we do NOT assert
+    // resource.id === pageId; the OpenFGA check below is the authority (a non-folder link's grant reaches only
+    // its own page, so the common case stays exact; a folder link additionally reaches its subtree per the
+    // link's capability). A SPACE token (ADR-038 / #104) likewise resolves via the FGA check (viewer from
+    // space). Same "trust FGA, not the token's page claim" discipline for both.
+    if (c.resource.type !== "page" && c.resource.type !== "space") {
+      assert(false, "unsupported resource");
     }
     const capability = c.resource.type === "space" ? "view" : c.capability;
     // #92: an EPHEMERAL Excalidraw room is co-editing → it requires EDIT (a view/comment guest cannot
