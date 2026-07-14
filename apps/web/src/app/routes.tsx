@@ -143,6 +143,7 @@ import { useHeadingHashLanding, replaceHashWith } from "../toc/useHashLanding"; 
 import { PageTitle } from "./PageTitle";
 import { PageMeta } from "./PageMeta";
 import { ProgressRing } from "./ProgressRing"; // #290: title-band page-progress ring
+import { useTheme } from "./ThemeProvider"; // #376: public reader remounts on theme switch (diagram re-render)
 import { RelatedPanel } from "./RelatedPanel";
 import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
@@ -1065,8 +1066,12 @@ function PublicPageContent({ pageId }: { pageId: string }) {
   // (review, ADR-124 — the one finding, an unsanitized :::embed-external degrade href, is
   // fixed). The CM6 engine is LAZY-loaded (dynamic import) — a hygiene split (routes.tsx already pulls CM6 via
   // the member Editor, so eager growth is ~net-zero; the fuller isolation is a later member-route lazify).
-  // No member resolvers are wired (anonymous surface) → images/plantuml/transclude degrade, like the template
-  // preview. wireToc drives the TOC from the CM heading extension, listening on the OUTER scroll container.
+  // #376 / ADR-149 §2: the PUBLIC resolvers are wired (images / plantuml / transclusions render for anon
+  // readers via the ANON-gated, abuse-bounded /public/* routes; refusals degrade like before). theme is an
+  // effect dep so a light/dark switch remounts the surface — mermaid/plantuml re-render for the new theme
+  // (#342/#360 class; the widget theme is read at render time). wireToc drives the TOC from the CM heading
+  // extension, listening on the OUTER scroll container.
+  const { theme: publicTheme } = useTheme();
   useEffect(() => {
     if (state.status !== "ok" || !bodyEl) return;
     setHeadings([]);
@@ -1074,9 +1079,13 @@ function PublicPageContent({ pageId }: { pageId: string }) {
     setVisibleFroms([]);
     let cancelled = false;
     let dispose = () => {};
-    void Promise.all([import("../editor/editor-livepreview"), import("../editor/toc-wiring")]).then(([{ mountPublishedView }, { wireToc }]) => {
+    void Promise.all([import("../editor/editor-livepreview"), import("../editor/toc-wiring"), import("../editor/image-resolver"), import("../editor/diagram-renderer"), import("../editor/transclude-resolver")]).then(([{ mountPublishedView }, { wireToc }, { makePublicImageResolver }, { makePublicDiagramRenderer }, { makePublicTranscludeResolver }]) => {
       if (cancelled || !bodyEl) return;
-      const view = mountPublishedView(bodyEl, state.page!.content, {});
+      const view = mountPublishedView(bodyEl, state.page!.content, {
+        resolveImageUrl: makePublicImageResolver(),
+        renderDiagram: makePublicDiagramRenderer(pageId),
+        resolveTransclude: makePublicTranscludeResolver(pageId),
+      });
       const unwire = wireToc(view, {
         onHeadings: setHeadings,
         onActiveHeading: setActiveFrom,
@@ -1090,7 +1099,7 @@ function PublicPageContent({ pageId }: { pageId: string }) {
       dispose = () => { unwire(); view.destroy(); };
     });
     return () => { cancelled = true; dispose(); if (bodyEl) bodyEl.replaceChildren(); };
-  }, [state, bodyEl]);
+  }, [state, bodyEl, pageId, publicTheme]);
 
   useEffect(() => {
     if (state.status !== "ok" || !state.page!.noindex) return;

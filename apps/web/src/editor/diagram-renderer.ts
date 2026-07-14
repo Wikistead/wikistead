@@ -40,6 +40,13 @@ export function makeDiagramRenderer(token: string, pageId: string, fetcher: Fetc
   return makeRenderer(`${API_URL}/pages/${encodeURIComponent(pageId)}/plantuml/render`, token, fetcher);
 }
 
+// #376 / ADR-149 §2: the ANONYMOUS public reader's renderer — hits the abuse-bounded /public sibling
+// (ANON view + published gate + source-membership + cache + rate limit server-side). No token. The
+// same degrade rules: any refusal (400 non-member source, 404, 429, 204 unconfigured) keeps the fence.
+export function makePublicDiagramRenderer(pageId: string, fetcher: Fetcher = fetch): DiagramRenderer {
+  return makeRenderer(`${API_URL}/public/pages/${encodeURIComponent(pageId)}/plantuml/render`, "", fetcher);
+}
+
 // #267 the TEMPLATE-preview variant — hits the template-scoped, view-gated render endpoint (a faithful
 // mirror of the page one) so a template preview renders plantuml like the real editor. The server 404s a
 // non-viewer (existence-hidden) and 204-degrades when the operator endpoint is unconfigured — same contract.
