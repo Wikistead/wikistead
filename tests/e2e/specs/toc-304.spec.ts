@@ -139,3 +139,52 @@ test("#345 Issue A: the narrow overlay TOC carries the two-layer highlight", asy
   const visibleCount = await items.evaluateAll((els) => els.filter((e) => e.hasAttribute("data-visible")).length);
   expect(visibleCount, "the overlay TOC receives the light-visible layer (was rail-only)").toBeGreaterThanOrEqual(1);
 });
+
+// #345 Issue 1: on a long TOC the rail auto-follows the highlight so the active item never scrolls out of
+// the rail as the reader nears the bottom (the old single-active centring dropped it off).
+test("#345 the rail follows the highlight to the bottom — the active item stays visible", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1360, height: 520 } })).newPage();
+  await openScratch(page, "toc-follow-bottom");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  const body = Array.from({ length: 16 }, (_, i) => `# Section ${i + 1}\n\n${Array.from({ length: 6 }, (_, j) => `para ${i}.${j} lorem ipsum dolor sit amet.`).join("\n\n")}`).join("\n\n");
+  await page.keyboard.insertText(body + "\n");
+  await sleep(700);
+  const rail = page.locator("[data-testid=toc][data-variant=rail]");
+  await expect(rail).toBeVisible({ timeout: 8000 });
+  // the rail must actually overflow for the follow to matter.
+  expect(await rail.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+
+  await page.locator(".cm-scroller").evaluate((el) => { el.dispatchEvent(new WheelEvent("wheel", { bubbles: true })); el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.95; });
+  await sleep(400);
+  const r = await rail.evaluate((nav) => {
+    const active = nav.querySelector("[data-testid=toc-item][data-active]") as HTMLElement | null;
+    if (!active) return { hasActive: false, inView: false };
+    const nr = nav.getBoundingClientRect(), ar = active.getBoundingClientRect();
+    return { hasActive: true, inView: ar.top >= nr.top - 1 && ar.bottom <= nr.bottom + 1 };
+  });
+  expect(r.hasActive, "an active heading is lit near the bottom (not 'none')").toBe(true);
+  expect(r.inView, "the active item is scrolled into the rail's own viewport (follow)").toBe(true);
+});
+
+// #345 Issue 3: hovering the narrow-screen overlay TOC holds it open (it no longer fades from under the
+// reader after the ~1.2s scroll timeout).
+test("#345 hovering the overlay TOC holds it open past the fade timeout", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1360, height: 720 } })).newPage();
+  await openScratch(page, "toc-overlay-hover");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(Array.from({ length: 10 }, (_, i) => `# Section ${i + 1}\n\npara ${i} lorem ipsum dolor.`).join("\n\n") + "\n");
+  await sleep(400);
+  await page.setViewportSize({ width: 680, height: 720 }); // narrow → overlay
+  await sleep(400);
+  await page.locator(".cm-scroller").evaluate((el) => { el.dispatchEvent(new WheelEvent("wheel", { bubbles: true })); el.scrollTop = 200; });
+  await sleep(200);
+  const overlay = page.locator("[data-testid=toc][data-variant=overlay]");
+  await expect(overlay).toBeAttached({ timeout: 8000 });
+  // hover it, then wait PAST the 1.2s fade — it must stay visible (opacity 1) while hovered.
+  await overlay.hover();
+  await sleep(1500);
+  const opacity = await overlay.evaluate((el) => getComputedStyle(el).opacity);
+  expect(Number(opacity), "the overlay stays opaque while hovered (no fade-out)").toBeGreaterThan(0.9);
+});
