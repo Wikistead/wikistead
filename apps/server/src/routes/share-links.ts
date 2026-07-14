@@ -84,9 +84,14 @@ function toShareLink(r: ShareLinkRow): ShareLink {
 //    link + comments being open, never via a comment link.
 //  - space: view-only -> 'viewer' (ADR-038: a space link opens the whole space READ-only; space#editor
 //    has no share_link, so guests never edit via a space link). An edit space link is rejected.
-function relationForResource(type: ResourceRef['type'], capability: Capability): 'view_direct' | 'edit_direct' | 'viewer' {
+function relationForResource(type: ResourceRef['type'], capability: Capability): 'view_direct' | 'edit_direct' | 'viewer' | 'editor' {
   if (type === 'space') {
-    if (capability !== 'view') throw Object.assign(new Error('space links are view-only'), { statusCode: 400 })
+    // #274 / ADR-135: a space EDIT link writes `space#editor` (share_link + the non_expired twin are its
+    // ONLY direct types post-split) — page#edit_from_space inherits it to every published, non-private
+    // page. viewer_member references editor_MEMBER, so this can never reach space templates. Issuance is
+    // additionally entitlement-gated (spaceEditLink, 402) in createShareLink.
+    if (capability === 'edit') return 'editor'
+    if (capability !== 'view') throw Object.assign(new Error('space links are view or edit'), { statusCode: 400 })
     return 'viewer'
   }
   // page: view / edit are shareable; comment is the resource's setting (#100), manage is not. #218 / ADR-103:
@@ -128,14 +133,20 @@ export async function createShareLink(
   if (!resolveEntitlements(args.plan).guestAccess) {
     throw Object.assign(new Error('share links not available on this plan'), { statusCode: 402 })
   }
-  // Relation by kind (space = view-only 'viewer'; page = view/edit). Throws 400 on an
-  // unshareable combo (e.g. an edit space link).
+  // Relation by kind (page view/edit, space viewer/editor since #274).
   const relation = relationForResource(args.resource.type, args.capability)
 
   // `manage` on the resource — issuing an anonymous link is administrative. For a space link
   // this is space `manage` (exposing the WHOLE space is a bigger act than a page link).
   const canManage = await check(fga, `user:${args.userId}`, 'manage', args.resource)
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+
+  // #274 / ADR-135: a space EDIT link (the anonymous-wiki face) is its own lever — Cloud paid tiers
+  // only, self-host unlimited. Same 402 convention; existing links are untouched by a downgrade.
+  // AFTER the manage gate: a non-manager gets a uniform 403 and learns nothing about the plan.
+  if (args.resource.type === 'space' && args.capability === 'edit' && !resolveEntitlements(args.plan).spaceEditLink) {
+    throw Object.assign(new Error('space edit links not available on this plan'), { statusCode: 402 })
+  }
 
   const expiresAt = args.expiresInSeconds != null ? new Date(Date.now() + args.expiresInSeconds * 1000) : null
   // #233: hash the optional password (scrypt + salt) OUTSIDE the tx (KDF is slow); a blank/whitespace

@@ -44,11 +44,11 @@ beforeAll(async () => {
   db = await acquireTenantDb(tenant)
   spaceId = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'pft-space' })).id
   // EDITOR can edit the space (so template-authz failures surface as 404, not a space 403).
-  await writeTuples(fgaClient, [{ user: `user:${EDITOR}`, relation: 'editor', object: `space:${spaceId}` }])
+  await writeTuples(fgaClient, [{ user: `user:${EDITOR}`, relation: 'editor_member', object: `space:${spaceId}` }])
 }, 60_000)
 
 afterAll(async () => {
-  await deleteTuples(fgaClient, [{ user: `user:${EDITOR}`, relation: 'editor', object: `space:${spaceId}` }]).catch(() => {})
+  await deleteTuples(fgaClient, [{ user: `user:${EDITOR}`, relation: 'editor_member', object: `space:${spaceId}` }]).catch(() => {})
   for (const t of templateIds) await fgaClient.write({ deletes: (await fgaClient.read({ object: `template:${t}` })).tuples?.map((x) => x.key!).filter(Boolean) ?? [] }).catch(() => {})
   for (const t of templateIds) await adminPool`DELETE FROM templates WHERE id = ${t}`.catch(() => {})
   for (const id of ids) await deletePage(db, fgaClient, driver, { pageId: id, userId: 'dev-user' }).catch(() => {})

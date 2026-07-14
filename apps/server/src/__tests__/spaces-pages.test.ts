@@ -414,7 +414,7 @@ describe('cross-space move (security)', () => {
 
     // an editor of spaceA can `edit` the page but cannot move it OUT (no manage),
     // and has no rights on the destination space B either.
-    await writeTuples(fgaClient, [{ user: 'user:a-editor', relation: 'editor', object: `space:${spaceA}` }])
+    await writeTuples(fgaClient, [{ user: 'user:a-editor', relation: 'editor_member', object: `space:${spaceA}` }])
     expect(await check(fgaClient, 'user:a-editor', 'edit', { type: 'page', id: page.id })).toBe(true)
     await expect(
       movePage(db, fgaClient, driver, { pageId: page.id, userId: 'a-editor', parentId: null, afterId: null, spaceId: spaceB }),
@@ -423,7 +423,7 @@ describe('cross-space move (security)', () => {
     // the page never left spaceA
     expect((await db.sql<{ space_id: string }[]>`SELECT space_id FROM pages WHERE id = ${page.id}`)[0].space_id).toBe(spaceA)
 
-    await deleteTuples(fgaClient, [{ user: 'user:a-editor', relation: 'editor', object: `space:${spaceA}` }])
+    await deleteTuples(fgaClient, [{ user: 'user:a-editor', relation: 'editor_member', object: `space:${spaceA}` }])
     await deletePage(db, fgaClient, driver, { pageId: page.id, userId: 'dev-user' })
   })
 

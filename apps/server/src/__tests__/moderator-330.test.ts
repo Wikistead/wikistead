@@ -41,7 +41,7 @@ const base = [
   { user: `space:${SA}`, relation: 'space', object: `page:${PRIV}` },
   { user: MOD, relation: 'moderator', object: `space:${SA}` },
   { user: MGR, relation: 'manager', object: `space:${SA}` },
-  { user: ED, relation: 'editor', object: `space:${SA}` },
+  { user: ED, relation: 'editor_member', object: `space:${SA}` },
   // PRIV carries the private PAIR (ADR-098/#244)
   { user: 'user:*', relation: 'private', object: `page:${PRIV}` },
   { user: 'share_link:*', relation: 'private', object: `page:${PRIV}` },

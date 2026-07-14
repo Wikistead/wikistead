@@ -44,7 +44,7 @@ const page = (id: string) => ({ type: 'page' as const, id })
 const base = [
   { user: `space:${SA}`, relation: 'space', object: `page:${PG}` },
   { user: `space:${SA}`, relation: 'space', object: `page:${PG2}` },
-  { user: EDITOR, relation: 'editor', object: `space:${SA}` },
+  { user: EDITOR, relation: 'editor_member', object: `space:${SA}` },
   { user: MANAGER, relation: 'manager', object: `space:${SA}` },
   { user: EDITLINK, relation: 'edit_direct', object: `page:${PG}` },
   { user: EDITLINK, relation: 'edit_direct', object: `page:${PG2}` },

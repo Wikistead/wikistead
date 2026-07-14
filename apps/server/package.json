@@ -35,7 +35,8 @@
     "tenant:promote": "tsx --env-file=../../.env src/scripts/promote-tenant.ts",
     "private:backfill": "tsx --env-file=../../.env src/scripts/private-sharelink-backfill.ts",
     "viewer-member:backfill": "tsx --env-file=../../.env src/scripts/viewer-member-backfill.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "fga:migrate-editor": "tsx --env-file=../../.env src/scripts/migrate-editor-274.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.658.0",

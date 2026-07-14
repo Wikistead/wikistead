@@ -115,7 +115,11 @@ export async function buildSearchDoc(
   if (linkedToSpace && !isPrivate) {
     const { tuples: spaceTuples } = await fga.read({ object: `space:${page.space_id}` })
     for (const { key } of spaceTuples ?? []) {
-      if (!key || !['manager', 'editor', 'viewer'].includes(key.relation)) continue
+      // #274 / ADR-135: member edit grants moved to the editor_member leaf — ADD it here (approval
+      // condition 3: never a swap — a pre-migration store's legacy `editor` member tuples must keep
+      // resolving into the denorm during the Step-A window). Post-migration, `editor` holds only
+      // share_link tuples, which categorize() already excludes from the member viewer set.
+      if (!key || !['manager', 'editor', 'editor_member', 'viewer'].includes(key.relation)) continue
       categorize(key.user, viewerUsers, viewerGroups, setPublic)
     }
     const { tuples: tenantTuples } = await fga.read({ object: `tenant:${tenantId}` })
