@@ -10,6 +10,10 @@ export type DomainEvent =
   | { type: 'page.created';   tenantId: string; pageId: string; spaceId: string; actorId: string }
   | { type: 'page.updated';   tenantId: string; pageId: string; actorId: string }
   | { type: 'page.deleted';   tenantId: string; pageId: string; actorId: string }
+  // #411 / ADR-153: trash lifecycle. `page.deleted` now fires at PURGE (explicit or retention) — the
+  // point of no return keeps its historical event name; `page.restored` stays the REVISION restore.
+  | { type: 'page.trashed';        tenantId: string; pageId: string; actorId: string }
+  | { type: 'page.trash_restored'; tenantId: string; pageId: string; actorId: string }
   | { type: 'page.restored';  tenantId: string; pageId: string; fromRevisionId: string; actorId: string }
   | { type: 'page.published'; tenantId: string; pageId: string; revisionId: string; actorId: string }
   | { type: 'page.access_granted'; tenantId: string; pageId: string; grantee: string; relation: string; actorId: string }
