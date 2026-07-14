@@ -10,6 +10,7 @@ import { Button } from "../ui/Button";
 import { ShareDialog } from "../ui/ShareDialog";
 import { Input } from "../ui/Input";
 import { SpaceIcon } from "../ui/SpaceIcon";
+import { Switch } from "../ui/Switch";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
 import { SettingsShell, SettingsDenied, type SettingsTab } from "./SettingsShell";
@@ -163,13 +164,13 @@ function SpaceGeneralTab() {
           <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("spaceSettings.publicLabel")}</label>
           <div style={{ marginBottom: 32 }} className="rounded-md border border-border p-3" data-testid="space-public-section">
             <label className="flex items-start gap-2">
-              <input
-                type="checkbox"
+              {/* #389 / ADR-146: bare checkbox → DS Switch (on/off state). */}
+              <Switch
                 className="mt-0.5"
-                data-testid="space-public-toggle"
+                testId="space-public-toggle"
                 checked={!!isPublic}
                 disabled={setPublic.isPending}
-                onChange={(e) => applyPublic(e.target.checked)}
+                onChange={applyPublic}
               />
               <span>
                 <span className="block text-sm text-foreground">{t("spaceSettings.publicTitle")}</span>

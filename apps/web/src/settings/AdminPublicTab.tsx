@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { usePublicSurface, useSetPublicSurface } from "../data/queries";
 import { notify } from "../ui/toast";
+import { Switch } from "../ui/Switch";
 
 // #253 / ADR-113: the tenant PARENT SWITCH for the anonymous public surface. tenant#admin only (the GET/PUT
 // re-check, 403 otherwise). Default OFF = fail-safe: the whole public surface 404s until an admin turns it on
@@ -24,13 +25,13 @@ export function AdminPublicTab() {
       <p className="mt-0 text-sm text-fg-dim">{t("adminPublic.body")}</p>
 
       <label className="mt-4 flex items-start gap-2 rounded-md border border-border p-3" data-testid="public-surface-row">
-        <input
-          type="checkbox"
+        {/* #389 / ADR-146: bare checkbox -> DS Switch (on/off state). */}
+        <Switch
           className="mt-0.5"
-          data-testid="public-surface-toggle"
+          testId="public-surface-toggle"
           checked={!!enabled}
           disabled={isLoading || setSurface.isPending}
-          onChange={(e) => toggle(e.target.checked)}
+          onChange={toggle}
         />
         <span className="min-w-0 flex-1">
           <span className="block text-sm text-foreground">{t("adminPublic.toggleTitle")}</span>

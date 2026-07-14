@@ -12,6 +12,9 @@ import { AccentPicker } from "./AccentPicker";
 import { Avatar } from "../ui/Avatar";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
+import { RadioGroup } from "../ui/RadioGroup";
+import { CheckboxRow } from "../ui/Checkbox";
+import { SwitchRow } from "../ui/Switch";
 import { notify } from "../ui/toast";
 import { useAccountSettings, useUpdateAccountSettings, useUploadAvatar, useRemoveAvatar } from "../data/queries";
 import { downloadTenantExport } from "../data/exportApi"; // #309: whole-tenant Markdown-ZIP export
@@ -225,20 +228,14 @@ function EditorTab() {
       <SettingsCard>
       <label className="mb-1 block text-sm font-medium">{t("account.keymap")}</label>
       <p className="mb-2 text-xs text-fg-dim">{t("account.keymapHint")}</p>
-      <div className="flex flex-col gap-2">
-        {(["local", "vim", "default"] as const).map((m) => (
-          <Button
-            key={m}
-            variant={mode === m ? "primary" : "default"}
-            onClick={() => choose(m)}
-            data-testid={`account-keymap-${m}`}
-            aria-pressed={mode === m}
-            className="justify-start"
-          >
-            {t(`account.keymap_${m}`)}
-          </Button>
-        ))}
-      </div>
+      {/* #389 / ADR-146: a real radiogroup (list look) — was a row of highlighted buttons. */}
+      <RadioGroup
+        value={mode}
+        onChange={(v) => choose(v as "local" | "vim" | "default")}
+        ariaLabel={t("account.keymap")}
+        testId="account-keymap"
+        options={(["local", "vim", "default"] as const).map((m) => ({ value: m, label: t(`account.keymap_${m}`) }))}
+      />
       </SettingsCard>
 
       <SettingsCard>
@@ -246,20 +243,13 @@ function EditorTab() {
             the startup set (reading stays a mid-session state, not a startup value). */}
         <label className="mb-1 block text-sm font-medium">{t("account.displayMode")}</label>
         <p className="mb-2 text-xs text-fg-dim">{t("account.displayModeHint")}</p>
-        <div className="flex flex-col gap-2">
-          {(["local", "live", "source", "wysiwyg"] as const).map((m) => (
-            <Button
-              key={m}
-              variant={dmode === m ? "primary" : "default"}
-              onClick={() => update.mutate({ editorDisplayMode: m })}
-              data-testid={`account-displaymode-${m}`}
-              aria-pressed={dmode === m}
-              className="justify-start"
-            >
-              {t(`account.displayMode_${m}`)}
-            </Button>
-          ))}
-        </div>
+        <RadioGroup
+          value={dmode}
+          onChange={(v) => update.mutate({ editorDisplayMode: v as "local" | "live" | "source" | "wysiwyg" })}
+          ariaLabel={t("account.displayMode")}
+          testId="account-displaymode"
+          options={(["local", "live", "source", "wysiwyg"] as const).map((m) => ({ value: m, label: t(`account.displayMode_${m}`) }))}
+        />
       </SettingsCard>
 
       <SettingsCard testid="account-chrome">
@@ -267,30 +257,25 @@ function EditorTab() {
             vim button never disables vim (Ctrl+Alt+V + the keymap setting above stay the recovery). */}
         <label className="mb-1 block text-sm font-medium">{t("account.chrome")}</label>
         <p className="mb-2 text-xs text-fg-dim">{t("account.chromeHint")}</p>
-        <div className="mb-3 flex flex-col gap-2">
-          <Button
-            variant={vimToggleVisible ? "primary" : "default"}
-            onClick={() => writeChrome({ vimToggleVisible: !vimToggleVisible, modesVisible })}
-            data-testid="account-chrome-vim"
-            aria-pressed={vimToggleVisible}
-            className="justify-start"
-          >
-            {t(vimToggleVisible ? "account.chromeVimShown" : "account.chromeVimHidden")}
-          </Button>
+        {/* #389 / ADR-146: on/off state → Switch; the per-mode opt-ins → real checkboxes. */}
+        <div className="mb-3">
+          <SwitchRow
+            checked={vimToggleVisible}
+            onChange={(v) => writeChrome({ vimToggleVisible: v, modesVisible })}
+            testId="account-chrome-vim"
+            label={t(vimToggleVisible ? "account.chromeVimShown" : "account.chromeVimHidden")}
+          />
         </div>
         <p className="mb-2 text-xs text-fg-dim">{t("account.chromeModesHint")}</p>
         <div className="flex flex-col gap-2">
           {(["live", "source", "reading", "wysiwyg"] as const).map((m) => (
-            <Button
+            <CheckboxRow
               key={m}
-              variant={modesVisible[m] ? "primary" : "default"}
-              onClick={() => toggleMode(m)}
-              data-testid={`account-chrome-mode-${m}`}
-              aria-pressed={modesVisible[m]}
-              className="justify-start"
-            >
-              {t(`page.mode${m === "live" ? "Live" : m === "source" ? "Source" : m === "reading" ? "Reading" : "Wysiwyg"}`)}
-            </Button>
+              checked={modesVisible[m]}
+              onChange={() => toggleMode(m)}
+              testId={`account-chrome-mode-${m}`}
+              label={t(`page.mode${m === "live" ? "Live" : m === "source" ? "Source" : m === "reading" ? "Reading" : "Wysiwyg"}`)}
+            />
           ))}
         </div>
         <div className="mt-3">
@@ -306,20 +291,13 @@ function EditorTab() {
             language default (JP=UDEV Gothic, EN=Wikistead Mono); the others force a face. */}
         <label className="mb-1 block text-sm font-medium">{t("account.bodyFont")}</label>
         <p className="mb-2 text-xs text-fg-dim">{t("account.bodyFontHint")}</p>
-        <div className="flex flex-col gap-2">
-          {(["locale", "udev", "mono", "sans"] as const).map((f) => (
-            <Button
-              key={f}
-              variant={fontBody === f ? "primary" : "default"}
-              onClick={() => setFontBody(f)}
-              data-testid={`account-bodyfont-${f}`}
-              aria-pressed={fontBody === f}
-              className="justify-start"
-            >
-              {t(`account.bodyFont_${f}`)}
-            </Button>
-          ))}
-        </div>
+        <RadioGroup
+          value={fontBody}
+          onChange={(v) => setFontBody(v as FontBody)}
+          ariaLabel={t("account.bodyFont")}
+          testId="account-bodyfont"
+          options={(["locale", "udev", "mono", "sans"] as const).map((f) => ({ value: f, label: t(`account.bodyFont_${f}`) }))}
+        />
       </SettingsCard>
 
       <SettingsCard>
@@ -327,36 +305,25 @@ function EditorTab() {
             so the rail stays clean; the rail just filters by this depth. */}
         <label className="mb-1 block text-sm font-medium">{t("account.toc")}</label>
         <p className="mb-2 text-xs text-fg-dim">{t("account.tocHint")}</p>
-        <div className="mb-4 flex flex-col gap-2">
-          {([["on", true], ["off", false]] as const).map(([k, v]) => (
-            <Button
-              key={k}
-              variant={tocOn === v ? "primary" : "default"}
-              onClick={() => setTocOn(v)}
-              data-testid={`account-toc-${k}`}
-              aria-pressed={tocOn === v}
-              className="justify-start"
-            >
-              {t(`account.toc_${k}`)}
-            </Button>
-          ))}
+        {/* #389 / ADR-146: on/off → Switch; the 3-value depth → segmented radios. */}
+        <div className="mb-4">
+          <SwitchRow
+            checked={tocOn}
+            onChange={setTocOn}
+            testId="account-toc"
+            label={t(tocOn ? "account.toc_on" : "account.toc_off")}
+          />
         </div>
         <label className="mb-1 block text-sm font-medium">{t("account.tocDepth")}</label>
         <p className="mb-2 text-xs text-fg-dim">{t("account.tocDepthHint")}</p>
-        <div className="flex flex-col gap-2">
-          {([1, 3, 6] as const).map((d) => (
-            <Button
-              key={d}
-              variant={tocDepth === d ? "primary" : "default"}
-              onClick={() => setTocDepth(d)}
-              data-testid={`account-tocdepth-${d}`}
-              aria-pressed={tocDepth === d}
-              className="justify-start"
-            >
-              {t(`account.tocDepth_${d}`)}
-            </Button>
-          ))}
-        </div>
+        <RadioGroup
+          variant="segmented"
+          value={String(tocDepth)}
+          onChange={(v) => setTocDepth(Number(v) as 1 | 3 | 6)}
+          ariaLabel={t("account.tocDepth")}
+          testId="account-tocdepth"
+          options={([1, 3, 6] as const).map((d) => ({ value: String(d), label: t(`account.tocDepth_${d}`) }))}
+        />
       </SettingsCard>
 
       <SettingsCard>
@@ -380,19 +347,15 @@ function ThemeTab() {
       <SettingsCard>
       <label className="mb-1 block text-sm font-medium">{t("account.appearance")}</label>
       <p className="mb-2 text-xs text-fg-dim">{t("account.appearanceHint")}</p>
-      <div className="flex gap-2">
-        {(["light", "dark", "system"] as const).map((th: Theme) => (
-          <Button
-            key={th}
-            variant={theme === th ? "primary" : "default"}
-            onClick={() => setTheme(th)}
-            data-testid={`account-theme-${th}`}
-            aria-pressed={theme === th}
-          >
-            {t(`account.theme_${th}`)}
-          </Button>
-        ))}
-      </div>
+      {/* #389 / ADR-146: ≤4 short options → segmented radiogroup (the user-ruled default). */}
+      <RadioGroup
+        variant="segmented"
+        value={theme}
+        onChange={(v) => setTheme(v as Theme)}
+        ariaLabel={t("account.appearance")}
+        testId="account-theme"
+        options={(["light", "dark", "system"] as const).map((th) => ({ value: th, label: t(`account.theme_${th}`) }))}
+      />
       </SettingsCard>
 
       {/* #201: personal accent — device-local (like light/dark), overrides the tenant accent for THIS
