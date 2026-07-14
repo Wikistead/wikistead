@@ -138,7 +138,7 @@ function useDisplayModeShortcut(cycle: () => void, enabled: boolean, chord: stri
     return () => window.removeEventListener("keydown", onKey);
   }, [cycle, enabled, chord]);
 }
-import { Lock } from "lucide-react";
+import { Lock, Snowflake } from "lucide-react";
 import { useHeadingHashLanding, replaceHashWith } from "../toc/useHashLanding"; // #313: #<slug> deep links
 import { PageTitle } from "./PageTitle";
 import { PageMeta } from "./PageMeta";
@@ -539,6 +539,14 @@ function PageRoute() {
               <div className="pointer-events-auto relative mx-auto flex w-full max-w-[740px] items-center gap-3 px-6 pt-6">
                 {/* #109 Fix B: private (allowlist-only) lock beside the title. Only viewers of the page see it. */}
                 {page?.private && <Lock size={16} className="mt-1 flex-none self-start text-fg-dim" data-testid="title-private-lock" aria-label={t("sidebar.private")} />}
+                {/* #329 / ADR-139: freeze badge (staged edit lock) beside the title. Shown to any viewer
+                    freeze only removes access, so the badge reveals nothing; the title attribute names the level. */}
+                {page?.frozen && (
+                  <Snowflake size={16} className="mt-1 flex-none self-start text-fg-dim" data-testid="title-frozen-badge"
+                    aria-label={page.frozen === "full" ? t("page.frozenFull") : t("page.frozenGuests")}>
+                    <title>{page.frozen === "full" ? t("page.frozenFull") : t("page.frozenGuests")}</title>
+                  </Snowflake>
+                )}
                 <div className="min-w-0 flex-1">
                   <PageTitle
                     title={page?.title ?? ""}

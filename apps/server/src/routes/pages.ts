@@ -73,7 +73,7 @@ export async function setEmbedProviders(
 }
 
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean; created_by?: string | null; updated_by?: string | null; task_done?: number; task_total?: number }
-export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean; canComment?: boolean; private?: boolean; createdBy?: string | null; updatedBy?: string | null; taskDone?: number; taskTotal?: number }
+export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean; canComment?: boolean; private?: boolean; frozen?: 'full' | 'guests' | null; createdBy?: string | null; updatedBy?: string | null; taskDone?: number; taskTotal?: number }
 function toPage(r: PageRow): Page {
   // hasUnpublishedChanges + published are only present when the SELECT included the
   // columns (listPages); together they drive the sidebar's 3-state badge
@@ -349,7 +349,11 @@ export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: 
   const canComment = await check(fga, `user:${args.userId}`, 'comment', { type: 'page', id: args.pageId })
   // #109 Fix B: private flag drives the lock badge next to the title (visible to any viewer of the page).
   const isPrivate = await readPagePrivate(fga, args.pageId)
-  return { ...toPage(row), capability: access.readOnly ? 'view' : 'edit', canManage, canComment, private: isPrivate }
+  // #329 / ADR-139: freeze level drives the freeze badge + the permissions-dialog control state. Shown to
+  // any viewer (freeze only removes access — the flag reveals nothing; non-viewers 404 above). A frozen
+  // member's `capability` already resolves to 'view' via checkMemberAccess (the model subtracts edit).
+  const frozen = await readPageFrozen(fga, args.pageId)
+  return { ...toPage(row), capability: access.readOnly ? 'view' : 'edit', canManage, canComment, private: isPrivate, frozen }
 }
 
 // Update title. Outbox entry written in the same tx as the UPDATE.
@@ -883,6 +887,78 @@ export async function unsetPagePrivate(
   })
   subtree.forEach((id, i) => processOutboxAsync(driver, oids[i]!, { tenantId: args.tenantId, pageId: id, operation: 'upsert' }))
   emit({ type: 'page.made_non_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
+}
+
+// #329 / ADR-139: page FREEZE — a staged edit lock. The model subtracts the markers from the edit chain
+// BELOW the manage bypass (`edit = manage or edit_unfrozen`), so writing a marker pair cuts EVERY edit
+// path (collab join, publish, checkbox, attachment, MCP edit — they all check(edit)) for everyone below
+// manage, with NO per-path code; deleting it restores them all. Freeze is an authz state: no CRDT/history
+// touch, and NO reindex — it subtracts edit only, so view/search membership is unchanged (doc-builder
+// reads view-side relations). Level exclusivity: a page holds at most one level; setting one clears the
+// other. The `frozen` full-lock marker is a PAIR (the #244 typed-wildcard lesson — user:* alone would not
+// stop a share-link guest); `frozen_guests` is share_link:* alone by design (members keep editing).
+export type PageFreezeLevel = 'full' | 'guests'
+const FROZEN_MARKERS = (pageId: string) => [
+  { user: 'user:*', relation: 'frozen', object: `page:${pageId}` },
+  { user: 'share_link:*', relation: 'frozen', object: `page:${pageId}` },
+]
+const FROZEN_GUESTS_MARKERS = (pageId: string) => [
+  { user: 'share_link:*', relation: 'frozen_guests', object: `page:${pageId}` },
+]
+
+// Read WITHOUT a manage gate (the readPagePrivate precedent, #109 Fix B): the lock badge shows to anyone
+// who can already see the page — freeze only REMOVES access, so the flag reveals nothing (non-viewers 404
+// before they get here). The full-lock pair is kept in sync by the write path, so user:* presence is the
+// full-lock predicate (mirroring the private read).
+async function readPageFrozen(fga: OpenFgaClient, pageId: string): Promise<PageFreezeLevel | null> {
+  const [full, guests] = await Promise.all([
+    fga.read({ object: `page:${pageId}`, relation: 'frozen' }),
+    fga.read({ object: `page:${pageId}`, relation: 'frozen_guests' }),
+  ])
+  if ((full.tuples ?? []).some(({ key }) => key?.relation === 'frozen' && key.user === 'user:*')) return 'full'
+  if ((guests.tuples ?? []).some(({ key }) => key?.relation === 'frozen_guests' && key.user === 'share_link:*')) return 'guests'
+  return null
+}
+
+export async function setPageFrozen(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { pageId: string; tenantId: string; userId: string; level: PageFreezeLevel; plan?: string },
+): Promise<void> {
+  await requireManage(fga, args.userId, args.pageId)
+  const current = await readPageFrozen(fga, args.pageId)
+  if (current === args.level) return // idempotent — re-freezing at the same level is a no-op
+  await db.tx(async (tx) => {
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.frozen', target: `page:${args.pageId}` })
+    }
+    // Write the NEW level first, then clear the other level (each delete independent + idempotent).
+    // Fail-safe ordering: if the deletes fail we are momentarily at BOTH levels, which resolves to the
+    // stricter full lock — freeze never silently under-locks. No outbox: view/search are unaffected.
+    await writeTuples(fga, args.level === 'full' ? FROZEN_MARKERS(args.pageId) : FROZEN_GUESTS_MARKERS(args.pageId))
+    const other = args.level === 'full' ? FROZEN_GUESTS_MARKERS(args.pageId) : FROZEN_MARKERS(args.pageId)
+    await Promise.all(other.map((m) => deleteTuples(fga, [m]).catch(() => {})))
+  })
+  emit({ type: 'page.frozen', tenantId: args.tenantId, pageId: args.pageId, level: args.level, actorId: args.userId })
+}
+
+export async function unsetPageFrozen(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { pageId: string; tenantId: string; userId: string; plan?: string },
+): Promise<void> {
+  await requireManage(fga, args.userId, args.pageId)
+  await db.tx(async (tx) => {
+    if (args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.unfrozen', target: `page:${args.pageId}` })
+    }
+    // Delete every marker independently (the unsetPagePrivate lesson: a missing tuple in a batch delete
+    // fails the whole write and would leave the page stuck frozen).
+    await Promise.all(
+      [...FROZEN_MARKERS(args.pageId), ...FROZEN_GUESTS_MARKERS(args.pageId)].map((m) => deleteTuples(fga, [m]).catch(() => {})),
+    )
+  })
+  emit({ type: 'page.unfrozen', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
 }
 
 // #253 / ADR-113: make a PUBLISHED page anonymously public (or revoke it). Mirrors setPagePrivate — the
@@ -2252,6 +2328,24 @@ export async function pagesPlugin(app: FastifyInstance) {
   })
   app.delete<{ Params: { pageId: string } }>('/pages/:pageId/private', async (req, reply) => {
     await unsetPagePrivate(req.db, app.fga, app.searchDriver, {
+      pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub, plan: req.tenant.plan,
+    })
+    return reply.code(204).send()
+  })
+  // #329 / ADR-139 — page FREEZE toggle (manage-gated inside setPageFrozen/unsetPageFrozen). POST freezes
+  // at a level ('full' = everyone below manage loses edit; 'guests' = share-link guests only); DELETE
+  // unfreezes (clears both markers). The current level rides on GET /pages/:pageId (`frozen`), so no GET
+  // here — the badge and the dialog read the page payload.
+  app.post<{ Params: { pageId: string }; Body: { level?: string } }>('/pages/:pageId/freeze', async (req, reply) => {
+    const level = req.body?.level
+    if (level !== 'full' && level !== 'guests') return reply.code(400).send({ error: "level must be 'full' or 'guests'" })
+    await setPageFrozen(req.db, app.fga, {
+      pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub, level, plan: req.tenant.plan,
+    })
+    return reply.code(204).send()
+  })
+  app.delete<{ Params: { pageId: string } }>('/pages/:pageId/freeze', async (req, reply) => {
+    await unsetPageFrozen(req.db, app.fga, {
       pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub, plan: req.tenant.plan,
     })
     return reply.code(204).send()
