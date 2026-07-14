@@ -2,8 +2,8 @@
 #   - separate compose project (name: wikistead-e2e) => separate containers/network
 #   - separate named volumes => e2e seed/teardown never touches dev data
 #   - distinct host ports => can run alongside the dev stack
-# Step (1) of this phase keeps MinIO (prove the E2E harness on a known-good store);
-# step (2) swaps the storage service to SeaweedFS.
+# Storage is SeaweedFS S3 (the MinIO → SeaweedFS swap is complete — see the storage decision note); the
+# server-test stack uses the same image/config on a distinct port.
 name: wikistead-e2e
 
 services:
@@ -58,10 +58,8 @@ services:
     ports: ["7701:7700"]
     volumes: ["e2e_meilidata:/meili_data"]
 
-  # Storage: MinIO. We evaluated SeaweedFS (to drop MinIO) but its S3 gateway has
-  # multiple presigned-flow incompatibilities for the browser direct-upload the
-  # attachment feature needs (see the storage decision note). MinIO passes the
-  # attachment e2e cleanly. S3 on host :9002 keeps .env.e2e unchanged.
+  # Storage: SeaweedFS S3 on host :9002 (matches the server-test stack's storage choice; replaced MinIO —
+  # its community edition stalled). The browser direct-upload attachment e2e runs against this store.
   seaweedfs:
     image: chrislusf/seaweedfs:latest
     command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://dev.localhost:5180"
