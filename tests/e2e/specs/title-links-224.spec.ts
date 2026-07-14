@@ -176,3 +176,56 @@ test("#224 guest surface: NO auto links render for a guest (uninjected — 2-lay
   // assert the DECORATION is absent (not merely hidden) — the 2-layer requirement's e2e layer.
   await expect(guest.locator(".cm-lp-title-link")).toHaveCount(0);
 });
+
+// #351 (user ruling): the hover card stays LIGHT — a macro in the excerpt is never expanded into a
+// live widget (no canvas/iframe/embed) and no view-gated fetch fires from INSIDE the card. Fence diagrams
+// and fetch-backed directives render as a compact placeholder chip; plain markdown still renders richly.
+test("#351 static card: a macro-heavy excerpt renders placeholder chips — no widget, no fetch from the card", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const target = `Macro Card Target ${RUN}`;
+  await page.goto("/p/demo");
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  const targetId = await createScratchPage(page, target);
+  // the target page STARTS with a mermaid fence and an :::embed-page — the shapes that used to mount a
+  // live widget + fire a view-gated fetch inside the card (the rejection).
+  await page.goto(`/p/${targetId}?edit=1`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("```mermaid\ngraph TD; A-->B\n```\n\n:::embed-page\ndemo\n:::\n\nplain **bold351** tail\n");
+  await publishAndWait(page, targetId, "bold351");
+
+  await openScratch(page, "title-links-static-card");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(`see ${target} here\n\nbot\n`);
+  await sleep(600);
+  await page.getByText("bot").click();
+  const link = page.locator(`[data-pane=preview] .cm-lp-title-link[data-title-link="${targetId}"]`).first();
+  await expect(link).toBeVisible({ timeout: 10000 });
+
+  // Watch every request from hover onward: exactly ONE excerpt fetch is allowed; nothing else may be
+  // triggered by the card render (no page-body/embed/diagram resolution from inside the card).
+  const fetched: string[] = [];
+  page.on("request", (r) => { if (r.url().includes("/api/")) fetched.push(r.url()); });
+  await link.hover();
+  const card = page.getByTestId("title-link-card");
+  await expect(card).toBeVisible({ timeout: 5000 });
+
+  // placeholder chips for the fence diagram AND the embed directive — no live widget/canvas/iframe/svg.
+  const chips = card.locator("[data-testid=static-macro-chip]");
+  await expect(chips).toHaveCount(2);
+  await expect(chips.nth(0)).toContainText("mermaid");
+  await expect(chips.nth(1)).toContainText("embed-page");
+  expect(await card.locator("iframe, canvas, svg, [data-testid=macro-embed-page], .cm-lp-macro").count(), "no live macro widget inside the card").toBe(0);
+  expect(await card.innerText()).not.toContain("graph TD"); // chip label only, not the diagram source
+
+  // plain markdown in the same excerpt still renders richly (non-regression).
+  await expect(card.locator("strong")).toContainText("bold351");
+
+  // the ONLY api call the hover produced is the single view-gated excerpt fetch (cached thereafter) —
+  // no embed/transclude/page fetch fired from inside the card.
+  await sleep(500);
+  const nonExcerpt = fetched.filter((u) => !u.includes("/excerpt"));
+  expect(nonExcerpt, `no extra fetch from the card render: ${nonExcerpt.join(", ")}`).toHaveLength(0);
+  expect(fetched.filter((u) => u.includes("/excerpt")).length, "exactly one excerpt fetch").toBeLessThanOrEqual(1);
+});
