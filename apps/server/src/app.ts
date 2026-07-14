@@ -6,6 +6,8 @@ import formbody from '@fastify/formbody'
 import type { Tenant, ResourceRef, Capability } from '@wikistead/types'
 import { resolveTenantFromHost, loadTenant } from './tenant.js'
 import { acquireTenantDb } from './db/index.js'
+import { pool } from './db/pool.js'
+import { checkReadiness } from './readiness.js'
 import type { TenantDb } from './db/index.js'
 import { fgaClient } from '@wikistead/authz'
 import { makeMemberVerifier, looksLikeGuestToken, verifyGuestToken } from '@wikistead/auth'
@@ -170,8 +172,21 @@ export async function buildApp(): Promise<FastifyInstance> {
     ttlSeconds: Number(process.env.GUEST_TOKEN_TTL_SECONDS ?? 3600),
   }
 
+  // #400: liveness stays STATIC (a dependency outage must not make k8s kill/restart the pod — that
+  // fixes nothing and loses the in-flight work); readiness pings every hard dependency so a pod with
+  // a broken DB/FGA/Valkey/search link drops out of the Service until it recovers. The response is
+  // booleans only (this is an unauthenticated endpoint — failure details go to the log, never the body).
   app.get('/healthz', async () => ({ ok: true }))
-  app.get('/readyz', async () => ({ ok: true }))
+  app.get('/readyz', async (req, reply) => {
+    const result = await checkReadiness({
+      db: () => pool`SELECT 1`.then(() => undefined),
+      fga: () => fgaClient.readAuthorizationModels({ pageSize: 1 }).then(() => undefined),
+      valkey: () => valkey.ping().then(() => undefined),
+      search: () => searchDriver.ensureIndex(), // idempotent; the Meili driver reaches the server, Logical no-ops
+    }, (dep, err) => req.log.warn({ dep, err }, 'readyz: dependency ping failed'))
+    if (!result.ok) reply.code(503)
+    return result
+  })
 
   // Defense-in-depth security headers on EVERY response (#148 deploy-gate / ADR-039). The prod proxy
   // is expected to set these too, but the SERVER is the fortress — it must not depend on a correctly
