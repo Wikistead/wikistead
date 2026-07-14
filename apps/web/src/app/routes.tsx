@@ -901,8 +901,11 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
             {/* #374 / ADR-149 §1: pass pageId so the guest resolvers (server diagram render, transclude) build
                 their URL and fetch with the SHARE TOKEN — the /pages/:id/plantuml/render + /attachments routes are
                 already `guest: 'view'` gated, so no new authz surface; it just lights up the macros the member
-                surface renders. mermaid is pure-client and needs no token. */}
-            <Editor key={docName} docName={docName} pageId={pageId} token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onToggleTask={canEdit ? onToggleTask : undefined} />
+                surface renders. mermaid is pure-client and needs no token.
+                #374guestSurface keeps the MEMBER-ONLY sources (title dictionary / backlinks / query)
+                suppressed — pageId used to double as their gate, so passing it above un-gated them on this
+                guest surface (the title-links-224 guest anti-test: no auto links for a guest, 2-layer rule). */}
+            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #227the shared TocChrome (rail on wide / overlay on narrow); yields to the comments
                 panel when open (shared right zone — no pointer overlap). */}

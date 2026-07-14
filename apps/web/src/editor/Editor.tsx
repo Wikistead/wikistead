@@ -68,6 +68,12 @@ export interface EditorProps {
   // The page id (for host-mediated diagram render — POST /pages/:pageId/plantuml/render, #140).
   // Omit outside a page context; plantuml then just degrades to its source.
   pageId?: string;
+  // #374TRUE on a guest (share-link) surface. pageId used to double as the member-only-source
+  // gate; slice A started passing pageId to the guest mount (for the diagram/transclude resolvers),
+  // which silently un-gated the member-only sources (title dictionary / backlinks / query) there — the
+  // 2-layer rule says a guest surface must not even INJECT those sources (the server stays the bastion
+  // either way). This flag restores the client layer without giving up the guest resolvers.
+  guestSurface?: boolean;
   token: string; // collab WebSocket token
   collabUrl: string;
   user: EditorUser;
@@ -148,7 +154,7 @@ function tint(color: string): string {
 // visible heading). All display-only. Returns a cleanup. Adds the headings listener via appendConfig so
 // the mount functions don't need to know about the TOC.
 
-export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
+export const Editor = memo(function Editor({ docName, pageId, guestSurface = false, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme(); // #200: re-render macro widgets (Excalidraw etc.) on a light/dark switch
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
@@ -246,20 +252,22 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
     } catch { resolve(null); }
   }, [apiToken]);
 
-  // #224 / ADR-104 go-live: the viewer-scoped title dictionary. MEMBER surfaces only (gated on the
-  // pageId prop — guest surfaces don't pass one, so they stay inert; the guest endpoint exists and is
-  // public-only-bound server-side for a later guest go-live). The dictionary is read through a REF so
-  // an invalidation refetch updates links in place (titleLinksRefresh) without remounting the editor.
+  // #224 / ADR-104 go-live: the viewer-scoped title dictionary. MEMBER surfaces only. #374the
+  // gate is pageId AND NOT guestSurface — pageId alone used to imply "member surface" until the guest
+  // mount started passing it (for the diagram/transclude resolvers), which un-gated this member-only
+  // fetch there (the title-links-224 guest anti-test). The dictionary is read through a REF so an
+  // invalidation refetch updates links in place (titleLinksRefresh) without remounting the editor.
   const navigateRouter = useNavigate();
   const queryClient = useQueryClient();
-  const titleDictQ = useTitleDictionary(pageId);
+  const memberPageId = guestSurface ? undefined : pageId; // the member-only-source gate (#374)
+  const titleDictQ = useTitleDictionary(memberPageId);
   const titleDictRef = useRef<readonly TitleEntry[]>([]);
   useEffect(() => {
     titleDictRef.current = (titleDictQ.data?.entries ?? []).map((e) => ({ title: e.title, pageId: e.id }));
     previewViewRef.current?.dispatch({ effects: titleLinksRefresh.of(null) });
   }, [titleDictQ.data]);
   const titleLinks = useMemo<TitleLinkSource | undefined>(() => {
-    if (!pageId) return undefined;
+    if (!memberPageId) return undefined; // member-only source (#374pageId alone no longer implies member)
     return {
       get dict() { return titleDictRef.current; },
       // navigate re-confirms view at the destination (the /p route's uniform 404) — never a client gate.
@@ -268,9 +276,9 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       excerpt: (id: string) =>
         apiFetch<{ title: string; excerpt: string | null }>(`/pages/${encodeURIComponent(id)}/excerpt`, apiToken)
           .catch(() => null),
-      opts: { selfPageId: pageId },
+      opts: { selfPageId: memberPageId },
     };
-  }, [pageId, apiToken, navigateRouter]);
+  }, [memberPageId, apiToken, navigateRouter]);
   // #307 / ADR-127: the host-mediated `:::backlinks` source. MEMBER surfaces only (gated on pageId — a
   // template preview / guest surface passes none, so the macro shows the empty-edit placeholder / nothing and
   // never fetches). `fetch` shares the react-query cache (["backlinks", pageId]) with the RelatedPanel and,
@@ -278,12 +286,12 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
   // (ADR-127 §9 remount freshness; push freshness is out of v1 scope). The endpoint FGA-view-confirms every
   // source for the caller (no new permission surface); navigate re-confirms view at the destination (uniform 404).
   const backlinks = useMemo<BacklinksSource | undefined>(() => {
-    if (!pageId) return undefined;
+    if (!memberPageId) return undefined; // member-only source (#374)
     return {
       // #307 /targetPageId=null ⇒ this page; a string ⇒ that page's backlinks (the endpoint view-gates
       // the target, so a non-viewable/absent id throws → .catch → null → the widget renders nothing).
       fetch: (targetPageId: string | null) => {
-        const id = targetPageId ?? pageId;
+        const id = targetPageId ?? memberPageId;
         return queryClient
           .fetchQuery({
             queryKey: ["backlinks", id],
@@ -295,27 +303,27 @@ export const Editor = memo(function Editor({ docName, pageId, token, collabUrl, 
       emptyLabel: i18n.t("macro.backlinksEmpty"),
       untitledLabel: i18n.t("backlinks.untitled"),
     };
-  }, [pageId, apiToken, navigateRouter, queryClient]);
+  }, [memberPageId, apiToken, navigateRouter, queryClient]);
   // #324 / ADR-134: the host-mediated `:::query` source. MEMBER surfaces only (gated on pageId — a guest /
   // template preview passes none, so the macro renders nothing and never fetches; Hole A rev2). The raw
   // directive body is the query spec (parsed server-side); the endpoint is member-only and view-filters every
   // result (`GET /pages/:id/query?spec=...`). Stale-by-default fetchQuery keyed on (pageId, spec) → refetch on
   // each widget mount, so re-entering the page re-resolves the list (member-live per-viewer).
   const query = useMemo<QuerySource | undefined>(() => {
-    if (!pageId) return undefined;
+    if (!memberPageId) return undefined; // member-only source (#374)
     return {
       fetch: (spec: string) =>
         queryClient
           .fetchQuery({
-            queryKey: ["page-query", pageId, spec],
-            queryFn: () => apiFetch<{ id: string; title: string }[]>(`/pages/${encodeURIComponent(pageId)}/query?spec=${encodeURIComponent(spec)}`, apiToken).then((r) => r ?? []),
+            queryKey: ["page-query", memberPageId, spec],
+            queryFn: () => apiFetch<{ id: string; title: string }[]>(`/pages/${encodeURIComponent(memberPageId)}/query?spec=${encodeURIComponent(spec)}`, apiToken).then((r) => r ?? []),
           })
           .catch(() => null),
       navigate: (id: string) => navigateRouter(`/p/${id}`),
       emptyLabel: i18n.t("macro.queryEmpty"),
       untitledLabel: i18n.t("backlinks.untitled"),
     };
-  }, [pageId, apiToken, navigateRouter, queryClient]);
+  }, [memberPageId, apiToken, navigateRouter, queryClient]);
   // Security-timing invalidation (ADR-104 Finding B): the collab server broadcasts a stateless
   // "dict-invalidate" ping (carrying NO pageId — existence-hiding even on the wire); we refetch the
   // viewer-scoped dictionary, throttled so a burst of reindex pings costs one round-trip.
