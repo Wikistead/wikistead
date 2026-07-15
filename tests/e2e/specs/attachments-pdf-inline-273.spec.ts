@@ -60,10 +60,40 @@ test("#273: a sniffed PDF renders in a sandboxed (allow-scripts, NO allow-same-o
   await expect(pdfFrame.locator("canvas")).toHaveCount(1, { timeout: 20000 });
   await expect(pdfFrame.locator("#msg")).toBeHidden();
 
-  // #273an INLINE viewer card's body is NOT the download affordance, so it must not advertise one —
-  // no pointer cursor on the card once the frame is mounted (the header ⤓ button keeps its own pointer).
+  // #273 c 07-16 return (SUPERSEDES thepin): the PDF card's header is pressable now — it opens the
+  // lightbox — so it advertises "open" with a zoom-in cursor (never the download pointer) + a hover wash.
   const pdfCursor = await pdfCard.locator(".cm-lp-attachment-card").evaluate((el) => getComputedStyle(el).cursor);
-  expect(pdfCursor).not.toBe("pointer");
+  expect(pdfCursor).toBe("zoom-in");
+  // and clicking the header (outside the buttons) opens the lightbox with the same containment
+  await pdfCard.locator(".cm-lp-attachment-name").click();
+  const lb = page.getByTestId("attachment-lightbox");
+  await expect(lb).toBeVisible({ timeout: 10000 });
+  await page.keyboard.press("Escape");
+  await expect(lb).toHaveCount(0);
+});
+
+// #273 c 07-16 return (2): the INLINE CHIP is pressable — hover wash + cursor on both surfaces; on the
+// READ-ONLY surface a body click runs the type's primary action (non-PDF → download). The edit surface
+// keeps the caret/raw-reveal pass-through (only cursor/hover change there).
+test("#273 affordance: the inline chip shows hover/cursor, and read-mode click downloads (non-PDF)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const pageId = await openScratch(page, "chip-affordance-273");
+  await enterEdit(page);
+  const name = `e2e-chip-${Date.now().toString(36)}.bin`;
+  const binId = await uploadAttachment(page, pageId, name, "application/octet-stream", Buffer.from("binarybytes"));
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Control+End");
+  await page.keyboard.insertText(`some text [${name}](wks-attachment:${binId}) more\n`);
+  await sleep(600);
+  const chip = page.getByTestId("attachment-chip").first();
+  await expect(chip).toBeVisible();
+  expect(await chip.evaluate((el) => getComputedStyle(el).cursor)).toBe("pointer");
+  // publish → read surface → chip click downloads
+  await page.getByTestId("publish-page").click();
+  await sleep(800);
+  const dl = page.waitForEvent("download", { timeout: 10000 });
+  await page.getByTestId("attachment-chip").first().click();
+  await dl;
 });
 
 // #273clicking a PDF card's body opens it LARGE in an in-app lightbox that reuses the SAME containment
