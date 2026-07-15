@@ -4237,6 +4237,26 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-searchMatch": { background: "color-mix(in srgb, var(--accent) 28%, transparent)", outline: "1px solid color-mix(in srgb, var(--accent) 45%, transparent)" },
   ".cm-searchMatch-selected": { background: "color-mix(in srgb, var(--accent) 55%, transparent)" },
   ".cm-lp-frontmatter-input": { border: "none", outline: "none", background: "transparent", font: "inherit", fontSize: "0.8em", color: "var(--fg)", minWidth: "6em", flex: "0 1 auto" },
+  // #413the custom tag-suggest popup (replaces the native datalist). Popover surface tokens
+  // (light/dark follow), keyboard-highlight row, and a font/browser-independent Lucide trigger.
+  ".cm-lp-fm-inputrow": { position: "relative", display: "inline-flex", alignItems: "center", gap: "0.15em", flex: "0 1 auto" },
+  ".cm-lp-fm-suggest-trigger": { border: "none", background: "none", cursor: "pointer", color: "var(--fg-dim)", padding: "0 0.1em", lineHeight: "1", display: "inline-flex", alignItems: "center" },
+  ".cm-lp-fm-suggest-trigger:hover": { color: "var(--fg)" },
+  ".cm-lp-fm-suggest": {
+    position: "absolute", top: "100%", left: "0", zIndex: "30", marginTop: "2px",
+    minWidth: "12em", maxHeight: "14em", overflowY: "auto",
+    display: "flex", flexDirection: "column", padding: "0.25em",
+    background: "var(--popover, var(--panel))", color: "var(--fg)",
+    border: "1px solid var(--border)", borderRadius: "var(--radius-md, 8px)",
+    boxShadow: "var(--shadow-md, 0 8px 24px rgba(0,0,0,0.28))",
+  },
+  ".cm-lp-fm-suggest-item": {
+    border: "none", background: "none", cursor: "pointer", textAlign: "left",
+    font: "inherit", fontSize: "0.8em", color: "var(--fg)",
+    padding: "0.25em 0.5em", borderRadius: "5px", whiteSpace: "nowrap",
+  },
+  ".cm-lp-fm-suggest-item:hover": { background: "var(--panel-2)" },
+  ".cm-lp-fm-suggest-active": { background: "color-mix(in srgb, var(--accent) 14%, transparent)" },
   ".cm-lp-backlinks-item": { color: "var(--link, #4ea1ff)", textDecoration: "none", cursor: "pointer" },
   ".cm-lp-backlinks-item:hover": { textDecoration: "underline" },
   ".cm-lp-backlinks-empty": { fontSize: "0.85em", color: "var(--fg-dim, #888)", fontStyle: "italic", padding: "0.2em 0" },

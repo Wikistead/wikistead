@@ -911,7 +911,8 @@
   "frontmatter": {
     "tagsLabel": "Tags",
     "addTag": "Add tag…",
-    "empty": "No tags"
+    "empty": "No tags",
+    "suggestOpen": "Browse tags"
   },
   "tagPicker": {
     "title": "Insert a tagged-pages list",
