@@ -893,7 +893,8 @@
     "changedBalancedModes": "Kept Live, Reading and WYSIWYG (Source is in Settings)",
     "bannerText": "New: tailor the editor to how you write.",
     "bannerCta": "Set it up",
-    "skippedNote": "We set up a balanced editor for you (vim off, with WYSIWYG). You can change this any time in Settings, or with “redo the questions”."
+    "skippedNote": "We set up a balanced editor for you (vim off, with WYSIWYG). You can change this any time in Settings, or with “redo the questions”.",
+    "atomHint": "Tip: cards (embeds, images, layouts, dynamic lists) select as a unit — Ctrl+Enter changes what they point at; everything else you just type into."
   },
   "frontmatter": {
     "tagsLabel": "Tags",

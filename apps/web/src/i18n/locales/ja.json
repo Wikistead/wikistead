@@ -892,7 +892,8 @@
     "changedBalancedModes": "Live / Reading / WYSIWYG を表示（Source は設定から追加できます）",
     "bannerText": "新機能：書き方に合わせてエディタを最適化できます。",
     "bannerCta": "設定する",
-    "skippedNote": "バランス型のエディタ表示にしました（vim オフ・WYSIWYG あり）。設定または「最初の質問をやり直す」でいつでも変更できます。"
+    "skippedNote": "バランス型のエディタ表示にしました（vim オフ・WYSIWYG あり）。設定または「最初の質問をやり直す」でいつでも変更できます。",
+    "atomHint": "ヒント：カード（埋め込み・画像・レイアウト・動的リスト）はひとかたまりで選択されます — Ctrl+Enter で中身/参照先を変更。それ以外はそのまま書き込めます。"
   },
   "frontmatter": {
     "tagsLabel": "タグ",

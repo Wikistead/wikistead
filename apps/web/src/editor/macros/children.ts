@@ -10,6 +10,11 @@ export const childrenMacro: DirectiveMacro = {
   name: "children",
   exportFidelity: "degrade",
   revealOnCursor: true,
+  // #395 / ADR-156: a zero-argument dynamic block — nothing to type, nothing to pick — is an ATOM
+  // an empty caret SELECTS it (ring), raw shows only via explicit entry (Ctrl+Enter) or Source.
+  // It carried revealOnCursor without atomSelectable (the ADR-156 "straggler"), stranding a caret
+  // on a body with nothing to edit.
+  atomSelectable: true,
   liveRender: () => {
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-query-placeholder";

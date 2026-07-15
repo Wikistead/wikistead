@@ -18,6 +18,12 @@ import { parseFrontmatterRange, FrontmatterWidget } from "./frontmatter";
 import { parseFenceLine, parseFenceInfo, serializeFenceInfo, CALLOUT_TYPES, type FenceAlign } from "@wikistead/macro-render"; // #198: code-fence attribute parser; #174: callout types; #255: align rewrite
 // #255: rendered diagram macros are centred by default and take a fence `align=` attribute (others don't).
 const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
+// #395 / ADR-156: the ATOM interaction class — macros with nothing to TYPE at the block itself
+// (picker-chosen reference, modal-edited scene, zero-arg dynamic block, slot container). Their body
+// must never suggest text editing: `cursor: default` (the cm-lp-atom-body sweep), no I-beam. The
+// clickable-whole-surface exception (the #273 download card) keeps its own `pointer`. Typed-body
+// macros (callout/table/todo/details/tagged/mermaid/plantuml/code) keep the caret affordances.
+const ATOM_CLASS_MACROS = new Set(["embed-page", "embed-external", "excalidraw", "columns", "tabs", "children"]);
 import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset, appendMarkdownInto } from "../macros/md-render";
 import { setActiveTabIndex } from "../macros/layout-directives"; // #278 item 1: record the clicked tab before the island's commit rebuilds the tabs widget
 import { buildEmbedElement } from "../macros/embed";
@@ -1316,7 +1322,7 @@ class StandaloneImageWidget extends WidgetType {
   eq(o: StandaloneImageWidget) { return o.id === this.id && o.alt === this.alt && o.align === this.align && o.selected === this.selected; }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div") as SiDom;
-    wrap.className = "cm-lp-macro-wrap cm-lp-image-wrap";
+    wrap.className = "cm-lp-macro-wrap cm-lp-image-wrap cm-lp-atom-body"; // #395/ADR-156: image = atom, no I-beam
     wrap.classList.add(`cm-lp-align-${this.align}`); // center default; drives text-align (same as diagrams)
     if (this.selected) wrap.classList.add("cm-lp-atom-sel");
     const img = document.createElement("img");
@@ -2197,6 +2203,8 @@ class MacroWidget extends WidgetType {
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
     wrap.className = "cm-lp-macro-wrap";
+    // #395 / ADR-156 rule 2: an atom-class body never shows the text I-beam (cursor: default via CSS).
+    if (ATOM_CLASS_MACROS.has(this.name)) wrap.classList.add("cm-lp-atom-body");
     // #255: a rendered DIAGRAM macro (mermaid/plantuml/excalidraw) is centred by DEFAULT (align="center")
     // and can be pushed left/right via the fence `align=` attribute. Only diagrams align (text macros
     // callout/table/columns — are unaffected). The class drives `text-align` on the wrap (below).
@@ -2393,7 +2401,11 @@ class MacroWidget extends WidgetType {
       // can't start. This holds for macros with the unified editUI (mermaid/callout) and for modal macros
       // (Excalidraw). EXCEPTION: a legacy richEditUI macro (table via InnerEditHost, #154) keeps its
       // in-place click-to-edit — its cell-edit UX depends on the body click and is not an editUI atom yet.
-      const clickEdits = !this.macro.editUI && editModeOf(this.macro) === "inline"; // table (#154) only
+      // #395 / ADR-156: gate on an ACTUAL inline rich editor (the :::table InnerEditHost, #154).
+      // editModeOf defaults to "inline" for a macro with NO edit UI at all, so a zero-arg dynamic
+      // block (:::children) hit this branch and a body click became EXPLICIT ENTRY (raw reveal with
+      // nothing to type) instead of the atom selection its class demands.
+      const clickEdits = !this.macro.editUI && this.macro.richEditUI?.present === "inline"; // table (#154) only
       const isLayout = this.name === "columns" || this.name === "tabs";
       wrap.addEventListener("mousedown", (e) => {
         e.preventDefault();
@@ -4418,6 +4430,9 @@ export const livePreviewTheme = EditorView.baseTheme({
   // the heightMap and accumulates across stacked widgets → vim/arrow motion below 2+ macros
   // drifts by a line. Padding is included in the measured height, so the heightMap matches.
   ".cm-lp-macro-wrap": { position: "relative", padding: "0.4em 0" },
+  // #395 / ADR-156 rule 2: atom bodies never suggest text editing. Interactive children (links,
+  // buttons, checkboxes) keep their own element-level `pointer` rules, which win over inheritance.
+  ".cm-lp-atom-body": { cursor: "default" },
   // ADR-024 atom selection: the caret resting on the atom rings it (selected as a unit).
   ".cm-lp-atom-sel": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "1px", borderRadius: "4px" },
   // #174 / ADR-087: mouse HOVER shows a subtle block-boundary highlight on EVERY block macro
