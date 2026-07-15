@@ -353,6 +353,30 @@ export const reAnchorAfterReveal = ViewPlugin.fromClass(
   },
 );
 
+// #359(option A, symptom 3): copy/cut with an EMPTY caret resting ON a block atom takes the WHOLE
+// block's source. CM's default for an empty selection copies the CURRENT LINE — on an atom that line is
+// the block's first SOURCE line ("```mermaid" / ":::note[Hello]"), so a WYSIWYG click-the-atom → Ctrl+C
+// → paste produced a broken fragment. Reveal is not involved (no atomicRanges churn — the #359 warp fix
+// stands); a NON-empty selection keeps CM's default doc slice, which already carries full raw source.
+export const atomClipboard: Extension = EditorView.domEventHandlers({
+  copy: (e, view) => atomClipboardHandler(e, view, false),
+  cut: (e, view) => atomClipboardHandler(e, view, true),
+});
+function atomClipboardHandler(e: ClipboardEvent, view: EditorView, isCut: boolean): boolean {
+  const sel = view.state.selection.main;
+  if (!sel.empty) return false; // a real selection: CM's default (the doc slice = raw source) is correct
+  const blocks = view.state.field(livePreview, false)?.blocks ?? [];
+  const b = blocks.find((bl) => sel.head >= bl.from && sel.head <= bl.to);
+  if (!b) return false; // not on an atom: keep CM's copy-the-line default
+  e.clipboardData?.setData("text/plain", view.state.sliceDoc(b.from, b.to));
+  e.preventDefault();
+  if (isCut && !view.state.readOnly) {
+    // remove the whole block including its trailing newline (the same range vim dd takes on an atom)
+    view.dispatch({ changes: { from: b.from, to: Math.min(b.to + 1, view.state.doc.length) }, userEvent: "delete.cut" });
+  }
+  return true;
+}
+
 // #202: nested bullet lists get a hierarchy glyph per level (Notion/editors convention) so nesting
 // reads at a glance: level 0 = •, 1 = ◦, 2 = ▪, then cycle. Level = indentation / 2 (the markdown
 // nesting convention used by list-edit.ts indent/outdent).
@@ -2867,10 +2891,16 @@ function rangeRevealed(state: EditorState, from: number, to: number): boolean {
 // byte-identical to rangeRevealed, so only visual selections over BLOCK atoms change.
 function blockRevealed(state: EditorState, from: number, to: number): boolean {
   if (explicitEntryCovers(state, from, to)) return true; // #358: explicit entry wins in every editable mode
+  // #359(option B): an EMPTY caret inside [from,to] reveals (the editing entry), and so does a
+  // NON-EMPTY selection FULLY CONTAINED in [from,to] — the writer is selecting revealed source to copy;
+  // dropping the reveal the moment the drag/visual became non-empty (the first #359 fix) made the raw
+  // snap back to an atom mid-selection, so a sub-range of a mermaid/details source could not be copied.
+  // A selection CROSSING the block's boundary still never reveals: that is exactly the #359 vim-warp
+  // case (atom↔raw churn moves EditorView.atomicRanges under the moving visual head).
   return syntaxRevealsAt(
     state.facet(displayMode),
     state.readOnly,
-    state.selection.ranges.some((r) => r.empty && r.head >= from && r.head <= to),
+    state.selection.ranges.some((r) => (r.empty ? r.head >= from && r.head <= to : r.from >= from && r.to <= to)),
   );
 }
 
