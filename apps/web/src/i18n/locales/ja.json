@@ -910,7 +910,8 @@
   "frontmatter": {
     "tagsLabel": "タグ",
     "addTag": "タグを追加…",
-    "empty": "タグなし"
+    "empty": "タグなし",
+    "suggestOpen": "タグ候補を開く"
   },
   "tagPicker": {
     "title": "タグのページ一覧を挿入",

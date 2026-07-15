@@ -2,6 +2,11 @@ import { WidgetType, type EditorView } from "@codemirror/view";
 import i18n from "../../i18n";
 import { tagSuggestSource } from "./decorations";
 
+// #413 the suggest trigger glyph — Lucide "chevron-down" as a trusted inline constant (the same
+// pattern as the code-fence copy button): identical across browsers/fonts, unlike the UA datalist ▼.
+const FM_SUGGEST_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+
+
 // #370 / ADR-145 §2: the document frontmatter subsystem — the leading `---\n…\n---` YAML fence of the SAME
 // single Y.Text (no second CRDT, no metadata store). The block renders as a compact top-of-page "properties"
 // widget (a tag-chip row); the caret inside reveals the raw YAML (the always-works editing fallback), and on
@@ -160,41 +165,112 @@ export class FrontmatterWidget extends WidgetType {
       input.className = "cm-lp-frontmatter-input";
       input.setAttribute("data-testid", "fm-tag-input");
       input.placeholder = i18n.t("frontmatter.addTag");
-      // #413 / ADR-145 §5: existing-tag autocomplete via a native <datalist>, fed by the host's
-      // view-filtered suggest seam (absent on guest/template surfaces → plain input). Debounced.
+      // #413 CUSTOM autocomplete (the native <datalist> is retired — its dropdown only filled on
+      // `input`, opened on browser-controlled timing, and drew a UA-dependent ▼). The popup is app-owned
+      // persistent DOM INSIDE the widget (block-widget rule: the tooltip layer is for floating editor UI,
+      // but this rides the input row and dies with the widget rebuild — which closes it, correct), fed by
+      // the host's view-filtered suggest seam (absent on guest/template surfaces → plain input, authz
+      // unchanged). Trigger = a Lucide chevron (inline trusted SVG — consistent across browsers/fonts);
+      // focus/click fetch and OPEN immediately (empty query = the full view-filtered list), typing
+      // narrows, ↑↓/Enter/Esc navigate. Styled via the .cm-lp-fm-suggest* baseTheme rules (DS tokens).
       const suggest = view.state.facet(tagSuggestSource);
+      const inputRow = document.createElement("span");
+      inputRow.className = "cm-lp-fm-inputrow";
+      inputRow.appendChild(input);
+      const addTag = (raw: string) => {
+        const v = cleanTag(raw);
+        if (v && !tags.some((t) => t.tag === v.toLowerCase())) {
+          this.write(view, [...tags.map((t) => t.display), v]);
+        }
+        input.value = "";
+      };
+      let suggestKeys: ((e: KeyboardEvent) => boolean) | null = null;
       if (suggest) {
-        const listId = `fm-tag-datalist-${Math.random().toString(36).slice(2, 8)}`;
-        const datalist = document.createElement("datalist");
-        datalist.id = listId;
-        datalist.setAttribute("data-testid", "fm-tag-datalist");
-        input.setAttribute("list", listId);
-        let timer: ReturnType<typeof setTimeout> | null = null;
-        input.addEventListener("input", () => {
-          if (timer) clearTimeout(timer);
-          timer = setTimeout(() => {
-            void suggest(input.value).then((items) => {
-              if (!items) return;
-              datalist.replaceChildren();
-              for (const it of items) {
-                const opt = document.createElement("option");
-                opt.value = it.display;
-                datalist.appendChild(opt);
-              }
-            });
-          }, 200);
+        const box = document.createElement("div");
+        box.className = "cm-lp-fm-suggest";
+        box.setAttribute("data-testid", "fm-tag-suggest");
+        box.style.display = "none";
+        let items: string[] = [];
+        let active = -1;
+        let openState = false;
+        let seq = 0;
+        let debounce: ReturnType<typeof setTimeout> | null = null;
+        const render = () => {
+          box.replaceChildren();
+          if (!openState || items.length === 0) { box.style.display = "none"; return; }
+          box.style.display = "";
+          items.forEach((d, i) => {
+            const row = document.createElement("button");
+            row.type = "button";
+            row.className = i === active ? "cm-lp-fm-suggest-item cm-lp-fm-suggest-active" : "cm-lp-fm-suggest-item";
+            row.setAttribute("data-testid", "fm-tag-suggest-item");
+            row.textContent = d; // author text — textContent only
+            row.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); }); // #265 guard
+            row.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); addTag(d); });
+            box.appendChild(row);
+          });
+        };
+        const close = () => { openState = false; active = -1; render(); };
+        const fetchAndOpen = (q: string) => {
+          const my = ++seq;
+          void suggest(q).then((res) => {
+            if (my !== seq || res == null) return;
+            const have = new Set(tags.map((t) => t.tag));
+            items = res.map((r) => r.display).filter((d) => !have.has(d.toLowerCase()));
+            active = items.length ? 0 : -1;
+            openState = true;
+            render();
+          });
+        };
+        const trigger = document.createElement("button");
+        trigger.type = "button";
+        trigger.className = "cm-lp-fm-suggest-trigger";
+        trigger.setAttribute("data-testid", "fm-tag-suggest-open");
+        trigger.setAttribute("aria-label", i18n.t("frontmatter.suggestOpen"));
+        trigger.innerHTML = FM_SUGGEST_ICON; // trusted constant (no user input)
+        trigger.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); }); // #265 guard
+        trigger.addEventListener("click", (e) => {
+          e.preventDefault(); e.stopPropagation();
+          if (openState) { close(); return; }
+          input.focus();
+          fetchAndOpen(input.value.trim());
         });
-        wrap.appendChild(datalist);
+        input.addEventListener("focus", () => fetchAndOpen(input.value.trim()));
+        input.addEventListener("input", () => {
+          if (debounce) clearTimeout(debounce);
+          debounce = setTimeout(() => fetchAndOpen(input.value.trim()), 120);
+        });
+        // let an item click land before closing (mousedown is prevented, click fires before this timer)
+        input.addEventListener("blur", () => { setTimeout(close, 150); });
+        suggestKeys = (e: KeyboardEvent) => {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            if (!openState) { fetchAndOpen(input.value.trim()); return true; }
+            if (items.length) {
+              active = (active + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+              render();
+            }
+            return true;
+          }
+          if (e.key === "Enter" && openState && active >= 0 && items[active]) {
+            addTag(items[active]!);
+            close();
+            return true;
+          }
+          if (e.key === "Escape" && openState) {
+            close();
+            return true; // first Esc closes the popup; a second one blurs (below)
+          }
+          return false;
+        };
+        inputRow.appendChild(trigger);
+        inputRow.appendChild(box);
       }
       input.addEventListener("mousedown", (e) => { e.stopPropagation(); });
       input.addEventListener("keydown", (e) => {
         e.stopPropagation(); // typing in the input must never reach CM keymaps (incl. vim)
+        if (suggestKeys && suggestKeys(e)) { e.preventDefault(); return; }
         if (e.key === "Enter") {
-          const v = cleanTag(input.value);
-          if (v && !tags.some((t) => t.tag === v.toLowerCase())) {
-            this.write(view, [...tags.map((t) => t.display), v]);
-          }
-          input.value = "";
+          addTag(input.value);
           e.preventDefault();
         } else if (e.key === "Escape") {
           input.blur();
@@ -202,7 +278,7 @@ export class FrontmatterWidget extends WidgetType {
           e.preventDefault();
         }
       });
-      wrap.appendChild(input);
+      wrap.appendChild(inputRow);
     }
     return wrap;
   }

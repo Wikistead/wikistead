@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
 import { enterEdit, openScratch, sleep } from "../helpers";
 
-// #413 / ADR-145 §5: tag autocomplete. Real Chromium: the frontmatter chip input feeds a <datalist>
-// from the view-filtered /tags/suggest, and the /tagged palette command opens the tag picker whose
-// suggestion chips insert a complete `:::tagged` atom.
+// #413 / ADR-145 §5 (+): tag autocomplete. Real Chromium: the frontmatter chip input opens a
+// CUSTOM suggest popup (the native datalist is retired) fed by the view-filtered /tags/suggest, and the
+// /tagged palette command opens the tag picker whose suggestion chips insert a complete `:::tagged` atom.
 
-test("#413: the chip input's datalist fills with existing tags; the /tagged picker inserts the block", async ({ browser }) => {
+test("#413: the chip input's suggest popup fills with existing tags; the /tagged picker inserts the block", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   // 1. publish a page carrying a distinctive tag so /tags/suggest can offer it
   await openScratch(page, "sug-seed");
@@ -25,13 +25,20 @@ test("#413: the chip input's datalist fills with existing tags; the /tagged pick
   await sleep(500);
   const input = page.getByTestId("fm-tag-input");
   await expect(input).toBeVisible();
+  // FOCUS alone opens the popup with the full view-filtered list (no typing needed)
   await input.click();
-  await page.keyboard.type("sugE");
   await expect
-    .poll(async () => page.locator('[data-testid="fm-tag-datalist"] option').count(), { timeout: 5000 })
+    .poll(async () => page.locator('[data-testid="fm-tag-suggest-item"]').count(), { timeout: 5000 })
     .toBeGreaterThan(0);
-  const options = await page.locator('[data-testid="fm-tag-datalist"] option').allTextContents();
-  void options; // values live in the value attribute; presence is the assertion
+  // typing narrows; the seeded tag stays visible
+  await page.keyboard.type("sugE");
+  await expect(page.locator('[data-testid="fm-tag-suggest-item"]', { hasText: "sugE2E413" }).first()).toBeVisible({ timeout: 5000 });
+  // keyboard: ArrowDown + Enter picks the highlighted suggestion → it becomes a chip
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("fm-tag-suge2e413")).toBeVisible({ timeout: 5000 });
+  // the popup carries the app trigger icon (not the UA datalist glyph)
+  await expect(page.getByTestId("fm-tag-suggest-open")).toBeVisible();
 
   // 3. /tagged opens the picker; a suggestion chip inserts the complete block
   await page.keyboard.press("Escape"); // leave the chip input
