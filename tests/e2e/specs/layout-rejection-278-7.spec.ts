@@ -142,3 +142,77 @@ test("#278-7 C7: a top-level callout is editable in WYSIWYG (hover ✎ → the c
   await sleep(700);
   await expect(page.locator(".cm-lp-callout-edit"), "the callout editUI opened").toHaveCount(1);
 });
+
+// ---- #278 (review rejection 2026-07-17, 2 residual points) ----
+// P1: inside a slot island the OUTER container wrap is hovered/atom-selected the whole time, so the
+//     descendant reveal rules used to light every chrome in the island permanently. Required pins:
+//     island non-figure text hover → NO chrome; figure hover → chrome; other -1.5em chrome (callout ✎)
+//     doesn't leak either.
+// P2: with the island open, re-clicking the ACTIVE tab commits the island and opens the inline rename
+//     on the rebuilt widget (supersedes the keep-editing pin; the commit precedes mousedown side
+//     effects and the mount goes by container offset + index, never by post-shrink hit-testing).
+
+test("#278-9 P1: island mermaid chrome shows on figure hover ONLY (no leak from island text)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await setUpPage(page);
+  await page.locator("[data-pane=preview]").getByText("lead line").click();
+  await sleep(700);
+  const island = page.locator("[data-testid=slot-edit-island]");
+  await expect(island).toHaveCount(1);
+  // hover the island's NON-mermaid line → the mermaid ✎ chrome stays hidden AND pointer-inert
+  await island.locator(".cm-content").getByText("lead line").hover();
+  await sleep(300);
+  const edit = island.locator("[data-testid=macro-edit]").first();
+  expect(parseFloat(await edit.evaluate((el) => getComputedStyle(el).opacity)), "chrome hidden on text hover").toBeLessThan(0.1);
+  const rowPE = await island.locator(".cm-lp-macro-btnrow").first().evaluate((el) => getComputedStyle(el).pointerEvents);
+  expect(rowPE, "the -1.5em btnrow must not steal the line's hover").toBe("none");
+  // hover the figure → the chrome reveals
+  await island.locator("[data-testid=macro-mermaid]").first().hover();
+  await sleep(300);
+  expect(parseFloat(await edit.evaluate((el) => getComputedStyle(el).opacity)), "chrome shows on figure hover").toBeGreaterThan(0.5);
+});
+
+test("#278-9 P1b: a callout's -1.5em ✎ inside an island doesn't leak on unrelated text hover", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await setUpPage(page);
+  // the columns container: first column holds "lead" + a nested warning
+  await page.locator("[data-pane=preview]").getByText("lead", { exact: true }).click();
+  await sleep(700);
+  const island = page.locator("[data-testid=slot-edit-island]");
+  await expect(island).toHaveCount(1);
+  await island.locator(".cm-content").getByText("lead", { exact: true }).hover();
+  await sleep(300);
+  const chips = island.locator(".cm-lp-callout-panel-edit, [data-testid=macro-edit]");
+  const n = await chips.count();
+  for (let i = 0; i < n; i++) {
+    const op = parseFloat(await chips.nth(i).evaluate((el) => getComputedStyle(el).opacity));
+    expect(op, `chrome ${i} stays hidden hovering unrelated island text`).toBeLessThan(0.1);
+  }
+});
+
+test("#278-9 P2: active-tab re-click with the island open commits it AND opens the rename", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await setUpPage(page);
+  await page.locator("[data-pane=preview]").getByText("lead line").click();
+  await sleep(700);
+  const island = page.locator("[data-testid=slot-edit-island]");
+  await expect(island).toHaveCount(1);
+  await island.locator(".cm-content").getByText("lead line").click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" EDITED");
+  await sleep(300);
+  await page.locator(".cm-lp-tab-active").first().click();
+  await sleep(600);
+  await expect(island, "the island committed + closed").toHaveCount(0);
+  const input = page.getByTestId("tab-rename-input");
+  await expect(input, "the rename mounted on the REBUILT widget").toHaveCount(1);
+  await page.keyboard.type("NewName");
+  await page.keyboard.press("Enter");
+  await sleep(800);
+  await expect(page.locator(".cm-lp-tab").first()).toHaveText("NewName");
+  await page.locator("[role=radiogroup] [role=radio]").nth(1).click(); // Source mode
+  await sleep(500);
+  const src = await page.locator("[data-pane=preview] .cm-content").first().innerText();
+  expect(src, "the island edit committed before the rename").toContain("lead line EDITED");
+  expect(src, "the rename round-trips the fence head").toContain(":::tab[NewName]");
+});
