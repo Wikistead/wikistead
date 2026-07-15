@@ -29,6 +29,13 @@ import { search, searchKeymap } from "@codemirror/search"; // #402: in-page find
 
 // vim Compartment content: the keymap AND a vimEnabled flag (so the decoration builder
 // can be mode-aware — ADR-022 Part 11). Reused by mount + the Editor's vim toggle.
+// #402 the CM search panel speaks through EditorState.phrases — the host passes a translated
+// map (built from i18n in Editor.tsx) and owns a Compartment so a LANGUAGE TOGGLE reconfigures the
+// phrases in place (vim/displayMode-style — never a remount, collab/presence untouched). No map = CM's
+// built-in English.
+export const searchPhrasesContent = (map: Record<string, string> | undefined): Extension =>
+  map ? EditorState.phrases.of(map) : [];
+
 // #402: the NON-vim branch carries the find/replace keymap (Mod-f / F3 / Mod-g). Vim keeps its own `/`
 // and ex `:%s` — mounting the CM panel keymap under vim would fight its bindings. Living inside the SAME
 // Compartment, a vim toggle swaps keymaps in place (never re-mounts → collab/presence stay attached).
@@ -100,6 +107,7 @@ export interface LivePreviewSharedOpts {
   titleLinks?: TitleLinkSource;
   list?: ListSource;
   linkStatus?: LinkStatusResolver;
+  searchPhrases?: Record<string, string>; // #402 translated CM search-panel phrases
 }
 
 // ADR-122 addendum (b) / #278: how the shared layer is being mounted. `nested: true` = a nested markdown
@@ -220,6 +228,9 @@ export function buildLivePreviewExtensions(opts: LivePreviewSharedOpts, env: Liv
     ...(opts.tagSuggest ? [tagSuggestSource.of(opts.tagSuggest)] : []), // #413
     ...(opts.openTagPrompt ? [tagPrompt.of(opts.openTagPrompt)] : []), // #413
     search({ top: true }), // #402: find/replace panel config (opened by the non-vim keymap above)
+    // #402 nested islands take the phrases statically (they are short-lived); the OUTER surface
+    // provides them via its Compartment in mountLivePreview/mountPublishedView instead (toggle-follows).
+    ...(env.nested ? [searchPhrasesContent(opts.searchPhrases)] : []),
     // Slash command palette (editable surface only; view guests don't get it). The `/` palette owns image
     // insert (P): uploadImage + the container (the host, so the hidden file input survives CM's DOM
     // reconcile) — HOST actions, so a nested island gets the bare palette (image/embed/template no-op
@@ -239,7 +250,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: LivePreviewSharedOpts & { vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; selfPageId?: string } = {},
+  opts: LivePreviewSharedOpts & { vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; searchPhrasesCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; selfPageId?: string } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -249,6 +260,9 @@ export function mountLivePreview(
       // ADR-056 / #164: editor display mode (live/source/...) via a Compartment so the caller can
       // switch it in place (no remount → collab/presence untouched), like vim.
       ...(opts.displayModeCompartment ? [opts.displayModeCompartment.of(displayModeContent(opts.displayMode ?? "live"))] : [displayMode.of(opts.displayMode ?? "live")]),
+      // #402 translated search-panel phrases; the host's Compartment lets a language toggle
+      // reconfigure them in place (no remount — collab/presence stay attached, the vim-toggle rule).
+      ...(opts.searchPhrasesCompartment ? [opts.searchPhrasesCompartment.of(searchPhrasesContent(opts.searchPhrases))] : [searchPhrasesContent(opts.searchPhrases)]),
       minimalSetup,
       // position:fixed so the palette/bubble/hint escape overflow:hidden ancestors and
       // CM flips them above/below + shifts horizontally to stay within the viewport.

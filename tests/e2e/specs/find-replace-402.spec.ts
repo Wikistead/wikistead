@@ -22,7 +22,7 @@ test("#402: Ctrl+F opens find/replace; matches highlight; replace rewrites the d
   await page.keyboard.press("Control+f");
   const panel = page.locator(".cm-panel.cm-search");
   await expect(panel).toBeVisible();
-  // real keystrokes (fill() sets the value without the keyup the panel listens for; Enter commits)
+  // real keystrokes (fill sets the value without the keyup the panel listens for; Enter commits)
   await panel.locator("input[name=search]").pressSequentially("alpha");
   await panel.locator("input[name=search]").press("Enter");
   await sleep(300);
@@ -54,4 +54,27 @@ test("#402: under vim, Ctrl+F does NOT open the CM panel (vim keeps its own / se
   await page.keyboard.type("/delta");
   await sleep(200);
   await expect(page.locator(".cm-vim-panel, .cm-panel").first()).toBeVisible();
+});
+
+// #402 (review return): the CM search panel must speak the UI language — the phrases facet
+// was never wired, so a Japanese UI still showed CM's built-in English ("next"/"replace all"/…).
+test("#402 the search panel is localized (ja) and follows the language", async ({ browser }) => {
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  await page.addInitScript(() => localStorage.setItem("wks.lang", "ja"));
+  await openScratch(page, "findrep-i18n");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("alpha one\n");
+  await sleep(200);
+  await page.keyboard.press("Control+f");
+  const panel = page.locator(".cm-panel.cm-search");
+  await expect(panel).toBeVisible();
+  // the five buttons + a checkbox label are Japanese (phrase map applied)
+  await expect(panel.locator("button[name=next]")).toHaveText("次へ");
+  await expect(panel.locator("button[name=prev]")).toHaveText("前へ");
+  await expect(panel.locator("button[name=replaceAll]")).toHaveText("すべて置換");
+  await expect(panel).toContainText("大文字小文字を区別");
+  // and the Find input placeholder is translated too
+  await expect(panel.locator("input[name=search]")).toHaveAttribute("placeholder", "検索");
 });

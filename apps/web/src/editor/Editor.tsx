@@ -4,7 +4,9 @@ import { EditorView } from "@codemirror/view";
 import { headingsExtension, extractHeadings, type Heading } from "./headings";
 import { taskProgressExtension, type TaskProgress } from "./task-progress"; // #290: page task-progress ring
 import { connect, connectEphemeral } from "./collab";
-import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayModeContent } from "./editor-livepreview";
+import { mountLivePreview, mountPublishedView, vimCompartmentContent, displayModeContent, searchPhrasesContent } from "./editor-livepreview";
+import { useTranslation } from "react-i18next";
+import { buildSearchPhrases } from "./search-phrases"; // #402 localized CM search-panel phrases
 import { wireToc } from "./toc-wiring"; // #319: extracted so the public reader shares the CM TOC wiring
 import type { DisplayMode, MacroTheme, ListSource } from "./live-preview/decorations";
 import { redrawMacros, taskStatePosAt } from "./live-preview/decorations";
@@ -162,6 +164,12 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
   const vimCompartment = useRef(new Compartment()).current;
   // ADR-056 / #164: display-mode Compartment, reconfigured in place on a mode switch (no remount).
   const displayModeCompartment = useRef(new Compartment()).current;
+  // #402 search-panel phrases Compartment — a language toggle reconfigures in place (no remount).
+  const searchPhrasesCompartment = useRef(new Compartment()).current;
+  const { t: tSearch } = useTranslation(); // re-renders on language change → searchPhrases recomputes
+  const searchPhrases = useMemo(() => buildSearchPhrases(tSearch), [tSearch]);
+  const searchPhrasesRef = useRef(searchPhrases);
+  searchPhrasesRef.current = searchPhrases;
 
   // Resolve inline-comment anchors against the live doc and push the ranges to the
   // preview's highlight field.
@@ -436,6 +444,8 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       vimCompartment,
       displayMode,
       displayModeCompartment,
+      searchPhrases: searchPhrasesRef.current,
+      searchPhrasesCompartment,
       onExitEdit,
       onPublish,
       // #92 / ADR-093: the host ephemeral-collab seam — opens a non-persisted room for a co-editing
@@ -496,6 +506,14 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
     if (!v || surfaceKey !== "edit") return;
     v.dispatch({ effects: displayModeCompartment.reconfigure(displayModeContent(displayMode)) });
   }, [displayMode, surfaceKey, displayModeCompartment]);
+
+  // #402 language toggle → reconfigure the search-panel phrases in place (vim-toggle rule:
+  // never remounts, collab/presence stay attached). Edit surface only (the panel lives there).
+  useEffect(() => {
+    const v = previewViewRef.current;
+    if (!v || surfaceKey !== "edit") return;
+    v.dispatch({ effects: searchPhrasesCompartment.reconfigure(searchPhrasesContent(searchPhrases)) });
+  }, [searchPhrases, surfaceKey, searchPhrasesCompartment]);
 
   // #200: on a light/dark theme change, tell the live-preview to rebuild macro widgets so a macro that
   // bakes theme colours into its output (Excalidraw's exported SVG) re-renders for the new theme. We
