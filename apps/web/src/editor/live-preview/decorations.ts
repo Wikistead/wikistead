@@ -2753,6 +2753,16 @@ class DetailsSummaryWidget extends WidgetType {
       detailsOpenState.set(this.from, now);
       wrap.classList.toggle("cm-lp-details-open", now);
       bodyWrap.setAttribute("aria-hidden", String(!now));
+      // #359in WYSIWYG, ALSO park an empty caret on the block (mermaid parity) so a follow-up
+      // Ctrl+C/Ctrl+X hits atomClipboard and takes the WHOLE `:::details…:::` source — the bar's
+      // preventDefault otherwise leaves the caret elsewhere and the copy silently no-ops. WYSIWYG never
+      // reveals on caret (syntaxRevealsAt), so the atom stays rendered; in Live a caret here WOULD flip
+      // the panel to raw source, destroying the click-to-toggle affordance (#337), so Live keeps the
+      // caret untouched (copy there goes through ✎ reveal or a cross-boundary selection).
+      if (!view.state.readOnly && view.state.facet(displayMode) === "wysiwyg") {
+        view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)) });
+        view.focus();
+      }
       view.requestMeasure(); // the ResizeObserver follows the transition; transitionend settles the final height
     });
     // #255/#282 block-widget rule: nail the final height at the END of the open/close animation so lines below

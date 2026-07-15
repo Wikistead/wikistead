@@ -89,6 +89,76 @@ test("#359-A (symptom 3): WYSIWYG atom-click + Ctrl+C copies the WHOLE block; pa
   expect((src.match(/A-->B/g) || []).length).toBe(2);
 });
 
+// #359details (collapsible directive) could NOT be copied in WYSIWYG — the summary bar's
+// mousedown preventDefault toggled collapse WITHOUT placing a caret, so atomClipboard (empty caret on
+// the block) never fired and Ctrl+C was a silent no-op. The fix parks a caret on the block on summary
+// click in WYSIWYG (never in Live, where a caret-in would flip the panel to raw and destroy the
+// click-to-toggle affordance). Callout gets the same mermaid-parity pin (its panel already places the
+// caret on click).
+const DIRECTIVE_CONTENT = "top line\n\n:::details[More]\nhidden body\n:::\n\n:::note[Hello]\nnote body\n:::\n\nbottom\n";
+const DETAILS_SRC = ":::details[More]\nhidden body\n:::";
+const NOTE_SRC = ":::note[Hello]\nnote body\n:::";
+
+async function newDirectivePage(browser: any) {
+  const ctx = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
+  const page = await ctx.newPage();
+  await openScratch(page, "select-copy-359-directive");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(DIRECTIVE_CONTENT);
+  await sleep(700);
+  await page.getByText("bottom", { exact: true }).click();
+  await sleep(300);
+  await page.locator("[role=radiogroup] [role=radio]").nth(3).click(); // WYSIWYG
+  await sleep(600);
+  await page.evaluate(() => navigator.clipboard.writeText("SENTINEL"));
+  return page;
+}
+
+test("#359-A: WYSIWYG details click + Ctrl+C copies the WHOLE directive; paste round-trips", async ({ browser }) => {
+  const page = await newDirectivePage(browser);
+  await page.locator("[data-pane=preview] [data-testid=details-summary-bar]").first().click();
+  await sleep(300);
+  await page.keyboard.press("Control+c");
+  await sleep(200);
+  const clip = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clip, "the whole :::details block, not a fragment or a no-op").toBe(DETAILS_SRC);
+  // paste after "bottom" and round-trip via Source mode (directive markers intact)
+  await page.getByText("bottom", { exact: true }).click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Control+v");
+  await sleep(500);
+  await page.locator("[role=radiogroup] [role=radio]").nth(1).click(); // Source
+  await sleep(500);
+  const src = await page.locator("[data-pane=preview] .cm-content").first().innerText();
+  expect((src.match(/:::details\[More\]/g) || []).length, "the pasted directive is intact").toBe(2);
+  expect((src.match(/hidden body/g) || []).length).toBe(2);
+});
+
+test("#359-A: WYSIWYG details Ctrl+X cuts the whole directive", async ({ browser }) => {
+  const page = await newDirectivePage(browser);
+  await page.locator("[data-pane=preview] [data-testid=details-summary-bar]").first().click();
+  await sleep(300);
+  await page.keyboard.press("Control+x");
+  await sleep(400);
+  const clip = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clip).toBe(DETAILS_SRC);
+  const src = await page.locator("[data-pane=preview] .cm-content").first().innerText();
+  expect(src, "the details block is gone from the doc").not.toContain("hidden body");
+  expect(src, "the callout was untouched").toContain("note body");
+});
+
+test("#359-A: WYSIWYG callout click + Ctrl+C copies the whole directive (mermaid parity)", async ({ browser }) => {
+  const page = await newDirectivePage(browser);
+  await page.locator("[data-pane=preview] [data-testid=callout-panel]").first().click();
+  await sleep(300);
+  await page.keyboard.press("Control+c");
+  await sleep(200);
+  const clip = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clip, "the whole :::note block").toBe(NOTE_SRC);
+});
+
 test("#359-A: Ctrl+X on an atom cuts the whole block (source on the clipboard, block gone)", async ({ browser }) => {
   const page = await newPage(browser);
   // WYSIWYG: the block never reveals, so the caret genuinely RESTS on the atom (in Live a caret-in
