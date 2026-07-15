@@ -654,7 +654,19 @@ export async function listMemberCandidates(
   args: { spaceId: string; userId: string; q: string },
 ): Promise<{ sub: string; displayName: string | null }[]> {
   await requireSpaceManage(fga, args.userId, args.spaceId)
-  const like = `%${args.q.trim()}%`
+  return searchMemberCandidates(db, args.q)
+}
+
+// #416 / ADR-161: the ONE candidate-search core shared by the space- and page-scoped endpoints (the
+// gates differ; the projection must not). {sub, displayName} ONLY, LIMIT 10, and an EMPTY query returns
+// [] — never the first-10 member dump (the ADR's empty-query pin, enforced for both callers here).
+export async function searchMemberCandidates(
+  db: TenantDb,
+  q: string,
+): Promise<{ sub: string; displayName: string | null }[]> {
+  const needle = q.trim()
+  if (!needle) return []
+  const like = `%${needle}%`
   const rows = await db.sql<{ sub: string; display_name: string | null }[]>`
     SELECT sub, display_name FROM members
     WHERE display_name ILIKE ${like} OR sub ILIKE ${like}

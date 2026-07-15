@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
-import { Input } from "../ui/Input";
+import { MemberSearchInput } from "../ui/MemberSearchInput";
 import {
   useSpaceAccess, useGrantSpaceAccess, useRevokeSpaceAccess, useMemberCandidates, useTenantGroups,
   useCommentOpen, useSetCommentOpen,
@@ -98,29 +98,18 @@ export function SpaceMembersTab() {
             ]}
           />
         ) : (
-        <div className="relative min-w-0 flex-1">
-          <Input
-            className="w-full"
-            data-testid="space-grant-input"
-            value={picked ? picked.label : query}
-            placeholder={t("spaceMembers.addPlaceholder")}
-            aria-label={t("spaceMembers.addPlaceholder")}
-            onChange={(e) => { setPicked(null); setQuery(e.target.value); }}
-          />
-          {!picked && query.trim().length > 0 && (candidates.data?.length ?? 0) > 0 && (
-            <ul className="absolute left-0 right-0 top-[calc(100%+2px)] z-20 m-0 max-h-60 list-none overflow-y-auto rounded-md border border-border bg-panel p-1 shadow-md" data-testid="space-grant-candidates">
-              {candidates.data!.map((c) => (
-                <li key={c.sub}>
-                  <button type="button" className="flex w-full cursor-pointer flex-col gap-px rounded-sm border-none bg-transparent px-2 py-1.5 text-left text-foreground hover:bg-panel-2" data-testid="space-grant-candidate"
-                    onClick={() => { setPicked({ grantee: `user:${c.sub}`, label: c.displayName || c.sub }); setQuery(""); }}>
-                    <span className="text-sm">{c.displayName || c.sub}</span>
-                    {c.displayName && <span className="text-[11px] text-fg-dim">{c.sub}</span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <MemberSearchInput
+          query={query}
+          onQueryChange={setQuery}
+          picked={picked}
+          onPick={(c) => { setPicked(c ? { grantee: `user:${c.sub}`, label: c.displayName || c.sub } : null); if (c) setQuery(""); }}
+          candidates={candidates.data ?? []}
+          placeholder={t("spaceMembers.addPlaceholder")}
+          ariaLabel={t("spaceMembers.addPlaceholder")}
+          inputTestId="space-grant-input"
+          listTestId="space-grant-candidates"
+          itemTestId="space-grant-candidate"
+        />
         )}
         <Select
           value={capability}

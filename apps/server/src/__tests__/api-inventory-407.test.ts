@@ -38,6 +38,7 @@ const EXCLUDED_PATHS = new Set([
   '/me/settings', '/me/avatar', '/members/:sub', '/members/:sub/avatar-image', '/members/invites', '/members/invites/:id', // account/invite UI plumbing
   '/ai/ask', '/ai/capability',     // AI feature surface (own contract)
   '/pages/:pageId/mentionable',    // comment @-mention candidates (UI-shaped)
+  '/pages/:pageId/member-candidates', // permissions-dialog member typeahead (UI-shaped; #416)
   '/pages/:pageId/tasks/toggle',   // read-surface checkbox flip (UI plumbing; publish covers integration)
   '/pages/:pageId/revisions/revert-actor', // moderation one-click revert (moderation UI surface)
   '/webhooks', '/webhooks/:id',    // admin-configured outbound webhooks (admin surface)

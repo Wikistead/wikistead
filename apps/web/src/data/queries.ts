@@ -1246,6 +1246,17 @@ export function useMemberCandidates(spaceId: string, q: string) {
   });
 }
 
+// #416 / ADR-161: the page-scoped member typeahead (permissions dialog). page#manage-gated server-side.
+export function usePageMemberCandidates(pageId: string | null, q: string) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["page-member-candidates", pageId, q],
+    queryFn: () => apiFetch<MemberCandidate[]>(`/pages/${encodeURIComponent(pageId!)}/member-candidates?q=${encodeURIComponent(q)}`, token).then((r) => r ?? []),
+    enabled: pageId != null && pageId.length > 0 && q.trim().length > 0,
+    staleTime: 10_000,
+  });
+}
+
 export function useSearch(q: string) {
   const { token } = useSession();
   const query = q.trim();

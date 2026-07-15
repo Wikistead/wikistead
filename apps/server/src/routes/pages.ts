@@ -24,7 +24,7 @@ import { renderPlantuml } from '../plantuml-render.js'
 import { assertPageViewable } from '../page-view-gate.js'
 import { revokeResourceShareLinks } from './share-links.js'
 import { getTemplate } from './templates.js'
-import { getSpaceInfo } from './spaces.js'
+import { getSpaceInfo, searchMemberCandidates } from './spaces.js'
 import { deletePinsForResources } from './pins.js'
 import { fanOutFeedEvent, sweepWatchesForResources, sweepUnviewableWatches } from './notifications.js'
 import { enqueueWebhookOutbox } from './webhooks.js'
@@ -2769,6 +2769,15 @@ export async function pagesPlugin(app: FastifyInstance) {
   // the route deliberately omits `config.guest`, so a share_link token is rejected (a public graph over
   // public pages is a later increment, ADR-133 §6). getLocalGraph view-gates the center and returns an edge
   // only when the caller can view BOTH endpoints; an unviewable page is absent as a node entirely.
+  // #416 / ADR-161: member typeahead for the PAGE permissions dialog. Gate = page#manage — byte-for-byte
+  // the authority that can already grant on this page (grantPageAccess), so the picker widens WHO can
+  // enumerate members only to principals who could act on the result anyway (the reviewed ruling). Same
+  // projection + empty-query pin as the space endpoint via the shared core. Member-only (no guest config).
+  app.get<{ Params: { pageId: string }; Querystring: { q?: string } }>('/pages/:pageId/member-candidates', async (req) => {
+    await requireManage(app.fga, req.user.sub, req.params.pageId)
+    return searchMemberCandidates(req.db, req.query.q ?? '')
+  })
+
   app.get<{ Params: { pageId: string }; Querystring: { depth?: string } }>('/pages/:pageId/graph', async (req) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
     const depth = req.query.depth === '2' ? 2 : 1
