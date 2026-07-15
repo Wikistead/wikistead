@@ -2,6 +2,7 @@ import { Link2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useMemberIdentity } from "../data/queries";
 import { assetUrl } from "../data/apiClient";
+import { Avatar } from "../ui/Avatar";
 
 // #208: the comment author display. The stored identity is the raw `authorSub` (a member OIDC sub or
 // `guest:<uuid>`) — used for authz server-side and NEVER changed here; this only formats how it READS.
@@ -26,13 +27,6 @@ export function authorLabel(sub: string, guestWord: string): string {
   return at > 0 ? sub.slice(0, at) : sub;
 }
 
-// Deterministic hue so the same member always gets the same avatar colour.
-function hue(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
-  return h;
-}
-
 export function AuthorChip({ sub }: { sub: string }) {
   const { t } = useTranslation();
   const guest = isGuestSub(sub);
@@ -43,7 +37,6 @@ export function AuthorChip({ sub }: { sub: string }) {
   const resolvedName = identity.data?.displayName ?? null;
   const hasAvatar = identity.data?.hasAvatar === true;
   const label = resolvedName ?? authorLabel(sub, t("common.guest"));
-  const initial = (label.trim()[0] ?? "?").toUpperCase();
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
       {guest ? (
@@ -51,26 +44,23 @@ export function AuthorChip({ sub }: { sub: string }) {
         <span className="inline-flex h-5 w-5 flex-none items-center justify-center rounded-full bg-panel-2 text-fg-dim" data-testid="comment-avatar-guest" title={t("common.guest")}>
           <Link2 size={12} aria-hidden />
         </span>
-      ) : hasAvatar ? (
-        // The uploaded avatar. ADR-150 §3 contract (the #372 mix-up class must not reappear here):
-        // keyed by THIS sub, and the src is /members/<thisSub>/avatar-image — never another sub's.
-        <img
-          key={sub}
-          src={assetUrl(`/members/${encodeURIComponent(sub)}/avatar-image`)}
-          alt=""
-          className="h-5 w-5 flex-none rounded-full object-cover"
-          data-testid="comment-avatar-img"
-          referrerPolicy="no-referrer"
-        />
       ) : (
-        <span
-          className="inline-flex h-5 w-5 flex-none items-center justify-center rounded-full text-[10px] font-semibold text-white"
-          style={{ backgroundColor: `hsl(${hue(sub)} 55% 45%)` }}
-          data-testid="comment-avatar"
-          aria-hidden
-        >
-          {initial}
-        </span>
+        // #431: the SHARED Avatar primitive (ui/avatar.ts), not a local re-implementation — so the
+        // initials (1–2 chars from the label) and the colour (seeded by SUB, stable across renames)
+        // match the top-right menu and every other surface for the same user.
+        // The uploaded avatar keeps the ADR-150 §3 contract (the #372 mix-up class must not reappear):
+        // keyed by THIS sub, src = /members/<thisSub>/avatar-image — never another sub's. A failed
+        // image load falls back to the initials chip inside Avatar.
+        <Avatar
+          key={sub}
+          name={label}
+          seed={sub}
+          src={hasAvatar ? assetUrl(`/members/${encodeURIComponent(sub)}/avatar-image`) : null}
+          size={20}
+          title={label}
+          data-testid={hasAvatar ? "comment-avatar-img" : "comment-avatar"}
+          className="text-[10px]"
+        />
       )}
       {/* full identity stays inspectable on hover; authz is unaffected (display-only).
           max-w caps pathological labels (a 64-hex OIDC sub, a very long display name) so `truncate`
