@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "e2e": "playwright test",
+    "e2e": "tsx ../../infra/openfga/ensure-e2e-model.ts && playwright test",
     "up": "node scripts/up.mjs",
     "down": "node scripts/down.mjs"
   },
@@ -11,6 +11,7 @@
     "@playwright/test": "^1.61.0",
     "fflate": "0.8.3",
     "jose": "^5.10.0",
-    "postgres": "^3.4.9"
+    "postgres": "^3.4.9",
+    "tsx": "^4.19.0"
   }
 }
