@@ -397,3 +397,38 @@ test("#335footnote + real links match between the public reader and member Readi
     expect(pub.real.deco, `real link underline public ${pub.real.deco} vs member ${member.real.deco}`).toBe(member.real.deco);
   }
 });
+
+// #429: the standalone public reader has a floating THEME TOGGLE — an anonymous visitor picks
+// light/dark themselves (localStorage + <html data-theme>), and the choice survives a reload.
+test("#429: the anonymous /pub reader can switch light/dark and the choice persists", async ({ browser }) => {
+  const authed = await (await browser.newContext()).newPage();
+  const id = await openScratch(authed, "pub-theme");
+  await enterEdit(authed);
+  await authed.click("[data-pane=preview] .cm-content");
+  await authed.keyboard.insertText("theme toggle body\n");
+  await sleep(400);
+  await authed.getByTestId("publish-page").click();
+  await sleep(800);
+  await makePublic(id);
+  await setPublicSurface(authed, true);
+
+  const anon = await (await browser.newContext()).newPage();
+  await anon.goto(`/pub/${id}`);
+  await expect(anon.getByTestId("public-body")).toContainText("theme toggle body");
+  // The floating toggle is present on the chromeless standalone reader.
+  const corner = anon.getByTestId("public-theme-corner");
+  await expect(corner).toBeVisible();
+  // Pick DARK from the menu → <html data-theme="dark"> + persisted. Items are picked by
+  // POSITION (ThemeToggle's fixed ORDER: light, dark, system) — labels are localized.
+  await corner.getByTestId("theme-toggle").click();
+  await anon.getByTestId("theme-menu").locator('[role="menuitem"]').nth(1).click();
+  await expect(anon.locator("html")).toHaveAttribute("data-theme", "dark");
+  // Survives a reload (localStorage, no session involved).
+  await anon.reload();
+  await expect(anon.getByTestId("public-body")).toContainText("theme toggle body");
+  await expect(anon.locator("html")).toHaveAttribute("data-theme", "dark");
+  // And back to LIGHT in-page.
+  await corner.getByTestId("theme-toggle").click();
+  await anon.getByTestId("theme-menu").locator('[role="menuitem"]').nth(0).click();
+  await expect(anon.locator("html")).toHaveAttribute("data-theme", "light");
+});

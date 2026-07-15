@@ -144,6 +144,7 @@ import { PageTitle } from "./PageTitle";
 import { PageMeta } from "./PageMeta";
 import { ProgressRing } from "./ProgressRing"; // #290: title-band page-progress ring
 import { useTheme } from "./ThemeProvider"; // #376: public reader remounts on theme switch (diagram re-render)
+import { ThemeToggle } from "./ThemeToggle"; // #429: the standalone public reader's floating theme switch
 import { RelatedPanel } from "./RelatedPanel";
 import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
@@ -1234,7 +1235,13 @@ function PublicPageRoute() {
   // wrapper the WINDOW scrolls (not the inner scroller) and the band's sticky never engages. h-dvh
   // gives PublicPageContent the same bounded-height context the space shell provides.
   return (
-    <div className="h-dvh">
+    <div className="relative h-dvh">
+      {/* #429: anonymous readers pick light/dark themselves. The space reader gets the toggle from
+          the AppShell header; this standalone page is chromeless (#227②), so the SAME
+          ThemeToggle floats top-right (localStorage + <html data-theme>, no session involved). */}
+      <div className="absolute right-3 top-3 z-10 rounded bg-panel/80 backdrop-blur-sm" data-testid="public-theme-corner">
+        <ThemeToggle />
+      </div>
       <PublicPageContent pageId={pageId} />
     </div>
   );
