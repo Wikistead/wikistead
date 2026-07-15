@@ -2,6 +2,7 @@
 // schemas to generate from), so this test is the anti-drift mechanism: it extracts EVERY route
 // registration from the source tree and asserts each path is either documented in the spec or explicitly
 // excluded below. Adding a member route without documenting it fails here — the spec can't silently rot.
+import { parse as parseYaml } from 'yaml' // #407 the spec must PARSE, not just string-match
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -72,6 +73,31 @@ describe('API inventory ↔ OpenAPI spec (#407 anti-drift)', () => {
       if (!spec.includes(specForm)) undocumented.push(route)
     }
     expect(undocumented, `routes missing from docs/api/openapi.yaml (document them or add a REVIEWED exclusion): ${undocumented.join(', ')}`).toEqual([])
+  })
+
+  // #407 (review return): the two regex tests above guarantee COVERAGE but never parsed the
+  // YAML — a broken spec (an unquoted description containing ": ") sailed through while Swagger UI could
+  // not read it. This pins "the spec is valid YAML and minimally well-formed OpenAPI 3.1": parse +
+  // structural asserts (openapi/info/paths present, every operation has responses).
+  it('the spec parses as YAML and is minimally well-formed OpenAPI 3.1', () => {
+    const doc = parseYaml(readFileSync(specPath, 'utf8')) as {
+      openapi?: string
+      info?: { title?: string; version?: string }
+      paths?: Record<string, Record<string, { responses?: unknown }>>
+    }
+    expect(doc.openapi, 'openapi version field').toMatch(/^3\.1\./)
+    expect(doc.info?.title, 'info.title').toBeTruthy()
+    expect(doc.info?.version, 'info.version').toBeTruthy()
+    expect(doc.paths && Object.keys(doc.paths).length, 'paths present').toBeGreaterThan(0)
+    const METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options'])
+    const missing: string[] = []
+    for (const [path, ops] of Object.entries(doc.paths!)) {
+      for (const [method, op] of Object.entries(ops)) {
+        if (!METHODS.has(method)) continue
+        if (!op || typeof op !== 'object' || !('responses' in op) || !op.responses) missing.push(`${method.toUpperCase()} ${path}`)
+      }
+    }
+    expect(missing, `operations without responses: ${missing.join(', ')}`).toEqual([])
   })
 
   it('every documented path still exists in the source (no dead spec entries)', () => {
