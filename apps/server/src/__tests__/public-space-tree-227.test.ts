@@ -78,7 +78,9 @@ describe('#227 space-level public tree', () => {
   it('lists the published+public root and its public child; omits unpublished / non-public / private', async () => {
     const res = await app.inject({ method: 'GET', url: `/public/spaces/${pubSpace}/pages`, headers: { host: 'dev.localhost' } })
     expect(res.statusCode).toBe(200)
-    const ids = flatIds(res.json() as { id: string; children: unknown[] }[])
+    // #364 / ADR-157: the route now returns { home, tree } (the home rides beside the tree).
+    const body = res.json() as { home: unknown; tree: { id: string; children: unknown[] }[] }
+    const ids = flatIds(body.tree)
     expect(ids).toContain(pub)
     expect(ids).toContain(child)     // public subtree traversed
     expect(ids).not.toContain(unpub) // published_at NULL → absent (title/existence hidden)

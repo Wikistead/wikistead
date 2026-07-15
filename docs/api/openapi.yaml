@@ -312,6 +312,12 @@ paths:
       summary: Delete a space
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
       responses: { "204": { description: Deleted } }
+  /spaces/{spaceId}/home:
+    post:
+      summary: Create the space HOME page and point the space at it (ADR-157)
+      description: "Creates a regular page titled after the space and sets spaces.home_page_id atomically. Gate: space edit. 409 when a home already exists."
+      parameters: [ { $ref: "#/components/parameters/spaceId" } ]
+      responses: { "201": { description: "{ id }" }, "403": { description: Not edit-capable }, "409": { description: A home already exists } }
   /spaces/{spaceId}/info:
     get:
       summary: Minimal space info for a viewer

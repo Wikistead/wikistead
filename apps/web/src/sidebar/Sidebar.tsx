@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { NodeApi } from "react-arborist";
-import { ChevronDown, ChevronUp, FileText, PinOff, Settings } from "lucide-react";
+import { ChevronDown, ChevronUp, FileText, Home, PinOff, Settings } from "lucide-react";
 import { PageTree, type PageTreeNode } from "./PageTree";
 import { SpaceSwitcher } from "./SpaceSwitcher";
 import { SpaceIcon } from "../ui/SpaceIcon"; // #284 show a page pin's owning space
@@ -246,7 +246,7 @@ export function Sidebar() {
           currentId={current}
           currentSpace={currentSpace}
           canManage={canManage}
-          onSelect={setActiveSpaceId}
+          onSelect={(id) => { setActiveSpaceId(id); navigate(`/spaces/${id}`); }} // #364 §6a: switching lands on the space home
           onRename={() => { if (currentSpace) setRenamingSpace({ id: currentSpace.id, name: currentSpace.name }); }}
           onNewSpace={() => setCreatingSpace(true)}
           onExportSpace={exportSpace}
@@ -268,6 +268,20 @@ export function Sidebar() {
         )}
       </div>
 
+      {/* #364 / ADR-157 §6b: the fixed Home entry — a stable way INTO the space root (the home page /
+          empty state). Not a tree node (the tree excludes the home to avoid the double display). */}
+      {current && (
+        <div className="border-b border-border px-1 py-1">
+          <div
+            className={`flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-lg px-2 transition-colors duration-[120ms] ${window.location.pathname === `/spaces/${current}` ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium" : "hover:bg-panel-2"}`}
+            data-testid="sidebar-home"
+            onClick={() => navigate(`/spaces/${current}`)}
+          >
+            <Home size={14} className="flex-none text-fg-dim" />
+            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{t("sidebar.home")}</span>
+          </div>
+        </div>
+      )}
       {/* #284: the "Pinned" section — the member's pinned PAGES (any space), above the tree so a deep
           page is reachable without expanding. Rendered strictly from the server's view-confirmed list. */}
       {pagePins.length > 0 && (

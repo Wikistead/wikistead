@@ -469,7 +469,8 @@
     "noSpaces": "No spaces yet — create one above.",
     "noPages": "No pages yet — add one above.",
     "collapse": "Collapse",
-    "expand": "Expand"
+    "expand": "Expand",
+    "home": "Home"
   },
   "dialogs": {
     "renamePageTitle": "Rename page",
@@ -980,5 +981,8 @@
     "loadMore": "Load more",
     "lockedTitle": "Audit log is a Team feature",
     "lockedBody": "Your entries are being retained. Upgrade to view, verify, and export the ledger."
+  },
+  "spaceHome": {
+    "writeButton": "Write the homepage"
   }
 }

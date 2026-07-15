@@ -17,7 +17,7 @@ import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
 
 interface SpaceRow { id: string; tenant_id: string; name: string; created_at: Date }
-export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage'; accentKey?: string | null; iconImageUrl?: string | null }
+export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage'; accentKey?: string | null; iconImageUrl?: string | null; homePageId?: string | null }
 function toSpace(r: SpaceRow): Space {
   return { id: r.id, tenantId: r.tenant_id, name: r.name, createdAt: r.created_at }
 }
@@ -137,8 +137,8 @@ export async function getSpaceInfo(db: TenantDb, spaceId: string): Promise<{ nam
 export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: string): Promise<Space[]> {
   // accent_key (space branding, Phase 5c) joined in so the client can apply the
   // space ▷ tenant ▷ default accent cascade without a per-space fetch.
-  const rows = await db.sql<(SpaceRow & { accent_key: string | null; icon_image_key: string | null })[]>`
-    SELECT s.id, s.tenant_id, s.name, s.created_at, ss.accent_key, ss.icon_image_key
+  const rows = await db.sql<(SpaceRow & { accent_key: string | null; icon_image_key: string | null; home_page_id: string | null })[]>`
+    SELECT s.id, s.tenant_id, s.name, s.created_at, s.home_page_id, ss.accent_key, ss.icon_image_key
     FROM spaces s LEFT JOIN space_settings ss ON ss.space_id = s.id
     ORDER BY s.created_at
   `
@@ -161,9 +161,20 @@ export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: strin
   const capById = new Map(caps)
   // iconImageUrl is a relative API path (the client prefixes it with the API base for
   // the <img> src). Public bytes are served by GET /spaces/:id/icon-image.
+  // #364 / ADR-157 §2 (the pointer must not become an existence oracle): expose homePageId ONLY when
+  // the CALLER can `view` the pointed page — via the shared FGA primitive, never a bespoke check. A
+  // denied pointer is OMITTED (null), byte-identical to "no home set".
+  const homeVisible = new Map(await Promise.all(
+    rows.map(async (r) => {
+      if (!r.home_page_id || capById.get(r.id) == null) return [r.id, false] as const
+      const ok = await check(fga, `user:${userId}`, 'view', { type: 'page', id: r.home_page_id }).catch(() => false)
+      return [r.id, ok] as const
+    }),
+  ))
   return rows.filter((r) => capById.get(r.id) != null).map((r) => ({
     ...toSpace(r), capability: capById.get(r.id)!, accentKey: r.accent_key,
     iconImageUrl: r.icon_image_key ? `/spaces/${r.id}/icon-image` : null,
+    homePageId: homeVisible.get(r.id) ? r.home_page_id : null,
   }))
 }
 
@@ -688,6 +699,48 @@ export async function searchMemberCandidates(
 
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
+// #364 / ADR-157 §3: create the space HOME — one endpoint creates a regular page (title = the space
+// name) and points `spaces.home_page_id` at it ATOMICALLY (the pointer write rides createPage's own
+// transaction via onCreatedInTx; a lost race rolls the page insert back and 409s). Gate = space `edit`
+// (owner ruling 3); the policy knob (#399) applies inside createPage's chokepoint like every create.
+export async function createSpaceHome(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { tenantId: string; spaceId: string; userId: string },
+): Promise<{ id: string }> {
+  const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'space', id: args.spaceId })
+  if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  const [row] = await db.sql<[{ name: string; home_page_id: string | null }?]>`
+    SELECT name, home_page_id FROM spaces WHERE id = ${args.spaceId}`
+  if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  // #411 interplay: a TRASHED home keeps the row (no FK SET NULL) but is byte-identically absent
+  // everywhere (the trash markers revoke view, so the oracle guard already omits the pointer). The
+  // empty state then shows the create button — allow REPLACING a trashed home's pointer; if that
+  // trashed page is later restored it comes back as a REGULAR page (the pointer moved on).
+  let replaceable: string | null = null
+  if (row.home_page_id) {
+    const [cur] = await db.sql<[{ deleted_at: Date | null }?]>`SELECT deleted_at FROM pages WHERE id = ${row.home_page_id}`
+    if (cur && cur.deleted_at == null) throw Object.assign(new Error('a home page already exists'), { statusCode: 409 })
+    replaceable = row.home_page_id
+  }
+  const { createPage } = await import('./pages.js')
+  const page = await createPage(db, fga, driver, {
+    tenantId: args.tenantId,
+    spaceId: args.spaceId,
+    userId: args.userId,
+    title: row.name,
+    onCreatedInTx: async (tx, pageId) => {
+      // the conditional write IS the race guard: someone else pointed first → 0 rows → rollback → 409
+      const updated = replaceable
+        ? await tx`UPDATE spaces SET home_page_id = ${pageId} WHERE id = ${args.spaceId} AND home_page_id = ${replaceable} RETURNING id`
+        : await tx`UPDATE spaces SET home_page_id = ${pageId} WHERE id = ${args.spaceId} AND home_page_id IS NULL RETURNING id`
+      if (updated.length === 0) throw Object.assign(new Error('a home page already exists'), { statusCode: 409 })
+    },
+  })
+  return { id: page.id }
+}
+
 export async function spacesPlugin(app: FastifyInstance) {
   app.post<{ Body: { name: string } }>('/spaces', async (req, reply) => {
     const space = await createSpace(req.db, app.fga, {
@@ -700,6 +753,16 @@ export async function spacesPlugin(app: FastifyInstance) {
   })
 
   app.get('/spaces', async (req) => listSpaces(req.db, app.fga, req.user.sub))
+
+  // #364 / ADR-157: create-and-point the space home (edit-gated; 409 when one exists).
+  app.post<{ Params: { spaceId: string } }>('/spaces/:spaceId/home', async (req, reply) => {
+    const created = await createSpaceHome(req.db, app.fga, app.searchDriver, {
+      tenantId: req.tenant.id,
+      spaceId: req.params.spaceId,
+      userId: req.user.sub,
+    })
+    return reply.code(201).send(created)
+  })
 
   // Tenant admin overview of all spaces (tenant#admin).
   app.get('/admin/spaces', async (req) => listAdminSpaces(req.db, app.fga, { tenantId: req.tenant.id, userId: req.user.sub }))
