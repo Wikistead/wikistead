@@ -44,6 +44,14 @@ export interface SourceEditorOptions {
   // own theme so the editing surface keeps the rendered surface's typography ("editing looks like the render",
   // north star 1) instead of snapping to a small monospace box.
   theme?: Extension;
+  // #278 opt-in (the slot ISLAND) teardown-blur guard. When this editor's own decoration update
+  // replaces the DOM node holding the caret (a revealed callout swapping to its editUI), Chrome drops focus
+  // with relatedTarget null and nothing takes it — committing there closed the island the moment its pill
+  // was clicked. With the guard, a successor-less blur defers one tick: focus back inside → not a leave;
+  // nothing focused → restore focus (keep editing); focus genuinely elsewhere → commit as usual. NOT for
+  // the mermaid/plantuml panes: their keyboard exit (Escape → programmatic blur, relatedTarget null) RELIES
+  // on the synchronous commit — guarding them would drop the save.
+  guardTeardownBlur?: boolean;
   onInput: (value: string) => void; // fires on every doc change — drives the local live preview (no doc write)
   onCommit: (value: string) => void; // fires on blur — the single Y.Text write via the macro's save()
 }
@@ -80,7 +88,24 @@ export function mountSourceEditor(opts: SourceEditorOptions): SourceEditorHandle
         EditorView.editorAttributes.of({ class: opts.dark ? "cm-dark" : "" }),
         EditorView.updateListener.of((u) => { if (u.docChanged) opts.onInput(u.state.doc.toString()); }),
         // Commit-on-blur → the single offset-invariant Y.Text write (never per-keystroke; see header).
-        EditorView.domEventHandlers({ blur: (_e, v) => { opts.onCommit(v.state.doc.toString()); return false; } }),
+        // #278 focus moving INTO this editor's own subtree is not a leave. A slot island can host a
+        // nested editUI (a mermaid ✎ opens its source pane INSIDE the island); that pane's focus grab blurs
+        // the island's contentDOM — committing there closed the island the instant the editUI opened.
+        EditorView.domEventHandlers({ blur: (e, v) => {
+          const to = e.relatedTarget as Node | null;
+          if (to && v.dom.contains(to)) return false;
+          if (opts.guardTeardownBlur && to === null) {
+            setTimeout(() => {
+              if (!v.dom.isConnected) return; // destroyed meanwhile (Escape-cancel keeps its no-commit semantics)
+              if (v.hasFocus || v.dom.contains(document.activeElement)) return; // focus returned — not a leave
+              if (document.activeElement === document.body || document.activeElement === null) { v.focus(); return; }
+              opts.onCommit(v.state.doc.toString()); // focus landed somewhere real → a genuine leave
+            }, 0);
+            return false;
+          }
+          opts.onCommit(v.state.doc.toString());
+          return false;
+        } }),
       ],
     }),
   });

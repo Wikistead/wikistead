@@ -96,11 +96,15 @@ test("#278-5 points 2+5: tab × matches the column × chip; nested ✎ sits insi
   expect(tabX.border, "tab × is a bordered chip like the column ×").toBe("1px");
   expect(Math.abs(tabX.w - colX.w), "tab × width matches the column ×").toBeLessThanOrEqual(2);
   expect(Math.abs(tabX.h - colX.h), "tab × height matches the column ×").toBeLessThanOrEqual(2);
-  // point 5 (UPDATED by #424, which supersedes the inside-the-panel special case): the nested ✎ now uses
-  // the UNIFIED block-top-left offset like every other edit affordance — anchored to its slot, floating
-  // ABOVE the slot's top edge — and must still be fully visible (not clipped by the panel/tab chrome).
-  await page.locator(".cm-lp-tabpanel-active [data-testid=macro-mermaid]").first().click();
-  await sleep(400);
+  // point 5 (re-based twice): #424 supersedes the inside-the-panel special case — the nested ✎ uses the
+  // UNIFIED block-top-left offset, floating ABOVE the slot's top edge, and must still be fully visible
+  // (not clipped by the panel/tab chrome). And under the A1 ruling a Live CLICK now enters the
+  // slot island, so the per-slot ✎ is exercised in WYSIWYG (the no-reveal mode's hover affordance).
+  await page.locator("[role=radiogroup] [role=radio]").nth(3).click(); // WYSIWYG
+  await sleep(600);
+  const slot = page.locator(".cm-lp-tabpanel-active [data-testid=macro-mermaid]").first();
+  await slot.hover();
+  await sleep(300);
   const pos = await page.evaluate(() => {
     const pen = document.querySelector("[data-testid=nested-macro-edit]");
     const slot = document.querySelector(".cm-lp-tabpanel-active [data-mac-pos]");

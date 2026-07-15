@@ -1723,6 +1723,60 @@ function removeLayoutItemAt(view: EditorView, pos: number, childName: "column" |
   view.dispatch({ changes: { from: fromLine.from, to: Math.min(toLine.to + 1, view.state.doc.length) }, userEvent: "delete" });
 }
 
+// #278 A2: rewrite the i-th tab's label (`:::tab[old]` → `:::tab[new]`) — one offset-invariant
+// replace of the OPEN-fence's head. Brackets/newlines are stripped from the label (they would corrupt the
+// fence); an empty result keeps the old label (a nameless tab renders as "Tab n", which reads as data loss).
+function renameTabAt(view: EditorView, pos: number, index: number, label: string): void {
+  const d = directiveMacroAt(view.state, pos);
+  if (!d || d.name !== "tabs") return;
+  const items = resolveDirectiveRanges(view.state.doc.toString()).filter((r) => r.name === "tab" && r.from >= d.from && r.to <= d.to);
+  const it = items[index];
+  if (!it) return;
+  const line = view.state.doc.lineAt(it.from);
+  const m = /^(\s*:+tab)(\[[^\]]*\])?/.exec(line.text);
+  if (!m) return;
+  const safe = label.replace(/[[\]\n]/g, "").trim();
+  if (!safe) return;
+  const next = `${m[1]}[${safe}]`;
+  if (next === m[0]) return;
+  view.dispatch({ changes: { from: line.from, to: line.from + m[0].length, insert: next }, userEvent: "input" });
+}
+
+// #278 A2: inline tab rename — clicking the ALREADY-ACTIVE tab swaps its label for an input; Enter /
+// blur commit (renameTabAt → the widget rebuilds from the new source), Escape cancels. The input's mousedown
+// AND keydown stopPropagation (the #265 widget-input lesson + the island key-routing lesson): its keys belong
+// to the input, never to the outer CM/vim.
+function startTabRename(view: EditorView, wrap: HTMLElement, cell: HTMLElement, index: number): void {
+  if (cell.querySelector(".cm-lp-tab-rename-input")) return; // already renaming
+  const textNode = Array.from(cell.childNodes).find((n) => n.nodeType === Node.TEXT_NODE) as Text | undefined;
+  const old = (textNode?.textContent ?? cell.textContent ?? "").trim();
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = old;
+  input.className = "cm-lp-tab-rename-input";
+  input.setAttribute("data-testid", "tab-rename-input");
+  input.size = Math.max(old.length, 3);
+  let done = false;
+  const finish = (commit: boolean) => {
+    if (done) return;
+    done = true;
+    const value = input.value;
+    input.remove();
+    if (textNode) cell.insertBefore(textNode, cell.firstChild);
+    if (commit && value.trim() && value.trim() !== old) renameTabAt(view, view.posAtDOM(wrap), index, value);
+  };
+  input.addEventListener("mousedown", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener("blur", () => finish(true));
+  textNode?.remove();
+  cell.insertBefore(input, cell.firstChild);
+  setTimeout(() => { input.focus(); input.select(); }, 0);
+}
+
 // #255: rewrite a rendered diagram fence's horizontal alignment by setting its `align=` attribute (CENTER
 // is the default → the attribute is DROPPED, so an existing untagged block stays untagged). Resolves the
 // fence at `pos` via macroFenceAt (posAtDOM lands on the closing ``` for a block atom, so we can't trust the
@@ -2001,6 +2055,7 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
     doc: bodyText,
     dark,
     testid: "slot-edit-src",
+    guardTeardownBlur: true, // #278 an in-island editUI swap must not blur-commit the island closed
     vim: view.state.facet(vimEnabled),
     extraExtensions: factory
       ? [factory({ vim: view.state.facet(vimEnabled), displayMode: view.state.facet(displayMode) === "wysiwyg" ? "wysiwyg" : "live" })]
@@ -2009,9 +2064,21 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
     onInput: () => {}, // rev4: the island renders itself (livePreview) — still NO doc write until blur
     onCommit: commitNow,
   });
+  // #278 commit at POINTERDOWN-capture when the pointer goes down OUTSIDE the island — before
+  // CM's own mousedown creates a MouseSelection on the outer view. Committing later (on blur, mid-click)
+  // shrinks the outer doc BETWEEN mousedown and mouseup, and CM's mouse selection then dispatches its
+  // (pre-shrink) positions → "RangeError: Selection points outside of document". The tab BAR is exempt
+  // the tab-switch capture handler (below) owns that commit and must record the clicked tab first.
+  const onDocPointerDown = (e: PointerEvent) => {
+    const t = e.target as HTMLElement | null;
+    if (!t || host.contains(t)) return;
+    if (t.closest(".cm-lp-tabbar") && host.closest(".cm-lp-macro-wrap")?.contains(t)) return;
+    commitNow(handle.getValue());
+  };
+  document.addEventListener("pointerdown", onDocPointerDown, true);
   // Disposed by MacroWidget.destroy(dom) on any unmount path. Marking `committed` on destroy also pins
   // the deferred tab-switch commit (below) against stale offsets: once the island is gone, no write.
-  host.__slotHandle = { destroy: () => { committed = true; handle.destroy(); } };
+  host.__slotHandle = { destroy: () => { committed = true; document.removeEventListener("pointerdown", onDocPointerDown, true); handle.destroy(); } };
   // ②: the island's keys must NEVER reach the outer editor. The island DOM lives INSIDE the outer
   // contentDOM, so every keydown bubbled into the outer CM — whose vim (normal mode) treated island keys
   // as ITS OWN motions/edits: an island `o`/`e`/`w` moved the outer selection, which clears slotEditField
@@ -2374,7 +2441,7 @@ class MacroWidget extends WidgetType {
       // removed it and REFLOWED the columns (a measured 315→336px jump on clicking a nested callout). Rendering
       // it unconditionally keeps the flex width constant; the × / slot-open click handlers stay nested-gated
       // below (structure ops are suppressed while editing a nested macro, but the width must not move).
-      if ((this.name === "columns" || this.name === "tabs") && !view.state.readOnly && !this.slotEdit) {
+      if ((this.name === "columns" || this.name === "tabs") && !view.state.readOnly) {
         const child = this.name === "columns" ? "column" : "tab";
         const add = document.createElement("button");
         add.type = "button";
@@ -2382,20 +2449,24 @@ class MacroWidget extends WidgetType {
         add.textContent = "＋";
         add.title = `Add ${child}`;
         add.setAttribute("data-testid", `layout-add-${child}`);
-        add.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (view.state.readOnly) return; addLayoutItem(view, view.posAtDOM(wrap), child); });
+        // #278 (E continued): the renders in the slot-edit state too — dropping it there
+        // reflowed the columns the moment an island opened (the same 315→336px jump). The ACTION stays
+        // gated: an outer structure edit mid-island would invalidate the island's captured commit offsets,
+        // so while a slot is being edited the is visually present but inert.
+        add.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (view.state.readOnly || view.state.field(slotEditField, false)) return; addLayoutItem(view, view.posAtDOM(wrap), child); });
         (this.name === "columns" ? wrap.querySelector(".cm-lp-columns") : wrap.querySelector(".cm-lp-tabbar"))?.appendChild(add);
       }
-      if ((this.name === "columns" || this.name === "tabs") && !view.state.readOnly && !nestedActive) {
+      // #278 B4: NOT gated on !nestedActive — the × used to vanish the moment a nested macro was
+      // selected (the "tab × disappears" repro: select the tab's mermaid → × gone), reflowing the corner.
+      // Render the affordances whenever the container is editable; actions stay gated at CLICK time.
+      if ((this.name === "columns" || this.name === "tabs") && !view.state.readOnly) {
         const child = this.name === "columns" ? "column" : "tab";
         const contentSel = this.name === "columns" ? ".cm-lp-column" : ".cm-lp-tabpanel";
-        if (this.slotEdit) {
-          // #278 §2a: a slot is being edited → swap its cell for the inline CM6 island (no ×/ affordances).
-          // Mark the host so updateDOM rebuilds (toDOM) when slot-edit toggles (else the DOM is reused + the
-          // island never mounts/unmounts — the same reason nested-host forces a rebuild).
-          wrap.classList.add("cm-lp-slot-edit-host");
-          const slotCell = wrap.querySelectorAll<HTMLElement>(contentSel)[this.slotEdit.index];
-          if (slotCell) mountSlotEditIsland(view, slotCell, { from: this.from, to: this.to }, this.slotEdit.index, child, this.theme === "dark", this.bodyFrom);
-        } else {
+        // #278 B4 (part 2): the ×/rename affordances render in EVERY editable state — the slot-edit
+        // branch used to skip them, so opening an island still made the tab × vanish (the same reflow the
+        // !nestedActive gate caused). For columns the edited CELL is replaced by the island right below, so
+        // its × simply leaves with it; the tab buttons (and other columns) keep theirs.
+        {
         const cells = wrap.querySelectorAll<HTMLElement>(this.name === "columns" ? ".cm-lp-column" : ".cm-lp-tab");
         cells.forEach((cell: HTMLElement, i: number) => {
           // A span (not a button): the tab `×` nests inside a <button> tab, and a button-in-button is invalid.
@@ -2411,18 +2482,51 @@ class MacroWidget extends WidgetType {
           // ①: gate at CLICK time — the widget DOM (and these listeners) can be REUSED across a
           // display-mode switch, so a listener attached in Live survives into Reading; Reading must not
           // structure-edit (readOnly covers it — checked live, not at build).
-          x.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (view.state.readOnly) return; removeLayoutItemAt(view, view.posAtDOM(wrap), child, i); });
+          // #278 inert while a slot island is open (same reason as the — an outer structure edit
+          // would invalidate the island's captured commit offsets); visible so the corner never reflows.
+          x.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); if (view.state.readOnly || view.state.field(slotEditField, false)) return; removeLayoutItemAt(view, view.posAtDOM(wrap), child, i); });
           if (this.name === "columns") cell.style.position = "relative"; // the × is absolutely placed in the cell
           cell.appendChild(x);
+          // #278 A2: clicking the ALREADY-ACTIVE tab again renames it inline (edits `:::tab[label]`).
+          // CAPTURE phase so the active-state check runs BEFORE the tab button's own activate flips the
+          // classes (bubble) — otherwise every tab click would look "already active" by the time we check.
+          if (this.name === "tabs") {
+            cell.addEventListener("mousedown", (e) => {
+              if (e.button !== 0 || view.state.readOnly) return;
+              if ((e.target as HTMLElement).closest(".cm-lp-tab-remove, .cm-lp-tab-rename-input")) return;
+              if (!cell.classList.contains("cm-lp-tab-active")) return; // first click = switch (bubble handler)
+              // While THIS tab's island is open, a header re-click keeps editing (the pin): starting a
+              // rename would steal focus → the island would blur-commit and close mid-edit. Rename is the
+              // no-island interaction; with the island open the click stays a no-op.
+              if (view.state.field(slotEditField, false)) return;
+              e.preventDefault();
+              e.stopImmediatePropagation(); // a re-click must not re-run activate / the island tab-switch commit
+              startTabRename(view, wrap, cell, i);
+            }, true);
+          }
         });
+        if (this.slotEdit) {
+          // #278 §2a: a slot is being edited → swap its cell for the inline CM6 island. Mark the host so
+          // updateDOM rebuilds (toDOM) when slot-edit toggles (else the DOM is reused + the island never
+          // mounts/unmounts — the same reason nested-host forces a rebuild). No slot-open listeners on the
+          // OTHER cells in this state: a preventDefault'd open would skip the island's blur→commit and lose
+          // the edit; the plain flow (blur commits, then the next click opens) stays the safe path.
+          wrap.classList.add("cm-lp-slot-edit-host");
+          const slotCell = wrap.querySelectorAll<HTMLElement>(contentSel)[this.slotEdit.index];
+          if (slotCell) mountSlotEditIsland(view, slotCell, { from: this.from, to: this.to }, this.slotEdit.index, child, this.theme === "dark", this.bodyFrom);
+        } else {
         // (#278 E part 1: the is rendered above, unconditionally, so a nested-select doesn't reflow.)
         // #278 §2a: clicking a slot's CONTENT enters inline edit for THAT slot (the CM6 island). Ignore clicks
-        // on the ×/nested-macro/tab-button (those have their own actions); for tabs only the ACTIVE panel is
+        // on the ×/add/tab-button (those have their own actions); for tabs only the ACTIVE panel is
         // visible, so this naturally targets the active tab only. Captured `from`/`to` = this container.
+        // #278 A1 (user ruling): a nested macro (`[data-mac-pos]`) is NO LONGER an ignore — ONE click
+        // anywhere in the slot (a nested warning included) enters the slot's edit mode, matching how an empty
+        // slot already behaves. Until entered, nested macros are not directly touchable; INSIDE the island
+        // they get the full top-level behaviour (reveal, pill, ✎/align, editUI) from the shared factory.
         const from = this.from, to = this.to;
         wrap.querySelectorAll<HTMLElement>(contentSel).forEach((slot: HTMLElement, i: number) => {
           slot.addEventListener("mousedown", (e) => {
-            if ((e.target as HTMLElement).closest(".cm-lp-layout-item-remove, .cm-lp-tab-remove, .cm-lp-layout-item-add, .cm-lp-tab, [data-mac-pos]")) return;
+            if ((e.target as HTMLElement).closest(".cm-lp-layout-item-remove, .cm-lp-tab-remove, .cm-lp-layout-item-add, .cm-lp-tab")) return;
             // ①: the display-mode gate lives at CLICK time, not build time — the widget DOM (with
             // this listener) is reused across a display-mode switch, so a listener attached in Live
             // survives into Reading. Reading is a reading surface (#166/#314: no body editing; the task
@@ -2436,6 +2540,7 @@ class MacroWidget extends WidgetType {
             view.dispatch({ effects: setSlotEditActive.of({ container: { from, to }, index: i }) });
           });
         });
+        }
         }
       }
       // #210 / ADR-087: embed macros have no rich UI, but their TARGET (page id / URL) must be
@@ -4395,6 +4500,10 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-macro-richui-key": { fontSize: "0.72em", fontWeight: "600", letterSpacing: "0.02em" },
   ".cm-lp-macro-raw:hover .cm-lp-macro-richui-raw, .cm-content:has(.cm-lp-macro-raw-zone:hover) .cm-lp-macro-richui-raw, .cm-lp-macro-raw-head .cm-lp-macro-richui-raw": { opacity: "0.9", pointerEvents: "auto" },
   ".cm-lp-macro-richui-raw:hover": { opacity: "1", pointerEvents: "auto" },
+  // #278 inside a slot ISLAND the -1.5em float lands ABOVE the island's scroller (its head line is
+  // the first line), where the pill is clipped and un-clickable (elementFromPoint hits the line beneath).
+  // Islands pin it to the head line's right end instead — in view, in the scroller, same affordance.
+  ".cm-lp-slot-edit-island .cm-lp-macro-richui-raw": { top: "0", left: "auto", right: "0" },
   // #254: the LAYOUT-only variant for the ✎+Ctrl+↵ hint on a RENDERED macro. Adds the key's gap but NOT
   // the always-visible opacity of cm-lp-macro-richui-raw, so the button keeps the base opacity:0 and is
   // revealed only by the hover/selection gate (below for macro-wrap; the callout-panel rule for the panel).
@@ -4407,11 +4516,14 @@ export const livePreviewTheme = EditorView.baseTheme({
   // #278 §1: PER-ITEM structure affordances on columns/tabs (retired the #213 bottom bar). A column's `×`
   // sits top-right IN the cell (hover-revealed); a tab's `×` rides the tab button; a trailing `` adds one.
   // The `×` glyph is a ::before so it never enters textContent (keeps tab labels / column text clean).
-  ".cm-lp-layout-item-remove::before, .cm-lp-tab-remove::before": { content: '"×"' },
+  // #278 B3: the glyph fills the 1.4em chip (the 0.85em element font left it looking tiny in the box).
+  ".cm-lp-layout-item-remove::before, .cm-lp-tab-remove::before": { content: '"×"', fontSize: "1.35em", lineHeight: "1" },
   // #278 F: destructive affordances (the column/tab `×`) use the semantic danger token, not fg-dim
   // delete reads as delete. Hover deepens (danger-tinted fill / full-strength colour). Token-referenced, not
   // hardcoded, so it tracks light/dark (tokens.css --danger).
-  ".cm-lp-layout-item-remove": { position: "absolute", top: "2px", right: "2px", zIndex: "3", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.4em", height: "1.4em", border: "1px solid color-mix(in srgb, var(--danger, #cf222e) 45%, transparent)", borderRadius: "4px", background: "var(--panel, #fff)", color: "var(--danger, #cf222e)", cursor: "pointer", fontSize: "0.85em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms, filter 120ms" },
+  // #278 B5: margin 0 — the column's prose flow spacing (adjacent-sibling margin-top) leaked onto the
+  // absolutely-placed chip, so a NON-empty column drew its x ~14px lower than an empty one (measured).
+  ".cm-lp-layout-item-remove": { margin: "0", position: "absolute", top: "2px", right: "2px", zIndex: "3", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.4em", height: "1.4em", border: "1px solid color-mix(in srgb, var(--danger, #cf222e) 45%, transparent)", borderRadius: "4px", background: "var(--panel, #fff)", color: "var(--danger, #cf222e)", cursor: "pointer", fontSize: "0.85em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms, filter 120ms" },
   ".cm-lp-column:hover .cm-lp-layout-item-remove": { opacity: "1" },
   // #278 item 6: hover BRIGHTENS the × (the darker/deeper hover read as a heavier action and
   // invited mis-clicks — the user ruled the opposite). brightness tracks light/dark without new tokens.
@@ -4423,6 +4535,8 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-tab-remove": { position: "absolute", top: "50%", right: "0.15em", transform: "translateY(-50%)", zIndex: "3", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.4em", height: "1.4em", border: "1px solid color-mix(in srgb, var(--danger, #cf222e) 45%, transparent)", borderRadius: "4px", background: "var(--panel, #fff)", color: "var(--danger, #cf222e)", cursor: "pointer", fontSize: "0.85em", lineHeight: "1", padding: "0", opacity: "0", pointerEvents: "none", transition: "opacity 120ms, filter 120ms" },
   ".cm-lp-tab:hover .cm-lp-tab-remove, .cm-lp-tabbar:hover .cm-lp-tab-remove": { opacity: "0.75", pointerEvents: "auto" },
   ".cm-lp-tab-remove:hover": { opacity: "1", filter: "brightness(1.3)" },
+  // #278 A2: the inline tab-rename input — inherits the tab's face, minimal chrome (accent underline).
+  ".cm-lp-tab-rename-input": { font: "inherit", color: "var(--fg, inherit)", background: "transparent", border: "none", borderBottom: "1px solid var(--accent, #4ea1ff)", outline: "none", padding: "0", width: "auto", minWidth: "3em" },
   ".cm-lp-layout-item-add": { flex: "0 0 auto", alignSelf: "flex-start", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.6em", height: "1.6em", border: "1px dashed var(--border, #888)", borderRadius: "4px", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
   ".cm-lp-macro-wrap:hover .cm-lp-layout-item-add, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-layout-item-add": { opacity: "1" },
   // #278 §2a (rev4): the inline CM6 slot-edit island — an accent-ringed box that replaces the slot's

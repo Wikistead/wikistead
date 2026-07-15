@@ -82,13 +82,27 @@ test("#196: a caret in a nested callout keeps the columns layout side-by-side an
   expect(await layout()).toEqual({ n: 2, sideBySide: true });
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("AAA note body");
 
-  // Click INTO the nested note → the flex layout is UNCHANGED (2 columns side-by-side), NO fence markers
-  // leak. The note is edited via its own editUI (callout panel), not by collapsing the columns to raw.
+  // Click INTO the nested note → the SLOT ISLAND opens for that column (#278 A1: one-click slot
+  // entry). Fences may show INSIDE the island (it is an editing surface — the note reveals under the
+  // caret exactly like top-level); the OUTER surface still leaks nothing, and the row stays side-by-side
+  // (the island occupies the clicked cell's flex slot, the sibling column is untouched).
   await page.getByText("AAA note body").click();
-  await sleep(300);
-  expect(await markers(), "no container/note fences leak — the layout stays a widget (B(i))").toBe(0);
-  expect(await layout(), "columns stay side-by-side with the caret in the nested note").toEqual({ n: 2, sideBySide: true });
-  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain("BBB"); // sibling column rendered
+  await sleep(500);
+  await expect(page.locator("[data-testid=slot-edit-island]"), "one click enters the slot island").toHaveCount(1);
+  const outsideMarkers = await page.evaluate(() => {
+    const root = (document.querySelector("[data-pane=preview] .cm-content") as HTMLElement).cloneNode(true) as HTMLElement;
+    root.querySelector("[data-testid=slot-edit-island]")?.remove();
+    return (root.innerText.match(/::::?/g) || []).length;
+  });
+  expect(outsideMarkers, "no fences leak OUTSIDE the island — the container stays a widget").toBe(0);
+  const rowLayout = await page.evaluate(() => {
+    const island = document.querySelector("[data-testid=slot-edit-island]") as HTMLElement | null;
+    const col = document.querySelector("[data-pane=preview] .cm-lp-column") as HTMLElement | null;
+    if (!island || !col) return null;
+    return Math.abs(island.getBoundingClientRect().top - col.getBoundingClientRect().top) < 20;
+  });
+  expect(rowLayout, "the island sits side-by-side with the sibling column").toBe(true);
+  expect(await page.locator("[data-pane=preview] .cm-content").first().innerText()).toContain("BBB"); // sibling column rendered
 });
 
 // #215 / ADR-100: a nested macro behaves like a top-level macro at depth — clicking it SELECTS it (ring)
@@ -112,38 +126,51 @@ test("#215: a nested callout selects, edits via its own editUI island, and delet
   await page.getByText("bot").click();
   await sleep(250);
 
-  // (1) Selection: clicking the nested note draws the nested ring + its own edit button (NOT the container).
+  // (1) Entry (#278 A1): clicking the nested note opens the SLOT ISLAND — no nested ring, no direct
+  // per-macro affordance; the column's content becomes editable as one live-preview surface.
   await page.getByText("AAA note").click();
-  await sleep(300);
-  await expect(page.locator("[data-pane=preview] .cm-lp-nested-sel")).toHaveCount(1);
-  await expect(page.locator("[data-pane=preview] [data-testid=nested-macro-edit]")).toHaveCount(1);
-  expect(await layout(), "layout stays side-by-side while a nested macro is selected").toEqual({ n: 2, sideBySide: true });
+  await sleep(500);
+  const island = page.locator("[data-testid=slot-edit-island]");
+  await expect(island).toHaveCount(1);
+  await expect(page.locator("[data-pane=preview] .cm-lp-nested-sel")).toHaveCount(0);
 
-  // (2) RichUI: the edit button opens the callout's OWN editUI island (type picker + label + body),
-  // in place — the structured macro-unit editor, not the parent columns' flat source dump.
-  await page.locator("[data-pane=preview] [data-testid=nested-macro-edit]").first().click({ force: true });
-  await sleep(350);
-  await expect(page.locator("[data-pane=preview] [data-testid=nested-edit-island]")).toHaveCount(1);
-  // #259: the callout type control is a row of VISUAL chips (calloutTypeOption, #174), NOT a bare
-  // <select> — the assertion was stale. Check the chip group the callout editUI actually renders.
-  await expect(page.locator("[data-pane=preview] [data-testid=nested-edit-island] [data-testid=callout-edit-type]")).toHaveCount(1);
-  expect(await layout(), "layout stays side-by-side while the nested editUI island is open").toEqual({ n: 2, sideBySide: true });
-  // #265: changing the TYPE via a chip in the nested island must round-trip to the source — the note becomes
-  // a warning (a nested callout's type is editable at depth, not just top-level). Was reported as "can't
-  // change type" (the assertion above only proved the chips render; this proves they FUNCTION at depth).
-  await page.locator("[data-pane=preview] [data-testid=nested-edit-island] [data-testid=callout-edit-type-warning]").click({ force: true });
+  // (2) RichUI at depth: inside the island the note behaves like TOP-LEVEL — caret on its head line
+  // surfaces the entry pill; the pill opens the callout's structured editUI (type chips + label + body).
+  await island.locator(".cm-content").getByText(/:::note/).click();
+  await sleep(300);
+  const pill = island.locator("[data-testid=callout-richui-enter]");
+  await expect(pill, "the top-level entry pill exists inside the island").toHaveCount(1);
+  const pb = (await pill.boundingBox())!;
+  await page.mouse.click(pb.x + pb.width / 2, pb.y + pb.height / 2); // coords: the pill fades/remounts, actionability loops
+  await sleep(400);
+  await expect(page.locator("[data-testid=callout-edit-type]"), "the callout editUI opened at depth").toHaveCount(1);
+  // Changing the TYPE via a chip must round-trip to the source — the note becomes a warning.
+  await page.locator("[data-testid=callout-edit-type-warning]").click({ force: true });
   await sleep(300);
   await page.keyboard.press("Escape");
   await sleep(300);
-  // the nested callout re-rendered as a WARNING (source :::note → :::warning), sibling column intact.
+  // Commit the island (click outside) → the nested callout re-renders as a WARNING, sibling intact.
+  await page.getByText("bot").click();
+  await sleep(500);
   await expect(page.locator("[data-pane=preview] .cm-lp-column .cm-lp-callout-warning")).toHaveCount(1);
   await expect(page.locator("[data-pane=preview] .cm-lp-column .cm-lp-callout-note")).toHaveCount(0);
+  expect(await layout(), "layout stays side-by-side after the depth edit").toEqual({ n: 2, sideBySide: true });
 
-  // (4) Deletion: Backspace on the selected nested note removes ONLY it — container + sibling intact.
+  // (4) Deletion at depth: re-enter the island and delete the callout's three source lines — ONLY the
+  // note goes; the container and the sibling column survive.
   await page.getByText("AAA note").click();
-  await sleep(250);
-  await page.keyboard.press("Backspace");
-  await sleep(350);
+  await sleep(500);
+  await expect(island).toHaveCount(1);
+  await island.locator(".cm-content").getByText(/:::warning/).click();
+  await sleep(200);
+  await page.keyboard.press("Home");
+  await page.keyboard.press("Shift+ArrowDown");
+  await page.keyboard.press("Shift+ArrowDown");
+  await page.keyboard.press("Shift+ArrowDown");
+  await page.keyboard.press("Delete");
+  await sleep(300);
+  await page.getByText("bot").click();
+  await sleep(500);
   const txt = await page.locator("[data-pane=preview] .cm-content").innerText();
   expect(txt, "the note is gone").not.toContain("AAA note");
   expect(txt, "the sibling column survives").toContain("BBB text");
@@ -166,28 +193,36 @@ test("#265: a nested callout island accepts REAL typing + a REAL type-chip click
   await page.keyboard.insertText("top\n\n::::columns\n:::column\n:::note\nAAA note\n:::\n:::\n:::column\nBBB text\n:::\n::::\n\nbot\n");
   await sleep(800);
 
-  // Open the nested note's editUI island via REAL clicks (no force).
+  // Open the note's editUI at depth via REAL clicks (no force): one click enters the SLOT island
+  // (#278 A1), a click on the note's head line surfaces the entry pill, the pill opens the editUI.
   await page.getByText("bot").click();
   await page.getByText("AAA note").click();
+  await sleep(500);
+  const slotIsland = page.locator("[data-testid=slot-edit-island]");
+  await expect(slotIsland).toHaveCount(1);
+  await slotIsland.locator(".cm-content").getByText(/:::note/).click();
   await sleep(300);
-  await page.locator("[data-pane=preview] [data-testid=nested-macro-edit]").first().click();
-  await sleep(350);
-  const island = page.locator("[data-pane=preview] [data-testid=nested-edit-island]");
+  const pb265 = (await slotIsland.locator("[data-testid=callout-richui-enter]").boundingBox())!;
+  await page.mouse.click(pb265.x + pb265.width / 2, pb265.y + pb265.height / 2);
+  await sleep(400);
+  const island = page.locator("[data-pane=preview] .cm-lp-callout-edit");
   await expect(island).toHaveCount(1);
 
   // (A) REAL typing into the body textarea must land (the swallow bug ate the keystrokes / focus).
-  const body = island.locator("[data-testid=callout-edit-body]");
+  const body = page.locator("[data-testid=callout-edit-body]");
   await body.click(); // real click to focus (the reported bug: this click was swallowed → island torn down)
   await expect(island).toHaveCount(1); // still open after clicking into it (not destroyed by a caret-move)
   await page.keyboard.press("End");
   await page.keyboard.type(" EDITED");
   await expect(body).toHaveValue(/AAA note EDITED/); // the field actually received the keys
   // Blur the body (real click on the label input) → its change fires → commit → source round-trips.
-  await island.locator("[data-testid=callout-edit-label]").click();
+  await page.locator("[data-testid=callout-edit-label]").click();
   await sleep(300);
 
   // (B) REAL click (no force) on the WARNING type chip → the type changes at depth.
-  await page.locator("[data-pane=preview] [data-testid=nested-edit-island] [data-testid=callout-edit-type-warning]").click();
+  await page.locator("[data-testid=callout-edit-type-warning]").click();
+  await sleep(300);
+  await page.keyboard.press("Escape"); // exit the editUI back to the island
   await sleep(300);
 
   // Exit the island (click outside) and assert BOTH edits took: the nested callout is a WARNING whose body
