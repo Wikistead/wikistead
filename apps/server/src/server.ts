@@ -6,7 +6,7 @@ import { startWebhookDrainWorker } from './routes/webhooks.js'
 import { startShareLinkSweepWorker } from './routes/share-links.js'
 import { startTrashRetentionWorker } from './routes/pages.js'
 import { fgaClient } from '@wikistead/authz'
-import { assertProductionFgaPersistent } from './openfga-guard.js'
+import { assertProductionFgaPersistent, assertFgaModelFresh } from './openfga-guard.js'
 
 // #178 / ADR-084: the server bootstrap, extracted from index.ts into a reusable function so BOTH
 // entrypoints share it — the CE entrypoint (apps/server/src/index.ts) and the EE composition root
@@ -16,6 +16,9 @@ import { assertProductionFgaPersistent } from './openfga-guard.js'
 export async function startServer(): Promise<FastifyInstance> {
   // Fail fast: in production OpenFGA must be persistent (postgres), not in-memory (ADR-035).
   assertProductionFgaPersistent()
+  // Fail fast (non-production): the pinned FGA model must exist and match model.fga (#433) —
+  // model drift otherwise surfaces as silent data-shaped authz failures instead of a config error.
+  await assertFgaModelFresh()
 
   const app = await buildApp()
 
