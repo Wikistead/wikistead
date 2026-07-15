@@ -23,6 +23,23 @@ import { resolveTenantForRequest, tenantPublicEnabled, loadPublicPage } from './
 
 const ANON = 'user:anonymous'
 
+// #408: a plain-text description from the PUBLISHED markdown (the loadPublicPage row — the
+// must-fix: never getExcerpt, whose helper lacks the published_at gate). Cheap markdown-strip, first
+// ~160 chars of prose; the caller escapes it.
+export function descriptionFromMd(md: string | null): string {
+  if (!md) return ''
+  const text = md
+    .replace(/^---\n[\s\S]*?\n---\n/, '')          // frontmatter
+    .replace(/```[\s\S]*?```/g, ' ')                 // fenced code
+    .replace(/^:{3,}[^\n]*$/gm, ' ')                  // directive markers
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')          // images
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')         // links → text
+    .replace(/[#>*_`~|-]/g, ' ')                       // markdown punctuation
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text.length > 160 ? `${text.slice(0, 159)}…` : text
+}
+
 // Load the built SPA index.html the shell injects into. FAIL-CLOSED by contract: a configured path
 // that cannot be read (or is not a plausible HTML document) throws — the server must not boot and
 // silently serve a broken shell. Returns null when UNSET (dev: shell off by design).
@@ -63,9 +80,16 @@ export async function publicShellPlugin(app: FastifyInstance) {
 
     const title = escapeHtml(page.title)
     const canonical = `https://${escapeHtml(req.headers.host ?? '')}/pub/${escapeHtml(page.id)}`
+    const description = escapeHtml(descriptionFromMd(page.published_md))
     let head = ''
     if (page.noindex) head += '<meta name="robots" content="noindex">'
     head += `<title>${title}</title><link rel="canonical" href="${canonical}">`
+    // #408: OpenGraph/Twitter meta on the same seam. og:image is OUT of v1 (an image URL needs
+    // safeHref-class scheme validation beyond escaping — ADR-154). Description comes from the SAME
+    // published row the gate resolved — never a draft's text.
+    head += `<meta property="og:title" content="${title}">`
+    if (description) head += `<meta property="og:description" content="${description}"><meta name="description" content="${description}">`
+    head += `<meta property="og:type" content="article"><meta property="og:url" content="${canonical}"><meta name="twitter:card" content="summary">`
     return send(reply, 200, injectShellHead(template, head))
   })
 
@@ -91,6 +115,53 @@ export async function publicShellPlugin(app: FastifyInstance) {
     let head = ''
     if (spaceRow.noindex) head += '<meta name="robots" content="noindex">'
     head += `<title>${title}</title><link rel="canonical" href="${canonical}">`
+    head += `<meta property="og:title" content="${title}"><meta property="og:type" content="website"><meta property="og:url" content="${canonical}"><meta name="twitter:card" content="summary">`
     return send(reply, 200, injectShellHead(template, head))
+  })
+}
+
+// ── #408: robots.txt + sitemap.xml (ADR-154 §2) ──────────────────────────────
+// Both respect the #253 tenant PARENT SWITCH: surface off ⇒ robots disallows everything and the
+// sitemap is empty — a switched-off tenant leaks no URL list and invites no crawl. Registered
+// UNCONDITIONALLY (unlike the shell, no built index.html is needed).
+export async function publicRobotsPlugin(app: FastifyInstance) {
+  app.get('/robots.txt', async (req, reply) => {
+    reply.type('text/plain; charset=utf-8').header('cache-control', 'no-store')
+    const tenant = await resolveTenantForRequest(req.headers.host ?? '')
+    const enabled = tenant ? await tenantPublicEnabled(tenant.id) : false
+    if (!enabled) return reply.send('User-agent: *\nDisallow: /\n')
+    // /pub is the crawlable surface; /assets lets JS-executing crawlers render the body (ADR-154).
+    return reply.send(
+      `User-agent: *\nAllow: /pub/\nAllow: /assets/\nDisallow: /\n\nSitemap: https://${req.headers.host}/sitemap.xml\n`,
+    )
+  })
+
+  app.get('/sitemap.xml', async (req, reply) => {
+    reply.type('application/xml; charset=utf-8').header('cache-control', 'no-store')
+    const empty = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>'
+    const tenant = await resolveTenantForRequest(req.headers.host ?? '')
+    if (!tenant || !(await tenantPublicEnabled(tenant.id))) return reply.send(empty)
+    // Candidates: PUBLISHED + INDEXABLE rows (gated in the SQL itself); each then confirmed as
+    // anonymously viewable via FGA — a sitemap is an existence oracle BY DESIGN, so it lists exactly
+    // what a crawler may index and nothing else (member-only/noindex/draft pages never appear).
+    const rows = await (withTenantTx(tenant.id, async (tx) => {
+      return tx<{ id: string; published_at: Date }[]>`
+        SELECT p.id, p.published_at
+        FROM pages p JOIN spaces s ON s.id = p.space_id
+        WHERE p.published_at IS NOT NULL AND p.deleted_at IS NULL AND NOT (p.noindex OR s.noindex)
+        ORDER BY p.published_at DESC
+        LIMIT 5000
+      `
+    }) as Promise<{ id: string; published_at: Date }[]>)
+    const urls: string[] = []
+    for (const r of rows) {
+      if (!(await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: r.id }))) continue
+      urls.push(
+        `<url><loc>https://${escapeHtml(req.headers.host ?? '')}/pub/${escapeHtml(r.id)}</loc><lastmod>${r.published_at.toISOString()}</lastmod></url>`,
+      )
+    }
+    return reply.send(
+      `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join('')}</urlset>`,
+    )
   })
 }

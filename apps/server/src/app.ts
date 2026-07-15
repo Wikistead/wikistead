@@ -34,7 +34,7 @@ import { searchPlugin } from './routes/search.js'
 import { attachmentsPlugin } from './routes/attachments.js'
 import { revisionsPlugin } from './routes/revisions.js'
 import { publicPlugin } from './routes/public.js'
-import { publicShellPlugin } from './routes/public-shell.js'
+import { publicShellPlugin, publicRobotsPlugin } from './routes/public-shell.js'
 import { apiKeysPlugin } from './routes/api-keys.js'
 import { shareLinksPlugin } from './routes/share-links.js'
 import { pinsPlugin } from './routes/pins.js'
@@ -211,6 +211,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     if (req.url === '/healthz' || req.url === '/readyz' ||
         req.url.startsWith('/webhooks/stripe') || req.url.startsWith('/public/') || // ONLY the Stripe inbound
         req.url.startsWith('/pub/') || // #409 / ADR-154: the crawler-facing HTML shell resolves its own tenant + anonymous gate
+        req.url === '/robots.txt' || req.url === '/sitemap.xml' || // #408 / ADR-154 §2: crawler surface, self-gated
         // receiver is public here — NOT all of /webhooks/ (the outbound-webhook admin CRUD /webhooks/:id is
         // a member/admin route and must go through auth; #228 collided with the old broad /webhooks/ prefix).
         req.url.startsWith('/auth/login') || req.url.startsWith('/auth/callback') ||
@@ -392,6 +393,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(revisionsPlugin)
   await app.register(publicPlugin)
   await app.register(publicShellPlugin) // #409 / ADR-154: /pub HTML shell (no-op unless PUBLIC_SHELL_INDEX is set)
+  await app.register(publicRobotsPlugin) // #408 / ADR-154 §2: robots.txt + sitemap.xml (parent-switch gated)
   await app.register(apiKeysPlugin)
   await app.register(shareLinksPlugin)
   await app.register(pinsPlugin) // #284: member pins (member-only — no guest opt-in)
