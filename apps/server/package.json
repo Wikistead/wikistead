@@ -67,12 +67,13 @@
   },
   "devDependencies": {
     "@openfga/syntax-transformer": "^0.2.1",
-    "@wikistead/entitlements-cloud": "workspace:^",
     "@types/node": "^22.0.0",
     "@types/nodemailer": "^8.0.1",
+    "@wikistead/entitlements-cloud": "workspace:^",
     "jose": "^5.9.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
-    "vitest": "^2.0.0"
+    "vitest": "^2.0.0",
+    "yaml": "^2.9.0"
   }
 }
