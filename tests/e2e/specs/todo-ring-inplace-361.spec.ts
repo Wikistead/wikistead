@@ -127,6 +127,74 @@ test("#361 c1846-3: the SIDEBAR ring animates across the refetch remount (transi
   expect(runs, "the sidebar ring arc played a stroke-dashoffset transition").toBeGreaterThanOrEqual(1);
 });
 
+// #361the DOUBLE-CLICK path. A rapid second click makes the two optimistic draft flips cancel
+// out BEFORE the server folds either, so with the toggle POST held open BOTH requests 409 ("expected
+// exactly one checkbox flip"). Two defects lived here:
+//   1. the failure-revert flipped back "its own char" — but that char is ALSO the original state, so
+//      the second revert flipped the draft AWAY from published: the page went silently dirty (the
+//      unpublished badge appeared and survived a reload) with a draft the user never wrote.
+//   2. every toggle invalidated ["published"]/["pages"] independently — no coalescing (the reported
+//      extra-blink mechanism; the refetch side is coalesced in useToggleTask now).
+// This pins the user-visible invariants: the box shows ONLY the two optimistic transitions (no extra
+// blink at rAF resolution), settles on the optimistic final value, and leaves NO dirty residue
+// (no unpublished badge, before or after a reload). Verified red without the fix (the badge appeared).
+async function doubleClickPin(browser: any, boxIndex: number, startChecked: boolean) {
+  const page = await (await browser.newContext()).newPage();
+  await page.route("**/tasks/toggle", async (route) => { await new Promise((r) => setTimeout(r, 800)); await route.continue(); });
+  await openScratch(page, `todo-dbl-361-${boxIndex}-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::todo[Sprint]\n- [ ] alpha\n- [x] bravo\n:::\n\nbelow\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(600);
+  await expect(page.getByTestId("edit-toggle")).toBeVisible({ timeout: 8000 });
+  await sleep(500);
+
+  const box = page.getByTestId("task-checkbox").nth(boxIndex);
+  expect(await box.evaluate((el) => (el as HTMLInputElement).checked)).toBe(startChecked);
+  await box.evaluate((el) => {
+    const w = window as unknown as { __tl?: [number, boolean][] };
+    w.__tl = [];
+    const t0 = performance.now();
+    const step = () => {
+      w.__tl!.push([Math.round(performance.now() - t0), (el as HTMLInputElement).checked]);
+      if (performance.now() - t0 < 6000) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+  await box.click();
+  await sleep(120);
+  await box.click();
+  await sleep(6200); // both held POSTs settle + any refetch/dirty-poll lands inside the sampling window
+
+  // rAF timeline: exactly the two optimistic transitions — no third flip (no extra blink), and the
+  // state after the second click never deviates from the optimistic final value (= the start value).
+  const tl = await page.evaluate(() => (window as unknown as { __tl?: [number, boolean][] }).__tl!);
+  const transitions: [number, boolean][] = [];
+  let cur: boolean | null = null;
+  for (const [t, v] of tl) { if (v !== cur) { transitions.push([t, v]); cur = v; } }
+  expect(transitions.length, `only the two clicks moved the box (timeline: ${transitions.map(([t, v]) => `${t}ms:${v}`).join(" -> ")})`).toBeLessThanOrEqual(3); // initial sample + click1 + click2
+  expect(cur, "settled on the optimistic final value").toBe(startChecked);
+  expect(await box.evaluate((el) => (el as HTMLInputElement).checked)).toBe(startChecked);
+
+  // no dirty residue: the failed round-trips must leave the draft equal to published — the silent
+  // corruption showed up here as a persistent "unpublished changes" badge.
+  await expect(page.getByTestId("unpublished-badge")).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByTestId("edit-toggle")).toBeVisible({ timeout: 8000 });
+  await sleep(1200); // let the dirty poll land
+  await expect(page.getByTestId("unpublished-badge"), "no dirty residue after a reload").toHaveCount(0);
+}
+
+test("#361a rapid double-click (ON-start) shows no extra blink and leaves no dirty residue", async ({ browser }) => {
+  await doubleClickPin(browser, 0, false);
+});
+
+test("#361a rapid double-click (OFF-start) shows no extra blink and leaves no dirty residue", async ({ browser }) => {
+  await doubleClickPin(browser, 1, true);
+});
+
 // #361the FAST-CLICK flicker. preventDefault on mousedown does NOT stop a native checkbox's
 // click-activation: a real click (mousedown+mouseup) flipped the box optimistically on mousedown and the
 // browser flipped it BACK on mouseup, leaving an unchecked window for the whole server round-trip
