@@ -35,6 +35,7 @@ import { attachmentsPlugin } from './routes/attachments.js'
 import { revisionsPlugin } from './routes/revisions.js'
 import { publicPlugin } from './routes/public.js'
 import { publicShellPlugin, publicRobotsPlugin } from './routes/public-shell.js'
+import { auditPlugin } from './routes/audit.js'
 import { apiKeysPlugin } from './routes/api-keys.js'
 import { shareLinksPlugin } from './routes/share-links.js'
 import { pinsPlugin } from './routes/pins.js'
@@ -394,6 +395,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(publicPlugin)
   await app.register(publicShellPlugin) // #409 / ADR-154: /pub HTML shell (no-op unless PUBLIC_SHELL_INDEX is set)
   await app.register(publicRobotsPlugin) // #408 / ADR-154 §2: robots.txt + sitemap.xml (parent-switch gated)
+  await app.register(auditPlugin) // #401 / ADR-155: audit-log viewer (tenant-admin + auditLog entitlement)
   await app.register(apiKeysPlugin)
   await app.register(shareLinksPlugin)
   await app.register(pinsPlugin) // #284: member pins (member-only — no guest opt-in)

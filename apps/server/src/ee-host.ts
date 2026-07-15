@@ -20,6 +20,7 @@ export { resolveTenantFromHost, loadTenant } from './tenant.js'
 export { groupFgaId, syncMemberGroups } from './auth/group-sync.js'
 export { billableMemberCount, lockSeats } from './auth/invites.js'
 export { auditIfEntitled, drainAuditOutbox, verifyTenantAuditChain } from './audit/outbox.js'
+export { auditPlugin } from './routes/audit.js' // #401 / ADR-155: the viewer moves to the ee/ overlay with the write side (#178)
 export { entitlementDenied } from './entitlement-ux.js'
 
 // #178: additional CE-GENERAL auth helpers the moved SAML code needs (SAML → packages/ee-server, mirroring

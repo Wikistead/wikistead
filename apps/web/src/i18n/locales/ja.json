@@ -169,7 +169,8 @@
     "public": "公開設定",
     "billing": "課金",
     "orphans": "孤立ドラフト",
-    "webhooks": "Webhook"
+    "webhooks": "Webhook",
+    "audit": "監査ログ"
   },
   "adminPublic": {
     "title": "公開設定",
@@ -948,5 +949,21 @@
     "onLine": "行",
     "goToLine": "行へ移動",
     "go": "移動"
+  },
+  "adminAudit": {
+    "title": "監査ログ",
+    "body": "改ざん検知つき（ハッシュチェーン・追記専用）のテナント操作台帳。管理操作・メンバー/権限の変更を記録します。",
+    "verify": "チェーンを検証",
+    "export": "JSONL エクスポート",
+    "verified": "チェーン検証 OK — {{count}} 件が無傷です。",
+    "broken": "チェーン破損（seq {{seq}}）: {{reason}}",
+    "time": "日時",
+    "actor": "実行者",
+    "action": "操作",
+    "target": "対象",
+    "empty": "監査エントリはまだありません。",
+    "loadMore": "さらに読み込む",
+    "lockedTitle": "監査ログは Team プランの機能です",
+    "lockedBody": "エントリは保持されています。アップグレードすると閲覧・検証・エクスポートできます。"
   }
 }

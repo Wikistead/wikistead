@@ -169,7 +169,8 @@
     "public": "Public access",
     "billing": "Billing",
     "orphans": "Orphan drafts",
-    "webhooks": "Webhooks"
+    "webhooks": "Webhooks",
+    "audit": "Audit log"
   },
   "adminPublic": {
     "title": "Public access",
@@ -949,5 +950,21 @@
     "onLine": "on line",
     "goToLine": "Go to line",
     "go": "go"
+  },
+  "adminAudit": {
+    "title": "Audit log",
+    "body": "The tenant's tamper-evident activity ledger (hash-chained, append-only). Admin actions, membership and access changes.",
+    "verify": "Verify chain",
+    "export": "Export JSONL",
+    "verified": "Chain verified — {{count}} entries intact.",
+    "broken": "CHAIN BROKEN at seq {{seq}}: {{reason}}",
+    "time": "Time",
+    "actor": "Actor",
+    "action": "Action",
+    "target": "Target",
+    "empty": "No audit entries yet.",
+    "loadMore": "Load more",
+    "lockedTitle": "Audit log is a Team feature",
+    "lockedBody": "Your entries are being retained. Upgrade to view, verify, and export the ledger."
   }
 }

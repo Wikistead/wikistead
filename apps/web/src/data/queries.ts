@@ -1084,6 +1084,25 @@ export function useRevokeApiKey() {
 // #228 / ADR-108: outbound webhooks (admin console CRUD). The secret is returned ONCE on creation.
 export interface WebhookSummary { id: string; url: string; event_filter: string[] | null; active: boolean; failure_count: number; createdAt: string }
 export interface WebhookCreated { id: string; secret: string }
+// #401 / ADR-155: the audit-log viewer (tenant-admin + auditLog entitlement; server re-checks both).
+export interface AuditRow { seq: number; at: string; actor: string; action: string; target: string }
+export interface AuditVerdict { valid: boolean; count: number; brokenAt?: number; brokenSeq?: number; reason?: string }
+
+export function useAuditLog(before: number | null, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["audit-log", before],
+    queryFn: () => apiFetch<AuditRow[]>(`/audit?limit=50${before != null ? `&before=${before}` : ""}`, token).then((r) => r ?? []),
+    enabled,
+    staleTime: 5_000,
+  });
+}
+
+export function useAuditVerify() {
+  const { token } = useSession();
+  return useMutation({ mutationFn: () => apiFetch<AuditVerdict>(`/audit/verify`, token) });
+}
+
 export function useWebhooks() {
   const { token } = useSession();
   return useQuery({ queryKey: ["webhooks"], queryFn: () => apiFetch<WebhookSummary[]>("/webhooks", token).then((r) => r ?? []) });
