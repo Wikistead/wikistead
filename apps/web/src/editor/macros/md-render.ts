@@ -382,8 +382,9 @@ function renderBlock(node: SNode, src: string, into: Node): number | void {
       if (rd) {
         const bodyLines = full.split("\n").slice(1);
         if (bodyLines.length && /^\s*:::+\s*$/.test(bodyLines[bodyLines.length - 1]!)) bodyLines.pop();
-        el.appendChild(renderMarkdownToDom(bodyLines.join("\n"), nestedBodyBase ?? undefined));
+        appendMarkdownInto(el, bodyLines.join("\n"), nestedBodyBase ?? undefined);
       } else {
+        el.classList.add("wks-prose"); // #381: renderBlocks emits the same raw-tag vocabulary
         renderBlocks(node, src, el);
       }
       into.appendChild(el); return dirTo;
@@ -403,6 +404,15 @@ function renderBlocks(parent: SNode, src: string, into: Node): void {
     const consumed = renderBlock(c, src, into);
     if (typeof consumed === "number" && consumed > skipUntil) skipUntil = consumed;
   }
+}
+
+// #381 / ADR-163: THE way to put rendered markdown into a container. Adds `.wks-prose` (the single
+// raw-tag prose stylesheet, styles/prose.css) to the container and appends the sanitized fragment
+// appending through this helper is what makes a future surface unable to forget the prose class (the
+// #335/#351 parity-gap class). NEVER call this on `.cm-content` / non-markdown DOM (ADR-163 invariant).
+export function appendMarkdownInto(el: HTMLElement, src: string, baseOffset?: number, opts?: { staticMacros?: boolean }): void {
+  el.classList.add("wks-prose");
+  el.appendChild(renderMarkdownToDom(src, baseOffset, opts));
 }
 
 // Parse `src` as Markdown and return a sanitized DOM fragment. Safe by construction (no innerHTML).
@@ -570,7 +580,7 @@ export function renderCalloutPanel(containerClass: string, icon: string, label: 
   }
   const bodyEl = document.createElement("div");
   bodyEl.className = "cm-lp-callout-panel-body";
-  bodyEl.appendChild(renderMarkdownToDom(body, baseOffset)); // sanitized DOM (no innerHTML); #215: thread base for nested tags
+  appendMarkdownInto(bodyEl, body, baseOffset); // sanitized DOM (no innerHTML); #215: thread base for nested tags
   main.appendChild(bodyEl);
   wrap.appendChild(main);
   return wrap;
