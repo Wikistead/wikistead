@@ -84,3 +84,65 @@ test("#424: a nested macro's edit button is unified too (Ctrl+↵ face, slot top
   expect(rel.dx, "nested button hugs the slot's left edge").toBeLessThanOrEqual(4);
   expect(rel.dy, "nested button floats above the slot top").toBeLessThan(0);
 });
+
+// #424 (rejection): the CALLOUT FAMILY was the last odd one out — details sat top-RIGHT and a
+// warning callout's button escaped the panel entirely (static panel → wrong containing block). Pin the
+// unified top-left on details AND a typed callout, inside the block horizontally, in BOTH modes.
+test("#424 details + warning callout edit buttons sit at the unified top-left, inside the block", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "unify-callout");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("intro\n\n:::details My summary\nhidden body\n:::\n\n:::warning\nwatch out\n:::\n\ntail\n");
+  await sleep(700);
+
+  for (const mode of ["live", "wysiwyg"] as const) {
+    await setMode(page, mode);
+    await page.keyboard.press("Control+End"); // caret away → widgets render
+    await sleep(200);
+
+    const details = page.locator("[data-pane=preview] [data-testid=macro-details]").first();
+    await expect(details, mode).toBeVisible();
+    await details.hover();
+    await sleep(250);
+    const dBtn = page.getByTestId("details-edit").first();
+    const dRel = await relPos(dBtn, details);
+    const dBox = (await dBtn.boundingBox())!;
+    const dBlock = (await details.boundingBox())!;
+    expect(dRel.dx, `${mode}: details button hugs the LEFT edge (was top-right)`).toBeLessThanOrEqual(4);
+    expect(dRel.dy, `${mode}: details button floats above the block top`).toBeLessThan(0);
+    expect(dBlock.x + dBlock.width - (dBox.x + dBox.width), `${mode}: details button stays inside the block (dRight>0)`).toBeGreaterThan(0);
+
+    const callout = page.locator("[data-pane=preview] .cm-lp-callout-panel.cm-lp-callout-warning").first();
+    await expect(callout, mode).toBeVisible();
+    await callout.hover();
+    await sleep(250);
+    const cBtn = page.getByTestId("callout-panel-edit").first();
+    const cRel = await relPos(cBtn, callout);
+    const cBox = (await cBtn.boundingBox())!;
+    const cBlock = (await callout.boundingBox())!;
+    expect(cRel.dx, `${mode}: warning button hugs the LEFT edge`).toBeLessThanOrEqual(4);
+    expect(cRel.dy, `${mode}: warning button floats above the block top`).toBeLessThan(0);
+    expect(cBlock.x + cBlock.width - (cBox.x + cBox.width), `${mode}: warning button stays INSIDE the panel (was 114px outside)`).toBeGreaterThan(0);
+    // Visible ON HOVER inside the viewport (the symptom was "no hint appears on warning").
+    expect(await cBtn.evaluate((el) => Number(getComputedStyle(el).opacity)), `${mode}: warning hint visible on hover`).toBeGreaterThan(0.9);
+    // The unified face on both.
+    await expect(cBtn.locator(".cm-lp-macro-richui-key")).toHaveText("Ctrl+↵");
+    await expect(dBtn.locator(".cm-lp-macro-richui-key")).toHaveText("Ctrl+↵");
+  }
+
+  // Entry behaviour non-regression: warning button still opens the callout editUI…
+  await page.getByTestId("callout-panel-edit").first().click();
+  await sleep(300);
+  await expect(page.getByTestId("callout-edit-type")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await sleep(200);
+  // …and the details button still raw-reveals the source (Live).
+  await setMode(page, "live");
+  const details = page.locator("[data-pane=preview] [data-testid=macro-details]").first();
+  await details.hover();
+  await sleep(250);
+  await page.getByTestId("details-edit").first().click();
+  await sleep(300);
+  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain(":::details");
+});
