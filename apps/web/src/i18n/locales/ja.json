@@ -67,7 +67,8 @@
   "userMenu": {
     "label": "アカウント",
     "accountSettings": "アカウント設定",
-    "tenantAdmin": "テナント管理"
+    "tenantAdmin": "テナント管理",
+    "devModeTitle": "dev トークンバイパスの identity(dev-user)です — 実 identity にはログインしてください"
   },
   "accountNav": {
     "title": "アカウント",

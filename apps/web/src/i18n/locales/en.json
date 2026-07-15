@@ -67,7 +67,8 @@
   "userMenu": {
     "label": "Account",
     "accountSettings": "Account settings",
-    "tenantAdmin": "Tenant admin"
+    "tenantAdmin": "Tenant admin",
+    "devModeTitle": "Dev-token bypass identity (dev-user) — sign in to use your real identity"
   },
   "accountNav": {
     "title": "Account",

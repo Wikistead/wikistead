@@ -22,6 +22,10 @@ export interface Session {
   collabToken: string; // token handed to the collab WebSocket
   tenantId: string;
   sub: string | null;
+  // #427: TRUE while the dev-token god-mode identity (dev-user) is active. A REAL cookie
+  // session always wins over the bypass (see the probe effect); the header shows a DEV
+  // badge while this is set so god-mode is never mistaken for a product identity.
+  devMode: boolean;
   // UI-convenience flag (tenant#admin) for menu/route gating ONLY. NOT a security
   // boundary — every admin action re-checks tenant#admin server-side.
   isAdmin: boolean;
@@ -47,7 +51,12 @@ export function useSession(): Session {
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const env = (import.meta as any).env ?? {};
-  const devToken: string | undefined = env.VITE_DEV_TOKEN;
+  // #427 (c): VITE_DEV_TOKEN_DISABLE=1 turns the bypass off from .env.local. Vite's precedence
+  // puts .env.development ABOVE .env.local for the SAME var, so un-setting VITE_DEV_TOKEN there
+  // never worked — a DIFFERENT opt-out var is not shadowed. Empty string counts as unset
+  // (.env.realauth pins VITE_DEV_TOKEN= to force real auth).
+  const devToken: string | undefined =
+    env.VITE_DEV_TOKEN_DISABLE === "1" ? undefined : env.VITE_DEV_TOKEN || undefined;
   const tenantId: string = env.VITE_TENANT ?? "tenant_dev";
 
   const [status, setStatus] = useState<AuthStatus>(devToken ? "authed" : "loading");
@@ -57,16 +66,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // dev-token is god-mode (tenant admin) to match the server's dev bypass.
   const [isAdmin, setIsAdmin] = useState<boolean>(!!devToken);
   const [collabToken, setCollabToken] = useState<string>(devToken ?? "");
+  // #427 (a): god-mode is PROVISIONAL — the probe below hands the identity to a real cookie
+  // session when one exists. Until then the dev token renders instantly (no loading flash,
+  // and the e2e dev-token contexts — which never carry a cookie — are untouched).
+  const [devMode, setDevMode] = useState<boolean>(!!devToken);
 
   useEffect(() => {
-    if (devToken) return; // dev bypass: already authed, dev-token drives collab
     let cancelled = false;
     void (async () => {
       try {
-        // /auth/me exposes ONLY sub + displayName + picture (never email) — #3.
+        // /auth/me exposes ONLY sub + displayName + picture (never email) — #3. Cookie only:
+        // with a dev token this probes for a REAL session (#427 — a logged-in identity must
+        // never be masked by the bypass); without one it decides authed vs anon as before.
         const me = await apiFetch<{ sub: string; isAdmin?: boolean; displayName?: string | null; picture?: string | null }>("/auth/me", ""); // cookie
         if (cancelled) return;
-        if (!me) return setStatus("anon");
+        if (!me) {
+          if (!devToken) setStatus("anon");
+          return; // dev token + no cookie → stay in god-mode
+        }
         setSub(me.sub);
         setIsAdmin(!!me.isAdmin);
         setDisplayName(me.displayName ?? null);
@@ -74,9 +91,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const ct = await apiFetch<{ token: string }>("/auth/collab-token", "", { method: "POST" });
         if (cancelled) return;
         setCollabToken(ct?.token ?? "");
+        setDevMode(false); // the real session owns the identity from here on
         setStatus("authed");
       } catch {
-        if (!cancelled) setStatus("anon"); // 401 → show login
+        if (!cancelled && !devToken) setStatus("anon"); // 401 → show login (real mode only)
       }
     })();
     return () => { cancelled = true; };
@@ -103,19 +121,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const me = await apiFetch<{ displayName?: string | null; picture?: string | null }>("/auth/me", devToken ?? "");
+      // Use the ACTIVE mode's authority (#427): once a real session owns the identity,
+      // refresh must not fall back to the dev bearer (that would re-mask the real user).
+      const me = await apiFetch<{ displayName?: string | null; picture?: string | null }>("/auth/me", devMode ? devToken ?? "" : "");
       if (!me) return;
       setDisplayName(me.displayName ?? null);
       setPicture(normPicture(me.picture));
     } catch { /* keep the current identity on a transient error */ }
-  }, [devToken]);
+  }, [devToken, devMode]);
 
   const value: Session = {
     status,
-    token: devToken ?? "",
+    // #427: the dev bearer authorizes API calls only WHILE god-mode is active; a real
+    // session switches the app to cookie authority (same as REAL mode).
+    token: devMode ? devToken ?? "" : "",
     collabToken,
     tenantId,
     sub,
+    devMode,
     isAdmin,
     displayName,
     picture,
