@@ -98,3 +98,36 @@ test("#370: :::tagged lists a published page carrying the tag; :::children lists
   await expect(item).toBeVisible({ timeout: 10000 });
   await expect(item).toHaveText("fm-tagged-member");
 });
+
+// #370 (review return): `:::children` showed the generic "Empty children" placeholder and
+// NEVER fired the host listSource fetch — its always-empty body was swallowed by the empty-macro branch
+// (backlinks had the exemption; children didn't). This pins the real flow: a parent with PUBLISHED
+// children renders the resolved list on the member edit surface.
+test("#370 :::children resolves and lists the published child pages (member edit surface)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const parent = await openScratch(page, "fm-children-parent");
+  // two published children under the parent, via the API (deterministic fixture)
+  const childIds = await page.evaluate(async ({ parent }) => {
+    const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };
+    const ids: string[] = [];
+    for (const title of ["fm-child-A", "fm-child-B"]) {
+      const r = await fetch(`http://dev.localhost:4010/spaces/demo_space/pages`, { method: "POST", headers: H, body: JSON.stringify({ title, parentId: parent }) });
+      const { id } = (await r.json()) as { id: string };
+      await fetch(`http://dev.localhost:4010/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+      ids.push(id);
+    }
+    return ids;
+  }, { parent });
+
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::children\n:::\n\ntail\n");
+  await page.keyboard.press("Control+End");
+  await sleep(800);
+  // the widget must NOT be the generic empty-macro placeholder…
+  await expect(page.getByTestId("macro-empty")).toHaveCount(0);
+  // …but the host-resolved list with both children
+  for (const id of childIds) {
+    await expect(page.locator(`[data-testid="macro-children-item-${id}"]`)).toBeVisible({ timeout: 10000 });
+  }
+});
