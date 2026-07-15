@@ -4815,8 +4815,14 @@ export const livePreviewTheme = EditorView.baseTheme({
   // #90 / #337: the collapsible details container is ONE box (border + radius) that GROWS when opened — the
   // summary bar and the body share the same box, and the body's row animates its height (no separate quoted
   // block appearing below). #337 point 2.
-  ".cm-lp-details-collapsible": { position: "relative", border: "1px solid var(--border, rgba(127,127,127,0.4))", borderRadius: "6px", overflow: "hidden", margin: "0.3em 0" },
-  ".cm-lp-details-summary": { display: "flex", alignItems: "center", gap: "0.35em", padding: "0.4em 0.7em", cursor: "pointer", color: "var(--fg-dim, #888)", userSelect: "none", fontWeight: "600" },
+  // #424overflow VISIBLE (was hidden) — the box-level clip existed only for the rounded
+  // corners, but it also clipped the unified top-left edit button (top:-1.5em floats ABOVE the box),
+  // making it unpaintable/unclickable. Corner clipping moves to the children below.
+  ".cm-lp-details-collapsible": { position: "relative", border: "1px solid var(--border, rgba(127,127,127,0.4))", borderRadius: "6px", margin: "0.3em 0" },
+  // borderRadius: the corner clip moved here from the box's overflow:hidden (#424) — all
+  // corners while CLOSED (the bar IS the box), top corners only when open (rule below).
+  ".cm-lp-details-summary": { display: "flex", alignItems: "center", gap: "0.35em", padding: "0.4em 0.7em", cursor: "pointer", color: "var(--fg-dim, #888)", userSelect: "none", fontWeight: "600", borderRadius: "5px" },
+  ".cm-lp-details-open .cm-lp-details-summary": { borderRadius: "5px 5px 0 0" },
   ".cm-lp-details-summary:hover": { background: "var(--panel-2, rgba(127,127,127,0.06))" },
   // ONE glyph rotated 90° in the open state (no ▸/▾ text swap). Transitions apply only after mount (the
   // `details-animated` class is added post-paint) so a rebuild / initial render doesn't animate.
@@ -4828,7 +4834,8 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-details-bodywrap": { display: "grid", gridTemplateRows: "0fr" },
   ".cm-lp-details-animated .cm-lp-details-bodywrap": { transition: "grid-template-rows 180ms ease" },
   ".cm-lp-details-open .cm-lp-details-bodywrap": { gridTemplateRows: "1fr" },
-  ".cm-lp-details-body": { overflow: "hidden", minHeight: "0" }, // grid child clips; NO padding (see above)
+  // borderRadius rounds the bottom corners (the clip moved off the box — #424).
+  ".cm-lp-details-body": { overflow: "hidden", minHeight: "0", borderRadius: "0 0 5px 5px" }, // grid child clips; NO padding (see above)
   ".cm-lp-details-body-inner": { padding: "0.1em 0.7em 0.55em" },
   ".cm-lp-details-body-inner > :first-child": { marginTop: "0" },
   "@media (prefers-reduced-motion: reduce)": {
