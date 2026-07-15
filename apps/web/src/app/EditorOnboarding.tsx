@@ -107,6 +107,8 @@ export function EditorOnboardingDialog({ open, onClose }: { open: boolean; onClo
                 <li key={k} className="flex items-center gap-2 text-sm"><Check size={14} className="flex-none text-[var(--accent)]" /> {t(k)}</li>
               ))}
             </ul>
+            {/* #395 / ADR-156: the one help-surface line for the atom/typed-body cursor policy. */}
+            <p className="text-xs text-fg-dim">{t("onboarding.atomHint")}</p>
             <p className="text-xs text-fg-dim">{t("onboarding.doneHint")}</p>
             <div className="flex justify-end">
               <Button variant="primary" data-testid="onboarding-close" onClick={close}>{t("common.close")}</Button>

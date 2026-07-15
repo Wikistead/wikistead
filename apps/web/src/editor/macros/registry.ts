@@ -234,6 +234,10 @@ export interface BlockDirectiveMacro extends DirectiveMacroBase {
   // entry (Ctrl+Enter → macroRenderActiveField) or a non-empty selection. For a picker-completed atom
   // (embed-page) whose id is edited via the ⇆ retarget button / Ctrl+Enter — there is nothing to type
   // in place, so caret-in-reveals-raw would only strand the caret. Omit → caret-in reveals raw (default).
+  // #395 / ADR-156 (the codified policy): set this for every macro with NOTHING TO TYPE at the block
+  // itself — picker-chosen references, modal-edited scenes, zero-argument dynamic blocks. Registration
+  // review must place each new macro in one class; a caret affordance on a nothing-to-type body is a
+  // review-blocking defect (the `:::children` straggler this policy closed).
   readonly atomSelectable?: boolean;
   readonly containerClass?: never;
   readonly icon?: never;
