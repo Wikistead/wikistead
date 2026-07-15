@@ -282,7 +282,11 @@
     "pages": "ページ数",
     "sharedWith": "共有先",
     "manage": "管理",
-    "empty": "スペースがまだありません。"
+    "empty": "スペースがまだありません。",
+    "creationPolicyTitle": "スペース作成",
+    "creationPolicyBody": "このテナントで新しいスペースを作成できる人。個人スペースは常に作成できます。",
+    "creationPolicyMembers": "全メンバー",
+    "creationPolicyAdmins": "テナント管理者のみ"
   },
   "spaceSettings": {
     "title": "{{name}} · 設定",
@@ -310,7 +314,11 @@
     "deleteHint": "スペースを削除すると、配下のすべてのページも完全に削除されます。",
     "deleteSpace": "スペースを削除",
     "deleteConfirmTitle": "このスペースを削除",
-    "deleteConfirm": "スペース「{{name}}」と配下のすべてのページを削除しますか？ この操作は元に戻せません。"
+    "deleteConfirm": "スペース「{{name}}」と配下のすべてのページを削除しますか？ この操作は元に戻せません。",
+    "pageCreationTitle": "ページ作成",
+    "pageCreationBody": "このスペースで新しいページを作成できる人。すべての作成経路（新規・複製・テンプレート・インポート）に適用されます。",
+    "pageCreationEditors": "編集できる全員",
+    "pageCreationManagers": "スペース管理者のみ"
   },
   "spaceTrash": {
     "title": "ゴミ箱",
@@ -542,7 +550,11 @@
     "restrictTitle": "制限（スペース閲覧者でも拒否）",
     "restrictPlaceholder": "メンバー ID（user sub）",
     "restrictAdd": "制限する",
-    "unrestrict": "制限を解除"
+    "unrestrict": "制限を解除",
+    "commentAudienceTitle": "このページのコメント",
+    "commentAudienceBody": "スペース設定より広くコメントを開放します。ページは開くだけで、狭めることはできません。",
+    "commentGuests": "閲覧リンクを持つゲストがコメント可能",
+    "commentMembers": "スペースの全メンバーがコメント可能"
   },
   "spaceTheme": {
     "title": "テーマ",

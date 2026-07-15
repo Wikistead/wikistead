@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, usePublished, useTenantGroups, useShareLinks, useSetFrozen, usePageMemberCandidates, type PageRelation } from "../data/queries";
+import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, usePublished, useTenantGroups, useShareLinks, useSetFrozen, usePageMemberCandidates, usePageCommentAudience, useSetPageCommentAudience, type PageRelation } from "../data/queries";
 import { MemberSearchInput } from "./MemberSearchInput";
 import { ConfirmDialog } from "./dialogs";
 import { notify } from "./toast";
@@ -26,6 +26,8 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   const restrict = useRestrict(pageId);
   const unrestrict = useUnrestrict(pageId);
   const { data: isPrivate } = usePagePrivate(pageId, open); // #109 / ADR-098
+  const commentAudience = usePageCommentAudience(pageId, open); // #399 / ADR-158 §1
+  const setCommentAudience = useSetPageCommentAudience(pageId);
   const setPrivate = useSetPrivate(pageId);
   // #109 Fix A (comment 768): making a page private REVOKES its share links — warn (with the count) first.
   const { data: shareLinks } = useShareLinks({ type: "page", id: pageId }, open);
@@ -307,6 +309,30 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               </div>
             ))}
           </div>
+        </div>
+
+        {/* #399 / ADR-158 §1: per-page comment-audience OVERRIDE — additive only (a page can open what
+            the space keeps closed, never narrow it). Independent wildcards, mirrors SpaceMembersTab. */}
+        <div className="mt-4 border-t border-border pt-3" data-testid="page-comment-audience">
+          <p className="m-0 mb-1 text-xs font-medium text-fg-dim">{t("permissions.commentAudienceTitle")}</p>
+          <p className="m-0 mb-2 text-xs text-fg-dim">{t("permissions.commentAudienceBody")}</p>
+          {([
+            { key: "guests" as const, label: t("permissions.commentGuests"), testId: "page-comment-guests" },
+            { key: "members" as const, label: t("permissions.commentMembers"), testId: "page-comment-members" },
+          ]).map(({ key, label: lbl, testId }) => {
+            const on = !!commentAudience.data?.[key];
+            return (
+              <label key={key} className="mb-2 flex items-center gap-2 text-sm">
+                <Switch checked={on} testId={testId} data-on={on}
+                  disabled={commentAudience.isLoading || setCommentAudience.isPending}
+                  onChange={(v) => setCommentAudience.mutate({ [key]: v }, {
+                    onSuccess: () => notify.success(t("toast.saved")),
+                    onError: () => notify.error(t("toast.actionFailed")),
+                  })} />
+                <span>{lbl}</span>
+              </label>
+            );
+          })}
         </div>
 
         <DialogFooter className="mt-4">

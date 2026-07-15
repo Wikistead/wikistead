@@ -5,12 +5,13 @@ import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useActiveSpace } from "../app/ActiveSpace";
 import { useSession } from "../session/SessionProvider";
-import { useSpaces, useRenameSpace, useDeleteSpace, useUploadSpaceIcon, useRemoveSpaceIcon, usePublicSurface, useSpacePublic, useSetSpacePublic } from "../data/queries";
+import { useSpaces, useRenameSpace, useDeleteSpace, useUploadSpaceIcon, useRemoveSpaceIcon, usePublicSurface, useSpacePublic, useSetSpacePublic, usePageCreationPolicy, useSetPageCreationPolicy } from "../data/queries";
 import { Button } from "../ui/Button";
 import { ShareDialog } from "../ui/ShareDialog";
 import { Input } from "../ui/Input";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import { Switch } from "../ui/Switch";
+import { Select } from "../ui/Select";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
 import { SettingsShell, SettingsDenied, type SettingsTab } from "./SettingsShell";
@@ -79,6 +80,8 @@ function SpaceGeneralTab() {
   const [draft, setDraft] = useState(name);
   const [confirming, setConfirming] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const pageCreation = usePageCreationPolicy(spaceId); // #399 / ADR-158 §3
+  const setPageCreation = useSetPageCreationPolicy(spaceId);
 
   // #277 / ADR-116: the space public toggle — offered ONLY while the tenant parent switch is ON
   // (mirrors the page toggle in PermissionsDialog; the server re-checks manage + the switch anyway).
@@ -149,6 +152,28 @@ function SpaceGeneralTab() {
           <Button variant="dangerGhost" disabled={removeIcon.isPending} data-testid="space-icon-image-remove"
             onClick={() => removeIcon.mutate(undefined, { onSuccess: () => notify.success(t("toast.saved")), onError: () => notify.error(t("toast.actionFailed")) })}>{t("spaceSettings.iconImageRemove")}</Button>
         )}
+      </div>
+
+      {/* #399 / ADR-158 §3: page-creation policy — who may create pages here. Restrict-only; the
+          server gate lives INSIDE createPage (every entry form: new/duplicate/template/import/MCP). */}
+      <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("spaceSettings.pageCreationTitle")}</label>
+      <p style={{ color: "var(--fg-dim)", fontSize: 13, marginTop: 0 }}>{t("spaceSettings.pageCreationBody")}</p>
+      <div style={{ marginBottom: 32 }} data-testid="page-creation-policy">
+        <Select
+          size="sm"
+          value={pageCreation.data?.pageCreationPolicy ?? "editors"}
+          disabled={pageCreation.isLoading || setPageCreation.isPending}
+          ariaLabel={t("spaceSettings.pageCreationTitle")}
+          testId="page-creation-policy-select"
+          options={[
+            { value: "editors", label: t("spaceSettings.pageCreationEditors") },
+            { value: "managers", label: t("spaceSettings.pageCreationManagers") },
+          ]}
+          onChange={(v) => setPageCreation.mutate(v, {
+            onSuccess: () => notify.success(t("toast.saved")),
+            onError: () => notify.error(t("toast.actionFailed")),
+          })}
+        />
       </div>
 
       {/* Space-scoped share link (#104): a view-only link to the whole space. */}

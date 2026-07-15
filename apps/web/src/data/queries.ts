@@ -1103,6 +1103,57 @@ export function useAuditVerify() {
   return useMutation({ mutationFn: () => apiFetch<AuditVerdict>(`/audit/verify`, token) });
 }
 
+// #399 / ADR-158: permission-policy knobs (restrict-only; the server is the fortress).
+export function usePageCommentAudience(pageId: string | null, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["page-comment-audience", pageId],
+    queryFn: () => apiFetch<{ guests: boolean; members: boolean }>(`/pages/${encodeURIComponent(pageId!)}/comment-audience`, token),
+    enabled: enabled && pageId != null && pageId.length > 0,
+  });
+}
+export function useSetPageCommentAudience(pageId: string | null) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { guests?: boolean; members?: boolean }) =>
+      apiFetch<{ guests: boolean; members: boolean }>(`/pages/${encodeURIComponent(pageId!)}/comment-audience`, token, { method: "PUT", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["page-comment-audience", pageId] }),
+  });
+}
+export function useSpaceCreationPolicy(enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["creation-policy"],
+    queryFn: () => apiFetch<{ spaceCreationPolicy: string }>(`/admin/creation-policy`, token),
+    enabled,
+  });
+}
+export function useSetSpaceCreationPolicy() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: string) => apiFetch<{ spaceCreationPolicy: string }>(`/admin/creation-policy`, token, { method: "PUT", body: JSON.stringify({ spaceCreationPolicy: v }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["creation-policy"] }),
+  });
+}
+export function usePageCreationPolicy(spaceId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["page-creation-policy", spaceId],
+    queryFn: () => apiFetch<{ pageCreationPolicy: string }>(`/spaces/${encodeURIComponent(spaceId)}/page-creation-policy`, token),
+    enabled: enabled && spaceId.length > 0,
+  });
+}
+export function useSetPageCreationPolicy(spaceId: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: string) => apiFetch<{ pageCreationPolicy: string }>(`/spaces/${encodeURIComponent(spaceId)}/page-creation-policy`, token, { method: "PUT", body: JSON.stringify({ pageCreationPolicy: v }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["page-creation-policy", spaceId] }),
+  });
+}
+
 export function useWebhooks() {
   const { token } = useSession();
   return useQuery({ queryKey: ["webhooks"], queryFn: () => apiFetch<WebhookSummary[]>("/webhooks", token).then((r) => r ?? []) });
