@@ -606,6 +606,12 @@ class CheckboxWidget extends WidgetType {
           ctl.onToggle(index, from, cur);
         }
       });
+      // #361suppress the NATIVE click toggle. preventDefault on mousedown does NOT stop a
+      // checkbox's click-activation — the browser flipped the box BACK on mouseup, so a fast click
+      // showed checked→unchecked→(server round-trip ~500ms)→checked ("turns on, turns off, turns on").
+      // A long press hid it (the round-trip completed while held). With the click default suppressed,
+      // the optimistic mousedown flip stands until the document/refetch confirms it.
+      box.addEventListener("click", (e) => e.preventDefault());
     }
     return box;
   }

@@ -126,3 +126,47 @@ test("#361 c1846-3: the SIDEBAR ring animates across the refetch remount (transi
   const runs = await page.evaluate(() => (window as unknown as { __sideRingRuns?: number }).__sideRingRuns ?? 0);
   expect(runs, "the sidebar ring arc played a stroke-dashoffset transition").toBeGreaterThanOrEqual(1);
 });
+
+// #361the FAST-CLICK flicker. preventDefault on mousedown does NOT stop a native checkbox's
+// click-activation: a real click (mousedown+mouseup) flipped the box optimistically on mousedown and the
+// browser flipped it BACK on mouseup, leaving an unchecked window for the whole server round-trip
+// (checked → unchecked → ~500ms → checked). element.click() never reproduced it (no mousedown), which is
+// how the earlier pins stayed green. This drives a REAL click with the toggle endpoint DELAYED to widen
+// the window, and samples the box on every frame: it must never revert before the server confirms.
+test("#361a real fast click never shows the reverted state while the toggle is in flight", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  // widen the revert window: hold the toggle POST for 1200ms
+  await page.route("**/tasks/toggle", async (route) => {
+    await new Promise((r) => setTimeout(r, 1200));
+    await route.continue();
+  });
+  await openScratch(page, `todo-fastclick-361-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::todo[Sprint]\n- [ ] alpha\n- [x] bravo\n:::\n\nbelow\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(600);
+  await expect(page.getByTestId("edit-toggle")).toBeVisible({ timeout: 8000 });
+  await sleep(500);
+  const boxes = page.getByTestId("task-checkbox");
+  await expect(boxes).toHaveCount(2);
+
+  // ON: real click on the unchecked alpha. The optimistic mousedown flip must HOLD through the whole
+  // in-flight window — unfixed, the native click reverted it and the box sat UNCHECKED for the 1200ms
+  // round-trip (exactly the reported "turns on, turns off, turns on").
+  await boxes.nth(0).click();
+  const onSamples: boolean[] = [];
+  for (let t = 0; t < 10; t++) { await sleep(100); onSamples.push(await boxes.nth(0).evaluate((el) => (el as HTMLInputElement).checked)); }
+  expect(onSamples.every(Boolean), `alpha stayed CHECKED while the toggle was in flight (samples: ${onSamples.join(",")})`).toBe(true);
+  await sleep(800); // let the held POST land + refetch settle
+  expect(await boxes.nth(0).evaluate((el) => (el as HTMLInputElement).checked), "alpha confirmed on").toBe(true);
+
+  // OFF: real click on the checked bravo — symmetric: it must stay UNCHECKED through the window.
+  await boxes.nth(1).click();
+  const offSamples: boolean[] = [];
+  for (let t = 0; t < 10; t++) { await sleep(100); offSamples.push(await boxes.nth(1).evaluate((el) => (el as HTMLInputElement).checked)); }
+  expect(offSamples.every((v) => !v), `bravo stayed UNCHECKED while the toggle was in flight (samples: ${offSamples.join(",")})`).toBe(true);
+  await sleep(800);
+  expect(await boxes.nth(1).evaluate((el) => (el as HTMLInputElement).checked), "bravo confirmed off").toBe(false);
+});
