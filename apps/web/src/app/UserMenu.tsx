@@ -10,10 +10,19 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 // server re-checks tenant#admin on every admin action) and Sign out.
 export function UserMenu({ onLogout }: { onLogout: () => void }) {
   const { t } = useTranslation();
-  const { isAdmin, displayName, picture, sub, user } = useSession();
+  const { isAdmin, displayName, picture, sub, user, devMode } = useSession();
   const navigate = useNavigate();
   const name = displayName ?? sub ?? t("userMenu.label");
   return (
+    <>
+    {/* #427 (b): make god-mode VISIBLE — while the dev-token bypass identity (dev-user) is
+        active, show a DEV badge so it is never mistaken for a real logged-in identity. A real
+        cookie session flips devMode off and the badge disappears. */}
+    {devMode && (
+      <span className="ml-2 rounded border border-border bg-panel-2 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-fg-dim" title={t("userMenu.devModeTitle")} data-testid="dev-mode-badge">
+        DEV
+      </span>
+    )}
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger className="ml-2 flex cursor-pointer rounded-full p-0 leading-none transition-shadow hover:shadow-[0_0_0_2px_var(--panel-2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" aria-label={t("userMenu.label")} title={name} data-testid="user-menu">
         <Avatar name={name} src={picture} seed={user.seed ?? sub ?? name} size={26} data-testid="user-avatar" />
@@ -35,5 +44,6 @@ export function UserMenu({ onLogout }: { onLogout: () => void }) {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    </>
   );
 }
