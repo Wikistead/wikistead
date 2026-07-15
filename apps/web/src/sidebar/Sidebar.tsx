@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { NodeApi } from "react-arborist";
-import { ChevronDown, ChevronUp, FilePlus, FileText, PinOff, Settings } from "lucide-react";
+import { ChevronDown, ChevronUp, FileText, PinOff, Settings } from "lucide-react";
 import { PageTree, type PageTreeNode } from "./PageTree";
 import { SpaceSwitcher } from "./SpaceSwitcher";
 import { SpaceIcon } from "../ui/SpaceIcon"; // #284 show a page pin's owning space
@@ -30,6 +30,7 @@ import { notify } from "../ui/toast";
 import { DeleteBacklinkWarning } from "../app/DeleteBacklinkWarning";
 import { ShareDialog } from "../ui/ShareDialog";
 import { TemplatePickerDialog } from "./TemplatePickerDialog";
+import { NewPageButton } from "./NewPageButton";
 import { downloadSpaceExport, importSpaceArchive } from "../data/exportApi"; // #309 export / #308 import
 
 import { buildPageNodes } from "./page-nodes";
@@ -260,7 +261,7 @@ export function Sidebar() {
           <div className="flex flex-none gap-0.5">
             {/* #250: split — the button creates a blank page immediately; the adjacent ▾ opens the
                 template picker (blank stays the fast default, templates are one extra click). */}
-            {canEdit && <button type="button" className={headerBtn} title={t("sidebar.newPage")} aria-label={t("sidebar.newPage")} data-testid="new-page" onClick={() => newPage(null)}><FilePlus size={15} /></button>}
+            {canEdit && <NewPageButton onClick={() => newPage(null)} />}
             {canEdit && <button type="button" className={headerBtn} title={t("templatePicker.title")} aria-label={t("templatePicker.title")} data-testid="new-page-from-template" onClick={() => setPickingTemplate(true)}><ChevronDown size={13} /></button>}
             {canManage && <button type="button" className={headerBtn} title={t("sidebar.spaceSettings")} aria-label={t("sidebar.spaceSettings")} data-testid="space-settings-open" onClick={() => current && navigate(`/spaces/${current}/settings`)}><Settings size={15} /></button>}
           </div>

@@ -174,6 +174,36 @@ describe('#274 guest create-publish (ADR-135 §3)', () => {
     expect(second.json()).toEqual({ error: 'rate limited', reason: 'create_rate' }) // static — no limit/id echo
   })
 
+  it('an EDIT-link guest RENAMES a page (naming happens in the editor), attributed and view-token-proof', async () => {
+    const anonId = anon()
+    const tok = await mkSpaceTok(await mkSpaceLink('edit'), 'edit', anonId)
+    const r = await createAsGuest(tok, { title: 'Untitled' })
+    expect(r.statusCode, r.body).toBe(201)
+    const page = r.json() as { id: string }
+    createdPages.push(page.id)
+
+    const ren = await app.inject({ method: 'PATCH', url: `/pages/${page.id}`, headers: guestHeaders(tok), payload: { title: 'Named by guest' } })
+    expect(ren.statusCode, ren.body).toBe(200)
+    expect((ren.json() as { title: string }).title).toBe('Named by guest')
+    const [row] = await admin`SELECT title FROM pages WHERE id = ${page.id}`
+    expect(row.title).toBe('Named by guest')
+
+    // a VIEW token cannot rename (the hook's capability guard rejects it before the handler)
+    const viewTok = await mkSpaceTok(await mkSpaceLink('view'), 'view', anon())
+    expect((await app.inject({ method: 'PATCH', url: `/pages/${page.id}`, headers: guestHeaders(viewTok), payload: { title: 'nope' } })).statusCode).toBe(401)
+    // and an edit-link guest cannot rename a page OUTSIDE its space (FGA deny — uniform 403)
+    const otherSpace = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: 'dev-user', plan: 'free', name: `gcp274b-${Date.now().toString(36)}` })).id
+    const foreign = (await createPage(db, fgaClient, app.searchDriver, { tenantId: TENANT, spaceId: otherSpace, userId: 'dev-user', title: 'foreign' })).id
+    createdPages.push(foreign)
+    try {
+      await publishPage(db, fgaClient, app.searchDriver, app.storageDriver, { pageId: foreign, subject: 'user:dev-user', createdBy: 'user:dev-user' })
+      expect((await app.inject({ method: 'PATCH', url: `/pages/${foreign}`, headers: guestHeaders(tok), payload: { title: 'nope' } })).statusCode).toBe(403)
+    } finally {
+      await deleteObjectTuples(fgaClient, `space:${otherSpace}`).catch(() => {})
+      await admin`DELETE FROM spaces WHERE id = ${otherSpace}`.catch(() => {})
+    }
+  })
+
   it('members are untouched by the guest caps (create keeps working while the link cap is 1)', async () => {
     await admin`UPDATE tenant_settings SET abuse_create_page_link_max = 1, abuse_create_page_session_max = 1 WHERE tenant_id = ${TENANT}`
     for (let i = 0; i < 2; i++) {

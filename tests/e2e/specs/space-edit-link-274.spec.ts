@@ -42,12 +42,18 @@ test("#274: a space EDIT link lets an anonymous guest edit a published page in t
   await sleep(800);
   expect(await paneText(member, "preview")).toContain("from-space-guest");
 
-  // #274 §3: the guest CREATES a page from the sidebar affordance — created published atomically,
-  // it opens in the editor and joins the tree.
-  await guest.getByTestId("guest-new-page").click();
-  await guest.getByTestId("guest-new-page-title").fill("Guest Wiki Page");
-  await guest.keyboard.press("Enter");
+  // #274 §3: the guest CREATES a page with the MEMBER new-page control — same testid/shape,
+  // click → an "Untitled" page immediately (created published atomically) → the editor opens in edit
+  // mode; naming happens in the title band, member-parity.
+  await guest.getByTestId("guest-sidebar").getByTestId("new-page").click();
   await guest.waitForSelector("[data-pane=preview] .cm-content", { timeout: 10000 });
+  await expect
+    .poll(async () => guest.$eval("[data-pane=preview] .cm-content", (el) => el.getAttribute("contenteditable")), { timeout: 10000 })
+    .toBe("true"); // opened straight in edit mode (member parity)
+  const band = guest.getByTestId("guest-title-band");
+  await band.locator("button[data-testid=page-title]").click();
+  await band.getByTestId("page-title-input").fill("Guest Wiki Page");
+  await guest.keyboard.press("Enter");
   await expect(guest.getByTestId("guest-tree-page").filter({ hasText: "Guest Wiki Page" })).toBeVisible({ timeout: 10000 });
 
   // revoke → the guest loses the space (uniform denial on the next load).

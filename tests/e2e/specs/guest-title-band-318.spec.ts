@@ -68,7 +68,10 @@ test("#318 view guest: the title band shows the page title; no rename affordance
   )).toBeGreaterThan(30);
 });
 
-test("#318 edit guest: the band shows too, and the title still has NO rename affordance", async ({ browser }) => {
+// #274 SUPERSEDES the original #318 rule for EDIT capability: guests can now create pages
+// ("Untitled"), so naming happens in the editor title band exactly like members — the title renders as
+// the click-to-rename button and a rename round-trips. VIEW capability keeps the read-only h1 (above).
+test("#318/#274 edit guest: the band title is click-to-rename (member parity) and persists", async ({ browser }) => {
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const pageId = await newPublishedPage(member, TITLE + " E");
@@ -80,7 +83,13 @@ test("#318 edit guest: the band shows too, and the title still has NO rename aff
 
   const band = guest.getByTestId("guest-title-band");
   await expect(band).toBeVisible();
-  await expect(band.locator("h1[data-testid=page-title]")).toContainText(TITLE + " E");
-  // even with EDIT capability the title is a plain h1 — rename is member-only (server gate unchanged).
-  await expect(guest.locator("button[data-testid=page-title]")).toHaveCount(0);
+  await expect(band.locator("button[data-testid=page-title]")).toContainText(TITLE + " E");
+  await band.locator("button[data-testid=page-title]").click();
+  await band.getByTestId("page-title-input").fill(TITLE + " E renamed");
+  await guest.keyboard.press("Enter");
+  await expect(band.locator("button[data-testid=page-title]")).toContainText(TITLE + " E renamed", { timeout: 5000 });
+  // the rename PERSISTED server-side (not just local state)
+  await guest.reload();
+  await guest.waitForSelector("[data-pane=preview] .cm-content");
+  await expect(guest.getByTestId("guest-title-band").locator("[data-testid=page-title]")).toContainText(TITLE + " E renamed");
 });
