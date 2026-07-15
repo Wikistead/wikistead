@@ -13,7 +13,7 @@ test("#275: sidebar-deleting the open page toasts and navigates away (no ghost)"
   const row = page.locator("[data-testid=sidebar] [data-testid=tree-page-name]").first();
   await row.hover();
   await page.locator("[data-testid=sidebar] [data-testid=page-actions]").first().click();
-  await page.locator("[data-testid=page-menu]").getByText(/delete/i).first().click();
+  await page.locator("[data-testid=page-menu]").getByText(/move to trash/i).first().click(); // #411 the soft-delete entry label
 
   // Confirm the delete.
   await expect(page.getByTestId("confirm-dialog")).toBeVisible();
