@@ -2126,7 +2126,30 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
   const onDocPointerDown = (e: PointerEvent) => {
     const t = e.target as HTMLElement | null;
     if (!t || host.contains(t)) return;
-    if (t.closest(".cm-lp-tabbar") && host.closest(".cm-lp-macro-wrap")?.contains(t)) return;
+    const wrapEl = host.closest(".cm-lp-macro-wrap") as HTMLElement | null;
+    // #278point 2: the tab-bar exemption narrows to NON-ACTIVE tabs (the tab-SWITCH path owns
+    // that commit so it can record the clicked index first). A click on the ACTIVE tab is the RENAME
+    // gesture (supersedes thekeep-editing ruling): commit here — BEFORE mousedown side effects,
+    // the(b) RangeError lesson — and mount the rename on the REBUILT widget by container offset +
+    // tab index. The mount cannot ride the browser's own mousedown: the commit shrinks the outer doc and
+    // shifts the layout, so the follow-up compat mouse events would hit-test a displaced element (the
+    // probe showed them landing on .cm-content). preventDefault suppresses them instead.
+    const ownBarTab = t.closest(".cm-lp-tab") as HTMLElement | null;
+    if (ownBarTab && wrapEl?.contains(ownBarTab)) {
+      if (!ownBarTab.classList.contains("cm-lp-tab-active")) return;
+      e.preventDefault();
+      const startFrom = wrapEl.dataset.layoutFrom;
+      const idx = Array.from(ownBarTab.parentElement?.querySelectorAll(".cm-lp-tab") ?? []).indexOf(ownBarTab);
+      commitNow(handle.getValue());
+      if (startFrom == null || idx < 0) return;
+      setTimeout(() => {
+        const nw = view.dom.querySelector(`[data-layout-from="${startFrom}"]`) as HTMLElement | null;
+        const cellNew = nw?.querySelectorAll<HTMLElement>(".cm-lp-tab")[idx];
+        if (nw && cellNew) startTabRename(view, nw, cellNew, idx);
+      }, 0);
+      return;
+    }
+    if (!ownBarTab && t.closest(".cm-lp-tabbar") && wrapEl?.contains(t)) return;
     commitNow(handle.getValue());
   };
   document.addEventListener("pointerdown", onDocPointerDown, true);
@@ -2262,6 +2285,10 @@ class MacroWidget extends WidgetType {
       // nested macros tag themselves (data-mac-pos) for the hit-test. Consumed by columns/tabs liveRender;
       // reset immediately after so it never leaks to another macro's render.
       const isLayout = this.name === "columns" || this.name === "tabs";
+      // #278point 2: a stable re-lookup key — the rename flow commits the island (the widget
+      // rebuilds mid-capture), so the handler must find the FRESH wrap; the container's start offset
+      // is unchanged by an in-slot commit (all edits land after it).
+      if (isLayout) wrap.dataset.layoutFrom = String(this.from);
       if (isLayout) setPendingBaseOffset(this.bodyFrom);
       const rendered = this.macro.liveRender(this.body, { theme: this.theme }); // #200: the widget's built theme (eq() rebuilds on a switch), not a live DOM read
       if (isLayout) setPendingBaseOffset(null);
@@ -2559,12 +2586,11 @@ class MacroWidget extends WidgetType {
               if (e.button !== 0 || view.state.readOnly) return;
               if ((e.target as HTMLElement).closest(".cm-lp-tab-remove, .cm-lp-tab-rename-input")) return;
               if (!cell.classList.contains("cm-lp-tab-active")) return; // first click = switch (bubble handler)
-              // While THIS tab's island is open, a header re-click keeps editing (thepin): starting a
-              // rename would steal focus → the island would blur-commit and close mid-edit. Rename is the
-              // no-island interaction; with the island open the click stays a no-op.
-              if (view.state.field(slotEditField, false)) return;
               e.preventDefault();
               e.stopImmediatePropagation(); // a re-click must not re-run activate / the island tab-switch commit
+              // #278point 2: this only ever fires with NO island open in this container — an
+              // active-tab pointerdown with an island open is handled (commit + deferred rename mount)
+              // by the island's document-capture handler, which preventDefaults the compat mousedown.
               startTabRename(view, wrap, cell, i);
             }, true);
           }
@@ -4603,7 +4629,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   // #255 comment 1040: the top-left action buttons flow in ONE flex row (no fixed `left` magic numbers), so
   // the ✎ + its "Ctrl+↵" hint (#174) and the align toggle never overlap regardless of width. The row is the
   // positioned element; its buttons flow statically inside it.
-  ".cm-lp-macro-btnrow": { position: "absolute", top: "-1.5em", left: "0", display: "inline-flex", alignItems: "center", gap: "4px", zIndex: "3" },
+  // #278point 1: pointer-INERT until the chrome is actually shown. The row floats -1.5em ABOVE
+  // its wrap, overlapping the PREVIOUS line — with pointer-events alive there, hovering that line hit
+  // the row (a wrap CHILD), satisfied `.cm-lp-macro-wrap:hover`, and lit the chrome "permanently" in a
+  // slot island (where the line above is dense editing text). Interactivity returns with visibility.
+  ".cm-lp-macro-btnrow": { position: "absolute", top: "-1.5em", left: "0", display: "inline-flex", alignItems: "center", gap: "4px", zIndex: "3", pointerEvents: "none" },
+  ".cm-lp-macro-wrap:hover .cm-lp-macro-btnrow, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-btnrow": { pointerEvents: "auto" },
   ".cm-lp-macro-btnrow > .cm-lp-macro-edit, .cm-lp-macro-btnrow > .cm-lp-macro-align": { position: "static", top: "auto", left: "auto" },
   // #424: the standalone (non-btnrow) edit button pins to the block's LEFT edge too — one position for
   // every entry affordance. Scoped to the edit button only (retarget is a top-RIGHT control).
@@ -4683,6 +4714,16 @@ export const livePreviewTheme = EditorView.baseTheme({
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
   ".cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap:hover .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-align": { opacity: "1" },
+  // #278point 1: a slot-edit ISLAND is a descendant of its (hovered / atom-SELECTED) outer
+  // container wrap, so the descendant reveal above lit every macro chrome inside the island permanently
+  // (hovering plain island text showed the mermaid ✎ Ctrl+↵; the -1.5em btnrow also stole that line's
+  // hover). Inside an island only the chrome's OWN wrap state may reveal it: re-hide + re-inert whenever
+  // that wrap is neither hovered nor selected. Higher specificity than the reveal, so it wins.
+  ".cm-lp-slot-edit-island .cm-lp-macro-wrap:not(:hover):not(.cm-lp-atom-sel) > .cm-lp-macro-btnrow": { pointerEvents: "none" },
+  ".cm-lp-slot-edit-island .cm-lp-macro-wrap:not(:hover):not(.cm-lp-atom-sel) > .cm-lp-macro-btnrow .cm-lp-macro-edit, .cm-lp-slot-edit-island .cm-lp-macro-wrap:not(:hover):not(.cm-lp-atom-sel) > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-slot-edit-island .cm-lp-macro-wrap:not(:hover):not(.cm-lp-atom-sel) > .cm-lp-macro-retarget": { opacity: "0", pointerEvents: "none" },
+  // ... and the callout-panel ✎ (it wears cm-lp-macro-edit too, so the descendant reveal reached it the
+  // same way). Its designed reveal is its OWN panel's hover (4661-style) — keep exactly that in islands.
+  ".cm-lp-slot-edit-island .cm-lp-callout-panel-editable:not(:hover) .cm-lp-callout-panel-edit": { opacity: "0", pointerEvents: "none" },
   // #174 point 3: innermost-wins for the edit ✎. Hovering a NESTED macro slot reveals THAT slot's own ✎;
   // while it does, suppress the CONTAINER's ✎ (its own direct btnrow) so the inner and outer buttons never
   // co-occur. `:has([data-mac-pos]:hover)` scopes it to the container holding the hovered slot; `>` keeps it

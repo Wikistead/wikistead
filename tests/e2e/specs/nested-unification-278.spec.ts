@@ -105,8 +105,9 @@ test("#278 item 1: switching tabs commits + closes the open slot island", async 
   expect(errs, errs.join(" | ")).toHaveLength(0);
 });
 
-// item 1 guard: clicking the EDITED tab's own header keeps the island open (no surprise commit).
-test("#278 item 1: clicking the edited tab's own header keeps editing", async ({ browser }) => {
+//point 2 (user ruling, supersedes the"keeps editing" pin): clicking the EDITED tab's
+// own header COMMITS the island and opens the inline rename — nothing typed in the island is lost.
+test("#278 item 1: clicking the edited tab's own header commits + opens rename", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "tab-same-island"); await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
@@ -116,9 +117,19 @@ test("#278 item 1: clicking the edited tab's own header keeps editing", async ({
   await page.locator("[data-pane=preview] .cm-lp-tabpanel-active").first().click();
   await sleep(400);
   await expect(page.locator("[data-testid=slot-edit-island]")).toBeVisible();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.type(" EDIT");
+  await sleep(150);
   await page.locator("[data-pane=preview] .cm-lp-tab", { hasText: "One" }).click();
-  await sleep(400);
-  await expect(page.locator("[data-testid=slot-edit-island]"), "same-tab click keeps the island").toBeVisible();
+  await sleep(500);
+  await expect(page.locator("[data-testid=slot-edit-island]"), "the island committed + closed").toHaveCount(0);
+  await expect(page.getByTestId("tab-rename-input"), "the inline rename opened").toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await sleep(300);
+  await page.getByTestId("displaymode-source").click();
+  await sleep(300);
+  const s = await page.locator("[data-pane=preview] .cm-content").first().innerText();
+  expect(s, "the island edit was committed, not discarded").toContain("alpha EDIT");
 });
 
 // item 6: the layout × BRIGHTENS on hover (brightness-up, not the darker danger fill).
