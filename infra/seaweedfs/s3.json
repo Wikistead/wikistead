@@ -2,7 +2,7 @@
   "identities": [
     {
       "name": "dev",
-      "credentials": [{ "accessKey": "minioadmin", "secretKey": "minioadmin" }],
+      "credentials": [{ "accessKey": "wksadmin", "secretKey": "wksadmin" }],
       "actions": ["Admin", "Read", "Write", "List", "Tagging"]
     }
   ]
