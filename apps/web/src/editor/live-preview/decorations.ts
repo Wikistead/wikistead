@@ -1095,10 +1095,12 @@ function openAttachmentLightbox(view: EditorView, id: string, name: string): voi
 }
 
 // #273 / ADR-120: INLINE file-attachment chip — [name](wks-attachment:id) with other text on
-// the line. Renders 📎 name (+ size once resolved) with a small download button. The chip
-// body passes clicks through (caret lands → the line reveals raw, like the inline image);
-// only the ⤓ button is interactive, and it must stopPropagation on mousedown (an atom
-// widget's interactive DOM otherwise loses the click to the editor — the #265 guard).
+// the line. Renders 📎 name (+ size once resolved) with a small download button. On the EDIT
+// surface the chip body passes clicks through (caret lands → the line reveals raw, like the
+// inline image); only the ⤓ button is interactive, with the #265 mousedown guard. On a
+// READ-ONLY surface (c 07-16 return, item 2) the body click runs the type's PRIMARY action
+// PDF → the lightbox, anything else → download — and the chip shows hover + a matching cursor
+// on BOTH surfaces (zoom-in for a PDF, pointer otherwise) so it reads as pressable.
 class AttachmentChipWidget extends WidgetType {
   constructor(readonly id: string, readonly name: string) { super(); }
   eq(other: AttachmentChipWidget) { return other.id === this.id && other.name === this.name; }
@@ -1122,12 +1124,26 @@ class AttachmentChipWidget extends WidgetType {
     dl.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
     dl.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); triggerAttachmentDownload(view, this.id); });
     chip.appendChild(dl);
+    let kind: string | null = null;
     void view.state.facet(attachmentResolver).meta(this.id).then((m) => {
       if (m?.sizeBytes != null) size.textContent = ` (${fmtBytes(m.sizeBytes)})`;
+      kind = m?.inlineKind ?? null;
+      if (kind === "pdf") chip.classList.add("cm-lp-attachment-chip-pdf"); // zoom-in cursor (CSS)
     });
+    if (view.state.readOnly) {
+      // read surface: the whole chip is the primary action (there is no caret/raw to protect).
+      chip.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); }); // #265 guard
+      chip.addEventListener("click", (e) => {
+        if ((e.target as HTMLElement).closest("button")) return; // ⤓ handles itself
+        e.preventDefault();
+        e.stopPropagation();
+        if (kind === "pdf") openAttachmentLightbox(view, this.id, this.name);
+        else triggerAttachmentDownload(view, this.id);
+      });
+    }
     return chip;
   }
-  ignoreEvent() { return false; } // body clicks pass through → caret enters → raw reveal
+  ignoreEvent() { return false; } // body clicks pass through (edit surface) → caret enters → raw reveal
 }
 
 // #273 / ADR-120: STANDALONE file attachment (its line is only the link) — an ATOM like the
@@ -1172,13 +1188,15 @@ class AttachmentCardWidget extends WidgetType {
     wrap.appendChild(card);
 
     // #273 (2): a DOWNLOAD card (non-inline binary) downloads on a click ANYWHERE in the card, not just
-    // the ⤓. A PDF INLINE card is excluded (the body is the viewer — only its header ⤓ downloads). The wrap's
-    // mousedown still selects the atom (ring) first, so a click both selects AND downloads (owner-approved).
+    // the ⤓. The wrap's mousedown still selects the atom (ring) first, so a click both selects AND acts
+    // (owner-approved). c 07-16 return (item 1): a PDF INLINE card's header is no longer inert — clicking it
+    // (outside the buttons) OPENS the lightbox, the same ⤢ path, so the whole card consistently means
+    // "click to open"; its ⤓ still downloads.
     card.addEventListener("click", (e) => {
       if ((e.target as HTMLElement).closest("button")) return; // the ⤓ (or edit) button handles itself
-      if (wrap.querySelector(".cm-lp-attachment-frame")) return; // an inline PDF card — header click never downloads
       e.preventDefault();
-      triggerAttachmentDownload(view, this.id);
+      if (wrap.querySelector(".cm-lp-attachment-frame")) openAttachmentLightbox(view, this.id, this.name);
+      else triggerAttachmentDownload(view, this.id);
     });
 
     this.ensureInlineMount(view, wrap, size);
@@ -4400,7 +4418,13 @@ export const livePreviewTheme = EditorView.baseTheme({
     display: "inline-flex", alignItems: "center", gap: "4px", padding: "0 6px",
     border: "1px solid var(--wks-border, rgba(128,128,128,.35))", borderRadius: "6px",
     background: "color-mix(in srgb, currentColor 6%, transparent)", whiteSpace: "nowrap",
+    cursor: "pointer", // c 07-16 return (2): the chip reads as pressable (download; PDF overrides to zoom-in)
   },
+  ".cm-lp-attachment-chip:hover": {
+    background: "color-mix(in srgb, currentColor 12%, transparent)",
+    borderColor: "color-mix(in srgb, currentColor 50%, transparent)",
+  },
+  ".cm-lp-attachment-chip-pdf": { cursor: "zoom-in" },
   ".cm-lp-attachment-size": { opacity: "0.65", fontSize: "0.85em" },
   ".cm-lp-attachment-dl": {
     border: "none", background: "transparent", cursor: "pointer", padding: "0 2px",
@@ -4422,6 +4446,13 @@ export const livePreviewTheme = EditorView.baseTheme({
   // inline viewer card whose body is the pdf.js frame). currentColor color-mix tracks light/dark themes.
   ".cm-lp-attachment-wrap:not(:has(.cm-lp-attachment-frame)) .cm-lp-attachment-card": { cursor: "pointer" },
   ".cm-lp-attachment-wrap:not(:has(.cm-lp-attachment-frame)) .cm-lp-attachment-card:hover": {
+    background: "color-mix(in srgb, currentColor 11%, transparent)",
+    borderColor: "color-mix(in srgb, currentColor 50%, transparent)",
+  },
+  // #273 c 07-16 return (1): the PDF INLINE card's header is pressable too — click opens the lightbox
+  // so it gets the SAME hover wash with a zoom-in cursor ("open", not "download").
+  ".cm-lp-attachment-wrap:has(.cm-lp-attachment-frame) .cm-lp-attachment-card": { cursor: "zoom-in" },
+  ".cm-lp-attachment-wrap:has(.cm-lp-attachment-frame) .cm-lp-attachment-card:hover": {
     background: "color-mix(in srgb, currentColor 11%, transparent)",
     borderColor: "color-mix(in srgb, currentColor 50%, transparent)",
   },
