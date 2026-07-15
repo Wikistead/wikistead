@@ -2184,10 +2184,14 @@ class MacroWidget extends WidgetType {
     // like blank space even though a block widget occupies it (so vertical caret motion
     // "jumps" past invisible content). Render a common, visible placeholder for ALL macros
     // when the body is empty, so the block is obviously present and obviously editable.
-    if (this.body.trim() === "" && this.name !== "backlinks") {
+    if (this.body.trim() === "" && this.name !== "backlinks" && this.name !== "children") {
       // #307 / ADR-127: `:::backlinks` has an ALWAYS-empty body (its content is the host-resolved list, not
       // the source), so it must NOT take this generic "Empty macro" placeholder — it flows to the liveRender +
       // host-resolve path below (which renders the list, or collapses/placeholders when there are no backlinks).
+      // #370`:::children` is the same shape (always-empty body, host-resolved list) and MUST take the
+      // same exemption — without it this branch swallowed the widget as "Empty children" and the listSource
+      // fetch below never fired (the review return: a parent with published children showed Empty).
+      // `:::tagged` is NOT exempt: its body carries the tag name, so an empty body IS an unfinished macro.
       const ph = document.createElement("div");
       ph.className = "cm-lp-macro cm-lp-macro-empty";
       ph.setAttribute("data-testid", "macro-empty");
