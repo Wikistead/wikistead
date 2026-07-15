@@ -1,6 +1,6 @@
 // Member session layer (P1.1 C2). BFF model: the browser holds an opaque,
 // host-only session cookie; the session body lives in Valkey so it is revocable
-// (logout / admin force-logout / removal take effect by DELETING the Valkey key —
+// (logout / admin force-logout / removal take effect by DELETING the Valkey key
 // clearing the cookie alone is not enough). Programmatic clients use Bearer
 // (API key / guest token) instead; this layer is for browser members.
 import { randomBytes } from 'node:crypto'
@@ -55,6 +55,26 @@ const memberKey = (tenantId: string, sub: string) => `member-sess:${tenantId}:${
 
 // Fresh 256-bit id on every login → no session fixation (a pre-auth id is never
 // promoted; each established session gets a brand-new id).
+// #419: the tenant's default language for server-composed strings. v1 consumers: the personal-space
+// initial name ONLY (an app-wide locale default is a separate, deliberately unopened design). NULL /
+// missing row / unknown value → 'en' (pre-#419 behaviour).
+export async function tenantDefaultLang(db: TenantDb): Promise<'en' | 'ja'> {
+  try {
+    const [row] = await db.sql<[{ default_lang: string | null }?]>`
+      SELECT default_lang FROM tenant_settings LIMIT 1`
+    return row?.default_lang === 'ja' ? 'ja' : 'en'
+  } catch {
+    return 'en' // best-effort (the caller's whole block is best-effort too)
+  }
+}
+
+// #419: the localized personal-space initial name. An empty display name falls back to a
+// language-appropriate generic / "Personal Space").
+export function personalSpaceName(displayName: string, lang: 'en' | 'ja'): string {
+  if (!displayName) return lang === 'ja' ? 'マイスペース' : 'Personal Space'
+  return lang === 'ja' ? `${displayName}のスペース` : `${displayName}'s Space`
+}
+
 function newSid(): string {
   return randomBytes(32).toString('base64url')
 }
@@ -106,7 +126,7 @@ export async function readSession(valkey: IORedis, sid: string): Promise<Session
 }
 
 // Real revocation: delete the Valkey entry. Callers also clear the cookie. Reads
-// the session first to de-index the sid from its (tenant, sub) set (best-effort —
+// the session first to de-index the sid from its (tenant, sub) set (best-effort
 // the entry itself is gone regardless).
 export async function destroySession(valkey: IORedis, sid: string): Promise<void> {
   const raw = await valkey.get(key(sid))
@@ -196,9 +216,12 @@ export async function establishMemberSession(
   // #226 / ADR-106: ensure the member has an owner-only personal space (idempotent, maxSpaces-exempt).
   // BEST-EFFORT — a failure here must never block login (the space is a convenience, not a credential),
   // so it runs after the session-critical work and swallows errors. The DB UNIQUE index makes concurrent
-  // first-logins race-safe. Named after the member (server-side, no i18n); the owner can rename it.
+  // first-logins race-safe. #419: the initial name is localized by the TENANT's default language (OIDC
+  // claims carry no locale) — "X" / "X's Space" — v1 uses default_lang for THIS name only,
+  // never as an app-wide locale default. Existing spaces are never renamed; the owner can rename freely.
   try {
-    const name = claims.name?.trim() || claims.email?.split('@')[0] || 'Personal'
+    const displayName = claims.name?.trim() || claims.email?.split('@')[0] || ''
+    const name = personalSpaceName(displayName, await tenantDefaultLang(deps.db))
     await ensurePersonalSpace(deps.db, deps.fga, { tenantId: tenant.id, userId: claims.sub, name, plan: tenant.plan })
   } catch { /* personal-space creation is best-effort; never block login */ }
   return createSession(deps.valkey, {
