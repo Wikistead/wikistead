@@ -17,7 +17,7 @@ export function CheckboxRow({
   className?: string;
 }) {
   return (
-    <label className={cn("flex cursor-pointer items-start gap-2.5 rounded-md border border-border p-2.5 transition-colors duration-[120ms] hover:bg-panel has-data-[state=checked]:border-accent", className)}>
+    <label className={cn("flex cursor-pointer items-start gap-2.5 rounded-md border border-border p-2.5 transition-colors duration-[120ms] hover:bg-panel has-data-[state=checked]:border-primary", className)}>
       <CheckboxRoot
         className="mt-0.5"
         checked={checked}
