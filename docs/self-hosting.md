@@ -29,9 +29,13 @@ Two invariants shape every deployment (details: `deploy/README.md`, ADR-016/039)
    through a reverse proxy — the session cookie is a host-only BFF cookie and the
    collab WebSocket is same-host. Never expose `server:4000` or `collab:4100`
    directly.
-2. **OpenFGA must run on a persistent datastore** (Postgres — wired in both the
-   compose file and the k8s base). With an in-memory FGA store a restart silently
-   erases every permission in the system.
+2. **OpenFGA must run on a persistent datastore** (Postgres — never the in-memory
+   engine: a restart would silently erase every permission in the system). The
+   compose file wires this with a host volume. **The k8s base does NOT persist it:
+   its Postgres is a dev-convenience Deployment with no PVC** — a pod restart
+   loses the app database AND every permission. For production you must supply a
+   durable Postgres yourself (StatefulSet + PVC, or a managed/operator database —
+   tracked as the #423 launch blocker; backup/restore is #403).
 
 ## Requirements
 
@@ -112,8 +116,14 @@ registry, hosts) and every dev credential:
   with your cluster's secret tooling. Note: encrypting the OpenFGA datastore URI
   with SOPS+age is tracked in #147 and not yet wired — do not commit real
   credentials to a fork until it lands, or wire your own SealedSecrets/SOPS.
-- **OpenFGA**: the base runs OpenFGA against Postgres (persistent — mandatory).
-  On first deploy, create the store + write `infra/openfga/model.fga`, then set
+- **Postgres / OpenFGA**: the base runs OpenFGA against Postgres (the persistent
+  ENGINE is mandatory), **but the base's Postgres itself is ephemeral — a plain
+  Deployment with no data volume** (dev convenience, exactly like the SeaweedFS
+  note below). For production, replace it with a StatefulSet + PVC or a managed/
+  operator Postgres (CloudNativePG etc.) BEFORE putting data in — a pod restart
+  on the base manifest wipes the app database and every permission (#423 tracks
+  wiring this in-repo; #403 tracks backup/restore). On first deploy, create the
+  store + write `infra/openfga/model.fga`, then set
   `OPENFGA_STORE_ID`/`OPENFGA_MODEL_ID` in the server/collab env. The server
   asserts the datastore/model at boot and refuses to start misconfigured.
 - **Storage**: the base ships SeaweedFS (single binary, S3 gateway) with an
