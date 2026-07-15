@@ -16,7 +16,8 @@ import type { TenantDb } from '../db/index.js'
 import { fgaClient, check, checkRelation, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace, ensurePersonalSpace } from '../routes/spaces.js'
-import { createPage, deletePage } from '../routes/pages.js'
+import { createPage, deletePage, guestCreatePublishPage } from '../routes/pages.js'
+import { LogicalStorageDriver } from '../storage/index.js'
 import type { Tenant } from '@wikistead/types'
 
 const driver = new LogicalSearchDriver()
@@ -93,6 +94,26 @@ describe('page_creation_policy (#399 §3 — the chokepoint pin)', () => {
       pages.push(ok.id)
     } finally {
       await setPagePolicy('editors')
+    }
+  })
+
+  it("'managers' closes the GUEST create route too (a space edit share-link is a live create path; a guest is never a manager)", async () => {
+    // Reviewer finding on ADR-158's stale premise: #274/ADR-135 shipped space edit share-links, so
+    // guestCreatePublishPage is a real "by any means" entry — it must hit the same knob.
+    const storage = new LogicalStorageDriver()
+    const elink = { user: 'share_link:pk399-elink', relation: 'editor', object: `space:${spaceId}` }
+    await writeTuples(fgaClient, [elink])
+    await setPagePolicy('managers')
+    try {
+      await expect(guestCreatePublishPage(db, fgaClient, driver, storage, { tenantId: tenant.id, spaceId, shareLinkId: 'pk399-elink', title: 'guest blocked' }))
+        .rejects.toMatchObject({ statusCode: 403, reason: 'page_creation_policy' })
+      // Default 'editors': the guest path itself stays intact (non-regression).
+      await setPagePolicy('editors')
+      const g = await guestCreatePublishPage(db, fgaClient, driver, storage, { tenantId: tenant.id, spaceId, shareLinkId: 'pk399-elink', title: 'guest ok' })
+      pages.push(g.id)
+    } finally {
+      await setPagePolicy('editors')
+      await deleteTuples(fgaClient, [elink]).catch(() => {})
     }
   })
 

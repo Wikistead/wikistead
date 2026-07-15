@@ -2,7 +2,7 @@ import * as Y from 'yjs'
 import type { Sql } from 'postgres'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readUserTuplesByType } from '@wikistead/authz'
+import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readUserTuplesByType, requireTenantAdmin } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { docName } from '@wikistead/types'
 import { resolveDirectiveRanges } from '@wikistead/macro-render' // #353: scan `:::query` blocks for the anon snapshot
@@ -330,6 +330,14 @@ export async function guestCreatePublishPage(
   const context = { current_time: new Date().toISOString() }
   const canEdit = await check(fga, subject, 'edit', { type: 'space', id: args.spaceId }, context)
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  // #399 / ADR-158 §3: the page-creation policy covers this route too ("by any means") — a space
+  // edit share-link (#274/ADR-135) is a live guest CREATE path, and a guest is never a space
+  // manager, so 'managers' closes guest creation outright. Same static reason as the member gate.
+  const [guestPolicyRow] = await db.sql<[{ page_creation_policy: string }?]>`
+    SELECT page_creation_policy FROM spaces WHERE id = ${args.spaceId}`
+  if (guestPolicyRow?.page_creation_policy === 'managers') {
+    throw Object.assign(new Error('page creation is restricted to space managers'), { statusCode: 403, reason: 'page_creation_policy' })
+  }
 
   const parentId = args.parentId ?? null
   if (parentId) {
@@ -3083,16 +3091,14 @@ export async function pagesPlugin(app: FastifyInstance) {
 
   // #399 / ADR-158 §2: the tenant space-creation policy knob (admin-gated, the public-settings shape).
   // RESTRICT-ONLY — enforcement lives inside createSpace; this endpoint only stores the setting.
-  app.get('/admin/creation-policy', async (req, reply) => {
-    const ok = await app.fga.check({ user: `user:${req.user.sub}`, relation: 'admin', object: `tenant:${req.tenant.id}` })
-    if (!ok.allowed) return reply.code(403).send({ error: 'admin only' })
+  app.get('/admin/creation-policy', async (req) => {
+    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id) // #383: the shared 403 "admin only" gate
     const [row] = await req.db.sql<[{ space_creation_policy: string }?]>`
       SELECT space_creation_policy FROM tenant_settings LIMIT 1`
     return { spaceCreationPolicy: row?.space_creation_policy ?? 'members' }
   })
   app.put<{ Body: { spaceCreationPolicy?: string } }>('/admin/creation-policy', async (req, reply) => {
-    const ok = await app.fga.check({ user: `user:${req.user.sub}`, relation: 'admin', object: `tenant:${req.tenant.id}` })
-    if (!ok.allowed) return reply.code(403).send({ error: 'admin only' })
+    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
     const v = req.body?.spaceCreationPolicy
     if (v !== 'members' && v !== 'admins') return reply.code(400).send({ error: "spaceCreationPolicy ('members' | 'admins') required" })
     await req.db.sql`
