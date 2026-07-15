@@ -282,7 +282,11 @@
     "pages": "Pages",
     "sharedWith": "Shared with",
     "manage": "Manage",
-    "empty": "No spaces yet."
+    "empty": "No spaces yet.",
+    "creationPolicyTitle": "Space creation",
+    "creationPolicyBody": "Who may create new spaces in this tenant. Personal spaces are always allowed.",
+    "creationPolicyMembers": "All members",
+    "creationPolicyAdmins": "Tenant admins only"
   },
   "spaceSettings": {
     "title": "{{name}} · Settings",
@@ -310,7 +314,11 @@
     "deleteHint": "Deleting a space permanently removes it and all of its pages.",
     "deleteSpace": "Delete space",
     "deleteConfirmTitle": "Delete this space",
-    "deleteConfirm": "Delete space \"{{name}}\" and all of its pages? This cannot be undone."
+    "deleteConfirm": "Delete space \"{{name}}\" and all of its pages? This cannot be undone.",
+    "pageCreationTitle": "Page creation",
+    "pageCreationBody": "Who may create new pages in this space. Applies to every way a page is created (new, duplicate, template, import).",
+    "pageCreationEditors": "Anyone who can edit",
+    "pageCreationManagers": "Space managers only"
   },
   "spaceTrash": {
     "title": "Trash",
@@ -542,7 +550,11 @@
     "allowlistTitle": "Allow list (only these people can access this private page)",
     "privateConfirmTitle": "Make this page private?",
     "privateConfirmBody": "{{count}} active share link(s) for this page will be revoked and can't be restored. Space members will lose inherited access.",
-    "privateConfirmAction": "Make private"
+    "privateConfirmAction": "Make private",
+    "commentAudienceTitle": "Commenting on this page",
+    "commentAudienceBody": "Open commenting beyond the space setting. A page can only open more, never less.",
+    "commentGuests": "Guests with a view link may comment",
+    "commentMembers": "All space members may comment"
   },
   "spaceTheme": {
     "title": "Theme",

@@ -1,7 +1,9 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useAdminSpaces } from "../data/queries";
+import { useAdminSpaces, useSpaceCreationPolicy, useSetSpaceCreationPolicy } from "../data/queries";
 import { Button } from "../ui/Button";
+import { Select } from "../ui/Select";
+import { notify } from "../ui/toast";
 
 // Tenant admin → Spaces overview (Phase 5 #4). Lists every space in the tenant
 // with page + direct-grant counts, and links to each space's settings. tenant#admin
@@ -10,10 +12,34 @@ export function AdminSpacesTab() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const spaces = useAdminSpaces();
+  // #399 / ADR-158 §2: tenant-wide space-creation policy (restrict-only knob; the server is the
+  // fortress — createSpace re-checks; the personal auto-create is exempt by design).
+  const creationPolicy = useSpaceCreationPolicy();
+  const setCreationPolicy = useSetSpaceCreationPolicy();
 
   return (
     <div className="max-w-[720px] p-6" data-testid="admin-spaces">
       <h2 className="mt-0">{t("adminSpaces.title")}</h2>
+
+      <div className="mb-6" data-testid="space-creation-policy">
+        <h3 className="mt-0 text-sm font-medium">{t("adminSpaces.creationPolicyTitle")}</h3>
+        <p className="mt-0 mb-2 text-sm text-fg-dim">{t("adminSpaces.creationPolicyBody")}</p>
+        <Select
+          size="sm"
+          value={creationPolicy.data?.spaceCreationPolicy ?? "members"}
+          disabled={creationPolicy.isLoading || setCreationPolicy.isPending}
+          ariaLabel={t("adminSpaces.creationPolicyTitle")}
+          testId="space-creation-policy-select"
+          options={[
+            { value: "members", label: t("adminSpaces.creationPolicyMembers") },
+            { value: "admins", label: t("adminSpaces.creationPolicyAdmins") },
+          ]}
+          onChange={(v) => setCreationPolicy.mutate(v, {
+            onSuccess: () => notify.success(t("toast.saved")),
+            onError: () => notify.error(t("toast.actionFailed")),
+          })}
+        />
+      </div>
       {spaces.isLoading && <p className="text-sm text-fg-dim">{t("common.loading")}</p>}
       {!spaces.isLoading && (spaces.data?.length ?? 0) === 0 && <p className="text-sm text-fg-dim">{t("adminSpaces.empty")}</p>}
 
