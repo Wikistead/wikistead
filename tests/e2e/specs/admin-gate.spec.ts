@@ -121,6 +121,11 @@ test("non-admin member is denied: admin → 403 (no menu entry); unviewable spac
   await admin.waitForURL((u) => !u.pathname.startsWith("/auth/"), { timeout: 15_000 });
   await admin.goto(`${REAL_WEB}/admin/members`);
   await expect(admin.getByRole("heading", { name: "Members" })).toBeVisible();
+  // #436: the real-mode profile has no persisted chrome prefs, so the onboarding BANNER (#339 class)
+  // floats over the bottom of the page — exactly where the invite form lives — and swallows the click.
+  // It renders AFTER settings load, so WAIT for it (bounded) rather than a one-shot visibility probe.
+  await admin.getByTestId("onboarding-banner-dismiss").click({ timeout: 5000 }).catch(() => {});
+  await expect(admin.getByTestId("onboarding-banner")).toBeHidden();
   const inviteEmail = `gate${Date.now()}@e2e.test`;
   await admin.getByLabel("invite email").fill(inviteEmail);
   await admin.getByRole("button", { name: "Send invite" }).click();
@@ -136,6 +141,12 @@ test("non-admin member is denied: admin → 403 (no menu entry); unviewable spac
   await member.goto(link!);
   await member.getByRole("button", { name: "Accept invite" }).click();
   await member.waitForURL((u) => !u.pathname.startsWith("/auth/") && u.pathname !== "/invite", { timeout: 20_000 });
+
+  // #436: a BRAND-NEW member gets the editor-onboarding dialog (#347) on first load; its overlay
+  // swallows every click below. Dismiss it (skip → close), waiting bounded for the late mount.
+  await member.getByTestId("onboarding-skip").click({ timeout: 5000 }).catch(() => {});
+  await member.getByTestId("onboarding-close").click({ timeout: 3000 }).catch(() => {});
+  await expect(member.getByTestId("onboarding-dialog")).toBeHidden();
 
   // Admin console: isAdmin false → 403 banner, and the user menu has no entry.
   await member.goto(`${REAL_WEB}/admin/members`);
