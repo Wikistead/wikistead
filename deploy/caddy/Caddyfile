@@ -32,6 +32,12 @@
 
 	# Collab WebSocket (Hocuspocus). Caddy v2 upgrades WebSockets automatically; the long
 	# transport timeouts keep idle collab connections alive (mirrors the nginx ingress 1h).
+	# #409 / ADR-154: the crawler-facing HTML shell — /pub is answered by the server (head-injected
+	# built index.html), never the static web container.
+	handle /pub/* {
+		reverse_proxy {$SERVER_UPSTREAM:server:4000}
+	}
+
 	handle /collab/* {
 		reverse_proxy {$COLLAB_UPSTREAM:collab:4100} {
 			transport http {
