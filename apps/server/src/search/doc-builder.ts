@@ -124,7 +124,11 @@ export async function buildSearchDoc(
       // condition 3: never a swap — a pre-migration store's legacy `editor` member tuples must keep
       // resolving into the denorm during the Step-A window). Post-migration, `editor` holds only
       // share_link tuples, which categorize() already excludes from the member viewer set.
-      if (!key || !['manager', 'editor', 'editor_member', 'viewer'].includes(key.relation)) continue
+      // #330 / ADR-141 §1b (user-approved option 1): ADD 'moderator' — withdraws thedefer. With
+      // viewer_member ⊇ moderator a space moderator is a genuine viewer of the space's non-private
+      // pages, so the stage-1 denorm listing them never exceeds FGA truth (this block already runs only
+      // for published, non-private pages; moderator has no share_link/wildcard types).
+      if (!key || !['manager', 'editor', 'editor_member', 'viewer', 'moderator'].includes(key.relation)) continue
       categorize(key.user, viewerUsers, viewerGroups, setPublic)
     }
     const { tuples: tenantTuples } = await fga.read({ object: `tenant:${tenantId}` })
