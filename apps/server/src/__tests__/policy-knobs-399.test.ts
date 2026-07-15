@@ -31,8 +31,12 @@ const PERSONAL = 'pk399-personal'
 const grants: { user: string; relation: string; object: string }[] = []
 const pages: string[] = []
 
+//(review): the SAME UPSERT the admin PUT route runs — a bare UPDATE is a 0-row no-op when
+// the seed carries no tenant_settings row, which silently skips the §2 gate and turns this
+// security pin into a state-dependent false green. The UPSERT exercises the gate unconditionally.
 const setSpacePolicy = (v: string | null) =>
-  admin`UPDATE tenant_settings SET space_creation_policy = ${v ?? 'members'} WHERE tenant_id = ${tenant.id}`
+  admin`INSERT INTO tenant_settings (tenant_id, space_creation_policy) VALUES (${tenant.id}, ${v ?? 'members'})
+        ON CONFLICT (tenant_id) DO UPDATE SET space_creation_policy = ${v ?? 'members'}`
 const setPagePolicy = (v: string) => admin`UPDATE spaces SET page_creation_policy = ${v} WHERE id = ${spaceId}`
 
 beforeAll(async () => {
