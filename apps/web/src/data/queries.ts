@@ -559,14 +559,23 @@ export function useToggleTask(pageId: string) {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
+    // #361 rapid toggles must COALESCE their refetches. Each click fires its own POST; if every
+    // one invalidated on success, the FIRST click's refetch landed with the intermediate committed
+    // state and overwrote the later click's optimistic flip (an extra blink per extra click). Keyed
+    // mutations let the LAST in-flight toggle (isMutating === 1, i.e. only ourselves) do the single
+    // invalidate once everything settled — intermediate toggles skip the refetch, so the widget keeps
+    // the optimistic state until the final committed snapshot arrives.
+    mutationKey: ["toggle", pageId],
     mutationFn: (index: number) =>
       apiFetch<{ publishedAt: string | null }>(`/pages/${encodeURIComponent(pageId)}/tasks/toggle`, token, {
         method: "POST",
         body: JSON.stringify({ index }),
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["published", pageId] });
-      qc.invalidateQueries({ queryKey: ["pages"] });
+    onSettled: () => {
+      if (qc.isMutating({ mutationKey: ["toggle", pageId] }) <= 1) {
+        qc.invalidateQueries({ queryKey: ["published", pageId] });
+        qc.invalidateQueries({ queryKey: ["pages"] });
+      }
     },
   });
 }

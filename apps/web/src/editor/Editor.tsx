@@ -379,6 +379,17 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       // the LIVE draft over the existing collab connection (canEdit ⇒ effect 1 has
       // opened it), then persists via the no-revision endpoint; a rejection (409
       // dirty/mixed, 403) reverts our single flip so the draft is left untouched.
+      // #361 per-index flip GENERATION + resync-to-published failure handling. The old revert
+      // checked only "does the bracket still hold the char I wrote" and flipped it back — but after a
+      // rapid double-click BOTH POSTs can 409 (the two draft flips cancel out before the server folds
+      // either), and the second revert then saw its own char (which is ALSO the original state) and
+      // "reverted" it, silently flipping the draft AWAY from published (a dirty page out of nowhere —
+      // probe-confirmed). Flip-back arithmetic is parity-fragile (N failed flips need N reverts, but
+      // superseded handlers must not touch newer state), so failure handling is now: only the LAST
+      // outstanding flip for an index acts, and it RESYNCS the draft bracket to the CURRENT PUBLISHED
+      // state (the view doc — kept current by the refetch sync) — the invariant a failed toggle must
+      // restore, correct for any number of coalesced failures.
+      const flipGen = new Map<number, number>();
       const onToggleTaskInView = canEdit && onToggleTask
         ? (index: number, _from: number, checked: boolean) => {
             const c = collabRef.current;
@@ -405,9 +416,15 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
               return;
             }
             flipAt(pos, next); // optimistic draft flip, re-located in the DRAFT
+            const myGen = (flipGen.get(index) ?? 0) + 1;
+            flipGen.set(index, myGen);
             onToggleTask(index).catch(() => {
-              const p = taskStatePosAt(c.ytext.toString(), index); // re-resolve for the revert too (offsets moved)
-              if (p >= 0 && c.ytext.toString()[p] === next) flipAt(p, expect);
+              if (flipGen.get(index) !== myGen) return; // a newer flip superseded ours — it settles the state
+              const pubDoc = previewViewRef.current?.state.doc.toString();
+              if (pubDoc == null) return;
+              const want = pubDoc[taskStatePosAt(pubDoc, index)]; // the bracket state the server still holds
+              const p = taskStatePosAt(c.ytext.toString(), index); // re-resolve — draft offsets may have moved
+              if (p >= 0 && (want === "x" || want === " ") && c.ytext.toString()[p] !== want) flipAt(p, want);
             });
           }
         : undefined;
