@@ -929,5 +929,24 @@
       "confirmed": "ファイル添付"
     },
     "mention": "メンション"
+  },
+  "editorSearch": {
+    "find": "検索",
+    "replacePlaceholder": "置換",
+    "next": "次へ",
+    "previous": "前へ",
+    "all": "すべて",
+    "matchCase": "大文字小文字を区別",
+    "byWord": "単語単位",
+    "regexp": "正規表現",
+    "replace": "置換",
+    "replaceAll": "すべて置換",
+    "close": "閉じる",
+    "currentMatch": "現在の一致",
+    "replacedMatches": "$ 件を置換しました",
+    "replacedOnLine": "$ 行目の一致を置換しました",
+    "onLine": "行",
+    "goToLine": "行へ移動",
+    "go": "移動"
   }
 }

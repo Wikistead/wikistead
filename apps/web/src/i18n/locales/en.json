@@ -930,5 +930,24 @@
       "confirmed": "File attached"
     },
     "mention": "Mentions"
+  },
+  "editorSearch": {
+    "find": "Find",
+    "replacePlaceholder": "Replace",
+    "next": "next",
+    "previous": "previous",
+    "all": "all",
+    "matchCase": "match case",
+    "byWord": "by word",
+    "regexp": "regexp",
+    "replace": "replace",
+    "replaceAll": "replace all",
+    "close": "close",
+    "currentMatch": "current match",
+    "replacedMatches": "replaced $ matches",
+    "replacedOnLine": "replaced match on line $",
+    "onLine": "on line",
+    "goToLine": "Go to line",
+    "go": "go"
   }
 }
