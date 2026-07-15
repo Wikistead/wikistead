@@ -18,7 +18,7 @@ import { bumpRateBucket, API_RATE_LIMIT_WINDOW_S } from '../rate-limit.js'
 
 // noindex: the page's own flag OR'd with its space's flag (#277 / ADR-116 guardrail 4) — a page
 // reached via space inheritance is noindex if EITHER the page or its space says so.
-interface PublicPageRow { id: string; title: string; published_md: string | null; noindex: boolean; published_query_snapshot: string | null }
+export interface PublicPageRow { id: string; title: string; published_md: string | null; noindex: boolean; published_query_snapshot: string | null }
 
 // Anonymous principal for FGA check/listObjects.
 // user:anonymous has NO tenant memberships, no groups, no explicit grants.
@@ -30,7 +30,7 @@ const ANON = 'user:anonymous'
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
-async function resolveTenantForRequest(host: string) {
+export async function resolveTenantForRequest(host: string) {
   const { slug, domain } = resolveTenantFromHost(host)
   return loadTenant(slug, domain)
 }
@@ -40,7 +40,7 @@ async function resolveTenantForRequest(host: string) {
 // every public route 404s uniformly (existence-hidden), WITHOUT touching any index or grant — non-destructive,
 // so turning it back ON restores every public page (like the non-destructive billing freeze). The server is
 // the fortress here: the hidden toggle UI is convenience; this gate is the guarantee.
-async function tenantPublicEnabled(tenantId: string): Promise<boolean> {
+export async function tenantPublicEnabled(tenantId: string): Promise<boolean> {
   return withTenantTx(tenantId, async (tx) => {
     const [r] = await tx<{ public_enabled: boolean }[]>`SELECT public_enabled FROM tenant_settings WHERE tenant_id = ${tenantId}`
     return r?.public_enabled === true
@@ -53,7 +53,7 @@ async function tenantPublicEnabled(tenantId: string): Promise<boolean> {
 // to anonymous visitors. Every public read here ALSO requires `published_at IS NOT NULL` (unpublished →
 // treated as absent → 404), alongside the FGA view check. The public surface exposes only the PUBLISHED
 // snapshot, never a draft's mere existence.
-async function loadPublicPage(tenantId: string, pageId: string): Promise<PublicPageRow | null> {
+export async function loadPublicPage(tenantId: string, pageId: string): Promise<PublicPageRow | null> {
   return withTenantTx(tenantId, async (tx) => {
     const [r] = await tx<PublicPageRow[]>`
       SELECT p.id, p.title, p.published_md, (p.noindex OR s.noindex) AS noindex, p.published_query_snapshot
