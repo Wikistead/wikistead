@@ -221,6 +221,15 @@ export async function createPage(
   // non-editor gets 403 regardless of any templateId/fromPageId they pass).
   const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'space', id: args.spaceId })
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  // #399 / ADR-158 §3: the page-creation POLICY knob, checked INSIDE the chokepoint (right after the
+  // FGA gate —binding condition) so duplicate/template/import/MCP creates are covered
+  // uniformly. RESTRICT-ONLY: 'managers' additionally requires space manage; FGA stays the granter.
+  const [policyRow] = await db.sql<[{ page_creation_policy: string }?]>`
+    SELECT page_creation_policy FROM spaces WHERE id = ${args.spaceId}`
+  if (policyRow?.page_creation_policy === 'managers') {
+    const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'space', id: args.spaceId })
+    if (!canManage) throw Object.assign(new Error('page creation is restricted to space managers'), { statusCode: 403, reason: 'page_creation_policy' })
+  }
 
   // Seed the new page's DRAFT content. Two sources, both view-gated and existence-hidden (404)
   // #250 templateId — a `templates` snapshot (view = manage or space/tenant audience); title defaults
@@ -780,6 +789,19 @@ function validateGrant(grantee: string, relation: string): asserts relation is P
   if (!/^user:[^*\s]+$/.test(grantee) && !/^group:[^\s]+#member$/.test(grantee)) {
     throw Object.assign(new Error('grantee must be user:<sub> or group:<id>#member'), { statusCode: 400 })
   }
+}
+
+// #399 / ADR-158 §1: read the page's OWN comment_open wildcard tuples (the override state; the
+// effective audience is this OR the space's — the model's monotonic union).
+async function readPageCommentAudience(fga: OpenFgaClient, pageId: string): Promise<{ guests: boolean; members: boolean }> {
+  const { tuples } = await fga.read({ object: `page:${pageId}` })
+  let guests = false, members = false
+  for (const { key } of tuples ?? []) {
+    if (key?.relation !== 'comment_open') continue
+    if (key.user === 'share_link:*') guests = true
+    else if (key.user === 'user:*') members = true
+  }
+  return { guests, members }
 }
 
 async function requireManage(fga: OpenFgaClient, userId: string, pageId: string): Promise<void> {
@@ -2769,6 +2791,35 @@ export async function pagesPlugin(app: FastifyInstance) {
   // the route deliberately omits `config.guest`, so a share_link token is rejected (a public graph over
   // public pages is a later increment, ADR-133 §6). getLocalGraph view-gates the center and returns an edge
   // only when the caller can view BOTH endpoints; an unviewable page is absent as a node entirely.
+  // #399 / ADR-158 §1: the PAGE-level comment-audience override. The model has supported direct
+  // `page#comment_open` wildcard tuples since #100/#244 (`[user:*, share_link:*] or comment_open from
+  // space`) — this ships the missing write path, mirroring the space switch (setSpaceCommentOpen)
+  // manage-gated, each wildcard toggled INDEPENDENTLY and idempotently (members = user:*, guests =
+  // share_link:* — deliberately NOT a #244 always-together pair; "members only" IS the lone-user:*
+  // state). ADDITIVE semantics recorded honestly: a page can OPEN comments its space keeps closed,
+  // never close below the space (monotonic union; subtractive override = a deny-shaped model change,
+  // out of scope per ADR-029's deferral).
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/comment-audience', async (req) => {
+    await requireManage(app.fga, req.user.sub, req.params.pageId)
+    return readPageCommentAudience(app.fga, req.params.pageId)
+  })
+  app.put<{ Params: { pageId: string }; Body: { guests?: boolean; members?: boolean } }>('/pages/:pageId/comment-audience', async (req) => {
+    await requireManage(app.fga, req.user.sub, req.params.pageId)
+    const cur = await readPageCommentAudience(app.fga, req.params.pageId)
+    const obj = `page:${req.params.pageId}`
+    const writes: { user: string; relation: string; object: string }[] = []
+    const deletes: { user: string; relation: string; object: string }[] = []
+    const apply = (want: boolean | undefined, have: boolean, user: string) => {
+      if (want === undefined || want === have) return
+      ;(want ? writes : deletes).push({ user, relation: 'comment_open', object: obj })
+    }
+    apply(req.body?.guests, cur.guests, 'share_link:*')
+    apply(req.body?.members, cur.members, 'user:*')
+    if (deletes.length) await deleteTuples(app.fga, deletes)
+    if (writes.length) await writeTuples(app.fga, writes)
+    return { guests: req.body?.guests ?? cur.guests, members: req.body?.members ?? cur.members }
+  })
+
   // #416 / ADR-161: member typeahead for the PAGE permissions dialog. Gate = page#manage — byte-for-byte
   // the authority that can already grant on this page (grantPageAccess), so the picker widens WHO can
   // enumerate members only to principals who could act on the result anyway (the reviewed ruling). Same
@@ -3028,5 +3079,25 @@ export async function pagesPlugin(app: FastifyInstance) {
     if (typeof req.body?.enabled !== 'boolean') return reply.code(400).send({ error: 'enabled (boolean) required' })
     await setTenantPublicEnabled(req.db, req.tenant.id, req.body.enabled)
     return { publicEnabled: req.body.enabled }
+  })
+
+  // #399 / ADR-158 §2: the tenant space-creation policy knob (admin-gated, the public-settings shape).
+  // RESTRICT-ONLY — enforcement lives inside createSpace; this endpoint only stores the setting.
+  app.get('/admin/creation-policy', async (req, reply) => {
+    const ok = await app.fga.check({ user: `user:${req.user.sub}`, relation: 'admin', object: `tenant:${req.tenant.id}` })
+    if (!ok.allowed) return reply.code(403).send({ error: 'admin only' })
+    const [row] = await req.db.sql<[{ space_creation_policy: string }?]>`
+      SELECT space_creation_policy FROM tenant_settings LIMIT 1`
+    return { spaceCreationPolicy: row?.space_creation_policy ?? 'members' }
+  })
+  app.put<{ Body: { spaceCreationPolicy?: string } }>('/admin/creation-policy', async (req, reply) => {
+    const ok = await app.fga.check({ user: `user:${req.user.sub}`, relation: 'admin', object: `tenant:${req.tenant.id}` })
+    if (!ok.allowed) return reply.code(403).send({ error: 'admin only' })
+    const v = req.body?.spaceCreationPolicy
+    if (v !== 'members' && v !== 'admins') return reply.code(400).send({ error: "spaceCreationPolicy ('members' | 'admins') required" })
+    await req.db.sql`
+      INSERT INTO tenant_settings (tenant_id, space_creation_policy) VALUES (${req.tenant.id}, ${v})
+      ON CONFLICT (tenant_id) DO UPDATE SET space_creation_policy = ${v}, updated_at = now()`
+    return { spaceCreationPolicy: v }
   })
 }

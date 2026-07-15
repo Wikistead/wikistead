@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, writeTuples, deleteTuples, deleteObjectTuples, requireTenantAdmin } from '@wikistead/authz'
+import { check, writeTuples, deleteTuples, deleteObjectTuples, requireTenantAdmin, isTenantAdmin } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
@@ -58,6 +58,16 @@ export async function createSpace(
   // #226 / ADR-106: a PERSONAL space is EXEMPT from maxSpaces (it is per-member, not part of the shared-
   // space budget) — the auto-create must always succeed, so it skips the cap. This is a resource-kind
   // distinction (personal vs shared), NOT a plan branch: the cap value still comes from the resolver.
+  // #399 / ADR-158 §2: the space-creation POLICY knob. RESTRICT-ONLY (never grants): 'admins' requires
+  // tenant#admin on top of membership. The PERSONAL auto-create is exempt (a resource-kind, not a
+  // privilege — first login must always succeed).
+  if (!args.personal) {
+    const [pol] = await db.sql<[{ space_creation_policy: string }?]>`
+      SELECT space_creation_policy FROM tenant_settings LIMIT 1`
+    if (pol?.space_creation_policy === 'admins' && !(await isTenantAdmin(fga, args.userId, args.tenantId))) {
+      throw Object.assign(new Error('space creation is restricted to admins'), { statusCode: 403, reason: 'space_creation_policy' })
+    }
+  }
   const row = await db.tx(async (tx) => {
     if (!args.personal && isFinite(ent.maxSpaces)) {
       await tx`SELECT pg_advisory_xact_lock(hashtext(${`space:${args.tenantId}`}))`
@@ -705,6 +715,22 @@ export async function spacesPlugin(app: FastifyInstance) {
       userId: req.user.sub,
     })
     return reply.code(204).send()
+  })
+
+  // #399 / ADR-158 §3: the per-space page-creation policy knob (manage-gated, the comment-open shape).
+  // RESTRICT-ONLY — enforcement lives inside createPage (the chokepoint); this only stores the setting.
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/page-creation-policy', async (req) => {
+    await requireSpaceManage(app.fga, req.user.sub, req.params.spaceId)
+    const [row] = await req.db.sql<[{ page_creation_policy: string }?]>`
+      SELECT page_creation_policy FROM spaces WHERE id = ${req.params.spaceId}`
+    return { pageCreationPolicy: row?.page_creation_policy ?? 'editors' }
+  })
+  app.put<{ Params: { spaceId: string }; Body: { pageCreationPolicy?: string } }>('/spaces/:spaceId/page-creation-policy', async (req, reply) => {
+    await requireSpaceManage(app.fga, req.user.sub, req.params.spaceId)
+    const v = req.body?.pageCreationPolicy
+    if (v !== 'editors' && v !== 'managers') return reply.code(400).send({ error: "pageCreationPolicy ('editors' | 'managers') required" })
+    await req.db.sql`UPDATE spaces SET page_creation_policy = ${v} WHERE id = ${req.params.spaceId}`
+    return { pageCreationPolicy: v }
   })
 
   // ── per-space access (Phase 5b) — all manage-gated ──

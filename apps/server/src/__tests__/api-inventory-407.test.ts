@@ -37,11 +37,13 @@ const EXCLUDED_PATHS = new Set([
   '/pages/:pageId/private', '/pages/:pageId/public', '/pages/:pageId/restrict', '/pages/:pageId/freeze', // permission dialog plumbing (grants API covers integration)
   '/spaces/:spaceId/access', '/spaces/:spaceId/public-access', '/spaces/:spaceId/comment-open', // space settings plumbing
   '/spaces/:spaceId/groups', '/spaces/:spaceId/member-candidates', '/spaces/:spaceId/pages-overview', // space settings plumbing
+  '/spaces/:spaceId/page-creation-policy', '/admin/creation-policy', // creation-policy knobs (#399; admin/space settings plumbing)
   '/spaces/:spaceId/branding', '/spaces/:spaceId/icon-image', '/branding', '/branding/logo', '/tenant/branding', '/tenant/branding/logo', // branding/UI
   '/me/settings', '/me/avatar', '/members/:sub', '/members/:sub/avatar-image', '/members/invites', '/members/invites/:id', // account/invite UI plumbing
   '/ai/ask', '/ai/capability',     // AI feature surface (own contract)
   '/pages/:pageId/mentionable',    // comment @-mention candidates (UI-shaped)
   '/pages/:pageId/member-candidates', // permissions-dialog member typeahead (UI-shaped; #416)
+  '/pages/:pageId/comment-audience', // permissions-dialog comment override (UI-shaped; #399)
   '/pages/:pageId/tasks/toggle',   // read-surface checkbox flip (UI plumbing; publish covers integration)
   '/pages/:pageId/revisions/revert-actor', // moderation one-click revert (moderation UI surface)
   '/webhooks', '/webhooks/:id',    // admin-configured outbound webhooks (admin surface)
