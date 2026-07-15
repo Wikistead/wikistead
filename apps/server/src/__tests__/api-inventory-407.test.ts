@@ -44,6 +44,7 @@ const EXCLUDED_PATHS = new Set([
   '/pages/:pageId/tasks/toggle',   // read-surface checkbox flip (UI plumbing; publish covers integration)
   '/pages/:pageId/revisions/revert-actor', // moderation one-click revert (moderation UI surface)
   '/webhooks', '/webhooks/:id',    // admin-configured outbound webhooks (admin surface)
+  '/audit', '/audit/verify', '/audit/export', // audit-log viewer (admin+entitlement surface, #401 / ADR-155)
 ])
 
 function extractRoutes(): string[] {

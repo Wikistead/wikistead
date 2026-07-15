@@ -9,6 +9,7 @@ import { TenantBrandingTab } from "./TenantBrandingTab";
 import { AdminAuthTab } from "./AdminAuthTab";
 import { AdminApiTab } from "./AdminApiTab";
 import { AdminWebhooksTab } from "./AdminWebhooksTab";
+import { AdminAuditTab } from "./AdminAuditTab";
 import { AdminEmbedsTab } from "./AdminEmbedsTab";
 import { AdminPublicTab } from "./AdminPublicTab";
 import { AdminBillingTab } from "./AdminBillingTab";
@@ -28,6 +29,7 @@ function useAdminTabs(): SettingsTab[] {
     { key: "auth", label: t("adminNav.auth"), to: "/admin/auth" },
     { key: "api", label: t("adminNav.api"), to: "/admin/api" },
     { key: "webhooks", label: t("adminNav.webhooks"), to: "/admin/webhooks" },
+    { key: "audit", label: t("adminNav.audit"), to: "/admin/audit" },
     { key: "embeds", label: t("adminNav.embeds"), to: "/admin/embeds" },
     { key: "public", label: t("adminNav.public"), to: "/admin/public" },
     { key: "billing", label: t("adminNav.billing"), to: "/admin/billing" },
@@ -66,6 +68,7 @@ export function AdminRoutes() {
       <Route path="auth" element={<AdminAuthTab />} />
       <Route path="api" element={<AdminApiTab />} />
       <Route path="webhooks" element={<AdminWebhooksTab />} />
+      <Route path="audit" element={<AdminAuditTab />} />
       <Route path="embeds" element={<AdminEmbedsTab />} />
       <Route path="public" element={<AdminPublicTab />} />
       <Route path="billing" element={<AdminBillingTab />} />
