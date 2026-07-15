@@ -104,11 +104,11 @@ test("#174-4: a pipe table nested in columns renders as a <table>", async ({ bro
   await expect(table.locator("tbody td")).toHaveCount(2);
 });
 
-// #278E part 1: clicking a NESTED callout inside a column must NOT reflow the column width. The
-// (add-item) is a flex child; it used to be skipped whenever a nested macro was selected, which removed it
-// and jumped the columns (measured 315->336px). Now the renders unconditionally, so the width is stable
-// and with the width stable the nested edit form stays contained in its column (no layout "explosion").
-test("#278E: clicking a nested callout in a column does not reflow the column width", async ({ browser }) => {
+// #278E part 1, re-based on theA1 ruling: clicking a nested callout now enters the SLOT
+// ISLAND (one-click slot entry). The width-stability concern survives translated: the island replaces the
+// clicked cell in the SAME flex slot, the stays rendered (its removal was the measured 315→336px jump),
+// so the OTHER column's width must not move and the island must stay contained beside it.
+test("#278E: entering a column's island does not reflow the neighbouring column", async ({ browser }) => {
   const page = await (await browser.newContext({ viewport: { width: 1100, height: 700 } })).newPage();
   await openScratch(page, "nested-callout-reflow"); await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
@@ -118,21 +118,21 @@ test("#278E: clicking a nested callout in a column does not reflow the column wi
   const cols = page.locator("[data-pane=preview] [data-testid=macro-columns] .cm-lp-column");
   const before = await cols.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
   expect(before.length).toBe(2);
-  // click the nested warning callout → nested-select; the column width must NOT jump.
-  await page.locator("[data-pane=preview] .cm-lp-callout-warning").first().click({ force: true }); await sleep(400);
-  const afterClick = await cols.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
-  expect(afterClick, `column width must not reflow on nested-select (was ${before}, now ${afterClick})`).toEqual(before);
-  // the nested edit form (if opened) stays CONTAINED within its column — no horizontal overflow / explosion.
-  await page.locator("[data-pane=preview] .cm-lp-callout-warning").first().hover(); await sleep(200);
-  await page.locator("[data-pane=preview] .cm-lp-macro-edit").first().click({ force: true }).catch(() => {});
-  await sleep(400);
-  const contained = await page.evaluate(() => {
-    const form = document.querySelector("[data-pane=preview] .cm-lp-callout-edit") as HTMLElement | null;
-    const col = form?.closest(".cm-lp-column") as HTMLElement | null;
-    if (!form || !col) return true; // no form → nothing to contain
-    return form.getBoundingClientRect().right <= col.getBoundingClientRect().right + 1;
+  // click the nested warning callout → the SLOT ISLAND opens for that column (A1)
+  await page.locator("[data-pane=preview] .cm-lp-callout-warning").first().click({ force: true }); await sleep(500);
+  await expect(page.locator("[data-testid=slot-edit-island]"), "one click enters the slot island").toHaveCount(1);
+  const state = await page.evaluate(() => {
+    const other = document.querySelector("[data-pane=preview] [data-testid=macro-columns] .cm-lp-column") as HTMLElement | null;
+    const island = document.querySelector("[data-testid=slot-edit-island]") as HTMLElement | null;
+    const row = island?.closest(".cm-lp-columns") as HTMLElement | null;
+    return {
+      otherW: other ? Math.round(other.getBoundingClientRect().width) : null,
+      islandRight: island ? Math.round(island.getBoundingClientRect().right) : null,
+      rowRight: row ? Math.round(row.getBoundingClientRect().right) : null,
+      plus: !!document.querySelector("[data-testid=layout-add-column]"),
+    };
   });
-  expect(contained, "the nested edit form must stay within its column (no overflow)").toBe(true);
-  const afterEdit = await cols.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
-  expect(afterEdit, "column width stays stable through the nested edit").toEqual(before);
+  expect(state.plus, "the ＋ stays rendered while the island is open (no reflow source)").toBe(true);
+  expect(Math.abs((state.otherW ?? 0) - before[1]!), `the untouched column keeps its width (was ${before[1]}, now ${state.otherW})`).toBeLessThanOrEqual(2);
+  expect(state.islandRight! <= state.rowRight! + 1, "the island stays contained in the row (no explosion)").toBe(true);
 });
