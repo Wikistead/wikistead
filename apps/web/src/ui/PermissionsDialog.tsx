@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, usePublished, useTenantGroups, useShareLinks, useSetFrozen, type PageRelation } from "../data/queries";
+import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, usePublished, useTenantGroups, useShareLinks, useSetFrozen, usePageMemberCandidates, type PageRelation } from "../data/queries";
+import { MemberSearchInput } from "./MemberSearchInput";
 import { ConfirmDialog } from "./dialogs";
 import { notify } from "./toast";
 import { Select } from "./Select";
@@ -77,12 +78,18 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   const [groupName, setGroupName] = useState("");
   const [relation, setRelation] = useState<PageRelation>("view");
   const [restrictSub, setRestrictSub] = useState("");
+  // #416 / ADR-161: member typeahead (page#manage-gated endpoint). A pick fills the grantee; RAW input
+  // stays valid (the picker assists — a pasted sub still works, as before).
+  const [pickedGrant, setPickedGrant] = useState<{ grantee: string; label: string } | null>(null);
+  const [pickedRestrict, setPickedRestrict] = useState<{ grantee: string; label: string } | null>(null);
+  const grantCandidates = usePageMemberCandidates(open && mode === "user" && !pickedGrant ? pageId : null, sub);
+  const restrictCandidates = usePageMemberCandidates(open && !pickedRestrict ? pageId : null, restrictSub);
 
   const addRestrict = () => {
-    const s = restrictSub.trim();
-    if (!s) return;
-    restrict.mutate({ principal: `user:${s}` }, {
-      onSuccess: () => { notify.success(t("toast.saved")); setRestrictSub(""); },
+    const principal = pickedRestrict?.grantee ?? (restrictSub.trim() ? `user:${restrictSub.trim()}` : null);
+    if (!principal) return;
+    restrict.mutate({ principal }, {
+      onSuccess: () => { notify.success(t("toast.saved")); setRestrictSub(""); setPickedRestrict(null); },
       onError: () => notify.error(t("toast.actionFailed")),
     });
   };
@@ -96,13 +103,14 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
       });
       return;
     }
-    const s = sub.trim();
-    if (!s) return;
-    grant.mutate({ grantee: `user:${s}`, relation }, {
+    const grantee = pickedGrant?.grantee ?? (sub.trim() ? `user:${sub.trim()}` : null);
+    if (!grantee) return;
+    grant.mutate({ grantee, relation }, {
       onSuccess: () => notify.success(t("toast.accessGranted")),
       onError: () => notify.error(t("toast.actionFailed")),
     });
     setSub("");
+    setPickedGrant(null);
   };
   // Prefer the server-resolved group name (groupFgaId is one-way); fall back to the raw id.
   const label = (g: { grantee: string; groupName?: string }) =>
@@ -223,7 +231,19 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               ]}
             />
           ) : (
-            <Input inputSize="sm" className="min-w-0 flex-1" data-testid="grant-sub" aria-label={t("permissions.member")} placeholder={t("permissions.memberPlaceholder")} value={sub} onChange={(e) => setSub(e.target.value)} />
+            <MemberSearchInput
+              inputSize="sm"
+              query={sub}
+              onQueryChange={setSub}
+              picked={pickedGrant}
+              onPick={(c) => setPickedGrant(c ? { grantee: `user:${c.sub}`, label: c.displayName || c.sub } : null)}
+              candidates={grantCandidates.data ?? []}
+              placeholder={t("permissions.memberPlaceholder")}
+              ariaLabel={t("permissions.member")}
+              inputTestId="grant-sub"
+              listTestId="grant-candidates"
+              itemTestId="grant-candidate"
+            />
           )}
           <Select
             value={relation}
@@ -261,8 +281,19 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
         <div className="mt-4 border-t border-border pt-3">
           <p className="m-0 mb-2 text-xs font-medium text-fg-dim">{t("permissions.restrictTitle")}</p>
           <div className="flex items-center gap-2">
-            <Input className="flex-1" value={restrictSub} onChange={(e) => setRestrictSub(e.target.value)}
-              placeholder={t("permissions.restrictPlaceholder")} data-testid="restrict-sub" aria-label={t("permissions.restrictTitle")} />
+            {/* restrict stays USER-only by design (#416: group/share_link restrictees are out of scope). */}
+            <MemberSearchInput
+              query={restrictSub}
+              onQueryChange={setRestrictSub}
+              picked={pickedRestrict}
+              onPick={(c) => setPickedRestrict(c ? { grantee: `user:${c.sub}`, label: c.displayName || c.sub } : null)}
+              candidates={restrictCandidates.data ?? []}
+              placeholder={t("permissions.restrictPlaceholder")}
+              ariaLabel={t("permissions.restrictTitle")}
+              inputTestId="restrict-sub"
+              listTestId="restrict-candidates"
+              itemTestId="restrict-candidate"
+            />
             <Button variant="default" size="sm" data-testid="restrict-add" disabled={restrict.isPending} onClick={addRestrict}>{t("permissions.restrictAdd")}</Button>
           </div>
           <div className="mt-2 flex flex-col gap-2" data-testid="restrict-list">
