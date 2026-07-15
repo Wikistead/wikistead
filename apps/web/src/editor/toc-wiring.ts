@@ -80,14 +80,15 @@ export function wireToc(
       // area — the old narrow band left only ~1 light item (the "2 layers don't show" report). posAtCoords near
       // the very edge can miss, so nudge in 8px; works for both scroll seams (posAtCoords maps screen y → doc
       // offset for the CM scroller AND the public outer scroller uniformly).
-      let topPos = view.posAtCoords({ x: cx, y: rect.top + bandPx() + 8 });
-      let botPos = view.posAtCoords({ x: cx, y: rect.top + rect.height - 8 });
-      // #345 Issue B: when a sample MISSES (the content is shorter than the viewport, so the bottom sample
-      // lands below the rendered text; or a tall intro pushes a sample off content), fall back to the doc bounds
-      // instead of bailing. The old `topPos != null && botPos != null` guard skipped the visible layer entirely
-      // on a miss, and the active layer went null too — the reported "nothing is highlighted".
-      if (topPos == null) topPos = 0;
-      if (botPos == null) botPos = view.state.doc.length;
+      // #345 (fix 3): resolve both samples with posAtCoords' NON-precise mode, which returns the
+      // NEAREST document position instead of null. The old miss-fallback sent a null TOP sample to doc
+      // offset 0 — at the very bottom of a long page (the sample lands past the rendered content) that
+      // made active fall back to the FIRST heading and lit the whole TOC. Nearest-position semantics do
+      // the right thing structurally: past-the-end samples resolve near doc.length (→ the LAST heading
+      // stays active at the bottom), a tall-intro sample resolves inside the intro (the Issue B
+      // fallback below still lights the topmost visible heading), and short docs clamp to their end.
+      const topPos = view.posAtCoords({ x: cx, y: rect.top + bandPx() + 8 }, false);
+      const botPos = view.posAtCoords({ x: cx, y: rect.top + rect.height - 8 }, false);
       const lo = Math.min(topPos, botPos), hi = Math.max(topPos, botPos);
       // VISIBLE (light): every section [h.from, next.from) intersecting [lo, hi]. Diff-apply.
       const visible: number[] = [];
