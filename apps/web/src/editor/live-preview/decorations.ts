@@ -2907,6 +2907,15 @@ function rangeRevealed(state: EditorState, from: number, to: number): boolean {
 // atomicRanges). Inline markers keep the overlap-based `rangeRevealed` (they are not atoms → no vim warp, and the
 // on-selection reveal is the established format-toolbar/vim-decorate behaviour). For a single empty caret this is
 // byte-identical to rangeRevealed, so only visual selections over BLOCK atoms change.
+// #438: is this selection range LINEWISE — anchored at a line start and ending at a line start (or
+// EOF)? vim operators (dd / dj / yy / V) materialise a TRANSIENT linewise selection before acting; a
+// mouse/charwise drag virtually never is. Used to keep operator selections from flipping a block's
+// reveal state mid-operator (below).
+function isLinewiseRange(state: EditorState, r: { from: number; to: number }): boolean {
+  if (state.doc.lineAt(r.from).from !== r.from) return false;
+  return r.to === state.doc.length || state.doc.lineAt(r.to).from === r.to;
+}
+
 function blockRevealed(state: EditorState, from: number, to: number): boolean {
   if (explicitEntryCovers(state, from, to)) return true; // #358: explicit entry wins in every editable mode
   // #359(option B): an EMPTY caret inside [from,to] reveals (the editing entry), and so does a
@@ -2915,10 +2924,17 @@ function blockRevealed(state: EditorState, from: number, to: number): boolean {
   // snap back to an atom mid-selection, so a sub-range of a mermaid/details source could not be copied.
   // A selection CROSSING the block's boundary still never reveals: that is exactly the #359 vim-warp
   // case (atom↔raw churn moves EditorView.atomicRanges under the moving visual head).
+  // #438: EXCEPT a LINEWISE contained selection. vim's dd/yy/dj materialise a transient linewise
+  // selection before operating; under the unconditional form that selection kept the block revealed
+  // mid-operator, so dd deleted ONE raw line of a frontmatter block instead of the whole unit. With
+  // linewise selections excluded the block collapses for that instant and CM's atomicRanges extend the
+  // operator's deletion over the whole atom — the pre-#359 dd-takes-the-block behaviour. The
+  // select-to-copy flow (a charwise drag inside revealed source) is untouched; a deliberate vim `V`
+  // inside revealed source now selects the collapsed atom, which is coherent linewise-vim semantics.
   return syntaxRevealsAt(
     state.facet(displayMode),
     state.readOnly,
-    state.selection.ranges.some((r) => (r.empty ? r.head >= from && r.head <= to : r.from >= from && r.to <= to)),
+    state.selection.ranges.some((r) => (r.empty ? r.head >= from && r.head <= to : r.from >= from && r.to <= to && !isLinewiseRange(state, r))),
   );
 }
 
