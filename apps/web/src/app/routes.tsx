@@ -729,17 +729,19 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
       .catch(() => setPages((prev) => prev ?? []));
   }, [spaceId, token]);
 
-  // #274 / ADR-135: the guest "new page" affordance (edit links only). The page is created PUBLISHED
-  // atomically server-side; open it right away so the guest lands in the editor. 429 = the created-page
-  // cap — surfaced as a static cool-down notice (no limit detail: the server sends a reason code only).
-  const createGuestPage = useCallback(async (title: string) => {
+  // #274 / ADR-135 (review ruling): the guest "new page" affordance (edit links only) uses
+  // the MEMBER operation model — click → a blank "Untitled" page immediately → open straight in edit
+  // mode; naming happens in the editor title band. Created PUBLISHED atomically server-side. 429 = the
+  // created-page cap — a static cool-down notice (no limit detail: the server sends a reason code only).
+  const [createdId, setCreatedId] = useState<string | null>(null); // start the editor in edit for a page WE just created
+  const createGuestPage = useCallback(async () => {
     try {
       const page = await apiFetch<Page>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token, {
         method: "POST",
-        body: JSON.stringify({ title }),
+        body: JSON.stringify({ title: "Untitled" }), // the member new-page literal (Sidebar.tsx newPage) — byte parity
       });
       refreshPages();
-      if (page) setOpenId(page.id);
+      if (page) { setCreatedId(page.id); setOpenId(page.id); }
     } catch (e) {
       notify.error(t((e as { status?: number }).status === 429 ? "share.newPageRateLimited" : "share.newPageFailed"));
     }
@@ -768,8 +770,10 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
   return (
     <AppShell sidebar={<GuestSidebar pages={pages ?? []} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} />}>
       {pageMinted ? (
-        // key on the page id so switching pages in the tree remounts the editor cleanly.
-        <GuestPageContent key={openId} minted={pageMinted} />
+        // key on the page id so switching pages in the tree remounts the editor cleanly. A page this
+        // guest JUST created opens straight in edit mode (member new-page parity,); onTitleChange
+        // refreshes the tree so the rename shows up without a reload.
+        <GuestPageContent key={openId} minted={pageMinted} startEditing={openId === createdId} onTitleChange={refreshPages} />
       ) : (
         <div className="flex h-full items-center justify-center p-8 text-center text-fg-dim" data-testid="guest-space-welcome">
           {pages == null ? t("share.opening") : t("share.spacePickPrompt")}
@@ -788,7 +792,7 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
 // chrome-less AppShell) and by the space-link reader-chrome (GuestSpace, rendered inside an AppShell whose
 // sidebar is the guest page tree). Keeping the AppShell out of here lets the space layout own a single
 // shell with the sidebar slot (#245 / ADR-112).
-function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () => void }) {
+function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange }: { minted: GuestToken; onBack?: () => void; startEditing?: boolean; onTitleChange?: () => void }) {
   const { t } = useTranslation();
   const { token, docName, capability } = minted;
   const pageId = docName.replace(/^t:.+?:p:/, "");
@@ -821,7 +825,8 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
   const onScrollActivity = useCallback(() => { tocScrollListeners.current.forEach((fn) => fn()); }, []);
   const subscribeTocScroll = useCallback((fn: () => void) => { tocScrollListeners.current.add(fn); return () => { tocScrollListeners.current.delete(fn); }; }, []);
   const canEdit = capability === "edit";
-  const [editing, setEditing] = useState(false);
+  //a page the guest just created opens straight in edit mode (member new-page parity).
+  const [editing, setEditing] = useState(startEditing && capability === "edit");
   const [vim, toggleVim] = useVimPref();
   useVimToggleShortcut(toggleVim, editing, resolveKey("editor.toggleVim", undefined)); // guest: default chord
   const [displayMode, cycleDisplayMode, setDisplayMode] = useDisplayMode(); // ADR-056 / #164 (device-local; guests have no server profile)
@@ -835,6 +840,14 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
       .catch(() => { /* denied/expired → empty view */ });
   }, [pageId, token]);
   useEffect(() => { reloadPublished(); }, [reloadPublished]);
+
+  // #274EDIT-capability guests rename via the same title band as members (naming happens in the
+  // editor — guest pages are created "Untitled"). The server re-checks FGA edit on the guest token.
+  const renameGuestPage = useCallback((title: string) => {
+    apiFetch<{ title: string }>(`/pages/${encodeURIComponent(pageId)}`, token, { method: "PATCH", body: JSON.stringify({ title }) })
+      .then((r) => { setPageTitle(r?.title ?? title); notify.success(t("toast.saved")); onTitleChange?.(); })
+      .catch(() => notify.error(t("toast.actionFailed")));
+  }, [pageId, token, t, onTitleChange]);
 
   // #318: publish the guest band's ACTUAL height as --wks-band-h on the editor's positioning parent
   // the same ResizeObserver contract as the member surface (#212 bounce 3), so the CM top padding, the
@@ -911,14 +924,16 @@ function GuestPageContent({ minted, onBack }: { minted: GuestToken; onBack?: () 
         <div className="relative flex min-h-0" style={{ flex: 1 }}>
           <div className="relative min-w-0 flex-1">
             {/* #318: the guest surface gets the SAME frosted title band as the member page (#212) / public
-                reader (#227). PageTitle without onRename = a read-only h1 (no rename affordance leaks to a
-                guest, even with edit capability — rename stays member-only server-side). The band height is
-                published as --wks-band-h (bandRef) so the editor's first line + TOC/anchor jumps clear it. */}
+                reader (#227). #274supersedes the #318 "no rename for guests" rule for the EDIT
+                capability: guests can now CREATE pages (named "Untitled"), so naming must happen here like
+                it does for members — PATCH /pages/:id is guest:'edit' opt-in with the FGA edit gate (the
+                same trust level as body editing). VIEW links keep the read-only h1 (no affordance). The
+                band height is published as --wks-band-h (bandRef) so the editor's first line clears it. */}
             <div ref={bandRef} className="pointer-events-none absolute inset-x-0 top-0 z-20 pb-6">
               <div aria-hidden="true" className="absolute inset-y-0 left-0 right-2.5 bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_90%,transparent)] via-[color-mix(in_srgb,var(--bg)_42%,transparent)] to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_50%,transparent)]" />
               <div className="pointer-events-auto relative mx-auto flex w-full max-w-[740px] items-center gap-3 px-6 pt-6">
                 <div className="min-w-0 flex-1" data-testid="guest-title-band">
-                  <PageTitle title={pageTitle} />
+                  <PageTitle title={pageTitle} onRename={canEdit ? renameGuestPage : undefined} />
                 </div>
                 {/* Desktop: the status chip rides the band row (member parity); mobile keeps the ⋯ controls. */}
                 {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}

@@ -387,8 +387,6 @@
     "spaceEmpty": "このスペースにはまだ公開ページがありません。",
     "backToSpace": "ページ一覧へ戻る",
     "spacePickPrompt": "ページを選んで閲覧してください。",
-    "newPage": "新しいページ",
-    "newPageTitle": "ページタイトル",
     "newPageFailed": "ページを作成できませんでした。",
     "newPageRateLimited": "ページ作成は一時的に制限されています。しばらくしてからお試しください。",
     "passwordTitle": "パスワードが必要です",

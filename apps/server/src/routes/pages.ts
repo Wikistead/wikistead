@@ -462,9 +462,14 @@ export async function updatePage(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { pageId: string; userId: string; title: string },
+  // Member (userId) or an EDIT-capability share-link guest (#274guests create pages named
+  // "Untitled", so naming must work for them like it does for members — the same FGA edit gate that
+  // already lets them rewrite the whole body, with current_time for expiry; actor attribution = anonId).
+  args: { pageId: string; userId?: string; guest?: { shareLinkId: string; anonId?: string }; title: string },
 ): Promise<Page> {
-  const canEdit = await check(fga, `user:${args.userId}`, 'edit', { type: 'page', id: args.pageId })
+  const subject = args.userId ? `user:${args.userId}` : `share_link:${args.guest!.shareLinkId}`
+  const context = args.userId ? undefined : { current_time: new Date().toISOString() }
+  const canEdit = await check(fga, subject, 'edit', { type: 'page', id: args.pageId }, context)
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
   let outboxId!: string
@@ -480,7 +485,7 @@ export async function updatePage(
   })
   const page = toPage(row as PageRow)
   processOutboxAsync(driver, outboxId, { tenantId: page.tenantId, pageId: page.id, operation: 'upsert' })
-  emit({ type: 'page.updated', tenantId: page.tenantId, pageId: page.id, actorId: args.userId })
+  emit({ type: 'page.updated', tenantId: page.tenantId, pageId: page.id, actorId: args.userId ?? args.guest!.anonId ?? `guest:${args.guest!.shareLinkId}` })
   return page
 }
 
@@ -2660,11 +2665,14 @@ export async function pagesPlugin(app: FastifyInstance) {
     return getPage(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub })
   })
 
+  // Rename — members or an EDIT-capability guest (#274guest pages are created "Untitled" and
+  // named here, member-parity). The FGA edit gate is the shared authority; view tokens are rejected by
+  // the auth hook's capability guard before the handler.
   app.patch<{ Params: { pageId: string }; Body: { title: string } }>(
-    '/pages/:pageId', async (req) => {
+    '/pages/:pageId', { config: { guest: 'edit' } }, async (req) => {
       return updatePage(req.db, app.fga, app.searchDriver, {
         pageId: req.params.pageId,
-        userId: req.user.sub,
+        ...(req.user ? { userId: req.user.sub } : { guest: { shareLinkId: req.guest!.shareLinkId, anonId: req.guest!.anonId } }),
         title: req.body.title,
       })
     },
