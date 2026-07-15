@@ -26,8 +26,12 @@ import postgres from 'postgres'
 
 const FINAL_EDITOR = 'define editor: [share_link, share_link with non_expired] or editor_member'
 const STEP_A_EDITOR = 'define editor: [user, group#member] or editor_member'
-const FINAL_VIEWER_MEMBER = 'define viewer_member: [user, group#member] or editor_member'
-const STEP_A_VIEWER_MEMBER = 'define viewer_member: [user, group#member] or editor'
+// #330 §1b appended `or moderator` to viewer_member AFTER this migration shipped — keep the constants
+// exact-matching the CURRENT model.fga line so the loud-throw shape guard stays meaningful (a loose
+// prefix match would silently accept future reshapes). Step A keeps the moderator branch: it is
+// orthogonal to the editor split being migrated.
+const FINAL_VIEWER_MEMBER = 'define viewer_member: [user, group#member] or editor_member or moderator'
+const STEP_A_VIEWER_MEMBER = 'define viewer_member: [user, group#member] or editor or moderator'
 
 export function finalDsl(): string {
   return readFileSync(new URL('../../../../infra/openfga/model.fga', import.meta.url), 'utf8')
