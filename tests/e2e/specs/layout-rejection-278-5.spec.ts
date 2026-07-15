@@ -96,17 +96,28 @@ test("#278-5 points 2+5: tab × matches the column × chip; nested ✎ sits insi
   expect(tabX.border, "tab × is a bordered chip like the column ×").toBe("1px");
   expect(Math.abs(tabX.w - colX.w), "tab × width matches the column ×").toBeLessThanOrEqual(2);
   expect(Math.abs(tabX.h - colX.h), "tab × height matches the column ×").toBeLessThanOrEqual(2);
-  // point 5: select the nested mermaid — its corner ✎ must sit INSIDE the tab panel (not clipped above)
+  // point 5 (UPDATED by #424, which supersedes the inside-the-panel special case): the nested ✎ now uses
+  // the UNIFIED block-top-left offset like every other edit affordance — anchored to its slot, floating
+  // ABOVE the slot's top edge — and must still be fully visible (not clipped by the panel/tab chrome).
   await page.locator(".cm-lp-tabpanel-active [data-testid=macro-mermaid]").first().click();
   await sleep(400);
   const pos = await page.evaluate(() => {
     const pen = document.querySelector("[data-testid=nested-macro-edit]");
-    const panel = document.querySelector(".cm-lp-tabpanel-active");
-    if (!pen || !panel) return null;
-    return { penTop: pen.getBoundingClientRect().top, panelTop: panel.getBoundingClientRect().top };
+    const slot = document.querySelector(".cm-lp-tabpanel-active [data-mac-pos]");
+    if (!pen || !slot) return null;
+    const r = pen.getBoundingClientRect();
+    return {
+      penTop: r.top,
+      penHeight: r.height,
+      slotTop: slot.getBoundingClientRect().top,
+      opacity: parseFloat(getComputedStyle(pen).opacity),
+      visible: r.width > 0 && r.height > 0,
+    };
   });
-  expect(pos, "pencil + active panel found").not.toBeNull();
-  expect(pos!.penTop, "the ✎ starts inside the panel").toBeGreaterThanOrEqual(pos!.panelTop);
+  expect(pos, "pencil + slot found").not.toBeNull();
+  expect(pos!.penTop, "the ✎ floats above the slot top (#424 unified offset)").toBeLessThan(pos!.slotTop);
+  expect(pos!.visible, "the ✎ has a real box (not clipped away)").toBe(true);
+  expect(pos!.opacity, "the ✎ is visible while the nested macro is selected").toBeGreaterThan(0.9);
 });
 
 test("#278-5 point 3: vim o / A→Enter on the island's bottom line adds a line inside the island", async ({ browser }) => {

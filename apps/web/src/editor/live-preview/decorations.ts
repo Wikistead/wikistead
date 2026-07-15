@@ -1162,7 +1162,7 @@ class AttachmentCardWidget extends WidgetType {
       reveal.type = "button";
       reveal.className = "cm-lp-macro-edit cm-lp-macro-edit-hint";
       reveal.title = "Edit";
-      reveal.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
+      reveal.innerHTML = MACRO_EDIT_BUTTON_HTML;
       reveal.setAttribute("data-testid", "macro-edit");
       reveal.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(wrap), true); });
       btnRow.appendChild(reveal);
@@ -1316,7 +1316,7 @@ class StandaloneImageWidget extends WidgetType {
       reveal.type = "button";
       reveal.className = "cm-lp-macro-edit cm-lp-macro-edit-hint";
       reveal.title = "Edit";
-      reveal.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
+      reveal.innerHTML = MACRO_EDIT_BUTTON_HTML;
       reveal.setAttribute("data-testid", "macro-edit");
       reveal.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(wrap), true); });
       btnRow.appendChild(reveal);
@@ -1480,7 +1480,7 @@ class MacroRawRichuiPill extends WidgetType {
     btn.type = "button";
     btn.className = "cm-lp-macro-edit cm-lp-macro-richui-raw";
     btn.title = "Rich edit (Ctrl+Enter)";
-    btn.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
+    btn.innerHTML = MACRO_EDIT_BUTTON_HTML;
     btn.setAttribute("data-testid", this.testid);
     // Own mousedown → open the RichUI; preventDefault so the caret isn't also re-placed, stopPropagation so it
     // does not bubble to the line. ignoreEvent keeps CM from routing the click as an editor gesture.
@@ -1681,6 +1681,10 @@ type RenderableMacro = { liveRender: (body: string, ctx: { theme: MacroTheme }) 
 // #174 / ADR-087: the single macro-edit affordance is a Lucide SVG pencil (ADR-052 icon system),
 // replacing the ✎ emoji. A trusted constant (no user input) → safe as innerHTML.
 const MACRO_EDIT_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
+// #424: THE edit-entry button face — icon + the visible "Ctrl+↵" key hint, identical for every macro
+// (editUI-opening and raw-revealing alike; what the press DOES stays per-macro). Trusted constant markup
+// (no user input → XSS-safe). Never compose a bare-pencil variant — the uniform face is the contract.
+const MACRO_EDIT_BUTTON_HTML = MACRO_EDIT_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
 // #198 (comment 724): Lucide copy / check glyphs for the code-fence copy button. Trusted constants
 // (no user input) → safe as innerHTML.
 const COPY_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
@@ -2151,9 +2155,9 @@ class MacroWidget extends WidgetType {
                                               // pinning the pencil to the tabs top instead of the inner macro)
             const edit = document.createElement("button");
             edit.type = "button";
-            edit.className = "cm-lp-macro-edit cm-lp-nested-macro-edit";
-            edit.title = "Edit";
-            edit.innerHTML = MACRO_EDIT_ICON;
+            edit.className = "cm-lp-macro-edit cm-lp-macro-edit-hint cm-lp-nested-macro-edit";
+            edit.title = "Edit (Ctrl+Enter)";
+            edit.innerHTML = MACRO_EDIT_BUTTON_HTML; // #424: the uniform face (the macro IS selected here, so Ctrl+↵ works directly)
             edit.setAttribute("data-testid", "nested-macro-edit");
             edit.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterNestedMacroAt(view, this.nestedSel!); });
             slot.appendChild(edit);
@@ -2184,9 +2188,11 @@ class MacroWidget extends WidgetType {
             edit.type = "button";
             // Hover-gated variant (the base .cm-lp-nested-macro-edit is opacity:1 — only drawn on selection);
             // -hover overrides to opacity:0 + reveals on the slot's :hover (CSS below).
-            edit.className = "cm-lp-macro-edit cm-lp-nested-macro-edit cm-lp-nested-macro-edit-hover";
-            edit.title = "Edit";
-            edit.innerHTML = MACRO_EDIT_ICON; // no Ctrl+↵ hint: keyboard entry needs the macro SELECTED first
+            edit.className = "cm-lp-macro-edit cm-lp-macro-edit-hint cm-lp-nested-macro-edit cm-lp-nested-macro-edit-hover";
+            edit.title = "Edit (Ctrl+Enter)";
+            // #424 (user ruling, supersedes the bare-pencil rule): ONE face for every entry button
+            // icon + Ctrl+↵ — even where the key needs the macro selected first; uniformity beats the nuance.
+            edit.innerHTML = MACRO_EDIT_BUTTON_HTML;
             edit.setAttribute("data-testid", "nested-macro-edit");
             const container = { from: this.from, to: this.to };
             edit.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterNestedMacroAt(view, { nested: { from: m.from, to: m.to }, anchor, container }); });
@@ -2335,25 +2341,13 @@ class MacroWidget extends WidgetType {
       if (hasEditUI(this.macro) && !nestedActive) {
         const edit = document.createElement("button");
         edit.type = "button";
-        edit.className = "cm-lp-macro-edit";
-        edit.title = "Edit";
-        // #174 / ADR-087: a Lucide SVG pencil (not the ✎ emoji — ADR-052 icon system), top-left, shown
-        // on hover/selection. innerHTML of a trusted constant SVG (no user input → XSS-safe).
-        edit.innerHTML = MACRO_EDIT_ICON;
-        // #174 comment 911: unify the "✎ Ctrl+↵" affordance across macros — show the SAME visible
-        // Ctrl+↵ key hint (as the callout/table raw-lead pill) next to the pencil, but ONLY when
-        // Ctrl+Enter opens the SAME UI the pencil does. That holds for a richEditUI macro (excalidraw's
-        // modal / a rich grid: Ctrl+Enter and ✎ both open it). It does NOT hold for an editUI-only fence
-        // macro (mermaid/plantuml), whose Ctrl+Enter reveals RAW source, not the editUI — so no hint there
-        // (it would mislead; that asymmetry + their editUI bug is #239).
-        if (this.macro.richEditUI) {
-          edit.innerHTML += '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
-          // #254: use the LAYOUT-only hint class (gap for the key), NOT cm-lp-macro-richui-raw — that class
-          // forces opacity:0.8 (always visible), which is only correct for the RAW-editing pill
-          // (MacroRawRichuiPill). On a RENDERED macro the ✎ must stay hover/selection-gated (base opacity:0
-          // + the .cm-lp-macro-wrap:hover / .cm-lp-atom-sel gate), or it shows with no hover/selection.
-          edit.classList.add("cm-lp-macro-edit-hint");
-        }
+        // #424 (user ruling, supersedes the richEditUI-only hint rule): EVERY entry button wears the
+        // same face — icon + visible Ctrl+↵ — whether the press opens an editUI, a richEditUI modal, or a
+        // raw reveal; what it opens stays per-macro. Hover/selection gating unchanged (#254: edit-hint is
+        // layout-only, never the always-visible richui-raw class).
+        edit.className = "cm-lp-macro-edit cm-lp-macro-edit-hint";
+        edit.title = "Edit (Ctrl+Enter)";
+        edit.innerHTML = MACRO_EDIT_BUTTON_HTML;
         edit.setAttribute("data-testid", "macro-edit");
         edit.addEventListener("mousedown", (e) => {
           e.preventDefault();
@@ -2603,7 +2597,7 @@ class DetailsSummaryWidget extends WidgetType {
       edit.type = "button";
       edit.className = "cm-lp-macro-edit cm-lp-macro-edit-hint cm-lp-callout-panel-edit";
       edit.title = "Edit (Ctrl+Enter)";
-      edit.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
+      edit.innerHTML = MACRO_EDIT_BUTTON_HTML;
       edit.setAttribute("data-testid", "details-edit");
       edit.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(wrap)); view.focus(); });
       wrap.appendChild(edit);
@@ -2699,7 +2693,7 @@ class CalloutWidget extends WidgetType {
       edit.type = "button";
       edit.className = "cm-lp-macro-edit cm-lp-macro-edit-hint cm-lp-callout-panel-edit";
       edit.title = "Edit (Ctrl+Enter)";
-      edit.innerHTML = MACRO_EDIT_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
+      edit.innerHTML = MACRO_EDIT_BUTTON_HTML;
       edit.setAttribute("data-testid", "callout-panel-edit");
       edit.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(el)); });
       el.appendChild(edit);
@@ -4347,7 +4341,9 @@ export const livePreviewTheme = EditorView.baseTheme({
   // (edit / retarget / fold) are reliably clickable — the Notion block-hover pattern, uniform across macros.
   ".cm-lp-macro-edit, .cm-lp-macro-retarget, .cm-lp-macro-align": {
     position: "absolute",
-    top: "-1.55em", // above the content box (outside the iframe/widget), in the block's top margin
+    top: "-1.5em", // above the content box (outside the iframe/widget), in the block's top margin — the
+    // #424 UNIFIED offset: every edit affordance sits at block top-left with this exact top (btnrow,
+    // raw pill, nested, callout panel), so Live and WYSIWYG render the button in the same place.
     display: "inline-flex", // centres the Lucide SVG (#174) / the fold glyph
     alignItems: "center",
     justifyContent: "center",
@@ -4367,8 +4363,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   // #255 comment 1040: the top-left action buttons flow in ONE flex row (no fixed `left` magic numbers), so
   // the ✎ + its "Ctrl+↵" hint (#174) and the align toggle never overlap regardless of width. The row is the
   // positioned element; its buttons flow statically inside it.
-  ".cm-lp-macro-btnrow": { position: "absolute", top: "-1.55em", left: "0", display: "inline-flex", alignItems: "center", gap: "4px", zIndex: "3" },
+  ".cm-lp-macro-btnrow": { position: "absolute", top: "-1.5em", left: "0", display: "inline-flex", alignItems: "center", gap: "4px", zIndex: "3" },
   ".cm-lp-macro-btnrow > .cm-lp-macro-edit, .cm-lp-macro-btnrow > .cm-lp-macro-align": { position: "static", top: "auto", left: "auto" },
+  // #424: the standalone (non-btnrow) edit button pins to the block's LEFT edge too — one position for
+  // every entry affordance. Scoped to the edit button only (retarget is a top-RIGHT control).
+  ".cm-lp-macro-edit": { left: "0" },
   // #255 the 3-button segmented align control. The group is a rounded pill of 3 buttons sharing a
   // border; the active side gets an accent tint. Reuses the macro-align hover-reveal (it carries that class).
   ".cm-lp-align-seg": { display: "inline-flex", border: "1px solid var(--border, #888)", borderRadius: "5px", overflow: "hidden", background: "var(--panel, var(--bg, #fff))", padding: "0" },
@@ -4453,13 +4452,15 @@ export const livePreviewTheme = EditorView.baseTheme({
   // edit affordance — not the container's (suppressed while nested). #215 comment 834: keep only the
   // position override; the pencil uses the SAME (normal) color as every other macro's edit button — the
   // accent ring already marks the focused macro, so tinting the pencil too was redundant.
-  ".cm-lp-nested-macro-edit": { position: "absolute", top: "-0.9em", left: "-0.4em", opacity: "1", zIndex: "5" },
+  // #424: nested macros use the SAME top-left offset as every other edit affordance (the old
+  // -0.9em/-0.4em special case made the button wander between nesting levels).
+  ".cm-lp-nested-macro-edit": { position: "absolute", top: "-1.5em", left: "0", opacity: "1", zIndex: "5" },
   // #278 point 5: INSIDE a layout cell / tab panel the floated corner controls (-0.9em / -1.55em
   // above their slot) stick out past the container's top edge and get cut (the clipped mermaid toolbar
   // in a tab). Nested contexts pin them INSIDE the slot's top-left corner instead — the container never
   // clips them and they still sit "at the corner" (the user-suggested in-container placement).
-  ".cm-lp-tabpanel .cm-lp-nested-macro-edit, .cm-lp-column .cm-lp-nested-macro-edit": { top: "2px", left: "2px" },
-  ".cm-lp-tabpanel .cm-lp-macro-btnrow, .cm-lp-column .cm-lp-macro-btnrow": { top: "2px", left: "2px" },
+  // #424: the old tabpanel/column overrides (top:2px left:2px — an INSIDE-the-block position) are gone;
+  // nested affordances sit at the unified block-top-left like everywhere else.
   // #174 comment 1003: the WYSIWYG hover variant. Unlike the selection pencil (drawn only when selected, so
   // opacity:1), this one sits on EVERY editable nested slot, so it must be hover-gated — opacity:0 until the
   // slot itself is hovered. `>` keeps it to the pencil that is a direct child of the hovered [data-mac-pos].
