@@ -134,6 +134,56 @@ describe('GET /pub/:id — the crawler shell (#409 / ADR-154)', () => {
     expect(r.body).toContain('&lt;/title&gt;&lt;script&gt;')
   })
 
+  it('#408: social meta rides the shell — og:title/description/type/url + twitter:card, all escaped', async () => {
+    await admin`UPDATE pages SET published_md = ${'# Heading\n\nSome **prose** with a [link](/p/x) and `code`.\n\n```js\nsecret()\n```'} WHERE id = ${publicPage}`
+    const r = await app.inject({ method: 'GET', url: `/pub/${publicPage}`, headers: H })
+    expect(r.body).toContain('<meta property="og:title" content="Shell Public Page">')
+    expect(r.body).toContain('og:type" content="article"')
+    expect(r.body).toContain('twitter:card" content="summary"')
+    expect(r.body).toContain(`/pub/${publicPage}`)
+    const desc = /og:description" content="([^"]*)"/.exec(r.body)?.[1] ?? ''
+    expect(desc).toContain('Some prose with a link and code')
+    expect(desc).not.toContain('secret()') // fenced code stripped
+    // The hostile-title page's og:title is escaped too (same interpolation discipline).
+    const x = await app.inject({ method: 'GET', url: `/pub/${xssPage}`, headers: H })
+    expect(x.body).not.toContain('<script>window.__shell_xss')
+  })
+
+  it('#408: robots.txt allows /pub+/assets and points at the sitemap; parent switch OFF disallows all', async () => {
+    const on = await app.inject({ method: 'GET', url: '/robots.txt', headers: H })
+    expect(on.statusCode).toBe(200)
+    expect(on.body).toContain('Allow: /pub/')
+    expect(on.body).toContain('Allow: /assets/')
+    expect(on.body).toContain('Sitemap: https://dev.localhost/sitemap.xml')
+    await admin`UPDATE tenant_settings SET public_enabled = FALSE WHERE tenant_id = ${tenant.id}`
+    try {
+      const off = await app.inject({ method: 'GET', url: '/robots.txt', headers: H })
+      expect(off.body.trim()).toBe('User-agent: *\nDisallow: /')
+    } finally {
+      await admin`UPDATE tenant_settings SET public_enabled = TRUE WHERE tenant_id = ${tenant.id}`
+    }
+  })
+
+  it('#408 anti-test 4: the sitemap lists the public indexable page and omits noindexed/member-only/draft (list AND count)', async () => {
+    const r = await app.inject({ method: 'GET', url: '/sitemap.xml', headers: H })
+    expect(r.statusCode).toBe(200)
+    expect(r.body).toContain(`/pub/${publicPage}`)
+    for (const id of [noindexPage, memberPage, unpubPage]) expect(r.body).not.toContain(id)
+    // Count discipline: exactly as many <url> entries as anonymously-indexable pages we can see —
+    // the omitted three never inflate the count.
+    const count = (r.body.match(/<url>/g) ?? []).length
+    expect(count).toBeGreaterThan(0)
+    expect(r.body.includes(memberPage)).toBe(false)
+    // Parent switch OFF → empty urlset (no URL list leak).
+    await admin`UPDATE tenant_settings SET public_enabled = FALSE WHERE tenant_id = ${tenant.id}`
+    try {
+      const off = await app.inject({ method: 'GET', url: '/sitemap.xml', headers: H })
+      expect((off.body.match(/<url>/g) ?? []).length).toBe(0)
+    } finally {
+      await admin`UPDATE tenant_settings SET public_enabled = TRUE WHERE tenant_id = ${tenant.id}`
+    }
+  })
+
   it('the #253 tenant parent switch OFF hides the whole shell surface (generic 404)', async () => {
     await admin`UPDATE tenant_settings SET public_enabled = FALSE WHERE tenant_id = ${tenant.id}`
     try {

@@ -21,6 +21,7 @@ const EXCLUDED_PREFIXES = [
   '/.well-known/',                 // OAuth metadata for MCP clients
   '/public/',                      // anonymous public reader
   '/pub/',                         // crawler-facing HTML shell (#409 / ADR-154 — not a JSON API)
+  '/robots.txt', '/sitemap.xml',   // crawler surface (#408 / ADR-154 §2)
   '/healthz', '/readyz',           // infra probes
 ]
 // Individual member routes deliberately not in the v1 spec (app-internal UI plumbing, not a stable
