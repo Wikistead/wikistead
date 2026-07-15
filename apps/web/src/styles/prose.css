@@ -1,0 +1,81 @@
+/* #381 / ADR-163 §1-§2: THE raw-tag prose stylesheet.
+ *
+ * Two DOM vocabularies render markdown (structurally irreducible):
+ *   - the CM6 surfaces decorate `.cm-line`s with `.cm-lp-*` classes (livePreviewTheme, decorations.ts);
+ *   - `renderMarkdownToDom` emits real tags (h1/p/ul/pre/…) into widget/nested/tooltip DOM the
+ *     editor-scoped baseTheme can never reach (the #86 lesson).
+ * Before #381 the raw-tag vocabulary was re-implemented per surface (hover card, the callout-icons
+ * `:is(...)` block, public.css frontmatter) and every new surface silently missed something (#335 #351
+ * #376 class). Now: every container that receives renderMarkdownToDom output wears `.wks-prose`
+ * (added at the emission points via appendMarkdownInto — md-render.ts), and THIS file is the single
+ * source for that vocabulary. Surface-local diffs (the hover card's clamp/compaction, macro chrome,
+ * container gaps) stay with their surfaces.
+ *
+ * The VALUES both vocabularies share live in the custom properties below, consumed here AND by
+ * livePreviewTheme — selectors stay per-vocabulary, magnitudes converge on one definition (parity is
+ * pinned by a real-DOM computed-style e2e).
+ *
+ * INVARIANT (ADR-163): `.wks-prose` is opt-in for renderMarkdownToDom output containers ONLY — never on
+ * `.cm-content` or any non-markdown DOM (test-pinned). */
+
+:root {
+  /* the heading scale (mirrored by .cm-lp-h1..h6) */
+  --wks-prose-h1: 1.8em;
+  --wks-prose-h2: 1.5em;
+  --wks-prose-h3: 1.3em;
+  --wks-prose-h4: 1.15em;
+  --wks-prose-h5: 1.05em;
+  --wks-prose-h6: 1em;
+  /* the inline-code box (mirrored by .cm-lp-inline-code) */
+  --wks-inline-code-bg: rgba(127, 127, 127, 0.18);
+  --wks-inline-code-radius: 3px;
+  /* quote / rule / table (mirrored by .cm-lp-quote / .cm-lp-hr / .cm-lp-table) */
+  --wks-quote-border: 3px solid var(--border, #888);
+  --wks-hr-border: 2px solid var(--border, #888);
+  --wks-table-cell-border: 1px solid var(--border, #888);
+}
+
+/* ── block prose (formerly the callout-icons :is(container-list) block, #185) ──
+ * Tailwind's preflight strips h1-h6 / blockquote / hr / list defaults, so without these a nested
+ * heading renders as plain body text. Headings mirror the editor's .cm-lp-h* sizes + --font-body. */
+.wks-prose :is(h1, h2, h3, h4, h5, h6) { font-weight: 700; line-height: 1.3; font-family: var(--font-body); }
+.wks-prose h1 { font-size: var(--wks-prose-h1); }
+.wks-prose h2 { font-size: var(--wks-prose-h2); }
+.wks-prose h3 { font-size: var(--wks-prose-h3); }
+.wks-prose h4 { font-size: var(--wks-prose-h4); }
+.wks-prose h5 { font-size: var(--wks-prose-h5); }
+.wks-prose h6 { font-size: var(--wks-prose-h6); opacity: 0.85; }
+.wks-prose blockquote { margin: 0; border-left: var(--wks-quote-border); padding-left: 0.8em; color: var(--fg-dim, #888); }
+.wks-prose hr { border: none; border-top: var(--wks-hr-border); }
+.wks-prose ul { list-style: disc; padding-left: 1.5em; margin: 0; }
+.wks-prose ol { list-style: decimal; padding-left: 1.5em; margin: 0; }
+.wks-prose code { font-family: var(--font-code); background: var(--wks-inline-code-bg); border-radius: var(--wks-inline-code-radius); padding: 0 3px; }
+.wks-prose pre { font-family: var(--font-code); background: rgba(127, 127, 127, 0.12); border-radius: 4px; padding: 0.5em 0.7em; overflow: auto; }
+.wks-prose pre code { background: none; padding: 0; }
+
+/* pipe tables (md-render emits .cm-lp-md-table) — the #174 bordered look, theme tokens */
+.wks-prose .cm-lp-md-table { border-collapse: collapse; margin: 0; font-size: 0.95em; }
+.wks-prose .cm-lp-md-table :is(th, td) { border: var(--wks-table-cell-border); padding: 0.3em 0.6em; text-align: left; vertical-align: top; }
+.wks-prose .cm-lp-md-table th { font-weight: 700; background: rgba(127, 127, 127, 0.12); }
+
+/* inline images (#305): Tailwind preflight makes img a block; an image sharing its paragraph with
+ * text goes back inline (thumbnail); a standalone image (only child of its paragraph) is a full block. */
+.wks-prose p img { display: inline-block; max-height: 1.6em; width: auto; vertical-align: text-bottom; }
+.wks-prose p img:only-child { display: block; max-height: none; max-width: 100%; width: auto; vertical-align: bottom; }
+
+/* the static-macro placeholder chip (md-render staticMacros mode — hover card excerpts, #351) */
+.wks-prose .cm-lp-md-macro-chip {
+  display: inline-block;
+  padding: 0 0.5em;
+  margin: 0.15em 0;
+  font-size: 0.9em;
+  border: 1px solid var(--border, #33363b);
+  border-radius: 999px;
+  background: var(--panel-2, rgba(128, 128, 128, 0.08));
+  color: var(--fg-dim, #888);
+}
+
+/* #370 / ADR-145: the frontmatter tag-chip row renderMarkdownToDom emits on non-CM surfaces (moved here
+ * from public.css — the CM surfaces style the same classes via the baseTheme). */
+.wks-prose-frontmatter { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4em; padding: 0.2em 0 0.5em; }
+.wks-prose-frontmatter .cm-lp-frontmatter-chip { display: inline-flex; align-items: center; font-size: 0.8em; line-height: 1.6; padding: 0 0.55em; border-radius: 999px; background: var(--panel-2); color: var(--fg); }

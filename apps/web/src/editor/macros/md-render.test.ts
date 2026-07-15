@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeAll } from "vitest";
-import { renderMarkdownToDom, renderCalloutPanel } from "./md-render";
+import { renderMarkdownToDom, renderCalloutPanel, appendMarkdownInto } from "./md-render";
 import { renderMarkdownToHtml, builtinMacroRegistry } from "@wikistead/macro-render";
 import { registerMacro } from "./registry";
 import { tabsMacro } from "./layout-directives";
@@ -533,5 +533,26 @@ describe("renderMarkdownToDom — staticMacros mode (#351 the hover card stays l
     dflt.appendChild(renderMarkdownToDom("```staticfence\nx\n```\n"));
     expect(dflt.querySelector(".static-heavy-widget"), "default mode unchanged").not.toBeNull();
     expect(dflt.querySelector("[data-testid=static-macro-chip]")).toBeNull();
+  });
+});
+
+// #381 / ADR-163: appendMarkdownInto = renderMarkdownToDom + the `.wks-prose` container class (the ONE
+// raw-tag prose sheet). Every emission point goes through it, so the class can't be forgotten again.
+describe("appendMarkdownInto (#381)", () => {
+  it("adds .wks-prose to the container and appends the rendered fragment", () => {
+    const el = document.createElement("div");
+    appendMarkdownInto(el, "# Hi\n\n`code`\n");
+    expect(el.classList.contains("wks-prose")).toBe(true);
+    expect(el.querySelector("h1")?.textContent).toBe("Hi");
+    expect(el.querySelector("code")?.textContent).toBe("code");
+  });
+
+  it("a nested directive body gets .wks-prose via its emission point too", () => {
+    const el = document.createElement("div");
+    appendMarkdownInto(el, ":::unknowndir\n## Inside\n:::\n");
+    const body = el.querySelector(".cm-lp-md-directive");
+    expect(body).not.toBeNull();
+    expect(body!.classList.contains("wks-prose")).toBe(true);
+    expect(body!.querySelector("h2")?.textContent).toBe("Inside");
   });
 });

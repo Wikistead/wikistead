@@ -1116,13 +1116,11 @@ function PublicPageContent({ pageId }: { pageId: string }) {
     setVisibleFroms([]);
     let cancelled = false;
     let dispose = () => {};
-    void Promise.all([import("../editor/editor-livepreview"), import("../editor/toc-wiring"), import("../editor/image-resolver"), import("../editor/diagram-renderer"), import("../editor/transclude-resolver")]).then(([{ mountPublishedView }, { wireToc }, { makePublicImageResolver }, { makePublicDiagramRenderer }, { makePublicTranscludeResolver }]) => {
+    void Promise.all([import("../editor/editor-livepreview"), import("../editor/toc-wiring"), import("../editor/resolver-set")]).then(([{ mountPublishedView }, { wireToc }, { makeResolverSet }]) => {
       if (cancelled || !bodyEl) return;
-      const view = mountPublishedView(bodyEl, state.page!.content, {
-        resolveImageUrl: makePublicImageResolver(),
-        renderDiagram: makePublicDiagramRenderer(pageId),
-        resolveTransclude: makePublicTranscludeResolver(pageId),
-      });
+      // #381 / ADR-163: the "public" context is exactly the ADR-149 anonymous trio (tokenless) — the
+      // facade owns that closure, so this surface can never mount with empty resolvers again (#376).
+      const view = mountPublishedView(bodyEl, state.page!.content, makeResolverSet({ kind: "public", pageId }));
       const unwire = wireToc(view, {
         onHeadings: setHeadings,
         onActiveHeading: setActiveFrom,

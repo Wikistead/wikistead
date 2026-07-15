@@ -18,7 +18,7 @@ import { parseFrontmatterRange, FrontmatterWidget } from "./frontmatter";
 import { parseFenceLine, parseFenceInfo, serializeFenceInfo, CALLOUT_TYPES, type FenceAlign } from "@wikistead/macro-render"; // #198: code-fence attribute parser; #174: callout types; #255: align rewrite
 // #255: rendered diagram macros are centred by default and take a fence `align=` attribute (others don't).
 const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
-import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset } from "../macros/md-render";
+import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset, appendMarkdownInto } from "../macros/md-render";
 import { setActiveTabIndex } from "../macros/layout-directives"; // #278 item 1: record the clicked tab before the island's commit rebuilds the tabs widget
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
@@ -196,7 +196,7 @@ class FootnoteSectionWidget extends WidgetType {
       // the unref marker in CSS — keeps the visible numbers aligned with `fn-N` / `fnref-N`.
       if (!it.unref) { li.id = `fn-${it.n}`; li.value = it.n; }
       const bodySrc = view.state.doc.sliceString(it.from, it.to).replace(/^\[\^[^\]\s]+\]:[ \t]?/, ""); // drop `[^label]: `
-      li.appendChild(renderMarkdownToDom(bodySrc)); // sanitized DOM (no innerHTML), inline styled by CSS
+      appendMarkdownInto(li, bodySrc); // sanitized DOM (no innerHTML); .wks-prose = the shared raw-tag sheet (#381)
       if (!it.unref && it.refPos != null) {
         li.appendChild(document.createTextNode(" "));
         const back = document.createElement("a");
@@ -2303,7 +2303,7 @@ class MacroWidget extends WidgetType {
             ph.textContent = "Cannot display this content"; // uniform — hides whether the page exists
             rendered.appendChild(ph);
           } else {
-            rendered.appendChild(renderMarkdownToDom(content)); // sanitized DOM (no innerHTML)
+            appendMarkdownInto(rendered, content); // sanitized DOM (no innerHTML); .wks-prose (#381)
           }
         });
       }
@@ -2676,7 +2676,7 @@ class DetailsSummaryWidget extends WidgetType {
     bodyEl.setAttribute("data-testid", "details-body");
     const bodyInner = document.createElement("div");
     bodyInner.className = "cm-lp-details-body-inner cm-lp-md-directive"; // padding + nested-block styling
-    bodyInner.appendChild(renderMarkdownToDom(this.body)); // shared renderer, sanitized DOM (display-only)
+    appendMarkdownInto(bodyInner, this.body); // shared renderer, sanitized DOM (display-only); .wks-prose (#381)
     bodyEl.appendChild(bodyInner);
     bodyWrap.appendChild(bodyEl);
     wrap.append(bar, bodyWrap);
@@ -4190,8 +4190,8 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-backlinks-empty": { fontSize: "0.85em", color: "var(--fg-dim, #888)", fontStyle: "italic", padding: "0.2em 0" },
   ".cm-lp-inline-code": {
     fontFamily: "var(--font-code)", // #190: code face (Wikistead Mono), distinct from prose --font-body
-    background: "rgba(127,127,127,0.18)",
-    borderRadius: "3px",
+    background: "var(--wks-inline-code-bg, rgba(127,127,127,0.18))", // #381 shared value token
+    borderRadius: "var(--wks-inline-code-radius, 3px)",
     padding: "0 3px",
   },
   ".cm-lp-link": { color: "var(--link, #4ea1ff)", textDecoration: "underline" }, // #223: semantic token, not a hardcoded blue
@@ -4212,12 +4212,15 @@ export const livePreviewTheme = EditorView.baseTheme({
   // inherit it, but set it EXPLICITLY here so no inherited/default family can strand headings on a
   // different face than the body (the bounce: titles didn't track the font selection).
   ".cm-lp-h": { fontWeight: "700", lineHeight: "1.3", fontFamily: "var(--font-body)" },
-  ".cm-lp-h1": { fontSize: "1.8em" },
-  ".cm-lp-h2": { fontSize: "1.5em" },
-  ".cm-lp-h3": { fontSize: "1.3em" },
-  ".cm-lp-h4": { fontSize: "1.15em" },
-  ".cm-lp-h5": { fontSize: "1.05em" },
-  ".cm-lp-h6": { fontSize: "1em", opacity: "0.85" },
+  // #381 / ADR-163 §2: the heading scale / inline-code box / quote / hr / table-border VALUES are shared
+  // custom properties (styles/prose.css :root) consumed by BOTH this CM vocabulary and the raw-tag
+  // .wks-prose vocabulary — selectors stay per-vocabulary (structural), magnitudes cannot drift.
+  ".cm-lp-h1": { fontSize: "var(--wks-prose-h1, 1.8em)" },
+  ".cm-lp-h2": { fontSize: "var(--wks-prose-h2, 1.5em)" },
+  ".cm-lp-h3": { fontSize: "var(--wks-prose-h3, 1.3em)" },
+  ".cm-lp-h4": { fontSize: "var(--wks-prose-h4, 1.15em)" },
+  ".cm-lp-h5": { fontSize: "var(--wks-prose-h5, 1.05em)" },
+  ".cm-lp-h6": { fontSize: "var(--wks-prose-h6, 1em)", opacity: "0.85" },
   ".cm-lp-code-line": {
     fontFamily: "var(--font-code)", // #190: fenced code uses the code face, not prose --font-body
     background: "rgba(127,127,127,0.12)",
@@ -4267,7 +4270,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   },
   ".cm-lp-code-hl": { background: "color-mix(in srgb, var(--accent) 14%, transparent)", boxShadow: "inset 2px 0 0 var(--accent)" },
   ".cm-lp-quote": {
-    borderLeft: "3px solid var(--border, #888)",
+    borderLeft: "var(--wks-quote-border, 3px solid var(--border, #888))", // #381 shared value token
     paddingLeft: "0.8em",
     color: "var(--fg-dim, #888)",
   },
@@ -4275,7 +4278,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   // zero the line height — a 0-height .cm-line corrupts CodeMirror's vertical-motion
   // geometry (caret jumps over lines). Draw the rule with a centered border instead.
   ".cm-lp-hr": {
-    borderTop: "2px solid var(--border, #888)",
+    borderTop: "var(--wks-hr-border, 2px solid var(--border, #888))", // #381 shared value token
   },
   ".cm-lp-bullet": { paddingRight: "0.25em" },
   // #202: the ordered-list ordinal (per-level style: decimal / lower-alpha / lower-roman). Tabular so
@@ -4290,7 +4293,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   // tables. Table padding is inside the table box → included in getBoundingClientRect.
   ".cm-lp-table": { borderCollapse: "collapse", padding: "0.4em 0", fontSize: "0.95em" },
   ".cm-lp-table th, .cm-lp-table td": {
-    border: "1px solid var(--border, #444)",
+    border: "var(--wks-table-cell-border, 1px solid var(--border, #444))", // #381 shared value token
     padding: "3px 8px",
     textAlign: "left",
     // #197 (comment 638): a min row height so an EMPTY cell/row doesn't collapse to a sliver. In table

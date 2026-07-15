@@ -20,6 +20,7 @@ import "./styles/tokens.css";
 import "./styles/print.css";
 import "./styles/macro-modal.css";
 import "./styles/callout-icons.css"; // #158-C4: callout header icons (Lucide mask-image)
+import "./styles/prose.css"; // #381 / ADR-163: THE raw-tag prose sheet (.wks-prose) + shared value tokens
 import "./styles/public.css"; // #227: prose styling for the anonymous public page body (outside CM)
 import "katex/dist/katex.min.css"; // #158-C3: KaTeX math rendering (MIT, self-hosted)
 

@@ -14,8 +14,4 @@
 .wks-public [data-testid="public-body"] .lp-editor-host,
 .wks-public [data-testid="public-body"] .cm-editor { height: 100%; }
 
-/* #370 / ADR-145: tag-chip row emitted by renderMarkdownToDom for a leading frontmatter block on NON-CM
- * surfaces (hover preview, transclusion, template preview). The CM surfaces style the same classes via the
- * baseTheme (editor-scoped — it can't reach here, the #86 lesson), so these few rules mirror it globally. */
-.wks-prose-frontmatter { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4em; padding: 0.2em 0 0.5em; }
-.wks-prose-frontmatter .cm-lp-frontmatter-chip { display: inline-flex; align-items: center; font-size: 0.8em; line-height: 1.6; padding: 0 0.55em; border-radius: 999px; background: var(--panel-2); color: var(--fg); }
+/* #370 → #381: the frontmatter chip-row rules moved to styles/prose.css (the ONE raw-tag prose sheet). */

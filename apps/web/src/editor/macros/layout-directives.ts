@@ -1,5 +1,5 @@
 import type { DirectiveMacro } from "./registry";
-import { renderMarkdownToDom, takePendingBaseOffset } from "./md-render";
+import { renderMarkdownToDom, appendMarkdownInto, takePendingBaseOffset } from "./md-render";
 // #85 slice 2: the DOM-free export half (parseLayoutItems + the htmlRenders) is the single source of
 // truth in @wikistead/macro-render, shared with the server export renderer. This file adds only the
 // DOM liveRender + editor metadata on top.
@@ -34,7 +34,7 @@ export function columnsLiveRender(body: string): HTMLElement {
     if (!c.content.trim()) col.classList.add("cm-lp-column-empty"); // #278 H: hover affordance for an empty slot
     // The column SLOT is not tagged (a click on empty slot area selects the container, ADR-100 §1);
     // only real nested macros inside get data-mac-pos, via renderMarkdownToDom with the column base.
-    col.appendChild(renderMarkdownToDom(c.content, base != null ? base + c.contentOffset : undefined));
+    appendMarkdownInto(col, c.content, base != null ? base + c.contentOffset : undefined);
     row.appendChild(col);
   }
   return row;
@@ -108,7 +108,7 @@ export function tabsLiveRender(body: string): HTMLElement {
     const panel = document.createElement("div");
     panel.className = "cm-lp-tabpanel";
     if (!t.content.trim()) panel.classList.add("cm-lp-tabpanel-empty"); // #278 H: hover affordance for an empty tab
-    panel.appendChild(renderMarkdownToDom(t.content, base != null ? base + t.contentOffset : undefined));
+    appendMarkdownInto(panel, t.content, base != null ? base + t.contentOffset : undefined);
     const activate = () => {
       for (const b of Array.from(bar.children)) b.classList.toggle("cm-lp-tab-active", b === btn);
       for (const p of Array.from(panels.children)) (p as HTMLElement).classList.toggle("cm-lp-tabpanel-active", p === panel);

@@ -1,8 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useSession } from "../session/SessionProvider";
 import { mountPublishedView } from "./editor-livepreview";
-import { makeImageResolver } from "./image-resolver";
-import { makeTemplateDiagramRenderer } from "./diagram-renderer";
+import { makeResolverSet } from "./resolver-set"; // #381 / ADR-163: image + template diagram, nothing else
 
 // #267 the template preview renders with the EDITOR'S OWN read-only engine (mountPublishedView —
 // the exact CM6 surface the member view/Reading mode uses), so math (KaTeX), todo checkboxes, syntax
@@ -22,10 +21,7 @@ export function TemplateBodyPreview({ body, templateId, testid }: { body: string
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const view = mountPublishedView(host, body, {
-      resolveImageUrl: makeImageResolver(token),
-      renderDiagram: makeTemplateDiagramRenderer(token, templateId),
-    });
+    const view = mountPublishedView(host, body, makeResolverSet({ kind: "template", token, templateId }));
     return () => {
       view.destroy();
       host.replaceChildren();

@@ -2,7 +2,7 @@ import { Facet, StateEffect, type Extension, type Range } from "@codemirror/stat
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, hoverTooltip } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { matchTitleLinks, type TitleEntry, type MatchOpts } from "./title-links";
-import { renderMarkdownToDom } from "../macros/md-render";
+import { appendMarkdownInto } from "../macros/md-render";
 
 // #224 / ADR-104: render auto internal links over body text whose words match a page title. The decoration is
 // DISPLAY-ONLY and OFFSET-INVARIANT (a Mark over the existing text — the source stays plain Markdown, Open
@@ -140,20 +140,12 @@ const titleLinkCardTheme = EditorView.baseTheme({
     overflow: "hidden",
     overflowWrap: "anywhere",
   },
+  // #381 / ADR-163: the card body is a `.wks-prose` container now (appendMarkdownInto), so its PROSE
+  // incl. the code-fence box #351 was missing — comes from the ONE raw-tag sheet (styles/prose.css). The
+  // two rules below are the card's own EXCERPT COMPACTION (surface-local layout, not prose): tight block
+  // margins and flattened headings so a heading-lead excerpt stays a few readable lines inside the clamp.
   ".cm-lp-title-link-card-body :is(h1,h2,h3,h4,h5,h6,p,ul,ol,pre)": { margin: "0.15em 0" },
   ".cm-lp-title-link-card-body :is(h1,h2,h3,h4,h5,h6)": { fontSize: "1em", fontWeight: "700", color: "var(--fg)" },
-  // #351 the static-macro placeholder chip (md-render staticMacros mode) — a small muted pill naming
-  // the macro instead of a live widget/fetch. Only ever rendered inside this card (the sole static consumer).
-  ".cm-lp-title-link-card-body .cm-lp-md-macro-chip": {
-    display: "inline-block",
-    padding: "0 0.5em",
-    margin: "0.15em 0",
-    fontSize: "0.9em",
-    border: "1px solid var(--border, #33363b)",
-    borderRadius: "999px",
-    background: "var(--panel-2, rgba(128,128,128,0.08))",
-    color: "var(--fg-dim, #888)",
-  },
 });
 
 export function titleLinkHover(): Extension {
@@ -212,7 +204,7 @@ export function titleLinkHover(): Extension {
           // (user ruling): STATIC macros — the card stays light. A macro in the excerpt renders as a
           // compact chip (fence diagrams, embed/transclude/query/backlinks), never a live widget, and NO
           // view-gated fetch fires from inside the card; plain markdown renders as before.
-          if (excerptMd) body.appendChild(renderMarkdownToDom(excerptMd, undefined, { staticMacros: true }));
+          if (excerptMd) appendMarkdownInto(body, excerptMd, undefined, { staticMacros: true });
           dom.append(title, body);
           return { dom };
         },

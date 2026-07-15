@@ -120,13 +120,9 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
 .cm-lp-md-preview svg{max-width:100%;height:auto}
 .cm-lp-md-preview img{max-width:100%;height:auto}
 .cm-lp-md-preview table{display:block;max-width:100%;overflow-x:auto}
-/* #305 the inline-image convention for every rendered-markdown container (column/tab bodies,
-   callout panels, transcludes, previews) — the SAME rule as the editor's cm-lp-image-inline and the
-   public reader. The Tailwind preflight sets img{display:block}, so an image sharing its paragraph
-   with text must be forced back inline (thumbnail); a standalone image (its own paragraph = only
-   child) stays a block at full width. */
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) p img{display:inline-block;max-height:1.6em;width:auto;vertical-align:text-bottom}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) p img:only-child{display:block;max-height:none;max-width:100%;width:auto;vertical-align:bottom}
+/* #305 → #381: the inline-image convention moved to styles/prose.css (.wks-prose p img) — every
+   rendered-markdown container wears .wks-prose now (appendMarkdownInto), so the rule lives in the ONE
+   raw-tag prose sheet instead of a container list here. */
 .cm-lp-column>*+*,.cm-lp-tabpanel>*+*,.cm-lp-embed-page>*+*,.cm-lp-callout-panel-body>*+*,.cm-lp-md-preview>*+*{margin-top:var(--lp-block-gap)}
 .cm-lp-column>*:first-child,.cm-lp-tabpanel>*:first-child,.cm-lp-embed-page>*:first-child,.cm-lp-md-preview>*:first-child{margin-top:0}
 
@@ -140,32 +136,11 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
    in sync from one source. */
 .cm-lp-embed-page{padding-left:var(--lp-line-pad-left,6px)}
 
-/* #185: nested renderMarkdownToDom blocks (inside columns / tabs / transclude / a callout panel body /
-   a generic directive box) need the SAME block styling as the top-level editor. Tailwind preflight
-   strips h1-h6 / blockquote / hr / list defaults, so WITHOUT this a nested heading is present in the
-   DOM but renders identically to body text ("the heading doesn't appear"); the same goes for quotes,
-   rules and lists. One selector list covers every nested container × every block type (comprehensive,
-   not per-block patched). Headings mirror the editor's .cm-lp-h* sizes + --font-body (#190). */
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) :is(h1,h2,h3,h4,h5,h6){font-weight:700;line-height:1.3;font-family:var(--font-body)}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) h1{font-size:1.8em}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) h2{font-size:1.5em}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) h3{font-size:1.3em}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) h4{font-size:1.15em}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) h5{font-size:1.05em}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) h6{font-size:1em;opacity:0.85}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) blockquote{margin:0;border-left:3px solid var(--border,#888);padding-left:0.8em;color:var(--fg-dim,#888)}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) hr{border:none;border-top:2px solid var(--border,#888)}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) ul{list-style:disc;padding-left:1.5em;margin:0}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) ol{list-style:decimal;padding-left:1.5em;margin:0}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) code{font-family:var(--font-code);background:rgba(127,127,127,0.18);border-radius:3px;padding:0 3px}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) pre{font-family:var(--font-code);background:rgba(127,127,127,0.12);border-radius:4px;padding:0.5em 0.7em;overflow:auto}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) pre code{background:none;padding:0}
-/* #174 (2): a GFM pipe table nested inside a column/tab/transclude (rendered by md-render as
-   .cm-lp-md-table) got NO table styling — it collapsed to a bordersless, padless skeleton. Give it the
-   shared bordered look (theme tokens, light/dark). Header cells are emphasised like the top-level table. */
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) .cm-lp-md-table{border-collapse:collapse;margin:0;font-size:0.95em}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) .cm-lp-md-table :is(th,td){border:1px solid var(--border,#888);padding:0.3em 0.6em;text-align:left;vertical-align:top}
-:is(.cm-lp-column,.cm-lp-tabpanel,.cm-lp-embed-page,.cm-lp-callout-panel-body,.cm-lp-md-directive,.cm-lp-md-preview) .cm-lp-md-table th{font-weight:700;background:rgba(127,127,127,0.12)}
+/* #185 → #381 / ADR-163: the nested-container prose block (headings/quote/hr/lists/code/pre/tables)
+   moved to styles/prose.css keyed on .wks-prose — every renderMarkdownToDom container gets that class at
+   the emission point (appendMarkdownInto), so ONE sheet serves every present and future raw-tag surface
+   instead of this hand-maintained container list. Only genuinely macro-specific chrome stays below.
+*/
 
 /* #185 (re-bounce): the tab-switch styling lives in the CM baseTheme (.cm-editor-scoped), but the
    NESTED tabs rendered by renderMarkdownToDom (a tabs macro inside another tab/column) can sit in DOM

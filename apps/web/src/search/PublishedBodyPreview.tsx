@@ -1,8 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useSession } from "../session/SessionProvider";
 import { mountPublishedView } from "../editor/editor-livepreview";
-import { makeImageResolver } from "../editor/image-resolver";
-import { makeDiagramRenderer } from "../editor/diagram-renderer";
+import { makeResolverSet } from "../editor/resolver-set"; // #381 / ADR-163: image + diagram, nothing else
 
 // #285 (B): render a page's PUBLISHED body with the editor's OWN read-only engine (mountPublishedView —
 // the exact CM6 surface members use for view/Reading), so math, code, todo checkboxes, and every macro look
@@ -19,10 +18,7 @@ export function PublishedBodyPreview({ body, pageId, testid }: { body: string; p
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const view = mountPublishedView(host, body, {
-      resolveImageUrl: makeImageResolver(token),
-      renderDiagram: makeDiagramRenderer(token, pageId),
-    });
+    const view = mountPublishedView(host, body, makeResolverSet({ kind: "preview", token, pageId }));
     return () => {
       view.destroy();
       host.replaceChildren();

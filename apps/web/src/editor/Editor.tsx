@@ -11,11 +11,8 @@ import { redrawMacros, taskStatePosAt } from "./live-preview/decorations";
 import i18n from "../i18n"; // #307: strings for the host-owned :::backlinks source (i18n stays out of the CM layer)
 import { useTheme } from "../app/ThemeProvider";
 import { makeMacroPresence } from "./macro-presence";
-import { makeImageResolver } from "./image-resolver";
-import { makeAttachmentResolver } from "./attachment-resolver";
-import { makeDiagramRenderer } from "./diagram-renderer";
+import { makeResolverSet } from "./resolver-set"; // #381 / ADR-163: the surface declares its context
 import { makeLinkStatusResolver } from "./link-status";
-import { makeTranscludeResolver } from "./transclude-resolver";
 import { PageEmbedPicker } from "./PageEmbedPicker";
 import { EmbedUrlModal } from "./EmbedUrlModal";
 import { TagPickerModal } from "./TagPickerModal";
@@ -185,18 +182,17 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
   // edit (surface stays "view") — the collab server is the fortress regardless.
   const surfaceKey: SurfaceKey = canEdit && editing ? "edit" : "view";
 
-  const resolveImageUrl = useMemo(() => makeImageResolver(apiToken), [apiToken]);
-  // #273: file-attachment links (chip / download card / sandboxed PDF viewer) — same auth token.
-  const resolveAttachment = useMemo(() => makeAttachmentResolver(apiToken), [apiToken]);
-  // #140: host-mediated diagram render (plantuml). Only when we have a pageId (the render endpoint is
-  // page-scoped + page-view gated); otherwise undefined → the macro degrades to its source fence.
-  const renderDiagram = useMemo(() => (pageId ? makeDiagramRenderer(apiToken, pageId) : undefined), [apiToken, pageId]);
+  // #381 / ADR-163: the RESOURCE resolvers come from the one facade — this surface just declares
+  // "member/guest page" (guest = same set with the guest token; the server re-gates). Without a pageId
+  // diagram/transclude are absent and those macros degrade, exactly as before.
+  const { resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude } = useMemo(
+    () => makeResolverSet({ kind: "page", token: apiToken, pageId: pageId ?? null }),
+    [apiToken, pageId],
+  );
   // #276 / ADR-117: dead-internal-link resolver. Member surfaces only in v1 — gated on the API token (a
-  // guest/anon `view` path is a named follow-up, ADR §4), so guests simply see no strikethrough.
+  // guest/anon `view` path is a named follow-up, ADR §4), so guests simply see no strikethrough. A
+  // page-INTERACTION concern, so it stays caller-supplied (not part of the resolver set).
   const linkStatus = useMemo(() => (apiToken ? makeLinkStatusResolver(apiToken) : undefined), [apiToken]);
-  // #108: host-mediated internal transclude (the :::transclude macro never fetches). page-scoped (the
-  // server re-checks view on the referenced page); undefined without a pageId → placeholder.
-  const resolveTransclude = useMemo(() => (pageId ? makeTranscludeResolver(apiToken, pageId) : undefined), [apiToken, pageId]);
   // #108 / ADR-071 (comment 551): the tenant external-embed host allowlist for the client-direct
   // sandboxed iframe. Stable reference (react-query) so it doesn't churn the surface remount.
   const embedQuery = useEmbedProviders();
