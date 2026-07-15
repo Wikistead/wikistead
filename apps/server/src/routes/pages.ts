@@ -214,7 +214,11 @@ export async function createPage(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { tenantId: string; spaceId: string; userId: string; title?: string; parentId?: string | null; fromPageId?: string | null; templateId?: string | null },
+  args: { tenantId: string; spaceId: string; userId: string; title?: string; parentId?: string | null; fromPageId?: string | null; templateId?: string | null;
+    // #364 / ADR-157: compose an extra write into the SAME create transaction (the space-home endpoint
+    // sets `spaces.home_page_id` here so "create the page + point the space at it" is atomic; a throw
+    // rolls the page insert back). Runs before the FGA writes; PG-only work belongs here.
+    onCreatedInTx?: (tx: Parameters<Parameters<TenantDb['tx']>[0]>[0], pageId: string) => Promise<void> },
 ): Promise<Page> {
   // Destination gate FIRST: creating a page here needs `edit` on the space. This runs BEFORE any
   // template resolution, so a template-seeded create can never bypass the destination's authz (a
@@ -257,6 +261,10 @@ export async function createPage(
     const [p] = await db.sql<{ space_id: string; deleted_at: Date | null }[]>`SELECT space_id, deleted_at FROM pages WHERE id = ${parentId}`
     // A trashed parent is refused with the SAME error as an absent one (#411 — the trash hides existence).
     if (!p || p.deleted_at || p.space_id !== args.spaceId) throw Object.assign(new Error('parent not in space'), { statusCode: 400 })
+    // #364 / ADR-157 §3: the space HOME is a LEAF (v1) — no children under it. Keeps the root-listing
+    // exclusion trivially sound and the `_home.md` flat export lossless.
+    const [homeRow] = await db.sql<[{ home_page_id: string | null }?]>`SELECT home_page_id FROM spaces WHERE id = ${args.spaceId}`
+    if (homeRow?.home_page_id === parentId) throw Object.assign(new Error('the space home is a leaf (v1) — pages cannot be created under it'), { statusCode: 400 })
     // #218 / ADR-103 (comment 996 decision 3): cap nesting depth so the inherited-authz parent chain stays
     // resolvable under OpenFGA's resolution-depth limit. The new leaf's depth = parent depth + 1.
     if ((await ancestorDepth(db, parentId)) + 1 > MAX_PAGE_DEPTH) {
@@ -277,6 +285,7 @@ export async function createPage(
       VALUES (${args.tenantId}, ${args.spaceId}, ${parentId}, ${seedTitle ?? ''}, ${position}, ${args.userId})
       RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
     `
+    if (args.onCreatedInTx) await args.onCreatedInTx(tx, r!.id) // #364: atomic composition (throw → rollback)
     // Visibility gate (Phase 4): a new page is a DRAFT — do NOT link it to its
     // space (no `page#space`), so space members do NOT inherit access. Grant the
     // CREATOR direct `manage` instead. publishPage writes `page#space` to release
@@ -418,10 +427,15 @@ export async function listPages(
   fga: OpenFgaClient,
   args: { spaceId: string; subject: string; context?: { current_time: string } },
 ): Promise<Page[]> {
+  // #364 / ADR-157 §4: the home renders AT the space root, so the tree (member AND the shared #245
+  // guest route) skips it — the one root-listing exclusion. Pins/search/overview deliberately include it.
   const rows = await db.sql<PageRow[]>`
-    SELECT id, tenant_id, space_id, parent_id, title, position, created_at, updated_at,
-           has_unpublished_changes, (published_at IS NOT NULL) AS published, task_done, task_total
-    FROM pages WHERE space_id = ${args.spaceId} AND deleted_at IS NULL ORDER BY position, created_at
+    SELECT p.id, p.tenant_id, p.space_id, p.parent_id, p.title, p.position, p.created_at, p.updated_at,
+           p.has_unpublished_changes, (p.published_at IS NOT NULL) AS published, p.task_done, p.task_total
+    FROM pages p JOIN spaces s ON s.id = p.space_id
+    WHERE p.space_id = ${args.spaceId} AND p.deleted_at IS NULL
+      AND (s.home_page_id IS NULL OR p.id != s.home_page_id)
+    ORDER BY p.position, p.created_at
   `
   const allowed = await filterAuthorized(fga, args.subject, 'view', rows.map((r) => r.id), args.context)
   const visible = rows.filter((r) => allowed.has(r.id))
@@ -1480,6 +1494,19 @@ export async function movePage(
     targetSpace = p.space_id // the parent's space is authoritative for the destination
   }
   const crossSpace = targetSpace !== page.space_id
+
+  // #364 / ADR-157 §3: the space HOME is a LEAF (v1). Two refusals, both 400: the home itself cannot be
+  // re-parented under anything (it lives at the space root), and nothing can be moved UNDER the home.
+  const [homeOfTarget] = await db.sql<[{ home_page_id: string | null }?]>`SELECT home_page_id FROM spaces WHERE id = ${targetSpace}`
+  const [homeOfSource] = crossSpace
+    ? await db.sql<[{ home_page_id: string | null }?]>`SELECT home_page_id FROM spaces WHERE id = ${page.space_id}`
+    : [homeOfTarget]
+  if (homeOfSource?.home_page_id === args.pageId && newParent != null) {
+    throw Object.assign(new Error('the space home is a leaf (v1) — it cannot be nested'), { statusCode: 400 })
+  }
+  if (newParent != null && homeOfTarget?.home_page_id === newParent) {
+    throw Object.assign(new Error('the space home is a leaf (v1) — pages cannot be moved under it'), { statusCode: 400 })
+  }
 
   // #218 / ADR-103 Addendum 3: a move that CHANGES the page's EFFECTIVE private state — INTO a private folder
   // (implicit privatise) or OUT of one (implicit un-privatise) — is a manage-level act (setPagePrivate is

@@ -90,6 +90,10 @@ export interface ImportNode {
   oldId: string | null // from manifest — used to remap /p/<oldId> cross-links
   attachments: ImportAttachment[]
   children: ImportNode[]
+  // #364 / ADR-157 §5: the archive-root `_home.md`. Imported as a regular page; the target space's
+  // home pointer is set only when NONE exists (never a silent overwrite). Empty title resolves to
+  // the target space's name at materialize time (the no-manifest foreign-ZIP case).
+  isHome?: boolean
 }
 export interface ExportManifest {
   formatVersion: number
@@ -187,6 +191,30 @@ export function buildIR(files: Record<string, Uint8Array>): ImportIR {
     if (parent != null && nodeByDir.has(parent)) nodeByDir.get(parent)!.children.push(node)
     else roots.push(node)
   }
+  // #364 / ADR-157 §5: the archive-root `_home.md` (the exporter writes the home there instead of a
+  // page directory; images under `_home_images/`). Always a ROOT node; the manifest's `_home` entry
+  // carries its title/oldId when present, a foreign ZIP resolves the title at materialize time.
+  if (files['_home.md']) {
+    const meta = byDir.get('_home')
+    const markdown = strFromU8(files['_home.md']!)
+    const homeAtts: ImportAttachment[] = []
+    for (const [name, bytes] of Object.entries(files)) {
+      if (!name.startsWith('_home_images/')) continue
+      const rest = name.slice('_home_images/'.length)
+      if (rest.includes('/') || rest === '') continue
+      homeAtts.push({ relPath: `_home_images/${rest}`, name: rest, bytes, mime: mimeFromName(rest) })
+    }
+    roots.unshift({
+      dir: '_home',
+      title: meta?.title ?? '',
+      markdown,
+      published: meta ? meta.published : markdown.trim().length > 0,
+      oldId: meta?.oldId ?? null,
+      attachments: homeAtts,
+      children: [],
+      isHome: true,
+    })
+  }
   return { roots, hasManifest: manifest != null }
 }
 
@@ -278,7 +306,18 @@ export async function materializeImport(
   try {
     // Pass 1 — create every page (edit-gated) + re-upload its attachments; collect the id maps.
     async function createNode(node: ImportNode, parentId: string | null): Promise<void> {
-      const page = await createPage(db, fga, driver, { tenantId: args.tenantId, spaceId: args.spaceId, userId: args.userId, title: node.title, parentId })
+      // #364 / ADR-157 §5: a home node with no manifest title is named after the TARGET space.
+      let title = node.title
+      if (node.isHome && !title) {
+        const [sp] = await db.sql<[{ name: string }?]>`SELECT name FROM spaces WHERE id = ${args.spaceId}`
+        title = sp?.name ?? 'Home'
+      }
+      const page = await createPage(db, fga, driver, { tenantId: args.tenantId, spaceId: args.spaceId, userId: args.userId, title, parentId })
+      // #364: restore the home pointer only when the space has NONE (409-class conflict → the archive's
+      // home stays a regular page, never a silent overwrite) and only for a space-level import.
+      if (node.isHome && parentId == null) {
+        await db.sql`UPDATE spaces SET home_page_id = ${page.id} WHERE id = ${args.spaceId} AND home_page_id IS NULL`
+      }
       report.pagesCreated++
       if (!node.published || node.markdown.trim() === '') report.emptyPagesCreated++
       if (node.oldId) pageIdMap.set(node.oldId, page.id)

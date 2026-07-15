@@ -19,6 +19,9 @@ export interface Space {
   // sidebar renders a deterministic initials chip. The server returns a relative API
   // path; useSpaces prefixes it with the API base. (The text-glyph override was removed.)
   iconImageUrl?: string | null;
+  // #364 / ADR-157: the space HOME page pointer. Server-side oracle guard: null when unset OR when
+  // the caller cannot view the pointed page (byte-identical), so the client can trust it blindly.
+  homePageId?: string | null;
 }
 export interface Page {
   id: string;

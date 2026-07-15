@@ -138,7 +138,7 @@ function useDisplayModeShortcut(cycle: () => void, enabled: boolean, chord: stri
     return () => window.removeEventListener("keydown", onKey);
   }, [cycle, enabled, chord]);
 }
-import { Lock, Snowflake } from "lucide-react";
+import { Home, Lock, Snowflake } from "lucide-react";
 import { useHeadingHashLanding, replaceHashWith } from "../toc/useHashLanding"; // #313: #<slug> deep links
 import { PageTitle } from "./PageTitle";
 import { PageMeta } from "./PageMeta";
@@ -163,7 +163,7 @@ import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, assetUrl, type GuestToken } from "../data/apiClient";
-import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useCreatePage, useEntitlements, type Page } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useCreatePage, useEntitlements, useSpaces, type Page } from "../data/queries";
 import { GuestSidebar } from "./GuestSidebar";
 import { ConfirmDialog } from "../ui/dialogs";
 import { DeleteBacklinkWarning } from "./DeleteBacklinkWarning";
@@ -188,9 +188,15 @@ const COLLAB_URL = resolveCollabUrl();
 
 // Member route: /p/:pageId — tenant comes from the session, docName is formed
 // the same way the collab server expects ("t:<tenant>:p:<page>").
-function PageRoute() {
+// #364 / ADR-157: `pageIdOverride` lets the space-root route /spaces/:id) render the HOME page with
+// the full page machinery (view/edit/publish/history/collab) without a second implementation; the
+// param path additionally canonicalises /p/<home-id> → /spaces/:id (one location for the home).
+function PageRoute({ pageIdOverride }: { pageIdOverride?: string } = {}) {
   const { t } = useTranslation();
-  const { pageId } = useParams<{ pageId: string }>();
+  const params = useParams<{ pageId: string }>();
+  const pageId = pageIdOverride ?? params.pageId;
+  const spacesForHome = useSpaces();
+  const homeOwner = !pageIdOverride && pageId ? (spacesForHome.data ?? []).find((s) => s.homePageId === pageId) : undefined;
   const [searchParams, setSearchParams] = useSearchParams();
   const autoEdit = searchParams.get("edit") === "1"; // set by the create-page flow
   // Diff modal is URL-driven (?diff=<revId>): a shallow deep-link (no route added) that
@@ -445,6 +451,8 @@ function PageRoute() {
       </AppShell>
     );
   }
+  // #364 / ADR-157 §4: /p/<home-id> canonicalises to the space root (one location for the home).
+  if (homeOwner) return <Navigate to={`/spaces/${homeOwner.id}`} replace />;
   const docName = `t:${tenantId}:p:${pageId}`;
   // One props bag drives the floating control groups (status / actions / vim) and the
   // mobile ⋯ — same handlers as the old toolbar, only relocated (behaviour unchanged).
@@ -1247,12 +1255,26 @@ function toPublicTreeNodes(nodes: PublicChildNode[]): PageTreeNode[] {
     children: toPublicTreeNodes(n.children),
   }));
 }
-function PublicSpaceSidebar({ nodes, openId, onOpen }: { nodes: PublicChildNode[]; openId: string | null; onOpen: (id: string) => void }) {
+function PublicSpaceSidebar({ nodes, home, openId, onOpen }: { nodes: PublicChildNode[]; home: { id: string; title: string } | null; openId: string | null; onOpen: (id: string) => void }) {
+  const { t } = useTranslation();
   const treeNodes = useMemo(() => toPublicTreeNodes(nodes), [nodes]);
   // The SAME frame + tree component the member Sidebar renders (data-testid="sidebar" + PageTree rows), but
   // read-only: no canEdit → no row menu / DnD / create; no session — every node came from a /public/* fetch.
   return (
     <div className="relative flex h-full min-w-0 flex-col overflow-hidden text-[length:var(--text-ui)]" data-testid="sidebar">
+      {/* #364 / ADR-157: the public space's HOME — a fixed entry above the tree (the tree excludes it). */}
+      {home && (
+        <div className="border-b border-border px-1 py-1">
+          <div
+            className={`flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-lg px-2 transition-colors duration-[120ms] ${openId === home.id ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium" : "hover:bg-panel-2"}`}
+            data-testid="public-home-entry"
+            onClick={() => onOpen(home.id)}
+          >
+            <Home size={14} className="flex-none text-fg-dim" />
+            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{t("sidebar.home")}</span>
+          </div>
+        </div>
+      )}
       <PageTree nodes={treeNodes} selectedId={openId} onOpen={onOpen} openByDefault />
     </div>
   );
@@ -1261,6 +1283,7 @@ function PublicSpaceRoute() {
   const { t } = useTranslation();
   const { spaceId } = useParams<{ spaceId: string }>();
   const [tree, setTree] = useState<PublicChildNode[] | null>(null);
+  const [home, setHome] = useState<{ id: string; title: string } | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -1271,9 +1294,13 @@ function PublicSpaceRoute() {
       .then(async (res) => {
         if (cancelled) return;
         if (!res.ok) { setNotFound(true); return; }
-        const t = (await res.json()) as PublicChildNode[];
+        // #364 / ADR-157: the route now returns { home, tree }; tolerate the legacy bare array.
+        const body = (await res.json()) as PublicChildNode[] | { home: { id: string; title: string } | null; tree: PublicChildNode[] };
+        const t = Array.isArray(body) ? body : body.tree;
+        const h = Array.isArray(body) ? null : body.home;
         setTree(t);
-        setOpenId(t[0]?.id ?? null); // open the first public page by default
+        setHome(h);
+        setOpenId(h?.id ?? t[0]?.id ?? null); // the home is the space root — open it by default
       })
       .catch(() => { if (!cancelled) setNotFound(true); });
     return () => { cancelled = true; };
@@ -1281,7 +1308,7 @@ function PublicSpaceRoute() {
 
   if (notFound) return <AppShell><div data-testid="public-not-found" style={{ padding: 24 }}>{t("publicPage.notFound")}</div></AppShell>;
   return (
-    <AppShell sidebar={<PublicSpaceSidebar nodes={tree ?? []} openId={openId} onOpen={setOpenId} />}>
+    <AppShell sidebar={<PublicSpaceSidebar nodes={tree ?? []} home={home} openId={openId} onOpen={setOpenId} />}>
       {openId ? (
         <PublicPageContent key={openId} pageId={openId} />
       ) : (
@@ -1293,10 +1320,60 @@ function PublicSpaceRoute() {
   );
 }
 
+// #364 / ADR-157 §5-§6: the space ROOT route — the member landing for a space. Renders the HOME page
+// with the FULL page machinery (PageRoute with an override id), or the empty state: the space-name
+// heading + a "write the homepage" button visible ONLY to edit-capable viewers (owner ruling 3).
+function SpaceHomeRoute() {
+  const { t } = useTranslation();
+  const { spaceId } = useParams<{ spaceId: string }>();
+  const { status, logout, token } = useSession();
+  const spacesQ = useSpaces(status === "authed");
+  const qc = useQueryClient();
+  const [creating, setCreating] = useState(false);
+  const navigate = useNavigate();
+  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  if (status === "anon") return <LoginScreen />;
+  const space = (spacesQ.data ?? []).find((sp) => sp.id === spaceId);
+  if (spacesQ.isSuccess && !space) {
+    return (
+      <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
+        <div style={{ padding: 24 }} data-testid="page-not-found">{t("page.notFound")}</div>
+      </AppShell>
+    );
+  }
+  if (space?.homePageId) return <PageRoute pageIdOverride={space.homePageId} />;
+  const canEdit = space?.capability === "edit" || space?.capability === "manage";
+  const createHome = () => {
+    if (!spaceId || creating) return;
+    setCreating(true);
+    void apiFetch<{ id: string }>(`/spaces/${encodeURIComponent(spaceId)}/home`, token, { method: "POST" })
+      .then(async (r) => {
+        await qc.invalidateQueries({ queryKey: ["spaces"] });
+        // land in the editor immediately — the new home is an unpublished draft only the creator sees
+        if (r?.id) navigate(`/spaces/${spaceId}?edit=1`, { replace: true });
+      })
+      .catch(() => notify.error(t("toast.actionFailed")))
+      .finally(() => setCreating(false));
+  };
+  return (
+    <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
+      <div className="flex h-full flex-col items-center justify-center gap-4 p-8" data-testid="space-home-empty">
+        <h1 className="text-2xl font-semibold">{space?.name ?? ""}</h1>
+        {canEdit && (
+          <Button variant="primary" data-testid="space-home-create" disabled={creating} onClick={createHome}>
+            {t("spaceHome.writeButton")}
+          </Button>
+        )}
+      </div>
+    </AppShell>
+  );
+}
+
 export function AppRoutes() {
   return (
     <Routes>
       <Route path="/p/:pageId" element={<PageRoute />} />
+      <Route path="/spaces/:spaceId" element={<SpaceHomeRoute />} /> {/* #364 / ADR-157 §6: the space root */}
       <Route path="/pub/space/:spaceId" element={<PublicSpaceRoute />} />
       <Route path="/pub/:pageId" element={<PublicPageRoute />} />
       <Route path="/share/:linkId" element={<ShareRoute />} />

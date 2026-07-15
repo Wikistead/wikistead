@@ -111,9 +111,12 @@ export async function loadPublicChildTree(
 async function loadPublicSpaceRoots(tenantId: string, spaceId: string): Promise<{ id: string; title: string }[]> {
   return withTenantTx(tenantId, async (tx) => {
     return tx<{ id: string; title: string }[]>`
-      SELECT id, title FROM pages WHERE space_id = ${spaceId} AND parent_id IS NULL
-        AND published_at IS NOT NULL
-      ORDER BY position, created_at LIMIT ${MAX_CHILDREN_PER_NODE}
+      SELECT p.id, p.title FROM pages p JOIN spaces s ON s.id = p.space_id
+      WHERE p.space_id = ${spaceId} AND p.parent_id IS NULL
+        AND p.published_at IS NOT NULL
+        -- #364 / ADR-157 §4: the home renders at the public space root too — skip it in the tree.
+        AND (s.home_page_id IS NULL OR p.id != s.home_page_id)
+      ORDER BY p.position, p.created_at LIMIT ${MAX_CHILDREN_PER_NODE}
     `
   }) as Promise<{ id: string; title: string }[]>
 }
@@ -199,7 +202,20 @@ export async function publicPlugin(app: FastifyInstance) {
       if (!(await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: r.id }))) continue
       tree.push({ id: r.id, title: r.title, children: await loadPublicChildTree(tenant.id, r.id) })
     }
-    return reply.send(tree)
+    // #364 / ADR-157 §5: the space HOME rides the same response (rendered at the public space root).
+    // Same anon gates as every tree node: published (the RLS query) + ANON view. Response stays
+    // backward-tolerant: the shell accepts both the legacy array and the {home, tree} object.
+    const homeRow = await withTenantTx(tenant.id, async (tx) => {
+      const [r] = await tx<{ id: string; title: string }[]>`
+        SELECT p.id, p.title FROM pages p JOIN spaces s ON s.id = p.space_id
+        WHERE s.id = ${req.params.spaceId} AND p.id = s.home_page_id
+          AND p.published_at IS NOT NULL AND p.deleted_at IS NULL`
+      return r ?? null
+    }) as { id: string; title: string } | null
+    const home = homeRow && (await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: homeRow.id }))
+      ? { id: homeRow.id, title: homeRow.title }
+      : null
+    return reply.send({ home, tree })
   })
 
   // GET /public/pages/:pageId — single public page read-only render
