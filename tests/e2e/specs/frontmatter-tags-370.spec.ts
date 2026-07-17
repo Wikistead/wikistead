@@ -131,3 +131,49 @@ test("#370 :::children resolves and lists the published child pages (member edit
     await expect(page.locator(`[data-testid="macro-children-item-${id}"]`)).toBeVisible({ timeout: 10000 });
   }
 });
+
+// #370 (review return): `:::children` is a DESCENDANT TREE (grandchildren nested via real
+// sub-<ul>s), and the list wears NO box chrome (border/panel wash) — a plain Markdown bullet list.
+test("#370 :::children nests grandchildren and renders without the box chrome", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const parent = await openScratch(page, "fm-children-tree");
+  const { child, grand } = await page.evaluate(async ({ parent }) => {
+    const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };
+    const mk = async (title: string, parentId: string) => {
+      const r = await fetch(`http://dev.localhost:4010/spaces/demo_space/pages`, { method: "POST", headers: H, body: JSON.stringify({ title, parentId }) });
+      const { id } = (await r.json()) as { id: string };
+      await fetch(`http://dev.localhost:4010/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+      return id;
+    };
+    const child = await mk("fm-tree-child", parent);
+    const grand = await mk("fm-tree-grand", child);
+    return { child, grand };
+  }, { parent });
+
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::children\n:::\n\ntail\n");
+  await page.keyboard.press("Control+End");
+  await sleep(800);
+  const childItem = page.locator(`[data-testid="macro-children-item-${child}"]`);
+  const grandItem = page.locator(`[data-testid="macro-children-item-${grand}"]`);
+  await expect(childItem).toBeVisible({ timeout: 10000 });
+  await expect(grandItem).toBeVisible();
+  // the grandchild sits in a nested sub-list UNDER the child's <li> (real tree structure)…
+  const nested = await grandItem.evaluate((el) => !!el.closest("ul.cm-lp-backlinks-sub"));
+  expect(nested, "grandchild rendered inside a nested sub-<ul>").toBe(true);
+  // …and physically indented relative to the top-level item
+  const cb = (await childItem.boundingBox())!;
+  const gb = (await grandItem.boundingBox())!;
+  expect(gb.x, "nested item is indented").toBeGreaterThan(cb.x + 8);
+  // Issue 2: no box chrome — transparent background, no border, and REAL list bullets
+  const box = page.locator("[data-testid=macro-children]").first();
+  const style = await box.evaluate((el) => {
+    const s = getComputedStyle(el);
+    const ul = getComputedStyle(el.querySelector("ul")!);
+    return { bg: s.backgroundColor, borderW: s.borderTopWidth, listStyle: ul.listStyleType };
+  });
+  expect(style.bg, "no panel wash").toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+  expect(style.borderW, "no border").toBe("0px");
+  expect(style.listStyle, "plain markdown bullets").toBe("disc");
+});
