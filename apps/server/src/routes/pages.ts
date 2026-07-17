@@ -544,8 +544,10 @@ export async function publishPage(
   // (guests) evaluates the share_link's non_expired condition.
   args: { pageId: string; subject: string; createdBy: string; context?: { current_time: string } },
 ): Promise<{ publishedAt: Date | null; revisionId: string | null; noop: boolean }> {
-  const canEdit = await check(fga, args.subject, 'edit', { type: 'page', id: args.pageId }, args.context)
-  if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  // #420 3b: the PUBLISH verb (its edit_live superset feeder keeps every edit holder — member or
+  // edit-link guest — publishing exactly as before; publish-only grants now pass too).
+  const canPublish = await check(fga, args.subject, 'publish', { type: 'page', id: args.pageId }, args.context)
+  if (!canPublish) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
   const [draft] = await db.sql<[{ tenant_id: string; space_id: string; ydoc: Buffer | null; title: string; published_md: string | null; published_at: Date | null; published_revision_id: string | null }]>`
     SELECT tenant_id, space_id, ydoc, title, published_md, published_at, published_revision_id FROM pages WHERE id = ${args.pageId}
@@ -848,6 +850,22 @@ async function requireManage(fga: OpenFgaClient, userId: string, pageId: string)
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 }
 
+// #420 / ADR-164 increment 3b: the split-verb route gates. Checking the VERB (not manage) admits
+// capability-granted principals; manage still passes every one via the model's superset arm — no
+// double check needed. 403 shape matches requireManage (the pre-split behaviour for managers).
+async function requireVerb(fga: OpenFgaClient, userId: string, pageId: string, verb: 'delete' | 'share' | 'settings' | 'publish'): Promise<void> {
+  const ok = await check(fga, `user:${userId}`, verb, { type: 'page', id: pageId })
+  if (!ok) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+}
+
+// Rider 2: the model deliberately keeps the ADMIN verbs alive on a TRASHED page (delete is
+// the restore/purge authority), so SHARE/SETTINGS routes must themselves refuse trashed pages with
+// the uniform 404 (byte-identical to absent — no existence leak, no grant surgery on trash).
+async function requireNotTrashed(db: TenantDb, pageId: string): Promise<void> {
+  const [row] = await db.sql<[{ deleted_root_id: string | null }?]>`SELECT deleted_root_id FROM pages WHERE id = ${pageId}`
+  if (!row || row.deleted_root_id) throw Object.assign(new Error('not found'), { statusCode: 404 })
+}
+
 // #330 / ADR-141: the MODERATION gate — `moderate` OR `manage` passes. `moderate` does not imply page-level
 // manage (a page creator's manage_direct is not a moderator), and manage_direct holders are not in
 // space#moderator, so BOTH relations are checked. Used by the moderation verbs (freeze C-4, per-actor revert
@@ -868,7 +886,8 @@ export async function grantPageAccess(
   args: { pageId: string; tenantId: string; userId: string; grantee: string; relation: string; plan?: string },
 ): Promise<void> {
   validateGrant(args.grantee, args.relation)
-  await requireManage(fga, args.userId, args.pageId)
+  await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
+  await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   // One tx: durable audit (#177) + the reindex outbox; FGA LAST so a grant failure rolls both back.
   const oid = await db.tx(async (tx) => {
     if (args.plan !== undefined) {
@@ -890,7 +909,8 @@ export async function revokePageAccess(
   args: { pageId: string; tenantId: string; userId: string; grantee: string; relation: string; plan?: string },
 ): Promise<void> {
   validateGrant(args.grantee, args.relation)
-  await requireManage(fga, args.userId, args.pageId)
+  await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
+  await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   // One tx: durable audit (#177) + the reindex outbox; FGA LAST so a revoke failure rolls both back.
   const oid = await db.tx(async (tx) => {
     if (args.plan !== undefined) {
@@ -929,7 +949,8 @@ export async function restrictPageAccess(
   args: { pageId: string; tenantId: string; userId: string; principal: string; plan?: string },
 ): Promise<void> {
   validateRestrictee(args.principal)
-  await requireManage(fga, args.userId, args.pageId)
+  await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
+  await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   const oid = await db.tx(async (tx) => {
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.access_restricted', target: `page:${args.pageId}` })
@@ -951,7 +972,8 @@ export async function unrestrictPageAccess(
   args: { pageId: string; tenantId: string; userId: string; principal: string; plan?: string },
 ): Promise<void> {
   validateRestrictee(args.principal)
-  await requireManage(fga, args.userId, args.pageId)
+  await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
+  await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   const oid = await db.tx(async (tx) => {
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.access_unrestricted', target: `page:${args.pageId}` })
@@ -966,10 +988,12 @@ export async function unrestrictPageAccess(
 
 // List the principals RESTRICTED on a page (manage-gated) — the deny list, distinct from grants.
 export async function listPageRestrictions(
+  db: TenantDb,
   fga: OpenFgaClient,
   args: { pageId: string; userId: string },
 ): Promise<{ principal: string }[]> {
-  await requireManage(fga, args.userId, args.pageId)
+  await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
+  await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   const { tuples } = await fga.read({ object: `page:${args.pageId}`, relation: 'restricted' })
   const out: { principal: string }[] = []
   for (const { key } of tuples ?? []) {
@@ -1019,7 +1043,8 @@ export async function setPagePrivate(
   driver: SearchDriver,
   args: { pageId: string; tenantId: string; userId: string; plan?: string },
 ): Promise<void> {
-  await requireManage(fga, args.userId, args.pageId)
+  await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
+  await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   // #218 / ADR-103 (decision 2b): privatising a FOLDER makes its whole subtree (effective-)private. The
   // `private` marker is written on the ROOT only (the model cascades it down the parent chain), but the
   // public-grant strip, share-link sweep, and reindex must run on EVERY descendant too — the model can't
@@ -1064,7 +1089,8 @@ export async function unsetPagePrivate(
   driver: SearchDriver,
   args: { pageId: string; tenantId: string; userId: string; plan?: string },
 ): Promise<void> {
-  await requireManage(fga, args.userId, args.pageId)
+  await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
+  await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   // #218 / ADR-103: clearing the ROOT marker resumes space inheritance for the WHOLE subtree (private
   // cascaded down; removing the root marker un-inherits it), so the whole subtree must be reindexed (space
   // members re-enter stage-1). We do NOT restore public grants or share-links (safe-side: one-way — a
@@ -1171,7 +1197,8 @@ export async function setPagePublic(
   driver: SearchDriver,
   args: { pageId: string; tenantId: string; userId: string; plan?: string },
 ): Promise<void> {
-  await requireManage(fga, args.userId, args.pageId)
+  await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
+  await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   // published-only: a draft has no public snapshot to serve (would leak an in-progress page).
   const [p] = await db.sql<{ published_at: Date | null }[]>`SELECT published_at FROM pages WHERE id = ${args.pageId}`
   if (!p || p.published_at == null) throw Object.assign(new Error('only a published page can be made public'), { statusCode: 400 })
@@ -1213,7 +1240,8 @@ export async function unsetPagePublic(
   driver: SearchDriver,
   args: { pageId: string; tenantId: string; userId: string; plan?: string },
 ): Promise<void> {
-  await requireManage(fga, args.userId, args.pageId)
+  await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
+  await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   const oid = await db.tx(async (tx) => {
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.made_non_public', target: `page:${args.pageId}` })
@@ -1251,18 +1279,21 @@ export async function setTenantPublicEnabled(db: TenantDb, tenantId: string, ena
 }
 
 // Manage-gated read of a page's public state (view_base@user:*) for the toggle UI's authoritative read.
-export async function isPagePublic(fga: OpenFgaClient, args: { pageId: string; userId: string }): Promise<boolean> {
-  await requireManage(fga, args.userId, args.pageId)
+export async function isPagePublic(db: TenantDb, fga: OpenFgaClient, args: { pageId: string; userId: string }): Promise<boolean> {
+  await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
+  await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   const { tuples } = await fga.read({ object: `page:${args.pageId}`, relation: 'view_base' })
   return (tuples ?? []).some(({ key }) => key?.relation === 'view_base' && key.user === 'user:*')
 }
 
 // Is the page private (allowlist mode)? Manage-gated read for the permissions UI.
 export async function isPagePrivate(
+  db: TenantDb,
   fga: OpenFgaClient,
   args: { pageId: string; userId: string },
 ): Promise<boolean> {
-  await requireManage(fga, args.userId, args.pageId)
+  await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
+  await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   const { tuples } = await fga.read({ object: `page:${args.pageId}`, relation: 'private' })
   return (tuples ?? []).some(({ key }) => key?.relation === 'private' && key.user === 'user:*')
 }
@@ -1272,7 +1303,8 @@ export async function listPageAccess(
   db: TenantDb,
   args: { pageId: string; tenantId: string; userId: string },
 ): Promise<{ grantee: string; relation: PageRelation; groupName?: string }[]> {
-  await requireManage(fga, args.userId, args.pageId)
+  await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
+  await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   const { tuples } = await fga.read({ object: `page:${args.pageId}` })
   // #163: resolve group grantee ids back to names for display (groupFgaId is one-way).
   const names = (await db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`).map((r) => r.g)
@@ -1673,7 +1705,7 @@ export async function trashPage(
   driver: SearchDriver,
   args: { pageId: string; userId: string },
 ): Promise<void> {
-  await requireManage(fga, args.userId, args.pageId)
+  await requireVerb(fga, args.userId, args.pageId, 'delete') // #420 3b / Rider 1: trash rides the delete verb
   const [meta] = await db.sql<[{ tenant_id: string; deleted_root_id: string | null }?]>`
     SELECT tenant_id, deleted_root_id FROM pages WHERE id = ${args.pageId}
   `
@@ -1727,8 +1759,8 @@ export async function restorePage(
   driver: SearchDriver,
   args: { pageId: string; userId: string },
 ): Promise<{ reparented: boolean }> {
-  const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: args.pageId })
-  if (!canManage) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  const canDelete = await check(fga, `user:${args.userId}`, 'delete', { type: 'page', id: args.pageId })
+  if (!canDelete) throw Object.assign(new Error('not found'), { statusCode: 404 }) // #420 3b / Rider 1: restore/purge = delete verb
   const [root] = await db.sql<[{ tenant_id: string; parent_id: string | null; deleted_root_id: string | null }?]>`
     SELECT tenant_id, parent_id, deleted_root_id FROM pages WHERE id = ${args.pageId}
   `
@@ -1780,8 +1812,8 @@ export async function purgePage(
   driver: SearchDriver,
   args: { pageId: string; userId: string },
 ): Promise<void> {
-  const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: args.pageId })
-  if (!canManage) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  const canDelete = await check(fga, `user:${args.userId}`, 'delete', { type: 'page', id: args.pageId })
+  if (!canDelete) throw Object.assign(new Error('not found'), { statusCode: 404 }) // #420 3b / Rider 1: restore/purge = delete verb
   const [row] = await db.sql<[{ deleted_root_id: string | null }?]>`SELECT deleted_root_id FROM pages WHERE id = ${args.pageId}`
   if (!row || row.deleted_root_id !== args.pageId) throw Object.assign(new Error('not found'), { statusCode: 404 })
   await deletePage(db, fga, driver, { pageId: args.pageId, userId: args.userId })
@@ -1811,7 +1843,9 @@ export async function listSpaceTrash(
   `
   const out: TrashEntry[] = []
   for (const r of rows) {
-    if (!(await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: r.id }))) continue
+    // #420 3b / Rider 1: the trash listing filters per-entry on the DELETE verb (the restore/purge
+    // authority) — a delete-only role sees its trash; manage still qualifies via the superset.
+    if (!(await check(fga, `user:${args.userId}`, 'delete', { type: 'page', id: r.id }))) continue
     out.push({ id: r.id, title: r.title, deletedAt: r.deleted_at.toISOString(), deletedBy: r.deleted_by, descendants: r.descendants })
   }
   return out
@@ -1823,8 +1857,8 @@ export async function deletePage(
   driver: SearchDriver,
   args: { pageId: string; userId: string },
 ): Promise<void> {
-  const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: args.pageId })
-  if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  const canDelete = await check(fga, `user:${args.userId}`, 'delete', { type: 'page', id: args.pageId })
+  if (!canDelete) throw Object.assign(new Error('forbidden'), { statusCode: 403 }) // #420 3b / Rider 1
   await physicalDeletePage(db, fga, driver, { pageId: args.pageId, actorId: args.userId })
 }
 
@@ -2893,11 +2927,13 @@ export async function pagesPlugin(app: FastifyInstance) {
   // never close below the space (monotonic union; subtractive override = a deny-shaped model change,
   // out of scope per ADR-029's deferral).
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/comment-audience', async (req) => {
-    await requireManage(app.fga, req.user.sub, req.params.pageId)
+    await requireVerb(app.fga, req.user.sub, req.params.pageId, 'share') // #420 3b
+    await requireNotTrashed(req.db, req.params.pageId) // Rider 2
     return readPageCommentAudience(app.fga, req.params.pageId)
   })
   app.put<{ Params: { pageId: string }; Body: { guests?: boolean; members?: boolean } }>('/pages/:pageId/comment-audience', async (req) => {
-    await requireManage(app.fga, req.user.sub, req.params.pageId)
+    await requireVerb(app.fga, req.user.sub, req.params.pageId, 'share') // #420 3b
+    await requireNotTrashed(req.db, req.params.pageId) // Rider 2
     const cur = await readPageCommentAudience(app.fga, req.params.pageId)
     const obj = `page:${req.params.pageId}`
     const writes: { user: string; relation: string; object: string }[] = []
@@ -2918,7 +2954,8 @@ export async function pagesPlugin(app: FastifyInstance) {
   // enumerate members only to principals who could act on the result anyway (the reviewed ruling). Same
   // projection + empty-query pin as the space endpoint via the shared core. Member-only (no guest config).
   app.get<{ Params: { pageId: string }; Querystring: { q?: string } }>('/pages/:pageId/member-candidates', async (req) => {
-    await requireManage(app.fga, req.user.sub, req.params.pageId)
+    await requireVerb(app.fga, req.user.sub, req.params.pageId, 'share') // #420 3b
+    await requireNotTrashed(req.db, req.params.pageId) // Rider 2
     return searchMemberCandidates(req.db, req.query.q ?? '')
   })
 
@@ -3081,7 +3118,7 @@ export async function pagesPlugin(app: FastifyInstance) {
   // deny list is distinct from the grant list; a restricted principal 404s on the page even as a
   // space viewer. principal = user:<sub> | group:<id>#member (raw) OR groupName (#163 resolved).
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/restrict', async (req) => {
-    return listPageRestrictions(app.fga, { pageId: req.params.pageId, userId: req.user.sub })
+    return listPageRestrictions(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub })
   })
   app.post<{ Params: { pageId: string }; Body: { principal?: string; groupName?: string } }>('/pages/:pageId/restrict', async (req, reply) => {
     const principal = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.principal ?? '')
@@ -3102,7 +3139,7 @@ export async function pagesPlugin(app: FastifyInstance) {
   // (space inheritance cut + public stripped); DELETE clears it (space inheritance resumes). The allow
   // list is the existing grant/revoke path (POST/DELETE /pages/:id/access). GET reports the flag.
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/private', async (req) => {
-    return { private: await isPagePrivate(app.fga, { pageId: req.params.pageId, userId: req.user.sub }) }
+    return { private: await isPagePrivate(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub }) }
   })
   app.post<{ Params: { pageId: string } }>('/pages/:pageId/private', async (req, reply) => {
     await setPagePrivate(req.db, app.fga, app.searchDriver, {
@@ -3141,7 +3178,7 @@ export async function pagesPlugin(app: FastifyInstance) {
     // `public` = this page's OWN grant (the toggle's state). #253 review: also report `effectivePublic`
     // whether an anonymous reader can actually reach the page (its own grant OR via a PUBLIC SPACE), so the
     // UI can warn "publicly reachable via space" when the own toggle reads OFF but the page is world-readable.
-    const own = await isPagePublic(app.fga, { pageId: req.params.pageId, userId: req.user.sub })
+    const own = await isPagePublic(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub })
     const effectivePublic = await check(app.fga, 'user:anonymous', 'view', { type: 'page', id: req.params.pageId })
     return { public: own, effectivePublic }
   })
