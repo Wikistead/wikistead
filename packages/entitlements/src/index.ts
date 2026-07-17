@@ -116,6 +116,11 @@ export interface Entitlements {
   // only — already-issued links keep working on a downgrade (revocation policy is a #127 pricing call).
   // Self-host UNLIMITED on; Cloud = paid tiers (free off), resolved here (never `if(plan)` in routes).
   spaceEditLink: boolean
+  // #420 / ADR-164: may the tenant DEFINE and ASSIGN custom roles (named capability bundles)?
+  // Gates the write path only (define/edit/delete/assign) — already-expanded grants are plain FGA
+  // tuples and survive a downgrade (issuance-gate semantics, the apiAccess/webhooks precedent).
+  // Built-in roles are free on every plan. Self-host UNLIMITED on; Cloud = top tier (EE).
+  customRoles: boolean
 }
 
 // Self-host / Community edition: never plan-limited.
@@ -139,6 +144,7 @@ export const UNLIMITED: Entitlements = {
   userMacros: true,
   mcpWrite: true,
   spaceEditLink: true,
+  customRoles: true,
 }
 
 // NOTE (ADR-069 / #132): the Cloud plan table (`CLOUD_PLANS`) and its resolver

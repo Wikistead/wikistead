@@ -161,6 +161,13 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     enforcedAt: 'share-link issuance (createShareLink, space+edit) — 402 with a static reason; existing links unaffected',
     downgrade: 'issuance gated; already-issued links keep working (revocation policy: #127)',
   },
+  customRoles: {
+    title: 'Custom roles',
+    summary: 'Whether the tenant may DEFINE and ASSIGN custom roles — named bundles of atomic capabilities (view/comment/edit/publish/delete/share/settings/moderate; #420 / ADR-164). Built-in roles are free on every plan. OpenFGA stays the single authz truth: a role only chooses which fixed-relation tuples to write.',
+    unit: 'boolean',
+    enforcedAt: 'role define/edit/delete + assignment write-paths (tenant-admin routes) — 403 entitlementDenied',
+    downgrade: 'defining/assigning gated; already-expanded grants are plain FGA tuples and keep working',
+  },
   apiRateLimit: {
     title: 'API rate limit',
     summary: 'Authenticated API-key request rate per window — perKey (per-key fairness) and perTenant (all-keys ceiling), evaluated AND (the stricter trips first → 429) (#175 / ADR-063).',
