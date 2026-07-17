@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 //   unpressed = ghost   (transparent surface, hover panel)
 // `aria-pressed` carries the state to assistive tech (the toggle-button pattern). Consolidated
 // so vim/TOC (and later toggles) can't drift apart — same idea as RightPanel for the panels.
-export function ToggleButton({ pressed, onToggle, icon, label, testId, text, badge }: {
+export function ToggleButton({ pressed, onToggle, icon, label, testId, text, badge, disabled }: {
   pressed: boolean;
   onToggle: () => void;
   icon: ReactNode;
@@ -14,6 +14,7 @@ export function ToggleButton({ pressed, onToggle, icon, label, testId, text, bad
   testId: string;
   text?: string;       // optional visible label (e.g. "Vim"); omitted ⇒ icon-only round button
   badge?: ReactNode;
+  disabled?: boolean;  // #406 S4: rendered but inert (e.g. vim on a coarse pointer) — the label explains why
 }) {
   return (
     <button
@@ -23,8 +24,9 @@ export function ToggleButton({ pressed, onToggle, icon, label, testId, text, bad
       title={label}
       data-testid={testId}
       data-active={pressed || undefined}
+      disabled={disabled}
       onClick={onToggle}
-      className={`pointer-events-auto relative inline-flex h-9 items-center justify-center gap-2 rounded-full border text-xs font-medium shadow-md backdrop-blur transition-colors duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] ${
+      className={`pointer-events-auto relative inline-flex h-9 items-center justify-center gap-2 rounded-full border text-xs font-medium shadow-md backdrop-blur transition-colors duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] disabled:cursor-default disabled:opacity-50 ${
         text ? "px-3.5" : "w-9"
       } ${
         // #212 bounce: keep the SAME translucency as the toolbar panel (panel @ 82%) for BOTH states so

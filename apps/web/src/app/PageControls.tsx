@@ -50,6 +50,10 @@ export interface PageControlsProps {
   // showVimToggle=false hides the vim BUTTON only (Ctrl+Alt+V still works); visibleModes filters
   // the display-mode segment (the cycle key skips hidden modes at the hook level).
   showVimToggle?: boolean;
+  // #406 S4 / ADR-159 (e): (pointer: coarse) forces vim OFF — soft-keyboard input breaks under vim.
+  // The toggle stays VISIBLE but disabled with an explanatory tooltip; the stored keymap preference
+  // is untouched (back on a fine-pointer device, vim returns).
+  vimForcedOff?: boolean;
   visibleModes?: ("live" | "source" | "reading" | "wysiwyg")[];
   onShare?: () => void;
   commentsOpen?: boolean;
@@ -210,9 +214,10 @@ export function PageVim(p: PageControlsProps) {
           pressed={!!p.vim}
           onToggle={p.onToggleVim}
           icon={<SquareTerminal size={14} />}
-          label={t("page.vimMode")}
+          label={p.vimForcedOff ? t("page.vimTouchDisabled") : t("page.vimMode")}
           text="Vim"
           testId="vim-toggle"
+          disabled={p.vimForcedOff}
         />
       )}
       {/* ADR-056 / #164 · #165: display-mode SEGMENT — icon-only buttons, current highlighted, one
@@ -322,7 +327,7 @@ export function PageControlsMobile(p: PageControlsProps) {
             <>
               {p.onPublish && <DropdownMenuItem disabled={p.publishing || !canPublish} onSelect={() => p.onPublish?.()} data-testid="m-publish-page"><UploadCloud size={14} /> {t("page.publish")}</DropdownMenuItem>}
               <DropdownMenuItem onSelect={p.onDone} data-testid="m-view-toggle"><X size={14} /> {t("page.done")}</DropdownMenuItem>
-              {p.onToggleVim && p.showVimToggle !== false && <DropdownMenuItem onSelect={p.onToggleVim} data-testid="m-vim-toggle"><SquareTerminal size={14} /> Vim {p.vim ? t("common.on") : t("common.off")}</DropdownMenuItem>}
+              {p.onToggleVim && p.showVimToggle !== false && <DropdownMenuItem disabled={p.vimForcedOff} onSelect={p.onToggleVim} data-testid="m-vim-toggle"><SquareTerminal size={14} /> Vim {p.vimForcedOff ? t("common.off") : p.vim ? t("common.on") : t("common.off")}</DropdownMenuItem>}
               {p.onCycleDisplayMode && <DropdownMenuItem onSelect={p.onCycleDisplayMode} data-testid="m-displaymode-toggle">{p.displayMode === "source" ? <Code size={14} /> : p.displayMode === "reading" ? <BookOpen size={14} /> : p.displayMode === "wysiwyg" ? <Sparkles size={14} /> : <Eye size={14} />} {t("page.displayMode")}: {t(p.displayMode === "source" ? "page.modeSource" : p.displayMode === "reading" ? "page.modeReading" : p.displayMode === "wysiwyg" ? "page.modeWysiwyg" : "page.modeLive")}</DropdownMenuItem>}
             </>
           ) : (

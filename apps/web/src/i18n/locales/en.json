@@ -413,6 +413,7 @@
     "done": "Close",
     "publish": "Publish",
     "vimMode": "Vim mode",
+    "vimTouchDisabled": "Vim is unavailable on touch devices (soft-keyboard input)",
     "split": "Vim mode",
     "single": "Normal mode",
     "comments": "Comments",
