@@ -81,7 +81,10 @@ describe('#270 guest space header (GET /spaces/:id/info)', () => {
     const body = res.json() as Record<string, unknown>
     expect(body.name).toBe('gs245')
     expect(body.iconImageUrl).toBeNull() // no uploaded icon → null (client falls back to an initials chip)
-    expect(Object.keys(body).sort()).toEqual(['iconImageUrl', 'name']) // NO other field leaks
+    // #364①: homePageId joined the payload — VIEW-GATED (null here: this space has no viewable
+    // home), so the minimal-field guarantee still holds: nothing else leaks.
+    expect(body.homePageId).toBeNull()
+    expect(Object.keys(body).sort()).toEqual(['homePageId', 'iconImageUrl', 'name']) // NO other field leaks
   })
 
   it('a PAGE-scoped guest link cannot read the space header (403 — resource-bound)', async () => {

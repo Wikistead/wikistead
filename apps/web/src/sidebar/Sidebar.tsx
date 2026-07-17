@@ -278,7 +278,7 @@ export function Sidebar() {
             onClick={() => navigate(`/spaces/${current}`)}
           >
             <Home size={14} className="flex-none text-fg-dim" />
-            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{t("sidebar.home")}</span>
+            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{currentSpace ? t("spaceHome.title", { name: currentSpace.name }) : t("sidebar.home")}</span> {/* #364viewer-language home label */}
           </div>
         </div>
       )}

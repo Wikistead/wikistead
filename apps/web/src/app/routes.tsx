@@ -571,7 +571,7 @@ function PageRoute({ pageIdOverride }: { pageIdOverride?: string } = {}) {
                       /spaces/:id, and /p/<home-id> canonicalises there). The server refuses the PATCH
                       too (two-layer defense). */}
                   <PageTitle
-                    title={page?.title ?? ""}
+                    title={pageIdOverride ? t("spaceHome.title", { name: page?.title ?? "" }) : page?.title ?? ""}
                     onRename={canEdit && spaceId && !pageIdOverride ? (title) => renamePage.mutate({ pageId: pageId!, spaceId, title }, {
                       onSuccess: () => notify.success(t("toast.saved")),
                       onError: () => notify.error(t("toast.actionFailed")),
@@ -739,7 +739,8 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
   const tenant = m?.[1] ?? "";
   const spaceId = m?.[2] ?? "";
   const [pages, setPages] = useState<Page[] | null>(null);
-  const [space, setSpace] = useState<{ name: string; iconImageUrl: string | null } | null>(null);
+  const [space, setSpace] = useState<{ name: string; iconImageUrl: string | null; homePageId?: string | null } | null>(null);
+  const landedHome = useRef(false); // #364①: default-land on the home ONCE (never re-hijack navigation)
   const [openId, setOpenId] = useState<string | null>(null);
 
   const refreshPages = useCallback(() => {
@@ -773,8 +774,14 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
       .catch(() => { if (!cancelled) setPages([]); });
     // #270: the space header (name + public icon only) so the guest sidebar shows the real space, not a
     // fixed "Shared space" label. Best-effort — a failure just falls back to the label.
-    apiFetch<{ name: string; iconImageUrl: string | null }>(`/spaces/${encodeURIComponent(spaceId)}/info`, token)
-      .then((r) => { if (!cancelled && r) setSpace(r); })
+    apiFetch<{ name: string; iconImageUrl: string | null; homePageId?: string | null }>(`/spaces/${encodeURIComponent(spaceId)}/info`, token)
+      .then((r) => {
+        if (cancelled || !r) return;
+        setSpace(r);
+        // #364①: guest default landing = the space home (member §6a parity), only when the server
+        // exposed a VIEW-GATED pointer and the guest hasn't opened anything yet.
+        if (r.homePageId && !landedHome.current) { landedHome.current = true; setOpenId((prev) => prev ?? r.homePageId!); }
+      })
       .catch(() => { /* keep the fallback label */ });
     return () => { cancelled = true; };
   }, [spaceId, token]);
@@ -787,7 +794,7 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
     : null;
 
   return (
-    <AppShell sidebar={<GuestSidebar pages={pages ?? []} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} />}>
+    <AppShell sidebar={<GuestSidebar pages={pages ?? []} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} />}>
       {pageMinted ? (
         // key on the page id so switching pages in the tree remounts the editor cleanly. A page this
         // guest JUST created opens straight in edit mode (member new-page parity,); onTitleChange
@@ -1381,7 +1388,7 @@ function SpaceHomeRoute() {
   return (
     <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
       <div className="flex h-full flex-col items-center justify-center gap-4 p-8" data-testid="space-home-empty">
-        <h1 className="text-2xl font-semibold">{space?.name ?? ""}</h1>
+        <h1 className="text-2xl font-semibold">{space ? t("spaceHome.title", { name: space.name }) : ""}</h1>
         {canEdit && (
           <Button variant="primary" data-testid="space-home-create" disabled={creating} onClick={createHome}>
             {t("spaceHome.writeButton")}

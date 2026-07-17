@@ -9,7 +9,6 @@ import { emit } from '@wikistead/events'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
-import { tenantDefaultLang } from '../auth/session.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { deletePinsForResources } from './pins.js'
 import { sweepWatchesForResources, sweepUnviewableWatches } from './notifications.js'
@@ -125,14 +124,27 @@ export async function ensurePersonalSpace(
 // capability, members, or any other field). A space-link guest is authorised to see the space they were
 // shared into (their share_link is a `viewer` on it), so its name/icon is safe to show the recipient; the
 // caller (the guest route) enforces the resource binding. RLS-scoped to the tenant.
-export async function getSpaceInfo(db: TenantDb, spaceId: string): Promise<{ name: string; iconImageUrl: string | null } | null> {
-  const [row] = await db.sql<{ name: string; icon_image_key: string | null }[]>`
-    SELECT s.name, ss.icon_image_key
+// #364①: `viewer` (optional) adds a VIEW-GATED homePageId for the caller — the same ADR-157 §2
+// oracle guard as listSpaces: the pointer is exposed ONLY when the caller can FGA-view the home page
+// (a share_link guest sees it only for a PUBLISHED, link-covered home; an unpublished/private home is
+// byte-identically absent = null, never an existence oracle).
+export async function getSpaceInfo(
+  db: TenantDb,
+  spaceId: string,
+  viewer?: { fga: OpenFgaClient; subject: string; context?: { current_time: string } },
+): Promise<{ name: string; iconImageUrl: string | null; homePageId: string | null } | null> {
+  const [row] = await db.sql<{ name: string; icon_image_key: string | null; home_page_id: string | null }[]>`
+    SELECT s.name, ss.icon_image_key, s.home_page_id
     FROM spaces s LEFT JOIN space_settings ss ON ss.space_id = s.id
     WHERE s.id = ${spaceId}
   `
   if (!row) return null
-  return { name: row.name, iconImageUrl: row.icon_image_key ? `/spaces/${spaceId}/icon-image` : null }
+  let homePageId: string | null = null
+  if (row.home_page_id && viewer) {
+    const ok = await check(viewer.fga, viewer.subject, 'view', { type: 'page', id: row.home_page_id }, viewer.context).catch(() => false)
+    homePageId = ok ? row.home_page_id : null
+  }
+  return { name: row.name, iconImageUrl: row.icon_image_key ? `/spaces/${spaceId}/icon-image` : null, homePageId }
 }
 
 export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: string): Promise<Space[]> {
@@ -301,9 +313,9 @@ export async function updateSpace(
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
   const name = args.name.trim()
   if (!name) throw Object.assign(new Error('empty name'), { statusCode: 400 })
-  // #364the home page's title is DERIVED from the space name — a space rename re-derives it in
-  // the same tx (and re-indexes the home so search shows the new title). Skipped when no home is set.
-  const lang = await tenantDefaultLang(db)
+  // #364→(user ruling, plan A): the home page's title IS the space name — no language
+  // suffix is ever STORED (the "Home / " wording is a pure UI label the viewer's i18n renders).
+  // A space rename re-writes the home title in the same tx (and re-indexes it for search).
   let outboxId: string | null = null
   let homeId: string | null = null
   const row = await db.tx(async (tx) => {
@@ -312,7 +324,7 @@ export async function updateSpace(
     if (!r) throw Object.assign(new Error('not found'), { statusCode: 404 })
     if (r.home_page_id) {
       const [updated] = await tx<{ id: string }[]>`
-        UPDATE pages SET title = ${deriveHomeTitle(name, lang)}, updated_at = now()
+        UPDATE pages SET title = ${name}, updated_at = now()
         WHERE id = ${r.home_page_id} AND deleted_at IS NULL RETURNING id`
       if (updated) {
         homeId = updated.id
@@ -724,13 +736,11 @@ export async function searchMemberCandidates(
 // name) and points `spaces.home_page_id` at it ATOMICALLY (the pointer write rides createPage's own
 // transaction via onCreatedInTx; a lost race rolls the page insert back and 409s). Gate = space `edit`
 // (owner ruling 3); the policy knob (#399) applies inside createPage's chokepoint like every create.
-// #364the home page's title is DERIVED from the space name (tenant default language picks the
-// suffix) and locked — a freely renamable home diluted "this is the homepage" (owner ruling). The body
-// stays a completely regular page; the title is the single exception (ADR-157 addendum). EN wording is
-// provisional pending the review ruling.
-export function deriveHomeTitle(spaceName: string, lang: 'en' | 'ja'): string {
-  return lang === 'ja' ? `${spaceName}のホーム` : `${spaceName} Home`
-}
+// #364(user ruling, plan A): the home page's STORED title is the space name, nothing else
+// deriveHomeTitle (the language-suffixed variant) is retired. The "Home / " suffix is rendered
+// by the viewer's UI from an i18n key, so search / pins / breadcrumbs keep one language-stable stored
+// value, every surface follows the VIEWER's language (anonymous/guest included), and the export
+// `_home.md` H1 is simply the space name. The title stays locked (updatePage refuses a home rename).
 
 export async function createSpaceHome(
   db: TenantDb,
@@ -758,8 +768,8 @@ export async function createSpaceHome(
     tenantId: args.tenantId,
     spaceId: args.spaceId,
     userId: args.userId,
-    //derived, locked title (tenant default language; updatePage refuses to rename a home)
-    title: deriveHomeTitle(row.name, await tenantDefaultLang(db)),
+    //the locked title IS the space name (no stored suffix; updatePage refuses a home rename)
+    title: row.name,
     onCreatedInTx: async (tx, pageId) => {
       // the conditional write IS the race guard: someone else pointed first → 0 rows → rollback → 409
       const updated = replaceable

@@ -2818,7 +2818,12 @@ export async function pagesPlugin(app: FastifyInstance) {
         return reply.code(404).send({ error: 'not found' })
       }
     }
-    const info = await getSpaceInfo(req.db, req.params.spaceId)
+    // #364①: hand the caller's principal through so homePageId is view-gated (member = user,
+    // guest = the share_link principal with current_time — an unpublished home stays null for guests).
+    const viewer = req.user
+      ? { fga: app.fga, subject: `user:${req.user.sub}` }
+      : { fga: app.fga, subject: `share_link:${req.guest!.shareLinkId}`, context: { current_time: new Date().toISOString() } }
+    const info = await getSpaceInfo(req.db, req.params.spaceId, viewer)
     if (!info) return reply.code(404).send({ error: 'not found' })
     return info
   })

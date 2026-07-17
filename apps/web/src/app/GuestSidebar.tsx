@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, FileText } from "lucide-react";
+import { ChevronRight, FileText, Home } from "lucide-react";
 import type { Page } from "../data/queries";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import { NewPageButton } from "../sidebar/NewPageButton";
@@ -43,7 +43,7 @@ function buildTree(pages: Page[]): TreeNode[] {
 // blank "Untitled" page immediately → the editor; naming happens there), not a guest-specific flow. The
 // template ▾ stays member-only (template non-leak). The server stays the fortress: the route re-checks
 // FGA `edit` on the space and applies the created-page cap regardless of this UI.
-export function GuestSidebar({ pages, space, openId, onOpen, onCreate }: { pages: Page[]; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void> }) {
+export function GuestSidebar({ pages, space, openId, onOpen, onCreate, homePageId }: { pages: Page[]; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null }) {
   const { t } = useTranslation();
   const tree = buildTree(pages);
   const [busy, setBusy] = useState(false);
@@ -76,6 +76,19 @@ export function GuestSidebar({ pages, space, openId, onOpen, onCreate }: { pages
         {/* member-parity at the header's right edge, exactly like the member sidebar header row. */}
         {onCreate && <span className="ml-auto flex flex-none"><NewPageButton onClick={() => void create()} disabled={busy} /></span>}
       </div>
+      {/* #364①: the fixed Home entry, member-parity (§6b) — shown only when the server exposed a
+          VIEW-GATED homePageId (an unpublished/unviewable home is null = no entry, existence-hidden).
+          The label is the viewer-language "<space> Home / " (a UI i18n label, never stored). */}
+      {homePageId && (
+        <div
+          className={`mb-1 flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-lg border-b border-border px-2 pb-1 transition-colors duration-[120ms] ${openId === homePageId ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium" : "hover:bg-panel-2"}`}
+          data-testid="guest-sidebar-home"
+          onClick={() => onOpen(homePageId)}
+        >
+          <Home size={14} className="flex-none text-fg-dim" />
+          <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{space ? t("spaceHome.title", { name: space.name }) : t("sidebar.home")}</span>
+        </div>
+      )}
       {tree.length === 0 ? (
         <div className="px-1 py-2 text-fg-dim" data-testid="guest-sidebar-empty">{t("share.spaceEmpty")}</div>
       ) : (
