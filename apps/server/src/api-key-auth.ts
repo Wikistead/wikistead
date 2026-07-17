@@ -6,7 +6,6 @@
 //   2. Constant-time comparison (timingSafeEqual) prevents timing oracle attacks.
 //   3. Last-used update is fire-and-forget so the hot path is never blocked.
 import { createHash, timingSafeEqual } from 'node:crypto'
-import { pool } from './db/pool.js'
 import { withTenantTx } from './db/index.js' // #382
 
 interface ApiKeyRow { id: string; owner_user_id: string; key_hash: string; scope: string | null }
@@ -46,7 +45,10 @@ export async function verifyApiKey(
   if (incoming.length !== stored.length || !timingSafeEqual(incoming, stored)) return null
 
   // Non-blocking last_used_at update — must not slow the auth hot path.
-  void pool`UPDATE api_keys SET last_used_at = now() WHERE id = ${row.id}`
+  // #428: through the TENANT driver, not the bare pool — api_keys is FORCE-RLS'd on app.tenant_id,
+  // so a context-less UPDATE matched 0 rows and last_used_at never moved (audit-only impact; the
+  // verification itself always ran inside withTenantTx above).
+  void withTenantTx(tenantId, (tx) => tx`UPDATE api_keys SET last_used_at = now() WHERE id = ${row.id}`).catch(() => {})
 
   // keyId enables per-key rate limiting (#175) without re-querying on the hot path.
   return { sub: row.owner_user_id, scope: row.scope === 'read' ? 'read' : 'write', keyId: row.id }
