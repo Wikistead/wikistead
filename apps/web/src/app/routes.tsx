@@ -144,7 +144,8 @@ import { PageTitle } from "./PageTitle";
 import { PageMeta } from "./PageMeta";
 import { ProgressRing } from "./ProgressRing"; // #290: title-band page-progress ring
 import { useTheme } from "./ThemeProvider"; // #376: public reader remounts on theme switch (diagram re-render)
-import { ThemeToggle } from "./ThemeToggle"; // #429: the standalone public reader's floating theme switch
+import { ThemeToggle } from "./ThemeToggle"; // #429/#430: the standalone public reader's header controls
+import { LanguageToggle } from "./LanguageToggle";
 import { RelatedPanel } from "./RelatedPanel";
 import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
@@ -1324,6 +1325,9 @@ function PublicHeader({ spaceName }: { spaceName?: string | null }) {
       {b && !b.whitelabel && (
         <span className="text-[11px] text-fg-dim opacity-70" data-testid="powered-by">{t("publicReader.poweredBy")}</span>
       )}
+      {/* #429 ruling: theme AND language ride the minimal public header (JA is core to positioning
+          one click away for anonymous readers too; the space reader gets both via the AppShell header) */}
+      <LanguageToggle />
       <ThemeToggle />
     </header>
   );
