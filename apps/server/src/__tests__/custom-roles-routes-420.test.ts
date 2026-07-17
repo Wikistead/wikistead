@@ -114,6 +114,39 @@ describe('split-verb route gates (#420 3b)', () => {
     }
   })
 
+  it('(2b) the GRANT CEILING (Addendum 3,strict fork): share-only grants reader/writer relations ONLY — every admin-class grant/revoke needs manage', async () => {
+    const pageId = await makePage('ceiling-target')
+    const grant = { user: `user:${SHR}`, relation: 'share_direct', object: `page:${pageId}` }
+    await writeTuples(fgaClient, [grant])
+    try {
+      // Reader/writer class: allowed (view / comment / edit).
+      for (const relation of ['view', 'comment', 'edit'] as const) {
+        await grantPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: SHR, grantee: 'user:crr420-rw', relation })
+        await revokePageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: SHR, grantee: 'user:crr420-rw', relation })
+      }
+      // Admin class — INCLUDING share itself (delegation is manage-only, the stricter ruled fork):
+      // 403 whether granted to SELF (the escalation) or to others.
+      for (const relation of ['manage', 'moderate', 'delete', 'share', 'settings', 'publish'] as const) {
+        await expect(grantPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: SHR, grantee: `user:${SHR}`, relation }), `self ${relation}`)
+          .rejects.toMatchObject({ statusCode: 403 })
+        await expect(grantPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: SHR, grantee: 'user:crr420-other', relation }), `other ${relation}`)
+          .rejects.toMatchObject({ statusCode: 403 })
+      }
+      // A share-only principal cannot strip a manager either (revoke is ceilinged the same way).
+      await expect(revokePageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: SHR, grantee: 'user:dev-user', relation: 'manage' }))
+        .rejects.toMatchObject({ statusCode: 403 })
+      // The escalation is REALLY closed: SHR still has no manage on the page.
+      expect(await check(fgaClient, `user:${SHR}`, 'manage', P(pageId))).toBe(false)
+      // Manager non-regression: manage grants admin-class relations as before.
+      await grantPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: 'dev-user', grantee: 'user:crr420-newmgr', relation: 'manage' })
+      expect(await check(fgaClient, 'user:crr420-newmgr', 'manage', P(pageId))).toBe(true)
+      await revokePageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: 'dev-user', grantee: 'user:crr420-newmgr', relation: 'manage' })
+    } finally {
+      await deleteTuples(fgaClient, [grant]).catch(() => {})
+      await trashPage(db, fgaClient, driver, { pageId, userId: 'dev-user' }).catch(() => {})
+    }
+  })
+
   it('(4) Rider 2: share-class operations answer the uniform 404 on a trashed page, and recover after restore', async () => {
     const pageId = await makePage('trash-404')
     // Pre-trash: the manager exercises each operation (positive) …
