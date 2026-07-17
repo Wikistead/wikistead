@@ -102,6 +102,22 @@ describe('API inventory ↔ OpenAPI spec (#407 anti-drift)', () => {
     expect(missing, `operations without responses: ${missing.join(', ')}`).toEqual([])
   })
 
+  // #407(second review return, SAME bug class): the minimal structural assert above let a
+  // flow-mapping description with unquoted commas through — "responses" existed, its CONTENT was phantom
+  // OpenAPI keys. Only a real OpenAPI validator catches that, so run one: @redocly/openapi-core (what
+  // redocly CLI runs), asserting ZERO error-severity problems (warnings — operationId etc. — are a
+  // separate, non-blocking polish decision). Proven red against thebreakage before the fix.
+  it('the spec passes a real OpenAPI validator (redocly core) with zero errors', async () => {
+    const { createConfig, lintFromString } = await import('@redocly/openapi-core')
+    const config = await createConfig({ extends: ['minimal'] })
+    const problems = await lintFromString({ source: readFileSync(specPath, 'utf8'), absoluteRef: specPath, config })
+    const errors = problems.filter((p) => p.severity === 'error')
+    expect(
+      errors.map((e) => `${e.ruleId}: ${e.message} @ ${e.location?.[0]?.pointer ?? '?'}`),
+      'redocly error-severity problems',
+    ).toEqual([])
+  })
+
   it('every documented path still exists in the source (no dead spec entries)', () => {
     const spec = readFileSync(specPath, 'utf8')
     const routes = new Set(extractRoutes().map((p) => p.replace(/:([A-Za-z]+)/g, '{$1}')))
