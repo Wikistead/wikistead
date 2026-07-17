@@ -430,6 +430,7 @@ export interface Published {
 }
 export function usePublished(pageId: string) {
   const { token } = useSession();
+  const qc = useQueryClient();
   return useQuery({
     queryKey: ["published", pageId],
     queryFn: () => apiFetch<Published>(`/pages/${encodeURIComponent(pageId)}/published`, token),
@@ -439,7 +440,11 @@ export function usePublished(pageId: string) {
     // and the Publish button enable promptly after an edit persists (#10); a publish
     // invalidates immediately (clears it). Kept off the React render path on purpose
     // — driving this from an editor signal regressed the presence/awareness e2e.
-    refetchInterval: 1500,
+    // #361the poll PAUSES while a checkbox toggle is in flight — a poll landing between two
+    // rapid toggles fetched the INTERMEDIATE committed state and repainted the box against the
+    // user's optimistic flip (the residual flicker). The toggle's own onSettled coalescing (last
+    // in-flight mutation only) refetches the final state once the burst settles.
+    refetchInterval: () => (qc.isMutating({ mutationKey: ["toggle", pageId] }) > 0 ? false : 1500),
   });
 }
 
