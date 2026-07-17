@@ -2837,12 +2837,17 @@ function openCalloutTypeMenu(view: EditorView, anchor: HTMLElement, blockStart: 
 
 class CalloutWidget extends WidgetType {
   private ro?: ResizeObserver;
-  constructor(readonly containerClass: string, readonly icon: string, readonly label: string, readonly body: string) { super(); }
+  constructor(readonly containerClass: string, readonly icon: string, readonly label: string, readonly body: string, readonly selected: boolean) { super(); }
   eq(o: CalloutWidget) {
-    return o.containerClass === this.containerClass && o.icon === this.icon && o.label === this.label && o.body === this.body;
+    return o.containerClass === this.containerClass && o.icon === this.icon && o.label === this.label && o.body === this.body && o.selected === this.selected;
   }
   toDOM(view: EditorView) {
     const el = renderCalloutPanel(this.containerClass, this.icon, this.label, this.body);
+    // #438 the SHARED atom-selection ring — every other atom (mermaid/details/embeds) rings via
+    // cm-lp-atom-sel; the callout panel was the one widget without it. Only ever visible where the
+    // caret can rest ON the atom without revealing (WYSIWYG / atom-select contexts) — in Live a
+    // caret-in reveals raw instead, so the click-to-edit path is untouched.
+    if (this.selected) el.classList.add("cm-lp-atom-sel");
     if (!view.state.readOnly) {
       // #174 comment 878 (ADR-087 addendum 2): a click PLACES THE CARET (reveals raw `:::type[label]` + body),
       // it does NOT open the editUI panel directly (that was the reversed behaviour the reviewer rejected).
@@ -3413,7 +3418,7 @@ const RENDERERS: BlockRenderer[] = [
           const bodyParts: string[] = [];
           for (let n = first.number + 1; n < lastLine.number; n++) bodyParts.push(doc.line(n).text);
           ctx.addAtomic(
-            Decoration.replace({ widget: new CalloutWidget(macro.containerClass, macro.icon, open!.label ?? "", bodyParts.join("\n")), block: true }),
+            Decoration.replace({ widget: new CalloutWidget(macro.containerClass, macro.icon, open!.label ?? "", bodyParts.join("\n"), atomSelected(ctx.state, first.from, lastLine.to)), block: true }),
             first.from,
             lastLine.to,
           );

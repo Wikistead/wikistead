@@ -121,7 +121,9 @@ export class FrontmatterWidget extends WidgetType {
     const wrap = document.createElement("div");
     wrap.className = "cm-lp-frontmatter";
     wrap.setAttribute("data-testid", "frontmatter-widget");
-    if (this.selected) wrap.classList.add("cm-lp-atom-selected");
+    // #438 the SHARED ring class (cm-lp-atom-sel) — the widget shipped with its own
+    // "cm-lp-atom-selected", which no CSS rule matches, so a selected frontmatter atom never ringed.
+    if (this.selected) wrap.classList.add("cm-lp-atom-sel");
     wrap.contentEditable = "false";
     const range = parseFrontmatterRange(this.src);
     const tags = range ? parseFmTags(range.inner) : [];
