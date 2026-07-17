@@ -201,3 +201,23 @@ describe('dev bypass production guard', () => {
     }
   })
 })
+
+// ── #428: last_used_at actually updates under RLS ─────────────────────────
+
+describe('#428 last_used_at under RLS', () => {
+  it('verifyApiKey moves last_used_at (the bare-pool UPDATE matched 0 rows under FORCE RLS)', async () => {
+    const created = await createApiKey(db, { tenantId: tenant.id, plan: tenant.plan, ownerUserId: 'dev-user', name: 'lu-428' })
+    const before = await adminPool`SELECT last_used_at FROM api_keys WHERE id = ${created.id}`
+    expect(before[0]!.last_used_at).toBeNull()
+    const verified = await verifyApiKey(created.plaintext, tenant.id)
+    expect(verified?.keyId).toBe(created.id)
+    // the update is fire-and-forget — poll briefly for it to land
+    let lastUsed: Date | null = null
+    for (let i = 0; i < 20 && !lastUsed; i++) {
+      await new Promise((r) => setTimeout(r, 100))
+      const [row] = await adminPool`SELECT last_used_at FROM api_keys WHERE id = ${created.id}`
+      lastUsed = row!.last_used_at as Date | null
+    }
+    expect(lastUsed, 'last_used_at recorded after a verification').not.toBeNull()
+  })
+})
