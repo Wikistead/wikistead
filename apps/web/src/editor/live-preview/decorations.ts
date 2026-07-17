@@ -316,6 +316,37 @@ export const reAnchorAfterReveal = ViewPlugin.fromClass(
   },
 );
 
+// #359symptom 2: a NON-EMPTY (visual/mouse) selection crossing a block atom was invisible ON the
+// atom — the widget's opaque background occluded .cm-selectionBackground, so the writer couldn't see how
+// far the selection reached. This plugin toggles `cm-lp-atom-insel` on every block-widget wrap whose doc
+// range intersects a non-empty selection range; CSS paints a translucent accent overlay (display-only
+// never a decoration/offset change, so remote carets and the #359 no-reveal rule are untouched). Runs on
+// every relevant update (CM may rebuild widget DOM at any time, so the class is re-derived, not cached).
+export const atomSelectionTint: Extension = ViewPlugin.define((view) => {
+  const apply = () => {
+    const ranges = view.state.selection.ranges.filter((r) => !r.empty);
+    const blocks = view.state.field(livePreview, false)?.blocks ?? [];
+    for (const el of Array.from(view.contentDOM.querySelectorAll<HTMLElement>(".cm-lp-macro-wrap, .cm-lp-details-collapsible, .cm-lp-callout-panel, .cm-lp-table"))) {
+      let on = false;
+      if (ranges.length && blocks.length) {
+        try {
+          const p = view.posAtDOM(el);
+          const b = blocks.find((bl) => p >= bl.from && p <= bl.to);
+          on = !!b && ranges.some((r) => r.to > b.from && r.from < b.to);
+        } catch { /* detached node mid-update */ }
+      }
+      el.classList.toggle("cm-lp-atom-insel", on);
+    }
+  };
+  const plugin = {
+    update(u: ViewUpdate) {
+      if (u.selectionSet || u.docChanged || u.viewportChanged) requestAnimationFrame(apply);
+    },
+    destroy() { /* classes die with the DOM */ },
+  };
+  return plugin;
+});
+
 // #359(option A, symptom 3): copy/cut with an EMPTY caret resting ON a block atom takes the WHOLE
 // block's source. CM's default for an empty selection copies the CURRENT LINE — on an atom that line is
 // the block's first SOURCE line ("```mermaid" / ":::note[Hello]"), so a WYSIWYG click-the-atom → Ctrl+C
@@ -4306,6 +4337,14 @@ export const linkClicks = EditorView.domEventHandlers({
 });
 
 export const livePreviewTheme = EditorView.baseTheme({
+  // #359symptom 2: the visual-selection tint painted OVER a block atom the selection crosses
+  // the widget's opaque surface hides .cm-selectionBackground, so without this the selection extent is
+  // invisible on atoms. Overlay (::after), never a background swap: the rendered content stays put.
+  ".cm-lp-atom-insel": { position: "relative" },
+  ".cm-lp-atom-insel::after": {
+    content: "''", position: "absolute", inset: "0", pointerEvents: "none", zIndex: "3",
+    background: "color-mix(in srgb, var(--accent, #4ea1ff) 18%, transparent)", borderRadius: "6px",
+  },
   ".cm-lp-strong": { fontWeight: "700" },
   ".cm-lp-emphasis": { fontStyle: "italic" },
   // #334 / ADR-129: highlight (`==text==`) — a themed marker tint, foreground preserved (matches the

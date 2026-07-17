@@ -183,6 +183,52 @@ export const atomYank: Extension = ViewPlugin.define((view) => {
       Vim.handleKey(cm!, "<Esc>", "mapping"); // back to normal (cancel the pending delete operator)
       e.preventDefault();
       e.stopImmediatePropagation(); // vim must NOT also see this 2nd d
+    } else if (e.key === "j" || e.key === "k") {
+      // #359symptom 1: ADJACENT atoms chain CM's atomicRanges skip — with three touching
+      // mermaid blocks one `j` jumped across ALL of them (atom1's exit lands inside atom2 → skip →
+      // atom3 → …). Gap-separated atoms are fine (the skip exits onto the landable line between), so
+      // this intercepts ONLY the chained case: when a plain j/k would enter an atom that TOUCHES
+      // another atom (an adjacency cluster), step ONE atom per press — land ON the entered atom's
+      // near edge (ADR-024: caret rests on the atom = selected; from above its first line, from
+      // below its last). Solitary/gapped atoms keep vim's default skip-over (the existing pins).
+      const vim = cm?.state.vim;
+      if (!vim || vim.insertMode) return;
+      if (vim.visualBlock) return; // rectangle semantics — leave to vim
+      const is = vim.inputState;
+      if (is && (is.operator || is.registerName || (is.prefixRepeat && is.prefixRepeat.length))) return; // dj/3j/"aj → vim
+      const lp = view.state.field(livePreview, false);
+      const blocks = lp?.blocks;
+      if (!blocks?.length) return;
+      const doc = view.state.doc;
+      const sel = view.state.selection.main;
+      const dir = e.key === "j" ? 1 : -1;
+      const blockAt = (pos: number) => blocks.find((b) => pos >= b.from && pos <= b.to) ?? null;
+      const cur = blockAt(sel.head);
+      // the line a plain j/k would step onto (from ON an atom: the line beyond the whole atom)
+      const edgeLineNum = cur
+        ? (dir > 0 ? doc.lineAt(cur.to).number + 1 : doc.lineAt(cur.from).number - 1)
+        : doc.lineAt(sel.head).number + dir;
+      if (edgeLineNum < 1 || edgeLineNum > doc.lines) return; // doc edge → vim
+      const entered = blockAt(doc.line(edgeLineNum).from);
+      if (!entered) return; // stepping onto a plain line → vim's default
+      // adjacency cluster check: does the entered atom TOUCH another atom on either side?
+      const touches = blocks.some((x) => {
+        if (x === entered) return false;
+        return doc.lineAt(entered.to).number + 1 === doc.lineAt(x.from).number
+          || doc.lineAt(x.to).number + 1 === doc.lineAt(entered.from).number;
+      });
+      if (!touches && !cur) return; // solitary atom entered from a plain line → default skip-over (pinned)
+      if (!touches && cur) return;  // leaving an atom onto a solitary atom is impossible here (no gap ⇒ touches)
+      // land ON the entered atom (near edge in the motion direction); visual keeps its anchor.
+      const caretPos = dir > 0 ? entered.from : doc.lineAt(entered.to).from;
+      view.dispatch({
+        selection: vim.visualMode && !sel.empty
+          ? EditorSelection.range(sel.anchor, caretPos)
+          : EditorSelection.cursor(caretPos),
+        scrollIntoView: true,
+      });
+      e.preventDefault();
+      e.stopImmediatePropagation(); // vim must NOT also run its own j/k (would chain-skip the cluster)
     } else if (e.key === "o" || e.key === "O") {
       // #183 symptom B / o-O: plain o/O with the caret ON an atom must open a line AFTER (o) / BEFORE
       // (O) the WHOLE atom — vim's own o/O would open INSIDE it (splitting a multi-line macro) or leave
