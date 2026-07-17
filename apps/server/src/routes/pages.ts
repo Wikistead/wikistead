@@ -1706,6 +1706,21 @@ export async function movePage(
 
 export const TRASH_RETENTION_DAYS = 30 // fixed in v1 (approval ruling); a tenant setting is a later seam
 
+// #437 / ADR-167: delete_mode — which deletion PATHWAYS exist (a reversibility policy). It never
+// changes WHO may delete: the delete-verb gates (#420 3b) hold unchanged in every mode, and the
+// mode gate always runs AFTER the FGA gate so the policy 400 can never become an existence or
+// permission oracle. Resolution: space override ?? tenant default ?? 'trash_only' (#411 as shipped).
+export type DeleteMode = 'trash_only' | 'both' | 'direct_only'
+export const DELETE_MODES: readonly DeleteMode[] = ['trash_only', 'both', 'direct_only']
+export async function resolveDeleteMode(db: TenantDb, spaceId: string): Promise<DeleteMode> {
+  const [row] = await db.sql<[{ mode: string | null; tenant_mode: string | null }?]>`
+    SELECT s.delete_mode AS mode, (SELECT delete_mode FROM tenant_settings LIMIT 1) AS tenant_mode
+    FROM spaces s WHERE s.id = ${spaceId}
+  `
+  const v = row?.mode ?? row?.tenant_mode ?? 'trash_only'
+  return (DELETE_MODES as readonly string[]).includes(v) ? (v as DeleteMode) : 'trash_only'
+}
+
 const TRASHED_MARKERS = (pageId: string) => [
   // The #244 typed-wildcard PAIR: a marker must enumerate every principal type it stops.
   { user: 'user:*', relation: 'trashed', object: `page:${pageId}` },
@@ -1724,11 +1739,16 @@ export async function trashPage(
   args: { pageId: string; userId: string },
 ): Promise<void> {
   await requireVerb(fga, args.userId, args.pageId, 'delete') // #420 3b / Rider 1: trash rides the delete verb
-  const [meta] = await db.sql<[{ tenant_id: string; deleted_root_id: string | null }?]>`
-    SELECT tenant_id, deleted_root_id FROM pages WHERE id = ${args.pageId}
+  const [meta] = await db.sql<[{ tenant_id: string; space_id: string; deleted_root_id: string | null }?]>`
+    SELECT tenant_id, space_id, deleted_root_id FROM pages WHERE id = ${args.pageId}
   `
   if (!meta) throw Object.assign(new Error('not found'), { statusCode: 404 })
   if (meta.deleted_root_id) return // already in the trash (its own root or riding an ancestor's) — no-op
+  // #437 / ADR-167: the mode gate runs strictly AFTER the FGA gate (above) — a static reason, no
+  // resource detail, so the 400 is policy-only and never an existence/permission oracle.
+  if ((await resolveDeleteMode(db, meta.space_id)) === 'direct_only') {
+    throw Object.assign(new Error('the trash pathway is disabled by policy'), { statusCode: 400, reason: 'delete_mode' })
+  }
   const subtree = [args.pageId, ...(await descendantIds(db, args.pageId))]
   // Idempotent scope: only rows not already claimed by an existing trash entry get stamped/marked
   // a nested OLDER trash root keeps its own deleted_root_id (restore/purge are keyed by it, ADR §2).
@@ -1880,6 +1900,28 @@ export async function deletePage(
   await physicalDeletePage(db, fga, driver, { pageId: args.pageId, actorId: args.userId })
 }
 
+// #437 / ADR-167: the DIRECT permanent path — offered only under 'both' / 'direct_only'. Order
+// FGA first (unauthorized callers get the uniform verb 403 for absent/live/trashed alike), then
+// the trashed/absent 404 (only a delete-capable caller — who already knows the page — reaches it;
+// a trashed root's permanent path stays the purge route), then the policy 400 (static reason).
+// One deletion implementation: this funnels into the same physicalDeletePage purge uses.
+export async function directDeletePage(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { pageId: string; userId: string },
+): Promise<void> {
+  await requireVerb(fga, args.userId, args.pageId, 'delete')
+  const [row] = await db.sql<[{ space_id: string; deleted_root_id: string | null }?]>`
+    SELECT space_id, deleted_root_id FROM pages WHERE id = ${args.pageId}
+  `
+  if (!row || row.deleted_root_id) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  if ((await resolveDeleteMode(db, row.space_id)) === 'trash_only') {
+    throw Object.assign(new Error('direct permanent deletion is disabled by policy'), { statusCode: 400, reason: 'delete_mode' })
+  }
+  await physicalDeletePage(db, fga, driver, { pageId: args.pageId, actorId: args.userId })
+}
+
 // #411 / ADR-153: the gate-free physical delete — callers authorize (deletePage/purgePage: caller manage;
 // retention sweep: system context, the trash entry itself is the authority). Never routed directly.
 async function physicalDeletePage(
@@ -1898,6 +1940,12 @@ async function physicalDeletePage(
   const ids = [args.pageId, ...(await descendantIds(db, args.pageId))]
   for (const id of ids) await deleteObjectTuples(fga, `page:${id}`)
 
+  // #437 / ADR-167 §3: permanent deletion is exactly where attribution matters most — EE tenants
+  // get an in-tx ledger row for EVERY physical delete (explicit purge, the retention sweep, and the
+  // direct path all funnel through here). Plan read from the global registry (no RLS on tenants).
+  const [tenantRow] = await pool<[{ plan: string }?]>`SELECT plan FROM tenants WHERE id = ${tenantId}`
+  const auditActor = args.actorId.includes(':') ? args.actorId : `user:${args.actorId}`
+
   const outboxIds: { id: string; pageId: string }[] = []
   await db.tx(async (tx) => {
     for (const id of ids) {
@@ -1907,6 +1955,7 @@ async function physicalDeletePage(
     // gate drops orphans regardless — this is row hygiene, not correctness.
     await deletePinsForResources(tx, ids)
     await sweepWatchesForResources(tx, ids) // #320 / ADR-126: same row-hygiene sweep for watches (display gate is the backstop)
+    await auditIfEntitled(tx, { id: tenantId, plan: tenantRow?.plan ?? '' }, { actor: auditActor, action: 'page.purged', target: `page:${args.pageId}` })
     await tx`DELETE FROM pages WHERE id = ${args.pageId}` // cascade deletes descendants
   })
   for (const o of outboxIds) processOutboxAsync(driver, o.id, { tenantId, pageId: o.pageId, operation: 'delete' })
@@ -2905,6 +2954,12 @@ export async function pagesPlugin(app: FastifyInstance) {
     return reply.code(204).send()
   })
 
+  // #437 / ADR-167: the direct permanent path (modes 'both' / 'direct_only' only — 400 otherwise).
+  app.delete<{ Params: { pageId: string } }>('/pages/:pageId/permanent', async (req, reply) => {
+    await directDeletePage(req.db, app.fga, app.searchDriver, { pageId: req.params.pageId, userId: req.user.sub })
+    return reply.code(204).send()
+  })
+
   // Trash listing is a member-only settings surface (no guest config — a share_link token never lists a
   // trash even if its own page is in it).
   app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/trash', async (req) => {
@@ -3275,4 +3330,23 @@ export async function pagesPlugin(app: FastifyInstance) {
     return { publicEnabled: req.body.enabled }
   })
 
+  // #437 / ADR-167: the tenant delete-mode knob (admin-gated, the old creation-policy shape — that
+  // knob itself moved to tenant-role capabilities, #445/ADR-171). It selects deletion PATHWAYS
+  // only — who may delete stays the delete verb / manage superset in every mode.
+  app.get('/admin/delete-mode', async (req) => {
+    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    const [row] = await req.db.sql<[{ delete_mode: string }?]>`SELECT delete_mode FROM tenant_settings LIMIT 1`
+    return { deleteMode: row?.delete_mode ?? 'trash_only' }
+  })
+  app.put<{ Body: { deleteMode?: string } }>('/admin/delete-mode', async (req, reply) => {
+    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    const v = req.body?.deleteMode
+    if (!v || !(DELETE_MODES as readonly string[]).includes(v)) {
+      return reply.code(400).send({ error: "deleteMode ('trash_only' | 'both' | 'direct_only') required" })
+    }
+    await req.db.sql`
+      INSERT INTO tenant_settings (tenant_id, delete_mode) VALUES (${req.tenant.id}, ${v})
+      ON CONFLICT (tenant_id) DO UPDATE SET delete_mode = ${v}, updated_at = now()`
+    return { deleteMode: v }
+  })
 }

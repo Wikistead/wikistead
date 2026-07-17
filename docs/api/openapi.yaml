@@ -124,6 +124,12 @@ paths:
       summary: Permanently delete a trashed page (a trash root) before its retention expires
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
       responses: { "204": { description: Purged }, "404": { description: "Not a trash root, not manageable, or absent (uniform)" } }
+  /pages/{pageId}/permanent:
+    delete:
+      summary: Permanently delete a LIVE page directly (no trash) — only when the space's delete_mode allows it
+      description: "The direct pathway of the delete_mode policy (ADR-167): available under 'both' / 'direct_only', 400 (static policy reason) under 'trash_only'. Requires the delete verb like the trash route; a trashed page stays purge-only (uniform 404 here)."
+      parameters: [ { $ref: "#/components/parameters/pageId" } ]
+      responses: { "204": { description: Permanently deleted }, "400": { description: Disabled by the delete_mode policy }, "404": { description: "Trashed or absent (uniform)" } }
   /pages/{pageId}/published:
     get:
       summary: Get the published markdown (the read surface)
@@ -329,6 +335,16 @@ paths:
       description: Each entry is a trashed root with its descendant count. Only entries the caller can manage are listed (others are silently absent). Member-only.
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
       responses: { "200": { description: "[{ id, title, deletedAt, deletedBy, descendants }]" }, "404": { description: Space not viewable or absent (uniform) } }
+  /spaces/{spaceId}/delete-mode:
+    get:
+      summary: Read the space's delete_mode override (manage-gated)
+      parameters: [ { $ref: "#/components/parameters/spaceId" } ]
+      responses: { "200": { description: "{ deleteMode: 'trash_only'|'both'|'direct_only'|null, tenantDefault, resolved }" } }
+    put:
+      summary: Set the space's delete_mode override (null inherits the tenant default; manage-gated)
+      description: "The deletion-pathway policy (ADR-167). It only chooses reversibility (trash vs direct) — who may delete is unchanged in every mode."
+      parameters: [ { $ref: "#/components/parameters/spaceId" } ]
+      responses: { "200": { description: "{ deleteMode }" }, "400": { description: Unknown mode } }
   /spaces/{spaceId}/export:
     get:
       summary: Export the space as a Markdown ZIP
