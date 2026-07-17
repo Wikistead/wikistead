@@ -53,3 +53,38 @@ test("#389: selected radio dot uses the BRAND accent (dark)", async ({ browser }
   await page.addInitScript(() => localStorage.setItem("wks.theme", "dark"));
   await checkSurface(page);
 });
+
+// #389 the dot centers in the circle by FLEX (never %-position + translate, whose top/left
+// subpixel rounding drifts apart at fractional zoom). Pins the rect-center match at 1x AND a
+// fractional deviceScaleFactor, and that the checked resting dot carries no transform (a persistent
+// transform exempts it from device-pixel snapping — the residual paint-level off-center).
+for (const dsf of [1, 1.25]) {
+  test(`#389 radio dot rect-centers in its circle (dsf ${dsf})`, async ({ browser }) => {
+    const page = await (await browser.newContext({ deviceScaleFactor: dsf })).newPage();
+    await page.goto("/settings/account/editor");
+    const choices = page.locator("[data-slot=radio-group-choice]");
+    await choices.first().waitFor({ timeout: 10000 });
+    const offs = await page.evaluate(() => {
+      const out: { dx: number; dy: number; transform: string; state: string | null }[] = [];
+      for (const choice of document.querySelectorAll("[data-slot=radio-group-choice]")) {
+        const circle = choice.querySelector("span[class*=rounded-full][class*=border]");
+        const dot = circle?.querySelector("span");
+        if (!circle || !dot) continue;
+        const c = circle.getBoundingClientRect(), d = dot.getBoundingClientRect();
+        out.push({
+          dx: Math.abs((d.left + d.right) / 2 - (c.left + c.right) / 2),
+          dy: Math.abs((d.top + d.bottom) / 2 - (c.top + c.bottom) / 2),
+          transform: getComputedStyle(dot).transform,
+          state: choice.getAttribute("data-state"),
+        });
+      }
+      return out;
+    });
+    expect(offs.length).toBeGreaterThan(1);
+    for (const o of offs) {
+      expect(o.dx, "dot horizontally centered").toBeLessThan(0.51);
+      expect(o.dy, "dot vertically centered").toBeLessThan(0.51);
+      if (o.state === "checked") expect(o.transform, "checked resting dot has NO transform (pixel-snaps)").toBe("none");
+    }
+  });
+}
