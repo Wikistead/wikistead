@@ -84,3 +84,31 @@ test("#274: a VIEW space link shows no create affordance", async ({ browser }) =
   await expect(guest.getByTestId("guest-sidebar")).toBeVisible({ timeout: 15000 });
   await expect(guest.getByTestId("guest-new-page")).toHaveCount(0); // read-only chrome stays write-free
 });
+
+// #274 (review return): the space-share COPY still said "view-only" (the #104 wording),
+// which sent the user to the page link instead — the space edit link looked like it didn't exist. Pin
+// the dialog warning to the new copy (capability is selectable; an editable link = anonymous wiki).
+test("#274: the space share dialog copy says the link capability is selectable (not view-only)", async ({ browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  await openDemo(member);
+  await member.getByTestId("space-settings-open").click();
+  await member.getByTestId("space-share").click();
+  const warning = member.getByTestId("share-space-warning");
+  await expect(warning).toBeVisible({ timeout: 8000 });
+  const text = await warning.innerText();
+  expect(text, "the stale view-only wording is gone").not.toMatch(/view-only|閲覧専用/);
+  expect(text, "the editable capability is mentioned").toMatch(/editable|編集可/i);
+});
+
+// #274 (optional item, bundled): a shell WITHOUT a sidebar must not render the decorative
+// PanelLeft icon — it read as a broken "expand sidebar" control on the guest page / settings shells.
+test("#274: the sidebar-less shell renders no dead sidebar-toggle icon", async ({ browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  await member.goto("/settings/account");
+  await member.waitForSelector("header", { timeout: 10000 });
+  await expect(member.getByTestId("sidebar-toggle")).toHaveCount(0);
+  await expect(member.locator("header svg.lucide-panel-left"), "no decorative panel icon").toHaveCount(0);
+  // and the member page shell (WITH sidebar) keeps the working toggle — the control itself is not gone.
+  await openDemo(member);
+  await expect(member.getByTestId("sidebar-toggle")).toBeVisible({ timeout: 8000 });
+});
