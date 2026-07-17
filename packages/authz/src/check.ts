@@ -21,12 +21,22 @@ const RELATION: Record<ResourceRef['type'], Partial<Record<Capability, string>>>
     edit:     'edit',
     manage:   'manage',
     moderate: 'moderate', // #330 / ADR-141: the moderation verb (freeze/revert/patrol; edit via the bypass)
+    // #420 / ADR-164 increment 1: the split verbs (delete/share/settings admin-class; publish edit-class).
+    delete:   'delete',
+    share:    'share',
+    settings: 'settings',
+    publish:  'publish',
   },
   space: {
     view:     'viewer',
     edit:     'editor',
     manage:   'manager',
     moderate: 'moderator', // #330: a space-level moderator appointment
+    // #420 / ADR-164: space-scoped capability assignment targets (cascade to pages, private-guarded there).
+    delete:   'deleter',
+    share:    'sharer',
+    settings: 'settings_editor',
+    publish:  'publisher',
     // comment: not defined on space
   },
 }
