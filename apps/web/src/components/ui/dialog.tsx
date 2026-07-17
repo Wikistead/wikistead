@@ -74,8 +74,9 @@ function DialogContent({
           // overrides the base max-width at `sm+`, so a base max-width cap can't hold the gutter for them at a
           // mid width (700–1000px, below 5xl). `w-[calc(100vw-4rem)]` is width, which the per-dialog max-widths
           // only CAP (never widen) — so the effective width is min(100vw-4rem, that dialog's max), giving every
+          // #406 S3 / ADR-159 §3: below `sm` the gutter narrows to 2rem total (phones can't spare 64px).
           // dialog the gutter at narrow/mid widths while the `sm:max-w-*` maxima still govern on wide screens.
-          "fixed left-[50%] z-50 grid w-[calc(100vw-4rem)] translate-x-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          "fixed left-[50%] z-50 grid w-[calc(100vw-2rem)] sm:w-[calc(100vw-4rem)] translate-x-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           position === "top" ? "top-[10%] translate-y-0" : "top-[50%] translate-y-[-50%]", // #344: top-pin vs center
           className
         )}

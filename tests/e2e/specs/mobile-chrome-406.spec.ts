@@ -185,3 +185,19 @@ test("#406 S4: coarse pointer forces vim OFF without touching the stored prefere
   const pref = await page.evaluate(() => localStorage.getItem("wks.editorVim"));
   expect(pref, "the device-local vim preference survives").toBe("1");
 });
+
+// ---- S3 (dialog/picker audit): sub-sm gutter + list-only pickers at phone width ----
+test("#406 S3: phone dialogs use the 2rem gutter; the search preview pane hides below md", async ({ browser }) => {
+  const page = await (await browser.newContext({ viewport: PHONE })).newPage();
+  await page.goto("/p/demo");
+  await page.waitForSelector("[data-pane=preview] .cm-content", { timeout: 15000 });
+  await sleep(500);
+  await page.getByTestId("search-trigger").click();
+  await expect(page.getByTestId("search-input")).toBeVisible({ timeout: 8000 });
+  const dlgW = await page.getByTestId("search-input").evaluate((el) => (el.closest("[role=dialog]") as HTMLElement).offsetWidth); // offsetWidth: immune to the zoom-in animation transform
+  // sub-sm: 100vw - 2rem (the old 4rem gutter left only 326px on a 390px phone)
+  expect(dlgW, "phone dialog width = 100vw - 2rem").toBeGreaterThanOrEqual(PHONE.width - 33);
+  await page.getByTestId("search-input").fill("demo");
+  await sleep(600);
+  await expect(page.getByTestId("search-preview"), "two-pane picker degrades to list-only below md").toBeHidden();
+});
