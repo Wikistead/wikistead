@@ -33,6 +33,7 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `page.unfrozen` | A page was unfrozen (both freeze markers cleared; every edit path restored). |
 | `space.created` | A space was created. |
 | `space.updated` | A space was updated. |
+| `vendor.access` | An operator break-glass access touched this tenant (Access Transparency, #435) |
 | `space.deleted` | A space was deleted. |
 | `space.access_granted` | A principal was granted a relation on a space. |
 | `space.access_revoked` | A principal lost a relation on a space. |

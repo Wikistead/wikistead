@@ -37,6 +37,15 @@ if (allowedSubs.length === 0) {
 const sql = postgres(dbUrl, { max: 2, onnotice: () => {} })
 const app = buildOperatorApp({ sql, jwks, allowedSubs })
 
+// #435 / ADR-169 (owner ruling: disclose the past too): project pre-feature operator ledger rows
+// into the per-tenant Access Transparency log ONCE at boot. Idempotent (append-only skip-count),
+// never emits vendor.access (notifications are for post-enablement accesses only), and a failure
+// must not block the console (retried on the next boot).
+import('../audit/transparency.js')
+  .then(({ backfillTransparencyProjection }) => backfillTransparencyProjection(sql))
+  .then(({ projected }) => { if (projected > 0) console.log(`access-transparency backfill: ${projected} row(s) projected`) })
+  .catch((err) => console.error('access-transparency backfill failed (will retry next boot)', err))
+
 const port = Number(process.env.PORT ?? 4100)
 app.listen({ port, host: '0.0.0.0' }).then(
   () => console.log(`operator console listening on :${port}`),

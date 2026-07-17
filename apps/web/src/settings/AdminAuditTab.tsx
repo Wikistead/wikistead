@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { useAuditLog, useAuditVerify, type AuditRow, type AuditVerdict } from "../data/queries";
+import { apiFetch } from "../data/apiClient";
 import { useSession } from "../session/SessionProvider";
 import { assetUrl } from "../data/apiClient";
 import { Button } from "../ui/Button";
@@ -106,6 +108,53 @@ export function AdminAuditTab() {
           <Button variant="default" size="sm" onClick={() => void loadMore()} data-testid="audit-load-more">{t("adminAudit.loadMore")}</Button>
         </div>
       )}
+
+      <VendorAccessSection />
     </div>
+  );
+}
+
+// #435 / ADR-169: Access Transparency — operator break-glass disclosed to the tenant admin. The empty
+// state is an EXPLICIT positive statement ("no operator access has occurred" — the feature's whole
+// point). Rows show the operator's stable pseudonym, an action code, a fixed reason code and the
+// timestamp — never an identity or free text. Locked plans see nothing extra here (the audit tab's
+// UpgradeNotice already covers the compliance family; the server 403s regardless).
+interface TransparencyRow { seq: number; at: string; actor: string; action: string; reason: string; target: string }
+function VendorAccessSection() {
+  const { t } = useTranslation();
+  const { token } = useSession();
+  const q = useQuery({
+    queryKey: ["transparency"],
+    queryFn: () => apiFetch<TransparencyRow[]>("/admin/transparency", token),
+    staleTime: 30_000,
+    retry: false,
+  });
+  const rows = q.data ?? [];
+  if (q.error) return null; // non-entitled / non-admin: the server denied — show nothing extra
+  return (
+    <section className="mt-8" data-testid="vendor-access">
+      <h3 className="mb-1 mt-0">{t("transparency.title")}</h3>
+      <p className="mt-0 text-sm text-fg-dim">{t("transparency.body")}</p>
+      {rows.length === 0 && !q.isLoading && (
+        <p className="text-sm text-fg-dim" data-testid="vendor-access-empty">{t("transparency.empty")}</p>
+      )}
+      {rows.length > 0 && (
+        <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.03em] [&_th]:text-fg-dim">
+          <thead>
+            <tr><th>{t("adminAudit.time")}</th><th>{t("transparency.operator")}</th><th>{t("adminAudit.action")}</th><th>{t("transparency.reason")}</th></tr>
+          </thead>
+          <tbody data-testid="vendor-access-rows">
+            {rows.map((r) => (
+              <tr key={r.seq} data-testid="vendor-access-row">
+                <td className="whitespace-nowrap text-fg-dim">{new Date(r.at).toLocaleString()}</td>
+                <td className="font-mono text-xs">{r.actor}</td>
+                <td>{r.action}</td>
+                <td>{t(`transparency.reasons.${r.reason}`, r.reason)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }

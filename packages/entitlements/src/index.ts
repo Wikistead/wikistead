@@ -72,6 +72,9 @@ export interface Entitlements {
   // (the transactional outbox enqueue is skipped when false). EE (self-host EE on; Cloud top tier
   // only — business placeholder). CE/free tenants generate no audit ledger.
   auditLog: boolean
+  // #435 / ADR-169 (EE): the Access Transparency surface — the tenant-facing projection of operator
+  // break-glass. Same compliance family/tier as auditLog.
+  accessTransparency: boolean
 
   // AI assists (#130 / ADR-077): gates the AI features (summarize/ask-KB/etc.). OFF by default
   // except self-host UNLIMITED; AI is also OFF unless an AIProvider is registered (BYOK) — this
@@ -138,6 +141,7 @@ export const UNLIMITED: Entitlements = {
   samlSso: true,
   scim: true,
   auditLog: true,
+  accessTransparency: true,
   aiFeatures: true,
   aiTokenAllowance: Infinity,
   apiRateLimit: { perKey: Infinity, perTenant: Infinity },

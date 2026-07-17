@@ -32,6 +32,9 @@ export type DomainEvent =
   // ── Spaces ───────────────────────────────────────────────────────────
   | { type: 'space.created';  tenantId: string; spaceId: string; actorId: string }
   | { type: 'space.updated';  tenantId: string; spaceId: string; actorId: string }
+  // #435 / ADR-169: an operator break-glass touched this tenant (Access Transparency). Fired for NEW
+  // accesses only (never for the backfill); carries the action code + timestamp, never the operator id.
+  | { type: 'vendor.access';  tenantId: string; action: string; at: string }
   | { type: 'space.deleted';  tenantId: string; spaceId: string; actorId: string }
   | { type: 'space.access_granted'; tenantId: string; spaceId: string; grantee: string; relation: string; actorId: string }
   | { type: 'space.access_revoked'; tenantId: string; spaceId: string; grantee: string; relation: string; actorId: string }
