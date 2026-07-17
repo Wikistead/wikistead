@@ -1128,21 +1128,20 @@ class AttachmentChipWidget extends WidgetType {
     dl.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
     dl.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); triggerAttachmentDownload(view, this.id); });
     chip.appendChild(dl);
-    let kind: string | null = null;
     void view.state.facet(attachmentResolver).meta(this.id).then((m) => {
       if (m?.sizeBytes != null) size.textContent = ` (${fmtBytes(m.sizeBytes)})`;
-      kind = m?.inlineKind ?? null;
-      if (kind === "pdf") chip.classList.add("cm-lp-attachment-chip-pdf"); // zoom-in cursor (CSS)
     });
     if (view.state.readOnly) {
       // read surface: the whole chip is the primary action (there is no caret/raw to protect).
+      // #273(user ruling): the INLINE chip has no rendered preview, so zooming was unnatural
+      // EVERY chip click downloads (pointer cursor, no PDF special case); the lightbox belongs only to
+      // the standalone card's ACTUALLY-RENDERED preview area (the ⤢ expand below).
       chip.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); }); // #265 guard
       chip.addEventListener("click", (e) => {
         if ((e.target as HTMLElement).closest("button")) return; // ⤓ handles itself
         e.preventDefault();
         e.stopPropagation();
-        if (kind === "pdf") openAttachmentLightbox(view, this.id, this.name);
-        else triggerAttachmentDownload(view, this.id);
+        triggerAttachmentDownload(view, this.id);
       });
     }
     return chip;
@@ -4555,7 +4554,7 @@ const livePreviewBaseTheme = EditorView.baseTheme({
     background: "color-mix(in srgb, currentColor 12%, transparent)",
     borderColor: "color-mix(in srgb, currentColor 50%, transparent)",
   },
-  ".cm-lp-attachment-chip-pdf": { cursor: "zoom-in" },
+  // #273the chip-pdf zoom-in cursor is retired — an inline chip always downloads (pointer).
   ".cm-lp-attachment-size": { opacity: "0.65", fontSize: "0.85em" },
   ".cm-lp-attachment-dl": {
     border: "none", background: "transparent", cursor: "pointer", padding: "0 2px",
