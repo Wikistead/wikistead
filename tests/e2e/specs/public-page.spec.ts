@@ -459,8 +459,11 @@ test("#430: the standalone public page has the minimal header — brand + powere
   const wl = (await (await anon.request.get("/api/branding")).json()).whitelabel as boolean;
   if (wl) await expect(header.getByTestId("powered-by")).toHaveCount(0);
   else await expect(header.getByTestId("powered-by")).toBeVisible();
-  // the #429 theme toggle moved into the header and still works
+  // the #429 theme AND language toggles ride the header (ruling) — and language actually switches
   await expect(header.getByTestId("theme-toggle")).toBeVisible();
+  await header.getByTestId("language-toggle").click();
+  await anon.getByTestId("language-ja").click();
+  await expect(anon.locator("html")).toHaveAttribute("lang", "ja"); // anon context is throwaway — no switch-back needed
   // anti-chrome: none of the member controls exist on the anonymous surface
   for (const tid of ["sidebar-toggle", "search-open", "notification-bell", "user-menu", "edit-toggle", "new-page"]) {
     await expect(anon.getByTestId(tid), tid).toHaveCount(0);
