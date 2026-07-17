@@ -287,10 +287,7 @@
     "sharedWith": "Shared with",
     "manage": "Manage",
     "empty": "No spaces yet.",
-    "creationPolicyTitle": "Space creation",
-    "creationPolicyBody": "Who may create new spaces in this tenant. Personal spaces are always allowed.",
-    "creationPolicyMembers": "All members",
-    "creationPolicyAdmins": "Tenant admins only"
+    "creationMovedToRoles": "Who may create spaces is now configured in Roles (the member default role)."
   },
   "spaceSettings": {
     "title": "{{name}} · Settings",
@@ -1023,8 +1020,17 @@
       "delete": "Delete",
       "share": "Share",
       "settings": "Settings",
-      "moderate": "Moderate"
-    }
+      "moderate": "Moderate",
+      "createSpaces": "create spaces"
+    },
+    "tenantDefaultsTitle": "Default tenant roles",
+    "tenantDefaultsBody": "Who may create spaces. Toggling member covers every member; admins always can.",
+    "adminLocked": "Admins can always create spaces (fixed by the permission model).",
+    "locked": "locked",
+    "scopeLabel": "Role scope",
+    "scopeResource": "Space / page",
+    "scopeTenant": "Tenant",
+    "assignTenantScope": "applies tenant-wide"
   },
   "detailsEdit": {
     "title": "Edit collapsible",

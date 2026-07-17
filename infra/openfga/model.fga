@@ -37,6 +37,12 @@ type tenant
   relations
     define admin: [user]
     define member: [user, group#member]
+    # ADR-171 (#445): who may CREATE shared spaces in this tenant. user:* is the "all members may
+    # create" default (seeded at provisioning; the member default-role toggle adds/removes it);
+    # user/group leaves are custom tenant-role expansions. `or admin` = admins always can (the
+    # superset precedent). RESTRICT-ONLY: gates creation, grants nothing else. No share_link types —
+    # guests never reach tenant-scoped actions.
+    define space_creator: [user, group#member, user:*] or admin
 
 type space
   relations

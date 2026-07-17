@@ -1,6 +1,7 @@
-// #399 / ADR-158: the three permission-policy knobs. Anti-test matrix (binding conditions):
-// - space_creation_policy='admins': member create 403 (static reason), admin succeeds, the PERSONAL
-//   auto-create stays exempt, default = today's behaviour.
+// #399 / ADR-158: the permission-policy knobs. Anti-test matrix (binding conditions):
+// - space creation (#445 / ADR-171 SUPERSEDED the §2 binary knob): the tenant#space_creator
+//   wildcard absent → member create 403 (static reason), admin succeeds (`or admin`), the PERSONAL
+//   auto-create stays exempt; wildcard present = today's default behaviour.
 // - page_creation_policy='managers': an EDITOR's create 403s IDENTICALLY through every createPage
 //   entry form (plain / duplicate fromPageId / templateId) — the chokepoint pin (import/MCP call the
 //   same function; verified the call graph); a manager succeeds; the knob never grants.
@@ -31,12 +32,12 @@ const PERSONAL = 'pk399-personal'
 const grants: { user: string; relation: string; object: string }[] = []
 const pages: string[] = []
 
-// (review): the SAME UPSERT the admin PUT route runs — a bare UPDATE is a 0-row no-op when
-// the seed carries no tenant_settings row, which silently skips the §2 gate and turns this
-// security pin into a state-dependent false green. The UPSERT exercises the gate unconditionally.
-const setSpacePolicy = (v: string | null) =>
-  admin`INSERT INTO tenant_settings (tenant_id, space_creation_policy) VALUES (${tenant.id}, ${v ?? 'members'})
-        ON CONFLICT (tenant_id) DO UPDATE SET space_creation_policy = ${v ?? 'members'}`
+// #445 / ADR-171: the space-creation control IS the tenant#space_creator wildcard tuple now.
+const wildcard = () => ({ user: 'user:*', relation: 'space_creator', object: `tenant:${tenant.id}` })
+const setMembersMayCreate = async (on: boolean) => {
+  if (on) await writeTuples(fgaClient, [wildcard()]).catch(() => {}) // idempotent (already-exists)
+  else await deleteTuples(fgaClient, [wildcard()]).catch(() => {}) // idempotent (may be absent)
+}
 const setPagePolicy = (v: string) => admin`UPDATE spaces SET page_creation_policy = ${v} WHERE id = ${spaceId}`
 
 beforeAll(async () => {
@@ -48,7 +49,7 @@ beforeAll(async () => {
 }, 60_000)
 
 afterAll(async () => {
-  await setSpacePolicy(null)
+  await setMembersMayCreate(true)
   await deleteTuples(fgaClient, grants).catch(() => {})
   for (const id of pages) await deletePage(db, fgaClient, driver, { pageId: id, userId: 'dev-user' }).catch(() => {})
   await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user' }).catch(() => {})
@@ -58,13 +59,13 @@ afterAll(async () => {
   await admin.end()
 }, 60_000)
 
-describe('space_creation_policy (#399 §2)', () => {
-  it("'admins': a plain member is 403 with the static reason; the admin succeeds; personal auto-create stays exempt", async () => {
-    await setSpacePolicy('admins')
+describe('space creation via tenant#space_creator (#445 / ADR-171 — supersedes #399 §2)', () => {
+  it('wildcard ABSENT: a plain member is 403 with the static reason; the admin succeeds (`or admin`); personal auto-create stays exempt', async () => {
+    await setMembersMayCreate(false)
     try {
       await expect(createSpace(db, fgaClient, { tenantId: tenant.id, userId: EDITOR, plan: tenant.plan, name: 'blocked' }))
-        .rejects.toMatchObject({ statusCode: 403, reason: 'space_creation_policy' })
-      // dev-user is tenant admin → allowed.
+        .rejects.toMatchObject({ statusCode: 403, reason: 'space_creator' })
+      // dev-user is tenant admin → allowed via the model's `or admin` arm.
       const s = await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'admin-ok' })
       await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: s.id, userId: 'dev-user' })
       // The PERSONAL auto-create is a resource kind, not a privilege — a plain member still gets one.
@@ -72,13 +73,30 @@ describe('space_creation_policy (#399 §2)', () => {
       const [row] = await admin<{ id: string }[]>`SELECT id FROM spaces WHERE personal_owner_sub = ${PERSONAL}`
       expect(row).toBeDefined()
     } finally {
-      await setSpacePolicy(null)
+      await setMembersMayCreate(true)
     }
   })
 
-  it("default 'members': a plain member can create (today's behaviour, non-regression)", async () => {
+  it("wildcard PRESENT (the seeded default): a plain member can create (today's behaviour, non-regression)", async () => {
+    await setMembersMayCreate(true)
     const s = await createSpace(db, fgaClient, { tenantId: tenant.id, userId: EDITOR, plan: tenant.plan, name: 'member-ok' })
     await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: s.id, userId: EDITOR })
+  })
+
+  it('cross-tenant: the dev wildcard never lets a member create in ANOTHER tenant (acme has its own tuple set)', async () => {
+    // The acme tenant's wildcard is its own tuple; deleting IT must not affect dev, and the dev
+    // member must not create into acme (tenant object binds the check).
+    const acme = { user: 'user:*', relation: 'space_creator', object: 'tenant:tenant_acme' }
+    await deleteTuples(fgaClient, [acme]).catch(() => {})
+    try {
+      await expect(createSpace(db, fgaClient, { tenantId: 'tenant_acme', userId: EDITOR, plan: tenant.plan, name: 'x-tenant' }))
+        .rejects.toMatchObject({ statusCode: 403 })
+      // dev unaffected by acme's missing wildcard
+      const s = await createSpace(db, fgaClient, { tenantId: tenant.id, userId: EDITOR, plan: tenant.plan, name: 'dev-still-ok' })
+      await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: s.id, userId: EDITOR })
+    } finally {
+      await writeTuples(fgaClient, [acme]).catch(() => {})
+    }
   })
 })
 
