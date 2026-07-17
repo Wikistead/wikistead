@@ -2,6 +2,7 @@
 // asset — the "Wikistead" wordmark is CSS text (translatable, selectable, crisp at
 // any size, follows dark/light via currentColor). icon.svg is inlined so it inherits
 // currentColor and needs no extra request.
+import { assetUrl } from "../data/apiClient";
 
 // The icon mark alone. Used as the DEFAULT logo slot in the header when a tenant has
 // uploaded no custom logo (#143: the logo slot is always filled — default OR custom —
@@ -23,6 +24,29 @@ export function BrandLockup() {
     <span className="inline-flex items-center gap-2 text-foreground" data-testid="brand">
       <WikisteadMark />
       <span className="text-[18px] font-semibold leading-none tracking-[-0.02em]" style={{ fontFamily: '"Plus Jakarta Sans", var(--font)' }}>Wikistead</span>
+    </span>
+  );
+}
+
+// #442: the TENANT brand lockup — the #143 two-slot rule (logo slot: custom upload OR the default
+// mark; name slot: tenant display name OR "Wikistead") as ONE component, so the header and the
+// sign-in card cannot drift apart again. The header's copy had a bare arbitrary font-size
+// (text-[15px]) whose INHERITED line-height mis-centred the name against the 22px mark;
+// leading-none (the canonical lockup's behaviour) pins the glyph box on both sizes.
+export function TenantBrand({ logoUrl, name, size = "header", logoTestId = "brand-logo", nameTestId = "brand" }: {
+  logoUrl?: string | null;
+  name?: string | null;
+  size?: "header" | "login";
+  logoTestId?: string;
+  nameTestId?: string;
+}) {
+  const login = size === "login";
+  return (
+    <span className="flex items-center gap-2 text-foreground">
+      {logoUrl
+        ? <img className={`block object-contain ${login ? "h-7 max-w-[180px]" : "h-[22px] max-w-[160px]"}`} src={assetUrl(logoUrl)} alt={name || "Wikistead"} data-testid={logoTestId} />
+        : <WikisteadMark />}
+      <span className={`${login ? "text-lg" : "text-[15px]"} font-semibold leading-none`} data-testid={nameTestId}>{name || "Wikistead"}</span>
     </span>
   );
 }
