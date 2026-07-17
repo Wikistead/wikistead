@@ -38,6 +38,7 @@ const EXCLUDED_PATHS = new Set([
   '/spaces/:spaceId/access', '/spaces/:spaceId/public-access', '/spaces/:spaceId/comment-open', // space settings plumbing
   '/spaces/:spaceId/groups', '/spaces/:spaceId/member-candidates', '/spaces/:spaceId/pages-overview', // space settings plumbing
   '/spaces/:spaceId/page-creation-policy', '/admin/creation-policy', // creation-policy knobs (#399; admin/space settings plumbing)
+  '/admin/roles', '/admin/roles/:roleId', // custom-role definitions (#420; admin console plumbing, EE-gated)
   '/spaces/:spaceId/branding', '/spaces/:spaceId/icon-image', '/branding', '/branding/logo', '/tenant/branding', '/tenant/branding/logo', // branding/UI
   '/me/settings', '/me/avatar', '/members/:sub', '/members/:sub/avatar-image', '/members/invites', '/members/invites/:id', // account/invite UI plumbing
   '/ai/ask', '/ai/capability',     // AI feature surface (own contract)
