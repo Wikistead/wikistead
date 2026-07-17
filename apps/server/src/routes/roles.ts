@@ -122,17 +122,89 @@ export async function rolesPlugin(app: FastifyInstance) {
     '/admin/roles/:roleId', async (req) => {
       await writeGates(req)
       const def = parseDefinition(req.body ?? {})
+      // #420 increment 4 (Fork B1, ruled/): a capability edit RE-EXPANDS every live
+      // assignment — added capabilities are granted, removed ones revoked, LIVE. All diffing runs in
+      // one tx with the assignments row-locked (the same FOR UPDATE discipline as unassign, so a
+      // concurrent unassign serializes); tuple writes/deletes are batched as the tx's LAST statements
+      // (FGA-last). The search reindex rides the outbox (async) per the ruling.
+      interface AsgRow { id: string; resource_type: 'page' | 'space'; resource_id: string; principal: string; owned_capabilities: string[] }
+      const pageIds: string[] = []
+      const spaceIds: string[] = []
+      const outboxIds: string[] = []
       await req.db.tx(async (tx) => {
-        const [row] = await tx<{ id: string }[]>`SELECT id FROM roles WHERE id = ${req.params.roleId}`
+        const [row] = await tx<{ id: string; capabilities: string[] }[]>`
+          SELECT id, capabilities FROM roles WHERE id = ${req.params.roleId} FOR UPDATE`
         if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
         const dup = await tx<{ id: string }[]>`SELECT id FROM roles WHERE name = ${def.name} AND id != ${req.params.roleId}`
         if (dup.length) throw Object.assign(new Error('a role with this name already exists'), { statusCode: 409 })
-        // NOTE (increment 4): once assignments exist, a capability change diff-re-expands every
-        // assignment (Fork B1, with thetuple reference count). Increment 2 has no
-        // assignment write-path, so editing a definition affects no tuples yet.
+
+        const before = new Set(row.capabilities as RoleCapability[])
+        const after = new Set(def.capabilities)
+        const added = def.capabilities.filter((c) => !before.has(c))
+        const removed = (row.capabilities as RoleCapability[]).filter((c) => !after.has(c))
+
+        const toWrite: { user: string; relation: string; object: string }[] = []
+        const toDelete: { user: string; relation: string; object: string }[] = []
+        if (added.length || removed.length) {
+          const assignments = await tx<AsgRow[]>`
+            SELECT id, resource_type, resource_id, principal, owned_capabilities
+            FROM role_assignments WHERE role_id = ${row.id} FOR UPDATE`
+          // An ADDED capability must be expressible at EVERY assigned scope BEFORE any write (no
+          // partial expansion — a space assignment cannot express `comment`).
+          for (const a of assignments) for (const c of added) expansionTuples(a.resource_type, a.resource_id, a.principal, c)
+
+          for (const a of assignments) {
+            if (a.resource_type === 'page') pageIds.push(a.resource_id)
+            else spaceIds.push(a.resource_id)
+            // ADD: principal-scoped pre-read decides ownership exactly like assign (a tuple that
+            // already exists — direct grant or another role's expansion — is left and not owned).
+            if (added.length) {
+              const { tuples: existingTuples } = await app.fga.read({ user: a.principal, object: `${a.resource_type}:${a.resource_id}` })
+              const existing = new Set((existingTuples ?? []).map((t) => `${t.key?.relation}|${t.key?.user}`))
+              const ownedAdd: RoleCapability[] = []
+              for (const c of added) {
+                const tuples = expansionTuples(a.resource_type, a.resource_id, a.principal, c)
+                const missing = tuples.filter((t) => !existing.has(`${t.relation}|${t.user}`))
+                toWrite.push(...missing)
+                if (missing.length === tuples.length) ownedAdd.push(c)
+              }
+              for (const c of ownedAdd) {
+                await tx`UPDATE role_assignments SET owned_capabilities = array_append(owned_capabilities, ${c})
+                         WHERE id = ${a.id} AND NOT (${c} = ANY(owned_capabilities))`
+              }
+            }
+            // REMOVE: thereference count per assignment — delete an owned leaf only when no
+            // OTHER assignment of this principal on this resource still covers the capability
+            // (their roles keep the CURRENT capability sets; this role's removal is what we diff).
+            for (const c of removed as RoleCapability[]) {
+              if (!a.owned_capabilities.includes(c)) continue // never owned (direct grant / other creator)
+              const covering = await tx<{ id: string }[]>`
+                SELECT a2.id FROM role_assignments a2 JOIN roles r2 ON r2.id = a2.role_id
+                WHERE a2.id != ${a.id} AND a2.resource_type = ${a.resource_type} AND a2.resource_id = ${a.resource_id}
+                  AND a2.principal = ${a.principal} AND ${c} = ANY(r2.capabilities)
+                FOR UPDATE OF a2`
+              if (covering.length) {
+                // ownership transfers to a coverer (the unassign rule — no orphaned leaf later)
+                await tx`UPDATE role_assignments SET owned_capabilities = array_append(owned_capabilities, ${c})
+                         WHERE id = ${covering[0]!.id} AND NOT (${c} = ANY(owned_capabilities))`
+              } else {
+                toDelete.push(...expansionTuples(a.resource_type, a.resource_id, a.principal, c))
+              }
+              await tx`UPDATE role_assignments SET owned_capabilities = array_remove(owned_capabilities, ${c}) WHERE id = ${a.id}`
+            }
+          }
+          for (const pid of pageIds) {
+            outboxIds.push(await enqueueOutbox(tx, { tenantId: req.tenant.id, pageId: pid, operation: 'upsert' }))
+          }
+        }
+
         await tx`UPDATE roles SET name = ${def.name}, capabilities = ${def.capabilities as string[]}, updated_at = now() WHERE id = ${req.params.roleId}`
         await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.updated', target: `role:${req.params.roleId}` })
+        if (toWrite.length) await writeTuples(app.fga, toWrite)
+        if (toDelete.length) await deleteTuples(app.fga, toDelete)
       })
+      outboxIds.forEach((oid, i) => processOutboxAsync(app.searchDriver, oid, { tenantId: req.tenant.id, pageId: pageIds[i]!, operation: 'upsert' }))
+      for (const sid of new Set(spaceIds)) await reindexPublishedPages(req.db, app.searchDriver, req.tenant.id, sid)
       return { id: req.params.roleId, name: def.name, capabilities: def.capabilities }
     })
 
