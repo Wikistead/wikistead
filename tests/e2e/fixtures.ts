@@ -59,12 +59,27 @@ async function fga(path: string, body: unknown, apiUrl: string, storeId: string)
   });
 }
 
+// #444: DENY-marker residues on the SHARED fixture objects. A trash/private spec that dies mid-run
+// (kill/timeout) leaves its markers behind, and because markers are deny-side, re-asserting the CORE
+// grants does NOT heal them — page:demo goes byte-invisible for every later run (twice on 2026-07-17).
+// The seed now strips every known marker pair from the shared objects before re-asserting the grants.
+const FIXTURE_OBJECTS = ["page:demo", "space:demo_space", "page:acme_page", "space:acme_space"] as const;
+const DENY_MARKER_RELATIONS = ["trashed", "private"] as const; // model.fga: [user:*, share_link:*] pairs
+const DENY_MARKER_USERS = ["user:*", "share_link:*"] as const;
+
 // Idempotently (re-)assert the core shared-fixture tuples. delete-then-write per tuple: OpenFGA rejects
 // writing a tuple that already exists AND deleting one that doesn't, so each op is tried and its error
-// swallowed — the end state is exactly the CORE set present.
+// swallowed — the end state is exactly the CORE set present (and NO deny markers on shared objects).
 export async function seedFgaFixtures(): Promise<void> {
   const { apiUrl, storeId, modelId } = fgaEnv();
   if (!storeId) return; // no e2e FGA configured (unit-only run) — nothing to seed
+  for (const object of FIXTURE_OBJECTS) {
+    for (const relation of DENY_MARKER_RELATIONS) {
+      for (const user of DENY_MARKER_USERS) {
+        try { await fga("/write", { deletes: { tuple_keys: [{ user, relation, object }] } }, apiUrl, storeId); } catch { /* absent */ }
+      }
+    }
+  }
   for (const t of CORE_FGA_TUPLES) {
     const key = { user: t.user, relation: t.relation, object: t.object };
     try { await fga("/write", { deletes: { tuple_keys: [key] } }, apiUrl, storeId); } catch { /* absent */ }
