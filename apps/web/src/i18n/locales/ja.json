@@ -1029,5 +1029,8 @@
     "title": "折りたたみを編集",
     "summary": "サマリー",
     "content": "本文"
+  },
+  "publicReader": {
+    "poweredBy": "Powered by Wikistead"
   }
 }

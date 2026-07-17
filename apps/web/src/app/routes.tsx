@@ -164,7 +164,8 @@ import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, assetUrl, type GuestToken } from "../data/apiClient";
-import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, chainPageToggle, useAccountSettings, useDeletePage, useCreatePage, useEntitlements, useSpaces, type Page } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, chainPageToggle, useAccountSettings, useDeletePage, useCreatePage, useEntitlements, useSpaces, useBranding, type Page } from "../data/queries";
+import { WikisteadMark } from "./BrandLockup"; // #430: the public header brand fallback
 import { GuestSidebar } from "./GuestSidebar";
 import { ConfirmDialog } from "../ui/dialogs";
 import { DeleteBacklinkWarning } from "./DeleteBacklinkWarning";
@@ -1265,21 +1266,45 @@ function PublicPageContent({ pageId }: { pageId: string }) {
   );
 }
 
+// #430: the public reader's MINIMAL header — tenant brand (logo/name), an optional space-name context
+// (#270 parity), the #429 theme toggle, and — on the FREE plan only — a subtle "Powered by Wikistead"
+// (the owner's freemium ruling; paid tenants white-label via the ONE /branding entitlement seam).
+// Language switch is deliberately absent (deferred, ruling b). NEVER any member chrome here.
+function PublicHeader({ spaceName }: { spaceName?: string | null }) {
+  const { t } = useTranslation();
+  const branding = useBranding();
+  const b = branding.data;
+  return (
+    <header className="flex h-10 flex-none items-center gap-2 border-b border-border bg-panel px-4" data-testid="public-header">
+      {b?.logoUrl ? (
+        <img className="block h-[20px] max-w-[140px] object-contain" src={assetUrl(b.logoUrl)} alt={b.displayName || "logo"} data-testid="public-brand-logo" />
+      ) : b?.whitelabel ? null : (
+        <WikisteadMark />
+      )}
+      {(b?.displayName || !b?.whitelabel) && (
+        <span className="text-[14px] font-semibold" data-testid="public-brand">{b?.displayName || "Wikistead"}</span>
+      )}
+      {spaceName && <span className="min-w-0 truncate text-[13px] text-fg-dim" data-testid="public-space-context">/ {spaceName}</span>}
+      <div className="flex-1" />
+      {b && !b.whitelabel && (
+        <span className="text-[11px] text-fg-dim opacity-70" data-testid="powered-by">{t("publicReader.poweredBy")}</span>
+      )}
+      <ThemeToggle />
+    </header>
+  );
+}
+
 function PublicPageRoute() {
   const { pageId } = useParams<{ pageId: string }>();
   if (!pageId) return <div data-testid="public-not-found" style={{ padding: 24 }} />;
-  //①: the standalone route has no AppShell to bound the height, so without a viewport-height
-  // wrapper the WINDOW scrolls (not the inner scroller) and the band's sticky never engages. h-dvh
-  // gives PublicPageContent the same bounded-height context the space shell provides.
+  //①: a viewport-height flex column bounds PublicPageContent (the inner scroller keeps working);
+  // #430: the floating #429 theme corner grew into the minimal header (theme toggle now lives there).
   return (
-    <div className="relative h-dvh">
-      {/* #429: anonymous readers pick light/dark themselves. The space reader gets the toggle from
-          the AppShell header; this standalone page is chromeless (#227②), so the SAME
-          ThemeToggle floats top-right (localStorage + <html data-theme>, no session involved). */}
-      <div className="absolute right-3 top-3 z-10 rounded bg-panel/80 backdrop-blur-sm" data-testid="public-theme-corner">
-        <ThemeToggle />
+    <div className="flex h-dvh flex-col">
+      <PublicHeader />
+      <div className="relative min-h-0 flex-1">
+        <PublicPageContent pageId={pageId} />
       </div>
-      <PublicPageContent pageId={pageId} />
     </div>
   );
 }
@@ -1306,6 +1331,13 @@ function PublicSpaceSidebar({ nodes, home, openId, onOpen }: { nodes: PublicChil
   // read-only: no canEdit → no row menu / DnD / create; no session — every node came from a /public/* fetch.
   return (
     <div className="relative flex h-full min-w-0 flex-col overflow-hidden text-[length:var(--text-ui)]" data-testid="sidebar">
+      {/* #430 (ruling c, #270 parity): the space NAME as context atop the public tree — home.title IS the
+          bare space name under the #364 plan-A storage rule; absent home → no heading (nothing to leak). */}
+      {home && (
+        <div className="flex items-center gap-1.5 border-b border-border px-2 py-1.5 font-semibold text-foreground" data-testid="public-space-heading">
+          <span className="truncate">{home.title}</span>
+        </div>
+      )}
       {/* #364 / ADR-157: the public space's HOME — a fixed entry above the tree (the tree excludes it). */}
       {home && (
         <div className="border-b border-border px-1 py-1">
@@ -1323,6 +1355,16 @@ function PublicSpaceSidebar({ nodes, home, openId, onOpen }: { nodes: PublicChil
     </div>
   );
 }
+// #430: the free-plan "Powered by Wikistead" marker for the public SPACE reader's AppShell header
+// (the standalone page header renders its own copy inside PublicHeader). Paid/white-label → nothing.
+function PublicPoweredBy() {
+  const { t } = useTranslation();
+  const branding = useBranding();
+  const b = branding.data;
+  if (!b || b.whitelabel) return null;
+  return <span className="text-[11px] text-fg-dim opacity-70" data-testid="powered-by">{t("publicReader.poweredBy")}</span>;
+}
+
 function PublicSpaceRoute() {
   const { t } = useTranslation();
   const { spaceId } = useParams<{ spaceId: string }>();
@@ -1352,7 +1394,7 @@ function PublicSpaceRoute() {
 
   if (notFound) return <AppShell><div data-testid="public-not-found" style={{ padding: 24 }}>{t("publicPage.notFound")}</div></AppShell>;
   return (
-    <AppShell sidebar={<PublicSpaceSidebar nodes={tree ?? []} home={home} openId={openId} onOpen={setOpenId} />}>
+    <AppShell sidebar={<PublicSpaceSidebar nodes={tree ?? []} home={home} openId={openId} onOpen={setOpenId} />} headerExtra={<PublicPoweredBy />}>
       {openId ? (
         <PublicPageContent key={openId} pageId={openId} />
       ) : (

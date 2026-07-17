@@ -27,7 +27,10 @@ const LOGO_MAX_BYTES = 512 * 1024
 // (base64 is ~1.34x the bytes; this bounds a ≤512KB logo with room for JSON overhead).
 const LOGO_BODY_LIMIT = 1_000_000
 
-export interface TenantBranding { displayName: string | null; accentKey: string | null; logoUrl: string | null }
+// #430 (owner ruling a): `whitelabel` rides the SAME branding entitlement — the ONE seam. Paid tenants
+// may white-label their PUBLIC pages (no Wikistead mark); the free plan's public reader shows a subtle
+// "Powered by Wikistead" (freemium). CE/self-host resolves through the same entitlement table.
+export interface TenantBranding { displayName: string | null; accentKey: string | null; logoUrl: string | null; whitelabel: boolean }
 
 // Sniff the real image type from magic bytes — never trust the client content-type.
 // SVG is intentionally EXCLUDED: it can carry <script>, and the logo is served as a
@@ -52,6 +55,7 @@ export async function getTenantBranding(db: TenantDb, plan: string): Promise<Ten
     displayName: row?.display_name ?? null,
     accentKey: row?.accent_key ?? null,
     logoUrl: entitled && row?.logo_key ? '/branding/logo' : null, // logo only (name/colour are basic)
+    whitelabel: entitled, // #430: paid = white-label public pages; free = "Powered by Wikistead"
   }
 }
 

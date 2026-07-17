@@ -415,8 +415,8 @@ test("#429: the anonymous /pub reader can switch light/dark and the choice persi
   const anon = await (await browser.newContext()).newPage();
   await anon.goto(`/pub/${id}`);
   await expect(anon.getByTestId("public-body")).toContainText("theme toggle body");
-  // The floating toggle is present on the chromeless standalone reader.
-  const corner = anon.getByTestId("public-theme-corner");
+  // #430: the toggle moved from the floating corner into the minimal public HEADER.
+  const corner = anon.getByTestId("public-header");
   await expect(corner).toBeVisible();
   // Pick DARK from the menu → <html data-theme="dark"> + persisted. Items are picked by
   // POSITION (ThemeToggle's fixed ORDER: light, dark, system) — labels are localized.
@@ -431,4 +431,40 @@ test("#429: the anonymous /pub reader can switch light/dark and the choice persi
   await corner.getByTestId("theme-toggle").click();
   await anon.getByTestId("theme-menu").locator('[role="menuitem"]').nth(0).click();
   await expect(anon.locator("html")).toHaveAttribute("data-theme", "light");
+});
+
+// #430: the public reader's MINIMAL header — brand + theme toggle live in a real header now (the #429
+// floating corner grew into it), and the FREE plan shows a subtle "Powered by Wikistead" (the freemium
+// ruling; a paid tenant white-labels via the one /branding entitlement seam — whitelabel:true hides it).
+// The anonymous surface still carries NO member chrome (search / bell / user menu / sidebar toggle).
+test("#430: the standalone public page has the minimal header — brand + powered-by + theme, NO member chrome", async ({ browser }) => {
+  const authed = await (await browser.newContext()).newPage();
+  const id = await openScratch(authed, "pub-header-430");
+  await enterEdit(authed);
+  await authed.click("[data-pane=preview] .cm-content");
+  await authed.keyboard.insertText("# Header Test\n\nbody\n");
+  await sleep(300);
+  await authed.getByTestId("publish-page").click();
+  await sleep(800);
+  await makePublic(id);
+  await setPublicSurface(authed, true);
+
+  const anon = await (await browser.newContext()).newPage();
+  await anon.goto(`/pub/${id}`);
+  const header = anon.getByTestId("public-header");
+  await expect(header).toBeVisible({ timeout: 10000 });
+  // the powered-by marker follows the ONE entitlement seam: free plan → visible; a branding-entitled
+  // (white-label) tenant → absent. Read the live seam so the pin is plan-agnostic; the per-plan matrix
+  // is pinned deterministically server-side (branding unit tests).
+  const wl = (await (await anon.request.get("/api/branding")).json()).whitelabel as boolean;
+  if (wl) await expect(header.getByTestId("powered-by")).toHaveCount(0);
+  else await expect(header.getByTestId("powered-by")).toBeVisible();
+  // the #429 theme toggle moved into the header and still works
+  await expect(header.getByTestId("theme-toggle")).toBeVisible();
+  // anti-chrome: none of the member controls exist on the anonymous surface
+  for (const tid of ["sidebar-toggle", "search-open", "notification-bell", "user-menu", "edit-toggle", "new-page"]) {
+    await expect(anon.getByTestId(tid), tid).toHaveCount(0);
+  }
+  // the page body still renders below the header (bounded-height context intact)
+  await expect(anon.getByTestId("public-title")).toBeVisible();
 });

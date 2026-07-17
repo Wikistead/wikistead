@@ -1030,5 +1030,8 @@
     "title": "Edit collapsible",
     "summary": "Summary",
     "content": "Content"
+  },
+  "publicReader": {
+    "poweredBy": "Powered by Wikistead"
   }
 }
