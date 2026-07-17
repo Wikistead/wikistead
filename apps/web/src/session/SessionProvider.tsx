@@ -73,6 +73,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    // #431god-mode resolves its CANONICAL identity — /auth/me via the dev bearer returns
+    // dev-user's display_name ("Dev User"), the same source the members surfaces read. Without it
+    // the header/author chips fell back to the sub and showed "DE" while member management showed
+    // "DU" for the same user. Colour stays sub-seeded (#431 round 1) — only the name source unifies.
+    const resolveGodModeIdentity = async () => {
+      if (!devToken) return;
+      try {
+        const dev = await apiFetch<{ displayName?: string | null; picture?: string | null }>("/auth/me", devToken);
+        if (!cancelled && dev) {
+          setDisplayName(dev.displayName ?? null);
+          setPicture(normPicture(dev.picture));
+        }
+      } catch { /* keep the sub fallback on a transient error */ }
+    };
     void (async () => {
       try {
         // /auth/me exposes ONLY sub + displayName + picture (never email) — #3. Cookie only:
@@ -81,8 +95,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const me = await apiFetch<{ sub: string; isAdmin?: boolean; displayName?: string | null; picture?: string | null }>("/auth/me", ""); // cookie
         if (cancelled) return;
         if (!me) {
-          if (!devToken) setStatus("anon");
-          return; // dev token + no cookie → stay in god-mode
+          if (!devToken) { setStatus("anon"); return; }
+          await resolveGodModeIdentity();
+          return; // stay in god-mode (a real cookie session still takes over when it exists)
         }
         setSub(me.sub);
         setIsAdmin(!!me.isAdmin);
@@ -94,7 +109,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setDevMode(false); // the real session owns the identity from here on
         setStatus("authed");
       } catch {
-        if (!cancelled && !devToken) setStatus("anon"); // 401 → show login (real mode only)
+        if (cancelled) return;
+        if (!devToken) { setStatus("anon"); return; } // 401 → show login (real mode only)
+        await resolveGodModeIdentity(); // 401 with a dev token = plain god-mode (#431)
       }
     })();
     return () => { cancelled = true; };
