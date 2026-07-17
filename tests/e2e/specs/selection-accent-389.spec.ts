@@ -65,7 +65,7 @@ for (const dsf of [1, 1.25]) {
     const choices = page.locator("[data-slot=radio-group-choice]");
     await choices.first().waitFor({ timeout: 10000 });
     const offs = await page.evaluate(() => {
-      const out: { dx: number; dy: number; transform: string; state: string | null }[] = [];
+      const out: { dx: number; dy: number; w: number; h: number; scale: string; state: string | null }[] = [];
       for (const choice of document.querySelectorAll("[data-slot=radio-group-choice]")) {
         const circle = choice.querySelector("span[class*=rounded-full][class*=border]");
         const dot = circle?.querySelector("span");
@@ -74,7 +74,8 @@ for (const dsf of [1, 1.25]) {
         out.push({
           dx: Math.abs((d.left + d.right) / 2 - (c.left + c.right) / 2),
           dy: Math.abs((d.top + d.bottom) / 2 - (c.top + c.bottom) / 2),
-          transform: getComputedStyle(dot).transform,
+          w: d.width, h: d.height,
+          scale: getComputedStyle(dot).scale,
           state: choice.getAttribute("data-state"),
         });
       }
@@ -84,7 +85,14 @@ for (const dsf of [1, 1.25]) {
     for (const o of offs) {
       expect(o.dx, "dot horizontally centered").toBeLessThan(0.51);
       expect(o.dy, "dot vertically centered").toBeLessThan(0.51);
-      if (o.state === "checked") expect(o.transform, "checked resting dot has NO transform (pixel-snaps)").toBe("none");
+      if (o.state === "checked") {
+        // #389the"transform === none" pin was a FALSE GREEN — a scale:0 dot also has
+        // transform none in Tailwind v4 (separate properties), so the invisible-dot regression passed.
+        // Pin what the user actually sees: the checked dot has a REAL rendered size and a non-zero scale.
+        expect(o.w, "checked dot is visibly rendered (width > 0)").toBeGreaterThan(4);
+        expect(o.h, "checked dot is visibly rendered (height > 0)").toBeGreaterThan(4);
+        expect(o.scale === "none" || parseFloat(o.scale) > 0, `checked dot scale is identity/positive (got ${o.scale})`).toBe(true);
+      }
     }
   });
 }

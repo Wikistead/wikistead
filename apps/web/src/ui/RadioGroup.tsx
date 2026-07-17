@@ -79,12 +79,16 @@ export function RadioGroup({
             aria-hidden
             className="mt-0.5 flex size-4 flex-none items-center justify-center rounded-full border border-input transition-colors duration-[120ms] group-data-[state=checked]:border-primary"
           >
-            {/* #389the checked steady-state carries NO transform (`transform-none`, not
+            {/* #389checked = `scale-100` — in Tailwind v4 `scale-*` and `transform-none` are
+                DIFFERENT properties (`scale` vs `transform`), so's `transform-none` never overrode
+                the base `scale-0` and the checked dot rendered INVISIBLE. Visibility beats the +0.4
+                device-px snapchased (a sub-pixel nicety, not worth the dot).
+                ('s original note, retained for context: the checked steady-state carries NO transform (`transform-none`, not
                 `scale-100`) — a persistent transform exempts the dot from device-pixel snapping, so
                 at fractional zoom (110%/125%) it painted measurably off-center (+0.4 device px at
                 1.25 in the probe). `none` interpolates from scale-0 like identity, so the pop
                 animation is unchanged; only the resting raster snaps. */}
-            <span className="size-2 scale-0 rounded-full bg-primary transition-transform duration-[120ms] group-data-[state=checked]:transform-none" />
+            <span className="size-2 scale-0 rounded-full bg-primary transition-transform duration-[120ms] group-data-[state=checked]:scale-100" />
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-sm text-foreground">{o.label}</span>
