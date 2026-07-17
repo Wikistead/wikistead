@@ -31,14 +31,17 @@ export function SearchBox() {
 
   return (
     <>
+      {/* #406 S1 (ADR-159 §3 header): below md the trigger compresses to a bare icon — same modal,
+          same testid, just no field-shaped chrome eating the narrow header. */}
       <button
         type="button"
         data-testid="search-trigger"
         onClick={() => setOpen(true)}
-        className="flex w-full max-w-xs items-center gap-2 rounded-md border border-input bg-transparent px-3 py-1.5 text-sm text-fg-dim hover:bg-panel-2"
+        className="flex items-center gap-2 rounded-md p-1.5 text-fg-dim hover:bg-panel-2 md:w-full md:max-w-xs md:border md:border-input md:bg-transparent md:px-3 md:py-1.5 md:text-sm"
       >
-        <Search size={14} className="shrink-0" />
-        <span className="truncate">{t("search.placeholderKbd")}</span>
+        <Search size={16} className="shrink-0 md:hidden" />
+        <Search size={14} className="hidden shrink-0 md:block" />
+        <span className="hidden truncate md:inline">{t("search.placeholderKbd")}</span>
       </button>
       <SearchModal open={open} onOpenChange={setOpen} />
     </>

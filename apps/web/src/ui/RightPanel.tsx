@@ -8,8 +8,13 @@ import { useEscClose } from "./useEscClose";
 // of that chrome: width, background, border, slide-in, padding, the header (title + optional actions
 // + close) and Esc-to-close. A panel supplies only its title/actions/body — change the look here and
 // all three follow. Exclusivity (one panel open at a time) stays in routes.tsx (part 1).
+// #406 S1 (ADR-159 §3): below md the panel is a FULL-WIDTH overlay sheet (fixed under the header,
+// covering the content) — the docked 320px aside only exists at md+. Exclusivity (one occupant,
+// routes.tsx) and every close affordance (X, Esc) are shared by both renderings.
 const SHELL =
-  "wks-slide-right flex min-h-0 w-[320px] flex-none flex-col gap-3 overflow-y-auto border-l border-border bg-panel p-3";
+  "wks-slide-right flex min-h-0 flex-col gap-3 overflow-y-auto border-border bg-panel p-3 " +
+  "fixed inset-x-0 bottom-0 top-[var(--header-h)] z-40 w-full border-t " +
+  "md:static md:inset-auto md:bottom-auto md:top-auto md:z-auto md:w-[320px] md:flex-none md:border-l md:border-t-0";
 const CLOSE_BTN =
   "inline-flex flex-none items-center justify-center rounded-md p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground";
 
