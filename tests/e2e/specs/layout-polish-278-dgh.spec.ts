@@ -20,23 +20,29 @@ test("#278 D: the mermaid editUI source pane hugs a 1-line source (<70px)", asyn
   expect(h, `mermaid source pane must hug the content, not the leaked clearance (was ${h}px)`).toBeLessThan(70);
 });
 
-// #278 G: a tab is the SAME width with or without its × (the × is absolute now → no flow width), so an
-// edit-mode tab and a Reading-mode tab (no ×) match.
-test("#278 G: tab width is unchanged by the × affordance (edit vs Reading)", async ({ browser }) => {
+// #278 G, MIGRATED by ④ (2026-07-17): the old pin held edit and Reading tab widths equal,
+// which forced Reading to keep a phantom right ×-slot gap. The new ruling: the ×-slot padding exists
+// ONLY while the × renders (edit surface); Reading is symmetric — so a Reading tab is DELIBERATELY
+// narrower. What stays pinned here: the edit surface reserves the slot uniformly (both tabs match).
+test("#278 G (④): edit tabs reserve the ×-slot uniformly; Reading drops it", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "tab-width"); await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.insertText("::::tabs\n:::tab[Alpha]\na\n:::\n:::tab[Beta]\nb\n:::\n::::\n\nbot\n");
   await sleep(700);
   await page.getByText("bot", { exact: true }).click(); await sleep(200);
-  const tabAlpha = page.locator("[data-pane=preview] .cm-lp-tab", { hasText: "Alpha" }).first();
-  const wEdit = await tabAlpha.evaluate((el) => Math.round(el.getBoundingClientRect().width));
-  // switch to Reading (no × appended) and re-measure the same tab.
+  const prEdit = await page.locator("[data-pane=preview] .cm-lp-tab").evaluateAll((els) =>
+    els.map((el) => parseFloat(getComputedStyle(el).paddingRight)));
+  expect(prEdit.length).toBe(2);
+  expect(Math.abs(prEdit[0] - prEdit[1]), "edit-surface ×-slot is uniform across tabs").toBeLessThanOrEqual(0.5);
+  // Reading: no × → symmetric padding (narrower than the edit tab is EXPECTED now)
   await page.getByTestId("displaymode-reading").click({ force: true }).catch(() => {});
   await sleep(400);
-  const tabAlphaR = page.locator("[data-pane=preview] .cm-lp-tab", { hasText: "Alpha" }).first();
-  const wRead = await tabAlphaR.evaluate((el) => Math.round(el.getBoundingClientRect().width));
-  expect(Math.abs(wEdit - wRead), `tab width must match edit(${wEdit}) vs reading(${wRead})`).toBeLessThanOrEqual(1);
+  const read = await page.locator("[data-pane=preview] .cm-lp-tab", { hasText: "Alpha" }).first().evaluate((el) => ({
+    pl: parseFloat(getComputedStyle(el).paddingLeft),
+    pr: parseFloat(getComputedStyle(el).paddingRight),
+  }));
+  expect(Math.abs(read.pr - read.pl), `Reading tab padding symmetric (pl=${read.pl} pr=${read.pr})`).toBeLessThanOrEqual(0.5);
 });
 
 // #278 H: an EMPTY column follows the row height (align-items: stretch), so its whole box is clickable

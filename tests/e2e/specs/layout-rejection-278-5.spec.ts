@@ -51,17 +51,19 @@ test("#278-5 point 4: the raw pill is hover/caret-gated, not always-on", async (
   await page.keyboard.insertText("intro\n\n:::warning[Careful]\nbody line\n:::\n\ntail\n");
   await sleep(600);
   await page.getByText(/:::warning/).first().waitFor({ state: "hidden" }).catch(() => {});
-  // enter the block, then put the caret on the BODY line with the mouse parked far away
+  // enter the block; parks the entry caret on the BODY line (it used to land on the head —
+  // the old ArrowDown step here chased that and left the caret on the CLOSE fence, so the later
+  // ArrowUp landed on the body and the head assert went red once the parking changed). Park the
+  // mouse far away and let the hover-out transition settle before sampling.
   await page.getByText("body line").click();
   await sleep(300);
   await page.mouse.move(30, 30);
-  await page.keyboard.press("ArrowDown"); // head line → body line (panel click can land on the head)
   await sleep(300);
   const pill = page.locator(".cm-lp-macro-richui-raw");
   await expect(pill, "pill exists while revealed").toHaveCount(1);
   const hidden = await pill.evaluate((el) => getComputedStyle(el).opacity);
   expect(parseFloat(hidden), "caret on a body line + mouse away → hidden").toBeLessThan(0.05);
-  // caret on the HEAD line → visible (keyboard path)
+  // caret on the HEAD line → visible (keyboard path): one ArrowUp from the body line
   await page.keyboard.press("ArrowUp");
   await sleep(300);
   const onHead = await pill.evaluate((el) => getComputedStyle(el).opacity);
