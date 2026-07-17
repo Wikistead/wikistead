@@ -6,7 +6,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, reAnchorAfterReveal, atomClipboard, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, listSource, linkStatusResolver, embedAllowlist, embedUrlPrompt, tagSuggestSource, tagPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, nestedLivePreviewConfig, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type ListSource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt, type TagSuggestSource, type TagPrompt } from "./live-preview/decorations";
+import { livePreview, reAnchorAfterReveal, atomClipboard, atomSelectionTint, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, listSource, linkStatusResolver, embedAllowlist, embedUrlPrompt, tagSuggestSource, tagPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, nestedLivePreviewConfig, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type ListSource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt, type TagSuggestSource, type TagPrompt } from "./live-preview/decorations";
 import { deadLinks } from "./live-preview/dead-links"; // #276 / ADR-117: dead-internal-link strikethrough overlay
 import { blockAnchors } from "./live-preview/block-anchor"; // #325 / ADR-137 slice 2: hide trailing ` ^id` markers
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
@@ -166,6 +166,7 @@ export function buildLivePreviewExtensions(opts: LivePreviewSharedOpts, env: Liv
     // #359 symptom 3: empty-caret copy/cut on a block atom takes the whole block's source (CM's
     // line-copy default emitted a broken first-line fragment). Shared with the islands via this factory.
     atomClipboard,
+    atomSelectionTint, // #359 visual-selection tint on crossed atoms
     // ADR-024: Ctrl+Enter "enters" the macro atom at the caret (modal / inline cell-edit
     // / source reveal). High prec so it beats vim's default Enter handling. event.key
     // "Enter" is JIS-safe. Mouse users enter by clicking (decorations MacroWidget).
