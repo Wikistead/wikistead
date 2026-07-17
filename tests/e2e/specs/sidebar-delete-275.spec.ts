@@ -6,13 +6,17 @@ import { openScratch, sleep } from "../helpers";
 // mirrors the page-⋯ path: a success toast + navigate home when the deleted page is the open one. Real
 // Chromium.
 test("#275: sidebar-deleting the open page toasts and navigates away (no ghost)", async ({ page }) => {
-  const id = await openScratch(page, `del-${Date.now().toString(36)}`);
+  const title = `del-${Date.now().toString(36)}`;
+  const id = await openScratch(page, title);
   await expect(page).toHaveURL(new RegExp(`/p/${id}`));
 
-  // Open the page's row ⋯ menu in the sidebar and choose Delete.
-  const row = page.locator("[data-testid=sidebar] [data-testid=tree-page-name]").first();
-  await row.hover();
-  await page.locator("[data-testid=sidebar] [data-testid=page-actions]").first().click();
+  // Open THIS page's row ⋯ menu (by title, never .first(): the demo seed self-heals (#444), so the
+  // tree can carry the restored Demo Page and other residue — the old first-row click deleted the
+  // WRONG page whenever the scratch row wasn't alone, and the count-0 assert below was equally
+  // residue-dependent).
+  const rowWrap = page.locator("[data-testid=sidebar] [data-testid=tree-page]", { hasText: title }).first();
+  await rowWrap.hover();
+  await rowWrap.locator("[data-testid=page-actions]").click();
   await page.locator("[data-testid=page-menu]").getByText(/move to trash/i).first().click(); // #411the soft-delete entry label
 
   // Confirm the delete.
@@ -20,8 +24,8 @@ test("#275: sidebar-deleting the open page toasts and navigates away (no ghost)"
   await page.getByTestId("confirm-delete").click();
   await sleep(800);
 
-  // The delete succeeded (row gone from the tree) …
-  await expect(page.locator("[data-testid=sidebar] [data-testid=tree-page-name]")).toHaveCount(0);
+  // The delete succeeded (THIS row gone from the tree) …
+  await expect(page.locator("[data-testid=sidebar] [data-testid=tree-page]", { hasText: title })).toHaveCount(0);
   // … a success toast appeared …
   await expect(page.locator("[data-sonner-toast]").first()).toBeVisible({ timeout: 5000 });
   // … and the URL left the deleted page (no ghost body).
