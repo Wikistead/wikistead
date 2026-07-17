@@ -318,10 +318,11 @@ export function useTagSuggestions(q: string, enabled = true) {
 // server returns an edge only when the viewer can see BOTH endpoints (an unviewable page is absent as a
 // node — never client-filtered here). hiddenCount reports viewable nodes dropped by the server node cap.
 // Lazy: only fetched while the §Local graph section (or the modal) is open.
-export interface LocalGraphNode { id: string; title: string }
+// #440 / ADR-166: spaceId only — NEVER a space name (names resolve via the view-filtered GET /spaces).
+export interface LocalGraphNode { id: string; title: string; spaceId: string }
 export interface LocalGraphEdge { from: string; to: string; type: "link" | "embed" }
 export interface LocalGraphResult { center: string; nodes: LocalGraphNode[]; edges: LocalGraphEdge[]; hiddenCount: number }
-export function useLocalGraph(pageId: string | null, depth: 1 | 2, enabled = true) {
+export function useLocalGraph(pageId: string | null, depth: 1 | 2 | 3, enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["local-graph", pageId, depth],
