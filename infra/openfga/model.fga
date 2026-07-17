@@ -87,6 +87,13 @@ type space
     # Pages inherit this (comment_open from space). Space is the only inheritance level (no per-page
     # override in v1 — that would need non-monotonic deny; deferred). Default OFF (anti-grief).
     define comment_open: [user:*, share_link:*]
+    # ADR-164 (#420): space-scoped custom-role capability grants. Each cascades to the space's pages via
+    # the matching page relation (private-guarded there). manager is NOT unioned in here — manager
+    # reaches every page capability through page.manage (the superset), keeping one bypass path.
+    define deleter: [user, group#member]
+    define sharer: [user, group#member]
+    define settings_editor: [user, group#member]
+    define publisher: [user, group#member]
 
 # share_link has no relations — the link identity is the principal.
 # Its capability and expiry live in the page relation tuples.
@@ -136,6 +143,25 @@ type page
     define manage_from_parent: manage_direct from parent or manage_from_parent from parent
     define manage_inherited: manage_from_parent and published
     define manage: manage_direct or manage_from_space or manage_inherited
+    # ADR-164 (#420) increment 1: the verb split. ADMIN-class capabilities — same composition class as
+    # manage (which stays their superset): private-guarded space inheritance, published-gated folder
+    # cascade, NO restricted/frozen/trashed subtraction (manage precedent — delete must keep operating
+    # ON trashed pages: Rider 1 moved restore/purge onto this verb, superseding ADR-153's manage-only).
+    define delete_direct: [user, group#member]
+    define delete_from_space: deleter from space but not private
+    define delete_from_parent: delete_direct from parent or delete_from_parent from parent
+    define delete_inherited: delete_from_parent and published
+    define delete: manage or delete_direct or delete_from_space or delete_inherited
+    define share_direct: [user, group#member]
+    define share_from_space: sharer from space but not private
+    define share_from_parent: share_direct from parent or share_from_parent from parent
+    define share_inherited: share_from_parent and published
+    define share: manage or share_direct or share_from_space or share_inherited
+    define settings_direct: [user, group#member]
+    define settings_from_space: settings_editor from space but not private
+    define settings_from_parent: settings_direct from parent or settings_from_parent from parent
+    define settings_inherited: settings_from_parent and published
+    define settings: manage or settings_direct or settings_from_space or settings_inherited
     # share_link entries appear twice per relation:
     #   share_link             — permanent link (tuple written without condition)
     #   share_link with non_expired — time-bounded link (tuple written with condition)
@@ -178,6 +204,20 @@ type page
     # #411 / ADR-153: TRASH cuts edit for EVERYONE including manage (a trashed page is not editable —
     # restore first). manage itself stays UNsubtracted below: it is the trash-listing/restore/purge authority.
     define edit: edit_live but not trashed
+    # ADR-164 (#420) increment 1, EDIT-class capability: publish. The edit chain is the SUPERSET feeder
+    # (ruling condition 2 — every edit holder publishes exactly as today), plus an independent
+    # publish-only grant path composed with the same denies as edit: restricted (per-principal deny),
+    # frozen (a frozen page cannot be published), trashed. No share_link types: publishing stays
+    # member/group-grantable only (a guest link's publish ability continues to ride its edit capability).
+    define publish_direct: [user, group#member]
+    define publish_from_space: publisher from space but not private
+    define publish_from_parent: publish_direct from parent or publish_from_parent from parent
+    define publish_inherited: publish_from_parent and published
+    define publish_base: publish_direct or publish_from_space or publish_inherited
+    define publish_permitted: publish_base but not restricted
+    define publish_unfrozen: publish_permitted but not frozen
+    define publish_live: edit_live or publish_unfrozen
+    define publish: publish_live but not trashed
 
     # Commenting authorization (#100 / ADR-029 Option B) — a RESOURCE SETTING, not a link capability.
     # view_direct: direct member/group/link view grants (WRITE TARGET + cascading leaf). user:* (public page)
@@ -207,7 +247,9 @@ type page
     define restricted: [user, group#member, share_link]
     # viewable = direct viewers OR anyone who can comment (commenters can view). Acyclic:
     # comment → {view_base, comment_open, edit}; viewable → {view_base, comment}; view_base is a leaf.
-    define viewable: view_base or comment
+    # ADR-164 (#420): capability holders must SEE the page they operate on (comment ⊃ view precedent)
+    # — the four new verbs feed viewable. Acyclic: they read manage/edit_live/leaves, never viewable.
+    define viewable: view_base or comment or delete or share or settings or publish
     # view = viewable MINUS restricted (monotonic deny). Every `view` check (routes, revisions, search
     # stage-2, public anon) inherits the deny.
     define view_live: viewable but not restricted

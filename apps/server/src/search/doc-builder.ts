@@ -12,7 +12,10 @@ const MAX_ANCESTOR_WALK = 11
 // parent chain). #411 / ADR-153: `comment` grants moved to the `comment_direct` leaf (the trash subtraction
 // made `comment` computed) — reading the old name here would silently drop comment-granted members from the
 // search viewer denorm (the Review approval condition). `view_base@user:*` (public) is read separately.
-const DIRECT_GRANT_RELATIONS = ['manage_direct', 'edit_direct', 'view_direct', 'comment_direct']
+// #420 / ADR-164 (Rider 3, landed WITH the write-path vocabulary): the four split-verb leaves confer
+// page view via the viewable union, so capability-granted members must join the stage-1 viewer set
+// (under-inclusion otherwise — they could view but never surface in search).
+const DIRECT_GRANT_RELATIONS = ['manage_direct', 'edit_direct', 'view_direct', 'comment_direct', 'delete_direct', 'share_direct', 'settings_direct', 'publish_direct']
 
 interface PageRow { id: string; tenant_id: string; space_id: string; title: string; published_md: string | null; updated_at: Date; deleted_at: Date | null }
 
@@ -128,7 +131,9 @@ export async function buildSearchDoc(
       // viewer_member ⊇ moderator a space moderator is a genuine viewer of the space's non-private
       // pages, so the stage-1 denorm listing them never exceeds FGA truth (this block already runs only
       // for published, non-private pages; moderator has no share_link/wildcard types).
-      if (!key || !['manager', 'editor', 'editor_member', 'viewer', 'moderator'].includes(key.relation)) continue
+      // #420 / ADR-164 (Rider 3): the space-scoped capability relations confer page view (viewable
+      // union) on the space's published, non-private pages — same private-cut context as this block.
+      if (!key || !['manager', 'editor', 'editor_member', 'viewer', 'moderator', 'deleter', 'sharer', 'settings_editor', 'publisher'].includes(key.relation)) continue
       categorize(key.user, viewerUsers, viewerGroups, setPublic)
     }
     const { tuples: tenantTuples } = await fga.read({ object: `tenant:${tenantId}` })

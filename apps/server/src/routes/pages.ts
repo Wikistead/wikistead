@@ -779,8 +779,11 @@ export async function getPublished(
 // grant is written to `view_base`, so the API capability ('view') maps to the FGA relation below.
 // #330 / ADR-141 adds `moderate` — a direct per-page moderation grant (the ruling: the only way to
 // appoint a moderator onto a PRIVATE page, whose space inheritance is private-guarded).
-export type PageRelation = 'view' | 'comment' | 'edit' | 'manage' | 'moderate'
-const PAGE_RELATIONS: PageRelation[] = ['view', 'comment', 'edit', 'manage', 'moderate']
+// #420 / ADR-164 increment 1 adds the four SPLIT capabilities — delete/share/settings (admin-class,
+// manage stays their superset) and publish (edit-class superset feeder) — as grantable leaves for the
+// custom-role expansion (and for direct grants).
+export type PageRelation = 'view' | 'comment' | 'edit' | 'manage' | 'moderate' | 'delete' | 'share' | 'settings' | 'publish'
+const PAGE_RELATIONS: PageRelation[] = ['view', 'comment', 'edit', 'manage', 'moderate', 'delete', 'share', 'settings', 'publish']
 
 // capability → FGA relation to WRITE. #218 / ADR-103: member/group/link direct grants go to the `*_direct`
 // LEAVES (view_direct / edit_direct / manage_direct) so they cascade down the parent chain; `edit`/`manage` are
@@ -789,11 +792,16 @@ const PAGE_RELATIONS: PageRelation[] = ['view', 'comment', 'edit', 'manage', 'mo
 // leaf (existing tuples migrated by infra/openfga/migrate-comment-direct.ts). `moderate` (#330) keeps its
 // own direct type on the relation itself ([user, group#member]) — no leaf split needed (it does not
 // cascade down parents; a per-page appointment is deliberate and page-scoped).
-function fgaRelationForCap(cap: PageRelation): 'view_direct' | 'comment_direct' | 'edit_direct' | 'manage_direct' | 'moderate' {
+function fgaRelationForCap(cap: PageRelation): 'view_direct' | 'comment_direct' | 'edit_direct' | 'manage_direct' | 'moderate' | 'delete_direct' | 'share_direct' | 'settings_direct' | 'publish_direct' {
   if (cap === 'view') return 'view_direct'
   if (cap === 'edit') return 'edit_direct'
   if (cap === 'manage') return 'manage_direct'
   if (cap === 'moderate') return 'moderate'
+  // #420 / ADR-164: the split verbs follow the same leaf pattern (cascading *_direct write targets).
+  if (cap === 'delete') return 'delete_direct'
+  if (cap === 'share') return 'share_direct'
+  if (cap === 'settings') return 'settings_direct'
+  if (cap === 'publish') return 'publish_direct'
   return 'comment_direct'
 }
 // FGA relation (as stored/read) → user-facing capability; null for non-grant relations (space/parent/
@@ -804,12 +812,16 @@ function capForFgaRelation(rel: string): PageRelation | null {
   if (rel === 'manage_direct') return 'manage'
   if (rel === 'comment_direct') return 'comment'
   if (rel === 'moderate') return 'moderate'
+  if (rel === 'delete_direct') return 'delete'
+  if (rel === 'share_direct') return 'share'
+  if (rel === 'settings_direct') return 'settings'
+  if (rel === 'publish_direct') return 'publish'
   return null
 }
 
 function validateGrant(grantee: string, relation: string): asserts relation is PageRelation {
   if (!PAGE_RELATIONS.includes(relation as PageRelation)) {
-    throw Object.assign(new Error('relation must be view, comment, edit, manage, or moderate'), { statusCode: 400 })
+    throw Object.assign(new Error('relation must be one of view, comment, edit, manage, moderate, delete, share, settings, publish'), { statusCode: 400 })
   }
   // Only real principals: a member or a group's member-set. NOT share_link, user:*,
   // page:, space: — those are not hand-grantable per-page access.
