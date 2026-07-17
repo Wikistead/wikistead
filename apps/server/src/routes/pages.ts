@@ -832,6 +832,22 @@ function validateGrant(grantee: string, relation: string): asserts relation is P
   }
 }
 
+// #420 / ADR-164 Addendum 3 (ruled, the STRICT fork): the GRANT RELATION CEILING. With the
+// grant gate lowered from manage to the share verb (increment 3b), an uncapped grant would let a
+// share-only principal write manage_direct to THEMSELVES — full escalation. The ceiling: a share
+// holder may grant/revoke only the READER/WRITER class (view/comment/edit, plus share links);
+// granting/revoking ANY admin-class relation — manage, moderate, delete, settings, publish, and
+// share ITSELF (delegation is manage-only, the stricter ruled fork) — requires `manage`.
+const ADMIN_CLASS_RELATIONS = new Set<PageRelation>(['manage', 'moderate', 'delete', 'share', 'settings', 'publish'])
+
+async function requireGrantAuthority(fga: OpenFgaClient, userId: string, pageId: string, relation: PageRelation): Promise<void> {
+  await requireVerb(fga, userId, pageId, 'share')
+  if (ADMIN_CLASS_RELATIONS.has(relation)) {
+    // manage passes via its own relation (not the share superset arm) — the ceiling check.
+    await requireManage(fga, userId, pageId)
+  }
+}
+
 // #399 / ADR-158 §1: read the page's OWN comment_open wildcard tuples (the override state; the
 // effective audience is this OR the space's — the model's monotonic union).
 async function readPageCommentAudience(fga: OpenFgaClient, pageId: string): Promise<{ guests: boolean; members: boolean }> {
@@ -860,7 +876,9 @@ async function requireVerb(fga: OpenFgaClient, userId: string, pageId: string, v
 
 // Rider 2: the model deliberately keeps the ADMIN verbs alive on a TRASHED page (delete is
 // the restore/purge authority), so SHARE/SETTINGS routes must themselves refuse trashed pages with
-// the uniform 404 (byte-identical to absent — no existence leak, no grant surgery on trash).
+// a 404 — no grant surgery on trash. Precision (reviewer nit): an UNAUTHORIZED caller gets 403 from
+// the verb gate for absent and trashed pages alike (no leak); only an AUTHORIZED share holder — who
+// already knows the page — can tell trashed (404) from live.
 async function requireNotTrashed(db: TenantDb, pageId: string): Promise<void> {
   const [row] = await db.sql<[{ deleted_root_id: string | null }?]>`SELECT deleted_root_id FROM pages WHERE id = ${pageId}`
   if (!row || row.deleted_root_id) throw Object.assign(new Error('not found'), { statusCode: 404 })
@@ -886,7 +904,7 @@ export async function grantPageAccess(
   args: { pageId: string; tenantId: string; userId: string; grantee: string; relation: string; plan?: string },
 ): Promise<void> {
   validateGrant(args.grantee, args.relation)
-  await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
+  await requireGrantAuthority(fga, args.userId, args.pageId, args.relation as PageRelation) // #420 Addendum 3: the ceiling — admin-class grants need manage
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   // One tx: durable audit (#177) + the reindex outbox; FGA LAST so a grant failure rolls both back.
   const oid = await db.tx(async (tx) => {
@@ -909,7 +927,7 @@ export async function revokePageAccess(
   args: { pageId: string; tenantId: string; userId: string; grantee: string; relation: string; plan?: string },
 ): Promise<void> {
   validateGrant(args.grantee, args.relation)
-  await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
+  await requireGrantAuthority(fga, args.userId, args.pageId, args.relation as PageRelation) // #420 Addendum 3: the ceiling — admin-class grants need manage
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   // One tx: durable audit (#177) + the reindex outbox; FGA LAST so a revoke failure rolls both back.
   const oid = await db.tx(async (tx) => {
