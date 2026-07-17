@@ -560,9 +560,13 @@ function PageRoute({ pageIdOverride }: { pageIdOverride?: string } = {}) {
                   </Snowflake>
                 )}
                 <div className="min-w-0 flex-1">
+                  {/* #364 the space HOME's title is derived from the space name and locked
+                      no rename affordance (pageIdOverride is only ever set when rendering the home at
+                      /spaces/:id, and /p/<home-id> canonicalises there). The server refuses the PATCH
+                      too (two-layer defense). */}
                   <PageTitle
                     title={page?.title ?? ""}
-                    onRename={canEdit && spaceId ? (title) => renamePage.mutate({ pageId: pageId!, spaceId, title }, {
+                    onRename={canEdit && spaceId && !pageIdOverride ? (title) => renamePage.mutate({ pageId: pageId!, spaceId, title }, {
                       onSuccess: () => notify.success(t("toast.saved")),
                       onError: () => notify.error(t("toast.actionFailed")),
                     }) : undefined}

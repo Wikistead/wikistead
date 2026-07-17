@@ -502,6 +502,11 @@ export async function updatePage(
   const context = args.userId ? undefined : { current_time: new Date().toISOString() }
   const canEdit = await check(fga, subject, 'edit', { type: 'page', id: args.pageId }, context)
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  // #364 a space HOME's title is derived from the space name and locked — the server is the
+  // fortress (the UI also hides the rename affordance, but hiding alone is not a defense). Body,
+  // publish, history and collab stay fully regular; the title is the single exception (ADR-157 add.).
+  const [homeOf] = await db.sql<[{ id: string }?]>`SELECT id FROM spaces WHERE home_page_id = ${args.pageId}`
+  if (homeOf) throw Object.assign(new Error('the home page title is derived from the space name'), { statusCode: 400 })
 
   let outboxId!: string
   const row = await db.tx(async (tx) => {

@@ -2,12 +2,12 @@ import { test, expect } from "@playwright/test";
 import { sleep } from "../helpers";
 
 // #364 / ADR-157: the space HOMEPAGE — member flows in real Chromium.
-//  - /spaces/:id renders the EMPTY STATE (space-name heading + the write button for edit-capable)
-//    until a home exists; the button creates-and-points atomically and lands in the editor.
-//  - the home renders AT the space root with the full page machinery; the sidebar tree EXCLUDES it
-//    (double-display rule) while the fixed 🏠 Home entry navigates back to it.
-//  - /p/<home-id> canonicalises to /spaces/:id (one location).
-//  - switching spaces lands on the space root (§6a).
+// - /spaces/:id renders the EMPTY STATE (space-name heading + the write button for edit-capable)
+// until a home exists; the button creates-and-points atomically and lands in the editor.
+// - the home renders AT the space root with the full page machinery; the sidebar tree EXCLUDES it
+// (double-display rule) while the fixed 🏠 Home entry navigates back to it.
+// - /p/<home-id> canonicalises to /spaces/:id (one location).
+// - switching spaces lands on the space root (§6a).
 
 async function newSpacePage(page: any, name: string): Promise<string> {
   const res = await page.evaluate(async (n: string) => {
@@ -50,6 +50,17 @@ test("#364: empty state → write button → home renders at the space root; tre
     return ((await r.json()) as { id: string }[]).map((p) => p.id);
   }, spaceId);
   expect(treeIds, "the tree route excludes the home").not.toContain(homeId);
+
+  // 3.5) the home's title is DERIVED (space name + locale suffix) and shows NO rename
+  // affordance — clicking the title never opens the rename textarea
+  const titleEl = page.getByTestId("page-title");
+  await expect(titleEl).toBeVisible({ timeout: 8000 });
+  const titleTxt = (await titleEl.innerText()).trim();
+  expect(titleTxt, "derived from the space name").toContain("home364");
+  expect(titleTxt, "carries the locale suffix").toMatch(/ Home$|のホーム$/);
+  await titleEl.click();
+  await sleep(300);
+  await expect(page.getByTestId("page-title-input"), "no rename affordance on the home").toHaveCount(0);
 
   // 4) /p/<home-id> canonicalises to the space root
   await page.goto(`/p/${homeId}`);

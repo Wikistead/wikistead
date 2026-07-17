@@ -9,6 +9,7 @@ import { emit } from '@wikistead/events'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
+import { tenantDefaultLang } from '../auth/session.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { deletePinsForResources } from './pins.js'
 import { sweepWatchesForResources, sweepUnviewableWatches } from './notifications.js'
@@ -294,15 +295,35 @@ export async function deleteSpace(
 export async function updateSpace(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { spaceId: string; userId: string; name: string },
+  args: { spaceId: string; userId: string; name: string; driver?: SearchDriver },
 ): Promise<Space> {
   const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'space', id: args.spaceId })
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
   const name = args.name.trim()
   if (!name) throw Object.assign(new Error('empty name'), { statusCode: 400 })
-  const [row] = await db.sql<SpaceRow[]>`
-    UPDATE spaces SET name = ${name} WHERE id = ${args.spaceId} RETURNING id, tenant_id, name, created_at`
-  if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
+  // #364 the home page's title is DERIVED from the space name — a space rename re-derives it in
+  // the same tx (and re-indexes the home so search shows the new title). Skipped when no home is set.
+  const lang = await tenantDefaultLang(db)
+  let outboxId: string | null = null
+  let homeId: string | null = null
+  const row = await db.tx(async (tx) => {
+    const [r] = await tx<(SpaceRow & { home_page_id: string | null })[]>`
+      UPDATE spaces SET name = ${name} WHERE id = ${args.spaceId} RETURNING id, tenant_id, name, created_at, home_page_id`
+    if (!r) throw Object.assign(new Error('not found'), { statusCode: 404 })
+    if (r.home_page_id) {
+      const [updated] = await tx<{ id: string }[]>`
+        UPDATE pages SET title = ${deriveHomeTitle(name, lang)}, updated_at = now()
+        WHERE id = ${r.home_page_id} AND deleted_at IS NULL RETURNING id`
+      if (updated) {
+        homeId = updated.id
+        outboxId = await enqueueOutbox(tx, { tenantId: r.tenant_id, pageId: updated.id, operation: 'upsert' })
+      }
+    }
+    return r
+  })
+  if (outboxId && homeId && args.driver) {
+    processOutboxAsync(args.driver, outboxId, { tenantId: row.tenant_id, pageId: homeId, operation: 'upsert' })
+  }
   emit({ type: 'space.updated', tenantId: row.tenant_id, spaceId: row.id, actorId: args.userId })
   return toSpace(row)
 }
@@ -703,6 +724,14 @@ export async function searchMemberCandidates(
 // name) and points `spaces.home_page_id` at it ATOMICALLY (the pointer write rides createPage's own
 // transaction via onCreatedInTx; a lost race rolls the page insert back and 409s). Gate = space `edit`
 // (owner ruling 3); the policy knob (#399) applies inside createPage's chokepoint like every create.
+// #364 the home page's title is DERIVED from the space name (tenant default language picks the
+// suffix) and locked — a freely renamable home diluted "this is the homepage" (owner ruling). The body
+// stays a completely regular page; the title is the single exception (ADR-157 addendum). EN wording is
+// provisional pending the review ruling.
+export function deriveHomeTitle(spaceName: string, lang: 'en' | 'ja'): string {
+  return lang === 'ja' ? `${spaceName}のホーム` : `${spaceName} Home`
+}
+
 export async function createSpaceHome(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -729,7 +758,8 @@ export async function createSpaceHome(
     tenantId: args.tenantId,
     spaceId: args.spaceId,
     userId: args.userId,
-    title: row.name,
+    // derived, locked title (tenant default language; updatePage refuses to rename a home)
+    title: deriveHomeTitle(row.name, await tenantDefaultLang(db)),
     onCreatedInTx: async (tx, pageId) => {
       // the conditional write IS the race guard: someone else pointed first → 0 rows → rollback → 409
       const updated = replaceable
@@ -768,7 +798,7 @@ export async function spacesPlugin(app: FastifyInstance) {
   app.get('/admin/spaces', async (req) => listAdminSpaces(req.db, app.fga, { tenantId: req.tenant.id, userId: req.user.sub }))
 
   app.patch<{ Params: { spaceId: string }; Body: { name?: string } }>('/spaces/:spaceId', async (req) => {
-    return updateSpace(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub, name: req.body?.name ?? '' })
+    return updateSpace(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub, name: req.body?.name ?? '', driver: app.searchDriver })
   })
 
   app.delete<{ Params: { spaceId: string } }>('/spaces/:spaceId', async (req, reply) => {
@@ -821,7 +851,7 @@ export async function spacesPlugin(app: FastifyInstance) {
     return reply.code(204).send()
   })
 
-  // Comment audience setting (#100 / ADR-029): read + toggle who may comment on this space's pages —
+  // Comment audience setting (#100 / ADR-029): read + toggle who may comment on this space's pages
   // guests (any view link) and/or public members. manage-gated (it's an administrative setting).
   // #277 / ADR-116: space-level anonymous public toggle. GET = current state (manage-gated).
   // POST makes the space public — ONLY while the tenant parent switch is ON (OFF ⇒ 403, mirroring
@@ -888,7 +918,7 @@ export async function spacesPlugin(app: FastifyInstance) {
     return reply.code(204).send()
   })
 
-  // #308 / ADR-132: content import — materialize an export ZIP as DRAFT pages under this space. MEMBER-ONLY:
+  // #308 / ADR-132: content import — materialize an export ZIP as DRAFT pages under this space. MEMBER-ONLY
   // the route carries no `config.guest`, so a share_link (anonymous edit-guest, #274) is rejected before any
   // work — closing the anonymous-ZIP storage-abuse surface (§4). The executor is further gated to space `edit`
   // inside createPage (a viewer is 403'd). base64 ZIP in (no multipart dep; bodyLimit + streaming size caps
