@@ -2122,7 +2122,14 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
   const commitNow = (value: string) => {
     if (committed) return; // blur / tab-switch / field-clear can race; write exactly once, never after destroy
     committed = true;
-    view.dispatch({ changes: { from: insFrom, to: insTo, insert: shape(value) }, effects: setSlotEditActive.of(null) });
+    // #278 an unchanged body commits as a CLEAR-ONLY dispatch — writing identical text is still a
+    // doc change (dirty flag, history step, collab traffic) for what the user experienced as "just leaving".
+    const next = shape(value);
+    if (next === view.state.doc.sliceString(insFrom, insTo)) {
+      view.dispatch({ effects: setSlotEditActive.of(null) });
+    } else {
+      view.dispatch({ changes: { from: insFrom, to: insTo, insert: next }, effects: setSlotEditActive.of(null) });
+    }
     view.focus();
   };
   // ADR-122 addendum (b): the island's decoration/keymap layer comes from the HOST's shared factory
@@ -2203,8 +2210,13 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
   host.addEventListener("keydown", (e) => { if (e.key === "Escape") escWasInsert = handle.inVimInsert(); }, true);
   host.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      if (escWasInsert) { escWasInsert = false; e.stopPropagation(); }
-      return; // normal-mode Escape bubbles → escExit closes the island (the intended exit)
+      if (escWasInsert) { escWasInsert = false; e.stopPropagation(); return; }
+      // #278 a normal-mode Escape is an EXIT, and every exit commits (the ADR-168 semantic the
+      // click-out path already has). Letting the bare escExit clear the field first destroyed the island
+      // with `committed = true` and the pending text was silently DISCARDED. Commit here, before the key
+      // bubbles on to escExit (which then sees the field already cleared and does nothing).
+      commitNow(handle.getValue());
+      return;
     }
     e.stopPropagation();
   });
