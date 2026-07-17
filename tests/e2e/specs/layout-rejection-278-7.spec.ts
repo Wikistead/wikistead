@@ -216,3 +216,81 @@ test("#278-9 P2: active-tab re-click with the island open commits it AND opens t
   expect(src, "the island edit committed before the rename").toContain("lead line EDITED");
   expect(src, "the rename round-trips the fence head").toContain(":::tab[NewName]");
 });
+
+// ---- #278(review rejection 2026-07-17, 3 new points) ----
+// ①: inside an island the Ctrl+↵ pill is HOVER-ONLY — panel-click entry parks the caret on the head
+//     line, and the top-level keyboard perma-show (macroRawHead) read as "the hint never goes away".
+//     Plus the GENERALIZED boundary pin: no island chrome lights from hovering unrelated island text.
+// ②③ invariant pins (not reproduced in probing — pinned so the class stays caught): no isolated
+//     colon ever renders in the island DOM, and the island's scroll state stays stable while the
+//     caret approaches the callout from below.
+
+test("#278-10 ①: the island pill shows on the callout's own hover ONLY (not caret-parked, not other text)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await setUpPage(page);
+  await page.locator("[data-pane=preview]").getByText("lead", { exact: true }).click();
+  await sleep(700);
+  const island = page.locator("[data-testid=slot-edit-island]");
+  await expect(island).toHaveCount(1);
+  // panel-click entry: the caret parks on the warning's head line, raw reveals, the pill mounts
+  await island.locator(".cm-content").getByText("inner", { exact: true }).click();
+  await sleep(500);
+  const pill = island.locator(".cm-lp-macro-richui-raw").first();
+  await expect(pill).toBeAttached();
+  // mouse far away → the pill must NOT stay lit from the parked caret
+  await page.mouse.move(10, 10);
+  await sleep(300);
+  expect(parseFloat(await pill.evaluate((el) => getComputedStyle(el).opacity)), "no perma-show with the mouse away").toBeLessThan(0.1);
+  // hovering the revealed raw line brings it back
+  await island.locator(".cm-content").getByText("inner", { exact: true }).hover();
+  await sleep(300);
+  expect(parseFloat(await pill.evaluate((el) => getComputedStyle(el).opacity)), "own-zone hover reveals").toBeGreaterThan(0.5);
+  // hovering UNRELATED island text does not
+  await island.locator(".cm-content").getByText("lead", { exact: true }).hover();
+  await sleep(300);
+  expect(parseFloat(await pill.evaluate((el) => getComputedStyle(el).opacity)), "unrelated text hover never lights it").toBeLessThan(0.1);
+});
+
+test("#278-10 ① generalized: NO island chrome lights from hovering neutral island text", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await setUpPage(page);
+  await page.locator("[data-pane=preview]").getByText("lead line").click();
+  await sleep(700);
+  const island = page.locator("[data-testid=slot-edit-island]");
+  await expect(island).toHaveCount(1);
+  await island.locator(".cm-content").getByText("lead line").hover();
+  await sleep(300);
+  const CHROME = ".cm-lp-macro-edit, .cm-lp-macro-align, .cm-lp-macro-retarget, .cm-lp-macro-richui-raw, .cm-lp-callout-panel-edit";
+  const ops = await island.locator(CHROME).evaluateAll((els) => els.map((el) => ({ c: el.className.slice(0, 60), op: getComputedStyle(el).opacity })));
+  for (const { c, op } of ops) expect(parseFloat(op), `chrome [${c}] hidden on neutral hover`).toBeLessThan(0.1);
+});
+
+test("#278-10 ②③ invariants: no isolated colon in island DOM; stable scroll state on from-below approach", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await setUpPage(page);
+  await page.locator("[data-pane=preview]").getByText("lead", { exact: true }).click();
+  await sleep(700);
+  const island = page.locator("[data-testid=slot-edit-island]");
+  await expect(island).toHaveCount(1);
+  // ② the raw reveal must show full fences only — a colon-bearing line is a fence line (:::...), never
+  //   a stray fragment like ":" or "::" (the nested colon-count off-by-one class)
+  await island.locator(".cm-content").getByText("inner", { exact: true }).click();
+  await sleep(500);
+  const lines = await island.locator(".cm-line").evaluateAll((els) => els.map((el) => el.textContent ?? ""));
+  for (const t of lines.filter((t) => t.includes(":"))) {
+    expect(t, `colon line is a full fence: "${t}"`).toMatch(/:{3,}/);
+  }
+  // ③ walk the caret up from the bottom (atomic skip over the panel) — the island's scroll geometry
+  //   must not oscillate (no transient scrollbar)
+  await island.locator(".cm-content").getByText("lead", { exact: true }).click();
+  await sleep(300);
+  await page.keyboard.press("Control+End");
+  await sleep(200);
+  const states: boolean[] = [];
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press("ArrowUp");
+    await sleep(120);
+    states.push(await island.locator(".cm-scroller").first().evaluate((el) => el.scrollHeight > el.clientHeight));
+  }
+  expect(new Set(states).size, "overflow state never flips during the walk").toBeLessThanOrEqual(1);
+});
