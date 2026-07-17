@@ -25,18 +25,37 @@ function RelatedSection({ title, count, children }: { title: string; count: numb
   );
 }
 
-// #394 / ADR-147: the depth-2 graph in a modal (search-modal sizing). Fetched only while open; a node
-// click closes the modal and navigates. Over-cap is reported ("top N"), never silently truncated.
+// #394 / ADR-147: the graph modal (search-modal sizing). Fetched only while open; a node click
+// closes the modal and navigates. Over-cap is reported ("top N"), never silently truncated.
+// #440 / ADR-166: the hop depth is selectable HERE only (1/2/3, default 2 — the mini stays 1-hop);
+// the server clamps depth anyway, this is convenience chrome.
 function LocalGraphModal({ pageId, open, onClose }: { pageId: string; open: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { data } = useLocalGraph(pageId, 2, open);
+  const [depth, setDepth] = useState<1 | 2 | 3>(2);
+  const { data } = useLocalGraph(pageId, depth, open);
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="sm:max-w-5xl" data-testid="local-graph-modal">
         <DialogHeader>
           <DialogTitle>{t("related.graph")}</DialogTitle>
         </DialogHeader>
+        <div className="flex items-center gap-1" data-testid="graph-depth-select" role="radiogroup" aria-label={t("related.graphDepth")}>
+          <span className="mr-1 text-[12px] text-fg-dim">{t("related.graphDepth")}</span>
+          {([1, 2, 3] as const).map((d) => (
+            <button
+              key={d}
+              type="button"
+              role="radio"
+              aria-checked={depth === d}
+              data-testid={`graph-depth-${d}`}
+              className={`rounded border px-2 py-0.5 text-[12px] ${depth === d ? "border-transparent bg-accent text-accent-foreground" : "border-border text-fg-dim hover:text-fg"}`}
+              onClick={() => setDepth(d)}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
         {data && (
           <LocalGraphCanvas
             data={data}

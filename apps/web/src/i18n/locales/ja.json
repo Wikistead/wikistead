@@ -770,7 +770,9 @@
     "graphMore": "+{{count}} 件 — 全体グラフを開く",
     "graphTopN": "接続の多い {{count}} ページを表示しています。",
     "graphLegendLink": "リンク",
-    "graphLegendEmbed": "埋め込み"
+    "graphLegendEmbed": "埋め込み",
+    "graphDepth": "ホップ数",
+    "graphLegendOtherSpaces": "共有されたページ"
   },
   "template": {
     "saveAsTemplate": "テンプレートとして保存",

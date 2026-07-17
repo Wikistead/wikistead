@@ -119,3 +119,49 @@ test("#394 the layout ANIMATES — display coordinates move between frames (mini
   const modalMove = await maxDisplacement(page, modalSel, 2000);
   expect(modalMove, "modal graph nodes move after mount").toBeGreaterThan(5);
 });
+
+// #440 / ADR-166: the modal's hop selector + the space legend. The selector refetches/relayouts per
+// depth (server clamps anyway); nodes color by space with a NAMED legend row only for spaces in the
+// viewer's own view-filtered space list (name-leak boundary is GET /spaces, pinned server-side).
+test("#440: the modal hop selector switches depth and the space legend names the viewable space", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const target = await openScratch(page, `lg-depth-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("depth target.\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(600);
+  const linker = await openScratch(page, `lg-depth-linker-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(`link [t](/p/${target})\n`);
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(800);
+
+  await page.goto(`/p/${target}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(400);
+  await page.getByTestId("page-overflow-trigger").click();
+  await page.getByTestId("related-toggle").click();
+  await page.getByTestId("local-graph-toggle").click();
+  await expect(page.getByTestId("local-graph-canvas")).toBeVisible({ timeout: 10000 });
+  await page.getByTestId("local-graph-expand").click();
+  const modal = page.getByTestId("local-graph-modal");
+  await expect(modal).toBeVisible({ timeout: 10000 });
+
+  // default = 2; switching to 1 and 3 keeps a live canvas (refetch + rebuild, no crash/blank)
+  await expect(modal.getByTestId("graph-depth-2")).toHaveAttribute("aria-checked", "true");
+  await modal.getByTestId("graph-depth-1").click();
+  await expect(modal.getByTestId("graph-depth-1")).toHaveAttribute("aria-checked", "true");
+  await expect(modal.locator("[data-testid=local-graph-canvas] canvas").first()).toBeAttached({ timeout: 10000 });
+  await modal.getByTestId("graph-depth-3").click();
+  await expect(modal.getByTestId("graph-depth-3")).toHaveAttribute("aria-checked", "true");
+  await expect(modal.locator("[data-testid=local-graph-canvas] canvas").first()).toBeAttached({ timeout: 10000 });
+
+  // the space legend names the space (dev-user views it → it is in GET /spaces) — no generic bucket here
+  await expect(modal.getByTestId("graph-space-legend").first()).toBeVisible({ timeout: 10000 });
+  await expect(modal.getByTestId("graph-space-legend-other")).toHaveCount(0);
+  void linker;
+});

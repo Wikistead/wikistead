@@ -2313,17 +2313,25 @@ export async function getRelatedPages(
 // AFTER the view-filter (a hidden page never occupies cap room and hiddenCount counts only viewable drops);
 // over-cap is REPORTED via hiddenCount, never silently truncated. MEMBER-only (the route carries no guest
 // config); a public graph over public pages is a later increment (§6).
-export interface LocalGraphNode { id: string; title: string }
+// #440 / ADR-166: nodes carry spaceId (already joined from pages; getPage exposes it for every
+// viewable page, so this is no new exposure) — NEVER a space name: names leave the server only
+// through the view-filtered GET /spaces (the existence-hiding boundary for spaces).
+export interface LocalGraphNode { id: string; title: string; spaceId: string }
 export interface LocalGraphEdge { from: string; to: string; type: PageLinkType }
 export interface LocalGraphResult { center: string; nodes: LocalGraphNode[]; edges: LocalGraphEdge[]; hiddenCount: number }
 
-const GRAPH_OVER_FETCH = 800 // candidate edges fetched so the view-filter still fills the node cap (ADR-027)
-const GRAPH_NODE_CAP = { 1: 30, 2: 120 } as const
+// #440 / ADR-166: depth is selectable 1/2/3 (server-clamped; 4+ is the space-wide graph's surface,
+// ADR-147 §③b). Depth 3 doubles the over-fetch so the view-filter can still FILL the larger cap.
+// Honest caveat (ADR-027 at scale): hiddenCount counts post-cap node drops only — candidates cut by
+// the over-fetch LIMIT are invisible to it, so a dense wiki at depth 3 shows a recency-biased sample.
+const GRAPH_OVER_FETCH = { 1: 800, 2: 800, 3: 1600 } as const
+const GRAPH_NODE_CAP = { 1: 30, 2: 120, 3: 250 } as const
+export type GraphDepth = 1 | 2 | 3
 
 export async function getLocalGraph(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { pageId: string; depth: 1 | 2; subject: string; context?: { current_time: string } },
+  args: { pageId: string; depth: GraphDepth; subject: string; context?: { current_time: string } },
 ): Promise<LocalGraphResult> {
   // View-gate the CENTER first: a non-viewable OR non-existent page is a uniform 404 so its existence /
   // neighbourhood can't be probed (same guard as getBacklinks / getRelatedPages).
@@ -2332,39 +2340,66 @@ export async function getLocalGraph(
   }
   // Candidate edges (stage 1 — page_links is only ever a candidate source, §6). JOINing pages on BOTH ends
   // drops dangling targets and is tenant-bounded by RLS twice over (page_links AND pages).
-  type Row = { from_id: string; to_id: string; type: PageLinkType; from_title: string; to_title: string }
+  // #440 / ADR-166: one query per depth, each a BOUNDED per-hop frontier (n1, n2 — depth iterations of
+  // the same pattern, deliberately NOT an unbounded recursive CTE). The single both-ends view-filter
+  // below runs over the final edge set whatever the depth — the authz structure is depth-independent.
+  type Row = { from_id: string; to_id: string; type: PageLinkType; from_title: string; to_title: string; from_space: string; to_space: string }
+  const overFetch = GRAPH_OVER_FETCH[args.depth]
   const rows = args.depth === 1
     ? await db.sql<Row[]>`
         SELECT pl.from_page_id AS from_id, pl.to_page_id AS to_id, pl.type,
-               fp.title AS from_title, tp.title AS to_title
+               fp.title AS from_title, tp.title AS to_title, fp.space_id AS from_space, tp.space_id AS to_space
         FROM page_links pl
         JOIN pages fp ON fp.id = pl.from_page_id AND fp.deleted_at IS NULL
         JOIN pages tp ON tp.id = pl.to_page_id AND tp.deleted_at IS NULL
         WHERE pl.from_page_id = ${args.pageId} OR pl.to_page_id = ${args.pageId}
         ORDER BY GREATEST(fp.updated_at, tp.updated_at) DESC
-        LIMIT ${GRAPH_OVER_FETCH}
+        LIMIT ${overFetch}
       `
-    : await db.sql<Row[]>`
+    : args.depth === 2
+    ? await db.sql<Row[]>`
         WITH n1 AS (
           SELECT DISTINCT CASE WHEN pl.from_page_id = ${args.pageId} THEN pl.to_page_id ELSE pl.from_page_id END AS id
           FROM page_links pl
           WHERE pl.from_page_id = ${args.pageId} OR pl.to_page_id = ${args.pageId}
         )
         SELECT pl.from_page_id AS from_id, pl.to_page_id AS to_id, pl.type,
-               fp.title AS from_title, tp.title AS to_title
+               fp.title AS from_title, tp.title AS to_title, fp.space_id AS from_space, tp.space_id AS to_space
         FROM page_links pl
         JOIN pages fp ON fp.id = pl.from_page_id AND fp.deleted_at IS NULL
         JOIN pages tp ON tp.id = pl.to_page_id AND tp.deleted_at IS NULL
         WHERE pl.from_page_id = ${args.pageId} OR pl.to_page_id = ${args.pageId}
            OR pl.from_page_id IN (SELECT id FROM n1) OR pl.to_page_id IN (SELECT id FROM n1)
         ORDER BY GREATEST(fp.updated_at, tp.updated_at) DESC
-        LIMIT ${GRAPH_OVER_FETCH}
+        LIMIT ${overFetch}
+      `
+    : await db.sql<Row[]>`
+        WITH n1 AS (
+          SELECT DISTINCT CASE WHEN pl.from_page_id = ${args.pageId} THEN pl.to_page_id ELSE pl.from_page_id END AS id
+          FROM page_links pl
+          WHERE pl.from_page_id = ${args.pageId} OR pl.to_page_id = ${args.pageId}
+        ), n2 AS (
+          SELECT DISTINCT CASE WHEN pl.from_page_id IN (SELECT id FROM n1) THEN pl.to_page_id ELSE pl.from_page_id END AS id
+          FROM page_links pl
+          WHERE pl.from_page_id IN (SELECT id FROM n1) OR pl.to_page_id IN (SELECT id FROM n1)
+        )
+        SELECT pl.from_page_id AS from_id, pl.to_page_id AS to_id, pl.type,
+               fp.title AS from_title, tp.title AS to_title, fp.space_id AS from_space, tp.space_id AS to_space
+        FROM page_links pl
+        JOIN pages fp ON fp.id = pl.from_page_id AND fp.deleted_at IS NULL
+        JOIN pages tp ON tp.id = pl.to_page_id AND tp.deleted_at IS NULL
+        WHERE pl.from_page_id = ${args.pageId} OR pl.to_page_id = ${args.pageId}
+           OR pl.from_page_id IN (SELECT id FROM n1) OR pl.to_page_id IN (SELECT id FROM n1)
+           OR pl.from_page_id IN (SELECT id FROM n2) OR pl.to_page_id IN (SELECT id FROM n2)
+        ORDER BY GREATEST(fp.updated_at, tp.updated_at) DESC
+        LIMIT ${overFetch}
       `
   // SINGLE-PASS view-filter over every candidate node (stage 2 — the authority), THEN everything else.
   const nodeIds = [...new Set([args.pageId, ...rows.flatMap((r) => [r.from_id, r.to_id])])]
   const viewable = await filterAuthorized(fga, args.subject, 'view', nodeIds, args.context)
   const edges: LocalGraphEdge[] = []
   const titles = new Map<string, string>()
+  const spaces = new Map<string, string>() // #440: spaceId per node (name-free — the client resolves names via GET /spaces)
   const seen = new Set<string>()
   for (const r of rows) {
     if (!viewable.has(r.from_id) || !viewable.has(r.to_id)) continue
@@ -2374,11 +2409,14 @@ export async function getLocalGraph(
     edges.push({ from: r.from_id, to: r.to_id, type: r.type })
     titles.set(r.from_id, r.from_title)
     titles.set(r.to_id, r.to_title)
+    spaces.set(r.from_id, r.from_space)
+    spaces.set(r.to_id, r.to_space)
   }
   // The center is always a node, even when isolated (its title then isn't in any surviving row).
   if (!titles.has(args.pageId)) {
-    const [row] = await db.sql<{ title: string }[]>`SELECT title FROM pages WHERE id = ${args.pageId}`
+    const [row] = await db.sql<{ title: string; space_id: string }[]>`SELECT title, space_id FROM pages WHERE id = ${args.pageId}`
     titles.set(args.pageId, row?.title ?? '')
+    spaces.set(args.pageId, row?.space_id ?? '')
   }
   // Node cap — post-filter (only viewable nodes compete), center always kept, rest ranked by degree so the
   // densest neighbours survive. Edges touching a dropped node are dropped with it; the drop is REPORTED.
@@ -2391,7 +2429,7 @@ export async function getLocalGraph(
   const others = [...titles.keys()].filter((id) => id !== args.pageId)
   others.sort((a, b) => (degree.get(b) ?? 0) - (degree.get(a) ?? 0))
   const kept = new Set([args.pageId, ...others.slice(0, cap - 1)])
-  const nodes: LocalGraphNode[] = [...kept].map((id) => ({ id, title: titles.get(id) ?? '' }))
+  const nodes: LocalGraphNode[] = [...kept].map((id) => ({ id, title: titles.get(id) ?? '', spaceId: spaces.get(id) ?? '' }))
   return {
     center: args.pageId,
     nodes,
@@ -2984,7 +3022,10 @@ export async function pagesPlugin(app: FastifyInstance) {
 
   app.get<{ Params: { pageId: string }; Querystring: { depth?: string } }>('/pages/:pageId/graph', async (req) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
-    const depth = req.query.depth === '2' ? 2 : 1
+    // #440 / ADR-166: depth 1..3, server-clamped — an out-of-range or garbage value normalizes
+    // (4+ → 3, non-numeric/0 → 1), never a 500 (4+ hops = the space-wide graph, ADR-147 §③b).
+    const parsed = Number.parseInt(req.query.depth ?? '1', 10)
+    const depth = (Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 3) : 1) as GraphDepth
     return getLocalGraph(req.db, app.fga, { pageId: req.params.pageId, depth, subject, context })
   })
 

@@ -770,7 +770,9 @@
     "graphMore": "+{{count}} more — open the full graph",
     "graphTopN": "Showing the {{count}} most connected pages.",
     "graphLegendLink": "Link",
-    "graphLegendEmbed": "Embed"
+    "graphLegendEmbed": "Embed",
+    "graphDepth": "Hops",
+    "graphLegendOtherSpaces": "Shared with you"
   },
   "template": {
     "saveAsTemplate": "Save as template",

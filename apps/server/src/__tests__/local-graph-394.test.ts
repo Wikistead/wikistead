@@ -25,7 +25,7 @@ let spaceId: string
 const ids: string[] = []
 // P→A, P→B, C→P, H→P (H is hidden from LIMITED), A→B (edge among neighbours), B→D (2-hop), H→E (E is
 // viewable but reachable ONLY through hidden H). X1..X26 →P pad the depth-1 neighbourhood past the 30 cap.
-let P!: string, A!: string, B!: string, C!: string, D!: string, E!: string, H!: string, ISO!: string
+let P!: string, A!: string, B!: string, C!: string, D!: string, E!: string, H!: string, ISO!: string, F3!: string
 const LIMITED = 'user:graph-limited-viewer'
 
 async function mk(title: string): Promise<string> {
@@ -42,10 +42,11 @@ beforeAll(async () => {
   spaceId = space.id
   P = await mk('P'); A = await mk('A'); B = await mk('B'); C = await mk('C')
   D = await mk('D'); E = await mk('E'); H = await mk('Hhidden'); ISO = await mk('Isolated')
+  F3 = await mk('F3hop') // #440: D→F3 — a 3-hop node (P→B→D→F3), visible only at depth 3
   const xs: string[] = []
   for (let i = 1; i <= 26; i++) xs.push(await mk(`X${i}`))
   const edges: [string, string[]][] = [
-    [P, [A, B]], [C, [P]], [H, [P, E]], [A, [B]], [B, [D]],
+    [P, [A, B]], [C, [P]], [H, [P, E]], [A, [B]], [B, [D]], [D, [F3]],
     ...xs.map((x): [string, string[]] => [x, [P]]),
   ]
   for (const [from, tos] of edges) {
@@ -53,7 +54,7 @@ beforeAll(async () => {
     await db.tx(async (tx) => syncPageLinks(tx, tenant.id, from, md))
   }
   // LIMITED sees everything EXCEPT H (and the X pad pages — they only matter for the creator's cap test).
-  await writeTuples(fgaClient, [P, A, B, C, D, E].map((id) => ({ user: LIMITED, relation: 'view_direct', object: `page:${id}` })))
+  await writeTuples(fgaClient, [P, A, B, C, D, E, F3].map((id) => ({ user: LIMITED, relation: 'view_direct', object: `page:${id}` })))
 }, 120_000)
 
 afterAll(async () => {
@@ -77,10 +78,28 @@ describe('getLocalGraph (#394 — neighbourhood shape)', () => {
     expect(g.nodes.find((n) => n.id === A)?.title).toBe('A')
   })
 
-  it('depth=2 adds edges among/from neighbours (A→B, B→D)', async () => {
+  it('depth=2 adds edges among/from neighbours (A→B, B→D) — the 3-hop node stays out', async () => {
     const g = await getLocalGraph(db, fgaClient, { pageId: P, depth: 2, subject: LIMITED })
     expect(edgeKeys(g)).toEqual(expect.arrayContaining([`${A}>${B}`, `${B}>${D}`]))
     expect(nodeIds(g)).toContain(D)
+    expect(nodeIds(g)).not.toContain(F3) // #440: 3-hop — depth 2 must not include it
+  })
+
+  // #440 / ADR-166: depth 3.
+  it('depth=3 reaches the 3-hop node (P→B→D→F3)', async () => {
+    const g = await getLocalGraph(db, fgaClient, { pageId: P, depth: 3, subject: LIMITED })
+    expect(edgeKeys(g)).toEqual(expect.arrayContaining([`${D}>${F3}`]))
+    expect(nodeIds(g)).toContain(F3)
+  })
+
+  it('#440: every node carries spaceId and NOTHING else beyond {id,title,spaceId} — no space NAME on the wire', async () => {
+    const g = await getLocalGraph(db, fgaClient, { pageId: P, depth: 3, subject: LIMITED })
+    for (const n of g.nodes) {
+      expect(Object.keys(n).sort()).toEqual(['id', 'spaceId', 'title'])
+      expect(n.spaceId).toBe(spaceId)
+    }
+    // belt-and-braces: the serialized payload never contains the space's name
+    expect(JSON.stringify(g)).not.toContain('local-graph-space')
   })
 
   it('an isolated page still returns its center node (no edges)', async () => {
@@ -104,6 +123,15 @@ describe('getLocalGraph (#394 — authz anti-tests, both-endpoint view-filter)',
     expect(nodeIds(g2)).not.toContain(H)
     expect(nodeIds(g2)).not.toContain(E) // E is viewable, but its only edge H→E has a hidden endpoint
     expect(edgeKeys(g2)).not.toContain(`${H}>${E}`)
+  })
+
+  it('ANTI-TEST 2b (#440): depth=3 leaks nothing either — H and its E stay absent for LIMITED', async () => {
+    const g3 = await getLocalGraph(db, fgaClient, { pageId: P, depth: 3, subject: LIMITED })
+    expect(nodeIds(g3)).not.toContain(H)
+    expect(nodeIds(g3)).not.toContain(E)
+    expect(g3.nodes.map((n) => n.title)).not.toContain('Hhidden')
+    expect(edgeKeys(g3)).not.toContain(`${H}>${P}`)
+    expect(edgeKeys(g3)).not.toContain(`${H}>${E}`)
   })
 
   it('ANTI-TEST 3: the creator DOES see H and E (the filter is per-viewer, not global)', async () => {
@@ -156,6 +184,20 @@ describe('GET /pages/:id/graph route (#394 — members only)', () => {
     const body = res.json()
     expect(Array.isArray(body.nodes)).toBe(true)
     expect(Array.isArray(body.edges)).toBe(true)
+  })
+
+  it('#440: depth clamps server-side — 4+ behaves as 3, garbage as a valid depth (never a 500)', async () => {
+    const H2 = { host: 'dev.localhost', authorization: 'Bearer dev-token' }
+    const d3 = await app.inject({ method: 'GET', url: `/pages/${P}/graph?depth=3`, headers: H2 })
+    const d9 = await app.inject({ method: 'GET', url: `/pages/${P}/graph?depth=9`, headers: H2 })
+    expect(d3.statusCode).toBe(200)
+    expect(d9.statusCode).toBe(200)
+    expect(new Set(d9.json().nodes.map((n: { id: string }) => n.id)))
+      .toEqual(new Set(d3.json().nodes.map((n: { id: string }) => n.id))) // 9 → clamped to the depth-3 graph
+    const garbage = await app.inject({ method: 'GET', url: `/pages/${P}/graph?depth=abc`, headers: H2 })
+    expect(garbage.statusCode).toBe(200)
+    const zero = await app.inject({ method: 'GET', url: `/pages/${P}/graph?depth=0`, headers: H2 })
+    expect(zero.statusCode).toBe(200)
   })
 
   it('ANTI-TEST 5: a share_link (guest) token is REJECTED — the graph is member-only', async () => {

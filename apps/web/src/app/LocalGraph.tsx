@@ -4,7 +4,8 @@ import Graph from "graphology";
 import Sigma from "sigma";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import { useTheme } from "./ThemeProvider";
-import type { LocalGraphResult } from "../data/queries";
+import { useSpaces, type LocalGraphResult } from "../data/queries";
+import { colorFromString } from "../ui/avatar";
 
 // #394 / ADR-147: the local link-graph canvas (sigma.js + graphology — the user-ruled renderer). PURE
 // display: the server already view-filtered both endpoints of every edge, so this never filters, counts,
@@ -28,6 +29,14 @@ export function LocalGraphCanvas({
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
+  // #440 / ADR-166: nodes color by SPACE. Names come exclusively from the view-filtered GET /spaces
+  // (the payload carries spaceId only); a node whose space is NOT in the viewer's list — reached via
+  // a per-page grant into an otherwise invisible space — draws in ONE shared neutral color with a
+  // single generic legend row. The neutral bucket is a UI measure, not a security boundary (the
+  // enforced boundary is the name; spaceId-level grouping is pre-existing wire behaviour).
+  const spaces = useSpaces();
+  const knownSpaces = new Map((spaces.data ?? []).map((s) => [s.id, s.name]));
+  const knownSpacesKey = [...knownSpaces.keys()].sort().join(",");
   // The handler lives in a ref so pointer wiring survives re-renders without rebuilding the sigma instance.
   const openRef = useRef(onOpenPage);
   openRef.current = onOpenPage;
@@ -61,7 +70,9 @@ export function LocalGraphCanvas({
         x: isCenter ? 0 : Math.cos(angle) * 6,
         y: isCenter ? 0 : Math.sin(angle) * 6,
         size: isCenter ? 9 : Math.min(4 + (degree.get(n.id) ?? 0) * 0.75, 8),
-        color: isCenter ? accent : fgDim,
+        // #440: center keeps the accent (identity > grouping); others color by space, neutral when
+        // the space is not in the viewer's own space list.
+        color: isCenter ? accent : knownSpaces.has(n.spaceId) ? colorFromString(n.spaceId) : fgDim,
       });
     });
     data.edges.forEach((e, i) => {
@@ -137,13 +148,21 @@ export function LocalGraphCanvas({
       cancelAnimationFrame(raf);
       sigma.kill();
     };
-  }, [data, theme]);
+    // knownSpacesKey (not the Map identity) so a spaces refetch with identical ids doesn't rebuild.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, theme, knownSpacesKey]);
+
+  // #440: the space legend — spaces actually present among the nodes, named ONLY when in the
+  // viewer's view-filtered list; every other node collapses into one generic neutral row.
+  const presentSpaceIds = [...new Set(data.nodes.filter((n) => n.id !== data.center).map((n) => n.spaceId))];
+  const namedSpaces = presentSpaceIds.filter((id) => knownSpaces.has(id));
+  const hasNeutral = presentSpaceIds.some((id) => !knownSpaces.has(id));
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div ref={ref} className={className} data-testid="local-graph-canvas" />
       {/* c 04:15 item 4: the edge-kind legend (line color → relation type). Display-only. */}
-      <div className="flex items-center gap-3 pt-1 text-[11px] text-fg-dim" data-testid="local-graph-legend">
+      <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px] text-fg-dim" data-testid="local-graph-legend">
         <span className="inline-flex items-center gap-1">
           <span aria-hidden className="inline-block h-[2px] w-4 rounded" style={{ background: "var(--border)" }} />
           {t("related.graphLegendLink")}
@@ -152,6 +171,19 @@ export function LocalGraphCanvas({
           <span aria-hidden className="inline-block h-[3px] w-4 rounded" style={{ background: "var(--link)" }} />
           {t("related.graphLegendEmbed")}
         </span>
+        {/* #440: per-space color legend (named only via the viewer's own space list + one generic bucket). */}
+        {namedSpaces.map((id) => (
+          <span key={id} className="inline-flex items-center gap-1" data-testid="graph-space-legend">
+            <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ background: colorFromString(id) }} />
+            {knownSpaces.get(id)}
+          </span>
+        ))}
+        {hasNeutral && (
+          <span className="inline-flex items-center gap-1" data-testid="graph-space-legend-other">
+            <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ background: "var(--fg-dim)" }} />
+            {t("related.graphLegendOtherSpaces")}
+          </span>
+        )}
       </div>
     </div>
   );
