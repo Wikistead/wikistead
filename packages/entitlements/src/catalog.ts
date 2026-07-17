@@ -140,6 +140,13 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     enforcedAt: 'audit outbox enqueue (skipped when false)',
     downgrade: 'gated; EE-only (no audit ledger written for CE/free)',
   },
+  accessTransparency: {
+    title: 'Access Transparency',
+    summary: 'Tenant-facing disclosure of operator break-glass accesses — a per-tenant, hash-chained projection of the sealed operator ledger (#435 / ADR-169, EE).',
+    unit: 'boolean',
+    enforcedAt: 'GET /admin/transparency (+ /verify) entitlement gate',
+    downgrade: 'gated; rows retained and hidden (the #401 convention)',
+  },
   userMacros: {
     title: 'User/third-party macros',
     summary: 'Whether the tenant may run non-first-party macros (#93 / ADR-073). Requires this AND a tenant-admin allowlist; macros never self-authorize. First-party always allowed.',

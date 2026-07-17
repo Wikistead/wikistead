@@ -1057,5 +1057,19 @@
     "trash_only": "Trash only (restorable for 30 days)",
     "both": "Trash and permanent delete side by side",
     "direct_only": "Permanent delete only (no trash)"
+  },
+  "transparency": {
+    "title": "Vendor access",
+    "body": "Operator (vendor) break-glass accesses to this tenant, disclosed with a verifiable per-tenant chain.",
+    "empty": "No operator access has occurred.",
+    "operator": "Operator",
+    "reason": "Reason",
+    "reasons": {
+      "support_ticket": "Support ticket",
+      "incident": "Incident response",
+      "maintenance": "Maintenance",
+      "legal": "Legal requirement",
+      "unspecified": "Unspecified (pre-disclosure)"
+    }
   }
 }
