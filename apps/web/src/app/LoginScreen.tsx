@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
-import { WikisteadMark } from "./BrandLockup";
+import { TenantBrand } from "./BrandLockup";
 import { ThemeToggle } from "./ThemeToggle";
 import { LanguageToggle } from "./LanguageToggle";
 import { useBranding } from "../data/queries";
@@ -71,11 +71,9 @@ export function LoginScreen() {
       </header>
       <main className="flex flex-1 items-center justify-center px-4 pb-16">
         <div className="w-full max-w-sm rounded-xl border border-border bg-panel p-8 shadow-md" data-testid="login-card">
-          <div className="mb-6 flex items-center gap-2">
-            {logoUrl
-              ? <img className="block h-7 max-w-[180px] object-contain" src={assetUrl(logoUrl)} alt={name || "Wikistead"} data-testid="login-brand-logo" />
-              : <WikisteadMark />}
-            <span className="text-lg font-semibold" data-testid="login-brand">{name || "Wikistead"}</span>
+          <div className="mb-6">
+            {/* #442: the shared TenantBrand lockup (same component as the app header). */}
+            <TenantBrand logoUrl={logoUrl} name={name} size="login" logoTestId="login-brand-logo" nameTestId="login-brand" />
           </div>
           <h1 className="mb-1 text-xl font-semibold">{t("auth.signInTitle")}</h1>
           <p className="mb-5 text-sm text-fg-dim">{t("auth.signInBody")}</p>

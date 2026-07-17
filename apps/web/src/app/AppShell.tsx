@@ -6,7 +6,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { LanguageToggle } from "./LanguageToggle";
 import { UserMenu } from "./UserMenu";
 import { NotificationBell } from "../notifications/NotificationBell";
-import { WikisteadMark } from "./BrandLockup";
+import { TenantBrand } from "./BrandLockup";
 import { FirstRunOnboarding } from "./EditorOnboarding";
 import { useBranding } from "../data/queries";
 import { assetUrl } from "../data/apiClient";
@@ -66,16 +66,9 @@ export function AppShell({
           // Wikistead mark. Name slot: the tenant display name when set, else "Wikistead". Setting a
           // logo never hides the name; setting a name never hides the (default) logo. (Was exclusive:
           // a logo replaced the name and a name replaced the default logo — the #143 bounce.)
-          const logoUrl = branding.data?.logoUrl;
-          const name = branding.data?.displayName;
-          const brand = (
-            <span className="flex items-center gap-2 text-foreground">
-              {logoUrl
-                ? <img className="block h-[22px] max-w-[160px] object-contain" src={assetUrl(logoUrl)} alt={name || "Wikistead"} data-testid="brand-logo" />
-                : <WikisteadMark />}
-              <span className="text-[15px] font-semibold" data-testid="brand">{name || "Wikistead"}</span>
-            </span>
-          );
+          // #442: the SAME TenantBrand component the sign-in card renders — the header's own copy
+          // drifted (inherited line-height mis-centred the name against the mark).
+          const brand = <TenantBrand logoUrl={branding.data?.logoUrl} name={branding.data?.displayName} size="header" />;
           return onLogout ? (
             <Link to="/" className="flex items-center rounded outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring" aria-label={t("nav.home")} data-testid="brand-home">{brand}</Link>
           ) : brand;
