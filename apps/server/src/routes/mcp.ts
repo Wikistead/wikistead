@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { filterAuthorized, check } from '@wikistead/authz'
+import { renderMcpSyntaxSections } from '@wikistead/macro-render'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { docName } from '@wikistead/types'
 import { getPublished, listPages, getBacklinks, createPage, publishPage } from './pages.js'
@@ -23,45 +24,22 @@ const MAX_EDIT_BODY_CHARS = 256_000
 const PROTOCOL_VERSION = '2024-11-05'
 const SERVER_INFO = { name: 'wikistead', version: '0.1.0' }
 
-// #373: the Wikistead authoring-syntax reference a connected LLM reads before writing page/comment bodies, so it
-// uses the real notation instead of guessing. Wikistead is Open-formats first (CommonMark / GFM), and its macros
-// are standard-ish `:::` directives / fenced code — everything round-trips to plain Markdown. This is PUBLIC
-// spec info (no authz), served through the same authenticated tool surface. Keep it in sync with the macro
-// registry (apps/web/src/editor/macros) — the mcp-syntax test pins that every macro form here is present.
-const SYNTAX_REFERENCE = `# Wikistead authoring syntax
+// #373 → #447 / ADR-172: the Wikistead authoring-syntax reference a connected LLM reads before writing
+// page/comment bodies, so it uses the real notation instead of guessing. Wikistead is Open-formats first
+// (CommonMark / GFM), and its macros are standard-ish `:::` directives / fenced code — everything
+// round-trips to plain Markdown. This is PUBLIC spec info (no authz), served through the same
+// authenticated tool surface. The per-macro sections GENERATE from the shared manifest in
+// @wikistead/macro-render (MCP_SYNTAX_MANIFEST); the editor-side lock-step test pins that manifest to
+// the macro registry, so a new first-party macro cannot ship without its syntax entry (the
+// exportFidelity pattern). Only the curated FORMAT prose below stays hand-written — it documents
+// CommonMark/frontmatter/inline marks, not macros.
+const SYNTAX_PREAMBLE = `# Wikistead authoring syntax
 
 Bodies are **CommonMark + GitHub-Flavored Markdown** (headings, **bold**, *italic*, \`code\`, lists, tables,
 task lists \`- [ ]\`, links \`[text](/p/<pageId>)\` for internal pages). On top of that, these macros are available
-(all are plain-text \`:::\` directives or fenced code — they round-trip losslessly to Markdown):
+(all are plain-text \`:::\` directives or fenced code — they round-trip losslessly to Markdown):`
 
-## Callouts (admonitions)
-\`\`\`
-:::note
-Body markdown.
-:::
-\`\`\`
-Types: \`note\`, \`info\`, \`tip\`, \`warning\`, \`danger\`.
-
-## Collapsible & layout
-- Details/disclosure: \`:::details[Summary]\` … \`:::\`
-- Columns: \`:::columns\` with inner \`:::column\` items … \`:::\`
-- Tabs: \`:::tabs\` with inner \`:::tab[Label]\` items … \`:::\`
-
-## Task list with a progress ring
-\`\`\`
-:::todo[My tasks]
-- [ ] a task
-- [x] done
-:::
-\`\`\`
-(Plain GFM \`- [ ]\` task lists also work without the wrapper.)
-
-## Diagrams (fenced code)
-- Mermaid: \`\`\`\`mermaid\`\`\` … flowchart/sequence/etc. … closing fence.
-- PlantUML: \`\`\`\`plantuml\`\`\` … \`@startuml\` … \`@enduml\` … closing fence.
-- Excalidraw: \`\`\`\`excalidraw\`\`\` (drawn in the editor).
-
-## Tags (frontmatter)
+const SYNTAX_TAIL = `## Tags (frontmatter)
 A page's tags live in a leading YAML frontmatter block (first line of the document):
 \`\`\`
 ---
@@ -70,19 +48,6 @@ tags: [recipes, dinner]
 \`\`\`
 Tags are plain strings (case-insensitive); no inline #tag notation exists.
 
-## Dynamic lists (read-only)
-- Pages carrying a tag: \`:::tagged\` … \`<tag name>\` … \`:::\`
-- This page's child pages: \`:::children\` … \`:::\` (empty body)
-Both render auto-updating, read-only lists. (\`:::query\` and \`:::backlinks\` no longer exist; backlinks
-live in the Related side panel.)
-
-## Embeds & transclusion
-- Embed another page's content: \`:::embed-page\` … \`<pageId>\` … \`:::\`
-- Embed an allowlisted external URL: \`:::embed-external\` … \`<url>\` … \`:::\`
-
-## Tables (rich)
-Standard GFM tables work. For HTML-bodied tables: \`:::table\` … HTML … \`:::\`.
-
 ## Inline
 - Highlight: \`==highlighted==\`
 - Footnotes: a reference \`[^1]\` and a definition line \`[^1]: the note\`.
@@ -90,6 +55,8 @@ Standard GFM tables work. For HTML-bodied tables: \`:::table\` … HTML … \`::
 
 Prefer plain CommonMark/GFM where it suffices; reach for a macro only when you need its behavior. Never invent
 notation not listed here.`
+
+const SYNTAX_REFERENCE = `${SYNTAX_PREAMBLE}\n\n${renderMcpSyntaxSections()}\n\n${SYNTAX_TAIL}`
 
 // The v1 read tool set. Each declares its required scope (read/write ceiling) and a thin broker.
 interface McpTool {
