@@ -4,6 +4,7 @@ import type { Sql } from 'postgres'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { pool } from '../db/pool.js'
+import { claimOutboxBatch } from '../db/outbox-lease.js' // #432
 import type { TenantDb } from '../db/index.js'
 import { withTenantTx } from '../db/index.js' // #382
 import { encryptSecret, decryptSecret } from '../auth/secret-crypto.js'
@@ -116,21 +117,16 @@ const signBody = (secret: string, ts: string, body: string) => `sha256=${createH
 // it. A 3xx/4xx/5xx (guardedFetch never follows redirects) is a FAILURE. A crash mid-row leaves the
 // claim to age out and the row retries (reliable, never best-effort). Returns rows handled.
 export async function drainWebhookOutbox(fga: OpenFgaClient, opts: { batch?: number } = {}): Promise<number> {
-  const batch = opts.batch ?? 20
   const send = guardedFetch({ maxBytes: 8 * 1024, timeoutMs: 10_000 })
-  // Phase 1 — CLAIM (short statement, no long tx).
-  const rows = await pool<WebhookOutboxRow[]>`
-    UPDATE webhook_outbox SET claimed_at = now()
-    WHERE id IN (
-      SELECT id FROM webhook_outbox
-      WHERE (claimed_at IS NULL OR claimed_at < now() - interval '2 minutes')
-        AND next_attempt_at <= now()
-      ORDER BY next_attempt_at
-      LIMIT ${batch}
-      FOR UPDATE SKIP LOCKED
-    )
-    RETURNING id, tenant_id, event_type, payload, attempts
-  `
+  // Phase 1 — CLAIM (short statement, no long tx). #432: the claim/stale-window live in the shared
+  // lease primitive; this site only adds its backoff gate (next_attempt_at decides due-ness/order).
+  const rows = await claimOutboxBatch<WebhookOutboxRow>({
+    table: 'webhook_outbox',
+    returning: ['id', 'tenant_id', 'event_type', 'payload', 'attempts'],
+    batch: opts.batch ?? 20,
+    orderBy: 'next_attempt_at',
+    extraDue: pool`AND next_attempt_at <= now()`,
+  })
   // Reschedule with backoff (or drop once exhausted), RELEASING the claim so next_attempt_at — not the
   // 2-minute stale window — controls when the row runs again.
   const retryOrDrop = async (row: WebhookOutboxRow) => {

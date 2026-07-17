@@ -1,5 +1,6 @@
 import type { Sql } from 'postgres'
 import { pool } from '../db/pool.js'
+import { claimOutboxBatch, startOutboxDrainWorker } from '../db/outbox-lease.js' // #432
 import { fgaClient } from '@wikistead/authz'
 import { buildSearchDoc } from './doc-builder.js'
 import type { SearchDriver } from './driver.js'
@@ -64,18 +65,12 @@ function publishDictInvalidate(tenantId: string, pageId: string): void {
 // claim ages out and it's retried). Idempotent with the inline path + itself
 // (Meili upsert/delete are idempotent), so double processing is harmless.
 export async function drainOutbox(driver: SearchDriver, opts: { batch?: number } = {}): Promise<number> {
-  const batch = opts.batch ?? 50
-  const claimed = await pool<ClaimedRow[]>`
-    UPDATE search_outbox SET claimed_at = now()
-    WHERE id IN (
-      SELECT id FROM search_outbox
-      WHERE claimed_at IS NULL OR claimed_at < now() - interval '2 minutes'
-      ORDER BY created_at
-      LIMIT ${batch}
-      FOR UPDATE SKIP LOCKED
-    )
-    RETURNING id, tenant_id, page_id, operation
-  `
+  // #432: the claim statement / stale window live in the shared lease primitive.
+  const claimed = await claimOutboxBatch<ClaimedRow>({
+    table: 'search_outbox',
+    returning: ['id', 'tenant_id', 'page_id', 'operation'],
+    batch: opts.batch ?? 50,
+  })
   let processed = 0
   for (const row of claimed) {
     try {
@@ -101,20 +96,7 @@ export async function drainOutbox(driver: SearchDriver, opts: { batch?: number }
 // drainOutbox directly, so no stray timer leaks into app.inject). The in-process
 // `running` guard prevents overlap within one instance; SKIP LOCKED handles across.
 export function startOutboxWorker(driver: SearchDriver, intervalMs = 2000): () => void {
-  let running = false
-  const timer = setInterval(async () => {
-    if (running) return
-    running = true
-    try {
-      for (let i = 0; i < 20 && (await drainOutbox(driver)) > 0; i++) { /* clear backlog, capped */ }
-    } catch {
-      /* next tick retries */
-    } finally {
-      running = false
-    }
-  }, intervalMs)
-  timer.unref?.()
-  return () => clearInterval(timer)
+  return startOutboxDrainWorker(() => drainOutbox(driver), intervalMs) // #432: the shared loop
 }
 
 export function processOutboxAsync(
