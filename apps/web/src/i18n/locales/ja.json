@@ -1024,5 +1024,10 @@
       "settings": "設定",
       "moderate": "モデレート"
     }
+  },
+  "detailsEdit": {
+    "title": "折りたたみを編集",
+    "summary": "サマリー",
+    "content": "本文"
   }
 }

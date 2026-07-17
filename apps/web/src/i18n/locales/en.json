@@ -1025,5 +1025,10 @@
       "settings": "Settings",
       "moderate": "Moderate"
     }
+  },
+  "detailsEdit": {
+    "title": "Edit collapsible",
+    "summary": "Summary",
+    "content": "Content"
   }
 }

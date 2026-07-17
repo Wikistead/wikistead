@@ -3466,14 +3466,26 @@ const RENDERERS: BlockRenderer[] = [
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editUI: macro.editUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme, from, to, bodyFrom, nestedSel, nestedEdit, dirAlign, wysiwygNested, slotEdit), block: true }), from, to);
         return macro.revealOnCursor ? false : undefined;
       }
-      if (macro.collapsible && !blockRevealed(ctx.state, first.from, lastLine.to)) {
-        // #90 details, collapsed: replace the whole block with a "▸ summary" bar (one widget →
-        // no per-line decoration conflict). Skip children so the fences aren't double-processed.
-        // Caret-in (rangeRevealed) falls through to the container render below = raw editable.
-        const dBody: string[] = [];
-        for (let n = first.number + 1; n < lastLine.number; n++) dBody.push(doc.line(n).text);
-        ctx.addAtomic(Decoration.replace({ widget: new DetailsSummaryWidget(open!.label ?? "Details", dBody.join("\n"), first.from), block: true }), first.from, lastLine.to);
-        return false;
+      if (macro.collapsible) {
+        // #425 / ADR-168: EXPLICIT entry (✎ / Ctrl+↵ → macroRenderActiveField) opens the PANEL editUI
+        // never raw `:::` (Source mode is the documented raw path). Checked FIRST so the explicit-entry
+        // reveal (blockRevealed's explicitEntryCovers) can't fall through to the raw container render.
+        const dActive = ctx.state.field(macroRenderActiveField, false);
+        if (macro.editUI?.present === "inline" && dActive && !dActive.raw && dActive.from <= first.from && dActive.to >= lastLine.to && !ctx.state.readOnly) {
+          const blockSrc = doc.sliceString(first.from, lastLine.to);
+          ctx.addAtomic(Decoration.replace({ widget: new EditableEditUIWidget(first.from, lastLine.to, blockSrc, macro.editUI, (b) => b, ctx.macroTheme, macro.tier), block: true }), first.from, lastLine.to);
+          return false; // the inline editor owns the block
+        }
+        if (!blockRevealed(ctx.state, first.from, lastLine.to)) {
+          // #90 details, collapsed: replace the whole block with a "▸ summary" bar (one widget →
+          // no per-line decoration conflict). Skip children so the fences aren't double-processed.
+          // A SELECTION-driven reveal still falls through to the raw container render below (#359
+          // select-to-copy stays raw — the panel mounts on explicit entry only).
+          const dBody: string[] = [];
+          for (let n = first.number + 1; n < lastLine.number; n++) dBody.push(doc.line(n).text);
+          ctx.addAtomic(Decoration.replace({ widget: new DetailsSummaryWidget(open!.label ?? "Details", dBody.join("\n"), first.from), block: true }), first.from, lastLine.to);
+          return false;
+        }
       }
       if (macro.containerClass) {
         // #174 / ADR-087: a container macro (callout) with the unified inline editUI, render-active →

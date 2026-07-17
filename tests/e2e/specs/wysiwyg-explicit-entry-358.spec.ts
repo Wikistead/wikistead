@@ -30,14 +30,16 @@ test("#358: WYSIWYG — Ctrl+Enter reveals a details block for editing; auto car
   expect(raw).not.toContain(":::details"); // still the widget — automatic reveal stays suppressed
   await expect(page.getByTestId("details-summary-bar")).toBeVisible();
 
-  // EXPLICIT entry: Ctrl+Enter on the block reveals the raw ::: source (editable) — the #358 fix.
+  // EXPLICIT entry (#358 → #425/ADR-168 migrated): Ctrl+Enter opens the PANEL editUI — never raw
+  // `:::` (Source mode is the raw path now).
   await page.keyboard.press("Control+Enter");
   await sleep(400);
+  await expect(page.getByTestId("details-editui")).toBeVisible({ timeout: 5000 });
   raw = await page.locator("[data-pane=preview] .cm-content").innerText();
-  expect(raw).toContain(":::details"); // raw source revealed for editing
+  expect(raw, "no raw fences while editing").not.toContain(":::details");
   await expect(page.getByTestId("details-summary-bar")).toHaveCount(0);
 
-  // Esc exits the raw edit session → the rendered widget returns.
+  // Esc exits the panel → the rendered widget returns.
   await page.keyboard.press("Escape");
   await sleep(400);
   raw = await page.locator("[data-pane=preview] .cm-content").innerText();
