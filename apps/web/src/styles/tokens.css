@@ -638,3 +638,12 @@ body {
    top-level editor is never affected). Covers slot island + both diagram source panels + any future nested CM. */
 .cm-editor .cm-editor.cm-focused .cm-fat-cursor { background: #ff9696 !important; outline: none !important; color: inherit !important; }
 .cm-editor .cm-editor.cm-focused .cm-line { caret-color: auto !important; }
+
+/* #278②: the restore rule above (4 classes) outranks the two guard rules (2 classes each) by
+   specificity, so INSIDE the island the `color: inherit !important` wins and the fat cursor paints the
+   atom's hidden source char again — the exact #238 leak, re-opened for nested editors only. Re-assert
+   both guards at higher specificity than the restore rule (the guard classes are toggled on the NESTED
+   editor's own .cm-editor by vimWysiwygCaretGuard / atomSelHideFatCursor, which run inside the island
+   via the shared factory). Glyph blanks; the #ff9696 block from the restore rule stays visible. */
+.cm-editor .cm-editor.cm-wys-blank-fatcursor.cm-focused .cm-fat-cursor { color: transparent !important; }
+.cm-editor .cm-editor.cm-atomsel-hide-fatcursor.cm-focused .cm-fat-cursor { background-color: transparent !important; color: transparent !important; }

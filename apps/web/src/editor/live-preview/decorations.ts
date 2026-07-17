@@ -4336,7 +4336,14 @@ export const linkClicks = EditorView.domEventHandlers({
   },
 });
 
-export const livePreviewTheme = EditorView.baseTheme({
+// #278④: Reading REUSES the edit-built widget DOM (① — listeners AND the ×/ chrome
+// spans survive a display-mode switch), so reading-surface styling cannot key on the DOM. Stamp the
+// mode on the editor root; the theme's `&.cm-lp-mode-reading` rules key on it. editorAttributes merges
+// on every update, so the class follows the Compartment-toggled displayMode with no re-pin.
+const readingModeClass: Extension = EditorView.editorAttributes.of((view): Record<string, string> | null =>
+  view.state.facet(displayMode) === "reading" ? { class: "cm-lp-mode-reading" } : null);
+
+const livePreviewBaseTheme = EditorView.baseTheme({
   // #359symptom 2: the visual-selection tint painted OVER a block atom the selection crosses
   // the widget's opaque surface hides .cm-selectionBackground, so without this the selection extent is
   // invisible on atoms. Overlay (::after), never a background swap: the rendered content stays put.
@@ -4713,11 +4720,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   // the row (a wrap CHILD), satisfied `.cm-lp-macro-wrap:hover`, and lit the chrome "permanently" in a
   // slot island (where the line above is dense editing text). Interactivity returns with visibility.
   ".cm-lp-macro-btnrow": { position: "absolute", top: "-1.5em", left: "0", display: "inline-flex", alignItems: "center", gap: "4px", zIndex: "3", pointerEvents: "none" },
-  // #278① (permanent form): reveal rules NEVER cross a slot-island boundary. The outer terms
-  // exclude island descendants (`:not(.cm-lp-slot-edit-island *)`); the island terms require a wrap
-  // INSIDE the island (its own state) — so chrome only ever lights from its OWN wrap, and new chrome
-  // classes inherit the boundary instead of needing per-class re-hide rules (thewhack-a-mole).
-  ".cm-lp-macro-wrap:hover .cm-lp-macro-btnrow:not(.cm-lp-slot-edit-island *), .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-btnrow:not(.cm-lp-slot-edit-island *), .cm-lp-slot-edit-island .cm-lp-macro-wrap:hover > .cm-lp-macro-btnrow, .cm-lp-slot-edit-island .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow": { pointerEvents: "auto" },
+  // #278① (the FINAL permanent form, superseding theboundary guards): every wrap-state
+  // reveal is DIRECT-CHILD (`>`) — a wrap's hover/atom-sel lights ONLY its own top-level chrome and
+  // can never reach a NESTED macro's chrome (the atom-selected container leaking the inner warning's
+  // ✎ was exactly a descendant match) nor an island's (a deep descendant by construction). One rule
+  // shape for top level, nested renders and islands alike; no enumeration guards remain.
+  ".cm-lp-macro-wrap:hover > .cm-lp-macro-btnrow, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow": { pointerEvents: "auto" },
   ".cm-lp-macro-btnrow > .cm-lp-macro-edit, .cm-lp-macro-btnrow > .cm-lp-macro-align": { position: "static", top: "auto", left: "auto" },
   // #424: the standalone (non-btnrow) edit button pins to the block's LEFT edge too — one position for
   // every entry affordance. Scoped to the edit button only (retarget is a top-RIGHT control).
@@ -4792,8 +4800,9 @@ export const livePreviewTheme = EditorView.baseTheme({
   // #278A2: the inline tab-rename input — inherits the tab's face, minimal chrome (accent underline).
   ".cm-lp-tab-rename-input": { font: "inherit", color: "var(--fg, inherit)", background: "transparent", border: "none", borderBottom: "1px solid var(--accent, #4ea1ff)", outline: "none", padding: "0", width: "auto", minWidth: "3em" },
   ".cm-lp-layout-item-add": { flex: "0 0 auto", alignSelf: "flex-start", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.6em", height: "1.6em", border: "1px dashed var(--border, #888)", borderRadius: "4px", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
-  //①: island-boundary-safe (see the btnrow rule) — the only lights from a wrap in its own surface.
-  ".cm-lp-macro-wrap:hover .cm-lp-layout-item-add:not(.cm-lp-slot-edit-island *), .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-layout-item-add:not(.cm-lp-slot-edit-island *), .cm-lp-slot-edit-island .cm-lp-macro-wrap:hover .cm-lp-layout-item-add, .cm-lp-slot-edit-island .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-layout-item-add": { opacity: "1" },
+  //①: direct-child chains only — the lights from ITS container's wrap state, never an
+  // ancestor container's (wrap > .cm-lp-columns > / wrap > .cm-lp-tabs > bar > ).
+  ".cm-lp-macro-wrap:hover > .cm-lp-columns > .cm-lp-layout-item-add, .cm-lp-macro-wrap:hover > .cm-lp-tabs > .cm-lp-tabbar > .cm-lp-layout-item-add, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-columns > .cm-lp-layout-item-add, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-tabs > .cm-lp-tabbar > .cm-lp-layout-item-add": { opacity: "1" },
   // #278 §2a (rev4): the inline CM6 slot-edit island — an accent-ringed box that replaces the slot's
   // rendered content while its body is edited IN a live-preview mini-editor (the box hugs its content
   // no fixed height,①).③: the ring is an OUTLINE (outside layout), not a border — a border
@@ -4807,14 +4816,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-slot-edit-island .cm-scroller": { overflow: "visible" },
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
-  // #278point 1 →① (permanent form): a slot-edit ISLAND is a descendant of its
-  // (hovered / atom-SELECTED) outer container wrap, so a plain descendant reveal lit every macro
-  // chrome inside the island permanently. Instead of per-class re-hide rules (three enumeration
-  // misses in a row), the reveal itself is island-boundary-safe: outer terms exclude island
-  // descendants, island terms require a wrap INSIDE the island — chrome lights only from its own
-  // surface's wrap state, and future chrome classes inherit the boundary automatically.
-  ".cm-lp-macro-wrap:hover .cm-lp-macro-edit:not(.cm-lp-slot-edit-island *), .cm-lp-macro-wrap:hover .cm-lp-macro-retarget:not(.cm-lp-slot-edit-island *), .cm-lp-macro-wrap:hover .cm-lp-macro-align:not(.cm-lp-slot-edit-island *), .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit:not(.cm-lp-slot-edit-island *), .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget:not(.cm-lp-slot-edit-island *), .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-align:not(.cm-lp-slot-edit-island *)": { opacity: "1" },
-  ".cm-lp-slot-edit-island .cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-slot-edit-island .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-slot-edit-island .cm-lp-macro-wrap:hover .cm-lp-macro-align, .cm-lp-slot-edit-island .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-slot-edit-island .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget, .cm-lp-slot-edit-island .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-align": { opacity: "1" },
+  // #278① (the FINAL permanent form): DIRECT-CHILD terms only — a wrap's state reveals its
+  // own btnrow chrome / direct edit / retarget / align, and can never reach a nested macro's or an
+  // island's chrome (both are deeper descendants by construction). This retires the
+  // `:not(island *)` + island-scoped enumeration entirely: one rule shape everywhere.
+  ".cm-lp-macro-wrap:hover > .cm-lp-macro-btnrow .cm-lp-macro-edit, .cm-lp-macro-wrap:hover > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-macro-wrap:hover > .cm-lp-macro-edit, .cm-lp-macro-wrap:hover > .cm-lp-macro-retarget, .cm-lp-macro-wrap:hover > .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-align": { opacity: "1" },
   // #174 point 3: innermost-wins for the edit ✎. Hovering a NESTED macro slot reveals THAT slot's own ✎;
   // while it does, suppress the CONTAINER's ✎ (its own direct btnrow) so the inner and outer buttons never
   // co-occur. `:has([data-mac-pos]:hover)` scopes it to the container holding the hovered slot; `>` keeps it
@@ -4888,7 +4894,19 @@ export const livePreviewTheme = EditorView.baseTheme({
   // is the same width with or without the × (Reading vs edit modes match). A little right padding gives the
   // hover-shown × a home at the tab's right edge without overlapping the label; it's on ALL tabs (both modes)
   // so widths stay equal.
-  ".cm-lp-tab": { position: "relative", border: "none", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", padding: "0.3em 1.9em 0.3em 0.7em", fontSize: "0.9em", borderBottom: "2px solid transparent", marginBottom: "-1px" },
+  // #278④: symmetric padding by default — the 1.9em right ×-slot only exists when the ×
+  // actually renders (editable surfaces append .cm-lp-tab-remove; a FRESH read/published render never
+  // does, so those tabs had a phantom right gap). :has keeps the editable width stable, × or not.
+  // Reading needs the mode-class override below too: switching Live→Reading REUSES the edit-built
+  // widget DOM (the × spans survive the display-mode switch — the① lesson), so the DOM alone
+  // cannot distinguish the surface there.
+  ".cm-lp-tab": { position: "relative", border: "none", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", padding: "0.3em 0.7em", fontSize: "0.9em", borderBottom: "2px solid transparent", marginBottom: "-1px" },
+  ".cm-lp-tab:has(.cm-lp-tab-remove)": { paddingRight: "1.9em" },
+  // #278④ (Reading): the reading surface is symmetric AND never shows structural-edit chrome
+  // the reused edit DOM keeps the ×/ elements (inert via the click-time readOnly gate, but they still
+  // revealed on hover and held the ×-slot). readingModeClass stamps the editor root.
+  "&.cm-lp-mode-reading .cm-lp-tab": { paddingRight: "0.7em" },
+  "&.cm-lp-mode-reading .cm-lp-tab-remove, &.cm-lp-mode-reading .cm-lp-layout-item-remove, &.cm-lp-mode-reading .cm-lp-layout-item-add": { display: "none" },
   ".cm-lp-tab:hover": { color: "var(--fg, inherit)" },
   ".cm-lp-tab-active": { color: "var(--fg, inherit)", borderBottomColor: "var(--accent, #4ea1ff)", fontWeight: "600" },
   ".cm-lp-tabpanel": { display: "none" },
@@ -5103,3 +5121,6 @@ export const livePreviewTheme = EditorView.baseTheme({
     color: "var(--fg-dim, #888)",
   },
 });
+
+// The public theme = the base theme + the reading-mode root stamp (see readingModeClass above).
+export const livePreviewTheme: Extension = [livePreviewBaseTheme, readingModeClass];

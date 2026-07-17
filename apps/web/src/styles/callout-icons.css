@@ -152,9 +152,15 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
    panel showed at once. Duplicate the switch rules GLOBALLY so only the active panel is visible
    regardless of nesting. Columns flex is likewise mirrored so nested columns lay out side-by-side. */
 .cm-lp-tabs .cm-lp-tabbar{display:flex;gap:0.25em;border-bottom:1px solid var(--border,#888);margin-bottom:0.6em}
-/* #278point 2: the right padding reserves the x chip's slot (1.4em box + gap) so the chip never
-   covers the tab's click center; kept on every surface so tab widths match across modes (the G pin). */
-.cm-lp-tabs .cm-lp-tab{padding:0.2em 1.9em 0.2em 0.6em;border:none;background:transparent;color:var(--fg-dim,#888);cursor:pointer;border-bottom:2px solid transparent;font:inherit}
+/* #278point 2 → REVISED by④: the right padding reserves the × chip's slot (1.4em box +
+   gap) so the chip never covers the tab's click center — but ONLY where the × actually shows (the
+   editable surface, via :has). Read/published tabs (no × in DOM) are symmetric; Reading needs the
+   explicit mode-class override below because it REUSES the edit-built widget DOM (the × span survives
+   the display-mode switch — it is hidden there, and the slot padding must go with it). */
+.cm-lp-tabs .cm-lp-tab{padding:0.2em 0.6em;border:none;background:transparent;color:var(--fg-dim,#888);cursor:pointer;border-bottom:2px solid transparent;font:inherit}
+.cm-lp-tabs .cm-lp-tab:has(.cm-lp-tab-remove){padding-right:1.9em}
+.cm-lp-mode-reading .cm-lp-tabs .cm-lp-tab{padding-right:0.6em}
+.cm-lp-mode-reading .cm-lp-tab-remove,.cm-lp-mode-reading .cm-lp-layout-item-remove,.cm-lp-mode-reading .cm-lp-layout-item-add{display:none}
 .cm-lp-tabs .cm-lp-tab-active{color:var(--fg);border-bottom-color:var(--accent)}
 .cm-lp-tabs .cm-lp-tabpanel{display:none}
 .cm-lp-tabs .cm-lp-tabpanel-active{display:block}
