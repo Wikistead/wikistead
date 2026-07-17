@@ -96,7 +96,9 @@ describe('draft/publish editing model', () => {
     expect(after).toBe(before)
   })
 
-  it('editing the draft again does NOT change the published version (nor search) until the next publish', async () => {
+  // #446: 15s — the two drainAndSearch round-trips ride Meilisearch on the SHARED server-test stack;
+  // under parallel-session load the default 5s tripped twice on 2026-07-17 while a solo run never has.
+  it('editing the draft again does NOT change the published version (nor search) until the next publish', { timeout: 15_000 }, async () => {
     await setDraft(pageId, `# Publish Test\n\n${T2} 新しい本文\n`) // new draft content
     const pub = await getPublished(db, fgaClient, { pageId, subject: 'user:dev-user' })
     expect(pub.hasUnpublishedChanges).toBe(true)
