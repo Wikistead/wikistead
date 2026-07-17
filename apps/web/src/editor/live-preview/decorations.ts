@@ -4655,7 +4655,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   // the row (a wrap CHILD), satisfied `.cm-lp-macro-wrap:hover`, and lit the chrome "permanently" in a
   // slot island (where the line above is dense editing text). Interactivity returns with visibility.
   ".cm-lp-macro-btnrow": { position: "absolute", top: "-1.5em", left: "0", display: "inline-flex", alignItems: "center", gap: "4px", zIndex: "3", pointerEvents: "none" },
-  ".cm-lp-macro-wrap:hover .cm-lp-macro-btnrow, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-btnrow": { pointerEvents: "auto" },
+  // #278 ① (permanent form): reveal rules NEVER cross a slot-island boundary. The outer terms
+  // exclude island descendants (`:not(.cm-lp-slot-edit-island *)`); the island terms require a wrap
+  // INSIDE the island (its own state) — so chrome only ever lights from its OWN wrap, and new chrome
+  // classes inherit the boundary instead of needing per-class re-hide rules (the whack-a-mole).
+  ".cm-lp-macro-wrap:hover .cm-lp-macro-btnrow:not(.cm-lp-slot-edit-island *), .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-btnrow:not(.cm-lp-slot-edit-island *), .cm-lp-slot-edit-island .cm-lp-macro-wrap:hover > .cm-lp-macro-btnrow, .cm-lp-slot-edit-island .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow": { pointerEvents: "auto" },
   ".cm-lp-macro-btnrow > .cm-lp-macro-edit, .cm-lp-macro-btnrow > .cm-lp-macro-align": { position: "static", top: "auto", left: "auto" },
   // #424: the standalone (non-btnrow) edit button pins to the block's LEFT edge too — one position for
   // every entry affordance. Scoped to the edit button only (retarget is a top-RIGHT control).
@@ -4685,12 +4689,20 @@ export const livePreviewTheme = EditorView.baseTheme({
   // otherwise, and pointer-inert so it never blocks clicks on the text above it.
   ".cm-lp-macro-richui-raw": { top: "-1.5em", left: "0", zIndex: "4", opacity: "0", pointerEvents: "none", display: "inline-flex", alignItems: "center", gap: "3px", padding: "1px 5px", transition: "opacity 120ms" },
   ".cm-lp-macro-richui-key": { fontSize: "0.72em", fontWeight: "600", letterSpacing: "0.02em" },
-  ".cm-lp-macro-raw:hover .cm-lp-macro-richui-raw, .cm-content:has(.cm-lp-macro-raw-zone:hover) .cm-lp-macro-richui-raw, .cm-lp-macro-raw-head .cm-lp-macro-richui-raw": { opacity: "0.9", pointerEvents: "auto" },
+  // ①: the zone `:has` walks DIRECT-child lines only (`>`), so hovering raw lines inside a slot
+  // island can never light pills of the OUTER document (or vice versa) — .cm-content elements nest.
+  ".cm-lp-macro-raw:hover .cm-lp-macro-richui-raw, .cm-content:has(> .cm-lp-macro-raw-zone:hover) .cm-lp-macro-richui-raw, .cm-lp-macro-raw-head .cm-lp-macro-richui-raw": { opacity: "0.9", pointerEvents: "auto" },
   ".cm-lp-macro-richui-raw:hover": { opacity: "1", pointerEvents: "auto" },
   // #278 inside a slot ISLAND the -1.5em float lands ABOVE the island's scroller (its head line is
   // the first line), where the pill is clipped and un-clickable (elementFromPoint hits the line beneath).
   // Islands pin it to the head line's right end instead — in view, in the scroller, same affordance.
   ".cm-lp-slot-edit-island .cm-lp-macro-richui-raw": { top: "0", left: "auto", right: "0" },
+  // #278 ①: inside an island the pill is HOVER-ONLY. Panel-click entry (enterMacroAt) parks the
+  // island caret ON the head line, so the top-level keyboard affordance (macroRawHead perma-show) reads
+  // as "the Ctrl+↵ hint never goes away" with the island's in-block pill placement above. Kill every
+  // non-hover reveal path inside the island, then re-assert the island's OWN hover paths on top.
+  ".cm-lp-slot-edit-island .cm-lp-macro-raw .cm-lp-macro-richui-raw": { opacity: "0", pointerEvents: "none" },
+  ".cm-lp-slot-edit-island .cm-lp-macro-raw:hover .cm-lp-macro-richui-raw, .cm-lp-slot-edit-island .cm-content:has(> .cm-lp-macro-raw-zone:hover) .cm-lp-macro-raw .cm-lp-macro-richui-raw, .cm-lp-slot-edit-island .cm-lp-macro-raw .cm-lp-macro-richui-raw:hover": { opacity: "0.9", pointerEvents: "auto" },
   // #254: the LAYOUT-only variant for the ✎+Ctrl+↵ hint on a RENDERED macro. Adds the key's gap but NOT
   // the always-visible opacity of cm-lp-macro-richui-raw, so the button keeps the base opacity:0 and is
   // revealed only by the hover/selection gate (below for macro-wrap; the callout-panel rule for the panel).
@@ -4725,7 +4737,8 @@ export const livePreviewTheme = EditorView.baseTheme({
   // #278 A2: the inline tab-rename input — inherits the tab's face, minimal chrome (accent underline).
   ".cm-lp-tab-rename-input": { font: "inherit", color: "var(--fg, inherit)", background: "transparent", border: "none", borderBottom: "1px solid var(--accent, #4ea1ff)", outline: "none", padding: "0", width: "auto", minWidth: "3em" },
   ".cm-lp-layout-item-add": { flex: "0 0 auto", alignSelf: "flex-start", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.6em", height: "1.6em", border: "1px dashed var(--border, #888)", borderRadius: "4px", background: "transparent", color: "var(--fg-dim, #888)", cursor: "pointer", fontSize: "0.9em", lineHeight: "1", padding: "0", opacity: "0", transition: "opacity 120ms" },
-  ".cm-lp-macro-wrap:hover .cm-lp-layout-item-add, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-layout-item-add": { opacity: "1" },
+  // ①: island-boundary-safe (see the btnrow rule) — the only lights from a wrap in its own surface.
+  ".cm-lp-macro-wrap:hover .cm-lp-layout-item-add:not(.cm-lp-slot-edit-island *), .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-layout-item-add:not(.cm-lp-slot-edit-island *), .cm-lp-slot-edit-island .cm-lp-macro-wrap:hover .cm-lp-layout-item-add, .cm-lp-slot-edit-island .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-layout-item-add": { opacity: "1" },
   // #278 §2a (rev4): the inline CM6 slot-edit island — an accent-ringed box that replaces the slot's
   // rendered content while its body is edited IN a live-preview mini-editor (the box hugs its content
   // no fixed height, ①). ③: the ring is an OUTLINE (outside layout), not a border — a border
@@ -4734,17 +4747,14 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-slot-edit-island": { flex: "1 1 0", minWidth: "0", outline: "1px solid var(--accent, #4ea1ff)", outlineOffset: "2px", borderRadius: "4px", background: "color-mix(in srgb, var(--accent, #4ea1ff) 4%, var(--panel, #fff))" },
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
-  ".cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-macro-wrap:hover .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-align": { opacity: "1" },
-  // #278 point 1: a slot-edit ISLAND is a descendant of its (hovered / atom-SELECTED) outer
-  // container wrap, so the descendant reveal above lit every macro chrome inside the island permanently
-  // (hovering plain island text showed the mermaid ✎ Ctrl+↵; the -1.5em btnrow also stole that line's
-  // hover). Inside an island only the chrome's OWN wrap state may reveal it: re-hide + re-inert whenever
-  // that wrap is neither hovered nor selected. Higher specificity than the reveal, so it wins.
-  ".cm-lp-slot-edit-island .cm-lp-macro-wrap:not(:hover):not(.cm-lp-atom-sel) > .cm-lp-macro-btnrow": { pointerEvents: "none" },
-  ".cm-lp-slot-edit-island .cm-lp-macro-wrap:not(:hover):not(.cm-lp-atom-sel) > .cm-lp-macro-btnrow .cm-lp-macro-edit, .cm-lp-slot-edit-island .cm-lp-macro-wrap:not(:hover):not(.cm-lp-atom-sel) > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-slot-edit-island .cm-lp-macro-wrap:not(:hover):not(.cm-lp-atom-sel) > .cm-lp-macro-retarget": { opacity: "0", pointerEvents: "none" },
-  // ... and the callout-panel ✎ (it wears cm-lp-macro-edit too, so the descendant reveal reached it the
-  // same way). Its designed reveal is its OWN panel's hover (4661-style) — keep exactly that in islands.
-  ".cm-lp-slot-edit-island .cm-lp-callout-panel-editable:not(:hover) .cm-lp-callout-panel-edit": { opacity: "0", pointerEvents: "none" },
+  // #278 point 1 → ① (permanent form): a slot-edit ISLAND is a descendant of its
+  // (hovered / atom-SELECTED) outer container wrap, so a plain descendant reveal lit every macro
+  // chrome inside the island permanently. Instead of per-class re-hide rules (three enumeration
+  // misses in a row), the reveal itself is island-boundary-safe: outer terms exclude island
+  // descendants, island terms require a wrap INSIDE the island — chrome lights only from its own
+  // surface's wrap state, and future chrome classes inherit the boundary automatically.
+  ".cm-lp-macro-wrap:hover .cm-lp-macro-edit:not(.cm-lp-slot-edit-island *), .cm-lp-macro-wrap:hover .cm-lp-macro-retarget:not(.cm-lp-slot-edit-island *), .cm-lp-macro-wrap:hover .cm-lp-macro-align:not(.cm-lp-slot-edit-island *), .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit:not(.cm-lp-slot-edit-island *), .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget:not(.cm-lp-slot-edit-island *), .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-align:not(.cm-lp-slot-edit-island *)": { opacity: "1" },
+  ".cm-lp-slot-edit-island .cm-lp-macro-wrap:hover .cm-lp-macro-edit, .cm-lp-slot-edit-island .cm-lp-macro-wrap:hover .cm-lp-macro-retarget, .cm-lp-slot-edit-island .cm-lp-macro-wrap:hover .cm-lp-macro-align, .cm-lp-slot-edit-island .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-edit, .cm-lp-slot-edit-island .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-retarget, .cm-lp-slot-edit-island .cm-lp-macro-wrap.cm-lp-atom-sel .cm-lp-macro-align": { opacity: "1" },
   // #174 point 3: innermost-wins for the edit ✎. Hovering a NESTED macro slot reveals THAT slot's own ✎;
   // while it does, suppress the CONTAINER's ✎ (its own direct btnrow) so the inner and outer buttons never
   // co-occur. `:has([data-mac-pos]:hover)` scopes it to the container holding the hovered slot; `>` keeps it
