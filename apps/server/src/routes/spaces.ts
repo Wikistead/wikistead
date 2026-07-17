@@ -17,7 +17,7 @@ import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
 
 interface SpaceRow { id: string; tenant_id: string; name: string; created_at: Date }
-export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage'; accentKey?: string | null; iconImageUrl?: string | null; homePageId?: string | null }
+export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage'; accentKey?: string | null; iconImageUrl?: string | null; homePageId?: string | null; deleteMode?: 'trash_only' | 'both' | 'direct_only' }
 function toSpace(r: SpaceRow): Space {
   return { id: r.id, tenantId: r.tenant_id, name: r.name, createdAt: r.created_at }
 }
@@ -152,8 +152,11 @@ export async function getSpaceInfo(
 export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: string): Promise<Space[]> {
   // accent_key (space branding, Phase 5c) joined in so the client can apply the
   // space ▷ tenant ▷ default accent cascade without a per-space fetch.
-  const rows = await db.sql<(SpaceRow & { accent_key: string | null; icon_image_key: string | null; home_page_id: string | null })[]>`
-    SELECT s.id, s.tenant_id, s.name, s.created_at, s.home_page_id, ss.accent_key, ss.icon_image_key
+  // #437 / ADR-167: the RESOLVED delete mode rides the listing so the client can shape the delete
+  // menu (trash / permanent / both) without a per-space fetch. A UI measure only — the routes gate.
+  const rows = await db.sql<(SpaceRow & { accent_key: string | null; icon_image_key: string | null; home_page_id: string | null; delete_mode: string | null; tenant_delete_mode: string | null })[]>`
+    SELECT s.id, s.tenant_id, s.name, s.created_at, s.home_page_id, ss.accent_key, ss.icon_image_key,
+           s.delete_mode, (SELECT delete_mode FROM tenant_settings LIMIT 1) AS tenant_delete_mode
     FROM spaces s LEFT JOIN space_settings ss ON ss.space_id = s.id
     ORDER BY s.created_at
   `
@@ -190,6 +193,7 @@ export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: strin
     ...toSpace(r), capability: capById.get(r.id)!, accentKey: r.accent_key,
     iconImageUrl: r.icon_image_key ? `/spaces/${r.id}/icon-image` : null,
     homePageId: homeVisible.get(r.id) ? r.home_page_id : null,
+    deleteMode: (r.delete_mode ?? r.tenant_delete_mode ?? 'trash_only') as 'trash_only' | 'both' | 'direct_only',
   }))
 }
 
@@ -836,6 +840,27 @@ export async function spacesPlugin(app: FastifyInstance) {
     if (v !== 'editors' && v !== 'managers') return reply.code(400).send({ error: "pageCreationPolicy ('editors' | 'managers') required" })
     await req.db.sql`UPDATE spaces SET page_creation_policy = ${v} WHERE id = ${req.params.spaceId}`
     return { pageCreationPolicy: v }
+  })
+
+  // #437 / ADR-167: the per-space delete-mode override (manage-gated, the page-creation-policy shape).
+  // NULL inherits the tenant default; enforcement lives in trashPage/directDeletePage — this only
+  // stores the setting. Pathways only: WHO may delete is untouched in every mode.
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/delete-mode', async (req) => {
+    await requireSpaceManage(app.fga, req.user.sub, req.params.spaceId)
+    const [row] = await req.db.sql<[{ mode: string | null; tenant_mode: string | null }?]>`
+      SELECT s.delete_mode AS mode, (SELECT delete_mode FROM tenant_settings LIMIT 1) AS tenant_mode
+      FROM spaces s WHERE s.id = ${req.params.spaceId}`
+    const tenantDefault = row?.tenant_mode ?? 'trash_only'
+    return { deleteMode: row?.mode ?? null, tenantDefault, resolved: row?.mode ?? tenantDefault }
+  })
+  app.put<{ Params: { spaceId: string }; Body: { deleteMode?: string | null } }>('/spaces/:spaceId/delete-mode', async (req, reply) => {
+    await requireSpaceManage(app.fga, req.user.sub, req.params.spaceId)
+    const v = req.body?.deleteMode ?? null
+    if (v !== null && v !== 'trash_only' && v !== 'both' && v !== 'direct_only') {
+      return reply.code(400).send({ error: "deleteMode ('trash_only' | 'both' | 'direct_only' | null) required" })
+    }
+    await req.db.sql`UPDATE spaces SET delete_mode = ${v} WHERE id = ${req.params.spaceId}`
+    return { deleteMode: v }
   })
 
   // ── per-space access (Phase 5b) — all manage-gated ──
