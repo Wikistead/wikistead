@@ -1,5 +1,6 @@
 import { SafeHtml, html, joinSafe, unsafeHtml } from "./safe-html.js";
 import { walkMarkdown, mdParser, type MdSink, type MdOpenRole, type MdLeafRole, type MdRoleData } from "./md-visitor.js";
+import { parseFenceInfo } from "./fence-info.js";
 
 // #85 / ADR-059 + ADR-085 → #384 / ADR-160: the SERVER-SIDE, DOM-FREE markdown → HTML renderer for
 // published / static export — now a SINK over the ONE shared visitor (md-visitor.ts). The visitor owns
@@ -118,23 +119,29 @@ class HtmlSink implements MdSink {
       const lang = args.info.trim().split(/\s+/)[0];
       const macro = lang ? this.macros.fence(lang) : undefined;
       if (macro) {
-        try { this.emit(withFidelity(lang!, macro.exportFidelity, macro.htmlRender(args.body))); return; }
+        // #422: diagram-fence align export parity (#255's `align=left|right` off the info string) —
+        // the same fixed-enum → fixed-class wrapper as the editor/read surfaces (never interpolated).
+        const align = parseFenceInfo(args.info).align;
+        try { this.emit(alignWrap(withFidelity(lang!, macro.exportFidelity, macro.htmlRender(args.body)), align)); return; }
         catch { /* a macro that throws must not break the render → fall through to plain code */ }
       }
     }
     this.emit(html`<pre><code>${args.body}</code></pre>`);
   }
 
-  // NOTE: `attrs` (#393) is not consumed here in v1 — the static server export applies no align, matching
-  // the diagram precedent (ADR-151 §2); export parity is the #422 follow-up.
-  directive(args: { name: string | null; label: string | null; body: string; walkChildren: () => void }): void {
+  // #422: `attrs` (#393) is now consumed for `:::table{align=left|right}` export parity — the server
+  // sink wraps the macro output in the SAME fixed alignment class the editor/read surfaces use
+  // (.cm-lp-align-* is global CSS, #267). A FIXED enum switches between FIXED class strings — the
+  // attr value is never interpolated into markup (the XSS boundary of ADR-151 §2 holds).
+  directive(args: { name: string | null; label: string | null; attrs: Record<string, string> | null; body: string; walkChildren: () => void }): void {
     const macro = args.name ? this.macros.directive(args.name) : undefined;
     if (macro) {
       // #85: hand the macro a recursive renderer so a container directive's nested Markdown body renders
       // as real HTML (SafeHtml — the same allowlist boundary at every depth). #335: nested body → the
       // visitor walks it topLevel=false, so its footnotes stay literal.
       const renderInner = (md: string): SafeHtml => renderDoc(md, this.macros, false);
-      try { this.emit(withFidelity(args.name!, macro.exportFidelity, macro.htmlRender(args.body, renderInner, args.label ?? undefined))); return; }
+      const align = args.name === "table" ? args.attrs?.align : undefined;
+      try { this.emit(alignWrap(withFidelity(args.name!, macro.exportFidelity, macro.htmlRender(args.body, renderInner, args.label ?? undefined)), align)); return; }
       catch { /* fall through to the generic box */ }
     }
     // Generic fallback: the wks-directive box around the node's own (block-joined) children.
@@ -143,6 +150,14 @@ class HtmlSink implements MdSink {
     const f = this.stack.pop()!;
     this.emit(joinSafe([f.prefix, ...f.parts, f.suffix]));
   }
+}
+
+// #422: the shared alignment wrapper — export parity for `:::table{align=}` and `align=` diagram
+// fences. FIXED class per enum value; anything else (including a crafted attr value) is a no-op.
+function alignWrap(out: SafeHtml, align: string | undefined): SafeHtml {
+  if (align !== "left" && align !== "right") return out;
+  const cls = align === "left" ? "cm-lp-align-left" : "cm-lp-align-right";
+  return joinSafe([unsafeHtml(`<div class="${cls}">`), out, unsafeHtml("</div>")]);
 }
 
 // Render a Markdown source string to sanitized HTML (SafeHtml). Safe by construction: every dynamic

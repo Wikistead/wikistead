@@ -343,3 +343,44 @@ describe("renderMarkdownToHtml — footnotes (#335 / ADR-130)", () => {
     expect(h).toContain("nested note");
   });
 });
+
+// #422 / ADR-151 follow-up: align EXPORT PARITY. The server sink wraps `:::table{align=left|right}`
+// (and an `align=` diagram fence) in the SAME fixed .cm-lp-align-* class the editor/read surfaces
+// use. The attr value is an enum switch between fixed class literals — a crafted value must be a
+// no-op (never interpolated into markup: the XSS boundary of ADR-151 §2).
+describe("renderMarkdownToHtml — #422 align export parity", () => {
+  it("wraps :::table{align=left|right} in the fixed align class", () => {
+    const left = out(":::table{align=left}\n<table><tbody><tr><td>x</td></tr></tbody></table>\n:::", builtinMacroRegistry());
+    expect(left).toContain('<div class="cm-lp-align-left">');
+    expect(left).toContain("</div>");
+    const right = out(":::table{align=right}\n<table><tbody><tr><td>x</td></tr></tbody></table>\n:::", builtinMacroRegistry());
+    expect(right).toContain('<div class="cm-lp-align-right">');
+  });
+
+  it("center / absent align emits NO wrapper (default parity)", () => {
+    const center = out(":::table{align=center}\n<table></table>\n:::", builtinMacroRegistry());
+    expect(center).not.toContain("cm-lp-align-");
+    const none = out(":::table\n<table></table>\n:::", builtinMacroRegistry());
+    expect(none).not.toContain("cm-lp-align-");
+  });
+
+  it("a crafted align value never reaches the markup; a non-enum value is a NO-OP (XSS boundary)", () => {
+    // The attr parser strips the quote-break attempt (yielding a clean enum value at most) and the
+    // sink switches between FIXED class literals — the injected fragment must never surface.
+    const crafted = out(':::table{align="left\u0022 onmouseover=\u0022evil()"}\n<table></table>\n:::', builtinMacroRegistry());
+    expect(crafted).not.toContain("onmouseover");
+    expect(crafted).not.toContain("evil");
+    // A non-enum value applies nothing (no wrapper, no interpolation).
+    const nonEnum = out(":::table{align=evil}\n<table></table>\n:::", builtinMacroRegistry());
+    expect(nonEnum).not.toContain("cm-lp-align-");
+    expect(nonEnum).not.toContain("evil\"");
+  });
+
+  it("wraps an align= diagram fence (mermaid) in the same fixed class", () => {
+    const aligned = out("```mermaid align=left\nflowchart TD\n```", builtinMacroRegistry());
+    expect(aligned).toContain('<div class="cm-lp-align-left">');
+    expect(aligned).toContain('<pre class="mermaid">');
+    const plain = out("```mermaid\nflowchart TD\n```", builtinMacroRegistry());
+    expect(plain).not.toContain("cm-lp-align-");
+  });
+});
