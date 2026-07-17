@@ -164,7 +164,7 @@ import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, assetUrl, type GuestToken } from "../data/apiClient";
-import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useCreatePage, useEntitlements, useSpaces, type Page } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, chainPageToggle, useAccountSettings, useDeletePage, useCreatePage, useEntitlements, useSpaces, type Page } from "../data/queries";
 import { GuestSidebar } from "./GuestSidebar";
 import { ConfirmDialog } from "../ui/dialogs";
 import { DeleteBacklinkWarning } from "./DeleteBacklinkWarning";
@@ -415,8 +415,8 @@ function PageRoute({ pageIdOverride }: { pageIdOverride?: string } = {}) {
   // the draft is rejected, never silently published. Stable so <Editor>'s memo holds.
   const toggleTask = useToggleTask(pageId ?? "");
   const onToggleTask = useCallback(
-    (index: number) =>
-      toggleTask.mutateAsync(index).then(() => undefined).catch((e) => {
+    (index: number, applyFlip: () => void) =>
+      toggleTask.mutateAsync({ index, applyFlip }).then(() => undefined).catch((e) => {
         // #303: a 409 is the EXPECTED outcome when the draft has unpublished changes — the checkbox can't
         // fold into published without mixing in that draft. Show a dedicated message, not the generic error.
         // Read `.status` STRUCTURALLY, not via `instanceof ApiError`: under Vite dev the apiClient module can
@@ -896,17 +896,31 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
   // already accepts guest:'edit'; only this client wiring was missing. Same contract as the member
   // path (#303): throw on failure so the editor reverts its optimistic draft flip; a 409 (dirty
   // draft) gets the dedicated toast (status read STRUCTURALLY — instanceof is unreliable under Vite
-  // module duplication). On success refetch the published snapshot this surface renders.
+  // module duplication). #361 the draft flip + POST run through the shared per-page serial
+  // chain (each fold must see exactly one flip — see chainPageToggle), and the published reload is
+  // COALESCED to the burst's last settle (a per-click reload repainted intermediate committed states
+  // against the user's final optimistic flip — the member-side mechanism, mirrored here).
+  const pendingTogglesRef = useRef(0);
   const onToggleTask = useCallback(
-    (index: number) =>
-      apiFetch<{ publishedAt: string | null }>(`/pages/${encodeURIComponent(pageId)}/tasks/toggle`, token, {
-        method: "POST",
-        body: JSON.stringify({ index }),
-      }).then(() => { reloadPublished(); }).catch((e) => {
+    (index: number, applyFlip: () => void) => {
+      pendingTogglesRef.current += 1;
+      const settle = () => {
+        pendingTogglesRef.current -= 1;
+        if (pendingTogglesRef.current === 0) reloadPublished();
+      };
+      return chainPageToggle(pageId, () => {
+        applyFlip();
+        return apiFetch<{ publishedAt: string | null }>(`/pages/${encodeURIComponent(pageId)}/tasks/toggle`, token, {
+          method: "POST",
+          body: JSON.stringify({ index }),
+        });
+      }).then(() => { settle(); }).catch((e) => {
+        settle();
         const dirty = (e as { status?: number } | null)?.status === 409;
         notify.error(t(dirty ? "toast.taskToggleDirty" : "toast.actionFailed"));
         throw e; // let the editor revert the optimistic flip
-      }),
+      });
+    },
     [pageId, token, reloadPublished, t],
   );
 

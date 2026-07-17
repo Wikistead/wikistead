@@ -308,3 +308,71 @@ test("#361 the published poll never repaints an intermediate state during a togg
   ).toBeLessThanOrEqual(3); // initial sample + click1(on) + click2(off) — a 4th = the poll repaint
   expect(cur, "settled on the optimistic final value (unchecked)").toBe(false);
 });
+
+// #361 the FAST-BURST "publish first" block. The optimistic draft flip used to be written at
+// CLICK time, so a rapid burst piled ≥2 flips into the draft before the server folded the first one —
+// the exactly-one-flip guard then 409'd EVERY request on a perfectly clean page, surfacing the
+// "publish your draft first" toast and reverting the user's clicks. The fix defers each draft flip
+// into the per-page serial toggle chain (flip + POST as one unit, strictly after the previous toggle
+// settled), so every fold sees exactly the one flip it claims. These pin: a real-click burst produces
+// NO 409, every flip lands (final state = click count), and no dirty residue survives (badge stays
+// absent, including after a reload). Verified red without the fix (both shapes 409'd).
+async function burstPin(browser: any, clicks: { boxIndex: number }[], expectFinal: boolean[], tag: string) {
+  const page = await (await browser.newContext()).newPage();
+  const toggleStatuses: number[] = [];
+  page.on("response", (r: { url: () => string; status: () => number; request: () => { method: () => string } }) => {
+    if (r.url().includes("/tasks/toggle") && r.request().method() === "POST") toggleStatuses.push(r.status());
+  });
+  // widen the burst window: every fold takes 600ms, so a 3-click burst outruns the first fold by far
+  await page.route("**/tasks/toggle", async (route: { continue: () => Promise<void> }) => {
+    await new Promise((r) => setTimeout(r, 600));
+    await route.continue();
+  });
+  await openScratch(page, `todo-burst-361-${tag}-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::todo[Sprint]\n- [ ] alpha\n- [ ] beta\n- [x] gamma\n:::\n\nbelow\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(600);
+  await expect(page.getByTestId("edit-toggle")).toBeVisible({ timeout: 8000 });
+  await sleep(500);
+  const boxes = page.getByTestId("task-checkbox");
+  await expect(boxes).toHaveCount(3);
+
+  // the burst: real clicks (mousedown+mouseup) ~120ms apart — well inside one 600ms fold
+  for (const c of clicks) {
+    await boxes.nth(c.boxIndex).click();
+    await sleep(120);
+  }
+  await sleep(600 * clicks.length + 2500); // serialized folds + the coalesced refetch settle
+
+  // 1. no toggle was rejected — the serialized folds each saw exactly one flip (unfixed: 409s here)
+  expect(toggleStatuses.length).toBe(clicks.length);
+  expect(toggleStatuses.every((s) => s === 200), `no "publish first" 409 in the burst (statuses: ${toggleStatuses.join(",")})`).toBe(true);
+
+  // 2. every click landed: the final states match the click parity
+  for (let i = 0; i < expectFinal.length; i++) {
+    expect(await boxes.nth(i).evaluate((el) => (el as HTMLInputElement).checked), `box ${i} final state`).toBe(expectFinal[i]!);
+  }
+
+  // 3. no dirty residue — the burst folded cleanly, draft == published (also across a reload)
+  await expect(page.getByTestId("unpublished-badge")).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByTestId("edit-toggle")).toBeVisible({ timeout: 8000 });
+  await sleep(1200);
+  await expect(page.getByTestId("unpublished-badge"), "no dirty residue after a reload").toHaveCount(0);
+  for (let i = 0; i < expectFinal.length; i++) {
+    expect(await boxes.nth(i).evaluate((el) => (el as HTMLInputElement).checked), `box ${i} state after reload`).toBe(expectFinal[i]!);
+  }
+}
+
+test("#361 a fast burst across DIFFERENT boxes folds every flip — no publish-first block", async ({ browser }) => {
+  // 3 different boxes: unfixed, flips 2 and 3 pile into the draft before fold 1 → every POST 409s
+  await burstPin(browser, [{ boxIndex: 0 }, { boxIndex: 1 }, { boxIndex: 2 }], [true, true, false], "diff");
+});
+
+test("#361 a fast SAME-box triple click folds every flip in order — no publish-first block", async ({ browser }) => {
+  // 3 clicks on one box (odd count → ends flipped): unfixed, flips 1+2 cancel in the draft → 409s
+  await burstPin(browser, [{ boxIndex: 0 }, { boxIndex: 0 }, { boxIndex: 0 }], [true, false, true], "same");
+});
