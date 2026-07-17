@@ -227,3 +227,28 @@ test("#273 a download card downloads on a full-body click", async ({ browser }) 
   ]);
   expect(download.suggestedFilename()).toBeTruthy();
 });
+
+// #273 (user ruling): an INLINE chip has no rendered preview, so a PDF chip must NOT zoom — the
+// chip is pointer-cursored and a read-mode click DOWNLOADS (like every other chip); the lightbox stays
+// exclusive to the standalone card's actually-rendered preview (the/⤢ pins above).
+test("#273 a PDF inline chip is pointer + download — never the lightbox", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const pageId = await openScratch(page, "chip-pdf-dl-273");
+  await enterEdit(page);
+  const name = `e2e-chip-${Date.now().toString(36)}.pdf`;
+  const pdfId = await uploadAttachment(page, pageId, name, "application/pdf", MINIMAL_PDF);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Control+End");
+  await page.keyboard.insertText(`ref inline [${name}](wks-attachment:${pdfId}) here\n`);
+  await sleep(800); // let the meta sniff resolve (the old bug keyed the zoom behaviour off it)
+  const chip = page.getByTestId("attachment-chip").first();
+  await expect(chip).toBeVisible();
+  expect(await chip.evaluate((el) => getComputedStyle(el).cursor), "pointer, not zoom-in").toBe("pointer");
+  await page.getByTestId("publish-page").click();
+  await sleep(800);
+  await sleep(400); // read surface + meta settle
+  const dl = page.waitForEvent("download", { timeout: 10000 });
+  await page.getByTestId("attachment-chip").first().click();
+  await dl;
+  await expect(page.getByTestId("attachment-lightbox"), "the chip never opens the lightbox").toHaveCount(0);
+});
