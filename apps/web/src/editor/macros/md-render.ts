@@ -89,6 +89,54 @@ function staticMacroChip(label: string): HTMLElement {
   return chip;
 }
 
+// #381the ONE code-fence header (filename tab + lang label + copy button), shared by the CM
+// surface (FenceHeaderWidget delegates here) and the static prose render below — the two read surfaces
+// must never diverge structurally (the nested fence had NO copy button / lang tab at all). Icons are
+// trusted constant SVGs (no user input → innerHTML is XSS-safe); title/lang go through textContent.
+export const FENCE_COPY_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+export const FENCE_CHECK_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+export function buildFenceHeader(args: { lang: string; title?: string; code: string; canCopy: boolean }): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "cm-lp-code-header";
+  row.contentEditable = "false";
+  const tab = document.createElement("span");
+  tab.className = "cm-lp-code-tab";
+  if (args.title) {
+    const t = document.createElement("span");
+    t.className = "cm-lp-code-title";
+    t.textContent = args.title; // XSS-safe: textContent, never innerHTML
+    tab.appendChild(t);
+  }
+  if (args.lang) {
+    const l = document.createElement("span");
+    l.className = "cm-lp-code-lang";
+    l.textContent = args.lang;
+    tab.appendChild(l);
+  }
+  // #174 comment 948: a lang-less fence must NOT emit an EMPTY tab stub — header is just the copy button.
+  if (args.title || args.lang) row.appendChild(tab);
+  if (args.canCopy) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cm-lp-code-copy";
+    btn.setAttribute("aria-label", "Copy code");
+    btn.title = "Copy code";
+    btn.innerHTML = FENCE_COPY_ICON;
+    btn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void navigator.clipboard?.writeText(args.code).then(() => {
+        btn.classList.add("cm-lp-code-copied");
+        btn.innerHTML = FENCE_CHECK_ICON;
+        setTimeout(() => { btn.classList.remove("cm-lp-code-copied"); btn.innerHTML = FENCE_COPY_ICON; }, 1400);
+      }).catch(() => { /* clipboard denied (insecure ctx / permission) — no-op */ });
+    });
+    row.appendChild(btn);
+  }
+  return row;
+}
+
 // #267: lezer's markdown grammar early-closes a nested `:::tabs` at an inner directive's close, so the
 // Directive node's `to` is wrong and slicing by it truncates a multi-tab/column body. resolveDirectiveRanges
 // (stack-based, Pandoc semantics) is the single truth for `:::` ranges (same fix as fence.ts for the CM
@@ -260,6 +308,7 @@ function renderBlock(node: SNode, src: string, into: Node): number | void {
     case "FencedCode": case "CodeBlock": {
       const t = node.getChild("CodeText");
       const body = t ? txt(src, t) : "";
+      let fenceMeta: { lang: string; title?: string } = { lang: "" }; // for the plain-code header below
       // ADR-085 shared macro renderer: a FENCE whose info string names a registered fence macro
       // (```mermaid / ```excalidraw …) dispatches to its liveRender — the SINGLE source of truth
       // so a diagram fence INSIDE a transclude / column / tab renders as the real macro, not a raw
@@ -271,6 +320,7 @@ function renderBlock(node: SNode, src: string, into: Node): number | void {
         const info = node.getChild("CodeInfo");
         const fence = info ? parseFenceInfo(txt(src, info)) : null; // #267: full parse for lang + align=
         const lang = fence ? fence.lang : null;
+        if (fence) fenceMeta = { lang: fence.lang, title: fence.title };
         const macro = lang ? findFenceMacro(lang) : undefined;
         // #351static mode never dispatches a fence macro (mermaid/plantuml/excalidraw would mount a
         // widget / render async) — a compact chip instead of the (long) raw source keeps the card small.
@@ -289,9 +339,15 @@ function renderBlock(node: SNode, src: string, into: Node): number | void {
           catch { /* a macro that throws must not break the render → fall through to plain code */ }
         }
       }
+      // #381the static fence is the SAME card as the CM surface — a shared header (filename tab +
+      // lang + copy button, buildFenceHeader) over the code body. Bare <pre><code> had no copy button and a
+      // different box, so a fence inside a column/tab looked nothing like its top-level twin.
+      const card = document.createElement("div");
+      card.className = "cm-lp-fence-card";
+      card.appendChild(buildFenceHeader({ lang: fenceMeta.lang, title: fenceMeta.title, code: body, canCopy: true }));
       const pre = document.createElement("pre"); const code = document.createElement("code");
       code.textContent = body;
-      pre.appendChild(code); into.appendChild(pre); return;
+      pre.appendChild(code); card.appendChild(pre); into.appendChild(card); return;
     }
     case "HorizontalRule": into.appendChild(document.createElement("hr")); return;
     case "Table": {
