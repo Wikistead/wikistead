@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { PanelLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "./ThemeToggle";
@@ -8,16 +8,20 @@ import { UserMenu } from "./UserMenu";
 import { NotificationBell } from "../notifications/NotificationBell";
 import { TenantBrand } from "./BrandLockup";
 import { FirstRunOnboarding } from "./EditorOnboarding";
+import { useMediaQuery } from "./PageControls";
 import { useBranding } from "../data/queries";
 import { assetUrl } from "../data/apiClient";
 
 // App skeleton: header / sidebar slot / main content. `sidebar` holds the page
 // tree and `search` the search box — both member-only; guest (share) routes pass
 // neither. `onLogout`, when given, renders a logout control (member chrome only).
-// The sidebar collapses via the header toggle (choice persists); the collapse is
-// ANIMATED — the sidebar grid column slides 260px → 0 (no display:none), with the
-// aside clipping its content. When fully collapsed the aside is 0-wide, so the
-// sidebar is genuinely hidden.
+// Desktop (md+): the sidebar collapses via the header toggle (choice persists);
+// the collapse is ANIMATED — the sidebar grid column slides 260px → 0.
+// #406 S1 / ADR-159 §3: below md the SAME sidebar renders as an off-canvas DRAWER
+// over a scrim — default-closed, opened by the same header toggle, closed by scrim
+// tap / Esc / navigating. The `wks.sidebarCollapsed` key stays a DESKTOP preference:
+// the drawer's open state is ephemeral and never touches it. One code path serves
+// the member, guest and public shells (they all route through AppShell).
 export function AppShell({
   children,
   sidebar,
@@ -31,28 +35,62 @@ export function AppShell({
 }) {
   const { t } = useTranslation();
   const branding = useBranding();
+  const isMobile = useMediaQuery("(max-width: 767px)"); // Tailwind `md` cut (ADR-159 §2)
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem("wks.sidebarCollapsed") === "1"; } catch { return false; }
   });
-  const toggle = () => setCollapsed((v) => {
-    const n = !v;
-    try { localStorage.setItem("wks.sidebarCollapsed", n ? "1" : "0"); } catch { /* no storage */ }
-    return n;
-  });
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerRef = useRef<HTMLElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const location = useLocation();
+  const toggle = () => {
+    if (isMobile) { setDrawerOpen((v) => !v); return; } // ephemeral — never writes the desktop key
+    setCollapsed((v) => {
+      const n = !v;
+      try { localStorage.setItem("wks.sidebarCollapsed", n ? "1" : "0"); } catch { /* no storage */ }
+      return n;
+    });
+  };
+
+  // Drawer lifecycle: close on navigation and when leaving the mobile breakpoint; Esc closes; focus
+  // moves into the drawer while open and returns to the toggle on close (the scrimmed-overlay contract).
+  useEffect(() => { setDrawerOpen(false); }, [location.pathname]);
+  useEffect(() => { if (!isMobile) setDrawerOpen(false); }, [isMobile]);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    drawerRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setDrawerOpen(false); toggleRef.current?.focus(); return; }
+      // minimal focus containment: Tab wraps inside the drawer while it is open
+      if (e.key === "Tab" && drawerRef.current) {
+        const focusables = drawerRef.current.querySelectorAll<HTMLElement>(
+          "a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex='-1'])",
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0]!, last = focusables[focusables.length - 1]!;
+        const active = document.activeElement as HTMLElement | null;
+        if (!drawerRef.current.contains(active)) { e.preventDefault(); first.focus(); }
+        else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+        else if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
 
   return (
     <div
-      // collapse the sidebar column to 0 when the user collapses it OR when there is no
-      // sidebar at all (settings screens) — otherwise the empty 260px column sat there as
-      // a "ghost" panel, pushing the content right and breaking the centering.
-      data-collapsed={!sidebar || collapsed ? "true" : "false"}
+      // collapse the sidebar column to 0 when the user collapses it, when there is no sidebar at
+      // all (settings screens), OR below md (the drawer replaces the docked column) — otherwise the
+      // empty 260px column sat there as a "ghost" panel, pushing the content right.
+      data-collapsed={!sidebar || collapsed || isMobile ? "true" : "false"}
       className="grid h-full grid-cols-[var(--sidebar-w)_1fr] grid-rows-[var(--header-h)_1fr] [grid-template-areas:'header_header''sidebar_main'] transition-[grid-template-columns] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)] data-[collapsed=true]:grid-cols-[0px_1fr]"
     >
       <header className="flex items-center gap-2 border-b border-border bg-panel px-4 [grid-area:header]">
         {/* #274: no decorative icon when there is no sidebar — a non-interactive PanelLeft read as a
             broken "expand sidebar" control on the guest page / settings shells. */}
         {sidebar && (
-          <button type="button" className="flex rounded p-1 text-fg-dim transition-colors hover:bg-panel-2 hover:text-foreground" aria-label={t("nav.toggleSidebar")} aria-pressed={!collapsed} data-testid="sidebar-toggle" onClick={toggle}>
+          <button ref={toggleRef} type="button" className="flex rounded p-1 text-fg-dim transition-colors hover:bg-panel-2 hover:text-foreground" aria-label={t("nav.toggleSidebar")} aria-pressed={isMobile ? drawerOpen : !collapsed} data-testid="sidebar-toggle" onClick={toggle}>
             <PanelLeft size={16} />
           </button>
         )}
@@ -75,16 +113,35 @@ export function AppShell({
         })()}
         <div className="flex-1" />
         {search && <div className="flex justify-end">{search}</div>}
-        <LanguageToggle />
-        <ThemeToggle />
+        {/* #406 S1 (ADR-159 §3 header): below md the standalone language/theme toggles fold away in
+            MEMBER chrome (the account menu carries them there); guest/pre-login shells have no account
+            menu, so they keep the compact toggles at every width. */}
+        <div className={onLogout ? "hidden items-center gap-2 md:flex" : "flex items-center gap-2"}>
+          <LanguageToggle />
+          <ThemeToggle />
+        </div>
         {/* #320 / ADR-126: the notification bell is member-only (guests have no inbox); onLogout marks a
             member shell (guest/loading shells pass none), so it gates the bell without a separate prop. */}
         {onLogout && <NotificationBell />}
         {onLogout && <UserMenu onLogout={onLogout} />}
       </header>
-      {/* Only render the sidebar panel when there IS one; on settings screens (no
-          sidebar) it would be an empty bordered panel column. */}
-      {sidebar && <aside className="box-border min-w-0 overflow-hidden border-r border-border bg-panel [grid-area:sidebar]">{sidebar}</aside>}
+      {/* Only render the docked sidebar panel when there IS one AND we're on desktop; on settings
+          screens (no sidebar) it would be an empty bordered panel column, and below md the drawer
+          (fixed overlay below) replaces the docked column entirely. */}
+      {sidebar && !isMobile && <aside className="box-border min-w-0 overflow-hidden border-r border-border bg-panel [grid-area:sidebar]">{sidebar}</aside>}
+      {sidebar && isMobile && drawerOpen && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/40" data-testid="drawer-scrim" onClick={() => { setDrawerOpen(false); toggleRef.current?.focus(); }} />
+          <aside
+            ref={drawerRef}
+            tabIndex={-1}
+            data-testid="mobile-drawer"
+            className="fixed inset-y-0 left-0 z-50 w-[280px] max-w-[85vw] overflow-y-auto border-r border-border bg-panel shadow-xl outline-none"
+          >
+            {sidebar}
+          </aside>
+        </>
+      )}
       <main className="min-h-0 min-w-0 overflow-hidden [grid-area:main]">{children}</main>
       {/* #289 / ADR-115: the first-run persona enrollment + existing-user banner. MEMBER-ONLY (#355):
           gate on the member-shell signal (onLogout — guest/share/loading shells pass none), NOT just the
