@@ -70,6 +70,9 @@ export interface PageControlsProps {
   // Delete the page. Set only when the caller may manage the page (FGA `manage`); the
   // server re-checks and 403s regardless (two-layer authz). Undefined → item hidden.
   onDelete?: () => void;
+  // #437 / ADR-167: the direct permanent entry (modes both/direct_only) — separate from the trash
+  // entry so the irreversible action never hides behind the reversible label.
+  onDeleteForever?: () => void;
   onDuplicate?: () => void; // #229: create a new page seeded from this one (template)
   onSaveTemplate?: () => void; // #248: save this page's published content as a reusable template
   onRelated?: () => void; // #322 / ADR-133: open the "Related" right-rail panel (§Backlinks 1-hop + future 2-hop/graph/tags)
@@ -155,6 +158,7 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string, watch?: W
   if (p.onSaveTemplate) items.push({ value: "save-template", label: t("template.saveAsTemplate"), icon: <FileStack size={14} />, testId: "save-template-open", disabled: p.publishState === "draft", hint: p.publishState === "draft" ? t("template.needsPublish") : undefined });
   // Delete in BOTH modes; manage-gated by onDelete being set. Destructive (danger). #4.
   if (p.onDelete) items.push({ value: "delete", label: t("page.delete"), icon: <Trash2 size={14} />, testId: "delete-page", danger: true });
+  if (p.onDeleteForever) items.push({ value: "deleteForever", label: t("page.deleteForever"), icon: <Trash2 size={14} />, testId: "delete-page-forever", danger: true });
   return items;
 }
 function runOverflow(p: PageControlsProps, v: string, watch?: WatchItems) {
@@ -173,6 +177,7 @@ function runOverflow(p: PageControlsProps, v: string, watch?: WatchItems) {
   else if (v === "permissions") p.onPermissions?.();
   else if (v === "share") p.onShare?.();
   else if (v === "delete") p.onDelete?.();
+  else if (v === "deleteForever") p.onDeleteForever?.();
 }
 
 // ── STATUS: under the title, right-aligned (draft / unpublished text + comments btn) ──

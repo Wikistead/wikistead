@@ -58,6 +58,7 @@ export function PageTree({
   onTogglePin,
   onMove,
   disableDrop,
+  deleteMode = "trash_only",
 }: {
   nodes: PageTreeNode[];
   selectedId: string | null;
@@ -65,6 +66,9 @@ export function PageTree({
   canEdit?: boolean;
   openByDefault?: boolean; // read-only callers (public reader) expand the whole tree so it's browsable at a glance
   onRowAction?: (value: string, d: PageTreeNode) => void;
+  // #437 / ADR-167: the space's resolved deletion-pathway policy — shapes which delete entries the
+  // row menu offers (trash / permanent / both). UI only; the server routes gate regardless.
+  deleteMode?: "trash_only" | "both" | "direct_only";
   // #284: pin/unpin toggle — a member-personal action, so NOT canEdit-gated (a view-only
   // member may pin). Ref-routed like onRowAction (the NodeRow identity contract, ADR-119).
   onTogglePin?: (d: PageTreeNode) => void;
@@ -215,7 +219,12 @@ export function PageTree({
                     <DropdownMenuItem onSelect={() => onRowActionRef.current!("share", d)}><Share2 size={13} /> {t("sidebar.share")}</DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => onRowActionRef.current!("rename", d)}><Pencil size={13} /> {t("sidebar.rename")}</DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => onRowActionRef.current!("duplicate", d)} data-testid="tree-duplicate-page"><Copy size={13} /> {t("page.duplicatePage")}</DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => onRowActionRef.current!("delete", d)} data-danger="" variant="destructive"><Trash2 size={13} /> {t("sidebar.delete")}</DropdownMenuItem>
+                    {deleteMode !== "direct_only" && (
+                      <DropdownMenuItem onSelect={() => onRowActionRef.current!("delete", d)} data-danger="" variant="destructive"><Trash2 size={13} /> {t("sidebar.delete")}</DropdownMenuItem>
+                    )}
+                    {(deleteMode === "both" || deleteMode === "direct_only") && (
+                      <DropdownMenuItem onSelect={() => onRowActionRef.current!("deleteForever", d)} data-danger="" variant="destructive" data-testid="tree-delete-forever"><Trash2 size={13} /> {t("sidebar.deleteForever")}</DropdownMenuItem>
+                    )}
                   </>
                 )}
               </DropdownMenuContent>
@@ -226,7 +235,7 @@ export function PageTree({
        </div>
       </div>
     );
-  }, [selectedId, canEdit, t, onOpen]);
+  }, [selectedId, canEdit, t, onOpen, deleteMode]);
 
   return (
     // #398: expose the measured tree width as a CSS var so a row can cap its width to it. react-arborist's

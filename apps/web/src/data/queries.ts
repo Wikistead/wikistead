@@ -22,6 +22,9 @@ export interface Space {
   // #364 / ADR-157: the space HOME page pointer. Server-side oracle guard: null when unset OR when
   // the caller cannot view the pointed page (byte-identical), so the client can trust it blindly.
   homePageId?: string | null;
+  // #437 / ADR-167: the RESOLVED deletion-pathway policy (space override ?? tenant default).
+  // Shapes the delete menu only — the routes gate regardless.
+  deleteMode?: "trash_only" | "both" | "direct_only";
 }
 export interface Page {
   id: string;
@@ -211,6 +214,62 @@ export function useDeletePage() {
       qc.invalidateQueries({ queryKey: ["pages", args.spaceId] });
       qc.invalidateQueries({ queryKey: ["backlinks"] }); // #307 / ADR-127: a deleted page's outbound links vanish → other pages' backlinks change
       qc.invalidateQueries({ queryKey: ["space-trash", args.spaceId] });
+    },
+  });
+}
+
+// #437 / ADR-167: the DIRECT permanent path (modes 'both' / 'direct_only'; the server 400s otherwise).
+export function useDirectDeletePage() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { pageId: string; spaceId: string }) =>
+      apiFetch<null>(`/pages/${args.pageId}/permanent`, token, { method: "DELETE" }),
+    onSuccess: (_p, args) => {
+      qc.invalidateQueries({ queryKey: ["pages", args.spaceId] });
+      qc.invalidateQueries({ queryKey: ["backlinks"] });
+      qc.invalidateQueries({ queryKey: ["space-trash", args.spaceId] });
+    },
+  });
+}
+
+// #437 / ADR-167: the delete-mode knobs (tenant admin + per-space override).
+export function useAdminDeleteMode(enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["admin-delete-mode"],
+    queryFn: () => apiFetch<{ deleteMode: string }>(`/admin/delete-mode`, token),
+    enabled,
+  });
+}
+export function useSetAdminDeleteMode() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: string) => apiFetch<{ deleteMode: string }>(`/admin/delete-mode`, token, { method: "PUT", body: JSON.stringify({ deleteMode: v }) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-delete-mode"] });
+      qc.invalidateQueries({ queryKey: ["spaces"] }); // the resolved mode rides the spaces listing
+    },
+  });
+}
+export function useSpaceDeleteMode(spaceId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["space-delete-mode", spaceId],
+    queryFn: () => apiFetch<{ deleteMode: string | null; tenantDefault: string; resolved: string }>(`/spaces/${encodeURIComponent(spaceId)}/delete-mode`, token),
+    enabled: enabled && spaceId.length > 0,
+  });
+}
+export function useSetSpaceDeleteMode() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { spaceId: string; deleteMode: string | null }) =>
+      apiFetch<{ deleteMode: string | null }>(`/spaces/${encodeURIComponent(args.spaceId)}/delete-mode`, token, { method: "PUT", body: JSON.stringify({ deleteMode: args.deleteMode }) }),
+    onSuccess: (_r, args) => {
+      qc.invalidateQueries({ queryKey: ["space-delete-mode", args.spaceId] });
+      qc.invalidateQueries({ queryKey: ["spaces"] });
     },
   });
 }

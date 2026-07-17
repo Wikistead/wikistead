@@ -1,7 +1,9 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useAdminSpaces } from "../data/queries";
+import { useAdminSpaces, useAdminDeleteMode, useSetAdminDeleteMode } from "../data/queries";
 import { Button } from "../ui/Button";
+import { Select } from "../ui/Select";
+import { notify } from "../ui/toast";
 
 // Tenant admin → Spaces overview (Phase 5 #4). Lists every space in the tenant
 // with page + direct-grant counts, and links to each space's settings. tenant#admin
@@ -10,6 +12,9 @@ export function AdminSpacesTab() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const spaces = useAdminSpaces();
+  // #437 / ADR-167: tenant default delete-mode (pathways only; WHO may delete never changes).
+  const deleteMode = useAdminDeleteMode();
+  const setDeleteMode = useSetAdminDeleteMode();
 
   return (
     <div className="max-w-[720px] p-6" data-testid="admin-spaces">
@@ -18,6 +23,26 @@ export function AdminSpacesTab() {
       {/* #445 / ADR-171: who may create spaces moved to Admin → Roles (the member default-role
           createSpaces preset) — the #399 §2 policy select is retired. */}
       <p className="mt-0 mb-4 text-sm text-fg-dim">{t("adminSpaces.creationMovedToRoles")}</p>
+      <div className="mb-6" data-testid="admin-delete-mode">
+        <h3 className="mt-0 text-sm font-medium">{t("adminSpaces.deleteModeTitle")}</h3>
+        <p className="mt-0 mb-2 text-sm text-fg-dim">{t("adminSpaces.deleteModeBody")}</p>
+        <Select
+          size="sm"
+          value={deleteMode.data?.deleteMode ?? "trash_only"}
+          disabled={deleteMode.isLoading || setDeleteMode.isPending}
+          ariaLabel={t("adminSpaces.deleteModeTitle")}
+          testId="admin-delete-mode-select"
+          options={[
+            { value: "trash_only", label: t("deleteMode.trash_only") },
+            { value: "both", label: t("deleteMode.both") },
+            { value: "direct_only", label: t("deleteMode.direct_only") },
+          ]}
+          onChange={(v) => setDeleteMode.mutate(v, {
+            onSuccess: () => notify.success(t("toast.saved")),
+            onError: () => notify.error(t("toast.actionFailed")),
+          })}
+        />
+      </div>
       {spaces.isLoading && <p className="text-sm text-fg-dim">{t("common.loading")}</p>}
       {!spaces.isLoading && (spaces.data?.length ?? 0) === 0 && <p className="text-sm text-fg-dim">{t("adminSpaces.empty")}</p>}
 
