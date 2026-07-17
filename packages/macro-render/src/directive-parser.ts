@@ -22,12 +22,36 @@ const COLON = 58; // ':'
 // as a DirectiveMark (parseBlock below), so a label's `[..]` (or any stray `]`) is never left to
 // Markdown inline parsing. #94 bug: the old strict `$` made `:::callout[a]b]` (and any `:::name
 // [label] trailing`) FAIL to match → the line fell back to a paragraph and `[a]` was linkified.
-export function parseDirectiveOpen(text: string): { colons: number; name: string; label?: string } | null {
-  const m = /^(:{3,})[ \t]*([A-Za-z][\w-]*)[ \t]*(?:\[([^\]]*)\])?/.exec(text);
+// #393 / ADR-151 §0: the shared directive-ATTRIBUTE facility. `{key=val key2="v w"}` after the optional
+// [label] (remark-directive / MyST / Pandoc common form). Keys are word-chars; a value is either bare
+// (no spaces/braces/quotes) or double-quoted. Unknown keys are PRESERVED verbatim in the map (lossless
+// round-trip — a consumer reads only the keys it knows; serializers re-emit what they parsed). Absent /
+// empty `{}` → no `attrs` field (backward compatible: every existing consumer sees the same shape).
+export function parseDirectiveAttrs(inner: string): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  let any = false;
+  const re = /([A-Za-z_][\w-]*)=(?:"([^"]*)"|([^\s"{}]+))/g;
+  for (let m = re.exec(inner); m; m = re.exec(inner)) {
+    out[m[1]!] = m[2] ?? m[3] ?? "";
+    any = true;
+  }
+  return any ? out : undefined;
+}
+
+export function serializeDirectiveAttrs(attrs: Record<string, string> | undefined): string {
+  if (!attrs) return "";
+  const parts = Object.entries(attrs).map(([k, v]) => (/^[^\s"{}]+$/.test(v) ? `${k}=${v}` : `${k}="${v.replace(/"/g, "")}"`));
+  return parts.length ? `{${parts.join(" ")}}` : "";
+}
+
+export function parseDirectiveOpen(text: string): { colons: number; name: string; label?: string; attrs?: Record<string, string> } | null {
+  const m = /^(:{3,})[ \t]*([A-Za-z][\w-]*)[ \t]*(?:\[([^\]]*)\])?[ \t]*(?:\{([^}]*)\})?/.exec(text);
   if (!m) return null;
-  const out: { colons: number; name: string; label?: string } = { colons: m[1]!.length, name: m[2]! };
+  const out: { colons: number; name: string; label?: string; attrs?: Record<string, string> } = { colons: m[1]!.length, name: m[2]! };
   const label = m[3]?.trim();
   if (label) out.label = label;
+  const attrs = m[4] != null ? parseDirectiveAttrs(m[4]) : undefined; // #393: {key=val} attributes
+  if (attrs) out.attrs = attrs;
   return out;
 }
 
@@ -54,6 +78,7 @@ export interface ResolvedDirective {
   colons: number;
   name: string;
   label?: string;
+  attrs?: Record<string, string>; // #393 / ADR-151: `{key=val}` attributes off the opening fence
   depth: number;     // nesting depth (0 = top-level)
   closed: boolean;   // false if the directive ran to EOF without a matching close fence
 }
@@ -66,7 +91,7 @@ function isBareColonLine(text: string): boolean {
 
 export function resolveDirectiveRanges(text: string): ResolvedDirective[] {
   const out: ResolvedDirective[] = [];
-  const stack: { from: number; bodyFrom: number; colons: number; name: string; label?: string; depth: number }[] = [];
+  const stack: { from: number; bodyFrom: number; colons: number; name: string; label?: string; attrs?: Record<string, string>; depth: number }[] = [];
   const lines = text.split("\n");
   let offset = 0;
   for (const line of lines) {
@@ -76,10 +101,10 @@ export function resolveDirectiveRanges(text: string): ResolvedDirective[] {
     if (bare && stack.length > 0) {
       // CLOSE — pop the INNERMOST open directive (Pandoc semantics; colon count does NOT gate).
       const top = stack.pop()!;
-      out.push({ from: top.from, to: lineEnd, bodyFrom: top.bodyFrom, bodyTo: lineStart, colons: top.colons, name: top.name, label: top.label, depth: top.depth, closed: true });
+      out.push({ from: top.from, to: lineEnd, bodyFrom: top.bodyFrom, bodyTo: lineStart, colons: top.colons, name: top.name, label: top.label, attrs: top.attrs, depth: top.depth, closed: true });
     } else {
       const open = parseDirectiveOpen(line);
-      if (open) stack.push({ from: lineStart, bodyFrom: Math.min(lineEnd + 1, text.length), colons: open.colons, name: open.name, label: open.label, depth: stack.length });
+      if (open) stack.push({ from: lineStart, bodyFrom: Math.min(lineEnd + 1, text.length), colons: open.colons, name: open.name, label: open.label, attrs: open.attrs, depth: stack.length });
       // else: a content line (or a bare `:::` with no open directive) — ignored.
     }
     offset = lineEnd + 1; // +1 for the consumed "\n"
@@ -87,7 +112,7 @@ export function resolveDirectiveRanges(text: string): ResolvedDirective[] {
   // Unclosed directives at EOF close at the text end (reveal-on-cursor / editing an in-progress block).
   while (stack.length > 0) {
     const top = stack.pop()!;
-    out.push({ from: top.from, to: text.length, bodyFrom: top.bodyFrom, bodyTo: text.length, colons: top.colons, name: top.name, label: top.label, depth: top.depth, closed: false });
+    out.push({ from: top.from, to: text.length, bodyFrom: top.bodyFrom, bodyTo: text.length, colons: top.colons, name: top.name, label: top.label, attrs: top.attrs, depth: top.depth, closed: false });
   }
   // Sort by start offset so callers get document order (the stack pops innermost-first).
   return out.sort((a, b) => a.from - b.from || b.to - a.to);

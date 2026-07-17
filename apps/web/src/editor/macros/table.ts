@@ -1,6 +1,6 @@
 import type { DirectiveMacro, MacroTier, MacroLevel } from "./registry";
 import { asMacroSource } from "./registry";
-import { parseHtml, styleToCss, parseTableSource, toHtml, toPipe, representableAsPipe, type Grid } from "./table-model";
+import { parseHtml, styleToCss, parseTableSource, toHtml, toPipe, representableAsPipe, tableAlignOf, tableFence, type Grid } from "./table-model";
 import { renderCellInline } from "./table-cell-dom";
 import { tableInlineEditor } from "../live-preview/table-edit";
 import { unsafeHtml } from "./safe-html";
@@ -13,15 +13,19 @@ import { tableHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRe
 // used to live in the table editor (serialize()), now declared as data the host applies.
 const PIPE: MacroLevel = { id: "pipe", layer: "gfm" };
 const HTML: MacroLevel = { id: "html", layer: "directive" };
+
 export const tableTier: MacroTier = {
   levels: [PIPE, HTML],
   canRepresentAt(source, level) {
     if (level.id === HTML.id) return true; // HTML can express any grid
-    return representableAsPipe(parseTableSource(source)); // pipe only if span/style/complex-header free
+    // #393: pipe (pure GFM) cannot carry the align attribute — a left/right table STAYS :::table (the
+    // tier never silently demotes the alignment away); center is the default there → no loss.
+    return representableAsPipe(parseTableSource(source)) && tableAlignOf(String(source)) === "center";
   },
   toLevel(source, level) {
     const grid = parseTableSource(source);
-    return asMacroSource(level.id === PIPE.id ? toPipe(grid) : ":::table\n" + toHtml(grid) + "\n:::");
+    const align = tableAlignOf(String(source)); // #393: preserved across re-serialization
+    return asMacroSource(level.id === PIPE.id ? toPipe(grid) : tableFence(align) + "\n" + toHtml(grid) + "\n:::");
   },
 };
 

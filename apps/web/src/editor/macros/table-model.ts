@@ -321,3 +321,20 @@ export function representableAsPipe(grid: Grid): boolean {
 export function serialize(grid: Grid): { tier: "pipe" | "html"; text: string } {
   return representableAsPipe(grid) ? { tier: "pipe", text: toPipe(grid) } : { tier: "html", text: toHtml(grid) };
 }
+
+// #393 / ADR-151: whole-table BLOCK alignment, carried as a `:::table{align=left|right}` directive
+// attribute on the opening fence. FIXED enum; `center` is the DEFAULT and writes NO attribute
+// (fence-info convention), so an unaligned table stays a bare `:::table` / plain pipe. The align lives
+// ALONGSIDE the grid (never inside CellStyle — that is per-cell text alignment, orthogonal). Lives here
+// (not table.ts) so table-edit.ts can consume it without a table ⇄ table-edit import cycle.
+export type TableAlign = "left" | "center" | "right";
+export function tableAlignOf(source: string): TableAlign {
+  const firstLine = source.split("\n", 1)[0] ?? "";
+  const m = /^:{3,}[ \t]*table[ \t]*(?:\[[^\]]*\])?[ \t]*\{([^}]*)\}/.exec(firstLine.trimStart());
+  const a = m ? /(?:^|\s)align=("?)(left|right|center)\1(?:\s|$)/.exec(m[1]!)?.[2] : undefined;
+  return a === "left" || a === "right" ? a : "center";
+}
+// The opening fence for a given align — center omits the attribute (round-trip stable).
+export function tableFence(align: TableAlign): string {
+  return align === "center" ? ":::table" : `:::table{align=${align}}`;
+}

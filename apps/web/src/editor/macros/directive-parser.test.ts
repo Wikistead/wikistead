@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parser } from "@lezer/markdown";
-import { directiveExtension, parseDirectiveOpen, isDirectiveClose } from "./directive-parser";
+import { directiveExtension, parseDirectiveOpen, isDirectiveClose, resolveDirectiveRanges, serializeDirectiveAttrs } from "./directive-parser";
 
 const p = parser.configure(directiveExtension);
 
@@ -14,14 +14,14 @@ function nodes(src: string): string[] {
 describe("directive fence matchers", () => {
   it("recognizes an opening fence with a name (+ optional attrs)", () => {
     expect(parseDirectiveOpen(":::callout")).toEqual({ colons: 3, name: "callout" });
-    expect(parseDirectiveOpen(":::note{type=warn}")).toEqual({ colons: 3, name: "note" });
+    expect(parseDirectiveOpen(":::note{type=warn}")).toEqual({ colons: 3, name: "note", attrs: { type: "warn" } }); // #393: attrs parse now
     expect(parseDirectiveOpen("::::columns")).toEqual({ colons: 4, name: "columns" });
     expect(parseDirectiveOpen(":::")).toBeNull(); // no name → not an opening
     expect(parseDirectiveOpen("text")).toBeNull();
   });
   it("parses an optional leading [label] / custom header (#94)", () => {
     expect(parseDirectiveOpen(":::callout[My Note]")).toEqual({ colons: 3, name: "callout", label: "My Note" });
-    expect(parseDirectiveOpen(":::note[Heads up]{type=warn}")).toEqual({ colons: 3, name: "note", label: "Heads up" });
+    expect(parseDirectiveOpen(":::note[Heads up]{type=warn}")).toEqual({ colons: 3, name: "note", label: "Heads up", attrs: { type: "warn" } }); // #393
     expect(parseDirectiveOpen(":::callout[  spaced  ]")).toEqual({ colons: 3, name: "callout", label: "spaced" }); // trimmed
     expect(parseDirectiveOpen(":::callout[]")).toEqual({ colons: 3, name: "callout" }); // empty → no label
     expect(parseDirectiveOpen(":::callout")).toEqual({ colons: 3, name: "callout" }); // unchanged (no label)
@@ -89,7 +89,6 @@ describe("directive parser (composite, nested markdown)", () => {
   });
 });
 
-import { resolveDirectiveRanges } from "./directive-parser";
 
 // #185 / ADR-096 (Option B): the pure stack resolver is the single source of truth for `:::` nesting.
 // A close pops the INNERMOST open directive (Pandoc semantics); colon count never gates the close, so a
@@ -153,5 +152,27 @@ describe("resolveDirectiveRanges (stack-based nesting)", () => {
     const rs = resolveDirectiveRanges(":::note\nstill typing");
     expect(rs[0]).toMatchObject({ name: "note", closed: false });
     expect(rs[0]!.to).toBe(":::note\nstill typing".length);
+  });
+});
+
+// #393 / ADR-151 §0: the shared directive-ATTRIBUTE facility ({key=val} after the optional [label]).
+describe("directive attributes (#393 / ADR-151)", () => {
+  it("parses bare and quoted values; unknown keys preserved verbatim", () => {
+    expect(parseDirectiveOpen(":::table{align=left}")).toEqual({ colons: 3, name: "table", attrs: { align: "left" } });
+    expect(parseDirectiveOpen(':::table{align=right foo="two words"}')).toEqual({ colons: 3, name: "table", attrs: { align: "right", foo: "two words" } });
+    expect(parseDirectiveOpen(":::table{}")).toEqual({ colons: 3, name: "table" }); // empty braces → no attrs field
+    expect(parseDirectiveOpen(":::table")).toEqual({ colons: 3, name: "table" }); // absent → unchanged shape
+  });
+  it("serializeDirectiveAttrs round-trips what parseDirectiveAttrs read (order-stable, lossless)", () => {
+    const attrs = parseDirectiveOpen(':::table{align=left keep="a b"}')!.attrs!;
+    expect(serializeDirectiveAttrs(attrs)).toBe('{align=left keep="a b"}');
+    expect(serializeDirectiveAttrs(undefined)).toBe("");
+    expect(serializeDirectiveAttrs({})).toBe("");
+  });
+  it("resolveDirectiveRanges carries attrs on the resolved range", () => {
+    const r = resolveDirectiveRanges(":::table{align=right}\n<table></table>\n:::\n");
+    expect(r).toHaveLength(1);
+    expect(r[0]!.name).toBe("table");
+    expect(r[0]!.attrs).toEqual({ align: "right" });
   });
 });
