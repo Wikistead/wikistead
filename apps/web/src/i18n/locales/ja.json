@@ -413,6 +413,7 @@
     "done": "閉じる",
     "publish": "公開",
     "vimMode": "Vim モード",
+    "vimTouchDisabled": "タッチデバイスでは Vim は使えません（ソフトキーボード入力のため）",
     "split": "Vim モード",
     "single": "通常モード",
     "comments": "コメント",

@@ -390,6 +390,11 @@ function PageRoute({ pageIdOverride }: { pageIdOverride?: string } = {}) {
   useDisplayModeShortcut(cycleDisplayMode, editing, resolveKey("editor.cycleDisplayMode", keybindings));
   const isDesktop = useMediaQuery("(min-width: 768px)"); // 3 floating groups vs one ⋯
   const isWide = useMediaQuery("(min-width: 1200px)"); // #192: enough right whitespace for the TOC rail
+  // #406 S4 / ADR-159 (e): a coarse pointer (touch = soft keyboard) forces the EFFECTIVE vim off
+  // vim breaks soft-keyboard input. The stored preference is untouched (vim returns on a fine-pointer
+  // device); the Compartment reconfigure in Editor swaps keymaps in place (collab/presence unbroken).
+  const coarsePointer = useMediaQuery("(pointer: coarse)");
+  const effectiveVim = vim && !coarsePointer;
   // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
   const publishState = !canEdit ? null : published?.publishedMd == null ? "draft" : published?.hasUnpublishedChanges ? "unpublished" : null;
 
@@ -468,7 +473,8 @@ function PageRoute({ pageIdOverride }: { pageIdOverride?: string } = {}) {
     canPublish: !!published?.hasUnpublishedChanges,
     onPublish: canEdit ? publishPage : undefined,
     publishing: publish.isPending,
-    vim,
+    vim: effectiveVim,
+    vimForcedOff: coarsePointer,
     onToggleVim: toggleVim,
     displayMode,
     onCycleDisplayMode: cycleDisplayMode,
@@ -585,7 +591,7 @@ function PageRoute({ pageIdOverride }: { pageIdOverride?: string } = {}) {
                 {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}
               </div>
             </div>
-            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={vim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #192: the TOC rail lives in the content's RIGHT WHITESPACE, inside the editor area, so the
                 scrollbar (the editor's, at the far right) is to the RIGHT of the rail — not between them.
@@ -846,6 +852,9 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
   useDisplayModeShortcut(cycleDisplayMode, editing, resolveKey("editor.cycleDisplayMode", undefined));
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const isWide = useMediaQuery("(min-width: 1200px)"); // #192: right whitespace for the TOC rail
+  // #406 S4: same coarse-pointer vim force-off as the member surface (ADR-159 (e)).
+  const coarsePointer = useMediaQuery("(pointer: coarse)");
+  const effectiveVim = vim && !coarsePointer;
 
   const reloadPublished = useCallback(() => {
     apiFetch<{ title?: string; publishedMd: string | null; canComment?: boolean }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
@@ -912,7 +921,8 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
     editing,
     onEdit: () => setEditing(true),
     onDone: () => setEditing(false),
-    vim,
+    vim: effectiveVim,
+    vimForcedOff: coarsePointer,
     onToggleVim: toggleVim,
     displayMode,
     onCycleDisplayMode: cycleDisplayMode,
@@ -959,7 +969,7 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
                 #374 guestSurface keeps the MEMBER-ONLY sources (title dictionary / backlinks / query)
                 suppressed — pageId used to double as their gate, so passing it above un-gated them on this
                 guest surface (the title-links-224 guest anti-test: no auto links for a guest, 2-layer rule). */}
-            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={vim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #227 the shared TocChrome (rail on wide / overlay on narrow); yields to the comments
                 panel when open (shared right zone — no pointer overlap). */}

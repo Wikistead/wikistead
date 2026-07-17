@@ -155,3 +155,33 @@ test("#406 S2: phone public reader — no horizontal overflow, readable base fon
   const font = await anon.getByTestId("public-body").evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
   expect(font, "readable base font on a phone").toBeGreaterThanOrEqual(15);
 });
+
+// ---- S4 (editor light pass, the ruled piece): (pointer: coarse) forces vim OFF ----
+// A vim-enabled user's soft-keyboard input breaks under vim, so on a touch device the EFFECTIVE
+// keymap is plain CM6 while the stored preference stays untouched (vim returns on a fine pointer).
+test("#406 S4: coarse pointer forces vim OFF without touching the stored preference", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: PHONE, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  await page.addInitScript(() => localStorage.setItem("wks.editorVim", "1")); // vim pref ON
+  await page.goto("/p/demo");
+  await page.waitForSelector("[data-pane=preview] .cm-content", { timeout: 15000 });
+  await sleep(600);
+  // enter edit via the mobile cluster
+  await page.getByTestId("page-controls-mobile").click();
+  await page.getByTestId("m-edit-toggle").click();
+  await page.waitForSelector("[data-pane=preview] .cm-content[contenteditable=true]", { timeout: 10000 });
+  await sleep(600);
+  // vim is OFF on the surface: no fat (normal-mode) cursor renders
+  await page.click("[data-pane=preview] .cm-content");
+  await sleep(300);
+  await expect(page.locator(".cm-fat-cursor"), "no vim normal-mode cursor on touch").toHaveCount(0);
+  // the mobile menu's vim row is disabled (visible but inert, with the explanation)
+  await page.getByTestId("page-controls-mobile").click();
+  const vimRow = page.getByTestId("m-vim-toggle");
+  await expect(vimRow).toBeVisible();
+  await expect(vimRow).toHaveAttribute("data-disabled", "");
+  await page.keyboard.press("Escape");
+  // the stored preference is untouched — a fine-pointer device would restore vim
+  const pref = await page.evaluate(() => localStorage.getItem("wks.editorVim"));
+  expect(pref, "the device-local vim preference survives").toBe("1");
+});
