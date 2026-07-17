@@ -87,3 +87,71 @@ test("#406 S1: tablet (md) keeps the desktop chrome — docked sidebar, 320px pa
   const w = await panel.evaluate((el) => el.getBoundingClientRect().width);
   expect(Math.round(w), "docked aside width").toBe(320);
 });
+
+// ---- S2 (read surfaces): the T1/T2 phone reading invariants (ADR-159 §1/§3) ----
+// Wide content (tables, code, long URLs) must scroll INSIDE its own container — the page body never
+// scrolls horizontally — and the public reader keeps a readable base font on a phone.
+import { enterEdit, openScratch, setPublicSurface } from "../helpers";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const WIDE_CONTENT =
+  "# Wide\n\nbody paragraph\n\n| colA | colB | colC | colD | colE | colF |\n| --- | --- | --- | --- | --- | --- |\n| a very long cell value here | bbbb | cccc | dddd | eeee | ffff |\n\n```js\nconst aVeryLongLineOfCodeThatWouldOverflowTheNarrowViewportWidthForSureYesReally = 1234567890;\n```\n\ntail\n";
+
+async function docOverflow(page: import("@playwright/test").Page) {
+  return page.evaluate(() => ({
+    over: document.documentElement.scrollWidth > window.innerWidth + 1,
+    innerScrollers: [...document.querySelectorAll("[data-pane=preview] *, [data-testid=public-body] *")]
+      .filter((el) => el.scrollWidth > el.clientWidth + 2 && /auto|scroll/.test(getComputedStyle(el).overflowX)).length,
+  }));
+}
+
+test("#406 S2: phone member READ surface — wide content scrolls in-container, never the page", async ({ browser }) => {
+  const desktop = await (await browser.newContext()).newPage();
+  const id = await openScratch(desktop, "mobile-read-406");
+  await enterEdit(desktop);
+  await desktop.click("[data-pane=preview] .cm-content");
+  await desktop.keyboard.insertText(WIDE_CONTENT);
+  await sleep(400);
+  await desktop.getByTestId("publish-page").click();
+  await sleep(800);
+
+  const phone = await (await browser.newContext({ viewport: PHONE })).newPage();
+  await phone.goto(`/p/${id}`);
+  await phone.waitForSelector("[data-pane=preview] .cm-content", { timeout: 15000 });
+  await sleep(800);
+  const m = await docOverflow(phone);
+  expect(m.over, "the page never scrolls horizontally").toBe(false);
+  // the CM read surface WRAPS long code lines (lineWrapping) and the table scrolls in its wrap —
+  // either strategy is fine; the invariant is that nothing widens the page itself.
+});
+
+test("#406 S2: phone public reader — no horizontal overflow, readable base font", async ({ browser }) => {
+  const repoEnv = readFileSync(fileURLToPath(new URL("../../../.env.e2e.local", import.meta.url)), "utf8");
+  const STORE = /OPENFGA_STORE_ID=(.+)/.exec(repoEnv)![1]!.trim();
+  const MODEL = /OPENFGA_MODEL_ID=(.+)/.exec(repoEnv)![1]!.trim();
+  const authed = await (await browser.newContext()).newPage();
+  const id = await openScratch(authed, "mobile-pub-406");
+  await enterEdit(authed);
+  await authed.click("[data-pane=preview] .cm-content");
+  await authed.keyboard.insertText(WIDE_CONTENT);
+  await sleep(400);
+  await authed.getByTestId("publish-page").click();
+  await sleep(800);
+  const res = await fetch(`http://localhost:8090/stores/${STORE}/write`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ writes: { tuple_keys: [{ user: "user:*", relation: "view_base", object: `page:${id}` }] }, authorization_model_id: MODEL }),
+  });
+  expect(res.ok).toBe(true);
+  await setPublicSurface(authed, true);
+
+  const anon = await (await browser.newContext({ viewport: PHONE })).newPage();
+  await anon.goto(`/pub/${id}`);
+  await expect(anon.getByTestId("public-title")).toBeVisible({ timeout: 15000 });
+  await sleep(500);
+  const m = await docOverflow(anon);
+  expect(m.over, "the public reader never scrolls horizontally").toBe(false);
+  const font = await anon.getByTestId("public-body").evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(font, "readable base font on a phone").toBeGreaterThanOrEqual(15);
+});
