@@ -15,6 +15,7 @@ export type { MacroHtmlDescriptor, MacroHtmlRegistry } from "./render.js";
 export { walkMarkdown, walkInlineMarkdown } from "./md-visitor.js";
 export type { MdSink, MdOpenRole, MdLeafRole, MdRoleData } from "./md-visitor.js";
 export { slugify, extractHeadingsFromMarkdown, sliceSectionBySlug, sliceBlockByAnchor } from "./headings.js"; // #325 / ADR-137: shared slug + section/block extractor
+export { MCP_SYNTAX_MANIFEST, renderMcpSyntaxSections, type McpSyntaxEntry } from "./mcp-manifest.js"; // #447 / ADR-172: the MCP syntax-reference manifest (lock-step with the editor registry)
 export type { MdHeading } from "./headings.js";
 export {
   parseLayoutItems,
