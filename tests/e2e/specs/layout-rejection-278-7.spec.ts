@@ -294,3 +294,61 @@ test("#278-10 ②③ invariants: no isolated colon in island DOM; stable scroll 
   }
   expect(new Set(states).size, "overflow state never flips during the walk").toBeLessThanOrEqual(1);
 });
+
+// ---- #278 (owner ruling): island chrome === top-level chrome, structurally ----
+// The SAME macro placed at top level and inside a slot island must produce an IDENTICAL chrome
+// signature — class, computed position, and per-state opacity (after-entry / head-caret / zone-hover).
+// The only island-specific CSS allowed is boundary scoping; any island-only override (position or
+// trigger) turns this red. New chrome classes inherit the comparison automatically via the signature.
+
+test("#278-11 the raw pill's signature is IDENTICAL at top level and inside an island", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "chrome-unify-278");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::warning[w]\ntopinner\n:::\n\n::::columns\n:::column\nlead\n\n:::warning[w]\ninner\n:::\nbelow\n:::\n:::column\na\n:::\n::::\n\ntail\n");
+  await sleep(800);
+  await page.getByText("tail", { exact: true }).click();
+  await sleep(300);
+
+  const sig = (scopeSel: string | null) =>
+    page.evaluate((sel) => {
+      const scope = sel ? document.querySelector(sel) : document.querySelector("[data-pane=preview]");
+      const pill = scope?.querySelector(".cm-lp-macro-richui-raw");
+      if (!pill) return null;
+      const cs = getComputedStyle(pill);
+      const line = pill.closest(".cm-line")!;
+      const pr = pill.getBoundingClientRect(), lr = line.getBoundingClientRect();
+      return { cls: pill.className, top: cs.top, left: cs.left, op: cs.opacity,
+        relTop: Math.round(pr.top - lr.top), relLeft: Math.round(pr.left - lr.left) };
+    }, scopeSel);
+
+  // TOP: panel click parks the caret on the BODY line (pill dark), ArrowUp to the head (pill lit)
+  await page.locator("[data-pane=preview] .cm-lp-callout-panel").first().click();
+  await sleep(400);
+  await page.mouse.move(10, 10); await sleep(250);
+  const topEntry = await sig(null);
+  await page.keyboard.press("ArrowUp"); await sleep(300);
+  const topHead = await sig(null);
+
+  // ISLAND: same sequence on the nested warning
+  await page.getByText("tail", { exact: true }).click(); await sleep(300);
+  await page.locator("[data-pane=preview]").getByText("lead", { exact: true }).click();
+  await sleep(700);
+  const ISL = "[data-testid=slot-edit-island]";
+  await expect(page.locator(ISL)).toHaveCount(1);
+  await page.locator(`${ISL} .cm-lp-callout-panel`).first().click();
+  await sleep(400);
+  await page.mouse.move(10, 10); await sleep(250);
+  const islEntry = await sig(ISL);
+  await page.keyboard.press("ArrowUp"); await sleep(300);
+  const islHead = await sig(ISL);
+
+  expect(topEntry, "top after-entry signature exists").toBeTruthy();
+  expect(islEntry, "island after-entry signature exists").toBeTruthy();
+  expect(islEntry, "after-entry: island === top").toEqual(topEntry);
+  expect(islHead, "head-caret: island === top").toEqual(topHead);
+  expect(parseFloat(topEntry!.op), "entry parks on the body — pill dark until deliberate head/hover").toBeLessThan(0.1);
+  expect(parseFloat(topHead!.op), "head caret lights the pill (the keyboard affordance) on BOTH surfaces").toBeGreaterThan(0.5);
+  expect(topHead!.relTop, "the shared -1.5em float position").toBeLessThan(0);
+});
