@@ -163,3 +163,56 @@ describe('role assignment expansion (#420 increment 3)', () => {
     }
   })
 })
+
+describe('role-edit re-expansion (#420 increment 4, Fork B1)', () => {
+  it('adding a capability grants it to every live assignment; removing revokes it — with the multi-source guard', async () => {
+    const r1 = await makeRole('cra420-evolve', ['view'])
+    const r2 = await makeRole('cra420-cover', ['delete'])
+    const u = 'user:cra420-frank'
+    const a1 = (await assign(r1, 'page', pageId, u)).json() as { id: string }
+    const a2 = (await assign(r2, 'page', pageId, u)).json() as { id: string }
+    try {
+      expect(await check(fgaClient, u, 'delete', P(pageId))).toBe(true) // via r2
+      // EDIT r1: add delete + settings → live re-expansion. delete already exists (r2 owns) → not owned here.
+      const put1 = await app.inject({ method: 'PUT', url: `/admin/roles/${r1}`, headers: H, payload: { name: 'cra420-evolve', capabilities: ['view', 'delete', 'settings'] } })
+      expect(put1.statusCode).toBe(200)
+      expect(await check(fgaClient, u, 'settings', P(pageId)), 'added capability granted live').toBe(true)
+      // EDIT r1: remove delete+settings again. settings (owned by r1's assignment) is revoked; delete
+      // is STILL covered by r2 → the shared leaf survives (the role-edit reinforcement).
+      const put2 = await app.inject({ method: 'PUT', url: `/admin/roles/${r1}`, headers: H, payload: { name: 'cra420-evolve', capabilities: ['view'] } })
+      expect(put2.statusCode).toBe(200)
+      expect(await check(fgaClient, u, 'settings', P(pageId)), 'removed capability revoked everywhere').toBe(false)
+      expect(await check(fgaClient, u, 'delete', P(pageId)), 'a leaf another role still covers survives').toBe(true)
+      // r2's edit removing delete now takes the leaf with it (last source).
+      const put3 = await app.inject({ method: 'PUT', url: `/admin/roles/${r2}`, headers: H, payload: { name: 'cra420-cover', capabilities: ['comment'] } })
+      expect(put3.statusCode).toBe(200)
+      expect(await check(fgaClient, u, 'delete', P(pageId)), 'last covering source removes the leaf').toBe(false)
+      expect(await check(fgaClient, u, 'comment', P(pageId)), 'swap-in capability granted').toBe(true)
+    } finally {
+      await unassign(a1.id)
+      await unassign(a2.id)
+    }
+  })
+
+  it('a direct grant survives a role-edit removal (ownership guard); space assignments refuse a space-inapplicable addition', async () => {
+    const u = 'user:cra420-grace'
+    await grantPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: 'dev-user', grantee: u, relation: 'publish' })
+    const roleId = await makeRole('cra420-pub2', ['publish', 'view'])
+    const a = (await assign(roleId, 'page', pageId, u)).json() as { id: string }
+    const sAsg = (await assign(roleId, 'space', spaceId, 'user:cra420-heidi')).json() as { id: string }
+    try {
+      // Remove publish from the role: the page assignment never owned it (direct grant first) → survives.
+      const put = await app.inject({ method: 'PUT', url: `/admin/roles/${roleId}`, headers: H, payload: { name: 'cra420-pub2', capabilities: ['view'] } })
+      expect(put.statusCode).toBe(200)
+      expect(await check(fgaClient, u, 'publish', P(pageId)), 'direct grant survives the role edit').toBe(true)
+      // Adding a space-inapplicable capability while a SPACE assignment exists → 400, nothing changes.
+      const bad = await app.inject({ method: 'PUT', url: `/admin/roles/${roleId}`, headers: H, payload: { name: 'cra420-pub2', capabilities: ['view', 'comment'] } })
+      expect(bad.statusCode).toBe(400)
+      const [role] = await admin<{ capabilities: string[] }[]>`SELECT capabilities FROM roles WHERE id = ${roleId}`
+      expect(role!.capabilities).toEqual(['view'])
+    } finally {
+      await unassign(a.id)
+      await unassign(sAsg.id)
+    }
+  })
+})
