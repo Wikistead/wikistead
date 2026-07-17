@@ -95,6 +95,7 @@
     "keymap_default": "Always start off",
     "shortcuts": "Keyboard shortcuts",
     "shortcutsHint": "Synced across your devices. Press a key combo to rebind.",
+    "selectionModel": "Cards & selection",
     "cmd_toggleVim": "Toggle vim mode",
     "cmd_searchFocus": "Focus page search",
     "kbChange": "Change",
@@ -908,7 +909,7 @@
     "bannerText": "New: tailor the editor to how you write.",
     "bannerCta": "Set it up",
     "skippedNote": "We set up a balanced editor for you (vim off, with WYSIWYG). You can change this any time in Settings, or with “redo the questions”.",
-    "atomHint": "Tip: cards (embeds, images, layouts, dynamic lists) select as a unit — Ctrl+Enter changes what they point at; everything else you just type into."
+    "atomHint": "Tip: reference cards (embeds, transclusions, page lists) select as one unit with an accent ring — Ctrl+Enter changes what they point at. Layouts and callouts open for editing when you click into them; everything else you just type into."
   },
   "frontmatter": {
     "tagsLabel": "Tags",

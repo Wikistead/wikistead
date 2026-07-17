@@ -4537,7 +4537,10 @@ export const livePreviewTheme = EditorView.baseTheme({
   // buttons, checkboxes) keep their own element-level `pointer` rules, which win over inheritance.
   ".cm-lp-atom-body": { cursor: "default" },
   // ADR-024 atom selection: the caret resting on the atom rings it (selected as a unit).
-  ".cm-lp-atom-sel": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "1px", borderRadius: "4px" },
+  // #395UX: a soft halo AROUND the 2px ring — with tenant accents far from blue, the thin
+  // outline alone read as decoration, not selection. The halo widens the selected signal without
+  // touching layout (box-shadow is paint-only) and stays accent-tinted so themes keep their voice.
+  ".cm-lp-atom-sel": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "1px", borderRadius: "4px", boxShadow: "0 0 0 5px color-mix(in srgb, var(--accent, #4ea1ff) 22%, transparent)" },
   // #174 / ADR-087: mouse HOVER shows a subtle block-boundary highlight on EVERY block macro
   // (columns/tabs/table/mermaid/…), so a mouse user sees the block is an interactive unit — parity
   // with the selection ring. `:not(.cm-lp-atom-sel)` so the accent selection ring wins when selected.
@@ -4548,7 +4551,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   // the hover block-boundary frame AND the atom selection ring (the ✎ edit button is already gated on
   // !state.readOnly at build time). Higher specificity than the two rules above, so it wins. One rule fixes all
   // three read-only faces (the #335 read-only-unification axis).
-  ".cm-content[contenteditable=\"false\"] .cm-lp-macro-wrap:hover, .cm-content[contenteditable=\"false\"] .cm-lp-atom-sel": { outline: "none" },
+  ".cm-content[contenteditable=\"false\"] .cm-lp-macro-wrap:hover, .cm-content[contenteditable=\"false\"] .cm-lp-atom-sel": { outline: "none", boxShadow: "none" },
   ".cm-lp-macro": { display: "block", overflowX: "auto" },
   // #255: diagram alignment (mermaid/plantuml/excalidraw). Column flex on the wrap centres/pushes the
   // rendered block (align-items works regardless of the child's display; the absolute ✎ button is

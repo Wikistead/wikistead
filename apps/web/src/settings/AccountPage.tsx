@@ -241,6 +241,14 @@ function EditorTab() {
       />
       </SettingsCard>
 
+      <SettingsCard testid="account-atom-policy">
+        {/* #395A: the ADR-156 atom/typed-body policy line, on a surface EVERY user can reach
+            the onboarding done-screen shows it only on first run, so existing members never saw it.
+            Reuses the onboarding string: one source of truth for the policy wording. */}
+        <label className="mb-1 block text-sm font-medium">{t("account.selectionModel")}</label>
+        <p className="text-xs text-fg-dim">{t("onboarding.atomHint")}</p>
+      </SettingsCard>
+
       <SettingsCard>
         {/* ADR-056 / #164: startup display mode, orthogonal to the keymap. #289 added wysiwyg to
             the startup set (reading stays a mid-session state, not a startup value). */}
