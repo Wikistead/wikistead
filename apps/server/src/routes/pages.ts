@@ -3234,21 +3234,4 @@ export async function pagesPlugin(app: FastifyInstance) {
     return { publicEnabled: req.body.enabled }
   })
 
-  // #399 / ADR-158 §2: the tenant space-creation policy knob (admin-gated, the public-settings shape).
-  // RESTRICT-ONLY — enforcement lives inside createSpace; this endpoint only stores the setting.
-  app.get('/admin/creation-policy', async (req) => {
-    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id) // #383: the shared 403 "admin only" gate
-    const [row] = await req.db.sql<[{ space_creation_policy: string }?]>`
-      SELECT space_creation_policy FROM tenant_settings LIMIT 1`
-    return { spaceCreationPolicy: row?.space_creation_policy ?? 'members' }
-  })
-  app.put<{ Body: { spaceCreationPolicy?: string } }>('/admin/creation-policy', async (req, reply) => {
-    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
-    const v = req.body?.spaceCreationPolicy
-    if (v !== 'members' && v !== 'admins') return reply.code(400).send({ error: "spaceCreationPolicy ('members' | 'admins') required" })
-    await req.db.sql`
-      INSERT INTO tenant_settings (tenant_id, space_creation_policy) VALUES (${req.tenant.id}, ${v})
-      ON CONFLICT (tenant_id) DO UPDATE SET space_creation_policy = ${v}, updated_at = now()`
-    return { spaceCreationPolicy: v }
-  })
 }

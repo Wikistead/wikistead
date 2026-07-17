@@ -1127,7 +1127,7 @@ export interface AuditVerdict { valid: boolean; count: number; brokenAt?: number
 
 // #420 / ADR-164 increment 5: custom-role definitions + assignments (tenant-admin console; the
 // server enforces the admin gate + customRoles entitlement on writes — UI is convenience only).
-export interface RoleDef { id: string; name: string; capabilities: string[] }
+export interface RoleDef { id: string; name: string; capabilities: string[]; scope: "resource" | "tenant" }
 export function useRoles(enabled = true) {
   const { token } = useSession();
   return useQuery({
@@ -1140,7 +1140,7 @@ export function useCreateRole() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { name: string; capabilities: string[] }) =>
+    mutationFn: (body: { name: string; capabilities: string[]; scope?: "resource" | "tenant" }) =>
       apiFetch<RoleDef>("/admin/roles", token, { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["roles"] }),
   });
@@ -1222,20 +1222,24 @@ export function useSetPageCommentAudience(pageId: string | null) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["page-comment-audience", pageId] }),
   });
 }
-export function useSpaceCreationPolicy(enabled = true) {
+// #445 / ADR-171: the DEFAULT tenant-role presets (CE — replaces the #399 §2 creation-policy knob).
+// member.createSpaces IS the tenant#space_creator wildcard tuple; admin is locked-on by the model.
+export interface TenantRoleDefaults { member: { createSpaces: boolean }; admin: { createSpaces: boolean; locked: boolean } }
+export function useTenantRoleDefaults(enabled = true) {
   const { token } = useSession();
   return useQuery({
-    queryKey: ["creation-policy"],
-    queryFn: () => apiFetch<{ spaceCreationPolicy: string }>(`/admin/creation-policy`, token),
+    queryKey: ["tenant-role-defaults"],
+    queryFn: () => apiFetch<TenantRoleDefaults>(`/admin/roles/tenant-defaults`, token),
     enabled,
   });
 }
-export function useSetSpaceCreationPolicy() {
+export function useSetTenantRoleDefaults() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: string) => apiFetch<{ spaceCreationPolicy: string }>(`/admin/creation-policy`, token, { method: "PUT", body: JSON.stringify({ spaceCreationPolicy: v }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["creation-policy"] }),
+    mutationFn: (memberCreateSpaces: boolean) =>
+      apiFetch<TenantRoleDefaults>(`/admin/roles/tenant-defaults`, token, { method: "PUT", body: JSON.stringify({ memberCreateSpaces }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tenant-role-defaults"] }),
   });
 }
 export function usePageCreationPolicy(spaceId: string, enabled = true) {

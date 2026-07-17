@@ -30,6 +30,9 @@ function adminTuples(tenantId: string, sub: string) {
   return [
     { user: `user:${sub}`, relation: 'admin', object: `tenant:${tenantId}` },
     { user: `user:${sub}`, relation: 'member', object: `tenant:${tenantId}` },
+    // ADR-171 (#445): seed the "all members may create spaces" default. The member default-role
+    // toggle (roles.ts) deletes/re-writes this wildcard; admins keep creating via `or admin`.
+    { user: 'user:*', relation: 'space_creator', object: `tenant:${tenantId}` },
   ]
 }
 

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, writeTuples, deleteTuples, deleteObjectTuples, requireTenantAdmin, isTenantAdmin } from '@wikistead/authz'
+import { check, writeTuples, deleteTuples, deleteObjectTuples, requireTenantAdmin, isSpaceCreator } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
@@ -58,14 +58,16 @@ export async function createSpace(
   // #226 / ADR-106: a PERSONAL space is EXEMPT from maxSpaces (it is per-member, not part of the shared-
   // space budget) — the auto-create must always succeed, so it skips the cap. This is a resource-kind
   // distinction (personal vs shared), NOT a plan branch: the cap value still comes from the resolver.
-  // #399 / ADR-158 §2: the space-creation POLICY knob. RESTRICT-ONLY (never grants): 'admins' requires
-  // tenant#admin on top of membership. The PERSONAL auto-create is exempt (a resource-kind, not a
-  // privilege — first login must always succeed).
+  // #445 / ADR-171 (supersedes the #399 §2 knob): space creation is the tenant-role capability
+  // `tenant#space_creator` — ONE FGA check, no settings SELECT / admin branch. The wildcard tuple
+  // (seeded at provisioning, toggled by the member default-role preset) is "all members may create";
+  // custom tenant-role expansions add user/group leaves; admins always pass via the model's
+  // `or admin` arm. RESTRICT-ONLY (gates creation, grants nothing else). The PERSONAL auto-create
+  // stays exempt (a resource kind, not a privilege — first login must always succeed; ADR-158's
+  // ruling carries over).
   if (!args.personal) {
-    const [pol] = await db.sql<[{ space_creation_policy: string }?]>`
-      SELECT space_creation_policy FROM tenant_settings LIMIT 1`
-    if (pol?.space_creation_policy === 'admins' && !(await isTenantAdmin(fga, args.userId, args.tenantId))) {
-      throw Object.assign(new Error('space creation is restricted to admins'), { statusCode: 403, reason: 'space_creation_policy' })
+    if (!(await isSpaceCreator(fga, args.userId, args.tenantId))) {
+      throw Object.assign(new Error('space creation is restricted'), { statusCode: 403, reason: 'space_creator' })
     }
   }
   const row = await db.tx(async (tx) => {

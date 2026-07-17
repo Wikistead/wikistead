@@ -12,19 +12,24 @@ import type { TupleKey, TupleKeyWithoutCondition } from '@openfga/sdk'
     authorizationModelId: process.env.OPENFGA_MODEL_ID,
   })
 
-  // Delete-then-write so this script is idempotent on re-run after restarts.
+  // Delete-then-write so this script is idempotent on re-run after restarts. PER TUPLE (#445):
+  // FGA write batches are all-or-nothing — with a batched delete, ADDING a tuple to the seed made
+  // the delete batch fail wholesale on the not-yet-existing newcomer (swallowed), and the write
+  // batch then died on "already exists" for every old tuple. Per-tuple keeps re-runs green across
+  // seed-set changes; dev-scale volume, so the extra round-trips are irrelevant.
   async function writeIdempotent(tuples: TupleKey[]) {
-    const deletes: TupleKeyWithoutCondition[] = tuples.map(({ user, relation, object }) => ({
-      user, relation, object,
-    }))
-    try { await fga.write({ deletes }) } catch { /* tuples may not exist yet */ }
-    await fga.write({ writes: tuples })
+    for (const t of tuples) {
+      const key: TupleKeyWithoutCondition = { user: t.user, relation: t.relation, object: t.object }
+      try { await fga.write({ deletes: [key] }) } catch { /* tuple may not exist yet */ }
+      await fga.write({ writes: [t] })
+    }
   }
 
   // ── Tenant + space + page hierarchy ─────────────────────────────────────
   await writeIdempotent([
     { user: 'user:dev-user',      relation: 'admin',   object: 'tenant:tenant_dev'  },
     { user: 'user:dev-user',      relation: 'member',  object: 'tenant:tenant_dev'  },
+    { user: 'user:*',             relation: 'space_creator', object: 'tenant:tenant_dev' }, // ADR-171: all-members-create default
     { user: 'tenant:tenant_dev',  relation: 'tenant',  object: 'space:demo_space'   },
     { user: 'user:dev-user',      relation: 'manager', object: 'space:demo_space'   },
     { user: 'space:demo_space',   relation: 'space',   object: 'page:demo'          },
@@ -59,6 +64,7 @@ import type { TupleKey, TupleKeyWithoutCondition } from '@openfga/sdk'
   // ── Acme tenant for cross-tenant isolation tests ─────────────────────────
   await writeIdempotent([
     { user: 'user:acme-admin',    relation: 'admin',   object: 'tenant:tenant_acme' },
+    { user: 'user:*',             relation: 'space_creator', object: 'tenant:tenant_acme' }, // ADR-171
     { user: 'tenant:tenant_acme', relation: 'tenant',  object: 'space:acme_space'   },
     { user: 'user:acme-admin',    relation: 'manager', object: 'space:acme_space'   },
     { user: 'space:acme_space',   relation: 'space',   object: 'page:acme_page'     },

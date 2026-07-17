@@ -37,8 +37,8 @@ const EXCLUDED_PATHS = new Set([
   '/pages/:pageId/private', '/pages/:pageId/public', '/pages/:pageId/restrict', '/pages/:pageId/freeze', // permission dialog plumbing (grants API covers integration)
   '/spaces/:spaceId/access', '/spaces/:spaceId/public-access', '/spaces/:spaceId/comment-open', // space settings plumbing
   '/spaces/:spaceId/groups', '/spaces/:spaceId/member-candidates', '/spaces/:spaceId/pages-overview', // space settings plumbing
-  '/spaces/:spaceId/page-creation-policy', '/admin/creation-policy', // creation-policy knobs (#399; admin/space settings plumbing)
-  '/admin/roles', '/admin/roles/:roleId', // custom-role definitions (#420; admin console plumbing, EE-gated)
+  '/spaces/:spaceId/page-creation-policy', // page-creation-policy knob (#399; space settings plumbing)
+  '/admin/roles', '/admin/roles/:roleId', '/admin/roles/tenant-defaults', // custom-role definitions + default presets (#420/#445; admin console plumbing)
   '/admin/roles/assignments', '/admin/roles/:roleId/assignments', '/admin/roles/assignments/:assignmentId', // role assignments (#420 inc3)
   '/spaces/:spaceId/branding', '/spaces/:spaceId/icon-image', '/branding', '/branding/logo', '/tenant/branding', '/tenant/branding/logo', // branding/UI
   '/me/settings', '/me/avatar', '/members/:sub', '/members/:sub/avatar-image', '/members/invites', '/members/invites/:id', // account/invite UI plumbing

@@ -287,10 +287,7 @@
     "sharedWith": "共有先",
     "manage": "管理",
     "empty": "スペースがまだありません。",
-    "creationPolicyTitle": "スペース作成",
-    "creationPolicyBody": "このテナントで新しいスペースを作成できる人。個人スペースは常に作成できます。",
-    "creationPolicyMembers": "全メンバー",
-    "creationPolicyAdmins": "テナント管理者のみ"
+    "creationMovedToRoles": "スペースを作成できる範囲の設定は「ロール」タブ(member 既定ロール)に移動しました。"
   },
   "spaceSettings": {
     "title": "{{name}} · 設定",
@@ -1022,8 +1019,17 @@
       "delete": "削除",
       "share": "共有",
       "settings": "設定",
-      "moderate": "モデレート"
-    }
+      "moderate": "モデレート",
+      "createSpaces": "スペース作成"
+    },
+    "tenantDefaultsTitle": "既定のテナントロール",
+    "tenantDefaultsBody": "スペースを作成できるメンバーの範囲。member をオフにすると管理者のみになります(管理者は常に作成可)。",
+    "adminLocked": "管理者は権限モデル上、常にスペースを作成できます。",
+    "locked": "固定",
+    "scopeLabel": "ロールのスコープ",
+    "scopeResource": "スペース / ページ",
+    "scopeTenant": "テナント",
+    "assignTenantScope": "テナント全体に適用"
   },
   "detailsEdit": {
     "title": "折りたたみを編集",

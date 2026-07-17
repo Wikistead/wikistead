@@ -24,3 +24,12 @@ export async function requireTenantAdmin(fga: OpenFgaClient, userId: string, ten
 export async function requireTenantAdminOr404(fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> {
   if (!(await isTenantAdmin(fga, userId, tenantId))) throw Object.assign(new Error('not found'), { statusCode: 404 })
 }
+
+// #445 / ADR-171: may `userId` create SHARED spaces in this tenant? A raw `space_creator` relation
+// check on the tenant object (the tenant-admin precedent above: `tenant` is not a ResourceRef type,
+// and tenant-scoped gates are deliberately outside the ADR-152 EE hook seam). The relation unions
+// the wildcard default, custom tenant-role leaves and `or admin` — ONE check, no settings/branching.
+export async function isSpaceCreator(fga: OpenFgaClient, userId: string, tenantId: string): Promise<boolean> {
+  const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'space_creator', object: `tenant:${tenantId}` })
+  return !!allowed
+}
