@@ -2853,7 +2853,16 @@ class CalloutWidget extends WidgetType {
       // it does NOT open the editUI panel directly (that was the reversed behaviour the reviewer rejected).
       // Same plain caret placement the pipe TableWidget uses; the RichUI is reached via the caret-in pill /
       // Ctrl+Enter (enterMacroAt), matching the table 4-quadrant model.
-      el.addEventListener("mousedown", (e) => { e.preventDefault(); view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(el)) }); view.focus(); });
+      // #278(2): park on the BODY line, not the head — a head-parked caret keeps the Ctrl+↵ pill
+      // lit (macroRawHead) until the caret moves, which read as a stuck hint right after entry. The body
+      // start is where typing continues anyway; the head rule stays for deliberate caret-on-head (vim).
+      el.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        const pos = view.posAtDOM(el);
+        const head = view.state.doc.lineAt(pos);
+        view.dispatch({ selection: EditorSelection.cursor(Math.min(head.to + 1, view.state.doc.length)) });
+        view.focus();
+      });
       // #174 / ADR-087 (Class 1): clicking the icon badge opens the TYPE picker directly (metadata direct-
       // click), instead of entering raw — stopPropagation so the panel's caret-in handler above doesn't fire.
       const iconEl = el.querySelector(".cm-lp-callout-panel-icon");
@@ -4653,16 +4662,13 @@ export const livePreviewTheme = EditorView.baseTheme({
   // island can never light pills of the OUTER document (or vice versa) — .cm-content elements nest.
   ".cm-lp-macro-raw:hover .cm-lp-macro-richui-raw, .cm-content:has(> .cm-lp-macro-raw-zone:hover) .cm-lp-macro-richui-raw, .cm-lp-macro-raw-head .cm-lp-macro-richui-raw": { opacity: "0.9", pointerEvents: "auto" },
   ".cm-lp-macro-richui-raw:hover": { opacity: "1", pointerEvents: "auto" },
-  // #278inside a slot ISLAND the -1.5em float lands ABOVE the island's scroller (its head line is
-  // the first line), where the pill is clipped and un-clickable (elementFromPoint hits the line beneath).
-  // Islands pin it to the head line's right end instead — in view, in the scroller, same affordance.
-  ".cm-lp-slot-edit-island .cm-lp-macro-richui-raw": { top: "0", left: "auto", right: "0" },
-  // #278①: inside an island the pill is HOVER-ONLY. Panel-click entry (enterMacroAt) parks the
-  // island caret ON the head line, so the top-level keyboard affordance (macroRawHead perma-show) reads
-  // as "the Ctrl+↵ hint never goes away" with the island's in-block pill placement above. Kill every
-  // non-hover reveal path inside the island, then re-assert the island's OWN hover paths on top.
-  ".cm-lp-slot-edit-island .cm-lp-macro-raw .cm-lp-macro-richui-raw": { opacity: "0", pointerEvents: "none" },
-  ".cm-lp-slot-edit-island .cm-lp-macro-raw:hover .cm-lp-macro-richui-raw, .cm-lp-slot-edit-island .cm-content:has(> .cm-lp-macro-raw-zone:hover) .cm-lp-macro-raw .cm-lp-macro-richui-raw, .cm-lp-slot-edit-island .cm-lp-macro-raw .cm-lp-macro-richui-raw:hover": { opacity: "0.9", pointerEvents: "auto" },
+  // #278(owner ruling, supersedes thereposition + thehover-only): island chrome
+  // renders EXACTLY like top-level — same reveal triggers (hover OR macroRawHead), same -1.5em/left:0
+  // position, no island-only overrides. The only island-specific CSS anywhere is the BOUNDARY scoping
+  // (`:not(.cm-lp-slot-edit-island *)` / `:has(>)`), which keeps outer state from leaking in — never a
+  // different look or trigger. Theclipping that motivated the reposition is solved by the
+  // island scroller's overflow: visible (below); theperma-show by parking the entry caret on
+  // the body line instead of the head (CalloutWidget mousedown — shared code, both surfaces).
   // #254: the LAYOUT-only variant for the ✎+Ctrl+↵ hint on a RENDERED macro. Adds the key's gap but NOT
   // the always-visible opacity of cm-lp-macro-richui-raw, so the button keeps the base opacity:0 and is
   // revealed only by the hover/selection gate (below for macro-wrap; the callout-panel rule for the panel).
@@ -4705,6 +4711,11 @@ export const livePreviewTheme = EditorView.baseTheme({
   // added 1px to the text's x/y so opening the island nudged the content; with an outline + zero editor
   // padding the text keeps its exact rendered position.
   ".cm-lp-slot-edit-island": { flex: "1 1 0", minWidth: "0", outline: "1px solid var(--accent, #4ea1ff)", outlineOffset: "2px", borderRadius: "4px", background: "color-mix(in srgb, var(--accent, #4ea1ff) 4%, var(--panel, #fff))" },
+  // #278the island hugs its content (no fixed height,①) so it never actually scrolls
+  // overflow: visible lets the -1.5em chrome (the Ctrl+↵ pill on a first-line block) float above the
+  // island exactly like top-level instead of being clipped by the scroll box (theclipping that
+  // used to force an island-only reposition). No content nudge (③ holds).
+  ".cm-lp-slot-edit-island .cm-scroller": { overflow: "visible" },
   // Visible on mouse hover AND when the atom is SELECTED via caret-entry (#174/ADR-087 — the
   // keyboard/vim user sees the edit affordance without a mouse).
   // #278point 1 →① (permanent form): a slot-edit ISLAND is a descendant of its
