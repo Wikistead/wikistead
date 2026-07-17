@@ -27,11 +27,13 @@ export function AppShell({
   sidebar,
   search,
   onLogout,
+  headerExtra,
 }: {
   children: ReactNode;
   sidebar?: ReactNode;
   search?: ReactNode;
   onLogout?: () => void;
+  headerExtra?: ReactNode; // #430: the public space reader's "Powered by Wikistead" marker (free plan)
 }) {
   const { t } = useTranslation();
   const branding = useBranding();
