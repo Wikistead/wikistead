@@ -238,3 +238,73 @@ test("#361 a real fast click never shows the reverted state while the toggle is 
   await sleep(800);
   expect(await boxes.nth(1).evaluate((el) => (el as HTMLInputElement).checked), "bravo confirmed off").toBe(false);
 });
+
+// #361 the RESIDUAL occasional blink. The toggle-side refetches were coalesced, but
+// usePublished's 1500ms background POLL was not gated — a poll landing between two rapid toggles
+// fetched the INTERMEDIATE committed state (post-click1) and repainted the box against the user's
+// final optimistic flip. Deterministic repro: hold both toggle POSTs open (2500ms) and serve the
+// intermediate published_md to any poll GET inside that window — unfixed, the poll applies it and a
+// third transition appears; fixed, the poll pauses while a toggle is in flight so the mock is never
+// fetched. Verified red without the refetchInterval gate.
+test("#361 the published poll never repaints an intermediate state during a toggle burst", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  let holdToggles = false;
+  let serveIntermediate = false;
+  const INTERMEDIATE = ":::todo[Sprint]\n- [x] alpha\n- [x] bravo\n:::\n\nbelow\n";
+  await page.route("**/tasks/toggle", async (route) => {
+    if (holdToggles) await new Promise((r) => setTimeout(r, 2500));
+    await route.continue();
+  });
+  await page.route("**/published", async (route) => {
+    if (serveIntermediate && route.request().method() === "GET") {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ publishedMd: INTERMEDIATE, publishedAt: new Date().toISOString(), hasUnpublishedChanges: false }) });
+      return;
+    }
+    await route.continue();
+  });
+  await openScratch(page, `todo-poll-361-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::todo[Sprint]\n- [ ] alpha\n- [x] bravo\n:::\n\nbelow\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(600);
+  await expect(page.getByTestId("edit-toggle")).toBeVisible({ timeout: 8000 });
+  await sleep(500);
+  const box = page.getByTestId("task-checkbox").nth(0);
+  expect(await box.evaluate((el) => (el as HTMLInputElement).checked)).toBe(false);
+
+  await box.evaluate((el) => {
+    const w = window as unknown as { __tl?: [number, boolean][] };
+    w.__tl = [];
+    const t0 = performance.now();
+    const step = () => {
+      w.__tl!.push([Math.round(performance.now() - t0), (el as HTMLInputElement).checked]);
+      if (performance.now() - t0 < 6000) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+  holdToggles = true;
+  serveIntermediate = true; // any poll inside the burst window sees the post-click1 committed state
+  await box.click(); // optimistic → checked, POST① held
+  await sleep(120);
+  await box.click(); // optimistic → unchecked (final), POST② held
+  // The intermediate answer is realistic ONLY while a toggle is still in flight (post-burst, the
+  // server would return the final state) — stop serving it just before the held POSTs land, so the
+  // legitimate coalesced onSettled refetch gets the real data. An UNGATED poll tick (≤1500ms) falls
+  // inside this window and repaints; the gated poll never fetches here at all.
+  await sleep(2200);
+  serveIntermediate = false;
+  holdToggles = false;
+  await sleep(3400); // settle: held POSTs land, the coalesced onSettled refetch applies the real state
+
+  const tl = await page.evaluate(() => (window as unknown as { __tl?: [number, boolean][] }).__tl!);
+  const transitions: [number, boolean][] = [];
+  let cur: boolean | null = null;
+  for (const [t, v] of tl) { if (v !== cur) { transitions.push([t, v]); cur = v; } }
+  expect(
+    transitions.length,
+    `only the two optimistic flips moved the box (timeline: ${transitions.map(([t, v]) => `${t}ms:${v}`).join(" -> ")})`,
+  ).toBeLessThanOrEqual(3); // initial sample + click1(on) + click2(off) — a 4th = the poll repaint
+  expect(cur, "settled on the optimistic final value (unchecked)").toBe(false);
+});
