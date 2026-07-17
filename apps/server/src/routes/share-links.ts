@@ -109,6 +109,26 @@ const guestCfg = {
 
 // ── Service functions ──────────────────────────────────────────────────────
 
+
+// #420 3b: the share-class gate for a page OR space resource. On a PAGE the `share` verb suffices
+// (its manage superset arm admits managers); on a SPACE the capability relation (sharer) has NO
+// manager union by design (managers bypass via page.manage), so space-level share operations accept
+// share OR manage — a manager keeps every pre-split ability.
+async function requireShareOnResource(fga: OpenFgaClient, userId: string, resource: ResourceRef): Promise<void> {
+  if (await check(fga, `user:${userId}`, 'share', resource)) return
+  if (resource.type === 'space' && (await check(fga, `user:${userId}`, 'manage', resource))) return
+  throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+}
+
+
+// Rider 2 (#420): a TRASHED page is uniformly absent to share-class operations (the model
+// keeps admin verbs alive on trash for restore/purge, so the route is the fortress here).
+async function requirePageNotTrashed(db: TenantDb, resource: ResourceRef): Promise<void> {
+  if (resource.type !== 'page') return
+  const [row] = await db.sql<[{ deleted_root_id: string | null }?]>`SELECT deleted_root_id FROM pages WHERE id = ${resource.id}`
+  if (!row || row.deleted_root_id) throw Object.assign(new Error('not found'), { statusCode: 404 })
+}
+
 // Create a share link for a page. Requires `manage` on the page — issuing an
 // anonymous edit link is an administrative act, so we gate on the strongest
 // page capability rather than `edit`.
@@ -136,10 +156,9 @@ export async function createShareLink(
   // Relation by kind (page view/edit, space viewer/editor since #274).
   const relation = relationForResource(args.resource.type, args.capability)
 
-  // `manage` on the resource — issuing an anonymous link is administrative. For a space link
-  // this is space `manage` (exposing the WHOLE space is a bigger act than a page link).
-  const canManage = await check(fga, `user:${args.userId}`, 'manage', args.resource)
-  if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  // #420 3b: share-class authority issues anonymous links (manage keeps passing — see the helper).
+  await requireShareOnResource(fga, args.userId, args.resource)
+  await requirePageNotTrashed(db, args.resource) // Rider 2
 
   // #274 / ADR-135: a space EDIT link (the anonymous-wiki face) is its own lever — Cloud paid tiers
   // only, self-host unlimited. Same 402 convention; existing links are untouched by a downgrade.
@@ -186,8 +205,8 @@ export async function listShareLinks(
   fga: OpenFgaClient,
   args: { resource: ResourceRef; userId: string },
 ): Promise<ShareLink[]> {
-  const canManage = await check(fga, `user:${args.userId}`, 'manage', args.resource)
-  if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  await requireShareOnResource(fga, args.userId, args.resource) // #420 3b
+  await requirePageNotTrashed(db, args.resource) // Rider 2
   const rows = await db.sql<ShareLinkRow[]>`
     SELECT id, tenant_id, resource_type, resource_id, capability, expires_at, created_by, created_at, revoked_at
     FROM share_links
@@ -210,8 +229,8 @@ export async function revokeShareLink(
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
 
   const resource: ResourceRef = { type: row.resource_type as ResourceRef['type'], id: row.resource_id }
-  const canManage = await check(fga, `user:${args.userId}`, 'manage', resource)
-  if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+  await requireShareOnResource(fga, args.userId, resource) // #420 3b: revoking a link is share-class too
+  await requirePageNotTrashed(db, resource) // Rider 2: a trashed page is uniformly absent
 
   // Idempotent: the grant may already be gone (double-revoke, or DB/FGA drift).
   // Either way the desired end state is "tuple absent + revoked_at set", so a

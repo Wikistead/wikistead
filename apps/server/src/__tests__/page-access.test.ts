@@ -120,7 +120,7 @@ describe('per-page restrict (monotonic deny)', () => {
     await restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', principal: R })
     expect(await check(fgaClient, R, 'view', { type: 'page', id: pageId })).toBe(false)
     // the deny appears in the restriction list (distinct from the grant list)
-    expect(await listPageRestrictions(fgaClient, { pageId, userId: 'dev-user' })).toEqual(
+    expect(await listPageRestrictions(db, fgaClient, { pageId, userId: 'dev-user' })).toEqual(
       expect.arrayContaining([{ principal: R }]),
     )
     // unrestrict → the grant re-applies, view=true again
@@ -131,7 +131,7 @@ describe('per-page restrict (monotonic deny)', () => {
   it('a non-manager cannot restrict / list restrictions (403)', async () => {
     await expect(restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: STRANGER, principal: R }))
       .rejects.toMatchObject({ statusCode: 403 })
-    await expect(listPageRestrictions(fgaClient, { pageId, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
+    await expect(listPageRestrictions(db, fgaClient, { pageId, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
   })
 
   it('rejects a WILDCARD restrictee (400); a SPECIFIC share_link is a valid restrictee (#218 A5-2)', async () => {
@@ -168,7 +168,7 @@ describe('per-page private (ADR-098 allowlist)', () => {
     expect(before!.isPublic).toBe(true) // public before
 
     await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
-    expect(await isPagePrivate(fgaClient, { pageId, userId: 'dev-user' })).toBe(true)
+    expect(await isPagePrivate(db, fgaClient, { pageId, userId: 'dev-user' })).toBe(true)
 
     // public⊥private write boundary: is_public flips false + the public grant is gone.
     const after = await buildSearchDoc(pool, fgaClient, pageId, TENANT)
@@ -237,9 +237,9 @@ describe('per-page private (ADR-098 allowlist)', () => {
 
   it('unsetPagePrivate clears the marker', async () => {
     await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
-    expect(await isPagePrivate(fgaClient, { pageId, userId: 'dev-user' })).toBe(true)
+    expect(await isPagePrivate(db, fgaClient, { pageId, userId: 'dev-user' })).toBe(true)
     await unsetPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
-    expect(await isPagePrivate(fgaClient, { pageId, userId: 'dev-user' })).toBe(false)
+    expect(await isPagePrivate(db, fgaClient, { pageId, userId: 'dev-user' })).toBe(false)
   })
 
   it('#109 comment 785: a partial FGA-delete failure keeps the page private, revokes the other links, and leaves the failed one recoverable', async () => {
@@ -256,7 +256,7 @@ describe('per-page private (ADR-098 allowlist)', () => {
     } finally { spy.mockRestore() }
 
     // The page IS private (fail-safe: the marker + public strip committed regardless of the revoke miss).
-    expect(await isPagePrivate(fgaClient, { pageId, userId: 'dev-user' })).toBe(true)
+    expect(await isPagePrivate(db, fgaClient, { pageId, userId: 'dev-user' })).toBe(true)
     // linkA revoked (FGA cleared → view=false) AND its DB row revoked (not in the active list).
     expect(await check(fgaClient, `share_link:${linkA.id}`, 'view', { type: 'page', id: pageId })).toBe(false)
     // linkB's FGA delete FAILED → it is still live on FGA (edit) AND left revoked_at IS NULL (recoverable),
@@ -293,7 +293,7 @@ describe('per-page private (ADR-098 allowlist)', () => {
       .rejects.toMatchObject({ statusCode: 403 })
     await expect(unsetPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: STRANGER }))
       .rejects.toMatchObject({ statusCode: 403 })
-    await expect(isPagePrivate(fgaClient, { pageId, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
+    await expect(isPagePrivate(db, fgaClient, { pageId, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
   })
 
   it('records a durable page.made_private audit entry when entitled + plan passed (#177)', async () => {

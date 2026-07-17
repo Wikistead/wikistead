@@ -67,7 +67,7 @@ describe('#253 setPagePublic guardrails', () => {
   it('a published page: grants view_base@user:*, forces noindex, and audits (EE)', async () => {
     await setPagePublic(db, fgaClient, driver, { pageId: pubPage, tenantId: TENANT, userId: 'dev-user', plan: 'team' })
     expect(await isPublicRaw(pubPage)).toBe(true) // anonymous grant present
-    expect(await isPagePublic(fgaClient, { pageId: pubPage, userId: 'dev-user' })).toBe(true)
+    expect(await isPagePublic(db, fgaClient, { pageId: pubPage, userId: 'dev-user' })).toBe(true)
     const [row] = await admin<{ noindex: boolean }[]>`SELECT noindex FROM pages WHERE id = ${pubPage}`
     expect(row!.noindex).toBe(true) // guardrail 4: noindex forced on
     await drainAuditOutbox(fgaClient as never).catch(() => {})
