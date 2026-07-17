@@ -1105,6 +1105,70 @@ export interface WebhookCreated { id: string; secret: string }
 export interface AuditRow { seq: number; at: string; actor: string; action: string; target: string }
 export interface AuditVerdict { valid: boolean; count: number; brokenAt?: number; brokenSeq?: number; reason?: string }
 
+// #420 / ADR-164 increment 5: custom-role definitions + assignments (tenant-admin console; the
+// server enforces the admin gate + customRoles entitlement on writes — UI is convenience only).
+export interface RoleDef { id: string; name: string; capabilities: string[] }
+export function useRoles(enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["roles"],
+    queryFn: () => apiFetch<{ builtIn: { name: string; capabilities: string[] }[]; custom: RoleDef[] }>("/admin/roles", token),
+    enabled,
+  });
+}
+export function useCreateRole() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; capabilities: string[] }) =>
+      apiFetch<RoleDef>("/admin/roles", token, { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["roles"] }),
+  });
+}
+export function useUpdateRole() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string; name: string; capabilities: string[] }) =>
+      apiFetch<RoleDef>(`/admin/roles/${encodeURIComponent(id)}`, token, { method: "PUT", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["roles"] }),
+  });
+}
+export function useDeleteRole() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/admin/roles/${encodeURIComponent(id)}`, token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["roles"] }),
+  });
+}
+export interface RoleAssignment { id: string; roleId: string; roleName: string; principal: string }
+export function useRoleAssignments(resourceType: string, resourceId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["role-assignments", resourceType, resourceId],
+    queryFn: () => apiFetch<RoleAssignment[]>(`/admin/roles/assignments?resourceType=${encodeURIComponent(resourceType)}&resourceId=${encodeURIComponent(resourceId)}`, token).then((r) => r ?? []),
+    enabled: enabled && resourceId.length > 0,
+  });
+}
+export function useAssignRole() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ roleId, ...body }: { roleId: string; resourceType: string; resourceId: string; principal: string }) =>
+      apiFetch<RoleAssignment>(`/admin/roles/${encodeURIComponent(roleId)}/assignments`, token, { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["role-assignments"] }),
+  });
+}
+export function useUnassignRole() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (assignmentId: string) => apiFetch<void>(`/admin/roles/assignments/${encodeURIComponent(assignmentId)}`, token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["role-assignments"] }),
+  });
+}
+
 export function useAuditLog(before: number | null, enabled = true) {
   const { token } = useSession();
   return useQuery({
