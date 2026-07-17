@@ -14,11 +14,12 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { LogicalStorageDriver } from '../storage/index.js'
-import { createSpace, deleteSpace, createSpaceHome, listSpaces, updateSpace, deriveHomeTitle } from '../routes/spaces.js'
+import { createSpace, deleteSpace, createSpaceHome, listSpaces, updateSpace } from '../routes/spaces.js'
 import { createPage, deletePage, listPages, movePage, publishPage, updatePage } from '../routes/pages.js'
 import { buildSpaceExport } from '../export/index.js'
 import { importArchive } from '../import/index.js'
 import { buildApp } from '../app.js'
+import { mintGuestToken } from '@wikistead/auth'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -153,7 +154,7 @@ describe('#364 space home — create / gates / oracle', () => {
   })
 })
 
-describe('#364 derived, locked home title', () => {
+describe('#364 (plan A): the STORED home title is the space name — no language suffix', () => {
   let sid: string
   let hid: string
   let prevLang: string | null = null
@@ -171,23 +172,22 @@ describe('#364 derived, locked home title', () => {
     }
   })
 
-  it('creation derives the title from the space name via the tenant default language (ja / en)', async () => {
+  it('creation stores the SPACE NAME as the title — no suffix, regardless of the tenant default language', async () => {
+    // (plan A): the "Home / " wording is a viewer-side i18n label, never a stored value
+    // search / pins keep one language-stable title and the display follows the VIEWER language instead.
     await admin`INSERT INTO tenant_settings (tenant_id, default_lang) VALUES (${TENANT}, 'ja')
       ON CONFLICT (tenant_id) DO UPDATE SET default_lang = 'ja'`
     const jaName = `home364t-ja-${Date.now().toString(36)}`
     sid = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: 'dev-user', plan: 'free', name: jaName })).id
     hid = (await createSpaceHome(db, fgaClient, driver, { tenantId: TENANT, spaceId: sid, userId: 'dev-user' })).id
     const [ja] = await admin`SELECT title FROM pages WHERE id = ${hid}`
-    expect(ja!.title).toBe(`${jaName}のホーム`)
-    expect(ja!.title).toBe(deriveHomeTitle(jaName, 'ja'))
-    // en: a second space under default_lang = 'en'
+    expect(ja!.title).toBe(jaName) // bare space name — no suffix even under default_lang=ja
     await admin`UPDATE tenant_settings SET default_lang = 'en'`
     const enName = `home364t-en-${Date.now().toString(36)}`
     const sid2 = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: 'dev-user', plan: 'free', name: enName })).id
     const hid2 = (await createSpaceHome(db, fgaClient, driver, { tenantId: TENANT, spaceId: sid2, userId: 'dev-user' })).id
     const [en] = await admin`SELECT title FROM pages WHERE id = ${hid2}`
-    expect(en!.title).toBe(`${enName} Home`)
-    // cleanup the second space inline
+    expect(en!.title).toBe(enName) // bare space name — no " Home" suffix either
     const rows = await admin`SELECT id FROM pages WHERE space_id = ${sid2}`
     for (const r of rows) { await deleteObjectTuples(fgaClient, `page:${r.id}`).catch(() => {}); await admin`DELETE FROM search_outbox WHERE page_id = ${r.id}`.catch(() => {}) }
     await deleteSpace(db, fgaClient, driver, { tenantId: TENANT, spaceId: sid2, userId: 'dev-user' }).catch(() => {})
@@ -197,14 +197,68 @@ describe('#364 derived, locked home title', () => {
     await expect(updatePage(db, fgaClient, driver, { pageId: hid, userId: 'dev-user', title: 'sneaky rename' }))
       .rejects.toMatchObject({ statusCode: 400 })
     const [row] = await admin`SELECT title FROM pages WHERE id = ${hid}`
-    expect(row!.title).toContain('のホーム')
+    expect(row!.title).not.toContain('のホーム') // still the bare space name (the 400 changed nothing)
   })
 
-  it('a space rename re-derives the home title in the same tx', async () => {
-    await admin`UPDATE tenant_settings SET default_lang = 'ja'`
+  it('a space rename re-writes the home title to the NEW space name in the same tx', async () => {
     const nextName = `home364t-renamed-${Date.now().toString(36)}`
     await updateSpace(db, fgaClient, { spaceId: sid, userId: 'dev-user', name: nextName, driver })
     const [row] = await admin`SELECT title FROM pages WHERE id = ${hid}`
-    expect(row!.title).toBe(`${nextName}のホーム`)
+    expect(row!.title).toBe(nextName) // bare name follows the rename — never a suffixed variant
+  })
+})
+
+// #364 ①: the GUEST /share) home wiring — /spaces/:id/info exposes homePageId VIEW-GATED for the
+// share_link principal (ADR-157 §2 oracle guard carried to the guest surface): an UNPUBLISHED home is
+// byte-identically null (existence-hidden); a published, link-covered home returns its id — on view AND
+// edit links alike. Fastify app + real minted guest tokens.
+describe('#364 ①: guest space info home pointer (view-gated, existence-hiding)', () => {
+  let app: FastifyInstance
+  let sid: string
+  let hid: string
+  const guestCfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 3600 }
+  const dev = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'content-type': 'application/json' }
+  let seq = 0
+  const anon = () => `anon:${(Date.now() + seq++).toString(16).slice(-12).padStart(12, '0')}`
+
+  const spaceTok = async (capability: 'view' | 'edit') => {
+    const r = await app.inject({ method: 'POST', url: '/share-links', headers: dev, payload: { resource: { type: 'space', id: sid }, capability, expiresInSeconds: null } })
+    expect(r.statusCode, r.body).toBe(201)
+    return mintGuestToken(guestCfg, { tenantId: TENANT, shareLinkId: (r.json() as { id: string }).id, resource: { type: 'space', id: sid }, capability, anonId: anon() })
+  }
+  const infoAs = async (token: string) =>
+    app.inject({ method: 'GET', url: `/spaces/${sid}/info`, headers: { host: 'dev.localhost', authorization: `Bearer ${token}` } })
+
+  beforeAll(async () => {
+    app = await buildApp()
+    await app.ready()
+    sid = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: 'dev-user', plan: 'free', name: `home364g-${Date.now().toString(36)}` })).id
+    hid = (await createSpaceHome(db, fgaClient, driver, { tenantId: TENANT, spaceId: sid, userId: 'dev-user' })).id
+  }, 60_000)
+  afterAll(async () => {
+    await app.close()
+    const rows = await admin`SELECT id FROM pages WHERE space_id = ${sid}`
+    for (const r of rows) { await deleteObjectTuples(fgaClient, `page:${r.id}`).catch(() => {}); await admin`DELETE FROM search_outbox WHERE page_id = ${r.id}`.catch(() => {}) }
+    await deleteSpace(db, fgaClient, driver, { tenantId: TENANT, spaceId: sid, userId: 'dev-user' }).catch(() => {})
+  }, 60_000)
+
+  it('ANTI-TEST: an UNPUBLISHED home is null for a space-link guest (no existence oracle), on view AND edit links', async () => {
+    for (const cap of ['view', 'edit'] as const) {
+      const res = await infoAs(await spaceTok(cap))
+      expect(res.statusCode, res.body).toBe(200)
+      expect((res.json() as { homePageId: string | null }).homePageId, `${cap} link`).toBeNull()
+    }
+  })
+
+  it('a PUBLISHED home returns its id to the guest (both capabilities); the member sees it too', async () => {
+    const pub = await app.inject({ method: 'POST', url: `/pages/${hid}/publish`, headers: dev, payload: {} })
+    expect(pub.statusCode, pub.body).toBe(200)
+    for (const cap of ['view', 'edit'] as const) {
+      const res = await infoAs(await spaceTok(cap))
+      expect(res.statusCode).toBe(200)
+      expect((res.json() as { homePageId: string | null }).homePageId, `${cap} link`).toBe(hid)
+    }
+    const member = await app.inject({ method: 'GET', url: `/spaces/${sid}/info`, headers: dev })
+    expect((member.json() as { homePageId: string | null }).homePageId).toBe(hid)
   })
 })

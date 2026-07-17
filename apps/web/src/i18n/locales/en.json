@@ -988,7 +988,8 @@
     "lockedBody": "Your entries are being retained. Upgrade to view, verify, and export the ledger."
   },
   "spaceHome": {
-    "writeButton": "Write the homepage"
+    "writeButton": "Write the homepage",
+    "title": "{{name}} Home"
   },
   "adminRoles": {
     "title": "Roles",

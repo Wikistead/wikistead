@@ -987,7 +987,8 @@
     "lockedBody": "エントリは保持されています。アップグレードすると閲覧・検証・エクスポートできます。"
   },
   "spaceHome": {
-    "writeButton": "ホームページを書く"
+    "writeButton": "ホームページを書く",
+    "title": "{{name}}のホーム"
   },
   "adminRoles": {
     "title": "ロール",
