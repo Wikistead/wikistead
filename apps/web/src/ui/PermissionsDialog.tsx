@@ -123,11 +123,15 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   return (
     <>
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent data-testid="permissions-dialog" className="sm:max-w-[480px]">
+      {/* #416 the dialog is BOUNDED (max-h) as a flex column — header and footer stay put and
+          everything between them is ONE scrolling body, so however many grants/restrictions/sections
+          accumulate, the modal never outgrows the viewport and Close stays reachable. */}
+      <DialogContent data-testid="permissions-dialog" className="flex max-h-[85vh] flex-col sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>{t("permissions.title")}</DialogTitle>
           <DialogDescription>{t("permissions.body")}</DialogDescription>
         </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1" data-testid="permissions-body">
 
         {/* #109 / ADR-098: PRIVATE (allowlist) toggle. Private cuts space inheritance — only the people
             listed below can view/edit — and strips public. Nested children do NOT inherit a parent's
@@ -264,7 +268,8 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
           <Button variant="primary" size="sm" data-testid="grant-add" disabled={grant.isPending} onClick={add}>{t("permissions.add")}</Button>
         </div>
 
-        <div className="mt-3 flex max-h-[55vh] flex-col gap-2 overflow-y-auto" data-testid="grant-list">
+        {/* #416 no per-list max-h — the single dialog-body scroll above replaces the nested scroller. */}
+          <div className="mt-3 flex flex-col gap-2" data-testid="grant-list">
           {(grants ?? []).map((g) => (
             <div key={`${g.grantee}:${g.relation}`} className="flex items-center gap-2" data-testid="grant-item">
               <span className="whitespace-nowrap text-xs text-fg-dim">{g.relation}</span>
@@ -333,6 +338,8 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               </label>
             );
           })}
+        </div>
+
         </div>
 
         <DialogFooter className="mt-4">
