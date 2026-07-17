@@ -60,16 +60,15 @@ test("#273: a sniffed PDF renders in a sandboxed (allow-scripts, NO allow-same-o
   await expect(pdfFrame.locator("canvas")).toHaveCount(1, { timeout: 20000 });
   await expect(pdfFrame.locator("#msg")).toBeHidden();
 
-  // #273 c 07-16 return (SUPERSEDES the pin): the PDF card's header is pressable now — it opens the
-  // lightbox — so it advertises "open" with a zoom-in cursor (never the download pointer) + a hover wash.
+  // #273 (SUPERSEDES the all-open pin): affordances split by REGION — the HEADER means
+  // DOWNLOAD (pointer cursor, click fires a download, never the lightbox); the PREVIEW area owns
+  // "open" (zoom-in + lightbox, pinned by the test below).
   const pdfCursor = await pdfCard.locator(".cm-lp-attachment-card").evaluate((el) => getComputedStyle(el).cursor);
-  expect(pdfCursor).toBe("zoom-in");
-  // and clicking the header (outside the buttons) opens the lightbox with the same containment
+  expect(pdfCursor).toBe("pointer");
+  const dl = page.waitForEvent("download", { timeout: 10000 });
   await pdfCard.locator(".cm-lp-attachment-name").click();
-  const lb = page.getByTestId("attachment-lightbox");
-  await expect(lb).toBeVisible({ timeout: 10000 });
-  await page.keyboard.press("Escape");
-  await expect(lb).toHaveCount(0);
+  await dl;
+  await expect(page.getByTestId("attachment-lightbox"), "header click never opens the lightbox").toHaveCount(0);
 });
 
 // #273 c 07-16 return (2): the INLINE CHIP is pressable — hover wash + cursor on both surfaces; on the
