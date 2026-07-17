@@ -33,7 +33,8 @@ export async function publishAndWait(page: Page, id: string, expectSubstring: st
 export async function openDemo(page: Page) {
   await page.goto("/p/demo");
   await page.waitForSelector("[data-pane=preview] .cm-content");
-  await page.waitForSelector("[data-testid=sidebar]");
+  // #406 S1: below md the docked sidebar is a closed drawer — the toggle is the always-present marker.
+  await page.waitForSelector("[data-testid=sidebar], [data-testid=sidebar-toggle]");
   await sleep(800);
 }
 
