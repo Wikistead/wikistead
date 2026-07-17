@@ -1,4 +1,4 @@
-// #364 / ADR-157: the space HOMEPAGE — a pointer at a regular page. The design-review anti-tests:
+// #364 / ADR-157: the space HOMEPAGE — a pointer at a regular page. The design-review anti-tests
 // atomic create (edit gate, 409 on second), the pointer existence-ORACLE guard (a viewer who cannot
 // see the home gets a listSpaces row byte-identical to "no home set"), the root-listing exclusion
 // (listPages skips the home; pins-class surfaces deliberately include it), the LEAF guards
@@ -14,8 +14,8 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { LogicalStorageDriver } from '../storage/index.js'
-import { createSpace, deleteSpace, createSpaceHome, listSpaces } from '../routes/spaces.js'
-import { createPage, deletePage, listPages, movePage, publishPage } from '../routes/pages.js'
+import { createSpace, deleteSpace, createSpaceHome, listSpaces, updateSpace, deriveHomeTitle } from '../routes/spaces.js'
+import { createPage, deletePage, listPages, movePage, publishPage, updatePage } from '../routes/pages.js'
 import { buildSpaceExport } from '../export/index.js'
 import { importArchive } from '../import/index.js'
 import { buildApp } from '../app.js'
@@ -150,5 +150,61 @@ describe('#364 space home — create / gates / oracle', () => {
     await deletePage(db, fgaClient, driver, { pageId: homeId, userId: 'dev-user' })
     const [row] = await admin`SELECT home_page_id FROM spaces WHERE id = ${spaceId}`
     expect(row!.home_page_id).toBeNull()
+  })
+})
+
+describe('#364derived, locked home title', () => {
+  let sid: string
+  let hid: string
+  let prevLang: string | null = null
+
+  beforeAll(async () => {
+    const [row] = await admin`SELECT default_lang FROM tenant_settings LIMIT 1`
+    prevLang = (row?.default_lang as string | undefined) ?? null
+  })
+  afterAll(async () => {
+    await admin`UPDATE tenant_settings SET default_lang = ${prevLang}`.catch(() => {})
+    if (sid) {
+      const rows = await admin`SELECT id FROM pages WHERE space_id = ${sid}`
+      for (const r of rows) { await deleteObjectTuples(fgaClient, `page:${r.id}`).catch(() => {}); await admin`DELETE FROM search_outbox WHERE page_id = ${r.id}`.catch(() => {}) }
+      await deleteSpace(db, fgaClient, driver, { tenantId: TENANT, spaceId: sid, userId: 'dev-user' }).catch(() => {})
+    }
+  })
+
+  it('creation derives the title from the space name via the tenant default language (ja / en)', async () => {
+    await admin`INSERT INTO tenant_settings (tenant_id, default_lang) VALUES (${TENANT}, 'ja')
+      ON CONFLICT (tenant_id) DO UPDATE SET default_lang = 'ja'`
+    const jaName = `home364t-ja-${Date.now().toString(36)}`
+    sid = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: 'dev-user', plan: 'free', name: jaName })).id
+    hid = (await createSpaceHome(db, fgaClient, driver, { tenantId: TENANT, spaceId: sid, userId: 'dev-user' })).id
+    const [ja] = await admin`SELECT title FROM pages WHERE id = ${hid}`
+    expect(ja!.title).toBe(`${jaName}のホーム`)
+    expect(ja!.title).toBe(deriveHomeTitle(jaName, 'ja'))
+    // en: a second space under default_lang = 'en'
+    await admin`UPDATE tenant_settings SET default_lang = 'en'`
+    const enName = `home364t-en-${Date.now().toString(36)}`
+    const sid2 = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: 'dev-user', plan: 'free', name: enName })).id
+    const hid2 = (await createSpaceHome(db, fgaClient, driver, { tenantId: TENANT, spaceId: sid2, userId: 'dev-user' })).id
+    const [en] = await admin`SELECT title FROM pages WHERE id = ${hid2}`
+    expect(en!.title).toBe(`${enName} Home`)
+    // cleanup the second space inline
+    const rows = await admin`SELECT id FROM pages WHERE space_id = ${sid2}`
+    for (const r of rows) { await deleteObjectTuples(fgaClient, `page:${r.id}`).catch(() => {}); await admin`DELETE FROM search_outbox WHERE page_id = ${r.id}`.catch(() => {}) }
+    await deleteSpace(db, fgaClient, driver, { tenantId: TENANT, spaceId: sid2, userId: 'dev-user' }).catch(() => {})
+  })
+
+  it('PATCH title on a home is refused (400) — the server is the fortress, not the hidden UI', async () => {
+    await expect(updatePage(db, fgaClient, driver, { pageId: hid, userId: 'dev-user', title: 'sneaky rename' }))
+      .rejects.toMatchObject({ statusCode: 400 })
+    const [row] = await admin`SELECT title FROM pages WHERE id = ${hid}`
+    expect(row!.title).toContain('のホーム')
+  })
+
+  it('a space rename re-derives the home title in the same tx', async () => {
+    await admin`UPDATE tenant_settings SET default_lang = 'ja'`
+    const nextName = `home364t-renamed-${Date.now().toString(36)}`
+    await updateSpace(db, fgaClient, { spaceId: sid, userId: 'dev-user', name: nextName, driver })
+    const [row] = await admin`SELECT title FROM pages WHERE id = ${hid}`
+    expect(row!.title).toBe(`${nextName}のホーム`)
   })
 })
