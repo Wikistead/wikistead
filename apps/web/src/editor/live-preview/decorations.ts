@@ -1162,14 +1162,13 @@ class AttachmentCardWidget extends WidgetType {
 
     // #273(2): a DOWNLOAD card (non-inline binary) downloads on a click ANYWHERE in the card, not just
     // the ⤓. The wrap's mousedown still selects the atom (ring) first, so a click both selects AND acts
-    // (owner-approved). c 07-16 return (item 1): a PDF INLINE card's header is no longer inert — clicking it
-    // (outside the buttons) OPENS the lightbox, the same ⤢ path, so the whole card consistently means
-    // "click to open"; its ⤓ still downloads.
+    // (owner-approved).(supersedes theall-open mapping): affordances split by REGION
+    // the header (name + icon row) always DOWNLOADS with a pointer cursor, PDF or not; the PREVIEW
+    // area is the "open" surface (zoom-in + lightbox via the frame's ⤢/expand path below).
     card.addEventListener("click", (e) => {
       if ((e.target as HTMLElement).closest("button")) return; // the ⤓ (or edit) button handles itself
       e.preventDefault();
-      if (wrap.querySelector(".cm-lp-attachment-frame")) openAttachmentLightbox(view, this.id, this.name);
-      else triggerAttachmentDownload(view, this.id);
+      triggerAttachmentDownload(view, this.id);
     });
 
     this.ensureInlineMount(view, wrap, size);
@@ -4472,9 +4471,9 @@ export const livePreviewTheme = EditorView.baseTheme({
     background: "color-mix(in srgb, currentColor 11%, transparent)",
     borderColor: "color-mix(in srgb, currentColor 50%, transparent)",
   },
-  // #273 c 07-16 return (1): the PDF INLINE card's header is pressable too — click opens the lightbox
-  // so it gets the SAME hover wash with a zoom-in cursor ("open", not "download").
-  ".cm-lp-attachment-wrap:has(.cm-lp-attachment-frame) .cm-lp-attachment-card": { cursor: "zoom-in" },
+  // #273(supersedes thezoom-in): the PDF INLINE card's HEADER means DOWNLOAD — pointer
+  // cursor, same hover wash; the zoom-in "open" affordance belongs to the PREVIEW area (frame + ⤢).
+  ".cm-lp-attachment-wrap:has(.cm-lp-attachment-frame) .cm-lp-attachment-card": { cursor: "pointer" },
   ".cm-lp-attachment-wrap:has(.cm-lp-attachment-frame) .cm-lp-attachment-card:hover": {
     background: "color-mix(in srgb, currentColor 11%, transparent)",
     borderColor: "color-mix(in srgb, currentColor 50%, transparent)",
