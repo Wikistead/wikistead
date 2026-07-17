@@ -14,6 +14,7 @@ import {
   useCreatePage,
   useRenamePage,
   useDeletePage,
+  useDirectDeletePage,
   useMovePage,
   usePins,
   useCreatePin,
@@ -109,6 +110,7 @@ export function Sidebar() {
   const createPage = useCreatePage();
   const renamePage = useRenamePage();
   const deletePage = useDeletePage();
+  const directDeletePage = useDirectDeletePage();
   const movePage = useMovePage();
 
   const [renaming, setRenaming] = useState<{ pageId: string; spaceId: string; title: string } | null>(null);
@@ -117,6 +119,7 @@ export function Sidebar() {
   // Page deletion only — space deletion lives in Space settings (avoids accidental
   // destruction from the sidebar; #1).
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+  const [deletingForever, setDeletingForever] = useState<{ id: string; name: string } | null>(null);
   const [sharing, setSharing] = useState<string | null>(null);
   const [pickingTemplate, setPickingTemplate] = useState(false);
   // #309: space Markdown-ZIP export — available to EVERY member (the server archive is view-filtered;
@@ -195,6 +198,8 @@ export function Sidebar() {
       { onSuccess: (p) => p && navigate(`/p/${p.id}?edit=1`) },
     );
     else if (value === "delete") setDeleting({ id: d.pageId, name: d.name });
+    // #437 / ADR-167: the direct permanent path (modes both/direct_only) — typed confirmation.
+    else if (value === "deleteForever") setDeletingForever({ id: d.pageId, name: d.name });
   };
 
   // DnD guard: block dropping a page onto itself or a descendant (cycle). Root drops and page parents
@@ -338,6 +343,7 @@ export function Sidebar() {
           onTogglePin={(d) => togglePin("page", d.pageId)}
           onMove={onMove}
           disableDrop={disableDrop}
+          deleteMode={currentSpace?.deleteMode ?? "trash_only"}
         />
       )}
 
@@ -363,6 +369,28 @@ export function Sidebar() {
             });
           }
           setDeleting(null);
+        }}
+      />
+      {/* #437 / ADR-167: the DIRECT permanent path — irreversible, so typed confirmation (the page
+          title) gates the button; the server still 400s outside modes both/direct_only. */}
+      <ConfirmDialog
+        open={deletingForever !== null}
+        title={t("sidebar.deleteForeverTitle")}
+        message={t("sidebar.deleteForeverConfirm", { name: deletingForever?.name || t("common.untitled") })}
+        confirmLabel={t("sidebar.deleteForever")}
+        confirmTestId="tree-delete-forever-confirm"
+        typedConfirmText={deletingForever?.name || t("common.untitled")}
+        warning={<DeleteBacklinkWarning pageId={deletingForever?.id ?? null} onNavigate={() => setDeletingForever(null)} />}
+        onClose={() => setDeletingForever(null)}
+        onConfirm={() => {
+          if (deletingForever) {
+            const wasOpen = deletingForever.id === pageId;
+            directDeletePage.mutate({ pageId: deletingForever.id, spaceId: current! }, {
+              onSuccess: () => { notify.success(t("toast.pageDeletedForever")); if (wasOpen) navigate("/", { replace: true }); },
+              onError: () => notify.error(t("toast.actionFailed")),
+            });
+          }
+          setDeletingForever(null);
         }}
       />
       <RenameDialog

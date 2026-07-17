@@ -47,7 +47,8 @@
     "saved": "Saved",
     "spaceDeleted": "Space deleted",
     "pageDeleted": "Page deleted",
-    "pageTrashed": "Moved to trash"
+    "pageTrashed": "Moved to trash",
+    "pageDeletedForever": "Page permanently deleted"
   },
   "theme": {
     "label": "Theme",
@@ -287,7 +288,9 @@
     "sharedWith": "Shared with",
     "manage": "Manage",
     "empty": "No spaces yet.",
-    "creationMovedToRoles": "Who may create spaces is now configured in Roles (the member default role)."
+    "creationMovedToRoles": "Who may create spaces is now configured in Roles (the member default role).",
+    "deleteModeTitle": "Deletion pathway (tenant default)",
+    "deleteModeBody": "Choose how pages are deleted across the tenant (spaces can override). Deleting is always manager-only; this setting only chooses reversibility."
   },
   "spaceSettings": {
     "title": "{{name}} · Settings",
@@ -319,7 +322,10 @@
     "pageCreationTitle": "Page creation",
     "pageCreationBody": "Who may create new pages in this space. Applies to every way a page is created (new, duplicate, template, import).",
     "pageCreationEditors": "Anyone who can edit",
-    "pageCreationManagers": "Space managers only"
+    "pageCreationManagers": "Space managers only",
+    "deleteModeTitle": "Deletion pathway",
+    "deleteModeBody": "Choose how pages in this space are deleted. Deleting is always manager-only; this setting only chooses reversibility.",
+    "deleteModeInherit": "Inherit tenant default ({{mode}})"
   },
   "spaceTrash": {
     "title": "Trash",
@@ -436,7 +442,8 @@
     "modeSource": "Source",
     "modeReading": "Reading",
     "modeWysiwyg": "WYSIWYG",
-    "duplicatePage": "Duplicate page"
+    "duplicatePage": "Duplicate page",
+    "deleteForever": "Delete permanently"
   },
   "sidebar": {
     "searchSpaces": "Search spaces…",
@@ -472,12 +479,16 @@
     "noPages": "No pages yet — add one above.",
     "collapse": "Collapse",
     "expand": "Expand",
-    "home": "Home"
+    "home": "Home",
+    "deleteForever": "Delete permanently",
+    "deleteForeverTitle": "Delete permanently",
+    "deleteForeverConfirm": "Permanently delete \"{{name}}\" and its sub-pages? This cannot be undone — there is no trash to restore from."
   },
   "dialogs": {
     "renamePageTitle": "Rename page",
     "pageTitleLabel": "Page title",
-    "confirmTitle": "Confirm"
+    "confirmTitle": "Confirm",
+    "typeToConfirm": "Type \"{{text}}\" to confirm"
   },
   "shareDialog": {
     "title": "Share page",
@@ -1041,5 +1052,10 @@
   },
   "publicReader": {
     "poweredBy": "Powered by Wikistead"
+  },
+  "deleteMode": {
+    "trash_only": "Trash only (restorable for 30 days)",
+    "both": "Trash and permanent delete side by side",
+    "direct_only": "Permanent delete only (no trash)"
   }
 }

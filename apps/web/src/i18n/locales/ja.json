@@ -47,7 +47,8 @@
     "saved": "保存しました",
     "spaceDeleted": "スペースを削除しました",
     "pageDeleted": "ページを削除しました",
-    "pageTrashed": "ゴミ箱に移動しました"
+    "pageTrashed": "ゴミ箱に移動しました",
+    "pageDeletedForever": "ページを完全に削除しました"
   },
   "theme": {
     "label": "テーマ",
@@ -287,7 +288,9 @@
     "sharedWith": "共有先",
     "manage": "管理",
     "empty": "スペースがまだありません。",
-    "creationMovedToRoles": "スペースを作成できる範囲の設定は「ロール」タブ(member 既定ロール)に移動しました。"
+    "creationMovedToRoles": "スペースを作成できる範囲の設定は「ロール」タブ(member 既定ロール)に移動しました。",
+    "deleteModeTitle": "削除経路（テナント既定）",
+    "deleteModeBody": "テナント全体のページ削除方法を選びます（スペース側で上書き可）。削除できるのは常に管理者のみで、この設定は可逆性だけを選びます。"
   },
   "spaceSettings": {
     "title": "{{name}} · 設定",
@@ -319,7 +322,10 @@
     "pageCreationTitle": "ページ作成",
     "pageCreationBody": "このスペースで新しいページを作成できる人。すべての作成経路（新規・複製・テンプレート・インポート）に適用されます。",
     "pageCreationEditors": "編集できる全員",
-    "pageCreationManagers": "スペース管理者のみ"
+    "pageCreationManagers": "スペース管理者のみ",
+    "deleteModeTitle": "削除経路",
+    "deleteModeBody": "このスペースのページの削除方法を選びます。削除できるのは常に管理者のみで、この設定は可逆性（ゴミ箱経由か否か）だけを選びます。",
+    "deleteModeInherit": "テナント既定を継承（{{mode}}）"
   },
   "spaceTrash": {
     "title": "ゴミ箱",
@@ -436,7 +442,8 @@
     "modeSource": "ソース",
     "modeReading": "リーディング",
     "modeWysiwyg": "WYSIWYG",
-    "duplicatePage": "ページを複製"
+    "duplicatePage": "ページを複製",
+    "deleteForever": "完全に削除"
   },
   "sidebar": {
     "searchSpaces": "スペースを検索…",
@@ -472,12 +479,16 @@
     "noPages": "ページがまだありません — 上から追加してください。",
     "collapse": "折りたたむ",
     "expand": "展開する",
-    "home": "ホーム"
+    "home": "ホーム",
+    "deleteForever": "完全に削除",
+    "deleteForeverTitle": "完全に削除",
+    "deleteForeverConfirm": "「{{name}}」とその下位ページを完全に削除しますか？この操作は取り消せません（ゴミ箱からの復元はできません）。"
   },
   "dialogs": {
     "renamePageTitle": "ページ名を変更",
     "pageTitleLabel": "ページタイトル",
-    "confirmTitle": "確認"
+    "confirmTitle": "確認",
+    "typeToConfirm": "確認のため「{{text}}」と入力してください"
   },
   "shareDialog": {
     "title": "ページを共有",
@@ -1040,5 +1051,10 @@
   },
   "publicReader": {
     "poweredBy": "Powered by Wikistead"
+  },
+  "deleteMode": {
+    "trash_only": "ゴミ箱経由のみ（30日間復元可能）",
+    "both": "ゴミ箱と完全削除を併用",
+    "direct_only": "完全削除のみ（ゴミ箱なし）"
   }
 }

@@ -164,7 +164,7 @@ import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, assetUrl, type GuestToken } from "../data/apiClient";
-import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, chainPageToggle, useAccountSettings, useDeletePage, useCreatePage, useEntitlements, useSpaces, useBranding, type Page } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, chainPageToggle, useAccountSettings, useDeletePage, useDirectDeletePage, useCreatePage, useEntitlements, useSpaces, useBranding, type Page } from "../data/queries";
 import { WikisteadMark } from "./BrandLockup"; // #430: the public header brand fallback
 import { GuestSidebar } from "./GuestSidebar";
 import { ConfirmDialog } from "../ui/dialogs";
@@ -371,8 +371,13 @@ function PageRoute({ pageIdOverride }: { pageIdOverride?: string } = {}) {
   const [permsOpen, setPermsOpen] = useState(false);
   const [sharing, setSharing] = useState(false); // share dialog (current page)
   const [deleting, setDeleting] = useState(false); // delete-page confirm (current page)
+  const [deletingForever, setDeletingForever] = useState(false); // #437: direct permanent confirm
   const [savingTemplate, setSavingTemplate] = useState(false); // #248: "Save as template" dialog
   const deletePage = useDeletePage();
+  const directDeletePage = useDirectDeletePage();
+  // #437 / ADR-167: the space's resolved deletion-pathway policy shapes which delete entries the ⋯
+  // menu offers (UI only — the server routes gate regardless).
+  const deleteMode = useSpaces().data?.find((s) => s.id === spaceId)?.deleteMode ?? "trash_only";
   const duplicatePage = useCreatePage(); // #229/#242: "Duplicate page" → new page seeded from this one
   const navigate = useNavigate();
 
@@ -488,7 +493,8 @@ function PageRoute({ pageIdOverride }: { pageIdOverride?: string } = {}) {
     // ⋯ items / Share button don't render. The server re-checks and 403s regardless
     // (two-layer authz — UI suppression + server enforcement). #4.
     onShare: page?.canManage ? () => setSharing(true) : undefined,
-    onDelete: page?.canManage ? () => setDeleting(true) : undefined,
+    onDelete: page?.canManage && deleteMode !== "direct_only" ? () => setDeleting(true) : undefined,
+    onDeleteForever: page?.canManage && (deleteMode === "both" || deleteMode === "direct_only") ? () => setDeletingForever(true) : undefined,
     // #229: create a new page in this space seeded with this page's published content, and open it
     // in edit mode. Needs a resolved space + an edit-capable user (the server view-gates the source
     // and 403s a non-editor of the destination space regardless).
@@ -647,6 +653,28 @@ function PageRoute({ pageIdOverride }: { pageIdOverride?: string } = {}) {
             {
               // The page is gone — leave it. The home route resolves to a remaining page.
               onSuccess: () => { notify.success(t("toast.pageTrashed")); navigate("/", { replace: true }); },
+              onError: () => notify.error(t("toast.actionFailed")),
+            },
+          );
+        }}
+      />
+      {/* #437 / ADR-167: irreversible — typed confirmation (the page title) gates the button. */}
+      <ConfirmDialog
+        open={deletingForever}
+        title={t("sidebar.deleteForeverTitle")}
+        message={t("sidebar.deleteForeverConfirm", { name: page?.title || t("common.untitled") })}
+        confirmLabel={t("sidebar.deleteForever")}
+        confirmTestId="confirm-delete-page-forever"
+        typedConfirmText={page?.title || t("common.untitled")}
+        warning={<DeleteBacklinkWarning pageId={deletingForever ? pageId ?? null : null} onNavigate={() => setDeletingForever(false)} />}
+        onClose={() => setDeletingForever(false)}
+        onConfirm={() => {
+          setDeletingForever(false);
+          if (!pageId || !spaceId) return;
+          directDeletePage.mutate(
+            { pageId, spaceId },
+            {
+              onSuccess: () => { notify.success(t("toast.pageDeletedForever")); navigate("/", { replace: true }); },
               onError: () => notify.error(t("toast.actionFailed")),
             },
           );

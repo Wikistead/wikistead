@@ -75,6 +75,8 @@ export function ConfirmDialog({
   confirmTestId = "confirm-delete",
   stacked = false,
   warning,
+  typedConfirmText,
+  typedConfirmLabel,
 }: {
   open: boolean;
   message: string;
@@ -91,8 +93,15 @@ export function ConfirmDialog({
   // When shown OVER another open dialog (e.g. the permissions dialog), raise the
   // overlay + content above it (default z-50) so it isn't drawn behind the base dialog.
   stacked?: boolean;
+  // #437 / ADR-167: typed confirmation for the IRREVERSIBLE path — the confirm button stays
+  // disabled until the user types this exact text (e.g. the page title). Resets on open.
+  typedConfirmText?: string;
+  typedConfirmLabel?: string;
 }) {
   const { t } = useTranslation();
+  const [typed, setTyped] = useState("");
+  useEffect(() => { if (open) setTyped(""); }, [open]);
+  const typedOk = !typedConfirmText || typed === typedConfirmText;
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent data-testid="confirm-dialog"
@@ -103,11 +112,17 @@ export function ConfirmDialog({
           <DialogDescription>{message}</DialogDescription>
         </DialogHeader>
         {warning}
+        {typedConfirmText != null && (
+          <div className="mt-2 flex flex-col gap-1.5">
+            <span className="text-sm text-fg-dim">{typedConfirmLabel ?? t("dialogs.typeToConfirm", { text: typedConfirmText })}</span>
+            <Input value={typed} onChange={(e) => setTyped(e.target.value)} data-testid="typed-confirm-input" placeholder={typedConfirmText} />
+          </div>
+        )}
         <DialogFooter className="mt-4">
           <Button variant="default" type="button" onClick={onClose}>
             {t("common.cancel")}
           </Button>
-          <Button variant={tone === "primary" ? "primary" : "danger"} type="button" data-testid={confirmTestId} onClick={onConfirm}>
+          <Button variant={tone === "primary" ? "primary" : "danger"} type="button" data-testid={confirmTestId} disabled={!typedOk} onClick={onConfirm}>
             {confirmLabel ?? t("common.delete")}
           </Button>
         </DialogFooter>

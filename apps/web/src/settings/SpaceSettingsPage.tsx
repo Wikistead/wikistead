@@ -5,7 +5,7 @@ import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useActiveSpace } from "../app/ActiveSpace";
 import { useSession } from "../session/SessionProvider";
-import { useSpaces, useRenameSpace, useDeleteSpace, useUploadSpaceIcon, useRemoveSpaceIcon, usePublicSurface, useSpacePublic, useSetSpacePublic, usePageCreationPolicy, useSetPageCreationPolicy } from "../data/queries";
+import { useSpaces, useRenameSpace, useDeleteSpace, useUploadSpaceIcon, useRemoveSpaceIcon, usePublicSurface, useSpacePublic, useSetSpacePublic, usePageCreationPolicy, useSetPageCreationPolicy, useSpaceDeleteMode, useSetSpaceDeleteMode } from "../data/queries";
 import { Button } from "../ui/Button";
 import { ShareDialog } from "../ui/ShareDialog";
 import { Input } from "../ui/Input";
@@ -81,6 +81,8 @@ function SpaceGeneralTab() {
   const [confirming, setConfirming] = useState(false);
   const [sharing, setSharing] = useState(false);
   const pageCreation = usePageCreationPolicy(spaceId); // #399 / ADR-158 §3
+  const spaceDeleteMode = useSpaceDeleteMode(spaceId); // #437 / ADR-167
+  const setSpaceDeleteMode = useSetSpaceDeleteMode();
   const setPageCreation = useSetPageCreationPolicy(spaceId);
 
   // #277 / ADR-116: the space public toggle — offered ONLY while the tenant parent switch is ON
@@ -170,6 +172,30 @@ function SpaceGeneralTab() {
             { value: "managers", label: t("spaceSettings.pageCreationManagers") },
           ]}
           onChange={(v) => setPageCreation.mutate(v, {
+            onSuccess: () => notify.success(t("toast.saved")),
+            onError: () => notify.error(t("toast.actionFailed")),
+          })}
+        />
+      </div>
+
+      {/* #437 / ADR-167: the deletion-pathway policy override (NULL inherits the tenant default).
+          Pathways only — who may delete stays the delete verb/manage superset in every mode. */}
+      <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("spaceSettings.deleteModeTitle")}</label>
+      <p style={{ color: "var(--fg-dim)", fontSize: 13, marginTop: 0 }}>{t("spaceSettings.deleteModeBody")}</p>
+      <div style={{ marginBottom: 32 }} data-testid="space-delete-mode">
+        <Select
+          size="sm"
+          value={spaceDeleteMode.data?.deleteMode ?? "inherit"}
+          disabled={spaceDeleteMode.isLoading || setSpaceDeleteMode.isPending}
+          ariaLabel={t("spaceSettings.deleteModeTitle")}
+          testId="space-delete-mode-select"
+          options={[
+            { value: "inherit", label: t("spaceSettings.deleteModeInherit", { mode: t(`deleteMode.${spaceDeleteMode.data?.tenantDefault ?? "trash_only"}`) }) },
+            { value: "trash_only", label: t("deleteMode.trash_only") },
+            { value: "both", label: t("deleteMode.both") },
+            { value: "direct_only", label: t("deleteMode.direct_only") },
+          ]}
+          onChange={(v) => setSpaceDeleteMode.mutate({ spaceId, deleteMode: v === "inherit" ? null : v }, {
             onSuccess: () => notify.success(t("toast.saved")),
             onError: () => notify.error(t("toast.actionFailed")),
           })}
