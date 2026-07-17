@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import Graph from "graphology";
 import Sigma from "sigma";
 import forceAtlas2 from "graphology-layout-forceatlas2";
-import FA2Layout from "graphology-layout-forceatlas2/worker";
 import { useTheme } from "./ThemeProvider";
 import type { LocalGraphResult } from "../data/queries";
 
@@ -55,9 +54,12 @@ export function LocalGraphCanvas({
       const angle = (2 * Math.PI * i) / Math.max(1, data.nodes.length);
       graph.addNode(n.id, {
         label: n.title || "…",
-        // circular seed (center pinned at the origin); the live force layout below relaxes it
-        x: isCenter ? 0 : Math.cos(angle),
-        y: isCenter ? 0 : Math.sin(angle),
+        // circular seed (center pinned at the origin); the live force layout below relaxes it.
+        // #394 (2): a WIDE seed (radius 6, not 1) — the compacted settle sits near the origin,
+        // so a unit-circle seed produced sub-pixel displacement and the animation was invisible.
+        // Spread → contract is the visible motion.
+        x: isCenter ? 0 : Math.cos(angle) * 6,
+        y: isCenter ? 0 : Math.sin(angle) * 6,
         size: isCenter ? 9 : Math.min(4 + (degree.get(n.id) ?? 0) * 0.75, 8),
         color: isCenter ? accent : fgDim,
       });
@@ -72,28 +74,6 @@ export function LocalGraphCanvas({
       }
     });
 
-    // c 04:15 items 2+3: a LIVE ForceAtlas2 (web worker — same package, no new dependency) animates the
-    // nodes from the circular seed to their settled positions, with COMPACTION over inferSettings'
-    // defaults: a fraction of the inferred scalingRatio (less mutual repulsion) + stronger gravity pulls
-    // the components together instead of spreading a small graph across the whole canvas. The layout
-    // stops after a bounded settle window (small graphs converge well inside it) and on unmount.
-    let layout: InstanceType<typeof FA2Layout> | null = null;
-    let settleTimer: ReturnType<typeof setTimeout> | null = null;
-    if (graph.order > 2) {
-      const inferred = forceAtlas2.inferSettings(graph);
-      layout = new FA2Layout(graph, {
-        settings: {
-          ...inferred,
-          adjustSizes: true,
-          scalingRatio: Math.max(0.5, (inferred.scalingRatio ?? 10) / 5),
-          gravity: Math.max(1, (inferred.gravity ?? 1) * 5),
-          slowDown: 5, // damped motion — animate, don't jitter
-        },
-      });
-      layout.start();
-      settleTimer = setTimeout(() => layout?.stop(), 3000);
-    }
-
     const sigma = new Sigma(graph, el, {
       renderEdgeLabels: false,
       labelColor: { color: fg },
@@ -104,6 +84,33 @@ export function LocalGraphCanvas({
       minCameraRatio: 0.3,
       maxCameraRatio: 3,
     });
+    // c 04:15 items 2+3, REWORKED per the live layout is a MAIN-THREAD rAF loop over the sync
+    // ForceAtlas2 iterator — the `graphology-layout-forceatlas2/worker` blob worker silently failed to
+    // start on the real device (no message ever arrived, nothing threw), leaving the seed frozen; a
+    // worker can't be trusted to animate. Each frame runs a couple of iterations and refreshes sigma,
+    // so the spread seed visibly contracts to the compacted settle (scalingRatio down / gravity up vs
+    // inferSettings, c2112-2) and stops after a bounded window; unmount cancels the loop.
+    let raf = 0;
+    if (graph.order > 2) {
+      const inferred = forceAtlas2.inferSettings(graph);
+      const settings = {
+        ...inferred,
+        adjustSizes: true,
+        scalingRatio: Math.max(0.5, (inferred.scalingRatio ?? 10) / 5),
+        gravity: Math.max(1, (inferred.gravity ?? 1) * 5),
+        slowDown: 5, // damped motion — animate, don't jitter
+      };
+      let frames = 0;
+      const step = () => {
+        forceAtlas2.assign(graph, { iterations: 2, settings });
+        sigma.refresh();
+        if (++frames < 150) raf = requestAnimationFrame(step); // ~2.5s settle window
+      };
+      raf = requestAnimationFrame(step);
+    }
+    // e2e seam (the false-green lesson): the movement pin samples real display coordinates
+    // across frames — same spirit as the editor's __lp* diagnostics. Display-only, never read by app code.
+    (el as HTMLElement & { __wksSigma?: Sigma }).__wksSigma = sigma;
     // Hover: keep the hovered node + its neighbourhood, DIM the rest. The label stays (c 04:15 item 1 —
     // dimming alone reads fine; hiding labels made the graph unreadable while hovering).
     let hovered: string | null = null;
@@ -127,8 +134,7 @@ export function LocalGraphCanvas({
     });
     sigma.on("clickNode", ({ node }) => openRef.current(node));
     return () => {
-      if (settleTimer) clearTimeout(settleTimer);
-      layout?.kill();
+      cancelAnimationFrame(raf);
       sigma.kill();
     };
   }, [data, theme]);
