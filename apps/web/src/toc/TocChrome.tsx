@@ -43,6 +43,7 @@ export function TocChrome({
         // items even with room to spare), clamped so it never collides with the reading column or overruns.
         <div
           className="pointer-events-none absolute bottom-2 z-[5]"
+          data-testid="toc-rail"
           style={{ left: railLeft, top: railTop, width: "clamp(210px, calc(50vw - 370px - 2rem), 300px)" }}
         >
           <div className="pointer-events-auto h-full">

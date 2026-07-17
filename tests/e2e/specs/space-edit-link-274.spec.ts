@@ -112,3 +112,53 @@ test("#274: the sidebar-less shell renders no dead sidebar-toggle icon", async (
   await openDemo(member);
   await expect(member.getByTestId("sidebar-toggle")).toBeVisible({ timeout: 8000 });
 });
+
+// ---- #274 (guest display, 3 points) ----
+// (1) the guest TOC rail is band-aware (the hardcoded 0.5rem slid it under the title band);
+// (2) the selected guest tree row uses the member accent-mix highlight, not the grey hover wash;
+// (3) covered in the member tree: creating a page scrolls its row into view (PageTree scrollTo).
+test("#274 guest TOC rail clears the title band and the selected row uses the accent highlight", async ({ browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  await openDemo(member);
+  const link = await member.evaluate(async (api) => {
+    const res = await fetch(`${api}/share-links`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "Content-Type": "application/json" },
+      body: JSON.stringify({ resource: { type: "space", id: "demo_space" }, capability: "edit", expiresInSeconds: null }),
+    });
+    return (await res.json()) as { id: string };
+  }, API);
+  const guest = await (await browser.newContext({ viewport: { width: 1600, height: 900 } })).newPage();
+  await guest.goto(`/share/${link.id}`);
+  await expect(guest.getByTestId("guest-sidebar")).toBeVisible({ timeout: 15000 });
+  await guest.getByTestId("guest-tree-page").filter({ hasText: "Demo Page" }).first().click();
+  await guest.waitForSelector("[data-pane=preview] .cm-content", { timeout: 10000 });
+  await sleep(1000);
+
+  // (2) accent-mix on the SELECTED row — compare against the resolved --panel-2 (the old wash)
+  const { bg, panel2 } = await guest.evaluate(() => {
+    const btn = [...document.querySelectorAll("[data-testid=guest-sidebar] [data-page-id]")]
+      .find((b) => (b.textContent || "").includes("Demo Page"));
+    const row = btn?.closest("div");
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = "var(--panel-2)";
+    document.body.appendChild(probe);
+    const p2 = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return { bg: row ? getComputedStyle(row).backgroundColor : null, panel2: p2 };
+  });
+  expect(bg, "selected row painted").toBeTruthy();
+  expect(bg, "accent mix, not the grey hover wash").not.toBe(panel2);
+
+  // (1) the rail's computed top respects the band height (the hardcode resolved to exactly 8px)
+  const geom = await guest.evaluate(() => {
+    const rail = document.querySelector("[data-testid=toc-rail]");
+    if (!rail) return null;
+    const bandH = parseFloat(getComputedStyle(rail.parentElement as Element).getPropertyValue("--wks-band-h")) || 0;
+    return { top: parseFloat(getComputedStyle(rail).top), bandH };
+  });
+  if (geom) {
+    expect(geom.bandH, "the guest shell publishes its band height").toBeGreaterThan(0);
+    expect(geom.top, "rail top = band height + 0.5rem, never the bare hardcode").toBeGreaterThanOrEqual(geom.bandH);
+  }
+});
