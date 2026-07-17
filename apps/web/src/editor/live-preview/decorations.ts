@@ -13,7 +13,7 @@ import { autoDemote } from "../macros/tier-cap";
 export type { MacroTheme }; // #200: re-exported so the Editor can type the redrawMacros payload
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, directiveChainAt, tableBlockAt } from "../macros/fence";
 import { currentMacroTheme } from "../macros/theme";
-import { parseDirectiveOpen, resolveDirectiveRanges } from "../macros/directive-parser";
+import { parseDirectiveOpen, resolveDirectiveRanges, serializeDirectiveAttrs } from "../macros/directive-parser";
 import { parseFrontmatterRange, FrontmatterWidget } from "./frontmatter";
 import { parseFenceLine, parseFenceInfo, serializeFenceInfo, CALLOUT_TYPES, type FenceAlign } from "@wikistead/macro-render"; // #198: code-fence attribute parser; #174: callout types; #255: align rewrite
 // #255: rendered diagram macros are centred by default and take a fence `align=` attribute (others don't).
@@ -1825,6 +1825,36 @@ export function diagramFenceAt(state: EditorState, pos: number): number | null {
   const f = macroFenceAt(state, pos);
   return f && DIAGRAM_MACROS.has(f.lang) ? f.from : null;
 }
+
+// #393 / ADR-151: the `:::table` directive whose range contains `pos` (innermost), else null — the
+// context-menu / align-segment gate, mirroring diagramFenceAt.
+export function tableDirectiveAt(state: EditorState, pos: number): number | null {
+  let best: { from: number; depth: number } | null = null;
+  for (const d of resolveDirectiveRanges(state.doc.toString())) {
+    if (d.name !== "table" || pos < d.from || pos > d.to) continue;
+    if (!best || d.depth > best.depth) best = { from: d.from, depth: d.depth };
+  }
+  return best ? best.from : null;
+}
+
+// #393 / ADR-151: rewrite a `:::table` block's alignment by setting/dropping its `{align=…}` directive
+// attribute (CENTER is the default → the attribute is DROPPED, so an untagged block stays untagged
+// the fence-info convention). One offset-invariant replace of the OPENING fence line; other attributes
+// on the line are preserved verbatim (serializeDirectiveAttrs round-trips the parsed map).
+export function setTableAlign(view: EditorView, pos: number, align: FenceAlign): void {
+  const from = tableDirectiveAt(view.state, pos);
+  if (from == null) return;
+  const line = view.state.doc.lineAt(from);
+  const open = parseDirectiveOpen(line.text);
+  if (!open || open.name !== "table") return;
+  const attrs: Record<string, string> = { ...(open.attrs ?? {}) };
+  if (align === "center") delete attrs.align;
+  else attrs.align = align; // fixed enum — never a free-form value (XSS boundary: enum → class switch)
+  const label = open.label ? `[${open.label}]` : "";
+  const next = `${":".repeat(open.colons)}table${label}${serializeDirectiveAttrs(Object.keys(attrs).length ? attrs : undefined)}`;
+  if (next === line.text) return;
+  view.dispatch({ changes: { from: line.from, to: line.to, insert: next }, userEvent: "input" });
+}
 // #255: align glyphs (three stacked bars, justified per side) — trusted constant SVGs (no user input).
 const ALIGN_ICON: Record<FenceAlign, string> = {
   left: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h13M3 12h18M3 18h13"/></svg>',
@@ -2220,6 +2250,10 @@ class MacroWidget extends WidgetType {
     // and can be pushed left/right via the fence `align=` attribute. Only diagrams align (text macros
     // callout/table/columns — are unaffected). The class drives `text-align` on the wrap (below).
     if (DIAGRAM_MACROS.has(this.name)) wrap.classList.add(`cm-lp-align-${this.align}`);
+    // #393 / ADR-151: a `:::table{align=left|right}` aligns as a block. Unlike diagrams, the DEFAULT
+    // (center-labelled) state adds NO class — a bare :::table keeps today's flow layout, and the flex
+    // align class would otherwise change every existing table.
+    if (this.name === "table" && this.align !== "center") wrap.classList.add(`cm-lp-align-${this.align}`);
     // ADR-024: the caret resting ON the atom selects it (no separate key) — a ring shows
     // it's selected as a unit (dd/yy operate on it; Ctrl+Enter enters).
     // #215 comment 813/817: when a NESTED macro is selected the caret sits on THIS container (so
@@ -2492,6 +2526,12 @@ class MacroWidget extends WidgetType {
         // #255 the 3-button segmented align control (writes the diagram fence's `align=` attribute).
         btnRow.appendChild(makeAlignSegment(this.align, (a) => setDiagramAlign(view, view.posAtDOM(wrap), a)));
       }
+      // #393 / ADR-151: the SAME segmented align control on a `:::table` block — writes/drops the
+      // directive's `{align=…}` attribute (center = attribute-less, the fence-info convention). The
+      // right-click menu offers the same three entries (context-menu.ts).
+      if (this.name === "table" && !nestedActive) {
+        btnRow.appendChild(makeAlignSegment(this.align, (a) => setTableAlign(view, view.posAtDOM(wrap), a)));
+      }
       // #278 §1: columns/tabs structure ops are now PER-ITEM inline affordances on the rendered cells (retiring
       // the #213 bottom-right +/− bar and the #257 panel's +/− buttons): each column/tab shows a hover `×`
       // (remove THAT item — not just the last) and a trailing `` adds one. Editor surface only (added here, in
@@ -2665,6 +2705,14 @@ class MacroWidget extends WidgetType {
     if (DIAGRAM_MACROS.has(this.name)) {
       for (const a of ["left", "center", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, a === this.align);
       const seg = dom.querySelector<HTMLElement>(".cm-lp-align-seg"); // #255 update the segment's active side
+      if (seg) updateAlignSegment(seg, this.align);
+      if (prev) prev.align = this.align;
+    }
+    // #393 / ADR-151: table block-align changes apply in place too (same no-rebuild rule). Unlike
+    // diagrams the default ("center") state carries NO class (a bare :::table keeps the flow layout).
+    if (this.name === "table") {
+      for (const a of ["left", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, a === this.align);
+      const seg = dom.querySelector<HTMLElement>(".cm-lp-align-seg");
       if (seg) updateAlignSegment(seg, this.align);
       if (prev) prev.align = this.align;
     }
@@ -3394,7 +3442,10 @@ const RENDERERS: BlockRenderer[] = [
         // #174 comment 1003: layout containers in WYSIWYG draw hover ✎ on their nested editable slots (below);
         // the flag is part of eq so a display-mode switch rebuilds the widget (eq ignores the live facet).
         const wysiwygNested = (open!.name === "columns" || open!.name === "tabs") && ctx.state.facet(displayMode) === "wysiwyg";
-        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editUI: macro.editUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme, from, to, bodyFrom, nestedSel, nestedEdit, "center", wysiwygNested, slotEdit), block: true }), from, to);
+        // #393 / ADR-151: `:::table{align=left|right}` block alignment (fixed enum off the directive
+        // attrs; anything else — incl. absent/center — stays the "center" default and writes no class).
+        const dirAlign: FenceAlign = open!.name === "table" && (open!.attrs?.align === "left" || open!.attrs?.align === "right") ? open!.attrs!.align as FenceAlign : "center";
+        ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editUI: macro.editUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme, from, to, bodyFrom, nestedSel, nestedEdit, dirAlign, wysiwygNested, slotEdit), block: true }), from, to);
         return macro.revealOnCursor ? false : undefined;
       }
       if (macro.collapsible && !blockRevealed(ctx.state, first.from, lastLine.to)) {

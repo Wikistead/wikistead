@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { parsePipe, parseHtml, toHtml, toPipe, hasSpans, mergeRect, unmergeAt, serialize, sanitizeStyle, insertColAt, insertRowAt, deleteColAt, deleteRowAt, cellTextToHtml, htmlToCellText, representableAsPipe } from "./table-model";
+import { parsePipe, parseHtml, toHtml, toPipe, hasSpans, mergeRect, unmergeAt, serialize, sanitizeStyle, insertColAt, insertRowAt, deleteColAt, deleteRowAt, cellTextToHtml, htmlToCellText, representableAsPipe, tableAlignOf, tableFence } from "./table-model";
+import { tableTier } from "./table";
+import { asMacroSource } from "./registry";
 
 // ADR-037 in-cell newlines: a cell newline is the only kept markup, as GFM <br>. The pair
 // MUST round-trip with no <br> loss/duplication (the tiptap #7731 class of bug) and a
@@ -205,5 +207,39 @@ describe("table-model: insert/delete rows & columns", () => {
     const d = deleteColAt(g, 0); // remove the first column under the span
     expect(d[0]![0]).toMatchObject({ text: "m", colspan: 1 }); // shrank to 1, kept text
     expect(d[1]!.map((c) => c!.text)).toEqual(["2"]);
+  });
+});
+
+// #393 / ADR-151: whole-table block alignment — parse/serialize + the tier demote rule.
+describe("table block alignment (#393 / ADR-151)", () => {
+  it("tableAlignOf reads the fence attribute; absent/center/garbage → center", () => {
+    expect(tableAlignOf(":::table{align=left}\n<table></table>\n:::")).toBe("left");
+    expect(tableAlignOf(":::table{align=right}\n<table></table>\n:::")).toBe("right");
+    expect(tableAlignOf(":::table{align=center}\n<table></table>\n:::")).toBe("center");
+    expect(tableAlignOf(":::table\n<table></table>\n:::")).toBe("center");
+    expect(tableAlignOf("| a |\n| - |\n| b |")).toBe("center"); // pipe = default
+    expect(tableAlignOf(":::table{align=weird}\n:::")).toBe("center"); // enum-gated
+  });
+  it("tableFence: center is attribute-less; left/right serialize the attr (round-trip stable)", () => {
+    expect(tableFence("center")).toBe(":::table");
+    expect(tableFence("left")).toBe(":::table{align=left}");
+    expect(tableAlignOf(tableFence("right") + "\n<table></table>\n:::")).toBe("right");
+  });
+});
+
+// #393: the tier rule — a left/right table can NEVER demote to pipe (the alignment would silently drop);
+// center + plain grid still demotes (pure GFM, no loss). Exercised through tableTier itself.
+describe("tableTier align demote rule (#393)", () => {
+  const plain = (fence: string) => fence + "\n<table><tr><td>a</td><td>b</td></tr></table>\n:::";
+  it("pipe is representable only when align is center", () => {
+    expect(tableTier.canRepresentAt(asMacroSource(plain(":::table")), { id: "pipe", layer: "gfm" })).toBe(true);
+    expect(tableTier.canRepresentAt(asMacroSource(plain(":::table{align=left}")), { id: "pipe", layer: "gfm" })).toBe(false);
+    expect(tableTier.canRepresentAt(asMacroSource(plain(":::table{align=right}")), { id: "pipe", layer: "gfm" })).toBe(false);
+  });
+  it("toLevel(html) preserves the align attribute; toLevel(pipe) only reachable at center", () => {
+    const rehtml = String(tableTier.toLevel(asMacroSource(plain(":::table{align=right}")), { id: "html", layer: "directive" }));
+    expect(rehtml.startsWith(":::table{align=right}\n")).toBe(true);
+    const center = String(tableTier.toLevel(asMacroSource(plain(":::table")), { id: "html", layer: "directive" }));
+    expect(center.startsWith(":::table\n")).toBe(true); // center never writes the attribute
   });
 });

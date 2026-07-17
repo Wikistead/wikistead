@@ -125,6 +125,8 @@ class HtmlSink implements MdSink {
     this.emit(html`<pre><code>${args.body}</code></pre>`);
   }
 
+  // NOTE: `attrs` (#393) is not consumed here in v1 — the static server export applies no align, matching
+  // the diagram precedent (ADR-151 §2); export parity is the #422 follow-up.
   directive(args: { name: string | null; label: string | null; body: string; walkChildren: () => void }): void {
     const macro = args.name ? this.macros.directive(args.name) : undefined;
     if (macro) {

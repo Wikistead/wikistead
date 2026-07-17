@@ -4,7 +4,7 @@ import { syntaxTree } from "@codemirror/language";
 import i18n from "../../i18n";
 import { INLINE_FORMATS } from "./commands";
 import { linkifyPaste, linkCopyRange } from "./paste-linkify";
-import { diagramFenceAt, setDiagramAlign, imageAlignAt, setImageAlign } from "./decorations"; // #255: right-click diagram/image alignment
+import { diagramFenceAt, setDiagramAlign, imageAlignAt, setImageAlign, tableDirectiveAt, setTableAlign } from "./decorations"; // #255: right-click diagram/image alignment; #393: table block alignment
 import type { FenceAlign } from "@wikistead/macro-render";
 
 // M0-4 (ADR-018): the right-click context menu — the superset entry for mouse users.
@@ -22,7 +22,7 @@ interface LinkRange { from: number; to: number; urlFrom: number; urlTo: number }
 // #325 / ADR-137 slice 2b: the block-reference target for a "Copy block reference" entry — the line-end
 // offset to append the marker at, plus any id already present on that line (so a repeat copy is idempotent).
 interface BlockRef { lineTo: number; existingId: string | null }
-interface MenuState { pos: number; kind: MenuKind; link?: LinkRange; diagramFrom?: number; imageFrom?: number; blockRef?: BlockRef }
+interface MenuState { pos: number; kind: MenuKind; link?: LinkRange; diagramFrom?: number; imageFrom?: number; tableFrom?: number; blockRef?: BlockRef } // #393: tableFrom = a :::table block at the click
 
 // #325 / ADR-137 slice 2b: the current page's id, provided by the mount (member surface only). Absent on
 // guest / template-preview surfaces — the block-reference entry is then hidden (a ref needs a `pageId#^id`).
@@ -272,6 +272,15 @@ function menuTooltip(v: MenuState): Tooltip {
           item(`align-${a}`, i18n.t(`contextMenu.align${a[0]!.toUpperCase()}${a.slice(1)}`), () => { setDiagramAlign(view, v.diagramFrom!, a); close(view); });
         }
       }
+      // #393 / ADR-151: a `:::table` block at the click → the SAME alignment entries (writes/drops the
+      // directive's {align=…} attribute; center = attribute-less). Fixed enum → setTableAlign (XSS: the
+      // value is never free text).
+      if (v.tableFrom != null) {
+        sep();
+        for (const a of ["left", "center", "right"] as FenceAlign[]) {
+          item(`align-${a}`, i18n.t(`contextMenu.align${a[0]!.toUpperCase()}${a.slice(1)}`), () => { setTableAlign(view, v.tableFrom!, a); close(view); });
+        }
+      }
       // #255 comment 1073: a standalone image at the click → the SAME alignment entries (writes ?align=).
       if (v.imageFrom != null) {
         sep();
@@ -328,9 +337,10 @@ const menuEvents = Prec.highest(
       if (wrapEl) { try { wrapPos = view.posAtDOM(wrapEl); } catch { wrapPos = null; } }
       const diagramFrom = diagramFenceAt(view.state, pos) ?? (wrapPos != null ? diagramFenceAt(view.state, wrapPos) : null) ?? undefined;
       const imageFrom = imageAlignAt(view.state, pos) ?? (wrapPos != null ? imageAlignAt(view.state, wrapPos) : null) ?? undefined; // #255: standalone image alignment
+      const tableFrom = tableDirectiveAt(view.state, pos) ?? (wrapPos != null ? tableDirectiveAt(view.state, wrapPos) : null) ?? undefined; // #393: :::table block alignment
       // #325 slice 2b: on a plain (no-selection, no-link) right-click, offer "Copy block reference" for the block under the cursor.
       const blockRef = kind === "plain" ? (blockRefTarget(view.state, pos, view.state.facet(selfPageIdFacet)) ?? undefined) : undefined;
-      view.dispatch({ effects: openMenu.of({ pos, kind, link, diagramFrom, imageFrom, blockRef }) });
+      view.dispatch({ effects: openMenu.of({ pos, kind, link, diagramFrom, imageFrom, tableFrom, blockRef }) });
       e.preventDefault();
       return true;
     },

@@ -1,4 +1,4 @@
-import { mergeRect, unmergeAt, toHtml, styleToCss, insertColAt, insertRowAt, deleteColAt, deleteRowAt, parseTableSource, type Grid, type CellStyle } from "../macros/table-model";
+import { mergeRect, unmergeAt, toHtml, styleToCss, insertColAt, insertRowAt, deleteColAt, deleteRowAt, parseTableSource, tableAlignOf, tableFence, type Grid, type CellStyle } from "../macros/table-model";
 import type { InnerEditHost, InlineEditor, InlineController } from "../macros/registry";
 import { asMacroSource } from "../macros/registry";
 import { renderCellInline, cellElToText, insertBrAtCaret, insertTextAtCaret, stripZeroWidth } from "../macros/table-cell-dom";
@@ -479,7 +479,10 @@ export const tableInlineEditor: InlineEditor = {
       // span/style/complex-header free. The editor no longer decides pipe-vs-:::table.
       // STAY in edit mode: host.replaceSource re-points render-active at the rewritten range
       // (per-op LWW; the user exits only via Done/Esc — ADR-022 review #2).
-      host.replaceSource(asMacroSource(":::table\n" + toHtml(next) + "\n:::"));
+      // #393 / ADR-151: carry the CURRENT source's block-align attribute onto the rewritten fence — a
+      // cell edit must never strip `:::table{align=…}` (center stays a bare fence; the host tier keeps
+      // the demote rule honest).
+      host.replaceSource(asMacroSource(tableFence(tableAlignOf(host.getSource())) + "\n" + toHtml(next) + "\n:::"));
     };
     // Show/position the floating toolbar above the first selected cell; hide when nothing
     // is selected (#1 — contextual, not always-on).

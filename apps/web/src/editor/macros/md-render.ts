@@ -269,7 +269,7 @@ class DomSink implements MdSink {
     pre.appendChild(code); card.appendChild(pre); into.appendChild(card);
   }
 
-  directive(args: { name: string | null; label: string | null; full: string; body: string; nodeFrom: number; resolved: boolean; walkChildren: () => void }): void {
+  directive(args: { name: string | null; label: string | null; attrs: Record<string, string> | null; full: string; body: string; nodeFrom: number; resolved: boolean; walkChildren: () => void }): void {
     const into = this.top();
     const { full, body } = args;
     const nl = full.indexOf("\n");
@@ -295,7 +295,23 @@ class DomSink implements MdSink {
       try { el = macro.liveRender(body, { theme: currentMacroTheme() }); }
       catch { /* a macro that throws must not break the render → fall through to the generic box */ }
       finally { setPendingBaseOffset(null); nestedDirectiveDepth--; }
-      if (el) { tagMacro(el, args.nodeFrom, parsed!.name); into.appendChild(el); return; } // #215 tag
+      if (el) {
+        tagMacro(el, args.nodeFrom, parsed!.name); // #215 tag
+        // #393 / ADR-151: `:::table{align=left|right}` block alignment on the read/nested surface.
+        // FIXED enum → fixed class (never raw-concatenated — the XSS boundary); center = default = no
+        // wrap. The <table> itself must not become a flex container, so the class rides a wrapper div
+        // (the global .cm-lp-align-* rules are flex-based).
+        const align = parsed!.name === "table" ? args.attrs?.align : undefined;
+        if (align === "left" || align === "right") {
+          const alignWrap = document.createElement("div");
+          alignWrap.className = align === "left" ? "cm-lp-align-left" : "cm-lp-align-right";
+          alignWrap.appendChild(el);
+          into.appendChild(alignWrap);
+          return;
+        }
+        into.appendChild(el);
+        return;
+      }
     }
     // #170 / ADR-049 (Y): a CONTAINER directive with an icon = a typed callout → the shared PANEL
     // (single source of truth with the CM widget), not a generic box.

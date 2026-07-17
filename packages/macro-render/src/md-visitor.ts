@@ -44,7 +44,7 @@ export interface MdSink {
   // Sink-owned constructs the visitor delegates whole (the real asymmetries — macro dispatch etc.).
   fence(args: { blockName: "FencedCode" | "CodeBlock"; info: string | null; body: string; nodeFrom: number }): void;
   directive(args: {
-    name: string | null; label: string | null; full: string; body: string;
+    name: string | null; label: string | null; attrs: Record<string, string> | null; full: string; body: string;
     nodeFrom: number; bodyStartRel: number;
     // true when resolveDirectiveRanges recognized this directive (its range is authoritative — the DOM
     // sink re-renders the corrected body); false = resolver miss → fall back to the lezer child walk.
@@ -231,6 +231,7 @@ function walkBlock(st: WalkState, node: MdNode): number | void {
       sink.directive({
         name: parsed?.name ?? null,
         label: parsed?.label ?? null,
+        attrs: parsed?.attrs ?? null, // #393 / ADR-151: `{key=val}` off the opening fence
         full,
         body: directiveBody(full),
         nodeFrom: node.from,
