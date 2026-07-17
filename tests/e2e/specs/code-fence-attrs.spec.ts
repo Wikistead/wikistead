@@ -123,7 +123,7 @@ test("#198 comment 770: plain & attributed fences share one rounded card base; S
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.insertText('```c\nint x = 1;\nint y = 2;\n```\n\n```ts title="app.ts" showLineNumbers {1}\nconst a = 1\nconst b = 2\n```\n\ntail\n');
   await sleep(400);
-  await page.getByText("tail").click(); // caret off the fences
+  await page.getByText("tail", { exact: true }).click(); // caret off the fences
   await sleep(300);
 
   const m = () => page.evaluate(() => {

@@ -24,7 +24,7 @@ const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 // clickable-whole-surface exception (the #273 download card) keeps its own `pointer`. Typed-body
 // macros (callout/table/todo/details/tagged/mermaid/plantuml/code) keep the caret affordances.
 const ATOM_CLASS_MACROS = new Set(["embed-page", "embed-external", "excalidraw", "columns", "tabs", "children"]);
-import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset, appendMarkdownInto } from "../macros/md-render";
+import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset, appendMarkdownInto, buildFenceHeader } from "../macros/md-render";
 import { setActiveTabIndex } from "../macros/layout-directives"; // #278 item 1: record the clicked tab before the island's commit rebuilds the tabs widget
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
@@ -240,52 +240,9 @@ const hrLine = Decoration.line({ attributes: { class: "cm-lp-hr" } });
 class FenceHeaderWidget extends WidgetType {
   constructor(readonly lang: string, readonly title: string | undefined, readonly code: string, readonly canCopy: boolean) { super(); }
   eq(o: FenceHeaderWidget) { return o.lang === this.lang && o.title === this.title && o.code === this.code && o.canCopy === this.canCopy; }
-  toDOM() {
-    const row = document.createElement("div");
-    row.className = "cm-lp-code-header";
-    row.contentEditable = "false";
-    // The filename tab (title + lang label) — top-left, editor-tab look.
-    const tab = document.createElement("span");
-    tab.className = "cm-lp-code-tab";
-    if (this.title) {
-      const t = document.createElement("span");
-      t.className = "cm-lp-code-title";
-      t.textContent = this.title; // XSS-safe: textContent, never innerHTML
-      tab.appendChild(t);
-    }
-    if (this.lang) {
-      const l = document.createElement("span");
-      l.className = "cm-lp-code-lang";
-      l.textContent = this.lang;
-      tab.appendChild(l);
-    }
-    // #174 comment 948: a lang-less fence (copy button only) must NOT emit an EMPTY tab — the
-    // .cm-lp-code-tab CSS (padding/bg/border/radius) would render it as a small empty tab "stub". Only
-    // append the tab when it actually has a title or lang; otherwise the header is just the copy button
-    // (kept right by margin-left:auto), and the card's rounded top-left corner stays intact.
-    if (this.title || this.lang) row.appendChild(tab);
-    // The copy button — view mode only (Source can select the raw text directly).
-    if (this.canCopy) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "cm-lp-code-copy";
-      btn.setAttribute("aria-label", "Copy code");
-      btn.title = "Copy code";
-      btn.innerHTML = COPY_ICON; // trusted constant SVG (no user input → XSS-safe)
-      btn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        void navigator.clipboard?.writeText(this.code).then(() => {
-          btn.classList.add("cm-lp-code-copied");
-          btn.innerHTML = CHECK_ICON;
-          setTimeout(() => { btn.classList.remove("cm-lp-code-copied"); btn.innerHTML = COPY_ICON; }, 1400);
-        }).catch(() => { /* clipboard denied (insecure ctx / permission) — no-op */ });
-      });
-      row.appendChild(btn);
-    }
-    return row;
-  }
+  // #381 the header DOM (filename tab + lang + copy button) is the SHARED builder in md-render
+  // the static prose fence renders the identical structure, so the two read surfaces cannot drift.
+  toDOM() { return buildFenceHeader({ lang: this.lang, title: this.title, code: this.code, canCopy: this.canCopy }); }
   ignoreEvent(e: Event) { return e.type !== "mousedown" && e.type !== "click"; }
 }
 
@@ -1757,8 +1714,6 @@ const MACRO_EDIT_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="n
 const MACRO_EDIT_BUTTON_HTML = MACRO_EDIT_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
 // #198 (comment 724): Lucide copy / check glyphs for the code-fence copy button. Trusted constants
 // (no user input) → safe as innerHTML.
-const COPY_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
-const CHECK_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
 // #213: structural editing for columns/tabs — add / remove a child :::column / :::tab as a real Y.Text
 // edit (single dispatch, offset-invariant), NOT raw hand-editing. The child's colon count is one less
 // than the container's (the outer≥inner convention), so an added item nests correctly under the
@@ -4383,7 +4338,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-h6": { fontSize: "var(--wks-prose-h6, 1em)", opacity: "0.85" },
   ".cm-lp-code-line": {
     fontFamily: "var(--font-code)", // #190: fenced code uses the code face, not prose --font-body
-    background: "rgba(127,127,127,0.12)",
+    background: "var(--wks-code-bg, rgba(127,127,127,0.12))", // #381 shared value token (prose.css)
   },
   // #198 / ADR-094: code-fence attribute chrome. Header band (title + lang), line-number gutter,
   // highlighted lines. All display-only; token colours (#158-C2) sit ABOVE the highlight background.
@@ -4454,7 +4409,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-lp-table": { borderCollapse: "collapse", padding: "0.4em 0", fontSize: "0.95em" },
   ".cm-lp-table th, .cm-lp-table td": {
     border: "var(--wks-table-cell-border, 1px solid var(--border, #444))", // #381 shared value token
-    padding: "3px 8px",
+    padding: "var(--wks-table-cell-padding, 3px 8px)", // #381 shared value token
     textAlign: "left",
     // #197 (comment 638): a min row height so an EMPTY cell/row doesn't collapse to a sliver. In table
     // layout `height` acts as a minimum, so every row is at least ~1 line tall whether it has text or not.
@@ -4463,7 +4418,7 @@ export const livePreviewTheme = EditorView.baseTheme({
   },
   // #197: a PALE, token-driven header (was a hardcoded grey wash). Neutral surface + --fg text so the
   // header is always readable in any theme — no accent tint that could clash with the header text.
-  ".cm-lp-table th": { background: "var(--panel-2, #f0f1f3)", color: "var(--fg)", fontWeight: "700" },
+  ".cm-lp-table th": { background: "var(--wks-table-th-bg, var(--panel-2, #f0f1f3))", color: "var(--fg)", fontWeight: "700" }, // #381 shared value token
   ".cm-lp-image": { maxWidth: "100%", height: "auto", borderRadius: "4px", verticalAlign: "bottom" },
   // #273: file-attachment affordances. The inline chip flows with the text; the standalone card
   // is a bordered row; the sandboxed PDF frame gets a bounded height (the ResizeObserver keeps
