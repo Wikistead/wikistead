@@ -555,6 +555,21 @@ export function useRemoveAvatar() {
   });
 }
 
+// #361per-page SERIAL chain for task toggles. The server's no-revision fold guard demands the
+// draft differ from published by EXACTLY the one claimed flip — so a rapid burst must not pile a second
+// draft flip in before the first fold commits (that 409'd every request on a clean page as "publish
+// first"). Each toggle's draft write (`applyFlip`) AND its POST run as one chained unit, strictly after
+// the previous toggle settled: every fold sees exactly one flip, and every burst click lands in order.
+// The chain lives OUTSIDE the mutation so the mutation itself still starts at click time — which is what
+// keeps therefetch coalescing (isMutating counts the whole burst) and thepoll gate honest.
+const toggleChains = new Map<string, Promise<void>>();
+export function chainPageToggle<T>(pageId: string, run: () => Promise<T>): Promise<T> {
+  const prev = toggleChains.get(pageId) ?? Promise.resolve();
+  const next = prev.then(run, run); // run regardless of the previous toggle's outcome (its failure is handled by its own caller)
+  toggleChains.set(pageId, next.then(() => undefined, () => undefined));
+  return next;
+}
+
 // Toggle a single task checkbox on the PUBLISHED page WITHOUT creating a revision
 // (ADR-019). Edit-gated server-side (the bastion); rejects 409 if the draft has any
 // non-checkbox change (so it can't smuggle a real edit past history). On success the
@@ -571,10 +586,15 @@ export function useToggleTask(pageId: string) {
     // invalidate once everything settled — intermediate toggles skip the refetch, so the widget keeps
     // the optimistic state until the final committed snapshot arrives.
     mutationKey: ["toggle", pageId],
-    mutationFn: (index: number) =>
-      apiFetch<{ publishedAt: string | null }>(`/pages/${encodeURIComponent(pageId)}/tasks/toggle`, token, {
-        method: "POST",
-        body: JSON.stringify({ index }),
+    // applyFlip (from the Editor) writes this toggle's draft flip; it MUST run inside the serial chain
+    // immediately before its own POST (#361— see chainPageToggle).
+    mutationFn: ({ index, applyFlip }: { index: number; applyFlip?: () => void }) =>
+      chainPageToggle(pageId, () => {
+        applyFlip?.();
+        return apiFetch<{ publishedAt: string | null }>(`/pages/${encodeURIComponent(pageId)}/tasks/toggle`, token, {
+          method: "POST",
+          body: JSON.stringify({ index }),
+        });
       }),
     onSettled: () => {
       if (qc.isMutating({ mutationKey: ["toggle", pageId] }) <= 1) {

@@ -120,10 +120,13 @@ export interface EditorProps {
   onPublish?: () => void;
   // Persist a view-mode task-checkbox toggle (ADR-019): the host POSTs the no-revision
   // endpoint for task `index` and refetches the published snapshot. Provided only for an
-  // edit-capable viewer; absent → checkboxes render disabled. Editor flips the live draft
-  // over its collab connection, then calls this; a rejection (409 dirty/mixed, 403)
-  // reverts the optimistic draft flip. Pass a STABLE callback (captured at mount).
-  onToggleTask?: (index: number) => Promise<void>;
+  // edit-capable viewer; absent → checkboxes render disabled. `applyFlip` writes the
+  // draft flip over the collab connection — the HOST must run it inside its per-page
+  // serial toggle chain, immediately before that toggle's own POST (#361flipping
+  // at click time let a rapid burst pile ≥2 flips into the draft before the first fold,
+  // so the server's exactly-one-flip guard 409'd a clean page). A rejection (409
+  // dirty/mixed, 403) reverts the optimistic draft flip. Pass a STABLE callback.
+  onToggleTask?: (index: number, applyFlip: () => void) => Promise<void>;
 }
 
 function userField(user: EditorUser) {
@@ -392,39 +395,46 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       const flipGen = new Map<number, number>();
       const onToggleTaskInView = canEdit && onToggleTask
         ? (index: number, _from: number, checked: boolean) => {
-            const c = collabRef.current;
-            if (!c) return;
+            if (!collabRef.current) return;
             // #303: the checkbox reports `_from` computed on the PUBLISHED snapshot — NEVER apply it to the
             // live draft (when the draft has diverged, `_from+1` lands on unrelated prose and the optimistic
             // flip + failure-revert overwrite real text; the corruption then syncs to every collaborator via
             // the CRDT). Instead re-resolve the SAME ordinal against the DRAFT (skeletons match ⇒ same index,
             // ADR-019), verify the bracket holds the expected pre-state, and only then flip. If the draft has
-            // diverged so the ordinal/pre-state don't line up, write NOTHING — corruption is now structurally
-            // impossible; the server 409 (dirty) still guards the published snapshot.
+            // diverged so the ordinal/pre-state don't line up, write NOTHING — corruption is structurally
+            // impossible; the server 409 (dirty) still guards the published snapshot and the host's toast fires.
+            //
+            // #361the draft write is DEFERRED into `applyFlip`, which the host runs inside its
+            // per-page SERIAL toggle chain right before this toggle's own POST. Flipping at click time let a
+            // rapid burst pile ≥2 flips into the draft before the server folded the first one, so the
+            // exactly-one-flip guard 409'd every request on a CLEAN page ("publish first" out of nowhere).
+            // Serialized, each fold sees exactly the one flip it claims. The click-time `checked` (the
+            // widget's live pre-click state, which tracks earlier optimistic flips) is still the correct
+            // expected pre-state at execution time, because the queued flips land in the same order.
             const expect = checked ? "x" : " "; // the CURRENT (pre-toggle) bracket char
             const next = checked ? " " : "x";
-            const flipAt = (pos: number, ch: string) => { c.ytext.delete(pos, 1); c.ytext.insert(pos, ch); };
-            const pos = taskStatePosAt(c.ytext.toString(), index);
-            if (pos < 0 || c.ytext.toString()[pos] !== expect) {
-              // #317: the draft has DIVERGED at the task level (the ordinal/pre-state don't line up). Writing
-              // NOTHING is still correct (the #303 corruption guard — never touch the diverged draft), but a
-              // SILENT no-op reads as "the checkbox is dead / nothing happened". So still call onToggleTask:
-              // the server flushes the draft, its skeleton won't match the published one → 409, and the existing
-              // dirty toast fires (member routes.tsx / guest routes.tsx). No local flip ⇒ no revert; onToggleTask
-              // shows the toast and re-throws, which we swallow. One shared path — fixes member AND guest.
-              void onToggleTask(index).catch(() => {});
-              return;
-            }
-            flipAt(pos, next); // optimistic draft flip, re-located in the DRAFT
-            const myGen = (flipGen.get(index) ?? 0) + 1;
-            flipGen.set(index, myGen);
-            onToggleTask(index).catch(() => {
+            let myGen = 0; // 0 = we never wrote (diverged no-op) → the failure path has nothing to restore
+            const applyFlip = () => {
+              const c = collabRef.current;
+              if (!c) return;
+              const pos = taskStatePosAt(c.ytext.toString(), index);
+              // #317: on divergence write NOTHING but still let the POST proceed — the server 409s and the
+              // host shows the dirty toast (a silent no-op reads as "the checkbox is dead").
+              if (pos < 0 || c.ytext.toString()[pos] !== expect) return;
+              c.ytext.delete(pos, 1);
+              c.ytext.insert(pos, next);
+              myGen = (flipGen.get(index) ?? 0) + 1;
+              flipGen.set(index, myGen);
+            };
+            onToggleTask(index, applyFlip).catch(() => {
+              const c = collabRef.current;
+              if (!c || myGen === 0) return; // never wrote → nothing to restore
               if (flipGen.get(index) !== myGen) return; // a newer flip superseded ours — it settles the state
               const pubDoc = previewViewRef.current?.state.doc.toString();
               if (pubDoc == null) return;
               const want = pubDoc[taskStatePosAt(pubDoc, index)]; // the bracket state the server still holds
               const p = taskStatePosAt(c.ytext.toString(), index); // re-resolve — draft offsets may have moved
-              if (p >= 0 && (want === "x" || want === " ") && c.ytext.toString()[p] !== want) flipAt(p, want);
+              if (p >= 0 && (want === "x" || want === " ") && c.ytext.toString()[p] !== want) { c.ytext.delete(p, 1); c.ytext.insert(p, want); }
             });
           }
         : undefined;
