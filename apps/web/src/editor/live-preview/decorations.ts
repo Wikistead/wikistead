@@ -24,7 +24,7 @@ const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 // clickable-whole-surface exception (the #273 download card) keeps its own `pointer`. Typed-body
 // macros (callout/table/todo/details/tagged/mermaid/plantuml/code) keep the caret affordances.
 const ATOM_CLASS_MACROS = new Set(["embed-page", "embed-external", "excalidraw", "columns", "tabs", "children"]);
-import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset, appendMarkdownInto, buildFenceHeader } from "../macros/md-render";
+import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset, appendMarkdownInto, buildFenceHeader, buildLinkList, withListHost } from "../macros/md-render";
 import { setActiveTabIndex } from "../macros/layout-directives"; // #278 item 1: record the clicked tab before the island's commit rebuilds the tabs widget
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
@@ -761,54 +761,8 @@ function directiveLabel(openLine: string, name: string): string | null {
 // view-authorized pages. Each row navigates through the host seam (never hardcoded routing — the destination
 // re-confirms view). Text via textContent (no innerHTML) — the titles came from the view-gated endpoint and are
 // treated as untrusted here regardless. `variant` selects the test-id namespace; the CSS classes are shared.
-function buildLinkList(
-  items: { id: string; title: string; depth?: number }[],
-  label: string | null,
-  src: { navigate: (id: string) => void; untitledLabel: string },
-  variant: "tagged" | "children",
-): HTMLElement {
-  const box = document.createElement("div");
-  box.className = "cm-lp-backlinks";
-  box.setAttribute("data-testid", `macro-${variant}`);
-  if (label) {
-    const h = document.createElement("div");
-    h.className = "cm-lp-backlinks-label";
-    h.textContent = label;
-    box.appendChild(h);
-  }
-  const rootUl = document.createElement("ul");
-  rootUl.className = "cm-lp-backlinks-list";
-  // #370 `depth` nests entries as real sub-<ul>s (the `:::children` descendant tree); flat input
-  // (tagged / no depth) builds the same single list as before. The stack tracks the open <ul> per level;
-  // a level jump with no preceding item degrades to the current level (never crashes on odd data).
-  const stack: HTMLUListElement[] = [rootUl];
-  for (const it of items) {
-    const depth = Math.max(0, it.depth ?? 0);
-    while (stack.length - 1 > depth) stack.pop();
-    while (stack.length - 1 < depth) {
-      const parentLi = stack[stack.length - 1]!.lastElementChild;
-      if (!(parentLi instanceof HTMLLIElement)) break; // no parent item to nest under → stay at this level
-      const sub = document.createElement("ul");
-      sub.className = "cm-lp-backlinks-list cm-lp-backlinks-sub";
-      parentLi.appendChild(sub);
-      stack.push(sub);
-    }
-    const li = document.createElement("li");
-    const a = document.createElement("a");
-    a.className = "cm-lp-backlinks-item";
-    a.setAttribute("data-testid", `macro-${variant}-item-${it.id}`);
-    a.href = `/p/${it.id}`; // real href (middle-click / open-in-new-tab work); left-click is SPA-routed below
-    a.textContent = it.title || src.untitledLabel;
-    // mousedown: keep the caret out of the atom / don't let CM handle it. click: SPA-navigate and preventDefault
-    // so the anchor's own full-page navigation to the SAME url never also fires (no double nav / white flash).
-    a.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
-    a.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); src.navigate(it.id); });
-    li.appendChild(a);
-    stack[stack.length - 1]!.appendChild(li);
-  }
-  box.appendChild(rootUl);
-  return box;
-}
+// buildLinkList moved to md-render.ts (#370) — ONE builder for the top-level widget AND the
+// nested list-host seam, so the two render paths cannot drift.
 
 // Host-injected external-embed host allowlist (#108 / ADR-071 comment 551). The :::embed macro can't
 // read the allowlist (host-API is {theme} only); the HOST supplies the tenant's allowlisted hosts and
@@ -2336,7 +2290,9 @@ class MacroWidget extends WidgetType {
       // is unchanged by an in-slot commit (all edits land after it).
       if (isLayout) wrap.dataset.layoutFrom = String(this.from);
       if (isLayout) setPendingBaseOffset(this.bodyFrom);
-      const rendered = this.macro.liveRender(this.body, { theme: this.theme }); // #200: the widget's built theme (eq() rebuilds on a switch), not a live DOM read
+      // #370 thread the view's ListSource through the md-render seam so a `:::tagged`/`:::children`
+      // NESTED in this container resolves (same view-filtered fetch as the top level — no new authz path).
+      const rendered = withListHost(view.state.facet(listSource), () => this.macro.liveRender(this.body, { theme: this.theme })); // #200: the widget's built theme (eq() rebuilds on a switch), not a live DOM read
       if (isLayout) setPendingBaseOffset(null);
       wrap.appendChild(rendered);
       // #215 / ADR-100 (Consumers 1 & 2): draw the nested-macro ring + edit button on the selected nested
@@ -2826,7 +2782,7 @@ class DetailsSummaryWidget extends WidgetType {
     bodyEl.setAttribute("data-testid", "details-body");
     const bodyInner = document.createElement("div");
     bodyInner.className = "cm-lp-details-body-inner cm-lp-md-directive"; // padding + nested-block styling
-    appendMarkdownInto(bodyInner, this.body); // shared renderer, sanitized DOM (display-only); .wks-prose (#381)
+    withListHost(view.state.facet(listSource), () => appendMarkdownInto(bodyInner, this.body)); // shared renderer, sanitized DOM; .wks-prose (#381); #370 nested-list seam
     bodyEl.appendChild(bodyInner);
     bodyWrap.appendChild(bodyEl);
     wrap.append(bar, bodyWrap);
@@ -2931,7 +2887,7 @@ class CalloutWidget extends WidgetType {
     return o.containerClass === this.containerClass && o.icon === this.icon && o.label === this.label && o.body === this.body && o.selected === this.selected;
   }
   toDOM(view: EditorView) {
-    const el = renderCalloutPanel(this.containerClass, this.icon, this.label, this.body);
+    const el = withListHost(view.state.facet(listSource), () => renderCalloutPanel(this.containerClass, this.icon, this.label, this.body)); // #370 nested-list seam
     // #438 the SHARED atom-selection ring — every other atom (mermaid/details/embeds) rings via
     // cm-lp-atom-sel; the callout panel was the one widget without it. Only ever visible where the
     // caret can rest ON the atom without revealing (WYSIWYG / atom-select contexts) — in Live a

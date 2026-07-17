@@ -140,6 +140,78 @@ let footnoteDocActive = false;
 // path while both markdown sinks share a single scheme judge (ADR-037; one XSS judgment).
 export { safeHref };
 
+
+// #370 the nested LIST-HOST seam. The `:::tagged`/`:::children` resolution used to be wired ONLY
+// at the top-level CM widget (the listSource facet), so the same macro nested inside a details/callout/
+// columns body — which re-enters this synchronous renderer — silently rendered its placeholder and never
+// fetched ("works top-level, dead nested": the #278/ADR-122 two-path drift class). The host (decorations)
+// now threads the SAME view-filtered ListSource through this module seam around every nested render
+// entry (withListHost — save/restore like staticRender; rendering is fully synchronous), and the
+// directive dispatch below resolves nested lists with the SAME lifecycle as the top level: placeholder →
+// async fetch through the member-only, view-filtered route → buildLinkList swap. NO new resolution path
+// exists — authz stays exactly the existing seam. Height changes are caught by the containers' shared
+// ResizeObserver (the block-widget rule).
+export interface ListHostSeam {
+  readonly fetch: (name: "tagged" | "children", body: string) => Promise<{ id: string; title: string; depth?: number }[] | null>;
+  readonly navigate: (pageId: string) => void;
+  readonly emptyLabel: string;
+  readonly untitledLabel: string;
+}
+let activeListHost: ListHostSeam | null = null;
+export function withListHost<T>(host: ListHostSeam | null, fn: () => T): T {
+  const prev = activeListHost;
+  activeListHost = host;
+  try { return fn(); } finally { activeListHost = prev; }
+}
+
+// The rendered list-of-pages DOM (shared by `:::tagged` and `:::children`, top-level widget AND nested
+// renders — moved here from decorations.ts so both paths build the identical tree). `depth` nests
+// entries as real sub-<ul>s (#370); titles via textContent (XSS-inert), navigation through the
+// host seam only (the destination re-confirms view → uniform 404).
+export function buildLinkList(
+  items: { id: string; title: string; depth?: number }[],
+  label: string | null,
+  src: { navigate: (id: string) => void; untitledLabel: string },
+  variant: "tagged" | "children",
+): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "cm-lp-backlinks";
+  box.setAttribute("data-testid", `macro-${variant}`);
+  if (label) {
+    const h = document.createElement("div");
+    h.className = "cm-lp-backlinks-label";
+    h.textContent = label;
+    box.appendChild(h);
+  }
+  const rootUl = document.createElement("ul");
+  rootUl.className = "cm-lp-backlinks-list";
+  const stack: HTMLUListElement[] = [rootUl];
+  for (const it of items) {
+    const depth = Math.max(0, it.depth ?? 0);
+    while (stack.length - 1 > depth) stack.pop();
+    while (stack.length - 1 < depth) {
+      const parentLi = stack[stack.length - 1]!.lastElementChild;
+      if (!(parentLi instanceof HTMLLIElement)) break; // no parent item to nest under → stay at this level
+      const sub = document.createElement("ul");
+      sub.className = "cm-lp-backlinks-list cm-lp-backlinks-sub";
+      parentLi.appendChild(sub);
+      stack.push(sub);
+    }
+    const li = document.createElement("li");
+    const a = document.createElement("a");
+    a.className = "cm-lp-backlinks-item";
+    a.setAttribute("data-testid", `macro-${variant}-item-${it.id}`);
+    a.href = `/p/${it.id}`;
+    a.textContent = it.title || src.untitledLabel;
+    a.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
+    a.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); src.navigate(it.id); });
+    li.appendChild(a);
+    stack[stack.length - 1]!.appendChild(li);
+  }
+  box.appendChild(rootUl);
+  return box;
+}
+
 // The DOM SINK (#384 / ADR-160): maps visitor roles to elements. `stack` tracks the open container; the
 // visitor's structural guarantees (marks skipped, text inert, link hrefs pre-judged, attachment scheme
 // intercepted before any anchor role) arrive here already made — this class only builds allowlisted DOM.
@@ -282,6 +354,27 @@ class DomSink implements MdSink {
     // #215 / ADR-100: absolute base of THIS directive's inner body (drop the ::: open line) — handed to a
     // nested columns/tabs liveRender (pendingBaseOffset) and to renderCalloutPanel. null when untagged.
     const nestedBodyBase = renderBase != null ? renderBase + args.nodeFrom + (nl === -1 ? full.length : nl) + 1 : null;
+    // #370 a NESTED `:::tagged`/`:::children` resolves through the list-host seam with the same
+    // placeholder → view-filtered fetch → swap lifecycle as the top-level widget (static mode keeps the
+    // compact chip below — the hover card must stay fetch-free).
+    if ((parsed?.name === "tagged" || parsed?.name === "children") && activeListHost && !staticRender) {
+      const host = activeListHost;
+      const listName = parsed.name as "tagged" | "children";
+      const holder = document.createElement("div");
+      holder.className = "cm-lp-macro cm-lp-query-placeholder";
+      holder.setAttribute("data-testid", `macro-${listName}-nested`);
+      into.appendChild(holder);
+      void host.fetch(listName, body).then((items) => {
+        holder.classList.remove("cm-lp-query-placeholder");
+        holder.replaceChildren();
+        if (items && items.length > 0) {
+          holder.appendChild(buildLinkList(items, args.label, { navigate: host.navigate, untitledLabel: host.untitledLabel }, listName));
+        } else {
+          holder.style.display = "none"; // nested read render: an empty/denied list shows nothing (top-level read parity)
+        }
+      });
+      return;
+    }
     // #351 static mode never dispatches a directive liveRender. Markdown-CONTENT containers
     // (columns/tabs/details) fall through to the plain-content fallback so their body still shows.
     if (staticRender && macro?.liveRender && !STATIC_PLAIN_DIRECTIVES.has(parsed!.name)) {
