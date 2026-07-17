@@ -38,6 +38,11 @@ const notifCount = async (sub: string) =>
 beforeAll(async () => {
   await admin`INSERT INTO tenants (id, slug, plan, isolation) VALUES (${TENANT}, ${TENANT}, 'free', 'logical') ON CONFLICT (id) DO NOTHING`
   db = await acquireTenantDb(asTenant(TENANT))
+  // #445 / ADR-171: createSpace now gates on tenant#space_creator — a hand-fabricated tenant must
+  // carry the wildcard provisioning seeds (the production shape for every real tenant).
+  const creatorSeed = { user: 'user:*', relation: 'space_creator', object: `tenant:${TENANT}` }
+  await writeTuples(fgaClient, [creatorSeed]).catch(() => {})
+  cleanupTuples.push(creatorSeed)
   const space = await createSpace(db, fgaClient, { tenantId: TENANT, userId: ACTOR, plan: 'free', name: 'N362 Space' })
   spaceId = space.id
   const grants = [A, B, C].map((s) => ({ user: `user:${s}`, relation: 'viewer', object: `space:${spaceId}` }))
