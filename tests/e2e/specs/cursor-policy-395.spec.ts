@@ -112,3 +112,49 @@ test("#395 the atom-policy hint is reachable in account settings and matches the
   expect(text, "layouts/callouts are click-into-edit, not ring atoms").toMatch(/layouts and callouts open for editing/i);
   expect(text, "must not claim layouts select as a unit").not.toMatch(/\(embeds, images, layouts/i);
 });
+
+// #395 ①: a ring-selected atom must SHOW its Ctrl+↵ entry pill — the ring alone gave no hint that
+// Ctrl+Enter acts on the atom (the raw pill only reveals on raw-zone hover, which a rendered atom never
+// has). The pill inherits the ✎ hover/atom-sel gating and routes through the exact Ctrl+Enter command.
+test("#395 selecting an atom (ring) reveals the Ctrl+Enter entry pill", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "atom-entry-pill-395");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::children\n:::\n\ntail\n");
+  await page.keyboard.press("Control+End");
+  await sleep(600);
+  await page.locator("[data-testid=macro-children], [data-testid=macro-children-placeholder]").first().click();
+  await sleep(400);
+  await expect(page.locator(".cm-lp-atom-sel")).toHaveCount(1); // the ring is on
+  const pill = page.getByTestId("macro-entry-pill").first();
+  await expect(pill).toBeAttached({ timeout: 5000 });
+  const opacity = await pill.evaluate((el) => parseFloat(getComputedStyle(el).opacity));
+  expect(opacity, "entry pill visible on the selected atom").toBeGreaterThanOrEqual(0.8);
+});
+
+// #395 ②: a PLAIN click on a rendered callout must NOT auto-launch the rich edit form — click /
+// caret-in edits in place (Live reveals raw; WYSIWYG keeps the atom); the type/header form opens only
+// via the explicit ✎ / Ctrl+Enter. (Pinned on both modes; the ✎ path is separately pinned by the
+// wysiwyg-callout suites.)
+test("#395 clicking a rendered callout never auto-opens the edit form (Live + WYSIWYG)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "callout-click-noform-395");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::note[Hey]\ncallout body\n:::\n\ntail\n");
+  await page.keyboard.press("Control+End");
+  await sleep(600);
+  // Live: click the panel body → raw reveals, NO form
+  await page.getByTestId("callout-panel").first().click({ position: { x: 60, y: 40 } });
+  await sleep(500);
+  await expect(page.getByTestId("callout-edit-type")).toHaveCount(0);
+  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain(":::note"); // in-place raw edit
+  // WYSIWYG: click the panel body → atom stays, NO form
+  await page.getByText("tail", { exact: true }).click();
+  await page.locator("[role=radiogroup] [role=radio]").nth(3).click();
+  await sleep(600);
+  await page.getByTestId("callout-panel").first().click({ position: { x: 60, y: 40 } });
+  await sleep(500);
+  await expect(page.getByTestId("callout-edit-type")).toHaveCount(0);
+});

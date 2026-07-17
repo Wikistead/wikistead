@@ -2498,6 +2498,26 @@ class MacroWidget extends WidgetType {
       const btnRow = document.createElement("div");
       btnRow.className = "cm-lp-macro-btnrow";
       wrap.appendChild(btnRow);
+      // #395 ①: an ATOM with NO edit UI (children / backlinks — zero-arg dynamic blocks) had a ring
+      // but NO visible Ctrl+↵ entry affordance (the raw pill only reveals on raw-zone hover, which a
+      // rendered atom never has) — the ADR-156 "ring + entry pill" pair was half-missing. Give those
+      // macros the SAME faced button (inherits the hover/atom-sel visibility gating at the btnrow CSS);
+      // the press routes through enterMacroCommand = exactly what Ctrl+Enter does on this atom.
+      if (!hasEditUI(this.macro) && !nestedActive) {
+        const entry = document.createElement("button");
+        entry.type = "button";
+        entry.className = "cm-lp-macro-edit cm-lp-macro-edit-hint";
+        entry.title = "Edit (Ctrl+Enter)";
+        entry.innerHTML = MACRO_EDIT_BUTTON_HTML;
+        entry.setAttribute("data-testid", "macro-entry-pill");
+        entry.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)) }); // park ON the atom first
+          enterMacroCommand(view); // the Ctrl+Enter action (retarget picker / raw reveal, per macro class)
+        });
+        btnRow.appendChild(entry);
+      }
       if (hasEditUI(this.macro) && !nestedActive) {
         const edit = document.createElement("button");
         edit.type = "button";
