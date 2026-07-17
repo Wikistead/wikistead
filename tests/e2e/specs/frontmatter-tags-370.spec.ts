@@ -177,3 +177,41 @@ test("#370:::children nests grandchildren and renders without the box chrome", a
   expect(style.borderW, "no border").toBe("0px");
   expect(style.listStyle, "plain markdown bullets").toBe("disc");
 });
+
+// #370`:::children` NESTED in a container (details / columns) must resolve — the list-host seam
+// now threads the same view-filtered listSource into the nested (md-render) path, so the nested macro
+// renders the REAL list (grandchildren nested) instead of a dead placeholder.
+test("#370:::children nested in details and columns resolves the real list", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const parent = await openScratch(page, "fm-children-nested-seam");
+  const { child, grand } = await page.evaluate(async ({ parent }) => {
+    const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };
+    const mk = async (title: string, parentId: string) => {
+      const r = await fetch(`http://dev.localhost:4010/spaces/demo_space/pages`, { method: "POST", headers: H, body: JSON.stringify({ title, parentId }) });
+      const { id } = (await r.json()) as { id: string };
+      await fetch(`http://dev.localhost:4010/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+      return id;
+    };
+    const child = await mk("fm-seam-child", parent);
+    const grand = await mk("fm-seam-grand", child);
+    return { child, grand };
+  }, { parent });
+
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::details[Kids]\n:::children\n:::\n:::\n\n::::columns\n:::column\n:::children\n:::\n:::\n:::column\nplain\n:::\n::::\n\ntail\n");
+  await page.keyboard.press("Control+End");
+  await sleep(1200); // nested renders + async fetches settle
+
+  // the details body holds a RESOLVED list (attached even while collapsed), grandchild nested
+  const detailsList = page.locator("[data-testid=macro-details] [data-testid=macro-children]").first();
+  await expect(detailsList).toBeAttached({ timeout: 10000 });
+  await expect(detailsList.locator(`[data-testid="macro-children-item-${child}"]`)).toBeAttached();
+  await expect(detailsList.locator(`[data-testid="macro-children-item-${grand}"]`)).toBeAttached();
+  // the column shows it VISIBLY
+  const colList = page.locator(".cm-lp-column [data-testid=macro-children]").first();
+  await expect(colList).toBeVisible({ timeout: 10000 });
+  await expect(colList.locator(`[data-testid="macro-children-item-${child}"]`)).toBeVisible();
+  // and no dead placeholder remains anywhere
+  await expect(page.locator(".cm-lp-query-placeholder")).toHaveCount(0);
+});
