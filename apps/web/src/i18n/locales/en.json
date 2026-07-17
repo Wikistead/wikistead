@@ -303,7 +303,7 @@
     "iconImageUpload": "Upload image",
     "iconImageRemove": "Remove image",
     "shareLabel": "Share space",
-    "shareHint": "Create a view-only link to this whole space (all published pages).",
+    "shareHint": "Create a share link to this whole space (all published pages). Choose view-only or editable (editable = an anonymously writable public wiki).",
     "publicLabel": "Public access",
     "publicTitle": "Make this space public on the web",
     "publicHint": "Anyone on the internet can read this space's PUBLISHED pages — private pages and drafts stay hidden.",
@@ -482,7 +482,7 @@
   "shareDialog": {
     "title": "Share page",
     "spaceTitle": "Share space",
-    "spaceWarning": "Anyone with this link can view every published page in this space — including pages you add later. The link is view-only.",
+    "spaceWarning": "Anyone with this link can view every published page in this space — including pages you add later. An editable link also allows anonymous editing and page creation.",
     "capability": "Capability",
     "canView": "Can view",
     "canEdit": "Can edit",

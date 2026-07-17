@@ -49,12 +49,12 @@ export function AppShell({
       className="grid h-full grid-cols-[var(--sidebar-w)_1fr] grid-rows-[var(--header-h)_1fr] [grid-template-areas:'header_header''sidebar_main'] transition-[grid-template-columns] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)] data-[collapsed=true]:grid-cols-[0px_1fr]"
     >
       <header className="flex items-center gap-2 border-b border-border bg-panel px-4 [grid-area:header]">
-        {sidebar ? (
+        {/* #274: no decorative icon when there is no sidebar — a non-interactive PanelLeft read as a
+            broken "expand sidebar" control on the guest page / settings shells. */}
+        {sidebar && (
           <button type="button" className="flex rounded p-1 text-fg-dim transition-colors hover:bg-panel-2 hover:text-foreground" aria-label={t("nav.toggleSidebar")} aria-pressed={!collapsed} data-testid="sidebar-toggle" onClick={toggle}>
             <PanelLeft size={16} />
           </button>
-        ) : (
-          <PanelLeft size={16} aria-hidden />
         )}
         {/* Brand: tenant logo ▷ tenant display name ▷ the Wikistead lockup. In member
             chrome (any page WITH a logout control — page route AND settings) it links
