@@ -1,6 +1,6 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
+import { Tree, type NodeApi, type NodeRendererProps, type TreeApi } from "react-arborist";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
 import { ChevronRight, Copy, FilePen, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Pin, Share2, Snowflake, Trash2 } from "lucide-react";
 import { ProgressRing } from "../app/ProgressRing"; // #290: sidebar :::todo progress ring
@@ -73,6 +73,14 @@ export function PageTree({
 }) {
   const { t } = useTranslation();
   const { ref: treeBox, size } = useSize();
+  // #274(3): keep the ACTIVE row visible — after creating a page the app navigates to it,
+  // but in a long (virtualized) tree the new row could sit outside the viewport. `nodes` is a dep on
+  // purpose: the freshly created row only exists after the tree refetch, so the scroll fires once it
+  // renders. nearest-style scrolling (react-arborist keeps it minimal), never a jump on ordinary clicks.
+  const treeRef = useRef<TreeApi<PageTreeNode> | null>(null);
+  useEffect(() => {
+    if (selectedId) treeRef.current?.scrollTo(`page:${selectedId}`);
+  }, [selectedId, nodes]);
 
   // Route the row action through a ref so NodeRow's identity does NOT depend on it. NodeRow is the
   // react-arborist row renderer: if its identity changes on a re-render, react-arborist REMOUNTS every row —
@@ -227,6 +235,7 @@ export function PageTree({
     // force-expanded) then produced a viewport-wide ghost. Capping to --tree-w keeps the preview sidebar-width.
     <div ref={treeBox} className="min-h-0 min-w-0 flex-1" data-testid="page-tree" style={{ "--tree-w": `${size.width || 260}px` } as React.CSSProperties}>
       <Tree<PageTreeNode>
+        ref={treeRef}
         className="!overflow-x-hidden"
         // #193 bounce: react-arborist forces each row wrapper to a content min-width; we hide horizontal
         // scroll, so override it to 0 (!min-w-0) — now the row = viewport width and the name truncates.

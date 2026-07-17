@@ -973,7 +973,9 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
               isWide={isWide}
               tocOn={tocOn}
               railEnabled={!commentsOpen}
-              railTop="0.5rem"
+              // #274(1): band-aware like the member shell — the hardcoded 0.5rem ignored
+              // --wks-band-h (set by this shell's bandRef) and slid the rail under the title band.
+              railTop="calc(var(--wks-band-h, 0px) + 0.5rem)"
             />
           </div>
           {commentsOpen && <CommentsPanel pageId={pageId} canComment={canComment} anchorGetterRef={anchorGetterRef} onClose={() => setCommentsOpen(false)} token={token} />}

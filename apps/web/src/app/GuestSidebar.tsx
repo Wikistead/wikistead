@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, FileText } from "lucide-react";
 import type { Page } from "../data/queries";
@@ -47,6 +47,14 @@ export function GuestSidebar({ pages, space, openId, onOpen, onCreate }: { pages
   const { t } = useTranslation();
   const tree = buildTree(pages);
   const [busy, setBusy] = useState(false);
+  // #274(3): keep the ACTIVE row visible — after creates a page the shell navigates to it,
+  // but in a long tree the new row (which only renders after the pages refetch — hence `pages` in the
+  // deps) could sit below the fold. nearest-block scrolling, so ordinary clicks never jump the list.
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!openId) return;
+    navRef.current?.querySelector(`[data-page-id="${openId}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [openId, pages]);
   const create = async () => {
     if (!onCreate || busy) return;
     setBusy(true);
@@ -61,7 +69,7 @@ export function GuestSidebar({ pages, space, openId, onOpen, onCreate }: { pages
   // and SpaceIcon falls back to an initials chip if there is no uploaded image.
   const heading = space?.name || t("share.spaceTitle");
   return (
-    <nav className="flex h-full flex-col gap-0.5 overflow-auto p-2 text-[length:var(--text-ui)]" data-testid="guest-sidebar" aria-label={heading}>
+    <nav ref={navRef} className="flex h-full flex-col gap-0.5 overflow-auto p-2 text-[length:var(--text-ui)]" data-testid="guest-sidebar" aria-label={heading}>
       <div className="flex items-center gap-1.5 px-1 pb-1.5 font-semibold text-foreground" data-testid="guest-space-heading">
         {space ? <SpaceIcon id={space.name} name={space.name} image={space.iconImageUrl} size={18} /> : null}
         <span className="truncate">{heading}</span>
@@ -83,8 +91,10 @@ function GuestNode({ node, depth, openId, onOpen }: { node: TreeNode; depth: num
   const hasChildren = node.children.length > 0;
   return (
     <div>
+      {/* #274(2): the SELECTED row uses the member accent-mix highlight (PageTree.tsx),
+          not the grey hover wash — same look for the same state on both shells. */}
       <div
-        className={`flex items-center gap-1 rounded ${openId === node.id ? "bg-panel-2" : "hover:bg-panel-2"}`}
+        className={`flex items-center gap-1 rounded ${openId === node.id ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium" : "hover:bg-panel-2"}`}
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
       >
         {hasChildren ? (
