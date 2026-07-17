@@ -75,7 +75,10 @@ test("#337: :::details opens in VIEW and Reading mode (read-only surfaces), not 
 });
 
 // #337 issue 2 (edit path): the raw source is reached via the hover ✎ edit button, not by the bar click.
-test(":::details ✎ edit button reveals the raw source for editing", async ({ browser }) => {
+// #425 / ADR-168 (migrated pin — the old "✎ reveals raw" behaviour is deliberately FLIPPED): the ✎
+// opens the PANEL editUI (summary field + body textarea); `:::` never renders while editing. Edits
+// round-trip through one replaceSource per change; Source mode is the raw path.
+test("#425: :::details ✎ opens the panel editUI (no raw `:::`); summary+body round-trip", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "details");
   await enterEdit(page);
@@ -85,10 +88,54 @@ test(":::details ✎ edit button reveals the raw source for editing", async ({ b
 
   const edit = page.locator("[data-pane=preview] [data-testid=details-edit]");
   await edit.dispatchEvent("mousedown"); // hover-shown (opacity); mousedown is the wired trigger
-  await sleep(250);
-  const revealed = await page.locator("[data-pane=preview] .cm-content").innerText();
-  expect(revealed).toContain(":::details[More info]");
-  expect(revealed).toContain("the hidden body");
+  await sleep(300);
+  await expect(page.getByTestId("details-editui")).toBeVisible({ timeout: 5000 });
+  const inEdit = await page.locator("[data-pane=preview] .cm-content").innerText();
+  expect(inEdit, "the DOM never shows raw fences while editing").not.toContain(":::details");
+  // edit summary + body → commit (change events) → Escape exits to the rendered widget
+  const summary = page.getByTestId("details-edit-summary");
+  await summary.click();
+  await summary.fill("New title");
+  const body = page.getByTestId("details-edit-body");
+  await body.click();
+  await body.fill("fresh body");
+  await page.keyboard.press("Escape");
+  await sleep(400);
+  await page.getByText("below", { exact: true }).click(); // caret OUT (an empty caret inside still reveals raw)
+  await sleep(300);
+  await expect(page.getByTestId("details-summary-bar")).toBeVisible({ timeout: 5000 });
+  expect(await page.locator("[data-pane=preview] [data-testid=details-summary-bar]").innerText()).toContain("New title");
+  // Source mode shows the round-tripped raw
+  await page.getByTestId("displaymode-source").click();
+  await sleep(300);
+  const src = await page.locator("[data-pane=preview] .cm-content").innerText();
+  expect(src).toContain(":::details[New title]");
+  expect(src).toContain("fresh body");
+});
+
+// #425: empty-summary keeps the previous label; [ ] and newlines are stripped (fence-head safety).
+test("#425: an empty summary keeps the old label; bracket chars are stripped", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "details-sanitize");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::details[Keep me]\nbody\n:::\n\nbelow\n");
+  await sleep(400);
+  await page.locator("[data-pane=preview] [data-testid=details-edit]").dispatchEvent("mousedown");
+  await sleep(300);
+  const summary = page.getByTestId("details-edit-summary");
+  await summary.fill("");
+  await page.getByTestId("details-edit-body").click(); // change fires on blur
+  await sleep(200);
+  await summary.fill("a[b]c");
+  await page.getByTestId("details-edit-body").click();
+  await sleep(200);
+  await page.keyboard.press("Escape");
+  await sleep(300);
+  await page.getByTestId("displaymode-source").click();
+  await sleep(300);
+  const src = await page.locator("[data-pane=preview] .cm-content").innerText();
+  expect(src).toContain(":::details[abc]"); // brackets stripped; the intermediate empty kept "Keep me"
 });
 
 // #337 issue 1: an icon-less directive-label (details) must NOT paint the ::before box — with --cb-icon
@@ -101,9 +148,12 @@ test(":::details revealed open fence shows no grey ::before square", async ({ br
   await page.keyboard.insertText(":::details[More info]\nthe hidden body\n:::\n\nbelow\n");
   await sleep(400);
 
-  // Reveal raw via the ✎ so the open fence gets the cm-lp-details.cm-lp-directive-label class pair.
-  await page.locator("[data-pane=preview] [data-testid=details-edit]").dispatchEvent("mousedown");
-  await sleep(250);
+  // #425: the ✎ now opens the panel — reveal raw via caret ENTRY instead (an empty caret inside the
+  // block still reveals the raw source; only the explicit ✎/Ctrl+↵ path flipped to the panel).
+  await page.getByText("below", { exact: true }).click();
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  await sleep(350);
   const label = page.locator("[data-pane=preview] .cm-lp-details.cm-lp-directive-label").first();
   await expect(label).toBeVisible();
   const beforeDisplay = await label.evaluate((el) => getComputedStyle(el, "::before").display);

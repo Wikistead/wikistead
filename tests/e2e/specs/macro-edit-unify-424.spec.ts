@@ -137,12 +137,14 @@ test("#424details + warning callout edit buttons sit at the unified top-left, in
   await expect(page.getByTestId("callout-edit-type")).toBeVisible();
   await page.keyboard.press("Escape");
   await sleep(200);
-  // …and the details button still raw-reveals the source (Live).
+  // …and the details button opens the PANEL editUI (#425 / ADR-168 — the old raw-reveal is flipped;
+  // Source mode is the raw path now).
   await setMode(page, "live");
   const details = page.locator("[data-pane=preview] [data-testid=macro-details]").first();
   await details.hover();
   await sleep(250);
   await page.getByTestId("details-edit").first().click();
   await sleep(300);
-  expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain(":::details");
+  await expect(page.getByTestId("details-editui")).toBeVisible({ timeout: 5000 });
+  expect(await page.locator("[data-pane=preview] .cm-content").innerText(), "no raw fences while editing").not.toContain(":::details");
 });

@@ -1,4 +1,7 @@
-import type { DirectiveMacro } from "./registry";
+import type { DirectiveMacro, EditUI } from "./registry";
+import { asMacroSource } from "./registry";
+import { parseDirectiveOpen } from "./directive-parser";
+import i18n from "../../i18n";
 import { renderMarkdownToDom, appendMarkdownInto, takePendingBaseOffset } from "./md-render";
 // #85 slice 2: the DOM-free export half (parseLayoutItems + the htmlRenders) is the single source of
 // truth in @wikistead/macro-render, shared with the server export renderer. This file adds only the
@@ -56,11 +59,74 @@ export const columnsMacro: DirectiveMacro = {
   htmlRender: columnsHtmlRender, // #85: single source of truth in @wikistead/macro-render
 };
 
+// #425 / ADR-168 §1: the details PANEL editUI — the callout editUI's exact shape MINUS the type picker
+// (summary input + body textarea; per-change commit through the narrow host = ONE offset-invariant
+// replaceSource per op; Escape/blur exits via the host default). `:::` never renders in this UI; the raw
+// source stays reachable through SOURCE mode only. Summary sanitization strips `[`/`]`/newlines (they
+// would corrupt the fence head); an EMPTY summary keeps the previous label (ADR-168 anti-test).
+const detailsEditUI: EditUI = {
+  present: "inline",
+  sourceScope: "block", // the editor owns the WHOLE `:::details[label]…:::` (it rewrites the fence head)
+  mount(container, source, _ctx, save) {
+    const lines = source.split("\n");
+    const open = parseDirectiveOpen(lines[0] ?? "");
+    let label = open?.label ?? "";
+    let body = lines.slice(1, Math.max(1, lines.length - 1)).join("\n");
+    const commit = () => save(asMacroSource(`:::details${label ? `[${label}]` : ""}\n${body}\n:::`));
+    const wrap = document.createElement("div");
+    wrap.className = "cm-lp-callout-edit"; // the shared panel skin (tokens; no new CSS surface)
+    wrap.setAttribute("data-testid", "details-editui");
+    const title = document.createElement("div");
+    title.className = "cm-lp-callout-edit-title";
+    title.textContent = i18n.t("detailsEdit.title");
+    const field = (labelText: string): HTMLLabelElement => {
+      const f = document.createElement("label");
+      f.className = "cm-lp-callout-edit-field";
+      const cap = document.createElement("span");
+      cap.className = "cm-lp-callout-edit-cap";
+      cap.textContent = labelText;
+      f.appendChild(cap);
+      return f;
+    };
+    const summaryField = field(i18n.t("detailsEdit.summary"));
+    const summaryIn = document.createElement("input");
+    summaryIn.type = "text";
+    summaryIn.className = "cm-lp-callout-edit-label";
+    summaryIn.value = label;
+    summaryIn.placeholder = "Details"; // the widget's default summary
+    summaryIn.setAttribute("data-testid", "details-edit-summary");
+    summaryIn.addEventListener("change", () => {
+      // fence-head safety: strip the chars that would corrupt `:::details[…]`; empty keeps the old label.
+      const next = summaryIn.value.replace(/[\[\]]/g, "").replace(/[\r\n]+/g, " ").trim();
+      if (next) label = next;
+      summaryIn.value = label;
+      commit();
+    });
+    summaryField.appendChild(summaryIn);
+    const bodyField = field(i18n.t("detailsEdit.content"));
+    const bodyTa = document.createElement("textarea");
+    bodyTa.rows = 6;
+    bodyTa.className = "cm-lp-callout-edit-body";
+    bodyTa.value = body;
+    bodyTa.spellcheck = false;
+    bodyTa.setAttribute("data-testid", "details-edit-body");
+    bodyTa.addEventListener("change", () => { body = bodyTa.value; commit(); });
+    bodyField.appendChild(bodyTa);
+    wrap.append(title, summaryField, bodyField);
+    container.appendChild(wrap);
+    const f = setTimeout(() => bodyTa.focus(), 0);
+    return { destroy() { clearTimeout(f); wrap.remove(); } };
+  },
+};
+
 export const detailsMacro: DirectiveMacro = {
   kind: "directive",
   name: "details",
   containerClass: "cm-lp-details",
-  collapsible: true, // caret-away → "▸ summary" bar; caret-in → raw editable (reveal-on-cursor)
+  collapsible: true, // caret-away → "▸ summary" bar; SELECTION still reveals raw (#359 select-to-copy)
+  // #425 / ADR-168: explicit entry (✎ / Ctrl+↵) opens the PANEL editUI — never raw `:::` (Source mode
+  // is the documented raw path). editModeOf prefers editUI, so the host needs no change.
+  editUI: detailsEditUI,
   exportFidelity: "preserve",
   slash: {
     labelKey: "palette.details",
