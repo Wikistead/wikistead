@@ -10,7 +10,8 @@
     "on": "ON",
     "off": "OFF",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "edit": "Edit"
   },
   "embedPicker": {
     "title": "Embed a page",
@@ -172,7 +173,8 @@
     "billing": "Billing",
     "orphans": "Orphan drafts",
     "webhooks": "Webhooks",
-    "audit": "Audit log"
+    "audit": "Audit log",
+    "roles": "Roles"
   },
   "adminPublic": {
     "title": "Public access",
@@ -987,5 +989,40 @@
   },
   "spaceHome": {
     "writeButton": "Write the homepage"
+  },
+  "adminRoles": {
+    "title": "Roles",
+    "body": "Custom roles bundle atomic capabilities and expand to real permissions on assignment. Built-in roles are always available; defining custom roles is an Enterprise feature.",
+    "builtInTitle": "Built-in roles",
+    "builtIn": "built-in",
+    "customTitle": "Custom roles",
+    "customEmpty": "No custom roles yet.",
+    "create": "New role",
+    "delete": "Delete role",
+    "nameLabel": "Role name",
+    "namePlaceholder": "e.g. recycler",
+    "conflict": "Name in use, or the role still has assignments — unassign first.",
+    "notEntitled": "Custom roles are an Enterprise feature on this plan.",
+    "assignTitle": "Assignments",
+    "assignBody": "Assign a custom role to a member on a space. The capabilities become real grants; unassigning removes exactly what the role added.",
+    "roleLabel": "Role",
+    "rolePlaceholder": "Select role",
+    "spaceLabel": "Space",
+    "spacePlaceholder": "Select space",
+    "subLabel": "Member ID",
+    "subPlaceholder": "member sub",
+    "assign": "Assign",
+    "unassign": "Unassign",
+    "assignEmpty": "No assignments on this space.",
+    "cap": {
+      "view": "View",
+      "comment": "Comment",
+      "edit": "Edit",
+      "publish": "Publish",
+      "delete": "Delete",
+      "share": "Share",
+      "settings": "Settings",
+      "moderate": "Moderate"
+    }
   }
 }

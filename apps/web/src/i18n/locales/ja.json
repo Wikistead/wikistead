@@ -10,7 +10,8 @@
     "on": "ON",
     "off": "OFF",
     "yes": "はい",
-    "no": "いいえ"
+    "no": "いいえ",
+    "edit": "編集"
   },
   "embedPicker": {
     "title": "ページを埋め込む",
@@ -172,7 +173,8 @@
     "billing": "課金",
     "orphans": "孤立ドラフト",
     "webhooks": "Webhook",
-    "audit": "監査ログ"
+    "audit": "監査ログ",
+    "roles": "ロール"
   },
   "adminPublic": {
     "title": "公開設定",
@@ -986,5 +988,40 @@
   },
   "spaceHome": {
     "writeButton": "ホームページを書く"
+  },
+  "adminRoles": {
+    "title": "ロール",
+    "body": "カスタムロールは原子的な権限を束ね、割当時に実際の権限へ展開されます。組込ロールは常に利用可能。カスタムロールの定義はエンタープライズ機能です。",
+    "builtInTitle": "組込ロール",
+    "builtIn": "組込",
+    "customTitle": "カスタムロール",
+    "customEmpty": "カスタムロールはまだありません。",
+    "create": "新しいロール",
+    "delete": "ロールを削除",
+    "nameLabel": "ロール名",
+    "namePlaceholder": "例: recycler",
+    "conflict": "名前が重複しているか、割当が残っています(先に割当を解除してください)。",
+    "notEntitled": "カスタムロールはこのプランでは利用できません(エンタープライズ機能)。",
+    "assignTitle": "割当",
+    "assignBody": "カスタムロールをスペース単位でメンバーに割り当てます。権限は実際の付与として展開され、解除するとロールが追加した分だけが取り除かれます。",
+    "roleLabel": "ロール",
+    "rolePlaceholder": "ロールを選択",
+    "spaceLabel": "スペース",
+    "spacePlaceholder": "スペースを選択",
+    "subLabel": "メンバー ID",
+    "subPlaceholder": "メンバーの sub",
+    "assign": "割り当て",
+    "unassign": "割当を解除",
+    "assignEmpty": "このスペースへの割当はありません。",
+    "cap": {
+      "view": "閲覧",
+      "comment": "コメント",
+      "edit": "編集",
+      "publish": "公開",
+      "delete": "削除",
+      "share": "共有",
+      "settings": "設定",
+      "moderate": "モデレート"
+    }
   }
 }
