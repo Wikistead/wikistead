@@ -59,6 +59,17 @@ export default defineConfig({
         changeOrigin: false,
         rewrite: (p) => p.replace(/^\/collab/, ""),
       },
+      // #441 / ADR-154 §4: robots + sitemap are SERVER routes (the #253 public switch gates them);
+      // without the proxy the dev browser got the SPA index.html. /pub deliberately stays the plain
+      // SPA in dev (ADR-154 §1) — only these two crawler files route through.
+      "/robots.txt": {
+        target: process.env.API_PROXY_TARGET ?? "http://localhost:4000",
+        changeOrigin: false,
+      },
+      "/sitemap.xml": {
+        target: process.env.API_PROXY_TARGET ?? "http://localhost:4000",
+        changeOrigin: false,
+      },
     },
   },
 });
