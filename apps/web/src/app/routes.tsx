@@ -953,7 +953,10 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
     [pageId, token, reloadPublished, t],
   );
 
-  const onPublish = async () => {
+  // #448: STABLE (useCallback) so the Editor's mount-captured vim-ex wiring (:w/:wq) can hold it
+  // the server publish route is ALREADY guest:'edit' (#328/ADR-140: FGA edit gate + guest rate cap +
+  // abuse filter + anonId attribution); only this client wiring was missing.
+  const onPublish = useCallback(async () => {
     setPublishing(true);
     try {
       await apiFetch(`/pages/${encodeURIComponent(pageId)}/publish`, token, { method: "POST" });
@@ -964,7 +967,11 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
     }
     setPublishing(false);
     reloadPublished();
-  };
+  }, [pageId, token, t, reloadPublished]);
+  // #448: vim :w/:wq/:q parity with the member surface — publish must be fire-and-forget for the
+  // Editor's => void contract; :q exits edit mode without publishing.
+  const publishForEditor = useCallback(() => { void onPublish(); }, [onPublish]);
+  const exitEdit = useCallback(() => setEditing(false), []);
 
   const controls: PageControlsProps = {
     canEdit,
@@ -978,7 +985,7 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
     onCycleDisplayMode: cycleDisplayMode,
     onSetDisplayMode: setDisplayMode,
     canPublish: true,
-    onPublish: canEdit ? () => void onPublish() : undefined,
+    onPublish: canEdit ? publishForEditor : undefined,
     publishing,
     // #100: comments toggle — shown to any guest who can VIEW (reading is guest:'view'); the composer
     // inside the panel is gated on canComment (comment_open). openComments count is member-only chrome.
@@ -1019,7 +1026,7 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
                 #374 guestSurface keeps the MEMBER-ONLY sources (title dictionary / backlinks / query)
                 suppressed — pageId used to double as their gate, so passing it above un-gated them on this
                 guest surface (the title-links-224 guest anti-test: no auto links for a guest, 2-layer rule). */}
-            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #227 the shared TocChrome (rail on wide / overlay on narrow); yields to the comments
                 panel when open (shared right zone — no pointer overlap). */}
