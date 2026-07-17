@@ -13,7 +13,10 @@
 //      locked-on.
 //  (6) CROSS-TENANT WRITE BIND: a tenant-role assignment naming ANOTHER tenant's id is a uniform
 //      404 and NO tuple lands on that tenant (FGA writes pierce RLS — the route bind is the guard).
-// Real Postgres + OpenFGA + the app via inject (dev bearer = tenant admin dev-user).
+// Real Postgres + OpenFGA + the app via inject. Runs on a DEDICATED throwaway tenant (slug crt445,
+// dev-user as its admin so the dev bearer works through host resolution): the wildcard-absent
+// windows these tests need would 403 PARALLEL test files' createSpace calls if they touched the
+// shared dev tenant's wildcard (observed flake: notifications-362 mid-suite).
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -26,10 +29,12 @@ import type { TenantDb } from '../db/index.js'
 import { LogicalSearchDriver } from '../search/index.js'
 import { buildApp } from '../app.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
+import { provisionTenant } from '../auth/provisioning.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
-const H = { host: 'dev.localhost', authorization: 'Bearer dev-token' }
+const SLUG = 'crt445'
+const H = { host: `${SLUG}.localhost`, authorization: 'Bearer dev-token' }
 const driver = new LogicalSearchDriver()
 
 let app: FastifyInstance
@@ -56,11 +61,21 @@ async function unassign(assignmentId: string) {
 }
 
 beforeAll(async () => {
-  tenant = (await new TenantRegistry(pool).findBySlug('dev'))!
+  const registry = new TenantRegistry(pool)
+  let t = await registry.findBySlug(SLUG)
+  if (!t) {
+    // dev-user as the admin → the dev bearer + host resolution make it a tenant admin here.
+    await provisionTenant(fgaClient, { slug: SLUG, plan: 'free', admin: { sub: 'dev-user' } })
+    t = await registry.findBySlug(SLUG)
+  }
+  tenant = t!
   db = await acquireTenantDb(tenant)
   app = await buildApp()
   await app.ready()
-  // Deterministic baseline whatever the stack's seed vintage: wildcard present (the shipped default).
+  // The throwaway tenant's plan is entitlement-poor — the suite baseline is UNLIMITED (anti-test 5
+  // narrows customRoles itself).
+  registerEntitlementsResolver(() => UNLIMITED)
+  // Deterministic baseline whatever this tenant's history: wildcard present (the shipped default).
   await writeTuples(fgaClient, [wildcard()]).catch(() => {})
 }, 60_000)
 
@@ -148,20 +163,20 @@ describe('tenant-scope custom roles (#445 / ADR-171)', () => {
       expect((g2.json() as { member: { createSpaces: boolean } }).member.createSpaces).toBe(true)
       expect(await canCreate(MEMBER), 'wildcard restored → member creates').toBe(true)
     } finally {
-      resetEntitlementsResolver()
+      registerEntitlementsResolver(() => UNLIMITED) // back to the suite baseline
     }
   })
 
   it('anti-test 6 (WRITE BIND): naming ANOTHER tenant id is a uniform 404 and writes NOTHING onto that tenant', async () => {
     const role = (await makeRole('crt445-bind', ['createSpaces'], 'tenant')).json() as { id: string }
-    const evil = await assign(role.id, 'tenant', 'tenant_acme', `user:${MEMBER}`)
+    const evil = await assign(role.id, 'tenant', 'tenant_dev', `user:${MEMBER}`)
     expect(evil.statusCode, 'cross-tenant assignment refused (uniform 404)').toBe(404)
     // Assert no DIRECT tuple landed on tenant B (the write-bind proof). A check() can't pin this:
-    // acme's own `user:*` wildcard matches any user principal by design — the tuple READ is the
-    // authority on what this route wrote.
-    const { tuples } = await fgaClient.read({ user: `user:${MEMBER}`, object: 'tenant:tenant_acme' })
+    // the target tenant's own `user:*` wildcard matches any user principal by design — the tuple
+    // READ (exact-match filter) is the authority on what this route wrote.
+    const { tuples } = await fgaClient.read({ user: `user:${MEMBER}`, object: 'tenant:tenant_dev' })
     expect((tuples ?? []).length, 'no leaked tuple on the other tenant').toBe(0)
-    const [prov] = await admin<{ id: string }[]>`SELECT id FROM role_assignments WHERE resource_id = 'tenant_acme'`
+    const [prov] = await admin<{ id: string }[]>`SELECT id FROM role_assignments WHERE resource_id = 'tenant_dev'`
     expect(prov, 'no provenance row either').toBeUndefined()
   })
 })
