@@ -94,3 +94,21 @@ test("#395 rule 2: atom bodies compute cursor default; the DL card keeps pointer
   // NOT swept to "default" like an atom body.
   expect(rawCursor, "typed-body raw keeps the text affordance").not.toBe("default");
 });
+
+// #395 the policy hint must (A) live on a surface EXISTING users can reach — Settings →
+// Account → Editor, not just the first-run onboarding done screen — and (B) describe the
+// IMPLEMENTATION: ring + Ctrl+Enter belong to reference cards (embed/transclude/children) only;
+// layouts and callouts are click-into-edit, never claimed as ring atoms.
+test("#395 the atom-policy hint is reachable in account settings and matches the implementation", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await page.goto("/p/demo");
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await page.goto("/settings/account/editor");
+  const card = page.getByTestId("account-atom-policy");
+  await expect(card, "the policy card renders for every member (no firstRun gate)").toBeVisible({ timeout: 8000 });
+  const text = (await card.innerText()).replace(/\s+/g, " ");
+  expect(text, "names the entry key").toContain("Ctrl+Enter");
+  expect(text, "ring is scoped to REFERENCE cards").toMatch(/reference cards/i);
+  expect(text, "layouts/callouts are click-into-edit, not ring atoms").toMatch(/layouts and callouts open for editing/i);
+  expect(text, "must not claim layouts select as a unit").not.toMatch(/\(embeds, images, layouts/i);
+});
