@@ -85,6 +85,10 @@ describe('operator console (#434 / ADR-170)', () => {
     expect(verifyOperatorToken(`${hsData}.${b64url(fakeMac)}`, jwks)).toBeNull()
     // missing sub fails
     expect(verifyOperatorToken(signToken({ sub: undefined }), jwks)).toBeNull()
+    // missing exp fails (exp is REQUIRED — no non-expiring operator tokens)
+    const noExpData = `${b64url(JSON.stringify({ alg: 'RS256', kid: 'test-op-key' }))}.${b64url(JSON.stringify({ sub: 'ops-alice' }))}`
+    const noExpSig = cryptoSign('sha256', Buffer.from(noExpData), privateKey)
+    expect(verifyOperatorToken(`${noExpData}.${b64url(noExpSig)}`, jwks)).toBeNull()
   })
 
   it('verify shares the CLI implementation (same data ⇒ same verdict) and the read is non-destructive', async () => {
