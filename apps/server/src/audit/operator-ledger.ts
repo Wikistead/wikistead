@@ -14,7 +14,7 @@ export const OPERATOR_SCOPE = '@operator'
 // A fixed advisory-lock key for the operator chain: SERIALIZE appends within their transaction so two
 // concurrent operator actions can't read the same tail and fork the chain (break-glass is rare, but
 // the chain integrity contract must hold regardless).
-const OPERATOR_CHAIN_LOCK = 179179
+export const OPERATOR_CHAIN_LOCK = 179179
 
 export interface OperatorAction {
   actor: string  // 'operator:<id>'

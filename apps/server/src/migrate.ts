@@ -36,5 +36,15 @@ for (const file of files) {
   console.log(`apply ${file}`)
 }
 
+// #435 / ADR-169 (owner ruling: disclose the past too): project pre-feature operator ledger rows
+// into the per-tenant Access Transparency log. This runs HERE — the admin connection — because the
+// operator console's operator_ro role deliberately has no privilege on tenant_transparency_log.
+// Idempotent (multiset match) and serialized against live break-glass appends (OPERATOR_CHAIN_LOCK),
+// so re-running deploys is safe. A failure fails the migration run: silently skipping it would
+// leave the disclosure ruling unimplemented with no signal.
+const { backfillTransparencyProjection } = await import('./audit/transparency.js')
+const { projected } = await backfillTransparencyProjection(sql)
+if (projected > 0) console.log(`access-transparency backfill: ${projected} row(s) projected`)
+
 await sql.end()
 console.log('migrations complete')
