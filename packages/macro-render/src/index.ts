@@ -10,6 +10,10 @@ export { highlightExtension } from "./highlight-ext.js"; // #334 / ADR-129: shar
 export { footnoteExtension } from "./footnote-ext.js"; // #335 / ADR-130: shared `[^1]` / `[^1]:` grammar
 export { renderMarkdownToHtml, mdParser } from "./render.js";
 export type { MacroHtmlDescriptor, MacroHtmlRegistry } from "./render.js";
+// #384 / ADR-160: the ONE markdown tree-walk; the DOM sink (apps/web md-render.ts) and the SafeHtml sink
+// (render.ts) are the two consumers.
+export { walkMarkdown, walkInlineMarkdown } from "./md-visitor.js";
+export type { MdSink, MdOpenRole, MdLeafRole, MdRoleData } from "./md-visitor.js";
 export { slugify, extractHeadingsFromMarkdown, sliceSectionBySlug, sliceBlockByAnchor } from "./headings.js"; // #325 / ADR-137: shared slug + section/block extractor
 export type { MdHeading } from "./headings.js";
 export {

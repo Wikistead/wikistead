@@ -1,0 +1,69 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`#384 golden corpus (ADR-160 stage 1 — byte-stable through the visitor migration) > DOM sink golden (nested/tagged render — baseOffset threads #215 anchors) 1`] = `"<p>para <strong>x</strong></p><div class="cm-lp-md-directive wks-prose"><p>inner</p></div>"`;
+
+exports[`#384 golden corpus (ADR-160 stage 1 — byte-stable through the visitor migration) > DOM sink golden (static mode — macro chips, no live dispatch) 1`] = `"<p>before</p><div class="cm-lp-fence-card"><div class="cm-lp-code-header" contenteditable="false"><span class="cm-lp-code-tab"><span class="cm-lp-code-lang">mermaid</span></span><button type="button" class="cm-lp-code-copy" aria-label="Copy code" title="Copy code"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></button></div><pre><code>flowchart TD</code></pre></div><p>after</p>"`;
+
+exports[`#384 golden corpus (ADR-160 stage 1 — byte-stable through the visitor migration) > DOM sink golden 1`] = `
+"<div class="cm-lp-frontmatter wks-prose-frontmatter" data-testid="prose-frontmatter"><span class="cm-lp-frontmatter-chip" data-testid="prose-fm-tag-alpha">alpha</span><span class="cm-lp-frontmatter-chip" data-testid="prose-fm-tag-beta gamma">beta gamma</span></div><h1>H1 title</h1><h2>H2 with <strong>bold</strong> and <code>code</code></h2><h6>H6 small</h6><p>para with <strong>strong</strong>, <em>em</em>, <s>strike</s>, <mark>mark</mark>, <code>inline</code>, a <a href="https://example.com/x?a=1" rel="noopener noreferrer nofollow" class="cm-lp-link">safe link</a>,
+an <span>unsafe link</span>, an <span class="wks-attachment-ref" data-testid="attachment-ref">📎 attachment</span>, and a footnote<sup class="cm-lp-footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup>.
+line one<br>line two</p><blockquote><p>quoted <strong>deep</strong></p><ul><li><p>inside list</p></li></ul></blockquote><ul><li><p>bullet a</p></li><li><p>bullet b</p><ol><li><p>nested one</p></li><li><p>nested two</p></li></ol></li></ul><hr><table class="cm-lp-md-table"><thead><tr><th>Head A</th><th>Head B</th></tr></thead><tbody><tr><td>cell <em>i</em></td><td>cell <a href="https://e.com" rel="noopener noreferrer nofollow" class="cm-lp-link">l</a></td></tr><tr><td>&lt;b&gt;raw&lt;/b&gt;</td><td>plain</td></tr></tbody></table><div class="cm-lp-fence-card"><div class="cm-lp-code-header" contenteditable="false"><button type="button" class="cm-lp-code-copy" aria-label="Copy code" title="Copy code"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></button></div><pre><code>plain fence &lt;not a tag&gt;</code></pre></div><div class="cm-lp-fence-card"><div class="cm-lp-code-header" contenteditable="false"><span class="cm-lp-code-tab"><span class="cm-lp-code-title">app.ts</span><span class="cm-lp-code-lang">ts</span></span><button type="button" class="cm-lp-code-copy" aria-label="Copy code" title="Copy code"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></button></div><pre><code>const x: number = 1;</code></pre></div><div class="cm-lp-fence-card"><div class="cm-lp-code-header" contenteditable="false"><span class="cm-lp-code-tab"><span class="cm-lp-code-lang">unknownlang</span></span><button type="button" class="cm-lp-code-copy" aria-label="Copy code" title="Copy code"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></button></div><pre><code>who knows</code></pre></div><div class="cm-lp-md-directive wks-prose"><p>inner <strong>body</strong> text</p></div><div class="cm-lp-md-directive wks-prose"><p>callout body with <code>code</code> and a nested footnote<sup class="cm-lp-footnote-ref cm-lp-footnote-undef">?</sup></p><p>[^inner]: nested def stays literal</p></div><p>&lt;div&gt;html block stays literal&lt;/div&gt;</p><p>&lt;script&gt;alert("xss")&lt;/script&gt;</p><p>text with inline &lt;img src=x onerror=alert(1)&gt; html</p><p>undefined ref here<sup class="cm-lp-footnote-ref cm-lp-footnote-undef">?</sup></p><section class="cm-lp-footnotes" data-testid="footnotes"><hr><ol class="cm-lp-footnotes-list"><li class="cm-lp-footnote-item" id="fn-1">the first note with <strong>bold</strong> <a href="#fnref-1" class="cm-lp-footnote-back">↩</a></li><li class="cm-lp-footnote-item cm-lp-footnote-unref">never referenced</li></ol></section>"
+`;
+
+exports[`#384 golden corpus (ADR-160 stage 1 — byte-stable through the visitor migration) > SafeHtml sink golden (builtin registry — directive dispatch incl. callout/details) 1`] = `
+"<div class="callout callout-note">
+
+<p>nested <strong>body</strong></p>
+
+</div>
+<details><summary>More</summary>
+
+<p>hidden</p>
+
+</details>
+<div class="columns"><div class="column">
+
+<p>left</p>
+
+</div><div class="column">
+
+<p>right</p>
+
+</div></div>"
+`;
+
+exports[`#384 golden corpus (ADR-160 stage 1 — byte-stable through the visitor migration) > SafeHtml sink golden (no registry — plain markdown) 1`] = `
+"<hr>
+<h2>tags: <span>alpha, &quot;beta gamma&quot;</span>
+</h2>
+<h1>H1 title</h1>
+<h2>H2 with <strong>bold</strong> and <code>code</code></h2>
+<h6>H6 small</h6>
+<p>para with <strong>strong</strong>, <em>em</em>, <s>strike</s>, <mark>mark</mark>, <code>inline</code>, a <a href="https://example.com/x?a=1" rel="noopener noreferrer nofollow">safe link</a>,
+an <span>unsafe link</span>, an <span class="wks-attachment-ref">📎 attachment</span>, and a footnote<sup class="cm-lp-footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup>.
+line one<br>line two</p>
+<blockquote><p>quoted <strong>deep</strong></p>
+<ul><li><p>inside list</p></li></ul></blockquote>
+<ul><li><p>bullet a</p></li>
+<li><p>bullet b</p>
+<ol><li><p>nested one</p></li>
+<li><p>nested two</p></li></ol></li></ul>
+<hr>
+<table><thead><tr><th>Head A</th><th>Head B</th></tr></thead><tbody><tr><td>cell <em>i</em></td><td>cell <a href="https://e.com" rel="noopener noreferrer nofollow">l</a></td></tr><tr><td>&lt;b&gt;raw&lt;/b&gt;</td><td>plain</td></tr></tbody></table>
+<pre><code>plain fence &lt;not a tag&gt;</code></pre>
+<pre><code>const x: number = 1;</code></pre>
+<pre><code>who knows</code></pre>
+<div class="wks-directive"><p>
+inner <strong>body</strong> text</p></div>
+<div class="wks-directive"><p>
+callout body with <code>code</code> and a nested footnote<sup class="cm-lp-footnote-ref cm-lp-footnote-undef">?</sup></p>
+</div>
+<p>&lt;div&gt;html block stays literal&lt;/div&gt;</p>
+<p>&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;</p>
+<p>text with inline &lt;img src=x onerror=alert(1)&gt; html</p>
+
+
+
+<p>undefined ref here<sup class="cm-lp-footnote-ref cm-lp-footnote-undef">?</sup></p>
+<section class="cm-lp-footnotes" data-testid="footnotes"><hr><ol class="cm-lp-footnotes-list"><li class="cm-lp-footnote-item" id="fn-1">the first note with <strong>bold</strong> <a href="#fnref-1" class="cm-lp-footnote-back">↩</a></li><li class="cm-lp-footnote-item cm-lp-footnote-unref">never referenced</li></ol></section>"
+`;
