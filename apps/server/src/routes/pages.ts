@@ -1982,7 +1982,9 @@ export const MAX_LINK_STATUS_IDS = 256
 // (a) confirmed to hold a REAL reference (precise regex, not a coincidental substring) and (b) gated
 // by an FGA `view` check for the viewer — so a backlink from a page the viewer can't see is never
 // leaked ("confirm via OpenFGA before display", like listSpaces / the search stage-2 guard).
-export interface Backlink { id: string; title: string }
+// #370`depth` (0-based) nests a `:::children` result under its nearest VISIBLE ancestor in the
+// descendant tree; absent (backlinks / tagged / pre-tree snapshots) reads as 0 = flat.
+export interface Backlink { id: string; title: string; depth?: number }
 
 // #353 / ADR-027 (authorized-hit gap, Hole C): the reverse-lookup lists (backlinks / tag / children) must not
 // DROP viewable results at the raw-fetch boundary. The naive shape — `LIMIT N` raw → per-item view-filter
@@ -2420,11 +2422,10 @@ export async function getListResults(
   if (!(await check(fga, subject, 'view', { type: 'page', id: pageId }, context))) {
     throw Object.assign(new Error('not found'), { statusCode: 404 })
   }
-  let rows: { id: string; title: string }[]
   if (name === 'tagged') {
     const tag = parseTaggedBody(body)
     if (!tag) return []
-    rows = await db.sql<{ id: string; title: string }[]>`
+    const rows = await db.sql<{ id: string; title: string }[]>`
       SELECT pt.page_id AS id, p.title FROM page_tags pt
       JOIN pages p ON p.id = pt.page_id
       WHERE pt.tag = ${tag}
@@ -2434,21 +2435,59 @@ export async function getListResults(
       ORDER BY p.updated_at DESC
       LIMIT ${QUERY_OVER_FETCH}
     `
-  } else {
-    rows = await db.sql<{ id: string; title: string }[]>`
-      SELECT id, title FROM pages
-      WHERE parent_id = ${pageId}
-        AND published_at IS NOT NULL
-        AND deleted_at IS NULL
-      ORDER BY position ASC, updated_at DESC
-      LIMIT ${QUERY_OVER_FETCH}
-    `
+    const out: Backlink[] = []
+    for (const r of rows) {
+      if (out.length >= QUERY_DISPLAY_N) break // top-N VIEWABLE by rank (Hole C — over-fetch past the display cap)
+      if (await check(fga, subject, 'view', { type: 'page', id: r.id }, context)) out.push({ id: r.id, title: r.title })
+    }
+    return out
+  }
+  // #370(user ruling): `children` is the DESCENDANT TREE — grandchildren and deeper included, depth-
+  // annotated (pre-order). The recursive walk traverses through UNPUBLISHED / UNVIEWABLE intermediates but
+  // never emits them: a node enters the result only when it is published AND FGA-view-confirmed for the
+  // caller, and the children of a dropped node RE-ROOT to the nearest emitted ancestor (the GuestSidebar
+  // buildTree leak-safe pattern — a visible page is not a leak; an unviewable page's title/existence never
+  // appears at any depth, in list OR count). The CTE depth cap (MAX_PAGE_DEPTH, the write-boundary cap)
+  // bounds the FETCH against corrupt/deep data; the in-memory walk carries its own visited-set so a
+  // parent_id cycle in corrupt data (unreachable via the move/create guards) can never recurse forever.
+  // Sibling order is per-level `position`.
+  const rows = await db.sql<{ id: string; title: string; parent_id: string; published: boolean; position: number; depth: number }[]>`
+    WITH RECURSIVE d AS (
+      SELECT id, title, parent_id, position, (published_at IS NOT NULL) AS published, 1 AS depth
+        FROM pages WHERE parent_id = ${pageId} AND deleted_at IS NULL
+      UNION ALL
+      SELECT p.id, p.title, p.parent_id, p.position, (p.published_at IS NOT NULL) AS published, d.depth + 1
+        FROM pages p JOIN d ON p.parent_id = d.id
+       WHERE p.deleted_at IS NULL AND d.depth < ${MAX_PAGE_DEPTH}
+    )
+    SELECT id, title, parent_id, published, position, depth FROM d
+    ORDER BY depth ASC, position ASC
+    LIMIT ${QUERY_OVER_FETCH}
+  `
+  type ChildRow = { id: string; title: string; parent_id: string; published: boolean; position: number; depth: number }
+  const byParent = new Map<string, ChildRow[]>()
+  for (const r of rows) {
+    const list = byParent.get(r.parent_id) ?? []
+    list.push(r)
+    byParent.set(r.parent_id, list)
   }
   const out: Backlink[] = []
-  for (const r of rows) {
-    if (out.length >= QUERY_DISPLAY_N) break // top-N VIEWABLE by rank (Hole C — over-fetch past the display cap)
-    if (await check(fga, subject, 'view', { type: 'page', id: r.id }, context)) out.push({ id: r.id, title: r.title })
+  const seen = new Set<string>()
+  const walk = async (parentId: string, depth: number): Promise<void> => {
+    for (const r of byParent.get(parentId) ?? []) {
+      if (out.length >= QUERY_DISPLAY_N) return // display cap (pre-order — over-fetch discipline as above)
+      if (seen.has(r.id)) continue // corrupt-data cycle guard (see above)
+      seen.add(r.id)
+      const visible = r.published && (await check(fga, subject, 'view', { type: 'page', id: r.id }, context))
+      if (visible) {
+        out.push({ id: r.id, title: r.title, depth })
+        await walk(r.id, depth + 1)
+      } else {
+        await walk(r.id, depth) // dropped node: its visible descendants re-root at THIS depth
+      }
+    }
   }
+  await walk(pageId, 0)
   return out
 }
 
@@ -2530,7 +2569,9 @@ function escapeMdLinkText(s: string): string {
 // the member read surface — no empty box).
 export function renderListSnapshot(results: readonly Backlink[]): string {
   if (results.length === 0) return ''
-  return results.map((r) => `- [${escapeMdLinkText(r.title)}](/p/${r.id})`).join('\n')
+  // depth (#370) indents a nested `:::children` entry two spaces per level — a standard nested
+  // Markdown bullet list, so the public/guest static snapshot renders the same tree the member sees.
+  return results.map((r) => `${'  '.repeat(r.depth ?? 0)}- [${escapeMdLinkText(r.title)}](/p/${r.id})`).join('\n')
 }
 
 // Substitute every `:::tagged`/`:::children` directive in `md` with its baked anonymous list — the

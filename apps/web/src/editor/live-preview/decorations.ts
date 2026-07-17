@@ -751,7 +751,9 @@ export const transcludeResolver = Facet.define<TranscludeResolver, TranscludeRes
 // layer). The facet is absent on anonymous/template surfaces (member-only — a guest surface renders the baked
 // snapshot server-side instead), so the boundary is enforced by absence.
 export interface ListSource {
-  readonly fetch: (name: "tagged" | "children", body: string) => Promise<{ id: string; title: string }[] | null>;
+  // `depth` (#370): 0-based nesting for `:::children` (the server's descendant tree, re-rooted past
+  // unviewable intermediates); absent (tagged) = flat.
+  readonly fetch: (name: "tagged" | "children", body: string) => Promise<{ id: string; title: string; depth?: number }[] | null>;
   readonly navigate: (pageId: string) => void;
   readonly emptyLabel: string; // dim edit-surface placeholder (a 0-height read-surface widget shows nothing)
   readonly untitledLabel: string; // fallback text for a result page with no title
@@ -772,7 +774,7 @@ function directiveLabel(openLine: string, name: string): string | null {
 // re-confirms view). Text via textContent (no innerHTML) — the titles came from the view-gated endpoint and are
 // treated as untrusted here regardless. `variant` selects the test-id namespace; the CSS classes are shared.
 function buildLinkList(
-  items: { id: string; title: string }[],
+  items: { id: string; title: string; depth?: number }[],
   label: string | null,
   src: { navigate: (id: string) => void; untitledLabel: string },
   variant: "tagged" | "children",
@@ -786,9 +788,23 @@ function buildLinkList(
     h.textContent = label;
     box.appendChild(h);
   }
-  const ul = document.createElement("ul");
-  ul.className = "cm-lp-backlinks-list";
+  const rootUl = document.createElement("ul");
+  rootUl.className = "cm-lp-backlinks-list";
+  // #370`depth` nests entries as real sub-<ul>s (the `:::children` descendant tree); flat input
+  // (tagged / no depth) builds the same single list as before. The stack tracks the open <ul> per level;
+  // a level jump with no preceding item degrades to the current level (never crashes on odd data).
+  const stack: HTMLUListElement[] = [rootUl];
   for (const it of items) {
+    const depth = Math.max(0, it.depth ?? 0);
+    while (stack.length - 1 > depth) stack.pop();
+    while (stack.length - 1 < depth) {
+      const parentLi = stack[stack.length - 1]!.lastElementChild;
+      if (!(parentLi instanceof HTMLLIElement)) break; // no parent item to nest under → stay at this level
+      const sub = document.createElement("ul");
+      sub.className = "cm-lp-backlinks-list cm-lp-backlinks-sub";
+      parentLi.appendChild(sub);
+      stack.push(sub);
+    }
     const li = document.createElement("li");
     const a = document.createElement("a");
     a.className = "cm-lp-backlinks-item";
@@ -800,9 +816,9 @@ function buildLinkList(
     a.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
     a.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); src.navigate(it.id); });
     li.appendChild(a);
-    ul.appendChild(li);
+    stack[stack.length - 1]!.appendChild(li);
   }
-  box.appendChild(ul);
+  box.appendChild(rootUl);
   return box;
 }
 
@@ -4281,11 +4297,13 @@ export const livePreviewTheme = EditorView.baseTheme({
   // rendered `.cm-lp-footnote-ref` / `.cm-lp-footnotes` in callout-icons.css so editor and page don't drift).
   ".cm-lp-footnote-ref": { verticalAlign: "super", fontSize: "0.75em", color: "var(--link, #4ea1ff)", lineHeight: "1" },
   ".cm-lp-footnote-def": { fontSize: "0.9em", opacity: "0.8" },
-  // #307 / ADR-127: the :::backlinks list (a subtle "pages that link here" box). Empty ⇒ the widget is
-  // removed/collapsed by the host, so nothing shows on read surfaces; the edit-surface placeholder is dim.
-  ".cm-lp-backlinks": { margin: "0.3em 0", padding: "0.5em 0.75em", border: "1px solid var(--border, rgba(127,127,127,0.3))", borderRadius: "6px", background: "var(--panel-2, rgba(127,127,127,0.05))" },
+  // #307 / ADR-127 → #370(user ruling): the `:::tagged` / `:::children` list renders as a PLAIN
+  // Markdown bullet list — no box chrome (border / radius / panel wash / inner padding). The nested
+  // `:::children` tree indents via real sub-<ul>s, background-free.
+  ".cm-lp-backlinks": { margin: "0.3em 0" },
   ".cm-lp-backlinks-label": { fontSize: "0.85em", fontWeight: "600", color: "var(--fg-dim, #888)", marginBottom: "0.3em" },
-  ".cm-lp-backlinks-list": { listStyle: "none", margin: "0", padding: "0", display: "flex", flexDirection: "column", gap: "0.15em" },
+  ".cm-lp-backlinks-list": { listStyle: "disc", margin: "0", padding: "0 0 0 1.4em" },
+  ".cm-lp-backlinks-list li": { margin: "0.1em 0" },
   // #370: the frontmatter properties widget (tag chips). Padding, not margin (block-widget heightMap rule).
   ".cm-lp-frontmatter": { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "0.4em", padding: "0.35em 0.2em 0.6em", borderBottom: "1px solid var(--border)" },
   ".cm-lp-frontmatter-label": { fontSize: "0.75em", color: "var(--fg-dim)", textTransform: "uppercase", letterSpacing: "0.04em" },

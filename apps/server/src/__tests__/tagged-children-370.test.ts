@@ -172,13 +172,35 @@ describe('getListResults tagged (#370 / ADR-145 §4)', () => {
   })
 })
 
-describe('getListResults children (#370 — kept from ADR-134, tag-independent)', () => {
-  it('returns the PUBLISHED child pages, and NOT the unpublished draft child (published graph)', async () => {
+describe('getListResults children (#370 —the DESCENDANT TREE, depth-annotated + re-rooted)', () => {
+  let grandUnderC1!: string  // published grandchild (parent > childPub1 > grandUnderC1)
+  let grandUnderC2!: string  // published grandchild (parent > childPub2 > grandUnderC2) — the re-root probe
+  let underDraft!: string    // published child of the UNPUBLISHED childDraft — re-roots past the draft
+
+  beforeAll(async () => {
+    grandUnderC1 = await mkPage('Grand One', 'g1', childPub1)
+    grandUnderC2 = await mkPage('Grand Two', 'g2', childPub2)
+    underDraft = await mkPage('Under Draft', 'ud', childDraft)
+  }, 60_000)
+
+  it('returns the descendant TREE pre-order with depth: children at 0, grandchildren nested at 1', async () => {
     const rows = await getListResults(db, fgaClient, { pageId: parent, name: 'children', body: '', subject: 'user:dev-user' })
-    const found = rows.map((r) => r.id)
-    expect(found).toContain(childPub1)
-    expect(found).toContain(childPub2)
-    expect(found).not.toContain(childDraft)
+    const byId = new Map(rows.map((r) => [r.id, r]))
+    expect(byId.get(childPub1)?.depth).toBe(0)
+    expect(byId.get(childPub2)?.depth).toBe(0)
+    expect(byId.get(grandUnderC1)?.depth).toBe(1) // theheadline: grandchildren ARE in the list, nested
+    expect(byId.get(grandUnderC2)?.depth).toBe(1)
+    // pre-order: a grandchild follows ITS parent, before the next sibling subtree
+    const order = rows.map((r) => r.id)
+    expect(order.indexOf(grandUnderC1)).toBeGreaterThan(order.indexOf(childPub1))
+    expect(order.indexOf(grandUnderC1)).toBeLessThan(order.indexOf(childPub2))
+  })
+
+  it('an UNPUBLISHED intermediate never appears, but its published descendants RE-ROOT to this level', async () => {
+    const rows = await getListResults(db, fgaClient, { pageId: parent, name: 'children', body: '', subject: 'user:dev-user' })
+    const byId = new Map(rows.map((r) => [r.id, r]))
+    expect(byId.has(childDraft)).toBe(false)          // draft → absent (published graph)
+    expect(byId.get(underDraft)?.depth).toBe(0)       // its published child surfaces, re-rooted to the top level
   })
 
   it('AUTHZ: a caller who CANNOT view the parent gets a uniform 404, and a non-existent id the SAME 404', async () => {
@@ -188,21 +210,72 @@ describe('getListResults children (#370 — kept from ADR-134, tag-independent)'
       .rejects.toMatchObject({ statusCode: 404 })
   })
 
-  it('AUTHZ: a viewable parent with an unviewable child OMITS that child (no title/count leak)', async () => {
+  it('AUTHZ: an unviewable NODE is absent at every depth (no title/count leak) — a deep grandchild too', async () => {
     const grants = [
       { user: 'user:member-b', relation: 'view_direct', object: `page:${parent}` },
       { user: 'user:member-b', relation: 'restricted', object: `page:${childPub2}` },
+      { user: 'user:member-b', relation: 'restricted', object: `page:${grandUnderC1}` },
+      { user: 'user:member-b', relation: 'restricted', object: `page:${grandUnderC2}` },
       { user: 'user:*', relation: 'published', object: `page:${childPub1}` },
       { user: 'user:*', relation: 'published', object: `page:${childPub2}` },
+      { user: 'user:*', relation: 'published', object: `page:${grandUnderC1}` },
+      { user: 'user:*', relation: 'published', object: `page:${grandUnderC2}` },
     ]
     await writeTuples(fgaClient, grants)
     try {
       const rows = await getListResults(db, fgaClient, { pageId: parent, name: 'children', body: '', subject: 'user:member-b' })
       const found = rows.map((r) => r.id)
       expect(found).toContain(childPub1)
-      expect(found).not.toContain(childPub2)
+      expect(found).not.toContain(childPub2)     // unviewable direct child — absent
+      expect(found).not.toContain(grandUnderC1)  // unviewable GRANDchild — absent at depth too
+      expect(found).not.toContain(grandUnderC2)
+      expect(rows.map((r) => r.title)).not.toContain('Child Two')
     } finally {
       await deleteTuples(fgaClient, grants).catch(() => {})
+    }
+  })
+
+  it('AUTHZ: an unviewable INTERMEDIATE drops out but its viewable descendants RE-ROOT (GuestSidebar pattern)', async () => {
+    const grants = [
+      { user: 'user:member-b', relation: 'view_direct', object: `page:${parent}` },
+      { user: 'user:member-b', relation: 'restricted', object: `page:${childPub2}` }, // the intermediate is hidden…
+      { user: 'user:*', relation: 'published', object: `page:${childPub1}` },
+      { user: 'user:*', relation: 'published', object: `page:${childPub2}` },
+      { user: 'user:*', relation: 'published', object: `page:${grandUnderC1}` },
+      { user: 'user:*', relation: 'published', object: `page:${grandUnderC2}` },
+      { user: 'user:member-b', relation: 'view_direct', object: `page:${grandUnderC2}` }, // …but its child is granted
+    ]
+    await writeTuples(fgaClient, grants)
+    try {
+      const rows = await getListResults(db, fgaClient, { pageId: parent, name: 'children', body: '', subject: 'user:member-b' })
+      const byId = new Map(rows.map((r) => [r.id, r]))
+      expect(byId.has(childPub2)).toBe(false)         // the unviewable intermediate never leaks
+      expect(byId.get(grandUnderC2)?.depth).toBe(0)   // its viewable child re-roots to the dropped node's level
+    } finally {
+      await deleteTuples(fgaClient, grants).catch(() => {})
+    }
+  })
+
+  it('CROSS-TENANT: another tenant\'s page can never be parented into this tree (schema/RLS boundary)', async () => {
+    // The pages FK/RLS make a cross-tenant parent_id structurally impossible; if an insert ever succeeded,
+    // the tenant-scoped (RLS) recursive CTE still could not see the foreign row. Accept either proof.
+    let inserted: string | null = null
+    try {
+      const [row] = await adminPool<{ id: string }[]>`
+        INSERT INTO pages (tenant_id, space_id, title, parent_id, published_md, published_at)
+        VALUES ('tenant_acme', (SELECT id FROM spaces WHERE tenant_id = 'tenant_acme' LIMIT 1), 'Acme Intruder', ${parent}, 'x', now())
+        RETURNING id
+      `
+      inserted = row?.id ?? null
+    } catch {
+      return // constraint refused the cross-tenant parent — the boundary holds at the schema layer
+    }
+    try {
+      const rows = await getListResults(db, fgaClient, { pageId: parent, name: 'children', body: '', subject: 'user:dev-user' })
+      expect(rows.map((r) => r.id)).not.toContain(inserted)
+      expect(rows.map((r) => r.title)).not.toContain('Acme Intruder')
+    } finally {
+      if (inserted) await adminPool`DELETE FROM pages WHERE id = ${inserted}`.catch(() => {})
     }
   })
 })
@@ -242,6 +315,24 @@ describe('resolveAnonymousListSnapshot + bake/substitute (#370)', () => {
   it('a non-public HOST yields an EMPTY snapshot (uniform 404 → [], no public existence oracle)', async () => {
     const rows = await resolveAnonymousListSnapshot(db, fgaClient, { pageId: hub, name: 'tagged', body: 'shared' })
     expect(rows).toEqual([])
+  })
+
+  it('CHILDREN TREE (#370): the anonymous snapshot is a tree — member-only descendants absent, public grandchildren re-rooted', async () => {
+    // pubHub > secretMid (member-only, published) > pubGrand (public, published): the anonymous tree must
+    // show pubGrand at depth 0 (re-rooted past the hidden intermediate) and never carry secretMid.
+    const secretMid = await mkPage('Secret Mid', 'sm', pubHub)
+    const pubGrand = await mkPage('Public Grand', 'pg', secretMid)
+    const g = [{ user: 'user:*', relation: 'view_base', object: `page:${pubGrand}` }]
+    await writeTuples(fgaClient, g)
+    try {
+      const rows = await resolveAnonymousListSnapshot(db, fgaClient, { pageId: pubHub, name: 'children', body: '' })
+      const byId = new Map(rows.map((r) => [r.id, r]))
+      expect(byId.has(secretMid)).toBe(false) // member-only page: absent from the PUBLIC tree at any depth
+      expect(rows.map((r) => r.title)).not.toContain('Secret Mid')
+      expect(byId.get(pubGrand)?.depth).toBe(0) // re-rooted to the nearest visible ancestor (the hub root)
+    } finally {
+      await deleteTuples(fgaClient, g).catch(() => {})
+    }
   })
 
   it('bake + substitute end-to-end: `:::tagged` becomes a static list of the PUBLIC pages only', async () => {
@@ -288,6 +379,13 @@ describe('substituteListSnapshots (#370 — pure)', () => {
     const out = substituteListSnapshots(md, snap([{ spec: 'tagged a', results: [{ id: 'p1', title: 'One' }] }]))
     expect(out).toContain('- [One](/p/p1)')
     expect(out).not.toContain(':::children')
+  })
+
+  it('depth renders as a NESTED Markdown bullet list (two spaces per level) — #370', () => {
+    const out = substituteListSnapshots(`:::children\n:::`, snap([
+      { spec: 'children', results: [{ id: 'p1', title: 'Top' }, { id: 'p2', title: 'Kid', depth: 1 } as { id: string; title: string }, { id: 'p3', title: 'Top2' }] },
+    ]))
+    expect(out).toBe('- [Top](/p/p1)\n  - [Kid](/p/p2)\n- [Top2](/p/p3)')
   })
 
   it('escapes Markdown-link metacharacters in a title (no injection into the static list)', () => {

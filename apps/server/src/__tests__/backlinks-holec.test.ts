@@ -67,10 +67,13 @@ describe('getBacklinks Hole C: over-fetch + rank-drop + top-N (#353 / ADR-027)',
 describe('getListResults children Hole C: over-fetch + top-N (#353→#370 / ADR-027)', () => {
   const parent = 'PARENT'
   it('returns top DISPLAY_N viewable children by rank and early-exits the view loop', async () => {
-    const rows = Array.from({ length: 250 }, (_, i) => ({ id: `c${i}`, title: `C${i}` }))
+    // #370children is now the descendant TREE — the fake rows carry the recursive-CTE columns
+    // (parent_id/published/position/depth). 250 direct children of the parent, pre-order = position order.
+    const rows = Array.from({ length: 250 }, (_, i) => ({ id: `c${i}`, title: `C${i}`, parent_id: parent, published: true, position: i, depth: 1 }))
     const { fga, calls } = fakeFga(() => true)
     const out = await getListResults(fakeDb(rows), fga, { pageId: parent, name: 'children', body: '', subject: 'user:u' })
     expect(out.length).toBe(DISPLAY_N)
+    expect(out[0]).toMatchObject({ id: 'c0', depth: 0 }) // emitted depth is result-tree-relative (top level = 0)
     expect(calls.length).toBe(1 + DISPLAY_N) // 1 parent gate + DISPLAY_N child checks (early-exit)
   })
 })
