@@ -4748,15 +4748,15 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // regression was hover-dependency). Solid panel bg + border are inherited from .cm-lp-macro-edit; this rule
   // must follow .cm-lp-macro-edit in source order so its top/left/opacity/display win at equal specificity.
   ".cm-lp-macro-raw": { position: "relative" },
-  // #278 point 4: the raw-entry pill is HOVER/CARET-gated, not always-on — visible while the
-  // mouse is over any line of the revealed block (head line direct, body lines via the zone `:has`)
-  // or while the caret rests on the block's head line (macroRawHead — the keyboard path). Hidden
-  // otherwise, and pointer-inert so it never blocks clicks on the text above it.
+  // #278 point 4 → #452 (owner ruling): the raw-entry pill is visible for the WHOLE reveal
+  // .cm-lp-macro-raw sits on the head line only while the block is revealed, so gating on IT (not on
+  // the caret-position macroRawHead) means "revealed ⇒ hint shown", whichever line the caret is on.
+  // The hover rules remain for mouse affordance; macroRawHead keeps its non-pill styling duties.
   ".cm-lp-macro-richui-raw": { top: "-1.5em", left: "0", zIndex: "4", opacity: "0", pointerEvents: "none", display: "inline-flex", alignItems: "center", gap: "3px", padding: "1px 5px", transition: "opacity 120ms" },
   ".cm-lp-macro-richui-key": { fontSize: "0.72em", fontWeight: "600", letterSpacing: "0.02em" },
   // ①: the zone `:has` walks DIRECT-child lines only (`>`), so hovering raw lines inside a slot
   // island can never light pills of the OUTER document (or vice versa) — .cm-content elements nest.
-  ".cm-lp-macro-raw:hover .cm-lp-macro-richui-raw, .cm-content:has(> .cm-lp-macro-raw-zone:hover) .cm-lp-macro-richui-raw, .cm-lp-macro-raw-head .cm-lp-macro-richui-raw": { opacity: "0.9", pointerEvents: "auto" },
+  ".cm-lp-macro-raw .cm-lp-macro-richui-raw, .cm-content:has(> .cm-lp-macro-raw-zone:hover) .cm-lp-macro-richui-raw": { opacity: "0.9", pointerEvents: "auto" },
   ".cm-lp-macro-richui-raw:hover": { opacity: "1", pointerEvents: "auto" },
   // #278 (owner ruling, supersedes the reposition + the hover-only): island chrome
   // renders EXACTLY like top-level — same reveal triggers (hover OR macroRawHead), same -1.5em/left:0
