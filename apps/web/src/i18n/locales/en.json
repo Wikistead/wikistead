@@ -815,10 +815,12 @@
     "backlinkWarning_other": "This page is referenced by {{count}} pages. Deleting it will leave broken links."
   },
   "macro": {
-    "excalidrawEmpty": "Empty drawing — click the ✎ button to edit",
-    "embedEmpty": "Empty embed — click the ✎ button to add a URL",
-    "pageEmbedEmpty": "Empty page embed — click the ✎ button to add a page",
-    "listEmpty": "No pages yet."
+    "excalidrawEmpty": "Empty drawing — Ctrl+↵ to open",
+    "embedEmpty": "Empty embed — Ctrl+↵ to add a URL",
+    "pageEmbedEmpty": "Empty page embed — Ctrl+↵ to add a page",
+    "listEmpty": "No pages yet.",
+    "emptyEdit": "Empty {{name}} — Ctrl+↵ to edit",
+    "emptyOpen": "Empty {{name}} — Ctrl+↵ to open"
   },
   "templates": {
     "title": "Templates",
