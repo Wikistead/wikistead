@@ -43,7 +43,10 @@ test("#278-5 point 1: a revealed callout shows plain source — no panel skin on
   expect(state.rawFence, "the raw fence text is visible").toBe(true);
 });
 
-test("#278-5 point 4: the raw pill is hover/caret-gated, not always-on", async ({ browser }) => {
+// #278-5 point 4 → MIGRATED by #452 (owner ruling): the pill is no longer caret-line-gated — it
+// stays visible for the WHOLE reveal (any caret line). What point 4 still guards: the pill exists
+// only WHILE revealed (never on the rendered panel), and leaving the block takes it away.
+test("#278-5 point 4 (as amended by #452): the raw pill shows for the whole reveal, and only then", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "pill-gate");
   await enterEdit(page);
@@ -51,23 +54,22 @@ test("#278-5 point 4: the raw pill is hover/caret-gated, not always-on", async (
   await page.keyboard.insertText("intro\n\n:::warning[Careful]\nbody line\n:::\n\ntail\n");
   await sleep(600);
   await page.getByText(/:::warning/).first().waitFor({ state: "hidden" }).catch(() => {});
-  // enter the block;parks the entry caret on the BODY line (it used to land on the head —
-  // the old ArrowDown step here chased that and left the caret on the CLOSE fence, so the later
-  // ArrowUp landed on the body and the head assert went red once the parking changed). Park the
-  // mouse far away and let the hover-out transition settle before sampling.
-  await page.getByText("body line").click();
+  await page.getByText("body line").click(); //parks the entry caret on the BODY line
   await sleep(300);
   await page.mouse.move(30, 30);
   await sleep(300);
   const pill = page.locator(".cm-lp-macro-richui-raw");
   await expect(pill, "pill exists while revealed").toHaveCount(1);
-  const hidden = await pill.evaluate((el) => getComputedStyle(el).opacity);
-  expect(parseFloat(hidden), "caret on a body line + mouse away → hidden").toBeLessThan(0.05);
-  // caret on the HEAD line → visible (keyboard path): one ArrowUp from the body line
-  await page.keyboard.press("ArrowUp");
+  const onBody = await pill.evaluate((el) => getComputedStyle(el).opacity);
+  expect(parseFloat(onBody), "caret on a body line → shown (#452)").toBeGreaterThan(0.5);
+  await page.keyboard.press("ArrowUp"); // head line — still shown
   await sleep(300);
   const onHead = await pill.evaluate((el) => getComputedStyle(el).opacity);
   expect(parseFloat(onHead), "caret on the head line → shown").toBeGreaterThan(0.5);
+  // leaving the block collapses the reveal — the pill goes with it (never on the rendered panel).
+  await page.getByText("tail", { exact: true }).click();
+  await sleep(500);
+  await expect(pill, "no pill once the reveal collapsed").toHaveCount(0);
 });
 
 test("#278-5 points 2+5: tab × matches the column × chip; nested ✎ sits inside the panel", async ({ browser }) => {
