@@ -123,7 +123,17 @@ export function PageTree({
          )}
          style={{ paddingLeft: `calc(${indent}px + 0.5rem)` }} // indent shifts only the content; 8px label room
        >
-        <span className="inline-flex flex-none items-center" onClick={(e) => { e.stopPropagation(); node.toggle(); }}>
+        {/* #451: the expand toggle's HIT AREA is a 24×24 box (icon stays 14px, centered) — the
+            negative margins keep the occupied width at ~14px so the title indent and the childless
+            spacer alignment don't move. stopPropagation keeps row-click (open) and toggle separate. */}
+        <span
+          className={cn(
+            "inline-flex h-6 w-6 flex-none items-center justify-center rounded-md -my-1.5 -mx-[5px]",
+            hasChildren && "cursor-pointer hover:bg-[color-mix(in_srgb,var(--fg)_8%,transparent)]",
+          )}
+          data-testid="tree-expand-toggle"
+          onClick={hasChildren ? (e) => { e.stopPropagation(); node.toggle(); } : undefined}
+        >
           {hasChildren ? <ChevronRight size={14} className={cn("transition-transform duration-[120ms]", node.isOpen && "rotate-90")} /> : <span className="inline-block w-[14px]" />}
         </span>
         {/* #315: a draft (never-published) page swaps the file icon itself — zero extra row width. The
