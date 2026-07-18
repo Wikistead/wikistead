@@ -513,6 +513,16 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       previewViewRef.current = null;
       if (anchorGetterRef) anchorGetterRef.current = null;
       previewHost.replaceChildren();
+      // #454: leaving the EDIT surface keeps the collab connection alive (effect 1 — sync must not
+      // drop), but the presence THIS surface published must go with it: yCollab's plugin does not
+      // null its last `cursor` on destroy, and a macro-modal `macroEdit` anchor has no exit path
+      // here — both lingered on every peer until full disconnect. Presence fields only; the
+      // provider/Y.Text are untouched (the reconfigure-never-drops-collab invariant). On a FULL
+      // unmount this runs just before effect 1's disconnect (setLocalState(null)) — harmless.
+      try {
+        c.provider.awareness?.setLocalStateField("cursor", null);
+        c.provider.awareness?.setLocalStateField("macroEdit", null);
+      } catch { /* awareness gone */ }
     };
     // vim excluded (Compartment reconfigure, not a remount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
