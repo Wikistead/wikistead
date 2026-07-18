@@ -107,6 +107,14 @@ const macroPresenceOverlayPlugin = ViewPlugin.fromClass(
       if (!byBlock.size) return [];
       const layerRect = this.layer.getBoundingClientRect();
       const contentRect = view.contentDOM.getBoundingClientRect();
+      // #453: hug the MACRO'S OWN rect (the same box the local atom-sel ring wraps) instead of the
+      // full content width — the local and remote frames must be the same size and shape. Wraps are
+      // matched geometrically per measure (top ≈ block top, height closest to the block height —
+      // robust against nested wraps inside layout containers), so upstream edits can't leave a
+      // stale offset mapping. Blocks without a wrap (non-widget macros) keep the old full-width box.
+      const wraps = Array.from(view.contentDOM.querySelectorAll<HTMLElement>(".cm-lp-macro-wrap")).map(
+        (el) => ({ el, rect: el.getBoundingClientRect() }),
+      );
       const out: Rect[] = [];
       for (const b of blocks) {
         const peers = byBlock.get(b.from);
@@ -115,13 +123,28 @@ const macroPresenceOverlayPlugin = ViewPlugin.fromClass(
         const a = view.coordsAtPos(b.from, 1);
         const z = view.coordsAtPos(to, -1);
         if (!a || !z) continue;
-        out.push({
-          top: a.top - layerRect.top,
-          left: contentRect.left - layerRect.left,
-          width: contentRect.width,
-          height: Math.max(z.bottom - a.top, 12),
-          peers,
-        });
+        const blockH = Math.max(z.bottom - a.top, 12);
+        const candidates = wraps.filter((w) => Math.abs(w.rect.top - a.top) < 8);
+        const wrap = candidates.sort(
+          (x, y) => Math.abs(x.rect.height - blockH) - Math.abs(y.rect.height - blockH),
+        )[0];
+        out.push(
+          wrap
+            ? {
+                top: wrap.rect.top - layerRect.top,
+                left: wrap.rect.left - layerRect.left,
+                width: wrap.rect.width,
+                height: wrap.rect.height,
+                peers,
+              }
+            : {
+                top: a.top - layerRect.top,
+                left: contentRect.left - layerRect.left,
+                width: contentRect.width,
+                height: blockH,
+                peers,
+              },
+        );
       }
       return out;
     }
@@ -169,12 +192,18 @@ const macroPresenceOverlayTheme = EditorView.baseTheme({
   // The layer sits in the scroller with zero footprint; its children are absolutely positioned in the
   // scroller's coordinate space (recomputed each measure, so scroll self-corrects). Never intercepts input.
   ".cm-macro-presence-layer": { position: "absolute", top: "0", left: "0", width: "0", height: "0", pointerEvents: "none", zIndex: "4" },
-  // The macro-wide outline in the peer's colour (offset-invariant — display only; the box owns no text).
+  // The macro outline in the peer's colour (offset-invariant — display only; the box owns no text).
+  // #453: the ring properties are BYTE-IDENTICAL to the local atom-sel ring (.cm-lp-atom-sel,
+  // decorations.ts) with only the colour swapped — the box is positioned exactly at the macro
+  // wrap's rect, so local and remote frames share one geometry (outline 2px + offset 1px + radius
+  // 4px + 22% halo). Keep these two rules in lockstep.
   ".cm-macro-presence-box": {
     position: "absolute",
     boxSizing: "border-box",
-    border: "2px solid var(--mp-color, #30bced)",
-    borderRadius: "6px",
+    outline: "2px solid var(--mp-color, #30bced)",
+    outlineOffset: "1px",
+    borderRadius: "4px",
+    boxShadow: "0 0 0 5px color-mix(in srgb, var(--mp-color, #30bced) 22%, transparent)",
     pointerEvents: "none",
   },
   // Avatar stack in the TOP-RIGHT corner — deliberately opposite the ✎/Ctrl+↵ edit button (top-left) so
