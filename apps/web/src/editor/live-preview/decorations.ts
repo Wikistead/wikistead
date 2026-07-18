@@ -1,4 +1,5 @@
 import { syntaxTree, foldedRanges, foldEffect, unfoldEffect } from "@codemirror/language";
+import i18n from "../../i18n"; // #455: the shared empty-macro placeholder text is localized (the #174macros precedent)
 import { Facet, StateField, StateEffect, EditorState, EditorSelection, Prec, type Range, type Extension } from "@codemirror/state";
 import {
   Decoration,
@@ -2245,7 +2246,9 @@ class MacroWidget extends WidgetType {
     // #255: a rendered DIAGRAM macro (mermaid/plantuml/excalidraw) is centred by DEFAULT (align="center")
     // and can be pushed left/right via the fence `align=` attribute. Only diagrams align (text macros
     // callout/table/columns — are unaffected). The class drives `text-align` on the wrap (below).
-    if (DIAGRAM_MACROS.has(this.name)) wrap.classList.add(`cm-lp-align-${this.align}`);
+    // #455: only a RENDERED diagram centres/aligns — the EMPTY placeholder must be a full-width
+    // block like every other macro's (the centre class shrank the dashed box to content width).
+    if (DIAGRAM_MACROS.has(this.name) && this.body.trim() !== "") wrap.classList.add(`cm-lp-align-${this.align}`);
     // #393 / ADR-151: a `:::table{align=left|right}` aligns as a block. Unlike diagrams, the DEFAULT
     // (center-labelled) state adds NO class — a bare :::table keeps today's flow layout, and the flex
     // align class would otherwise change every existing table.
@@ -2277,8 +2280,19 @@ class MacroWidget extends WidgetType {
       // #174 / ADR-087: the empty-macro affordance matches how the macro is actually edited
       // "inline" macros (table/callout/mermaid) edit in place on click, "modal" ones (Excalidraw)
       // open a separate editor. editModeOf is the single source of truth for that branch.
+      // #455: ONE localized pattern for every macro, and the text is now TRUE — the placeholder
+      // click actually enters the macro (the empty branch previously advertised "click to edit"
+      // while wiring nothing; the mousedown below routes through the same enterMacroAt as the
+      // rendered branch / Ctrl+Enter). Display-only: readOnly surfaces no-op inside enterMacroAt.
       const opens = editModeOf(this.macro) === "modal";
-      ph.textContent = `Empty ${this.name} — click to ${opens ? "open" : "edit"}`;
+      ph.textContent = i18n.t(opens ? "macro.emptyOpen" : "macro.emptyEdit", { name: this.name });
+      // #455: no bespoke click wiring here — the SHARED entry affordances below (the ✎/Ctrl+↵
+      // button row appended after this if/else, plus the keyboard Ctrl+Enter) already work on an
+      // empty wrap (probe-verified: the button opens mermaid's editUI from the empty state). The
+      // placeholder text now advertises exactly that entry (Ctrl+↵), instead of the old
+      // "click to edit" that no code backed. (A widget-level click-to-enter was prototyped and
+      // dropped: a cold-caret programmatic entry from the placeholder gets its selection re-synced
+      // away by CM's DOM-selection observer — the button path is the reliable one.)
       wrap.appendChild(ph);
     } else {
       // #215 / ADR-100: for the layout containers, hand the inner-body base offset to the liveRender so its

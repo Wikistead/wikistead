@@ -814,10 +814,12 @@
     "backlinkWarning_other": "このページは {{count}} ページから参照されています。削除するとリンク切れになります。"
   },
   "macro": {
-    "excalidrawEmpty": "空の図 — 左上の ✎ ボタンで編集",
-    "embedEmpty": "空の埋め込み — ✎ ボタンで URL を追加",
-    "pageEmbedEmpty": "空のページ埋め込み — ✎ ボタンでページを追加",
-    "listEmpty": "該当ページはまだありません。"
+    "excalidrawEmpty": "空の図 — Ctrl+↵ で開く",
+    "embedEmpty": "空の埋め込み — Ctrl+↵ で URL を追加",
+    "pageEmbedEmpty": "空のページ埋め込み — Ctrl+↵ でページを追加",
+    "listEmpty": "該当ページはまだありません。",
+    "emptyEdit": "空の{{name}} — Ctrl+↵ で編集",
+    "emptyOpen": "空の{{name}} — Ctrl+↵ で開く"
   },
   "templates": {
     "title": "テンプレート",
