@@ -1,0 +1,77 @@
+/* #389 alignment of the DS selection controls (radio dot, switch knob, checkbox glyph).
+ *
+ * The defect these rules exist to prevent: an indicator drawn as a CHILD of its frame is a second
+ * paint box, and each box rounds to device pixels on its own. At fractional zoom (125% / 150%) the
+ * two roundings disagree and the indicator paints visibly off-centre — measured at up to 1.0 device
+ * px — while getBoundingClientRect still reports a perfect match (chased that ghost for a whole
+ * round). No amount of flex centering fixes it, because the drift happens after layout.
+ *
+ * The rule, therefore: an indicator is painted BY its frame, as a background layer of the very same
+ * element. One box, one rounding, and the ink cannot leave the centre. Appearance still animates —
+ * a registered custom property makes the gradient's colour and the knob's offset animatable — so
+ * nothing is traded away for the alignment.
+ *
+ * Never express these states with a transform. A resting transform exempts an element from
+ * device-pixel snapping (and in Tailwind v4, `scale-*` and `transform-none` are separate properties,
+ * which is how a fix once left the dot invisible:).
+ */
+
+@property --wks-dot {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --wks-ring {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+
+/* Radio: ONE element paints both the ring and the dot, and it paints them the same way — as two
+   background layers. A CSS border is not enough: Chromium snaps a border to device pixels but not the
+   background beneath it, so a bordered ring with a gradient dot still drifted ~0.57 device px at 125%
+   even with no child element left. Two gradients rasterise together, and the dot cannot leave the
+   centre of the ring drawn around it. 16px box: dot radius 4, ring between 7 and 8, each with a
+   fraction of feather so the curve antialiases instead of stair-stepping. */
+.wks-radio-ring {
+  background-image:
+    radial-gradient(circle at 50% 50%, var(--wks-dot) 0 3.7px, transparent 4.3px),
+    radial-gradient(circle at 50% 50%, transparent 0 6.7px, var(--wks-ring) 7.1px 7.7px, transparent 8px);
+  transition:
+    --wks-dot var(--dur-fast) var(--ease-standard),
+    --wks-ring var(--dur-fast) var(--ease-standard);
+}
+.wks-radio-ring {
+  --wks-ring: var(--border); /* the same token --color-input aliases, so the unselected ring is unchanged */
+}
+/* checked either because an ancestor choice is (the DS list/card rows) or because the ring is the
+   radio itself (the bare primitive) */
+.group[data-state="checked"] .wks-radio-ring,
+.wks-radio-ring[data-state="checked"] {
+  --wks-dot: var(--accent);
+  --wks-ring: var(--accent);
+}
+
+/* Switch: the track paints its own knob. Geometry is deliberately whole even numbers — 36×20 track,
+   16px knob — so there is 2px of air on every side and the travel is exactly 16px. (The previous
+   track was 1.15rem = 18.4px tall around a 16px knob: 0.2px of air, on a fractional height.)
+   The knob moves by animating background-position-x, which needs no transform and no second box. */
+.wks-switch {
+  background-image: radial-gradient(circle 8px at 10px 50%, #fff 96%, transparent 100%);
+  background-repeat: no-repeat;
+  background-position-x: 0;
+  transition:
+    background-position-x var(--dur-fast) var(--ease-standard),
+    background-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard);
+}
+.wks-switch[data-state="checked"] {
+  background-position-x: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wks-radio-ring,
+  .wks-switch {
+    transition: none;
+  }
+}

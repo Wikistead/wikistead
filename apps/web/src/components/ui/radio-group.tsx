@@ -1,5 +1,4 @@
 import * as React from "react"
-import { CircleIcon } from "lucide-react"
 import { RadioGroup as RadioGroupPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
@@ -24,21 +23,16 @@ function RadioGroupItem({
     <RadioGroupPrimitive.Item
       data-slot="radio-group-item"
       className={cn(
-        // #389 the item itself is a flex centerer — the shadcn default centered the dot with
-        // %-position + translate(-50%), whose top/left subpixel rounding drifts apart at fractional
-        // zoom (110%/125%), nudging the dot off-center. Flex centering is zoom-stable.
-        "border-input text-primary focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 aria-invalid:border-destructive flex aspect-square size-4 shrink-0 items-center justify-center rounded-full border shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50",
+        // #389 the item paints its own dot (wks-radio-ring, ds-controls.css). Centering a
+        // child dot — by translate (the shadcn default) or by flex — cannot help: a child is
+        // its own paint box and rounds to device pixels separately from the ring, so at fractional
+        // zoom the dot sits visibly low. Painting the dot as this element's background leaves one
+        // box to round.
+        "wks-radio-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 aspect-square size-4 shrink-0 rounded-full outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50",
         className
       )}
       {...props}
-    >
-      <RadioGroupPrimitive.Indicator
-        data-slot="radio-group-indicator"
-        className="flex items-center justify-center"
-      >
-        <CircleIcon className="fill-primary size-2" />
-      </RadioGroupPrimitive.Indicator>
-    </RadioGroupPrimitive.Item>
+    />
   )
 }
 

@@ -18,6 +18,7 @@ import "./assets/fonts/udev-gothic.css";
 import "./assets/fonts/wikistead-mono.css";
 import "./styles/tokens.css";
 import "./styles/print.css";
+import "./styles/ds-controls.css"; // #389 indicators painted by their own frame (device-pixel stable)
 import "./styles/macro-modal.css";
 import "./styles/callout-icons.css"; // #158-C4: callout header icons (Lucide mask-image)
 import "./styles/prose.css"; // #381 / ADR-163: THE raw-tag prose sheet (.wks-prose) + shared value tokens
