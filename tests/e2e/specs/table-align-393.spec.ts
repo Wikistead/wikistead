@@ -153,3 +153,30 @@ test("#393: a nested :::table{align=right} aligns on the read/nested surface too
   await expect(nestedWrap).toBeVisible({ timeout: 8000 });
   await expect(nestedWrap.locator("table")).toBeVisible();
 });
+
+//the sink that renders a table's markdown for READING — `renderMarkdownToDom`, which draws
+// nested macro bodies here and is the same visitor the server's HTML export runs — only ever wrapped
+// left and right. That was correct while centre was the default and the wrapper's job was to express a
+// departure from it, and it silently became wrong when #393 made LEFT the default: an explicit
+// `align=center` reached the editor's own decoration and nothing else, so the same source sat centred
+// while being written and flush left wherever this visitor drew it. The centre pins above measure the
+// editor surface, which is a different renderer, so none of them could see it.
+test("#393a nested :::table{align=center} centres on the read surface (md-render path)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "table-align-center-nested-393");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(`::::columns\n:::column\n:::table{align=center}\n<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>\n:::\n:::\n:::column\nplain\n:::\n::::\n\nbelow\n`);
+  await page.getByText("below", { exact: true }).click();
+  await sleep(700);
+
+  const wrap = page.locator("[data-pane=preview] .cm-lp-column .cm-lp-align-center").first();
+  await expect(wrap, "the read sink wraps an explicit centre in the fixed align class").toBeVisible({ timeout: 8000 });
+  // …and it has to actually move the table: the class means nothing if the geometry still says left
+  const wrapBox = (await wrap.boundingBox())!;
+  const tableBox = (await wrap.locator("table").boundingBox())!;
+  const leftGap = tableBox.x - wrapBox.x;
+  const rightGap = wrapBox.x + wrapBox.width - (tableBox.x + tableBox.width);
+  expect(leftGap, `there is room on the left — a centred table is not flush against it (l=${leftGap} r=${rightGap})`).toBeGreaterThan(2);
+  expect(Math.abs(leftGap - rightGap), `centred within a pixel or two (l=${leftGap} r=${rightGap})`).toBeLessThan(2);
+});

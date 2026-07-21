@@ -349,17 +349,20 @@ describe("renderMarkdownToHtml — footnotes (#335 / ADR-130)", () => {
 // use. The attr value is an enum switch between fixed class literals — a crafted value must be a
 // no-op (never interpolated into markup: the XSS boundary of ADR-151 §2).
 describe("renderMarkdownToHtml — #422 align export parity", () => {
-  it("wraps :::table{align=left|right} in the fixed align class", () => {
+  it("wraps :::table{align=left|right|center} in the fixed align class", () => {
     const left = out(":::table{align=left}\n<table><tbody><tr><td>x</td></tr></tbody></table>\n:::", builtinMacroRegistry());
     expect(left).toContain('<div class="cm-lp-align-left">');
     expect(left).toContain("</div>");
     const right = out(":::table{align=right}\n<table><tbody><tr><td>x</td></tr></tbody></table>\n:::", builtinMacroRegistry());
     expect(right).toContain('<div class="cm-lp-align-right">');
+    const center = out(":::table{align=center}\n<table><tbody><tr><td>x</td></tr></tbody></table>\n:::", builtinMacroRegistry());
+    expect(center, "an explicit center must reach the read/export sink, not just the editor").toContain('<div class="cm-lp-align-center">');
   });
 
-  it("center / absent align emits NO wrapper (default parity)", () => {
-    const center = out(":::table{align=center}\n<table></table>\n:::", builtinMacroRegistry());
-    expect(center).not.toContain("cm-lp-align-");
+  //this used to assert that center emits NO wrapper, which was right while center was the
+  // default — and became the thing keeping the fix out once #393 made LEFT the default. The absent
+  // case is the one that carries "default parity" now.
+  it("absent align emits NO wrapper (it IS the default); center emits its own", () => {
     const none = out(":::table\n<table></table>\n:::", builtinMacroRegistry());
     expect(none).not.toContain("cm-lp-align-");
   });

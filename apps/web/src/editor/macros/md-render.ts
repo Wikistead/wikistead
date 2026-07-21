@@ -390,14 +390,18 @@ class DomSink implements MdSink {
       finally { setPendingBaseOffset(null); nestedDirectiveDepth--; }
       if (el) {
         tagMacro(el, args.nodeFrom, parsed!.name); // #215 tag
-        // #393 / ADR-151: `:::table{align=left|right}` block alignment on the read/nested surface.
-        // FIXED enum → fixed class (never raw-concatenated — the XSS boundary); center = default = no
-        // wrap. The <table> itself must not become a flex container, so the class rides a wrapper div
-        // (the global .cm-lp-align-* rules are flex-based).
+        // #393 / ADR-151: `:::table{align=…}` block alignment on the read/nested surface. FIXED enum →
+        // fixed class (never raw-concatenated — the XSS boundary). No attribute = left = no wrapper.
+        // The <table> itself must not become a flex container, so the class rides a wrapper div (the
+        // global .cm-lp-align-* rules are flex-based).
+        //`center` was missing here for as long as centre was the default. Once #393 made left
+        // the default, an explicit `align=center` reached the editor's decoration but not this sink,
+        // so a centred table read as flush left in Reading, in the public reader and in every export.
         const align = parsed!.name === "table" ? args.attrs?.align : undefined;
-        if (align === "left" || align === "right") {
+        const alignClass = align === "left" ? "cm-lp-align-left" : align === "right" ? "cm-lp-align-right" : align === "center" ? "cm-lp-align-center" : null;
+        if (alignClass) {
           const alignWrap = document.createElement("div");
-          alignWrap.className = align === "left" ? "cm-lp-align-left" : "cm-lp-align-right";
+          alignWrap.className = alignClass;
           alignWrap.appendChild(el);
           into.appendChild(alignWrap);
           return;
