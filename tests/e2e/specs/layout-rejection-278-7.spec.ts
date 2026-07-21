@@ -237,18 +237,27 @@ test("#278-10 ①: the island pill shows on the callout's own hover ONLY (not ca
   await sleep(500);
   const pill = island.locator(".cm-lp-macro-richui-raw").first();
   await expect(pill).toBeAttached();
-  // mouse far away → the pill must NOT stay lit from the parked caret
+  //(owner ruling, supersedes thehover-only rule this test was written against): a REVEALED
+  // macro shows its hint, keyboard or mouse — so the pill stays lit with the mouse away. What must still
+  // hold is the boundary: this island's reveal lights THIS island's pill and nothing in the outer document.
   await page.mouse.move(10, 10);
   await sleep(300);
-  expect(parseFloat(await pill.evaluate((el) => getComputedStyle(el).opacity)), "no perma-show with the mouse away").toBeLessThan(0.1);
-  // hovering the revealed raw line brings it back
+  expect(parseFloat(await pill.evaluate((el) => getComputedStyle(el).opacity)), "revealed ⇒ the hint shows, mouse or not").toBeGreaterThan(0.5);
+  const outerPillOpacity = await page.evaluate(() => {
+    const p = [...document.querySelectorAll("[data-pane=preview] .cm-lp-macro-richui-raw")]
+      .find((el) => !el.closest("[data-testid=slot-edit-island]")) as HTMLElement | undefined;
+    return p ? parseFloat(getComputedStyle(p).opacity) : 0;
+  });
+  expect(outerPillOpacity, "the outer document's pill stays dark — the island's reveal does not cross out").toBeLessThan(0.1);
+  // hovering the revealed raw line keeps it lit
   await island.locator(".cm-content").getByText("inner", { exact: true }).hover();
   await sleep(300);
-  expect(parseFloat(await pill.evaluate((el) => getComputedStyle(el).opacity)), "own-zone hover reveals").toBeGreaterThan(0.5);
-  // hovering UNRELATED island text does not
+  expect(parseFloat(await pill.evaluate((el) => getComputedStyle(el).opacity)), "own-zone hover keeps it lit").toBeGreaterThan(0.5);
+  // hovering UNRELATED island text leaves the reveal state alone (it neither lights another macro's pill
+  // nor darkens this one — the reveal, not the pointer, is what decides)
   await island.locator(".cm-content").getByText("lead", { exact: true }).hover();
   await sleep(300);
-  expect(parseFloat(await pill.evaluate((el) => getComputedStyle(el).opacity)), "unrelated text hover never lights it").toBeLessThan(0.1);
+  expect(parseFloat(await pill.evaluate((el) => getComputedStyle(el).opacity)), "still governed by the reveal").toBeGreaterThan(0.5);
 });
 
 test("#278-10 ① generalized: NO island chrome lights from hovering neutral island text", async ({ browser }) => {
@@ -348,7 +357,10 @@ test("#278-11the raw pill's signature is IDENTICAL at top level and inside an is
   expect(islEntry, "island after-entry signature exists").toBeTruthy();
   expect(islEntry, "after-entry: island === top").toEqual(topEntry);
   expect(islHead, "head-caret: island === top").toEqual(topHead);
-  expect(parseFloat(topEntry!.op), "entry parks on the body — pill dark until deliberate head/hover").toBeLessThan(0.1);
-  expect(parseFloat(topHead!.op), "head caret lights the pill (the keyboard affordance) on BOTH surfaces").toBeGreaterThan(0.5);
+  //the pill follows the REVEAL, not the caret's line within it — so entry already lights it, on
+  // both surfaces. The point of this test is that the two signatures are IDENTICAL (asserted above); the
+  // absolute value is pinned here so a future change to the trigger cannot pass by matching two wrongs.
+  expect(parseFloat(topEntry!.op), "entry reveals the macro, so the hint is already shown").toBeGreaterThan(0.5);
+  expect(parseFloat(topHead!.op), "and the head caret keeps it shown on BOTH surfaces").toBeGreaterThan(0.5);
   expect(topHead!.relTop, "the shared -1.5em float position").toBeLessThan(0);
 });

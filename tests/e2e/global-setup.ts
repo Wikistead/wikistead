@@ -36,6 +36,17 @@ export default async function globalSetup() {
     // mints invitees as sub "inv-<ts>" and creates invites in tenant_dev).
     await sql`DELETE FROM invites WHERE tenant_id = ${E2E.tenant}`;
     await sql`DELETE FROM members WHERE tenant_id = ${E2E.tenant} AND sub LIKE 'inv-%'`;
+    // The shared dev member's editor chrome is a per-user PREFERENCE that onboarding-289 sets while
+    // testing the personas; its afterEach restores it, but a killed or timed-out run leaves the last
+    // persona applied — and a persona that hides the vim button makes every vim spec fail to find it,
+    // in a way that reads as a product regression rather than leftover state. Reset it here, the same
+    // self-healing idea as seedFgaFixtures(): the next run starts from the default chrome regardless
+    // of how the previous one died. (The gate-* members onboarding-289 mints are throwaway.)
+    await sql`
+      UPDATE members SET editor_chrome = NULL, editor_display_mode = NULL, editor_keymap = NULL,
+                         onboarding_completed_at = COALESCE(onboarding_completed_at, now())
+      WHERE tenant_id = ${E2E.tenant} AND sub = 'dev-user'`;
+    await sql`DELETE FROM members WHERE tenant_id = ${E2E.tenant} AND sub LIKE 'gate-%'`;
     await sql`
       INSERT INTO tenant_oidc (tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri)
       VALUES (${E2E.tenant}, ${issuer.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${REDIRECT})
