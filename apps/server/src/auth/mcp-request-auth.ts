@@ -1,5 +1,6 @@
 import type { FastifyRequest } from 'fastify'
 import { verifyMcpAccessToken } from '@wikistead/auth'
+import { fgaClient, isTenantMember } from '@wikistead/authz'
 
 // #311 / ADR-131 slice 5: authenticate an /mcp request from its Bearer access token (minted by slice 4). This is
 // the (a)+(b) binding the token-endpoint review requires at the tool surface: verify the `mcp+jwt` signature/typ,
@@ -21,6 +22,13 @@ export async function authenticateMcpRequest(req: FastifyRequest, hostTenantId: 
   }
   // Tenant binding (the new attack surface): the token's tenant MUST equal the Host-resolved tenant.
   if (claims.tenantId !== hostTenantId) throw Object.assign(new Error('token tenant mismatch'), { statusCode: 401 })
+  // #471 / ADR-176: /mcp opts out of the shared member hook (`config: { public: true }`) and runs this
+  // instead, so the tenant binding has to be repeated here — including membership, resolved per
+  // request. Without it a removed member's token kept working until it expired, which for an MCP
+  // access token is long after the tenant believes the account is gone.
+  if (!(await isTenantMember(fgaClient, claims.sub, hostTenantId))) {
+    throw Object.assign(new Error('invalid or expired token'), { statusCode: 401 })
+  }
   return {
     sub: claims.sub, tenantId: claims.tenantId,
     scopes: Array.isArray(claims.scopes) ? claims.scopes : [],

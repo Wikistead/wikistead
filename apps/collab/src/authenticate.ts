@@ -9,7 +9,7 @@ import {
   verifyMemberCollabToken,
   makeMemberVerifier,
 } from "@wikistead/auth";
-import { fgaClient, check, checkMemberAccess } from "@wikistead/authz";
+import { fgaClient, check, checkMemberAccess, isTenantMember } from "@wikistead/authz";
 
 const guestCfg = {
   secret: process.env.GUEST_TOKEN_SECRET!,
@@ -53,9 +53,20 @@ export async function authenticate(args: { token: string; documentName: string }
   const { tenantId, pageId, ephemeral } = parseDocName(args.documentName);
   const token = args.token;
 
+  // #471 / ADR-176: a member principal is admitted to this room only if they are a member of the
+  // room's tenant. The two branches below already asserted the token's tenant CLAIM matched; the
+  // OIDC branch asserted nothing at all, so a token from another tenant joined any room whose page
+  // was reachable through `view_base@user:*` — a public page — and read the live document and
+  // appeared in presence. A claim is not authority in any case: membership is, per request, the same
+  // predicate the HTTP seam and login use.
+  const asMember = async (userId: string, groups: string[], readOnly: boolean): Promise<AuthResult> => {
+    assert(await isTenantMember(fgaClient, userId, tenantId), "not a member of this tenant");
+    return { principal: { kind: "member", tenantId, userId, groups }, readOnly };
+  };
+
   // Dev-only bypass (disabled in production at the env level).
   if (process.env.NODE_ENV !== "production" && token === "dev-token") {
-    return { principal: { kind: "member", tenantId, userId: "dev-user", groups: [] }, readOnly: false };
+    return asMember("dev-user", [], false);
   }
 
   if (looksLikeGuestToken(token)) {
@@ -101,16 +112,15 @@ export async function authenticate(args: { token: string; documentName: string }
     const access = await checkMemberAccess(fgaClient, c.sub, { type: "page", id: pageId });
     assert(access !== null, "member has no access to this page");
     if (ephemeral) assert(!access.readOnly, "ephemeral room requires edit"); // #92: co-editing = edit
-    return {
-      principal: { kind: "member", tenantId, userId: c.sub, groups: c.groups },
-      readOnly: access.readOnly,
-    };
+    return asMember(c.sub, c.groups, access.readOnly);
   }
 
-  // OIDC bearer member token (programmatic).
+  // OIDC bearer member token (programmatic). The token's own tenant claim, when it carries one, must
+  // agree with the room's tenant — matching the two branches above — and membership settles it.
   const m = await verifyMember(token);
+  assert(!m.tenantId || m.tenantId === tenantId, "tenant mismatch");
   const access = await checkMemberAccess(fgaClient, m.sub, { type: "page", id: pageId });
   assert(access !== null, "member has no access to this page");
   if (ephemeral) assert(!access.readOnly, "ephemeral room requires edit"); // #92: co-editing = edit
-  return { principal: { kind: "member", tenantId, userId: m.sub, groups: m.groups }, readOnly: access.readOnly };
+  return asMember(m.sub, m.groups, access.readOnly);
 }
