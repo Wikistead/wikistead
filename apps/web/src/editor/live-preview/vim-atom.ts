@@ -220,9 +220,16 @@ export const atomYank: Extension = ViewPlugin.define((view) => {
       if (!touches && !cur) return; // solitary atom entered from a plain line → default skip-over (pinned)
       if (!touches && cur) return;  // leaving an atom onto a solitary atom is impossible here (no gap ⇒ touches)
       // land ON the entered atom (near edge in the motion direction); visual keeps its anchor.
+      //`visualMode && !sel.empty` dropped the selection on the FIRST motion after `v`. Pressing
+      // `v` puts vim in visual mode without touching CodeMirror's selection — the range only appears
+      // once something moves — so the first j landed in the cursor() branch and collapsed the selection
+      // that was about to grow. Every following j saw an empty selection too, so from a line above an
+      // adjacent cluster the selection never grew at all: measured as "the selection cancels itself".
+      // Visual mode alone decides the shape; when the range is still empty its anchor IS the caret vim
+      // will grow from, so one expression serves both.
       const caretPos = dir > 0 ? entered.from : doc.lineAt(entered.to).from;
       view.dispatch({
-        selection: vim.visualMode && !sel.empty
+        selection: vim.visualMode
           ? EditorSelection.range(sel.anchor, caretPos)
           : EditorSelection.cursor(caretPos),
         scrollIntoView: true,
