@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { TenantDb } from '../db/index.js'
 import type { StorageDriver } from '../storage/index.js'
+import { isSpaceCreator } from '@wikistead/authz' // #445 the caller's own space-creation capability
 // Account settings option sets live in the pure settings-catalog leaf (#139 doc↔code linkage):
 // the SINGLE source for both this route's validation and the generated settings reference.
 import { KEYMAP_MODES, DISPLAY_MODE_PREFS, REMAPPABLE_COMMANDS, RESERVED_KEYS, validateEditorChrome, type KeymapMode, type DisplayModePref, type EditorChromeVisibility } from '../settings-catalog.js'
@@ -163,9 +164,25 @@ export async function clearAvatar(db: TenantDb, storage: StorageDriver, args: { 
   if (old?.avatar_image_key) await storage.deleteObject(old.avatar_image_key).catch(() => {})
 }
 
+// #445 the caller's OWN capabilities, so the UI can hide an affordance it knows will be
+// refused. Self-scoped (the route passes req.user.sub — no other principal is addressable) and it
+// discloses nothing about the tenant beyond what pressing the button would already reveal.
+// Convenience only: the server stays the fortress, and a stale flag still gets the 403 and its
+// message (two-layer rule). Extracted from the handler so the refused case is directly testable —
+// the dev bearer only ever resolves to a tenant admin, which always passes.
+export interface MyCapabilities { canCreateSpaces: boolean }
+export async function resolveCapabilities(
+  fga: Parameters<typeof isSpaceCreator>[0],
+  args: { subject: string; tenantId: string },
+): Promise<MyCapabilities> {
+  return { canCreateSpaces: await isSpaceCreator(fga, args.subject, args.tenantId) }
+}
+
 export async function accountPlugin(app: FastifyInstance) {
   // All member-gated (the default guard requires req.user; guests/unauth are rejected).
   app.get('/me/settings', async (req) => getAccountSettings(req.db, { subject: req.user.sub }))
+
+  app.get('/me/capabilities', async (req) => resolveCapabilities(app.fga, { subject: req.user.sub, tenantId: req.tenant.id }))
 
   app.patch<{ Body: { displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[] } }>('/me/settings', async (req) =>
     updateAccountSettings(req.db, { subject: req.user.sub, displayNameOverride: req.body?.displayNameOverride, editorKeymap: req.body?.editorKeymap, editorDisplayMode: req.body?.editorDisplayMode, keybindings: req.body?.keybindings, editorChrome: req.body?.editorChrome, onboardingCompleted: req.body?.onboardingCompleted, notificationsEnabled: req.body?.notificationsEnabled, defaultEventMask: req.body?.defaultEventMask }),

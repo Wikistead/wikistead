@@ -48,7 +48,8 @@
     "spaceDeleted": "Space deleted",
     "pageDeleted": "Page deleted",
     "pageTrashed": "Moved to trash",
-    "pageDeletedForever": "Page permanently deleted"
+    "pageDeletedForever": "Page permanently deleted",
+    "spaceCreateDenied": "You do not have permission to create spaces."
   },
   "theme": {
     "label": "Theme",

@@ -79,6 +79,17 @@ export function usePages(spaceId: string, enabled = true) {
   });
 }
 
+// #445 the caller's own capabilities. Read to HIDE an affordance the server would refuse;
+// never to decide access (the server is the fortress, and the 403 path still reports the reason).
+export interface MyCapabilities { canCreateSpaces: boolean }
+export function useMyCapabilities() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["me-capabilities"],
+    queryFn: () => apiFetch<MyCapabilities>("/me/capabilities", token),
+  });
+}
+
 export function useCreateSpace() {
   const { token } = useSession();
   const qc = useQueryClient();

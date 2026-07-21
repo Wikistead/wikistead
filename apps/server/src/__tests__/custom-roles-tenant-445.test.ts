@@ -18,7 +18,7 @@
 // windows these tests need would 403 PARALLEL test files' createSpace calls if they touched the
 // shared dev tenant's wildcard (observed flake: notifications-362 mid-suite).
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import type { FastifyInstance } from 'fastify'
+import Fastify, { type FastifyInstance } from 'fastify'
 import postgres from 'postgres'
 import { registerEntitlementsResolver, resetEntitlementsResolver, UNLIMITED } from '@wikistead/entitlements'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
@@ -29,6 +29,7 @@ import type { TenantDb } from '../db/index.js'
 import { LogicalSearchDriver } from '../search/index.js'
 import { buildApp } from '../app.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
+import { resolveCapabilities } from '../routes/account.js' // #445 the refused branch, directly
 import { provisionTenant } from '../auth/provisioning.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -178,5 +179,46 @@ describe('tenant-scope custom roles (#445 / ADR-171)', () => {
     expect((tuples ?? []).length, 'no leaked tuple on the other tenant').toBe(0)
     const [prov] = await admin<{ id: string }[]>`SELECT id FROM role_assignments WHERE resource_id = 'tenant_dev'`
     expect(prov, 'no provenance row either').toBeUndefined()
+  })
+
+  // (review rejection): a refused creation told the browser NOTHING, so the UI could not
+  // explain itself. Two additions pinned here: the 403 carries a machine-readable `code` (a bare
+  // `reason` property is dropped by the serialiser and never reaches the client), and the caller can
+  // ask for its OWN capability so the affordance can be hidden. The refusal itself is unchanged.
+  it(' the space-creation 403 carries code=space_creator, and /me/capabilities forwards the same check', async () => {
+    await deleteTuples(fgaClient, [wildcard()]).catch(() => {})
+    try {
+      const err = await createSpace(db, fgaClient, { tenantId: tenant.id, userId: MEMBER, plan: tenant.plan, name: 'crt445-denied' })
+        .then(() => null, (e: { statusCode?: number; code?: string }) => e)
+      expect(err?.statusCode).toBe(403)
+      expect(err?.code, 'the client can tell WHY it was refused (serialised; `reason` alone is not)').toBe('space_creator')
+      expect(await canCreate(MEMBER), 'and the capability the endpoint forwards says the same').toBe(false)
+
+      // What the BROWSER sees is the serialised body, not the thrown object — and only fields the
+      // error serialiser emits survive (this is exactly why `reason` never worked). Fastify decides
+      // that, so pin it against the real serialiser with the error this route throws. The route
+      // itself can't produce this over HTTP here: the dev bearer is always this tenant's admin.
+      const probe = Fastify()
+      probe.get('/probe', async () => { throw Object.assign(new Error('space creation is restricted'), { statusCode: 403, code: 'space_creator', reason: 'space_creator' }) })
+      const wire = await probe.inject({ method: 'GET', url: '/probe' })
+      expect(wire.statusCode).toBe(403)
+      expect((wire.json() as { code?: string; reason?: string }).code, 'the code reaches the wire').toBe('space_creator')
+      expect((wire.json() as { reason?: string }).reason, 'while a bare `reason` does not — the original bug').toBeUndefined()
+      await probe.close()
+
+      // The REFUSED case, exercised through the same resolver the route calls. This is the pin that
+      // a hardcoded `true` would fail — the dev bearer only ever resolves to this tenant's admin.
+      expect((await resolveCapabilities(fgaClient, { subject: MEMBER, tenantId: tenant.id })).canCreateSpaces,
+        'a member without the capability is told so').toBe(false)
+
+      // dev-user is this tenant's admin → still true via the model's `or admin` arm, in the same
+      // wildcard-absent window. Both branches observed, so the endpoint cannot be constant.
+      const caps = await app.inject({ method: 'GET', url: '/me/capabilities', headers: H })
+      expect(caps.statusCode).toBe(200)
+      expect((caps.json() as { canCreateSpaces: boolean }).canCreateSpaces).toBe(true)
+    } finally {
+      await writeTuples(fgaClient, [wildcard()]).catch(() => {})
+    }
+    expect(await canCreate(MEMBER), 'restored with the wildcard').toBe(true)
   })
 })

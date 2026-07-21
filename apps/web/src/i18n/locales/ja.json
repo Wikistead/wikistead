@@ -48,7 +48,8 @@
     "spaceDeleted": "スペースを削除しました",
     "pageDeleted": "ページを削除しました",
     "pageTrashed": "ゴミ箱に移動しました",
-    "pageDeletedForever": "ページを完全に削除しました"
+    "pageDeletedForever": "ページを完全に削除しました",
+    "spaceCreateDenied": "スペースを作成する権限がありません。"
   },
   "theme": {
     "label": "テーマ",

@@ -10,6 +10,7 @@ import { SpaceIcon } from "../ui/SpaceIcon"; // #284 show a page pin's owning sp
 import {
   useSpaces,
   useCreateSpace,
+  useMyCapabilities,
   useRenameSpace,
   useCreatePage,
   useRenamePage,
@@ -106,6 +107,7 @@ export function Sidebar() {
   const canManage = currentSpace?.capability === "manage";
 
   const createSpace = useCreateSpace();
+  const myCaps = useMyCapabilities(); // #445 hide the create-space entry point when refused
   const renameSpace = useRenameSpace();
   const createPage = useCreatePage();
   const renamePage = useRenamePage();
@@ -254,6 +256,7 @@ export function Sidebar() {
           onSelect={(id) => { setActiveSpaceId(id); navigate(`/spaces/${id}`); }} // #364 §6a: switching lands on the space home
           onRename={() => { if (currentSpace) setRenamingSpace({ id: currentSpace.id, name: currentSpace.name }); }}
           onNewSpace={() => setCreatingSpace(true)}
+          canCreateSpace={myCaps.data?.canCreateSpaces ?? true}
           onExportSpace={exportSpace}
           exportingSpace={exportingSpace}
           onImportSpace={importSpace}
@@ -407,8 +410,21 @@ export function Sidebar() {
         title={t("sidebar.newSpace")}
         label={t("sidebar.spaceName")}
         submitLabel={t("sidebar.createSpace")}
+        submitting={createSpace.isPending}
         onClose={() => setCreatingSpace(false)}
-        onSubmit={(name) => { createSpace.mutate(name, { onSuccess: (s) => s && setActiveSpaceId(s.id) }); setCreatingSpace(false); }}
+        // #445 a refused creation used to close the dialog and say nothing, so a member without
+        // the tenant capability saw "nothing happened". Close on success only — a failure keeps the
+        // typed name — and name the reason when the server gives one (403 space_creator).
+        onSubmit={(name) => createSpace.mutate(name, {
+          onSuccess: (s) => { if (s) setActiveSpaceId(s.id); setCreatingSpace(false); },
+          onError: (e) => {
+            const err = e as { status?: number; code?: string };
+            notify.error(err?.status === 403 && err.code === "space_creator"
+              ? t("toast.spaceCreateDenied")
+              : t("toast.actionFailed"));
+            void myCaps.refetch(); // the admin may have just turned it off — re-sync the affordance
+          },
+        })}
       />
       <ShareDialog pageId={sharing} onClose={() => setSharing(null)} />
       <TemplatePickerDialog open={pickingTemplate} spaceId={current} onClose={() => setPickingTemplate(false)} onPick={newPageFromTemplate} />

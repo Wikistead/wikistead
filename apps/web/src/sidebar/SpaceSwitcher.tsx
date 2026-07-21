@@ -14,7 +14,7 @@ import { visibleSpaces, recordRecentSpace, hiddenSpaceCount, allSpacesSorted } f
 // cmdk gives ↑↓/Enter.
 
 export function SpaceSwitcher({
-  spaces, currentId, currentSpace, canManage, onSelect, onRename, onNewSpace, onExportSpace, exportingSpace = false,
+  spaces, currentId, currentSpace, canManage, onSelect, onRename, onNewSpace, canCreateSpace = true, onExportSpace, exportingSpace = false,
   onImportSpace, importingSpace = false,
   pinnedSpaceIds = [], onTogglePin, onMovePin,
 }: {
@@ -25,6 +25,10 @@ export function SpaceSwitcher({
   onSelect: (id: string) => void;
   onRename: () => void;
   onNewSpace: () => void;
+  // #445 hide the entry point when the tenant role says the member may not create spaces.
+  // Convenience only — the server refuses regardless, and a stale flag still surfaces the 403's
+  // reason as a toast (two-layer rule: UI is convenience, the server is the fortress).
+  canCreateSpace?: boolean;
   // #284: the member's pinned space ids (server pin order, view-confirmed) + the ★ toggle.
   // Pinned spaces render first and are exempt from the bounded-list folding.
   pinnedSpaceIds?: string[];
@@ -168,9 +172,11 @@ export function SpaceSwitcher({
                     {importingSpace ? <Loader2 size={13} className="animate-spin" /> : <FolderUp size={13} />} {t("import.spaceItem")}
                   </CommandItem>
                 )}
-                <CommandItem value="__new" onSelect={() => { onNewSpace(); setOpen(false); }} data-testid="space-new">
-                  <Plus size={13} /> {t("sidebar.newSpace")}
-                </CommandItem>
+                {canCreateSpace && (
+                  <CommandItem value="__new" onSelect={() => { onNewSpace(); setOpen(false); }} data-testid="space-new">
+                    <Plus size={13} /> {t("sidebar.newSpace")}
+                  </CommandItem>
+                )}
               </CommandGroup>
             </CommandList>
           </Command>
