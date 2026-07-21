@@ -105,6 +105,36 @@ describe('task-checkbox toggle (no-revision, ADR-019)', () => {
     expect(ev).toMatchObject({ actor: 'user:dev-user', checkbox_index: 0, checked: true })
   })
 
+  // #481: the fold takes every pending flip, so a fast clicker publishes N changes through one
+  // call. The ledger used to record only the index that arrived with the request and lose the rest,
+  // which is the one thing an audit row exists not to do.
+  it('records ONE audit row per folded flip, not one per request (#481)', async () => {
+    // its own page: the fold refuses a draft whose task skeleton differs from published, so this needs
+    // a three-checkbox baseline — and the other cases here share one page and expect the two-checkbox
+    // one they were written against
+    const burst = await createPage(db, fgaClient, app.searchDriver, { tenantId: TENANT, spaceId, userId: 'dev-user', title: 'Task Burst Audit' })
+    try {
+      await setDraft(burst.id, `# Tasks\n\n- [ ] alpha\n- [ ] beta\n- [ ] gamma\n`)
+      await publishPage(db, fgaClient, app.searchDriver, app.storageDriver, { pageId: burst.id, subject: 'user:dev-user', createdBy: 'user:dev-user' })
+
+      // three flips land in the draft before the request that folds them — the burst shape
+      await setDraft(burst.id, `# Tasks\n\n- [x] alpha\n- [x] beta\n- [x] gamma\n`)
+      await toggleTask(db, fgaClient, app.searchDriver, { pageId: burst.id, subject: 'user:dev-user', createdBy: 'user:dev-user', index: 2 })
+
+      const rows = await admin<{ checkbox_index: number; checked: boolean }[]>`
+        SELECT checkbox_index, checked FROM checkbox_events WHERE page_id = ${burst.id} ORDER BY checkbox_index ASC`
+      expect(rows.length, 'three folded flips leave three rows, not the one that carried the request').toBe(3)
+      expect(rows.map((r) => r.checkbox_index), 'every folded index is named').toEqual([0, 1, 2])
+      expect(rows.every((r) => r.checked), 'each row carries the state it was folded to').toBe(true)
+    } finally {
+      await app.searchDriver.deleteDoc(burst.id).catch(() => {})
+      await admin`DELETE FROM checkbox_events WHERE page_id = ${burst.id}`.catch(() => {})
+      await admin`DELETE FROM revisions WHERE page_id = ${burst.id}`.catch(() => {})
+      await admin`DELETE FROM search_outbox WHERE page_id = ${burst.id}`.catch(() => {})
+      await admin`DELETE FROM pages WHERE id = ${burst.id}`.catch(() => {})
+    }
+  })
+
   // #97 (review fix): the audit `actor` is the human-readable principal (createdBy =
   // `guest:`/`user:`), matching the revision attribution label — NOT the FGA `subject`
   // (`share_link:`). principalForPage ties subject↔createdBy; here we pass them split to prove
