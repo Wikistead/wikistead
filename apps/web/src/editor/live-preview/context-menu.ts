@@ -5,6 +5,7 @@ import i18n from "../../i18n";
 import { INLINE_FORMATS } from "./commands";
 import { linkifyPaste, linkCopyRange } from "./paste-linkify";
 import { diagramFenceAt, setDiagramAlign, imageAlignAt, setImageAlign, tableDirectiveAt, setTableAlign } from "./decorations"; // #255: right-click diagram/image alignment; #393: table block alignment
+import { tableBlockAt } from "../macros/fence"; // #393pipe tables get the same align entries
 import type { FenceAlign } from "@wikistead/macro-render";
 
 // M0-4 (ADR-018): the right-click context menu — the superset entry for mouse users.
@@ -272,9 +273,11 @@ function menuTooltip(v: MenuState): Tooltip {
           item(`align-${a}`, i18n.t(`contextMenu.align${a[0]!.toUpperCase()}${a.slice(1)}`), () => { setDiagramAlign(view, v.diagramFrom!, a); close(view); });
         }
       }
-      // #393 / ADR-151: a `:::table` block at the click → the SAME alignment entries (writes/drops the
-      // directive's {align=…} attribute; center = attribute-less). Fixed enum → setTableAlign (XSS: the
-      // value is never free text).
+      // #393 / ADR-151 (+): a table at the click → the SAME alignment entries (writes/drops the
+      // directive's {align=…} attribute; LEFT is the default and attribute-less). Offered for GFM pipe
+      // tables too — they are left by definition, and picking centre/right promotes them to
+      // `:::table{align=…}`, which is the only place the attribute can live. Fixed enum →
+      // setTableAlign (XSS: the value is never free text).
       if (v.tableFrom != null) {
         sep();
         for (const a of ["left", "center", "right"] as FenceAlign[]) {
@@ -337,7 +340,14 @@ const menuEvents = Prec.highest(
       if (wrapEl) { try { wrapPos = view.posAtDOM(wrapEl); } catch { wrapPos = null; } }
       const diagramFrom = diagramFenceAt(view.state, pos) ?? (wrapPos != null ? diagramFenceAt(view.state, wrapPos) : null) ?? undefined;
       const imageFrom = imageAlignAt(view.state, pos) ?? (wrapPos != null ? imageAlignAt(view.state, wrapPos) : null) ?? undefined; // #255: standalone image alignment
-      const tableFrom = tableDirectiveAt(view.state, pos) ?? (wrapPos != null ? tableDirectiveAt(view.state, wrapPos) : null) ?? undefined; // #393: :::table block alignment
+      // #393 (+): resolve a `:::table` first, then fall back to a GFM pipe table at the click —
+      // both offer alignment (the pipe path promotes on pick). The widget-position fallback is the
+      // same tall-block-widget guard the diagram path documents above.
+      const tableFrom = tableDirectiveAt(view.state, pos)
+        ?? (wrapPos != null ? tableDirectiveAt(view.state, wrapPos) : null)
+        ?? tableBlockAt(view.state, pos)?.from
+        ?? (wrapPos != null ? tableBlockAt(view.state, wrapPos)?.from : null)
+        ?? undefined;
       // #325 slice 2b: on a plain (no-selection, no-link) right-click, offer "Copy block reference" for the block under the cursor.
       const blockRef = kind === "plain" ? (blockRefTarget(view.state, pos, view.state.facet(selfPageIdFacet)) ?? undefined) : undefined;
       view.dispatch({ effects: openMenu.of({ pos, kind, link, diagramFrom, imageFrom, tableFrom, blockRef }) });

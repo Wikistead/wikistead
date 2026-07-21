@@ -332,9 +332,13 @@ export function tableAlignOf(source: string): TableAlign {
   const firstLine = source.split("\n", 1)[0] ?? "";
   const m = /^:{3,}[ \t]*table[ \t]*(?:\[[^\]]*\])?[ \t]*\{([^}]*)\}/.exec(firstLine.trimStart());
   const a = m ? /(?:^|\s)align=("?)(left|right|center)\1(?:\s|$)/.exec(m[1]!)?.[2] : undefined;
-  return a === "left" || a === "right" ? a : "center";
+  // #393LEFT is the table default. A table's visual default is left, so borrowing the
+  // diagram convention (unattributed = centre) made `align=center` mean "write nothing", i.e. left —
+  // centring a table was impossible. Diagrams keep their own default; only tables changed.
+  return a === "left" || a === "right" || a === "center" ? a : "left";
 }
-// The opening fence for a given align — center omits the attribute (round-trip stable).
+// The opening fence for a given align — LEFT omits the attribute (it is the default, so an untagged
+// table round-trips byte-identically); center and right are explicit.
 export function tableFence(align: TableAlign): string {
-  return align === "center" ? ":::table" : `:::table{align=${align}}`;
+  return align === "left" ? ":::table" : `:::table{align=${align}}`;
 }

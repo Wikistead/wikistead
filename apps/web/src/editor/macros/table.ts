@@ -18,9 +18,10 @@ export const tableTier: MacroTier = {
   levels: [PIPE, HTML],
   canRepresentAt(source, level) {
     if (level.id === HTML.id) return true; // HTML can express any grid
-    // #393: pipe (pure GFM) cannot carry the align attribute — a left/right table STAYS :::table (the
-    // tier never silently demotes the alignment away); center is the default there → no loss.
-    return representableAsPipe(parseTableSource(source)) && tableAlignOf(String(source)) === "center";
+    // #393 (+): pipe (pure GFM) cannot carry the align attribute — a centred/right table STAYS
+    // :::table (the tier never silently demotes the alignment away). LEFT is the default, so a pipe
+    // table already expresses it and nothing is lost.
+    return representableAsPipe(parseTableSource(source)) && tableAlignOf(String(source)) === "left";
   },
   toLevel(source, level) {
     const grid = parseTableSource(source);

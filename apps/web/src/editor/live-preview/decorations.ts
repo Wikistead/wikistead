@@ -13,6 +13,7 @@ import { findFenceMacro, findDirectiveMacro, editModeOf, hasEditUI, asMacroSourc
 import { autoDemote } from "../macros/tier-cap";
 export type { MacroTheme }; // #200: re-exported so the Editor can type the redrawMacros payload
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, directiveChainAt, tableBlockAt } from "../macros/fence";
+import { toHtml, toPipe, representableAsPipe, tableFence, type TableAlign } from "../macros/table-model";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen, resolveDirectiveRanges, serializeDirectiveAttrs } from "../macros/directive-parser";
 import { parseFrontmatterRange, FrontmatterWidget } from "./frontmatter";
@@ -1829,18 +1830,39 @@ export function tableDirectiveAt(state: EditorState, pos: number): number | null
   return best ? best.from : null;
 }
 
-// #393 / ADR-151: rewrite a `:::table` block's alignment by setting/dropping its `{align=…}` directive
-// attribute (CENTER is the default → the attribute is DROPPED, so an untagged block stays untagged
-// the fence-info convention). One offset-invariant replace of the OPENING fence line; other attributes
-// on the line are preserved verbatim (serializeDirectiveAttrs round-trips the parsed map).
+// #393 / ADR-151 (+): rewrite a `:::table` block's alignment by setting/dropping its `{align=…}`
+// directive attribute. LEFT is the default → the attribute is DROPPED, so an untagged block stays
+// untagged; center and right are written out. One offset-invariant replace of the OPENING fence line;
+// other attributes on the line are preserved verbatim (serializeDirectiveAttrs round-trips the map).
 export function setTableAlign(view: EditorView, pos: number, align: FenceAlign): void {
   const from = tableDirectiveAt(view.state, pos);
-  if (from == null) return;
+  // #393a GFM PIPE table has nowhere to put the attribute, so aligning one PROMOTES it to
+  // `:::table{align=…}` with an HTML body — one offset-invariant replacement of the whole block.
+  // Asking for `left` is a no-op there: a pipe table already IS the default, and promoting it would
+  // trade the plainest possible Markdown for nothing (Open formats).
+  if (from == null) {
+    if (align === "left") return;
+    const blk = tableBlockAt(view.state, pos);
+    if (!blk || blk.tier !== "pipe") return;
+    const insert = `${tableFence(align as TableAlign)}\n${toHtml(blk.grid)}\n:::`;
+    view.dispatch({ changes: { from: blk.from, to: blk.to, insert }, userEvent: "input" });
+    return;
+  }
+  // …and back: returning a promoted table to the default writes plain pipes again whenever the grid
+  // can express itself that way, so a round-trip through the align control leaves standard Markdown
+  // rather than an attribute-less :::table wrapper.
+  if (align === "left") {
+    const blk = tableBlockAt(view.state, pos);
+    if (blk && blk.tier === "html" && representableAsPipe(blk.grid)) {
+      view.dispatch({ changes: { from: blk.from, to: blk.to, insert: toPipe(blk.grid) }, userEvent: "input" });
+      return;
+    }
+  }
   const line = view.state.doc.lineAt(from);
   const open = parseDirectiveOpen(line.text);
   if (!open || open.name !== "table") return;
   const attrs: Record<string, string> = { ...(open.attrs ?? {}) };
-  if (align === "center") delete attrs.align;
+  if (align === "left") delete attrs.align;
   else attrs.align = align; // fixed enum — never a free-form value (XSS boundary: enum → class switch)
   const label = open.label ? `[${open.label}]` : "";
   const next = `${":".repeat(open.colons)}table${label}${serializeDirectiveAttrs(Object.keys(attrs).length ? attrs : undefined)}`;
@@ -2256,10 +2278,10 @@ class MacroWidget extends WidgetType {
     // #455: only a RENDERED diagram centres/aligns — the EMPTY placeholder must be a full-width
     // block like every other macro's (the centre class shrank the dashed box to content width).
     if (DIAGRAM_MACROS.has(this.name) && this.body.trim() !== "") wrap.classList.add(`cm-lp-align-${this.align}`);
-    // #393 / ADR-151: a `:::table{align=left|right}` aligns as a block. Unlike diagrams, the DEFAULT
-    // (center-labelled) state adds NO class — a bare :::table keeps today's flow layout, and the flex
-    // align class would otherwise change every existing table.
-    if (this.name === "table" && this.align !== "center") wrap.classList.add(`cm-lp-align-${this.align}`);
+    // #393 / ADR-151 (+addendum): a `:::table{align=center|right}` aligns as a block; LEFT is
+    // the default and adds no class, so an untagged table keeps plain flow layout. This used to
+    // exclude `center` instead, which silently made "centre" mean "no class" — i.e. left.
+    if (this.name === "table" && this.align !== "left") wrap.classList.add(`cm-lp-align-${this.align}`);
     // ADR-024: the caret resting ON the atom selects it (no separate key) — a ring shows
     // it's selected as a unit (dd/yy operate on it; Ctrl+Enter enters).
     // #215 comment 813/817: when a NESTED macro is selected the caret sits on THIS container (so
@@ -2747,10 +2769,11 @@ class MacroWidget extends WidgetType {
       if (seg) updateAlignSegment(seg, this.align);
       if (prev) prev.align = this.align;
     }
-    // #393 / ADR-151: table block-align changes apply in place too (sameno-rebuild rule). Unlike
-    // diagrams the default ("center") state carries NO class (a bare :::table keeps the flow layout).
+    // #393 / ADR-151 (+): table block-align changes apply in place too (sameno-rebuild
+    // rule). Unlike diagrams the default (LEFT) carries no class, so every non-default side is toggled
+    // here — listing only left/right was how a fresh centre pick left the DOM untouched.
     if (this.name === "table") {
-      for (const a of ["left", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, a === this.align);
+      for (const a of ["center", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, a === this.align);
       const seg = dom.querySelector<HTMLElement>(".cm-lp-align-seg");
       if (seg) updateAlignSegment(seg, this.align);
       if (prev) prev.align = this.align;
@@ -3495,9 +3518,12 @@ const RENDERERS: BlockRenderer[] = [
         // #174 comment 1003: layout containers in WYSIWYG draw hover ✎ on their nested editable slots (below);
         // the flag is part of eq so a display-mode switch rebuilds the widget (eq ignores the live facet).
         const wysiwygNested = (open!.name === "columns" || open!.name === "tabs") && ctx.state.facet(displayMode) === "wysiwyg";
-        // #393 / ADR-151: `:::table{align=left|right}` block alignment (fixed enum off the directive
-        // attrs; anything else — incl. absent/center — stays the "center" default and writes no class).
-        const dirAlign: FenceAlign = open!.name === "table" && (open!.attrs?.align === "left" || open!.attrs?.align === "right") ? open!.attrs!.align as FenceAlign : "center";
+        // #393 / ADR-151 (+): `:::table{align=center|right}` block alignment (fixed enum off the
+        // directive attrs). A table with no attribute — or any other value — is LEFT, its natural flow
+        // default, and writes no class. Non-table macros keep the diagram default of centre.
+        const dirAlign: FenceAlign = open!.name === "table"
+          ? (open!.attrs?.align === "center" || open!.attrs?.align === "right" ? open!.attrs!.align as FenceAlign : "left")
+          : "center";
         ctx.addAtomic(Decoration.replace({ widget: new MacroWidget({ liveRender: macro.liveRender, richEditUI: macro.richEditUI, editUI: macro.editUI }, parts.join("\n"), false, open!.name, atomSelected(ctx.state, from, to), ctx.macroTheme, from, to, bodyFrom, nestedSel, nestedEdit, dirAlign, wysiwygNested, slotEdit), block: true }), from, to);
         return macro.revealOnCursor ? false : undefined;
       }
