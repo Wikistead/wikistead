@@ -546,6 +546,13 @@ paths:
       summary: The tenant activity feed (every event view-authorized for the caller)
       parameters: [ { name: unpatrolled, in: query, schema: { type: boolean } } ]
       responses: { "200": { description: Events }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
+  /spaces/{spaceId}/patrol:
+    get:
+      operationId: listSpacePatrol
+      tags: [discovery]
+      summary: The space moderation queue — abuse refusals and anonymous/share-link activity (space moderate)
+      parameters: [ { name: spaceId, in: path, required: true, schema: { type: string } }, { name: unpatrolled, in: query, schema: { type: boolean } }, { name: before, in: query, schema: { type: string } } ]
+      responses: { "200": { description: Events }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /feed/{eventId}/patrol:
     post: { operationId: createFeedPatrol, tags: [discovery], summary: Mark an event patrolled (manage/moderate), parameters: [ { name: eventId, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Marked }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
     delete: { operationId: deleteFeedPatrol, tags: [discovery], summary: Unmark, parameters: [ { name: eventId, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Unmarked }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }

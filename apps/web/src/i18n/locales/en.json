@@ -335,7 +335,8 @@
     "pageCreationManagers": "Space managers only",
     "deleteModeTitle": "Deletion pathway",
     "deleteModeBody": "Choose how pages in this space are deleted. Deleting is always manager-only; this setting only chooses reversibility.",
-    "deleteModeInherit": "Inherit tenant default ({{mode}})"
+    "deleteModeInherit": "Inherit tenant default ({{mode}})",
+    "moderation": "Moderation"
   },
   "spaceTrash": {
     "title": "Trash",
@@ -904,7 +905,11 @@
     "published": "{{who}} published {{title}}",
     "restored": "{{who}} restored {{title}}",
     "changed": "{{who}} changed {{title}}",
-    "markAllRead": "Mark all read"
+    "markAllRead": "Mark all read",
+    "abuseMassDelete": "{{who}} tried to publish a large deletion to “{{title}}” and was refused",
+    "abuseBanned": "{{who}} tried to publish blocked wording to “{{title}}” and was refused",
+    "abuseRatePublish": "{{who}} was rate-limited while publishing “{{title}}”",
+    "abuseRateCreate": "{{who}} was rate-limited while creating pages"
   },
   "recentChanges": {
     "title": "Recent Changes",
@@ -1093,5 +1098,13 @@
     "body": "Keys act with your own permissions — a key can never do more than you can. The plaintext is shown once, when you create it.",
     "restricted": "This tenant lets only administrators create API keys. Any key you already hold still works, and you can revoke it here.",
     "empty": "You have no API keys."
+  },
+  "moderation": {
+    "title": "Moderation queue",
+    "body": "Refused publishes, rate-capped guests, and anonymous or share-link activity in this space. Mark an item once you have looked at it.",
+    "denied": "You do not moderate this space.",
+    "unreviewedOnly": "Needs review",
+    "empty": "Nothing has been flagged in this space.",
+    "emptyUnreviewed": "Nothing is waiting for review."
   }
 }

@@ -169,13 +169,18 @@ export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: strin
     rows.map(async (r) => {
       const ref = { type: 'space', id: r.id } as const
       const user = `user:${userId}`
-      const [view, edit, manage] = await Promise.all([
+      // #326: `moderate` is reported ALONGSIDE the capability rather than folded into it. A space
+      // moderator is not a manager (model.fga: `moderator … or manager`), and collapsing the two would
+      // hand every moderator the rename/delete affordances. The UI needs to know both to offer the
+      // moderation queue without offering space settings.
+      const [view, edit, manage, moderate] = await Promise.all([
         check(fga, user, 'view', ref),
         check(fga, user, 'edit', ref),
         check(fga, user, 'manage', ref),
+        check(fga, user, 'moderate', ref),
       ])
       const capability: Space['capability'] | null = manage ? 'manage' : edit ? 'edit' : view ? 'view' : null
-      return [r.id, capability] as const
+      return [r.id, { capability, canModerate: moderate }] as const
     }),
   )
   const capById = new Map(caps)
@@ -186,13 +191,13 @@ export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: strin
   // denied pointer is OMITTED (null), byte-identical to "no home set".
   const homeVisible = new Map(await Promise.all(
     rows.map(async (r) => {
-      if (!r.home_page_id || capById.get(r.id) == null) return [r.id, false] as const
+      if (!r.home_page_id || capById.get(r.id)?.capability == null) return [r.id, false] as const
       const ok = await check(fga, `user:${userId}`, 'view', { type: 'page', id: r.home_page_id }).catch(() => false)
       return [r.id, ok] as const
     }),
   ))
-  return rows.filter((r) => capById.get(r.id) != null).map((r) => ({
-    ...toSpace(r), capability: capById.get(r.id)!, accentKey: r.accent_key,
+  return rows.filter((r) => capById.get(r.id)?.capability != null).map((r) => ({
+    ...toSpace(r), capability: capById.get(r.id)!.capability!, canModerate: capById.get(r.id)!.canModerate, accentKey: r.accent_key,
     iconImageUrl: r.icon_image_key ? `/spaces/${r.id}/icon-image` : null,
     homePageId: homeVisible.get(r.id) ? r.home_page_id : null,
     deleteMode: (r.delete_mode ?? r.tenant_delete_mode ?? 'trash_only') as 'trash_only' | 'both' | 'direct_only',

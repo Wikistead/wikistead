@@ -15,6 +15,17 @@ import { pool, registry, acquireTenantDb } from '../db/index.js' // #411: cross-
 import { flushDraft } from '../collab-flush.js'
 import { countTodoTasks } from '../task-progress.js' // #290: :::todo aggregate for the sidebar ring
 import { evaluatePublishAbuse } from '../abuse-filter.js' // #328 / ADR-140: publish-boundary abuse filter
+import { recordAbuseFlag } from './notifications.js' // #326 / ADR-142 Addendum 2: patrol flags at the refusal boundaries
+
+// #326: a flag names its actor the same way every other feed row does — the guest's session pseudonym
+// when there is one, else the link. Using the link id alone would both break the join with that
+// guest's ordinary activity and make the throttle per-LINK, so one guest's refusal would mute the
+// flags of everyone else editing through the same link.
+function abuseActor(req: { guest?: { shareLinkId: string; anonId?: string | null } | null }, fallback: string): string {
+  const g = req.guest
+  if (!g) return fallback
+  return g.anonId ?? `guest:${g.shareLinkId}` // the convention guestCreatePublishPage uses (:349)
+}
 import { guestPublishRateAllowed, guestCreatePageRateAllowed } from '../abuse-rate.js' // #328 / #274: guest publish + create caps
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import { auditIfEntitled } from '../audit/outbox.js'
@@ -542,7 +553,9 @@ export async function publishPage(
   // subject = FGA principal for the edit check ("user:<sub>" | "share_link:<id>");
   // createdBy attributes the revision/event ("user:<sub>" | "guest:<id>"); context
   // (guests) evaluates the share_link's non_expired condition.
-  args: { pageId: string; subject: string; createdBy: string; context?: { current_time: string } },
+  // #326 / ADR-142 Addendum 2: `onAbuseReject` lets the caller record a patrol flag for a refusal.
+  // Optional and best-effort — the 422 is the contract; the flag is a bonus the route wires in.
+  args: { pageId: string; subject: string; createdBy: string; context?: { current_time: string }; onAbuseReject?: (reason: string, spaceId: string) => void },
 ): Promise<{ publishedAt: Date | null; revisionId: string | null; noop: boolean }> {
   // #420 3b: the PUBLISH verb (its edit_live superset feeder keeps every edit holder — member or
   // edit-link guest — publishing exactly as before; publish-only grants now pass too).
@@ -564,7 +577,13 @@ export async function publishPage(
   `
   if (ab && (ab.abuse_shrink_ratio != null || (ab.abuse_banned_words?.length ?? 0) > 0)) {
     const verdict = evaluatePublishAbuse(draft.published_md, md, { shrinkRatio: ab.abuse_shrink_ratio, bannedWords: ab.abuse_banned_words ?? [] })
-    if (!verdict.ok) throw Object.assign(new Error('publish rejected by the abuse filter'), { statusCode: 422, reason: verdict.reason })
+    if (!verdict.ok) {
+      // #326: a refused publish is exactly what patrol wants to see — repeated refusals are the vandal
+      // signature the ruling asked to surface. Recorded before the throw, from the route's sink, so the
+      // 422 the caller receives is unchanged whether or not the flag lands.
+      args.onAbuseReject?.(verdict.reason, draft.space_id)
+      throw Object.assign(new Error('publish rejected by the abuse filter'), { statusCode: 422, reason: verdict.reason })
+    }
   }
 
   // #353→#370 / ADR-145: bake the anonymous static snapshot for this page's `:::tagged`/`:::children` blocks. Resolved
@@ -2867,6 +2886,16 @@ export async function pagesPlugin(app: FastifyInstance) {
         // #274 / ADR-135 §3: the guest created-page cap (two-bucket link+session window; static reason
         // code only, same no-oracle rule as publish). BEFORE any work so a flooding guest costs ~nothing.
         if (!(await guestCreatePageRateAllowed(app.valkey, req.db, { tenantId: req.tenant.id, shareLinkId: req.guest.shareLinkId, anonId: req.guest.anonId }))) {
+          // #326: no page exists yet, so the flag carries the SPACE only — the display gate already
+          // handles space-scoped events through space#view.
+          await recordAbuseFlag(app.valkey, req.db, {
+            tenantId: req.tenant.id, eventType: 'abuse.rate_capped_create',
+            pageId: null, spaceId: req.params.spaceId, actor: abuseActor(req, `guest:${req.guest.shareLinkId}`),
+            linkId: req.guest.shareLinkId,
+            // Same reason as the publish cap: the space's edit gate lives further down, in
+            // guestCreatePublishPage, so it is checked here before this space's queue gains a row.
+            authorize: () => check(app.fga, `share_link:${req.guest!.shareLinkId}`, 'edit', { type: 'space', id: req.params.spaceId }, { current_time: new Date().toISOString() }),
+          })
           return reply.code(429).send({ error: 'rate limited', reason: 'create_rate' })
         }
         const page = await guestCreatePublishPage(req.db, app.fga, app.searchDriver, app.storageDriver, {
@@ -3011,6 +3040,18 @@ export async function pagesPlugin(app: FastifyInstance) {
     // beyond the caps read; a STATIC reason code only (no content/limit interpolation — same no-oracle
     // rule as the 422 below, and the caller holds an edit-capable token, so nothing new is revealed).
     if (req.guest && !(await guestPublishRateAllowed(app.valkey, req.db, { tenantId: req.tenant.id, shareLinkId: req.guest.shareLinkId, anonId: req.guest.anonId }))) {
+      // #326: flag the refusal for patrol. The throttle is consulted FIRST so a flooding guest costs a
+      // single Valkey round-trip — the page lookup only happens for the one refusal that gets recorded,
+      // keeping the "a flood costs ~nothing" property this cap was written for.
+      await recordAbuseFlag(app.valkey, req.db, {
+        tenantId: req.tenant.id, eventType: 'abuse.rate_capped_publish',
+        pageId: req.params.pageId, actor: abuseActor(req, `guest:${req.guest.shareLinkId}`),
+        linkId: req.guest.shareLinkId,
+        // The cap fires BEFORE the edit gate, so prove the token actually reaches this page before
+        // writing a row about it — otherwise a token for one page plants flags on another.
+        authorize: () => check(app.fga, `share_link:${req.guest!.shareLinkId}`, 'edit', { type: 'page', id: req.params.pageId }, { current_time: new Date().toISOString() }),
+        spaceId: async () => (await req.db.sql<[{ space_id: string }?]>`SELECT space_id FROM pages WHERE id = ${req.params.pageId}`)[0]?.space_id ?? null,
+      })
       return reply.code(429).send({ error: 'rate limited', reason: 'publish_rate' })
     }
     // Flush the live draft to pages.ydoc BEFORE snapshotting, so a publish issued
@@ -3018,9 +3059,28 @@ export async function pagesPlugin(app: FastifyInstance) {
     // does not leave them behind as "unpublished changes". Best-effort: never blocks
     // longer than the timeout, and is a no-op when collab isn't running (e.g. tests).
     await flushDraft(app.valkey, docName(req.tenant.id, req.params.pageId))
+    // #326: the refusal below is patrol supply. The flag is recorded HERE, awaited, before the reply
+    // a fire-and-forget write would run after onResponse released the tenant connection, and the row
+    // would be refused by RLS with nothing to show for it (the reviewer proved exactly that).
+    let rejected: { reason: string; spaceId: string } | null = null
     try {
-      return await publishPage(req.db, app.fga, app.searchDriver, app.storageDriver, { pageId: req.params.pageId, ...p })
+      return await publishPage(req.db, app.fga, app.searchDriver, app.storageDriver, {
+        pageId: req.params.pageId, ...p,
+        onAbuseReject: (reason, spaceId) => { rejected = { reason, spaceId } },
+      })
     } catch (e) {
+      if (rejected) {
+        const r: { reason: string; spaceId: string } = rejected
+        await recordAbuseFlag(app.valkey, req.db, {
+          tenantId: req.tenant.id,
+          eventType: r.reason === 'banned_content' ? 'abuse.publish_rejected_banned' : 'abuse.publish_rejected_mass_delete',
+          pageId: req.params.pageId, spaceId: r.spaceId, actor: abuseActor(req, p.createdBy),
+          linkId: req.guest?.shareLinkId ?? null,
+          // publishPage already ran the edit gate to get this far — the rejection is a CONTENT verdict,
+          // not a permission one — so the right to write about this page is established.
+          authorize: async () => true,
+        })
+      }
       // #328 / ADR-140: surface the abuse-filter rejection as a 422 with the STATIC reason code so the client
       // can show a specific message (mass_delete / banned_content) — never the offending content (no oracle).
       const reason = (e as { reason?: string }).reason

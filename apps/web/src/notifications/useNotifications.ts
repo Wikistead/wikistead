@@ -59,6 +59,23 @@ export function useFeed(opts: { spaceId?: string; unpatrolled?: boolean; enabled
   });
 }
 
+// #326 / ADR-142 Addendum 2: the space PATROL queue — the same feed shape, narrowed server-side to
+// the moderation supply (abuse refusals + anonymous/share-link activity) and gated on space#moderate.
+// A 403 here means "you do not moderate this space", which the tab renders as a denial rather than an
+// empty queue: an empty list and a refused list must not look the same.
+export function usePatrolQueue(spaceId: string | undefined, opts: { unpatrolled?: boolean } = {}) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["patrol", spaceId ?? null, !!opts.unpatrolled],
+    queryFn: () => {
+      const qs = opts.unpatrolled ? "?unpatrolled=true" : "";
+      return apiFetch<FeedItem[]>(`/spaces/${encodeURIComponent(spaceId!)}/patrol${qs}`, token).then((r) => r ?? []);
+    },
+    enabled: !!spaceId,
+    retry: false,
+  });
+}
+
 // #326 / ADR-142 (C-1 patrol): mark / unmark a feed event as reviewed. Member-only; the server enforces the
 // per-event view-confirm → uniform 404 → capability gate order (a moderate/manage-gated write). Invalidates
 // the feed so the row's patrol state + the unpatrolled filter refresh.
@@ -68,7 +85,10 @@ export function useTogglePatrol() {
   return useMutation({
     mutationFn: ({ eventId, patrolled }: { eventId: string; patrolled: boolean }) =>
       apiFetch(`/feed/${encodeURIComponent(eventId)}/patrol`, token, { method: patrolled ? "DELETE" : "POST" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["feed"] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["feed"] });
+      void qc.invalidateQueries({ queryKey: ["patrol"] }); // #326: the space queue shows the same rows
+    },
   });
 }
 

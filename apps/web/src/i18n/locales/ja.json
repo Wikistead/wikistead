@@ -335,7 +335,8 @@
     "pageCreationManagers": "スペース管理者のみ",
     "deleteModeTitle": "削除経路",
     "deleteModeBody": "このスペースのページの削除方法を選びます。削除できるのは常に管理者のみで、この設定は可逆性（ゴミ箱経由か否か）だけを選びます。",
-    "deleteModeInherit": "テナント既定を継承（{{mode}}）"
+    "deleteModeInherit": "テナント既定を継承（{{mode}}）",
+    "moderation": "モデレーション"
   },
   "spaceTrash": {
     "title": "ゴミ箱",
@@ -903,7 +904,11 @@
     "published": "{{who}} が {{title}} を公開しました",
     "restored": "{{who}} が {{title}} を復元しました",
     "changed": "{{who}} が {{title}} を変更しました",
-    "markAllRead": "すべて既読"
+    "markAllRead": "すべて既読",
+    "abuseMassDelete": "{{who}} が「{{title}}」への大量削除を公開しようとして拒否されました",
+    "abuseBanned": "{{who}} が「{{title}}」に禁止語を公開しようとして拒否されました",
+    "abuseRatePublish": "{{who}} が「{{title}}」の公開でレート制限にかかりました",
+    "abuseRateCreate": "{{who}} がページ作成でレート制限にかかりました"
   },
   "recentChanges": {
     "title": "最近の変更",
@@ -1092,5 +1097,13 @@
     "body": "キーはあなた自身の権限で動きます（あなたにできないことはキーにもできません）。平文は作成時に一度だけ表示されます。",
     "restricted": "このテナントでは API キーを作成できるのは管理者だけです。すでにお持ちのキーはそのまま使え、ここで失効できます。",
     "empty": "API キーはまだありません。"
+  },
+  "moderation": {
+    "title": "モデレーションキュー",
+    "body": "このスペースで拒否された公開・レート制限にかかったゲスト・匿名／共有リンクからの操作。確認したら印を付けてください。",
+    "denied": "このスペースのモデレーション権限がありません。",
+    "unreviewedOnly": "未確認のみ",
+    "empty": "このスペースにフラグはありません。",
+    "emptyUnreviewed": "確認待ちはありません。"
   }
 }

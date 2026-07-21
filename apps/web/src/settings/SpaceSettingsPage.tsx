@@ -18,6 +18,7 @@ import { SettingsShell, SettingsDenied, type SettingsTab } from "./SettingsShell
 import { SpaceMembersTab } from "./SpaceMembersTab";
 import { SpacePagesTab } from "./SpacePagesTab";
 import { SpaceTrashTab } from "./SpaceTrashTab";
+import { SpaceModerationTab } from "./SpaceModerationTab";
 
 interface SpaceCtx { spaceId: string; name: string; accentKey: string | null; iconImageUrl: string | null }
 
@@ -31,6 +32,8 @@ function useSpaceTabs(spaceId: string): SettingsTab[] {
     { key: "members", label: t("spaceSettings.members"), to: `/spaces/${spaceId}/settings/members` },
     { key: "pages", label: t("spaceSettings.pages"), to: `/spaces/${spaceId}/settings/pages` },
     { key: "trash", label: t("spaceSettings.trash"), to: `/spaces/${spaceId}/settings/trash` },
+    // #326: the patrol queue lives with the space it moderates (ruling ②), not in a cross-space page.
+    { key: "moderation", label: t("spaceSettings.moderation"), to: `/spaces/${spaceId}/settings/moderation` },
   ];
 }
 
@@ -40,7 +43,7 @@ function SpaceSettingsLayout() {
   const { status, logout } = useSession();
   const { setActiveSpaceId } = useActiveSpace();
   const spacesQ = useSpaces();
-  const tabs = useSpaceTabs(spaceId ?? "");
+  const allTabs = useSpaceTabs(spaceId ?? "");
 
   // Opening a space's settings makes it the active space, so the accent cascade
   // (BrandingApplier) previews this space's accent live as it's edited on the Theme tab.
@@ -56,12 +59,16 @@ function SpaceSettingsLayout() {
   // The server stays the fortress: rename/delete re-check space#manage regardless.
   const space = (spacesQ.data ?? []).find((s) => s.id === spaceId);
   if (!space) return <AppShell onLogout={logout}><SettingsDenied kind="notFound" /></AppShell>;
-  if (space.capability !== "manage") return <AppShell onLogout={logout}><SettingsDenied kind="forbidden" /></AppShell>;
+  // #326: a space MODERATOR is not a manager, but the moderation queue is theirs. They may enter
+  // settings to reach that one tab; every other tab stays manager-only, and each of those surfaces
+  // re-checks server-side anyway.
+  const canModerate = space.canModerate === true;
+  if (space.capability !== "manage" && !canModerate) return <AppShell onLogout={logout}><SettingsDenied kind="forbidden" /></AppShell>;
 
   const ctx: SpaceCtx = { spaceId: space.id, name: space.name, accentKey: space.accentKey ?? null, iconImageUrl: space.iconImageUrl ?? null };
   return (
     <AppShell onLogout={logout}>
-      <SettingsShell title={t("spaceSettings.title", { name: space.name })} tabs={tabs}>
+      <SettingsShell title={t("spaceSettings.title", { name: space.name })} tabs={space.capability === "manage" ? allTabs : allTabs.filter((tb) => tb.key === "moderation")}>
         <Outlet context={ctx} />
       </SettingsShell>
     </AppShell>
@@ -278,6 +285,7 @@ export function SpaceSettingsRoutes() {
       <Route path="members" element={<SpaceMembersTab />} />
       <Route path="pages" element={<SpacePagesTab />} />
       <Route path="trash" element={<SpaceTrashTab />} />
+      <Route path="moderation" element={<SpaceModerationTab />} />
     </Route>
   );
 }
