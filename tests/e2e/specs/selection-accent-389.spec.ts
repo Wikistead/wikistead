@@ -54,7 +54,7 @@ test("#389: selected radio dot uses the BRAND accent (dark)", async ({ browser }
   await checkSurface(page);
 });
 
-// #389 the dot centers in the circle by FLEX (never %-position + translate, whose top/left
+// #389 / the dot centers in the circle by FLEX (never %-position + translate, whose top/left
 // subpixel rounding drifts apart at fractional zoom). Pins the rect-center match at 1x AND a
 // fractional deviceScaleFactor, and that the checked resting dot carries no transform (a persistent
 // transform exempts it from device-pixel snapping — the residual paint-level off-center).
@@ -65,7 +65,7 @@ for (const dsf of [1, 1.25]) {
     const choices = page.locator("[data-slot=radio-group-choice]");
     await choices.first().waitFor({ timeout: 10000 });
     const offs = await page.evaluate(() => {
-      const out: { dx: number; dy: number; w: number; h: number; scale: string; state: string | null }[] = [];
+      const out: { dx: number; dy: number; w: number; h: number; scale: string; transform: string; opacity: string; state: string | null }[] = [];
       for (const choice of document.querySelectorAll("[data-slot=radio-group-choice]")) {
         const circle = choice.querySelector("span[class*=rounded-full][class*=border]");
         const dot = circle?.querySelector("span");
@@ -76,6 +76,8 @@ for (const dsf of [1, 1.25]) {
           dy: Math.abs((d.top + d.bottom) / 2 - (c.top + c.bottom) / 2),
           w: d.width, h: d.height,
           scale: getComputedStyle(dot).scale,
+          transform: getComputedStyle(dot).transform,
+          opacity: getComputedStyle(dot).opacity,
           state: choice.getAttribute("data-state"),
         });
       }
@@ -88,10 +90,16 @@ for (const dsf of [1, 1.25]) {
       if (o.state === "checked") {
         // #389 the "transform === none" pin was a FALSE GREEN — a scale:0 dot also has
         // transform none in Tailwind v4 (separate properties), so the invisible-dot regression passed.
-        // Pin what the user actually sees: the checked dot has a REAL rendered size and a non-zero scale.
+        // Pin what the user actually sees: the checked dot has a REAL rendered size…
         expect(o.w, "checked dot is visibly rendered (width > 0)").toBeGreaterThan(4);
         expect(o.h, "checked dot is visibly rendered (height > 0)").toBeGreaterThan(4);
-        expect(o.scale === "none" || parseFloat(o.scale) > 0, `checked dot scale is identity/positive (got ${o.scale})`).toBe(true);
+        // …and #389 it rests with NO transform of any kind. A resting transform exempts an
+        // element from device-pixel snapping, so the dot must appear by opacity, never by scale.
+        // Both properties are asserted because Tailwind v4 writes them separately (`scale` vs
+        // `transform`) — checking one alone is how the/ pins passed while broken.
+        expect(o.scale, `checked dot rests without a scale (got ${o.scale})`).toBe("none");
+        expect(o.transform, `checked dot rests without a transform (got ${o.transform})`).toBe("none");
+        expect(parseFloat(o.opacity), "and it is fully opaque when checked").toBe(1);
       }
     }
   });
