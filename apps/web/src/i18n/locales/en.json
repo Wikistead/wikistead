@@ -901,9 +901,7 @@
   },
   "watch": {
     "watch": "Watch this page",
-    "unwatch": "Unwatch this page",
-    "subtree": "Watch page + subpages",
-    "space": "Watch this space"
+    "unwatch": "Unwatch this page"
   },
   "onboarding": {
     "title": "Set up your editor",

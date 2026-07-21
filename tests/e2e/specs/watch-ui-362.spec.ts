@@ -2,20 +2,20 @@ import { test, expect } from "@playwright/test";
 import { openScratch, sleep } from "../helpers";
 
 // #362 / ADR-126 addendum S2: the watch-management UI. The bell is the watch entry point (list surface
-// + mark-all-read); the ⋯ menu offers the three watch SCOPES; /watches lists with server-resolved
-// titles, mute and unwatch; the account settings gain a notifications tab. Server authz (view-gated
-// writes, double-gated reads) is pinned in notifications-362.test.ts — this exercises the real UI.
+// + mark-all-read); /watches lists with server-resolved titles, mute and unwatch; the account settings
+// gain a notifications tab. Server authz (view-gated writes, double-gated reads) is pinned in
+// notifications-362.test.ts — this exercises the real UI.
+// #467 (owner ruling, ADR-126 addendum): the ⋯ menu now carries ONE watch item, not three scopes
+// the scope-item pins below moved to the new watch-single-467 spec.
 
-test("#362: watch scopes in the ⋯ menu; the bell reaches the watch list; mute + unwatch work", async ({ browser }) => {
+test("#362: the page watch in the ⋯ menu; the bell reaches the watch list; mute + unwatch work", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   const title = `watch-ui-${Date.now()}`;
   await openScratch(page, title); // creates + navigates to a real page (view mode)
 
-  // ── ⋯ menu: three scope items (page / subtree / space) ──────────────────────
+  // ── ⋯ menu: the single watch item ───────────────────────────────────────────
   await page.getByTestId("page-overflow-trigger").click();
   await expect(page.getByTestId("watch-toggle")).toBeVisible();
-  await expect(page.getByTestId("watch-subtree-toggle")).toBeVisible();
-  await expect(page.getByTestId("watch-space-toggle")).toBeVisible();
   await page.getByTestId("watch-toggle").click(); // watch the page
   await sleep(400);
 
@@ -38,16 +38,27 @@ test("#362: watch scopes in the ⋯ menu; the bell reaches the watch list; mute 
   await expect(page.locator("[data-testid=watch-row]", { hasText: title })).toHaveCount(0, { timeout: 5000 });
 });
 
-test("#362: subtree + space watches from the ⋯ menu land in the list with their scope labels", async ({ browser }) => {
+// #467: the menu no longer CREATES subtree/space watches, but the server still speaks those scopes
+// and a member who already has one must not be stranded — it stays listed, labelled and removable.
+// So the watches are created through the API (what an older client did) and managed through the UI.
+test("#362 (as amended by #467): pre-existing subtree + space watches stay listed and manageable", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   const title = `watch-scope-${Date.now()}`;
-  await openScratch(page, title);
-  await page.getByTestId("page-overflow-trigger").click();
-  await page.getByTestId("watch-subtree-toggle").click();
-  await sleep(300);
-  await page.getByTestId("page-overflow-trigger").click();
-  await page.getByTestId("watch-space-toggle").click();
-  await sleep(300);
+  const pageId = await openScratch(page, title);
+  const spaceId = await page.evaluate(async (id) => {
+    const r = await fetch(`http://dev.localhost:4010/pages/${id}`, { headers: { Authorization: "Bearer dev-token" } });
+    return (await r.json()).spaceId as string;
+  }, pageId);
+  await page.evaluate(async ({ pageId, spaceId }) => {
+    const post = (body: unknown) =>
+      fetch("http://dev.localhost:4010/watches", {
+        method: "POST",
+        headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    await post({ resourceType: "subtree", resourceId: pageId });
+    await post({ resourceType: "space", resourceId: spaceId });
+  }, { pageId, spaceId });
 
   await page.goto("/watches");
   const sub = page.locator("[data-testid=watch-row]", { hasText: title }).first();
@@ -55,14 +66,14 @@ test("#362: subtree + space watches from the ⋯ menu land in the list with thei
   await expect(sub).toContainText(/Page \+ subpages|ページ＋配下/);
   const rows = page.locator("[data-testid=watch-row]");
   await expect(rows.filter({ hasText: /Space|スペース/ }).first(), "the space watch is listed").toBeVisible();
-  // cleanup: unwatch everything this test created (keep the shared dev tenant tidy). Re-locate the
-  // first match each pass — a removal shifts the row indexes, so a collected handle list goes stale.
+  // and they can still be removed from here (no stranded rows)
   for (let i = 0; i < 6; i++) {
     const target = rows.filter({ hasText: new RegExp(`${title}|Space|スペース`) }).first();
     if ((await target.count()) === 0) break;
     await target.getByTestId("watch-unwatch").click();
     await sleep(300);
   }
+  await expect(rows.filter({ hasText: title })).toHaveCount(0);
 });
 
 test("#362: the account notifications tab persists the kill switch + default mask", async ({ browser }) => {
