@@ -22,6 +22,10 @@ export { billableMemberCount, lockSeats } from './auth/invites.js'
 export { auditIfEntitled, drainAuditOutbox, verifyTenantAuditChain } from './audit/outbox.js'
 export { auditPlugin } from './routes/audit.js' // #401 / ADR-155: the viewer moves to the ee/ overlay with the write side (#178)
 export { entitlementDenied } from './entitlement-ux.js'
+// #475: SCIM deprovisioning revokes the member's API keys, so the EE side needs the same key
+// primitives the CE routes use — additive re-exports of CE code, no EE dependency added.
+export { createApiKey } from './routes/api-keys.js'
+export { verifyApiKey } from './api-key-auth.js'
 
 // #178: additional CE-GENERAL auth helpers the moved SAML code needs (SAML → packages/ee-server, mirroring
 // SCIM). Each is a pure CE utility ALREADY shared by CE OIDC (session / secret-crypto / oidc / return-to) —
