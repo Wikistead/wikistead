@@ -130,3 +130,69 @@ test("#359 symptom 2: atoms crossed by a visual selection wear the selection tin
   await sleep(300);
   await expect(page.locator("[data-pane=preview] .cm-lp-atom-insel")).toHaveCount(0);
 });
+
+// #359 the GROWTH transitions. The two earlier pins start from a state that is already
+// crossing (or already contained) and only check that it stays that way; the reveal flip happens
+// while a selection GROWS across a block edge, so nothing caught it. Under the containment rule the
+// block holding the selection's anchor flipped revealed→atom the instant the head left it: the raw
+// lines the selection was built on folded away and the selection died (or vim's head warped).
+// Reveal is now anchored, so each block's state is frozen for the life of the selection.
+const sel = (p: Page) => p.evaluate(() => (window as Window & { __lpSel?: { from: number; to: number; head: number; anchor: number } }).__lpSel!);
+
+test("#359 a visual selection started INSIDE revealed source survives growing OUT of the block", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await vimReady(page, "vim-growth-out-359");
+  // Land the caret inside the FIRST mermaid so it reveals its raw source (reveal-to-edit), then start
+  // a charwise visual there and grow down past the block's end.
+  await page.keyboard.press("j");
+  await sleep(200);
+  expect(await content(page), "the block under the caret revealed its raw source").toContain("graph TD");
+  const startLine = await headLine(page);
+  await page.keyboard.press("v");
+  await sleep(100);
+  const grown: number[] = [];
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("j");
+    await sleep(150);
+    const s = await sel(page);
+    grown.push(s.head);
+    expect(s.to - s.from, `step ${i}: the selection is still alive (not cancelled by a reveal flip)`).toBeGreaterThan(0);
+    expect(await content(page), `step ${i}: the anchored block kept its raw source (no fold-away mid-selection)`).toContain("graph TD");
+  }
+  // The head really left the starting block (the growth crossed the edge, which is the flip trigger).
+  expect(await headLine(page), `head advanced past the anchor block (from line ${startLine})`).toBeGreaterThan(startLine);
+  for (let i = 1; i < grown.length; i++) expect(grown[i]!, `head monotonic (no warp): ${grown}`).toBeGreaterThanOrEqual(grown[i - 1]!);
+});
+
+const DRAG_DOC = "top line\n\n```mermaid\nflowchart TD\n  A-->B\n```\n\nbottom\n";
+test("#359 a mouse drag started INSIDE revealed source survives growing OUT of the block", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "drag-growth-out-359");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(DRAG_DOC);
+  await sleep(700);
+  // Reveal by CARET, not by clicking the widget: a widget click sets explicit entry
+  // (macroRenderActiveField), which pins the reveal unconditionally and would hide the bug.
+  await page.getByText("top line", { exact: true }).click();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await sleep(500);
+  const flow = page.locator("[data-pane=preview]").getByText("flowchart TD");
+  await expect(flow, "raw revealed before the drag (caret entry, no explicit entry)").toHaveCount(1);
+  const fb = (await flow.boundingBox())!;
+  const bot = (await page.locator("[data-pane=preview]").getByText("bottom", { exact: true }).boundingBox())!;
+  await page.mouse.move(fb.x + 4, fb.y + fb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bot.x + 40, bot.y + bot.height / 2, { steps: 12 }); // grow OUT past the block end
+  await sleep(250);
+  await expect(flow, "the anchored block kept its raw source mid-drag").toHaveCount(1);
+  await page.mouse.up();
+  await sleep(300);
+  // The real symptom is that the selection cannot GROW past the block edge — it used to stall at the
+  // fence (reveal flips off → the raw folds → the pointer maps back inside). Pin where it actually
+  // reached: past the closing fence, into the text below.
+  const bottomAt = DRAG_DOC.indexOf("bottom"); // the test typed this doc, so the offset is exact
+  const s = await sel(page);
+  expect(s.to, `the selection grew past the block edge into the text below (sel ${JSON.stringify(s)})`).toBeGreaterThanOrEqual(bottomAt);
+});
