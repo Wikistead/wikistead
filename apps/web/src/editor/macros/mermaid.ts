@@ -1,5 +1,6 @@
 import { asMacroSource, type FenceMacro, type MacroContext } from "./registry";
 import { mermaidHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
+import { applyIntrinsicSvgSize } from "./svg-intrinsic-size"; // #465: percentage-width SVGs collapse to 300px inside the align flex
 import { mountSourceEditor } from "./source-editor"; // #243 / ADR-111 C3: CM6 mini-editor source pane
 
 // The first macro: ```mermaid renders a diagram. It proves the registry pipeline
@@ -138,6 +139,7 @@ export const mermaidMacro: FenceMacro = {
           // #282: measure in an off-flow sandbox at the element's real width, so the window never overflows.
           const { svg } = await renderMermaidOffscreen(mermaid, id, code, renderWidth);
           fig.innerHTML = svg; // sanitized by mermaid (securityLevel: strict)
+          applyIntrinsicSvgSize(fig); // #465
           paintedWidth = renderWidth;
           if (renderWidth > 0) svgCacheSet(cacheKey, svg); // #352: cache any real-width render for scroll re-entry
         } catch {
@@ -155,6 +157,7 @@ export const mermaidMacro: FenceMacro = {
     const cached = svgCacheGet(cacheKey);
     if (cached) {
       fig.innerHTML = cached;
+      applyIntrinsicSvgSize(fig); // #465 — the cached markup is the raw mermaid output too
       paintedWidth = el.clientWidth || 1;
     } else {
       paint();
@@ -199,7 +202,7 @@ export const mermaidMacro: FenceMacro = {
           try {
             // #282: sandbox the measuring node off-flow so a per-keystroke render never flashes the window bar.
             const { svg } = await renderMermaidOffscreen(mermaid, myId, trimmed, preview.clientWidth);
-            if (mine === gen) { preview.innerHTML = svg; preview.style.minHeight = ""; } // release once the new size is in
+            if (mine === gen) { preview.innerHTML = svg; applyIntrinsicSvgSize(preview); preview.style.minHeight = ""; } // #465 sizing; release once the new size is in
           } catch {
             if (mine === gen) preview.textContent = "Invalid mermaid diagram"; // keep min-height → no collapse
           }
