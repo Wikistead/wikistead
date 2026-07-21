@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseLayoutItems, tabsMacro, columnsMacro } from "./layout-directives";
+import { parseLayoutItems, tabsMacro, columnsMacro, tabsEnterTarget, setActiveTabIndex } from "./layout-directives";
+import { asMacroSource } from "./registry";
 
 describe("parseLayoutItems (#90)", () => {
   it("splits the inner items by name and keeps content", () => {
@@ -56,5 +57,43 @@ describe("layout directive degradation (#90 htmlRender, meaning-preserving)", ()
     const out = tabsMacro.htmlRender(":::tab[<img src=x onerror=alert(1)>]\nx\n:::").toString();
     expect(out).not.toContain("<img src=x"); // escaped, not live markup
     expect(out).toContain("&lt;img"); // present as escaped text
+  });
+});
+
+// #456 S2: a container declares where Ctrl+↵ lands (the S1 `enter` contract) instead of the host
+// hardcoding it. The offsets are relative to the macro's own source, so the host maps them to the
+// document without the macro doing coordinate work — these pin that the ranges really are the slot
+// bodies, which is the part a wrong answer would silently get away with.
+describe("#456 S2: container enter targets", () => {
+  const COLUMNS = "::::columns\n:::column\nfirst body\n:::\n:::column\nsecond body\n:::\n::::";
+  const TABS = "::::tabs\n:::tab[One]\ntab one body\n:::\n:::tab[Two]\ntab two body\n:::\n::::";
+
+  it("columns enters the FIRST column, and the range is exactly that column's body", () => {
+    const t = columnsMacro.enter!(asMacroSource(COLUMNS))!;
+    expect(t).not.toBeNull();
+    expect(COLUMNS.slice(t.from, t.to)).toBe("first body");
+  });
+
+  it("tabs enters the active tab — the first one when nothing has been activated", () => {
+    const t = tabsMacro.enter!(asMacroSource(TABS))!;
+    expect(TABS.slice(t.from, t.to)).toBe("tab one body");
+  });
+
+  it("tabs follows the tab the reader is actually on", () => {
+    const base = 4242;
+    setActiveTabIndex(base, 1);
+    const t = tabsEnterTarget(TABS, base)!;
+    expect(TABS.slice(t.from, t.to), "the SECOND tab, because that is what is on screen").toBe("tab two body");
+  });
+
+  it("an out-of-range remembered tab clamps rather than returning nothing", () => {
+    const base = 4243;
+    setActiveTabIndex(base, 99); // e.g. tabs were deleted since
+    const t = tabsEnterTarget(TABS, base)!;
+    expect(TABS.slice(t.from, t.to)).toBe("tab two body");
+  });
+
+  it("a container with no slots has no entry — the host falls back to the normal editUI", () => {
+    expect(columnsMacro.enter!(asMacroSource("::::columns\n::::"))).toBeNull();
   });
 });
