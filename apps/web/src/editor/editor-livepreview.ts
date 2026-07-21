@@ -86,6 +86,9 @@ function headerBandPx(view: EditorView): number {
 // the frosted band's real height, bottom = the floating controls strip (72px ≈ the .cm-content
 // 4.5rem padding-bottom — keep in sync). #313: the read-only published view needs it too, else a
 // TOC/anchor jump lands the heading flush under the band.
+// #473: the most the scrolloff may close the gap by, beyond the caret's own movement, in one keypress.
+// Half a line — visible as the view catching up, not as the caret jumping.
+const CATCH_UP_PX = 12;
 const bandScrollMargins = EditorView.scrollMargins.of((view) => ({ top: headerBandPx(view), bottom: 72 }));
 
 // ADR-122 addendum (b) / #278: the options consumed by the SHARED decoration/keymap layer (layer i) —
@@ -298,6 +301,7 @@ export function mountLivePreview(
         if (!u.selectionSet || u.docChanged) return;
         if (u.transactions.some((tr) => tr.isUserEvent("select.pointer") || tr.isUserEvent("select.jump"))) return;
         const view = u.view;
+        const prevHead = u.startState.selection.main.head;
         requestAnimationFrame(() => {
           const head = view.state.selection.main.head;
           const coords = view.coordsAtPos(head);
@@ -307,12 +311,25 @@ export function mountLivePreview(
           const above = coords.top < box.top + band;
           const below = coords.bottom > box.bottom - band;
           if (!above && !below) return;
-          // CM applies the scrollMargins facet ON TOP of yMargin, so subtract the crossed side's scroll
-          // margin — otherwise the rest line sits margin-px INSIDE the band while the trigger line is the
-          // band edge, and the caret see-saws between the two (a visible multi-line jump, not a 1-line
-          // follow). With them aligned, each keypress past the edge scrolls exactly its own distance.
-          const yMargin = Math.max(0, band - (above ? headerBandPx(view) : 72));
-          view.dispatch({ effects: EditorView.scrollIntoView(Math.min(head, view.state.doc.length), { y: "nearest", yMargin }) });
+          // How far the view would have to move to put the caret back on the band edge. Scrolling the
+          // element directly (rather than scrollIntoView + yMargin) keeps this number honest: CM adds the
+          // scrollMargins facet on top of any yMargin, so the old form had to subtract the crossed side's
+          // margin to land on the same line, and the two had to be kept in sync by hand — when they drifted
+          // the rest line and the trigger line disagreed and the caret see-sawed.
+          const need = below ? coords.bottom - (box.bottom - band) : box.top + band - coords.top;
+          // #473: pay that distance gradually. A click parks the caret wherever the user clicked — deliberately
+          // without scrolling — so it can sit well past the band edge, and the first arrow key used to
+          // settle the whole debt at once: the view lurched ~100px while the caret stayed on the same text,
+          // which reads as the caret leaping up the screen. Walking into the edge is unaffected (there the
+          // debt IS one line, so the step is the whole of it and the caret stays pinned as before); a
+          // deliberate long jump is unaffected too (the caret moved that far itself). Only the parked-caret
+          // case is spread out, at a fraction of a line per keypress, which is small enough not to read as a
+          // jump and still converges on the band in a few presses.
+          const prev = view.coordsAtPos(Math.min(prevHead, view.state.doc.length));
+          const moved = prev ? Math.abs(coords.top - prev.top) : 0;
+          const step = Math.min(need, moved + CATCH_UP_PX);
+          if (step <= 0) return;
+          view.scrollDOM.scrollTop += below ? step : -step;
         });
       }),
       // ADR-122 addendum (b) / #278: the shared decoration/keymap layer — ONE factory builds this surface
