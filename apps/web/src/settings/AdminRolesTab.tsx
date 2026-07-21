@@ -110,23 +110,16 @@ export function AdminRolesTab() {
       <h2 className="mt-0">{t("adminRoles.title")}</h2>
       <p className="mt-0 mb-4 text-sm text-fg-dim">{t("adminRoles.body")}</p>
 
-      {/* Built-in roles: virtual, read-only — shown so the picker vocabulary is uniform. */}
-      <h3 className="text-sm font-medium">{t("adminRoles.builtInTitle")}</h3>
-      <div className="mb-4 flex flex-col gap-1" data-testid="builtin-roles">
-        {(roles.data?.builtIn ?? []).map((r) => (
-          <div key={r.name} className="flex items-baseline gap-2 text-sm">
-            <span className="font-medium">{r.name}</span>
-            <span className="text-xs text-fg-dim">{r.capabilities.join(" · ")}</span>
-            <span className="text-[10px] uppercase tracking-wide text-fg-dim">{t("adminRoles.builtIn")}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* #445 / ADR-171: DEFAULT tenant roles (CE presets). member.createSpaces IS the
-          tenant#space_creator wildcard; admin is locked-on by the model (`or admin`). */}
-      <h3 className="text-sm font-medium">{t("adminRoles.tenantDefaultsTitle")}</h3>
-      <p className="mt-0 mb-1 text-xs text-fg-dim">{t("adminRoles.tenantDefaultsBody")}</p>
-      <div className="mb-4 flex flex-col gap-1" data-testid="tenant-defaults">
+      {/* #469: ONE place answers "what can this role do". The built-in roles are listed by SCOPE
+          (tenant roles act on the tenant — member/admin; resource roles act on a space or page —
+          viewer/editor/manager), and the tenant-level `createSpaces` capability lives IN that list
+          instead of a separate differently-shaped section. It is the only editable cell on a
+          built-in role (ADR-171 addendum): member's checkbox IS the tenant#space_creator wildcard;
+          admin's is inherent to the model (`or admin`) and is stated ONCE, as text, never as a
+          permanently disabled checkbox that reads "broken". */}
+      <h3 className="text-sm font-medium">{t("adminRoles.builtInTenantTitle")}</h3>
+      <p className="mt-0 mb-1 text-xs text-fg-dim">{t("adminRoles.builtInTenantBody")}</p>
+      <div className="mb-4 flex flex-col gap-1" data-testid="builtin-tenant-roles">
         <label className="flex items-center gap-1.5 text-sm">
           <input
             type="checkbox"
@@ -139,14 +132,24 @@ export function AdminRolesTab() {
             })}
           />
           <span className="font-medium">member</span>
-          <span>{t("adminRoles.cap.createSpaces")}</span>
+          <span className="text-xs text-fg-dim">{t("adminRoles.cap.createSpaces")}</span>
         </label>
-        <label className="flex items-center gap-1.5 text-sm text-fg-dim" title={t("adminRoles.adminLocked")}>
-          <input type="checkbox" data-testid="default-admin-create-spaces" checked disabled />
+        <div className="flex items-baseline gap-2 text-sm" data-testid="builtin-role-admin">
           <span className="font-medium">admin</span>
-          <span>{t("adminRoles.cap.createSpaces")}</span>
-          <span className="text-[10px] uppercase tracking-wide">{t("adminRoles.locked")}</span>
-        </label>
+          <span className="text-xs text-fg-dim">{t("adminRoles.adminAlways")}</span>
+        </div>
+      </div>
+
+      {/* Built-in RESOURCE roles: virtual, read-only — shown so the picker vocabulary is uniform. */}
+      <h3 className="text-sm font-medium">{t("adminRoles.builtInResourceTitle")}</h3>
+      <div className="mb-4 flex flex-col gap-1" data-testid="builtin-roles">
+        {(roles.data?.builtIn ?? []).map((r) => (
+          <div key={r.name} className="flex items-baseline gap-2 text-sm">
+            <span className="font-medium">{r.name}</span>
+            <span className="text-xs text-fg-dim">{r.capabilities.join(" · ")}</span>
+            <span className="text-[10px] uppercase tracking-wide text-fg-dim">{t("adminRoles.builtIn")}</span>
+          </div>
+        ))}
       </div>
 
       {/* Custom roles (EE): create / edit / delete. */}
