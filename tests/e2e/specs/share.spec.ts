@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Browser } from "@playwright/test";
-import { openDemo, resetDoc, paneText, enterSplit, enterEdit, sleep } from "../helpers";
+import { openDemo, resetDoc, paneText, enterSplit, enterEdit } from "../helpers";
 
 const API = "http://dev.localhost:4010";
 
@@ -15,7 +15,7 @@ async function createLink(page: Page, capability: "view" | "edit"): Promise<stri
   await row.hover();
   await row.locator("[data-testid=page-actions]").click();
   await page.locator("[data-testid=page-menu][data-state=open]").getByText("Share").click();
-  await page.waitForSelector("[data-testid=share-dialog]");
+  await page.waitForSelector("[data-testid=share-dialog]", { timeout: 10000 });
   // Two ShareDialog instances mount (sidebar + page route); only the open one is
   // visible, so scope the Select to the visible trigger.
   await page.locator("[data-testid=share-capability]:visible").click();
@@ -32,13 +32,22 @@ async function createLink(page: Page, capability: "view" | "edit"): Promise<stri
   return url;
 }
 
+// #470: this spec drives THREE browser contexts through a live collab session, so its cost tracks how
+// busy the stack already is — run third behind other specs it used to hit the 60s wall and read as a
+// regression. Every wait below is now a condition with its own budget and message, so the run is as
+// fast as the stack allows and a genuine failure names the step instead of expiring anonymously.
 test("anonymous share: create -> open -> co-edit -> read-only -> revoke denied", async ({ browser }: { browser: Browser }) => {
+  test.slow(); // triples the budget: three contexts + collab propagation is legitimately slow work
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   // P3: editor defaults to read-only view; the member edits + reads the source
   // pane below, so open the editable split.
   await enterSplit(member);
   await resetDoc(member);
+  // #470: a marker the guest must SEE before we ask it to type. The old fixed second was the only
+  // thing standing between "the guest's editor exists" and "the collab channel is live"; waiting for
+  // real content proves the channel instead of hoping, and costs nothing on a warm stack.
+  await member.keyboard.type("seed-470");
 
   // member creates an EDIT link
   const editUrl = await createLink(member, "edit");
@@ -48,16 +57,21 @@ test("anonymous share: create -> open -> co-edit -> read-only -> revoke denied",
   const guest = await (await browser.newContext()).newPage();
   await guest.goto(editUrl);
   await guest.waitForSelector("[data-pane=preview] .cm-content", { timeout: 10000 });
-  await sleep(1000);
-  // Edit-capable guest: reveal the editable surface (defaults to view).
+  // Edit-capable guest: reveal the editable surface (defaults to view — the read view shows the
+  // PUBLISHED text, so the live doc only appears once we are in edit).
   await enterEdit(guest);
   expect(await guest.$eval("[data-pane=preview] .cm-content", (el) => el.getAttribute("contenteditable"))).toBe("true");
+  // #470: wait for the DOC to arrive over collab, not for a fixed second. Under load the sleep was
+  // both too short (flake) and, on a warm stack, pure dead time — and when it did run out the test
+  // failed later, at an assertion that named the wrong step.
+  await expect.poll(() => paneText(guest, "preview"), { timeout: 20000, message: "the guest received the live doc over collab" })
+    .toContain("seed-470");
 
   // guest edit syncs to member (anonymous co-editing)
   await guest.click("[data-pane=preview] .cm-content");
   await guest.keyboard.type("from-guest");
-  await sleep(600);
-  expect(await paneText(member, "preview")).toContain("from-guest");
+  await expect.poll(() => paneText(member, "preview"), { timeout: 20000, message: "the guest's edit reached the member (anonymous co-editing)" })
+    .toContain("from-guest");
 
   // a VIEW link is read-only
   await member.bringToFront();
@@ -65,8 +79,8 @@ test("anonymous share: create -> open -> co-edit -> read-only -> revoke denied",
   const viewer = await (await browser.newContext()).newPage();
   await viewer.goto(viewUrl);
   await viewer.waitForSelector("[data-pane=preview] .cm-content", { timeout: 10000 });
-  await sleep(800);
-  expect(await viewer.$eval("[data-pane=preview] .cm-content", (el) => el.getAttribute("contenteditable"))).toBe("false");
+  await expect.poll(() => viewer.$eval("[data-pane=preview] .cm-content", (el) => el.getAttribute("contenteditable")),
+    { timeout: 15000, message: "a view link stays read-only" }).toBe("false");
 
   // revoke the edit link (authenticated API) -> a fresh guest is denied
   const editId = editUrl.split("/").pop()!;
@@ -78,6 +92,6 @@ test("anonymous share: create -> open -> co-edit -> read-only -> revoke denied",
 
   const denied = await (await browser.newContext()).newPage();
   await denied.goto(editUrl);
-  await sleep(1500);
-  expect(await denied.evaluate(() => document.body.innerText)).toMatch(/invalid, expired, or revoked/i);
+  await expect.poll(() => denied.evaluate(() => document.body.innerText),
+    { timeout: 15000, message: "the revoked link is refused" }).toMatch(/invalid, expired, or revoked/i);
 });
