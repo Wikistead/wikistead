@@ -248,7 +248,7 @@ export const tabsMacro: DirectiveMacro = {
   liveRender: tabsLiveRender,
   // #456 S2: the ACTIVE tab (see tabsEnterTarget) — the approved ruling. The macro answers this, not
   // the host, so a third-party container can define its own entry the same way.
-  enter: (source) => tabsEnterTarget(source, null),
+  enter: (source, ctx) => tabsEnterTarget(source, ctx?.anchor ?? null),
   // #278 §2a: NO editUI panel — the active tab's content is edited by an inline CM6 island in its panel (click
   // it); structure ops are the per-item inline ×/ (§1). The #257 panel is retired.
   // #85/#90 export degrade (meaning-preserving: label → visible heading + body). Single source of

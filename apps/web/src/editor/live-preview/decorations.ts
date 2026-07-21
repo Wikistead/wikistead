@@ -4262,6 +4262,29 @@ export const wysiwygInlineSkip: Extension = [vimMotionActive, EditorState.transa
 // an inline/source macro becomes render-active (table → the cell-edit widget; mermaid /
 // callout → revealed source via macroRenderActiveField). Returns true if a macro was
 // entered. Display-only: the document is untouched; presence/collab unaffected.
+
+// #456 S2 (host side): translate a container's declared entry point into the slot island the click
+// path already opens. The macro returns offsets relative to its own source; the slot INDEX is what
+// the island mount takes, and both agree because the children are counted in document order — the
+// same ordering mountSlotEditIsland uses when it maps an index back to a range.
+function enterDeclaredSlot(view: EditorView, dir: { from: number; to: number; macro: { enter?(src: MacroSource, ctx?: { anchor: number }): { from: number; to: number } | null } }): boolean {
+  const src = view.state.doc.sliceString(dir.from, dir.to);
+  // The anchor the host keys display state under is the macro's BODY offset (what the renderer is
+  // handed), not the fence start — pass that, so "the tab on screen" resolves to the same entry.
+  const nl = src.indexOf("\n");
+  const target = dir.macro.enter?.(asMacroSource(src), nl < 0 ? undefined : { anchor: dir.from + nl + 1 });
+  if (!target) return false;
+  const abs = dir.from + target.from;
+  const kids = resolveDirectiveRanges(view.state.doc.toString())
+    .filter((r) => r.from > dir.from && r.to <= dir.to)
+    .sort((a, b) => a.from - b.from);
+  const direct = kids.filter((k) => !kids.some((o) => o !== k && o.from < k.from && o.to >= k.to)); // skip grandchildren
+  const index = direct.findIndex((k) => abs >= k.from && abs <= k.to);
+  if (index < 0) return false;
+  view.dispatch({ effects: setSlotEditActive.of({ container: { from: dir.from, to: dir.to }, index }) });
+  return true; // the rebuild mounts the island and focuses it — do NOT focus the outer view here
+}
+
 export function enterMacroAt(view: EditorView, pos: number, raw = false): boolean {
   if (view.state.readOnly) return false;
   if (tableBlockAt(view.state, pos)) return openTableEditing(view, pos); // pipe OR :::table (#86)
@@ -4287,6 +4310,11 @@ export function enterMacroAt(view: EditorView, pos: number, raw = false): boolea
     if (b) dir = directiveMacroAt(view.state, Math.min(b.from + 1, view.state.doc.length));
   }
   if (dir) {
+    // #456 S2: a CONTAINER says where entering it lands (tabs → the tab on screen, columns → the
+    // first). Revealing raw source here would drop the reader into fences instead of the slot they
+    // were looking at. The macro answers in ITS OWN source offsets; mapping them to a slot is the
+    // host's job, done the same way the island mount does it — by direct children in document order.
+    if (dir.macro.enter && enterDeclaredSlot(view, dir)) return true;
     view.dispatch({ selection: EditorSelection.cursor(dir.from), effects: setMacroRenderActive.of({ from: dir.from, to: dir.to }) });
     view.focus();
     return true;

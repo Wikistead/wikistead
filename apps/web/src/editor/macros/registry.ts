@@ -179,6 +179,9 @@ export interface MacroSettings {
 // hardcoding "tabs → active tab, columns → first column", the macro declares it — so a third-party
 // container defines its own entry the same way. Returning null means "no inner target", and the host
 // falls back to the normal editUI.
+export interface EnterContext {
+  readonly anchor: number; // document offset of the macro's body — the key display state is stored under
+}
 export interface EnterTarget {
   // The slot's offset range within the macro's own source. The host maps it to the document and
   // mounts the surface there — the macro does no coordinate work of its own.
@@ -271,8 +274,12 @@ interface DirectiveMacroBase {
   readonly editUI?: EditUI; // #174 / ADR-087 — unified edit UI (see FenceMacro.editUI)
   readonly settings?: MacroSettings; // #456 S1 — declarative mouse settings (see FenceMacro.settings)
   // #456 S1: where Ctrl+↵ lands for a CONTAINER (tabs → the active tab, columns → the first column).
-  // Pure and source-only, like the tier: it reads the macro's own source and returns an offset range.
-  enter?(source: MacroSource): EnterTarget | null;
+  // Reads the macro's own source and answers in its own offsets, like the tier.
+  // #456 S2: `ctx.anchor` is the document offset of the macro's BODY. Some containers' entry depends on
+  // DISPLAY state the host keeps rather than on the source — which tab is on screen is the obvious case,
+  // and it is keyed by exactly that anchor. Optional: a container whose entry is source-only (columns)
+  // ignores it, and a caller without an anchor still gets a sensible answer.
+  enter?(source: MacroSource, ctx?: EnterContext): EnterTarget | null;
   // Tier levels for host auto-demote (ADR-025 step 3). The table declares this (pipe ⟷
   // :::table); container directives without alternate representations omit it.
   readonly tier?: MacroTier;
