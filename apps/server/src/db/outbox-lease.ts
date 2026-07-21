@@ -11,7 +11,11 @@ import { pool } from './pool.js'
 // at-least-once, idempotent handlers, crash ≠ failure (an aged claim retries).
 
 // One stale window for every outbox: how long a claim may sit before a crashed worker's rows are
-// re-claimable. Interval literals cannot be parameterized, so sites share this constant by value.
+// re-claimable. It is interpolated as a VALUE cast to interval (`${OUTBOX_STALE_CLAIM}::interval`),
+// so this constant is the only place the window exists. (An earlier note claimed intervals cannot be
+// parameterized — that is true only of the `interval '…'` LITERAL syntax; a parameter cast with
+// `::interval` is ordinary SQL. The literal left the constant decorative: changing it would not have
+// changed any query, and no test would have caught that.)
 export const OUTBOX_STALE_CLAIM = '2 minutes'
 
 // Claim a disjoint batch (across workers/instances — SKIP LOCKED) of due rows, marking them
@@ -27,30 +31,24 @@ export async function claimOutboxBatch<T extends Row>(opts: {
   const table = pool(opts.table)
   const order = pool(opts.orderBy ?? 'created_at')
   const cols = pool(opts.returning)
-  const rows = opts.extraDue
-    ? await pool`
-        UPDATE ${table} SET claimed_at = now()
-        WHERE id IN (
-          SELECT id FROM ${table}
-          WHERE (claimed_at IS NULL OR claimed_at < now() - interval '2 minutes')
-            ${opts.extraDue}
-          ORDER BY ${order}
-          LIMIT ${opts.batch}
-          FOR UPDATE SKIP LOCKED
-        )
-        RETURNING ${cols}
-      `
-    : await pool`
-        UPDATE ${table} SET claimed_at = now()
-        WHERE id IN (
-          SELECT id FROM ${table}
-          WHERE claimed_at IS NULL OR claimed_at < now() - interval '2 minutes'
-          ORDER BY ${order}
-          LIMIT ${opts.batch}
-          FOR UPDATE SKIP LOCKED
-        )
-        RETURNING ${cols}
-      `
+  // ONE claim statement. The due-narrowing fragment defaults to a always-true clause instead of an
+  // empty one: an EMPTY postgres.js fragment silently collapses the surrounding SQL (the first cut of
+  // this module zeroed the claim that way, which is why the branch existed), whereas `AND TRUE` is a
+  // real, harmless predicate the planner drops. With the branch gone, the stale window — and every
+  // other part of the lease — genuinely has one definition.
+  const due = opts.extraDue ?? pool`AND TRUE`
+  const rows = await pool`
+    UPDATE ${table} SET claimed_at = now()
+    WHERE id IN (
+      SELECT id FROM ${table}
+      WHERE (claimed_at IS NULL OR claimed_at < now() - ${OUTBOX_STALE_CLAIM}::interval)
+        ${due}
+      ORDER BY ${order}
+      LIMIT ${opts.batch}
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING ${cols}
+  `
   return rows as unknown as T[]
 }
 
