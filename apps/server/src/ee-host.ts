@@ -34,6 +34,6 @@ export { verifyApiKey } from './api-key-auth.js'
 // script uses appendOperatorEntry) — EE consumes it through the seam like the rest of the audit surface.
 export { coerceGroups } from './auth/oidc.js'
 export { encryptSecret, decryptSecret } from './auth/secret-crypto.js'
-export { SESSION_COOKIE, establishMemberSession, sessionCookieOptions } from './auth/session.js'
+export { SESSION_COOKIE, establishMemberSession, sessionCookieOptions, destroyMemberSessions, createSession } from './auth/session.js' // #477: SCIM deactivation drops the member's sessions too
 export { safeReturnTo } from './auth/return-to.js'
 export { appendOperatorEntry, type OperatorAction } from './audit/operator-ledger.js'
