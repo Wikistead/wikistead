@@ -13,6 +13,7 @@ import postgres from 'postgres'
 import IORedis from 'ioredis'
 import { pool } from '../db/pool.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { memberTuples } from './helpers/membership.js'
 import { mintGuestToken } from '@wikistead/auth'
 import { buildApp } from '../app.js'
 import { createSession, SESSION_COOKIE } from '../auth/session.js'
@@ -41,6 +42,7 @@ const fgaFixture = [
   // PAGE_HIDDEN deliberately gets NO tuples. ACME_PAGE gets a DIRECT view grant for alice —
   // the cross-tenant 404 must come from the RLS row-existence gate, not from a missing grant.
   { user: 'user:pin-alice', relation: 'view_direct', object: `page:${ACME_PAGE}` },
+  ...memberTuples(TENANT, ['pin-alice', 'pin-bob']), // #471: they act as members over HTTP
 ]
 // PAGE_B's space tuple is deleted mid-suite (the revoke case), so it is tracked separately.
 const pageBTuple = [{ user: `space:${SPACE}`, relation: 'space', object: `page:${PAGE_B}` }]

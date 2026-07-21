@@ -64,6 +64,9 @@ import type { TupleKey, TupleKeyWithoutCondition } from '@openfga/sdk'
   // ── Acme tenant for cross-tenant isolation tests ─────────────────────────
   await writeIdempotent([
     { user: 'user:acme-admin',    relation: 'admin',   object: 'tenant:tenant_acme' },
+    // #471 / ADR-176: admin and member are separate relations and provisioning writes BOTH; a seed
+    // that grants only admin describes a tenant nobody can authenticate into.
+    { user: 'user:acme-admin',    relation: 'member',  object: 'tenant:tenant_acme' },
     { user: 'user:*',             relation: 'space_creator', object: 'tenant:tenant_acme' }, // ADR-171
     { user: 'tenant:tenant_acme', relation: 'tenant',  object: 'space:acme_space'   },
     { user: 'user:acme-admin',    relation: 'manager', object: 'space:acme_space'   },
