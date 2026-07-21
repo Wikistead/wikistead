@@ -86,6 +86,9 @@ describe("#384 golden corpus (ADR-160 stage 1 — byte-stable through the visito
     expect(renderMarkdownToHtml(CORPUS).value).toMatchSnapshot();
   });
 
+  // #472 updated this snapshot on purpose: the callout now emits its `[label]` as a title, which the
+  // server renderer used to drop. A golden corpus is meant to make exactly that visible — the diff is
+  // the feature, and the surrounding bytes stayed put.
   it("SafeHtml sink golden (builtin registry — directive dispatch incl. callout/details)", () => {
     const src = `:::note[Hi]\nnested **body**\n:::\n\n:::details[More]\nhidden\n:::\n\n:::columns\n:::column\nleft\n:::\n:::column\nright\n:::\n::::\n`;
     expect(renderMarkdownToHtml(src, builtinMacroRegistry()).value).toMatchSnapshot();

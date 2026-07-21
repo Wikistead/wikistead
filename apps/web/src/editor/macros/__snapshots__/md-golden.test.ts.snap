@@ -13,6 +13,7 @@ line one<br>line two</p><blockquote><p>quoted <strong>deep</strong></p><ul><li><
 exports[`#384 golden corpus (ADR-160 stage 1 — byte-stable through the visitor migration) > SafeHtml sink golden (builtin registry — directive dispatch incl. callout/details) 1`] = `
 "<div class="callout callout-note">
 
+<div class="callout-title">Hi</div>
 <p>nested <strong>body</strong></p>
 
 </div>
