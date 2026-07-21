@@ -12,7 +12,7 @@ import { calloutTypeOption } from "./callout-type-ui";
 const calloutEditUI: EditUI = {
   present: "inline",
   sourceScope: "block",
-  mount(container, source, _ctx, save) {
+  mount(container, source, _ctx, save, editEnv) {
     const lines = source.split("\n");
     const open = parseDirectiveOpen(lines[0] ?? "");
     let type = open?.name ?? "note";
@@ -77,19 +77,36 @@ const calloutEditUI: EditUI = {
     labelIn.addEventListener("change", () => { label = labelIn.value.trim(); commit(); });
     labelField.appendChild(labelIn);
     const bodyField = field(i18n.t("calloutEdit.content"));
-    const bodyTa = document.createElement("textarea");
-    bodyTa.className = "cm-lp-callout-edit-body";
-    bodyTa.value = body;
-    bodyTa.spellcheck = false;
-    bodyTa.placeholder = i18n.t("calloutEdit.contentPlaceholder");
-    bodyTa.setAttribute("aria-label", i18n.t("calloutEdit.content"));
-    bodyTa.setAttribute("data-testid", "callout-edit-body");
-    bodyTa.addEventListener("change", () => { body = bodyTa.value; commit(); });
-    bodyField.appendChild(bodyTa);
+    // #456 S5: a callout body is Markdown, so it edits on the HOST's surface — the same one the page
+    // and the slot islands use (vim, the slash palette, completion, nested rendering), rather than the
+    // plain textarea each macro used to build for itself. The textarea remains for a host that lends
+    // no surface, which is what the unit tests mount against.
+    const surface = editEnv?.mountSurface?.({
+      parent: bodyField,
+      doc: asMacroSource(body),
+      kind: "markdown",
+      testid: "callout-edit-body",
+      onCommit: (v) => { body = v; commit(); },
+    });
+    let bodyTa: HTMLTextAreaElement | null = null;
+    if (!surface) {
+      bodyTa = document.createElement("textarea");
+      bodyTa.className = "cm-lp-callout-edit-body";
+      bodyTa.value = body;
+      bodyTa.spellcheck = false;
+      bodyTa.placeholder = i18n.t("calloutEdit.contentPlaceholder");
+      bodyTa.setAttribute("aria-label", i18n.t("calloutEdit.content"));
+      bodyTa.setAttribute("data-testid", "callout-edit-body");
+      bodyTa.addEventListener("change", () => { body = bodyTa!.value; commit(); });
+      bodyField.appendChild(bodyTa);
+    }
     wrap.append(title, typeField, labelField, bodyField);
     container.appendChild(wrap);
-    const f = setTimeout(() => bodyTa.focus(), 0);
-    return { destroy() { clearTimeout(f); wrap.remove(); } };
+    const f = setTimeout(() => (surface ? surface.focus() : bodyTa?.focus()), 0);
+    return {
+      destroy() { clearTimeout(f); surface?.destroy(); wrap.remove(); },
+      handlesEscape: () => surface?.inVimInsert() ?? false, // vim's insert→normal Escape stays in the panel
+    };
   },
 };
 

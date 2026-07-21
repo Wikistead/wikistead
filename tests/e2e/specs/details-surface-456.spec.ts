@@ -73,3 +73,37 @@ test("#456 S3: the shared surface brings the slash palette to a details body", a
   await expect(page.getByTestId("slash-palette"), "the page's slash palette opens inside the details body").toBeVisible({ timeout: 8000 });
   await page.keyboard.press("Escape");
 });
+
+// #456 S5: the same for a callout body — it is Markdown too, so it gets the shared surface rather
+// than the panel's old textarea. Same seam, no per-macro editor.
+test("#456 S5: the callout body edits on the shared surface too", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, `callout456-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::warning[Careful]\ncallout body\n:::\n\nbelow\n");
+  await sleep(800);
+  await page.getByText("below", { exact: true }).click();
+  await sleep(400);
+
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  await sleep(200);
+  await page.keyboard.press("Control+Enter");
+  await sleep(700);
+
+  const body = page.getByTestId("callout-edit-body");
+  await expect(body).toBeVisible({ timeout: 8000 });
+  expect(await body.evaluate((el) => el.tagName), "a CodeMirror surface, not a <textarea>").not.toBe("TEXTAREA");
+  expect(await body.evaluate((el) => el.classList.contains("cm-content"))).toBe(true);
+
+  await body.click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" extended");
+  await page.getByText("below", { exact: true }).click();
+  await sleep(800);
+
+  const doc = await docText(page);
+  expect(doc, "the edit landed in the callout body").toContain("callout body extended");
+  expect(doc, "and the fence head survived").toContain(":::warning[Careful]");
+});
