@@ -79,7 +79,8 @@ describe('verifyApiKey', () => {
   it('returns owner user ID for a valid active key', async () => {
     const result = await verifyApiKey(plaintext, tenant.id)
     expect(result).not.toBeNull()
-    expect(result!.sub).toBe('dev-user')
+    expect(result!.deactivated, 'an active owner authenticates as a principal').toBe(false)
+    expect(result as { sub: string }).toMatchObject({ sub: 'dev-user' })
   })
 
   it('returns null for a key with wrong hash (constant-time comparison)', async () => {
@@ -210,7 +211,7 @@ describe('#428 last_used_at under RLS', () => {
     const before = await adminPool`SELECT last_used_at FROM api_keys WHERE id = ${created.id}`
     expect(before[0]!.last_used_at).toBeNull()
     const verified = await verifyApiKey(created.plaintext, tenant.id)
-    expect(verified?.keyId).toBe(created.id)
+    expect(verified as { keyId: string }).toMatchObject({ keyId: created.id })
     // the update is fire-and-forget — poll briefly for it to land
     let lastUsed: Date | null = null
     for (let i = 0; i < 20 && !lastUsed; i++) {
