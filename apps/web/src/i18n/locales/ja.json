@@ -574,7 +574,10 @@
     "commentAudienceTitle": "このページのコメント",
     "commentAudienceBody": "スペース設定より広くコメントを開放します。ページは開くだけで、狭めることはできません。",
     "commentGuests": "閲覧リンクを持つゲストがコメント可能",
-    "commentMembers": "スペースの全メンバーがコメント可能"
+    "commentMembers": "スペースの全メンバーがコメント可能",
+    "tabAccess": "アクセス",
+    "tabRestrictions": "制限",
+    "tabAdvanced": "詳細"
   },
   "spaceTheme": {
     "title": "テーマ",

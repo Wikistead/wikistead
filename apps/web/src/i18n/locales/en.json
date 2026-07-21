@@ -574,7 +574,10 @@
     "commentAudienceTitle": "Commenting on this page",
     "commentAudienceBody": "Open commenting beyond the space setting. A page can only open more, never less.",
     "commentGuests": "Guests with a view link may comment",
-    "commentMembers": "All space members may comment"
+    "commentMembers": "All space members may comment",
+    "tabAccess": "Access",
+    "tabRestrictions": "Restrictions",
+    "tabAdvanced": "Advanced"
   },
   "spaceTheme": {
     "title": "Theme",

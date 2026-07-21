@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, usePublished, useTenantGroups, useShareLinks, useSetFrozen, usePageMemberCandidates, usePageCommentAudience, useSetPageCommentAudience, type PageRelation } from "../data/queries";
 import { MemberSearchInput } from "./MemberSearchInput";
@@ -10,6 +10,9 @@ import { Input } from "./Input";
 import { Switch } from "./Switch";
 import { RadioGroup } from "./RadioGroup";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
+
+type TabKey = "access" | "restrictions" | "advanced";
 
 // Per-page permission management (Phase 4c). Shown only to managers (the open page's
 // canManage); the server re-checks `manage` on every access call. Granting view/edit
@@ -75,6 +78,22 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
     onSuccess: () => notify.success(t("toast.saved")),
     onError: () => notify.error(t("toast.actionFailed")),
   });
+  // #460 / ADR-174: three tabs — who can reach the page (Access), who is kept out (Restrictions), and
+  // the settings that are neither (Advanced). Grouping only; every endpoint and every semantic is
+  // unchanged. The choice is remembered per page for the session, so re-opening the same page returns
+  // to the tab you were working in while a different page starts at Access.
+  const tabKey = `wks.permissions.tab.${pageId}`;
+  const [tab, setTab] = useState<TabKey>("access");
+  useEffect(() => {
+    if (!open) return;
+    const saved = sessionStorage.getItem(tabKey);
+    setTab(saved === "restrictions" || saved === "advanced" ? saved : "access");
+  }, [open, tabKey]);
+  const selectTab = (v: string) => {
+    const next: TabKey = v === "restrictions" || v === "advanced" ? v : "access";
+    setTab(next);
+    try { sessionStorage.setItem(tabKey, next); } catch { /* private mode / storage disabled */ }
+  };
   const [mode, setMode] = useState<"user" | "group">("user");
   const [sub, setSub] = useState("");
   const [groupName, setGroupName] = useState("");
@@ -84,8 +103,10 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   // stays valid (the picker assists — a pasted sub still works, as before).
   const [pickedGrant, setPickedGrant] = useState<{ grantee: string; label: string } | null>(null);
   const [pickedRestrict, setPickedRestrict] = useState<{ grantee: string; label: string } | null>(null);
-  const grantCandidates = usePageMemberCandidates(open && mode === "user" && !pickedGrant ? pageId : null, sub);
-  const restrictCandidates = usePageMemberCandidates(open && !pickedRestrict ? pageId : null, restrictSub);
+  // the typeahead only runs for the tab that shows it — the panel it belongs to is not even mounted
+  // otherwise, so the request would be answering a question nobody asked
+  const grantCandidates = usePageMemberCandidates(open && tab === "access" && mode === "user" && !pickedGrant ? pageId : null, sub);
+  const restrictCandidates = usePageMemberCandidates(open && tab === "restrictions" && !pickedRestrict ? pageId : null, restrictSub);
 
   const addRestrict = () => {
     const principal = pickedRestrict?.grantee ?? (restrictSub.trim() ? `user:${restrictSub.trim()}` : null);
@@ -126,12 +147,30 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
       {/* #416 the dialog is BOUNDED (max-h) as a flex column — header and footer stay put and
           everything between them is ONE scrolling body, so however many grants/restrictions/sections
           accumulate, the modal never outgrows the viewport and Close stays reachable. */}
-      <DialogContent data-testid="permissions-dialog" className="flex max-h-[85vh] flex-col sm:max-w-[560px]">
+      {/* #460 / ADR-174: wider on a large screen — the grant row (type / member / relation / add) had to
+          wrap at 560px. The phone gutter is unchanged, and the dialog stays BOUNDED (#416): header,
+          tab strip and footer are fixed and the ACTIVE PANEL scrolls, so Close is always reachable. */}
+      <DialogContent data-testid="permissions-dialog" className="flex max-h-[85vh] flex-col sm:max-w-[560px] lg:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{t("permissions.title")}</DialogTitle>
           <DialogDescription>{t("permissions.body")}</DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1" data-testid="permissions-body">
+        <Tabs value={tab} onValueChange={selectTab}>
+          {/* the three tabs are always present, including when a feature is off — a tab that appears and
+              disappears with state teaches nobody where anything lives */}
+          <TabsList aria-label={t("permissions.title")}>
+            <TabsTrigger value="access" data-testid="permissions-tab-access">
+              {t("permissions.tabAccess")}
+              {/* the count is read at dialog level, so it is honest before its tab has ever been opened */}
+              {(restrictions?.length ?? 0) > 0 && (
+                <span className="rounded-full bg-panel-2 px-1.5 text-[11px] text-fg-dim" data-testid="permissions-restrict-count">{restrictions!.length}</span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="restrictions" data-testid="permissions-tab-restrictions">{t("permissions.tabRestrictions")}</TabsTrigger>
+            <TabsTrigger value="advanced" data-testid="permissions-tab-advanced">{t("permissions.tabAdvanced")}</TabsTrigger>
+          </TabsList>
+
+        <TabsContent value="access" data-testid="permissions-panel-access">
 
         {/* #109 / ADR-098: PRIVATE (allowlist) toggle. Private cuts space inheritance — only the people
             listed below can view/edit — and strips public. Nested children do NOT inherit a parent's
@@ -184,32 +223,6 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             )}
           </div>
         )}
-
-        {/* #329 / ADR-139: FREEZE (staged edit lock) — off / guests-only / everyone-below-manager.
-            Explicit radios (the #389 direction: no highlight-square selection). Managers always edit;
-            commenting stays open for principals holding view (edit-independent path). */}
-        <div className="mt-2 rounded-md border border-border p-2" data-testid="freeze-row">
-          <span className="block text-sm text-foreground">{t("permissions.freezeTitle")}</span>
-          <span className="block text-xs text-fg-dim">
-            {frozen === "full" ? t("permissions.freezeFullHint")
-              : frozen === "guests" ? t("permissions.freezeGuestsHint")
-              : t("permissions.freezeHint")}
-          </span>
-          {/* #389 / ADR-146: 3 short options → segmented radiogroup (DS component, arrow-key focus). */}
-          <RadioGroup
-            variant="segmented"
-            className="mt-2"
-            value={frozen === "full" ? "full" : frozen === "guests" ? "guests" : "off"}
-            onChange={(v) => applyFreeze(v === "off" ? null : (v as "guests" | "full"))}
-            ariaLabel={t("permissions.freezeTitle")}
-            testId="freeze"
-            disabled={setFrozen.isPending}
-            options={(["off", "guests", "full"] as const).map((key) => ({
-              value: key,
-              label: t(`permissions.freeze${key === "off" ? "Off" : key === "guests" ? "Guests" : "Full"}`),
-            }))}
-          />
-        </div>
 
         <p className="mt-3 text-xs font-medium text-fg-dim">{isPrivate ? t("permissions.allowlistTitle") : t("permissions.grantTitle")}</p>
         <div className="flex items-center gap-2">
@@ -283,9 +296,12 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
           {(grants?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("permissions.empty")}</p>}
         </div>
 
+        </TabsContent>
+
+        <TabsContent value="restrictions" data-testid="permissions-panel-restrictions">
         {/* #109 / ADR-072 monotonic deny: restrict a principal from this page — they can't view it even
             as a space viewer (the page 404s for them). Deny wins over every grant. */}
-        <div className="mt-4 border-t border-border pt-3">
+        <div>
           <p className="m-0 mb-2 text-xs font-medium text-fg-dim">{t("permissions.restrictTitle")}</p>
           <div className="flex items-center gap-2">
             {/* restrict stays USER-only by design (#416: group/share_link restrictees are out of scope). */}
@@ -316,6 +332,35 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
           </div>
         </div>
 
+        </TabsContent>
+
+        <TabsContent value="advanced" data-testid="permissions-panel-advanced">
+        {/* #329 / ADR-139: FREEZE (staged edit lock) — off / guests-only / everyone-below-manager.
+            Explicit radios (the #389 direction: no highlight-square selection). Managers always edit;
+            commenting stays open for principals holding view (edit-independent path). */}
+        <div className="rounded-md border border-border p-2" data-testid="freeze-row">
+          <span className="block text-sm text-foreground">{t("permissions.freezeTitle")}</span>
+          <span className="block text-xs text-fg-dim">
+            {frozen === "full" ? t("permissions.freezeFullHint")
+              : frozen === "guests" ? t("permissions.freezeGuestsHint")
+              : t("permissions.freezeHint")}
+          </span>
+          {/* #389 / ADR-146: 3 short options → segmented radiogroup (DS component, arrow-key focus). */}
+          <RadioGroup
+            variant="segmented"
+            className="mt-2"
+            value={frozen === "full" ? "full" : frozen === "guests" ? "guests" : "off"}
+            onChange={(v) => applyFreeze(v === "off" ? null : (v as "guests" | "full"))}
+            ariaLabel={t("permissions.freezeTitle")}
+            testId="freeze"
+            disabled={setFrozen.isPending}
+            options={(["off", "guests", "full"] as const).map((key) => ({
+              value: key,
+              label: t(`permissions.freeze${key === "off" ? "Off" : key === "guests" ? "Guests" : "Full"}`),
+            }))}
+          />
+        </div>
+
         {/* #399 / ADR-158 §1: per-page comment-audience OVERRIDE — additive only (a page can open what
             the space keeps closed, never narrow it). Independent wildcards, mirrors SpaceMembersTab. */}
         <div className="mt-4 border-t border-border pt-3" data-testid="page-comment-audience">
@@ -340,7 +385,8 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
           })}
         </div>
 
-        </div>
+        </TabsContent>
+        </Tabs>
 
         <DialogFooter className="mt-4">
           <Button variant="default" type="button" onClick={onClose}>{t("common.close")}</Button>
