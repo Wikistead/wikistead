@@ -25,7 +25,7 @@ const TUPLES = [
   { user: "user:*", relation: "view_base", object: `page:${PAGE}` },
 ];
 
-let jwks: { url: string; mint: (sub: string) => Promise<string>; close: () => Promise<void> };
+let jwks: { url: string; mint: (sub: string, claims?: Record<string, unknown>) => Promise<string>; close: () => Promise<void> };
 let authenticate: typeof import("../authenticate.js").authenticate;
 
 async function startJwksIssuer(issuerUrl: string) {
@@ -40,8 +40,8 @@ async function startJwksIssuer(issuerUrl: string) {
   const port = (server.address() as { port: number }).port;
   return {
     url: `http://127.0.0.1:${port}/jwks`,
-    mint: (sub: string) =>
-      new SignJWT({})
+    mint: (sub: string, claims: Record<string, unknown> = {}) =>
+      new SignJWT(claims)
         .setProtectedHeader({ alg: "RS256", kid: "cmb471" })
         .setIssuer(issuerUrl).setSubject(sub).setIssuedAt().setExpirationTime("5m")
         .sign(privateKey as KeyLike),
@@ -78,6 +78,18 @@ describe("#471 / ADR-176: collab room membership", () => {
     const r = await authenticate({ token: await jwks.mint(OUTSIDER), documentName: DOC });
     expect(r.principal).toMatchObject({ kind: "member", tenantId: "tenant_dev", userId: OUTSIDER });
     expect(r.readOnly, "public view only — the wildcard grants reading, not writing").toBe(true);
+  });
+
+  it("accepts a tenant claim naming the tenant by SLUG, as the HTTP seam does", async () => {
+    // an IdP mints human names, not our internal ids — and a token that authenticates over HTTP and
+    // then cannot open the document it just fetched is worse than no claim check at all
+    await writeTuples(fgaClient, [{ user: `user:${OUTSIDER}`, relation: "member", object: "tenant:tenant_dev" }]).catch(() => {});
+    const bySlug = await jwks.mint(OUTSIDER, { tenant: "dev" });
+    const r = await authenticate({ token: bySlug, documentName: DOC });
+    expect(r.principal).toMatchObject({ kind: "member", userId: OUTSIDER });
+    // …while a claim naming somewhere else is still refused
+    await expect(authenticate({ token: await jwks.mint(OUTSIDER, { tenant: "somewhere-else" }), documentName: DOC }))
+      .rejects.toThrow(/tenant mismatch/);
   });
 
   it("refuses a member-collab token whose subject has since been removed", async () => {

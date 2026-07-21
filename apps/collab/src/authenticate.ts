@@ -10,6 +10,7 @@ import {
   makeMemberVerifier,
 } from "@wikistead/auth";
 import { fgaClient, check, checkMemberAccess, isTenantMember } from "@wikistead/authz";
+import { pool } from "./db.js";
 
 const guestCfg = {
   secret: process.env.GUEST_TOKEN_SECRET!,
@@ -46,6 +47,18 @@ export function parseDocName(name: string): { tenantId: string; pageId: string; 
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(`forbidden: ${msg}`);
+}
+
+// The room's tenant slug, for the advisory claim comparison below. Cached: it never changes for a
+// live room, and this must not add a query to every join.
+const slugCache = new Map<string, string>();
+async function tenantSlug(tenantId: string): Promise<string> {
+  const hit = slugCache.get(tenantId);
+  if (hit !== undefined) return hit;
+  const [row] = await pool<{ slug: string }[]>`SELECT slug FROM tenants WHERE id = ${tenantId}`;
+  const slug = row?.slug ?? "";
+  if (slug) slugCache.set(tenantId, slug);
+  return slug;
 }
 
 export async function authenticate(args: { token: string; documentName: string }): Promise<AuthResult> {
@@ -117,8 +130,12 @@ export async function authenticate(args: { token: string; documentName: string }
 
   // OIDC bearer member token (programmatic). The token's own tenant claim, when it carries one, must
   // agree with the room's tenant — matching the two branches above — and membership settles it.
+  // The claim may name the tenant by id or by slug, exactly as the HTTP seam accepts it: a token an
+  // IdP mints is far likelier to carry a human name than our internal id, and an asymmetry here
+  // would mean the same token authenticates over HTTP and then cannot open the document it just
+  // fetched.
   const m = await verifyMember(token);
-  assert(!m.tenantId || m.tenantId === tenantId, "tenant mismatch");
+  assert(!m.tenantId || m.tenantId === tenantId || m.tenantId === (await tenantSlug(tenantId)), "tenant mismatch");
   const access = await checkMemberAccess(fgaClient, m.sub, { type: "page", id: pageId });
   assert(access !== null, "member has no access to this page");
   if (ephemeral) assert(!access.readOnly, "ephemeral room requires edit"); // #92: co-editing = edit
