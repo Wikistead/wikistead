@@ -284,6 +284,38 @@ describe('buildHtmlExport', () => {
     expect(res!.body).toContain('Child page body') // the published_md was rendered
   })
 
+  // #422 the align FIX was false-green — the unit test asserted the wrapper CLASS existed in the
+  // render fragment, never that the finished document styles it. The export is self-contained, so the
+  // app bundle's copy of the #267 align rules is not there: the wrapper was inert and export/print
+  // showed no alignment at all. Pin the whole pipeline — wrapper survives the sanitizer AND the
+  // document carries the rule that makes it do something.
+  it('#422: an aligned block survives the sanitizer AND the export document styles it', async () => {
+    const [before] = await admin<[{ published_md: string | null }]>`SELECT published_md FROM pages WHERE id = ${CHILD}`
+    await admin`UPDATE pages SET published_md = ${':::table{align=right}\n<table><tbody><tr><td>x</td></tr></tbody></table>\n:::\n'} WHERE id = ${CHILD}`
+    try {
+      const res = await buildHtmlExport(db, fgaClient, { userId: USER, pageId: CHILD })
+      const doc = res!.body
+      // 1. the wrapper reached the FINAL document (the sanitizer keeps class-only styling hooks)
+      expect(doc, 'the align wrapper survives sanitize').toContain('class="cm-lp-align-right"')
+      // 2. …and the document defines what that class DOES (the half that was missing)
+      expect(doc, 'the export stylesheet aligns it').toContain('.cm-lp-align-right{display:flex;flex-direction:column;align-items:flex-end;}')
+      expect(doc).toContain('.cm-lp-align-left{display:flex;flex-direction:column;align-items:flex-start;}')
+
+      // The same wrapper on an aligned DIAGRAM fence. (The rejection expected mermaid to arrive as a
+      // degraded block; it is registered exportFidelity "preserve", so the export keeps the fence as
+      // <pre class="mermaid"> and the wrapper simply wraps that — no fidelity-badge nesting to reason
+      // about.)
+      await admin`UPDATE pages SET published_md = ${'```mermaid align=left\nflowchart TD\n  A-->B\n```\n'} WHERE id = ${CHILD}`
+      const diagram = (await buildHtmlExport(db, fgaClient, { userId: USER, pageId: CHILD }))!.body
+      expect(diagram, 'the diagram fence is aligned too').toContain('class="cm-lp-align-left"')
+      expect(diagram).toContain('<pre class="mermaid">')
+      // check the BODY, not the whole document — the stylesheet always defines .wks-fidelity-degrade
+      expect(diagram.split('</head>')[1] ?? '', 'preserve fidelity ⇒ no degrade badge around it').not.toContain('wks-fidelity-degrade')
+    } finally {
+      await admin`UPDATE pages SET published_md = ${before!.published_md} WHERE id = ${CHILD}`
+    }
+  })
+
   it('ships the editor-matching stylesheet so the export looks like the app (#85 bounce 635)', async () => {
     const res = await buildHtmlExport(db, fgaClient, { userId: USER, pageId: CHILD })
     const css = res!.body

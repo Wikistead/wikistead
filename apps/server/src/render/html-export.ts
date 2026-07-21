@@ -65,6 +65,14 @@ body{margin:0;background:var(--bg);color:var(--fg);}
 .callout-warning{--cb:var(--callout-warning);--cb-icon:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%22m21.73%2018-8-14a2%202%200%200%200-3.48%200l-8%2014A2%202%200%200%200%204%2021h16a2%202%200%200%200%201.73-3%22%3E%3C%2Fpath%3E%3Cpath%20d%3D%22M12%209v4%22%3E%3C%2Fpath%3E%3Cpath%20d%3D%22M12%2017h.01%22%3E%3C%2Fpath%3E%3C%2Fsvg%3E")}
 .callout-danger{--cb:var(--callout-danger);--cb-icon:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%22M12%2016h.01%22%3E%3C%2Fpath%3E%3Cpath%20d%3D%22M12%208v4%22%3E%3C%2Fpath%3E%3Cpath%20d%3D%22M15.312%202a2%202%200%200%201%201.414.586l4.688%204.688A2%202%200%200%201%2022%208.688v6.624a2%202%200%200%201-.586%201.414l-4.688%204.688a2%202%200%200%201-1.414.586H8.688a2%202%200%200%201-1.414-.586l-4.688-4.688A2%202%200%200%201%202%2015.312V8.688a2%202%200%200%201%20.586-1.414l4.688-4.688A2%202%200%200%201%208.688%202z%22%3E%3C%2Fpath%3E%3C%2Fsvg%3E")}
 .columns{display:flex;gap:1em;flex-wrap:wrap;}.columns>.column{flex:1;min-width:12em;}
+/* #422 block alignment (:::table{align=} and align= diagram fences). The renderer emits the
+   same .cm-lp-align-* wrapper the app uses, but THIS document is self-contained — the app bundle's
+   copy of these rules (callout-icons.css, #267) is not loaded here, so without them the wrapper was
+   inert and export/print showed no alignment at all. Same semantics as the app's: a column flex box
+   whose cross-axis start/end does the aligning (the <table> itself must not become the flex box). */
+.cm-lp-align-left{display:flex;flex-direction:column;align-items:flex-start;}
+.cm-lp-align-right{display:flex;flex-direction:column;align-items:flex-end;}
+.cm-lp-align-center{display:flex;flex-direction:column;align-items:center;}
 .tabs>.tab{margin:.5em 0;}.tab-label{margin:0 0 .3em;}
 .embed-link{word-break:break-all;}
 .wks-fidelity-degrade{position:relative;border:1px dashed color-mix(in srgb,var(--fg-dim) 55%,transparent);border-radius:6px;padding:.4em .6em;margin:.5em 0;}
