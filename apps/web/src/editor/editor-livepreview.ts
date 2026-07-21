@@ -1,4 +1,5 @@
 import { EditorView, minimalSetup } from "codemirror";
+import { dropCursor } from "@codemirror/view";
 import { tooltips, keymap } from "@codemirror/view";
 import { EditorState, Prec, type Compartment, type Extension } from "@codemirror/state";
 import { vim, getCM } from "@replit/codemirror-vim";
@@ -269,6 +270,11 @@ export function mountLivePreview(
       // reconfigure them in place (no remount — collab/presence stay attached, the vim-toggle rule).
       ...(opts.searchPhrasesCompartment ? [opts.searchPhrasesCompartment.of(searchPhrasesContent(opts.searchPhrases))] : [searchPhrasesContent(opts.searchPhrases)]),
       minimalSetup,
+      // #488: show WHERE a drag will land. minimalSetup omits dropCursor (basicSetup has it), so a
+      // file dragged over the page gave no clue about its insertion point until it was already
+      // inserted — and the drop lands at posAtCoords (image-drop.ts), which is exactly the position
+      // this draws. Display-only: it appends a div to scrollDOM and touches neither doc nor offsets.
+      dropCursor(),
       // position:fixed so the palette/bubble/hint escape overflow:hidden ancestors and
       // CM flips them above/below + shifts horizontally to stay within the viewport.
       tooltips({ position: "fixed" }),
