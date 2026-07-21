@@ -1198,16 +1198,30 @@ export function usePortal() {
 export type ApiScope = "read" | "write";
 export interface ApiKeySummary { id: string; name: string; keyPrefix: string; scope: ApiScope; createdAt: string; lastUsedAt: string | null }
 export interface ApiKeyCreated extends ApiKeySummary { plaintext: string }
+// #462: two lists, because they answer different questions. `useApiKeys` is the tenant-wide ADMIN
+// view (it used to be readable by any member, which laid out who automates what); `useMyApiKeys` is
+// the member's own keys, which is all a self-serve surface should show.
 export function useApiKeys() {
   const { token } = useSession();
   return useQuery({ queryKey: ["api-keys"], queryFn: () => apiFetch<ApiKeySummary[]>("/api-keys", token).then((r) => r ?? []) });
+}
+export function useMyApiKeys(enabled = true) {
+  const { token } = useSession();
+  return useQuery({ queryKey: ["api-keys", "mine"], queryFn: () => apiFetch<ApiKeySummary[]>("/api-keys/mine", token).then((r) => r ?? []), enabled });
+}
+// What the CALLER may do here — for showing or hiding the affordance only. The server refuses
+// regardless of what this says.
+export interface ApiKeyPolicy { policy: "members" | "admins_only"; canIssue: boolean; maxScope: ApiScope }
+export function useMyApiKeyPolicy() {
+  const { token } = useSession();
+  return useQuery({ queryKey: ["api-keys", "policy"], queryFn: () => apiFetch<ApiKeyPolicy>("/api-keys/policy", token) });
 }
 export function useCreateApiKey() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: { name: string; scope: ApiScope }) => apiFetch<ApiKeyCreated>("/api-keys", token, { method: "POST", body: JSON.stringify(args) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }), // refreshes both lists (shared key prefix)
   });
 }
 export function useRevokeApiKey() {
@@ -1382,14 +1396,17 @@ export function useDeleteWebhook() {
 }
 export function useApiPolicy() {
   const { token } = useSession();
-  return useQuery({ queryKey: ["api-policy"], queryFn: () => apiFetch<{ maxScope: ApiScope }>("/admin/api-policy", token) });
+  return useQuery({ queryKey: ["api-policy"], queryFn: () => apiFetch<{ maxScope: ApiScope; issuePolicy: "members" | "admins_only" }>("/admin/api-policy", token) });
 }
+// #462: each switch sends only its own field, so the two on this panel cannot overwrite each other
+// with a stale copy of the other's value.
 export function useUpdateApiPolicy() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (maxScope: ApiScope) => apiFetch<null>("/admin/api-policy", token, { method: "PATCH", body: JSON.stringify({ maxScope }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["api-policy"] }),
+    mutationFn: (patch: { maxScope?: ApiScope; issuePolicy?: "members" | "admins_only" }) =>
+      apiFetch<null>("/admin/api-policy", token, { method: "PATCH", body: JSON.stringify(patch) }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["api-policy"] }); void qc.invalidateQueries({ queryKey: ["api-keys"] }); },
   });
 }
 

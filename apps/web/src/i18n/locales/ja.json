@@ -79,7 +79,8 @@
     "editor": "エディタ",
     "theme": "テーマ",
     "data": "データ",
-    "notifications": "通知"
+    "notifications": "通知",
+    "apiKeys": "API キー"
   },
   "account": {
     "profileHint": "ワークスペース上のあなたの識別情報＝共同編集者からの見え方。",
@@ -241,7 +242,12 @@
     "empty": "API キーはまだありません。",
     "neverUsed": "未使用",
     "lastUsed": "最終使用",
-    "lastUsedRel": "{{rel}}に使用"
+    "lastUsedRel": "{{rel}}に使用",
+    "issuePolicy": "API キーを作成できる人",
+    "issueMembers": "すべてのメンバー",
+    "issueAdminsOnly": "管理者のみ",
+    "issueMembersHint": "メンバーは自分のアカウント設定から自分のキーを作成します。キーが所有者の権限を超えることはありません。",
+    "issueAdminsOnlyHint": "メンバーは既に持っているキーの確認と失効はできますが、新規作成はできません。"
   },
   "adminAuth": {
     "title": "認証",
@@ -1080,5 +1086,11 @@
       "legal": "法的要請",
       "unspecified": "未指定（開示開始前）"
     }
+  },
+  "accountApiKeys": {
+    "title": "API キー",
+    "body": "キーはあなた自身の権限で動きます（あなたにできないことはキーにもできません）。平文は作成時に一度だけ表示されます。",
+    "restricted": "このテナントでは API キーを作成できるのは管理者だけです。すでにお持ちのキーはそのまま使え、ここで失効できます。",
+    "empty": "API キーはまだありません。"
   }
 }

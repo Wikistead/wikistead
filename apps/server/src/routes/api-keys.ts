@@ -2,12 +2,16 @@ import { createHash, randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
-import { requireTenantAdmin } from '@wikistead/authz'
+import { requireTenantAdmin, isTenantAdmin } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { entitlementDenied } from '../entitlement-ux.js'
 import type { TenantDb } from '../db/index.js'
 
 export type ApiScope = 'read' | 'write'
+// #462: who may mint a key here. 'members' is what the server has always done (the admin-only
+// feeling came from the console being the only UI); 'admins_only' is the tenant asking for the
+// stricter rule, and the server — not the UI — is what enforces it.
+export type ApiKeyIssuePolicy = 'members' | 'admins_only'
 
 interface ApiKeyRow {
   id: string; tenant_id: string; owner_user_id: string; name: string
@@ -24,6 +28,29 @@ export async function getApiKeyMaxScope(db: TenantDb): Promise<ApiScope> {
     SELECT api_key_max_scope FROM tenant_settings LIMIT 1
   `
   return row?.api_key_max_scope === 'read' ? 'read' : 'write'
+}
+
+export async function getApiKeyIssuePolicy(db: TenantDb): Promise<ApiKeyIssuePolicy> {
+  const [row] = await db.sql<{ api_key_issue_policy: string | null }[]>`
+    SELECT api_key_issue_policy FROM tenant_settings LIMIT 1
+  `
+  return row?.api_key_issue_policy === 'admins_only' ? 'admins_only' : 'members'
+}
+
+export async function setApiKeyIssuePolicy(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { tenantId: string; userId: string; policy: ApiKeyIssuePolicy },
+): Promise<void> {
+  await requireTenantAdmin(fga, args.userId, args.tenantId)
+  if (args.policy !== 'members' && args.policy !== 'admins_only') {
+    throw Object.assign(new Error('invalid policy'), { statusCode: 400 })
+  }
+  await db.sql`
+    INSERT INTO tenant_settings (tenant_id, api_key_issue_policy, updated_at)
+    VALUES (${args.tenantId}, ${args.policy}, now())
+    ON CONFLICT (tenant_id) DO UPDATE SET api_key_issue_policy = ${args.policy}, updated_at = now()
+  `
 }
 
 export async function setApiKeyMaxScope(
@@ -87,15 +114,24 @@ export async function createApiKey(
   return result
 }
 
-// List active API keys for the current tenant (RLS scopes automatically).
-// key_hash is never exposed.
-export async function listApiKeys(db: TenantDb): Promise<ApiKeySummary[]> {
-  const rows = await db.sql<ApiKeyRow[]>`
-    SELECT id, name, key_prefix, scope, created_at, last_used_at
-    FROM api_keys
-    WHERE revoked_at IS NULL
-    ORDER BY created_at DESC
-  `
+// List active API keys. RLS keeps this inside the tenant; `ownerUserId` narrows it to one member's
+// own keys.
+//
+// #462: passing no owner is now an ADMIN view. It used to be the only view, and every member could
+// call it — so any member could read the name, prefix, scope and last-use time of every integration
+// in the tenant. Those are not secrets in the credential sense (the hash is never exposed), but they
+// map out who automates what, which is nobody's business but the owner's and the admin's.
+export async function listApiKeys(db: TenantDb, args: { ownerUserId?: string } = {}): Promise<ApiKeySummary[]> {
+  const owner = args.ownerUserId
+  const rows = owner
+    ? await db.sql<ApiKeyRow[]>`
+        SELECT id, name, key_prefix, scope, created_at, last_used_at
+        FROM api_keys WHERE revoked_at IS NULL AND owner_user_id = ${owner}
+        ORDER BY created_at DESC`
+    : await db.sql<ApiKeyRow[]>`
+        SELECT id, name, key_prefix, scope, created_at, last_used_at
+        FROM api_keys WHERE revoked_at IS NULL
+        ORDER BY created_at DESC`
   return rows.map(r => ({
     id: r.id, name: r.name, keyPrefix: r.key_prefix,
     scope: r.scope === 'read' ? 'read' : 'write',
@@ -128,6 +164,11 @@ export async function revokeApiKey(
 
 export async function apiKeysPlugin(app: FastifyInstance) {
   app.post<{ Body: { name: string; scope?: ApiScope } }>('/api-keys', async (req, reply) => {
+    // #462: the tenant's issuing policy, enforced HERE. The console hiding the button is a
+    // convenience; this is the gate. (Membership itself is settled before any route runs — #471.)
+    if ((await getApiKeyIssuePolicy(req.db)) === 'admins_only') {
+      await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    }
     const created = await createApiKey(req.db, {
       tenantId: req.tenant.id,
       plan: req.tenant.plan,
@@ -138,7 +179,15 @@ export async function apiKeysPlugin(app: FastifyInstance) {
     return reply.code(201).send(created)
   })
 
-  app.get('/api-keys', async (req) => listApiKeys(req.db))
+  // The caller's OWN keys — the member self-serve surface (#462).
+  app.get('/api-keys/mine', async (req) => listApiKeys(req.db, { ownerUserId: req.user.sub }))
+
+  // Every key in the tenant: an ADMIN view. It was open to any member, which handed out a map of
+  // who automates what (#462).
+  app.get('/api-keys', async (req) => {
+    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    return listApiKeys(req.db)
+  })
 
   app.delete<{ Params: { id: string } }>('/api-keys/:id', async (req, reply) => {
     const revoked = await revokeApiKey(req.db, { id: req.params.id, ownerUserId: req.user.sub })
@@ -146,11 +195,34 @@ export async function apiKeysPlugin(app: FastifyInstance) {
     return reply.code(204).send()
   })
 
-  // Tenant API policy: the max scope keys may be issued with (tenant#admin).
-  app.get('/admin/api-policy', async (req) => ({ maxScope: await getApiKeyMaxScope(req.db) }))
+  // Tenant API policy: who may issue, and the max scope they may issue with (tenant#admin). This is
+  // an /admin/ surface, so it is admin-gated like its siblings even though the same two values reach
+  // a member advisorily via /api-keys/policy — a member reads this through THAT door, not this one.
+  app.get('/admin/api-policy', async (req) => {
+    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    return { maxScope: await getApiKeyMaxScope(req.db), issuePolicy: await getApiKeyIssuePolicy(req.db) }
+  })
 
-  app.patch<{ Body: { maxScope: ApiScope } }>('/admin/api-policy', async (req, reply) => {
-    await setApiKeyMaxScope(req.db, app.fga, { tenantId: req.tenant.id, userId: req.user.sub, maxScope: req.body?.maxScope })
+  app.patch<{ Body: { maxScope?: ApiScope; issuePolicy?: ApiKeyIssuePolicy } }>('/admin/api-policy', async (req, reply) => {
+    // Admin-gate the request itself, not only each setter: an empty body would otherwise call no
+    // setter and hand a non-admin a 204, which reads like success on an admin route.
+    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    // Either field may be sent on its own, so the two switches on the same panel do not overwrite
+    // each other with a stale copy of the other's value.
+    if (req.body?.maxScope !== undefined) {
+      await setApiKeyMaxScope(req.db, app.fga, { tenantId: req.tenant.id, userId: req.user.sub, maxScope: req.body.maxScope })
+    }
+    if (req.body?.issuePolicy !== undefined) {
+      await setApiKeyIssuePolicy(req.db, app.fga, { tenantId: req.tenant.id, userId: req.user.sub, policy: req.body.issuePolicy })
+    }
     return reply.code(204).send()
+  })
+
+  // What the CALLER may do, so a member surface can show or hide its own affordance without being
+  // the authority on it (the server just refused, or will refuse, either way).
+  app.get('/api-keys/policy', async (req) => {
+    const policy = await getApiKeyIssuePolicy(req.db)
+    const canIssue = policy === 'members' || (await isTenantAdmin(app.fga, req.user.sub, req.tenant.id))
+    return { policy, canIssue, maxScope: await getApiKeyMaxScope(req.db) }
   })
 }
