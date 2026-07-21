@@ -663,33 +663,55 @@ export async function toggleTask(
   const canEdit = await check(fga, args.subject, 'edit', { type: 'page', id: args.pageId }, args.context)
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 
-  const [page] = await db.sql<[{ tenant_id: string; ydoc: Buffer | null; published_md: string | null; published_at: Date | null }]>`
-    SELECT tenant_id, ydoc, published_md, published_at FROM pages WHERE id = ${args.pageId}
-  `
-  if (!page) throw Object.assign(new Error('not found'), { statusCode: 404 })
-  if (page.published_md == null) throw Object.assign(new Error('not published'), { statusCode: 409 })
-
-  const draftMd = decodeYdocContent(page.ydoc)
-  const publishedMd = page.published_md
-
-  // Structural guard: the ONLY difference may be a single checkbox flip at `index`.
-  // Equal skeletons ⇒ identical prose AND identically-positioned task items; then the
-  // state arrays align 1:1 and exactly one must differ, at the claimed index.
-  if (taskSkeleton(draftMd) !== taskSkeleton(publishedMd)) {
-    throw Object.assign(new Error('draft has non-checkbox changes; publish them first'), { statusCode: 409 })
-  }
-  const draftStates = taskStates(draftMd)
-  const pubStates = taskStates(publishedMd)
-  const diff = draftStates.reduce<number[]>((acc, s, i) => (s !== pubStates[i] ? [...acc, i] : acc), [])
-  if (diff.length !== 1 || diff[0] !== args.index) {
-    throw Object.assign(new Error('expected exactly one checkbox flip at the given index'), { statusCode: 409 })
-  }
-
-  // Fold the flip into the published snapshot. NO revision insert (the whole point);
-  // draft == published again ⇒ not dirty. Reindex like publish (published text changed).
+  // #361 read → guard → fold now run inside ONE transaction under a per-page advisory lock.
+  // With the client no longer serializing toggles (that wait was the sluggishness the owner
+  // reported), two folds can overlap; reading the draft OUTSIDE the write would let the slower one
+  // commit a snapshot taken before its sibling's fold and silently drop that flip (published loses a
+  // tick the user already saw, and the page is left dirty). Serialized here, the second fold re-reads
+  // AFTER the first committed and simply finds nothing left to do (a `task_burst` no-op).
+  let tenantId!: string
+  let draftMd!: string
+  let draftStates!: boolean[]
   let outboxId!: string
   let publishedAt!: Date
   await db.tx(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${`task:${args.pageId}`})::bigint)`
+    const [page] = await tx<[{ tenant_id: string; ydoc: Buffer | null; published_md: string | null; published_at: Date | null }]>`
+      SELECT tenant_id, ydoc, published_md, published_at FROM pages WHERE id = ${args.pageId}
+    `
+    if (!page) throw Object.assign(new Error('not found'), { statusCode: 404 })
+    if (page.published_md == null) throw Object.assign(new Error('not published'), { statusCode: 409 })
+    tenantId = page.tenant_id
+    draftMd = decodeYdocContent(page.ydoc)
+    const publishedMd = page.published_md
+
+    // Structural guard: the ONLY difference may be a single checkbox flip at `index`.
+    // Equal skeletons ⇒ identical prose AND identically-positioned task items; then the
+    // state arrays align 1:1 and only state chars can differ.
+    // #361 the two 409s carry DISTINCT static `code`s (the field Fastify's default error
+    // serializer already emits, and apiErrorFrom already maps onto ApiError.code — no new plumbing).
+    // They share a status but tell different stories: `task_draft_dirty` means real unpublished prose
+    // is in the way ("publish first" is the honest advice), while `task_burst` only means a faster
+    // click already folded this flip — a transient the client resolves by resyncing, never a reason
+    // to undo what the user just saw. Static codes only (the caller already holds edit).
+    if (taskSkeleton(draftMd) !== taskSkeleton(publishedMd)) {
+      throw Object.assign(new Error('draft has non-checkbox changes; publish them first'), { statusCode: 409, code: 'task_draft_dirty' })
+    }
+    // #361 (P1, enabled because P0 needs it): the fold takes EVERY pending checkbox flip, not
+    // exactly one. Its actual job — stated when it was written — is "no non-checkbox content rides
+    // into published without a revision", and the skeleton equality above already guarantees exactly
+    // that. The count restriction only ever encoded "one click at a time", which a fast clicker
+    // legitimately breaks; rejecting the whole burst would undo flips the user already saw. The
+    // claimed index must still be among the diffs, so a stale or fabricated index is still refused.
+    draftStates = taskStates(draftMd)
+    const pubStates = taskStates(publishedMd)
+    const diff = draftStates.reduce<number[]>((acc, st, i) => (st !== pubStates[i] ? [...acc, i] : acc), [])
+    if (diff.length === 0 || !diff.includes(args.index)) {
+      throw Object.assign(new Error('the claimed checkbox is not flipped in the draft'), { statusCode: 409, code: 'task_burst' })
+    }
+
+    // Fold into the published snapshot. NO revision insert (the whole point); draft == published
+    // again ⇒ not dirty. Reindex like publish (published text changed).
     const tp = countTodoTasks(draftMd) // #290: a checkbox tick changes the :::todo aggregate too — keep it fresh
     const [p] = await tx<[{ published_at: Date }]>`
       UPDATE pages SET published_md = ${draftMd}, has_unpublished_changes = false,
@@ -709,7 +731,7 @@ export async function toggleTask(
       VALUES (${page.tenant_id}, ${args.pageId}, ${args.createdBy}, ${args.index}, ${draftStates[args.index]!})
     `
   })
-  processOutboxAsync(driver, outboxId, { tenantId: page.tenant_id, pageId: args.pageId, operation: 'upsert' })
+  processOutboxAsync(driver, outboxId, { tenantId, pageId: args.pageId, operation: 'upsert' })
   return { publishedAt }
 }
 

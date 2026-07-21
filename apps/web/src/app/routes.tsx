@@ -165,7 +165,7 @@ import { SearchBox } from "../search/SearchBox";
 import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, assetUrl, type GuestToken } from "../data/apiClient";
-import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, chainPageToggle, useAccountSettings, useDeletePage, useDirectDeletePage, useCreatePage, useEntitlements, useSpaces, useBranding, type Page } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useDirectDeletePage, useCreatePage, useEntitlements, useSpaces, useBranding, type Page } from "../data/queries";
 import { WikisteadMark } from "./BrandLockup"; // #430: the public header brand fallback
 import { GuestSidebar } from "./GuestSidebar";
 import { ConfirmDialog } from "../ui/dialogs";
@@ -423,14 +423,21 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   // the draft is rejected, never silently published. Stable so <Editor>'s memo holds.
   const toggleTask = useToggleTask(pageId ?? "");
   const onToggleTask = useCallback(
-    (index: number, applyFlip: () => void) =>
-      toggleTask.mutateAsync({ index, applyFlip }).then(() => undefined).catch((e) => {
+    (index: number, applyFlip: () => void, checked: boolean) =>
+      toggleTask.mutateAsync({ index, applyFlip, checked }).then(() => undefined).catch((e) => {
         // #303: a 409 is the EXPECTED outcome when the draft has unpublished changes — the checkbox can't
         // fold into published without mixing in that draft. Show a dedicated message, not the generic error.
         // Read `.status` STRUCTURALLY, not via `instanceof ApiError`: under Vite dev the apiClient module can
         // be duplicated across graphs so the class identity mismatches and instanceof is false at runtime
         // (#303 review defect — the dedicated toast never showed).
-        const dirty = (e as { status?: number } | null)?.status === 409;
+        // #361 the two 409s are told apart by their static code. `task_burst` is a TRANSIENT — a
+        // faster click already stacked a flip — so it is swallowed: no toast, and no rethrow, because
+        // rethrowing runs the editor's draft-revert and undoes what the user is looking at. The refetch
+        // that follows the burst is the reconciliation. Only `task_draft_dirty` (real unpublished prose)
+        // keeps the "publish first" message and the revert.
+        const err = e as { status?: number; code?: string } | null;
+        if (err?.status === 409 && err.code === "task_burst") return undefined;
+        const dirty = err?.status === 409;
         notify.error(t(dirty ? "toast.taskToggleDirty" : "toast.actionFailed"));
         throw e; // let the editor revert the optimistic flip
       }),
@@ -601,7 +608,9 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
                         items-center aligns the ring to the meta TEXT centre, not the taller margin-box — the ring
                         rode ~2px high against a SINGLE meta line (the 2-line case already looked centred). */}
                     {/* #361 point 3: animKey keeps the band ring animating across surface remounts too. */}
-                    <span className="mt-1 inline-flex self-center"><ProgressRing done={taskProgress.done} total={taskProgress.total} animKey={pageId} /></span>
+                    {/* the band ring and every sidebar tree ring are the SAME component, so the
+                        shared page-task-ring testid cannot address this one — give the band its own. */}
+                    <span className="mt-1 inline-flex self-center" data-testid="band-task-ring"><ProgressRing done={taskProgress.done} total={taskProgress.total} animKey={pageId} /></span>
                   </div>
                 </div>
                 {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}
@@ -934,10 +943,9 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
   // already accepts guest:'edit'; only this client wiring was missing. Same contract as the member
   // path (#303): throw on failure so the editor reverts its optimistic draft flip; a 409 (dirty
   // draft) gets the dedicated toast (status read STRUCTURALLY — instanceof is unreliable under Vite
-  // module duplication). #361 the draft flip + POST run through the shared per-page serial
-  // chain (each fold must see exactly one flip — see chainPageToggle), and the published reload is
-  // COALESCED to the burst's last settle (a per-click reload repainted intermediate committed states
-  // against the user's final optimistic flip — the member-side mechanism, mirrored here).
+  // module duplication). #361 the serial chain is gone (it cost a round-trip per click); the
+  // published reload stays COALESCED to the burst's last settle (a per-click reload repainted
+  // intermediate committed states against the user's final optimistic flip — the mechanism).
   const pendingTogglesRef = useRef(0);
   const onToggleTask = useCallback(
     (index: number, applyFlip: () => void) => {
@@ -946,15 +954,15 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
         pendingTogglesRef.current -= 1;
         if (pendingTogglesRef.current === 0) reloadPublished();
       };
-      return chainPageToggle(pageId, () => {
-        applyFlip();
-        return apiFetch<{ publishedAt: string | null }>(`/pages/${encodeURIComponent(pageId)}/tasks/toggle`, token, {
-          method: "POST",
-          body: JSON.stringify({ index }),
-        });
+      applyFlip(); // #361 no serial chain — the draft flip and the POST fire on the click frame
+      return apiFetch<{ publishedAt: string | null }>(`/pages/${encodeURIComponent(pageId)}/tasks/toggle`, token, {
+        method: "POST",
+        body: JSON.stringify({ index }),
       }).then(() => { settle(); }).catch((e) => {
         settle();
-        const dirty = (e as { status?: number } | null)?.status === 409;
+        const err = e as { status?: number; code?: string } | null;
+        if (err?.status === 409 && err.code === "task_burst") return undefined; // transient — never undo the user's flip
+        const dirty = err?.status === 409;
         notify.error(t(dirty ? "toast.taskToggleDirty" : "toast.actionFailed"));
         throw e; // let the editor revert the optimistic flip
       });

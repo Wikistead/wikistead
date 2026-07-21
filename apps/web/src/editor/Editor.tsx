@@ -126,7 +126,9 @@ export interface EditorProps {
   // at click time let a rapid burst pile ≥2 flips into the draft before the first fold,
   // so the server's exactly-one-flip guard 409'd a clean page). A rejection (409
   // dirty/mixed, 403) reverts the optimistic draft flip. Pass a STABLE callback.
-  onToggleTask?: (index: number, applyFlip: () => void) => Promise<void>;
+  // `checked` = the box's PRE-click state (#361): the host needs it to move the sidebar ring
+  // optimistically (that ring reads a server aggregate, not the document).
+  onToggleTask?: (index: number, applyFlip: () => void, checked: boolean) => Promise<void>;
 }
 
 function userField(user: EditorUser) {
@@ -426,7 +428,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
               myGen = (flipGen.get(index) ?? 0) + 1;
               flipGen.set(index, myGen);
             };
-            onToggleTask(index, applyFlip).catch(() => {
+            onToggleTask(index, applyFlip, checked).catch(() => {
               const c = collabRef.current;
               if (!c || myGen === 0) return; // never wrote → nothing to restore
               if (flipGen.get(index) !== myGen) return; // a newer flip superseded ours — it settles the state

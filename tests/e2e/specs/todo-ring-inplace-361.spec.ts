@@ -309,19 +309,22 @@ test("#361 the published poll never repaints an intermediate state during a togg
   expect(cur, "settled on the optimistic final value (unchecked)").toBe(false);
 });
 
-// #361 the FAST-BURST "publish first" block. The optimistic draft flip used to be written at
-// CLICK time, so a rapid burst piled ≥2 flips into the draft before the server folded the first one —
-// the exactly-one-flip guard then 409'd EVERY request on a perfectly clean page, surfacing the
-// "publish your draft first" toast and reverting the user's clicks. The fix defers each draft flip
-// into the per-page serial toggle chain (flip + POST as one unit, strictly after the previous toggle
-// settled), so every fold sees exactly the one flip it claims. These pin: a real-click burst produces
-// NO 409, every flip lands (final state = click count), and no dirty residue survives (badge stays
-// absent, including after a reload). Verified red without the fix (both shapes 409'd).
+// #361, MIGRATED by the owner ruling ("a burst 409 is acceptable if that buys speed").
+// The guarantee that mattered — a real-click burst lands EVERY flip, ends at the click parity, and
+// leaves no dirty residue even across a reload — is unchanged and still pinned. What changed is HOW:
+// the client-side serial chain is gone (it cost a round-trip per click), the server folds every
+// pending flip under a per-page lock, and a losing racer answers a silent `task_burst` 409. So the
+// old "every POST is 200" clause is retired in favour of "no request fails for the wrong reason and
+// nothing user-visible breaks": statuses are 200-or-409, no 409 is the dirty-draft kind, and no
+// error toast is raised.
 async function burstPin(browser: any, clicks: { boxIndex: number }[], expectFinal: boolean[], tag: string) {
   const page = await (await browser.newContext()).newPage();
   const toggleStatuses: number[] = [];
-  page.on("response", (r: { url: () => string; status: () => number; request: () => { method: () => string } }) => {
-    if (r.url().includes("/tasks/toggle") && r.request().method() === "POST") toggleStatuses.push(r.status());
+  const toggleCodes: string[] = [];
+  page.on("response", (r: { url: () => string; status: () => number; request: () => { method: () => string }; json: () => Promise<unknown> }) => {
+    if (!r.url().includes("/tasks/toggle") || r.request().method() !== "POST") return;
+    toggleStatuses.push(r.status());
+    if (r.status() !== 200) void r.json().then((b) => toggleCodes.push(String((b as { code?: string })?.code ?? "?"))).catch(() => {});
   });
   // widen the burst window: every fold takes 600ms, so a 3-click burst outruns the first fold by far
   await page.route("**/tasks/toggle", async (route: { continue: () => Promise<void> }) => {
@@ -347,9 +350,12 @@ async function burstPin(browser: any, clicks: { boxIndex: number }[], expectFina
   }
   await sleep(600 * clicks.length + 2500); // serialized folds + the coalesced refetch settle
 
-  // 1. no toggle was rejected — the serialized folds each saw exactly one flip (unfixed: 409s here)
+  // 1. every click reached the server, and any rejection is the harmless burst transient — never the
+  //    dirty-draft kind, and never surfaced to the user.
   expect(toggleStatuses.length).toBe(clicks.length);
-  expect(toggleStatuses.every((s) => s === 200), `no "publish first" 409 in the burst (statuses: ${toggleStatuses.join(",")})`).toBe(true);
+  expect(toggleStatuses.every((s) => s === 200 || s === 409), `only 200/409 in the burst (statuses: ${toggleStatuses.join(",")})`).toBe(true);
+  expect(toggleCodes.every((c) => c !== "task_draft_dirty"), `no dirty-draft rejection on a clean page (codes: ${toggleCodes.join(",")})`).toBe(true);
+  await expect(page.locator("[data-sonner-toast]"), "a burst never raises an error toast").toHaveCount(0);
 
   // 2. every click landed: the final states match the click parity
   for (let i = 0; i < expectFinal.length; i++) {
@@ -375,4 +381,88 @@ test("#361 a fast burst across DIFFERENT boxes folds every flip — no publish-f
 test("#361 a fast SAME-box triple click folds every flip in order — no publish-first block", async ({ browser }) => {
   // 3 clicks on one box (odd count → ends flipped): unfixed, flips 1+2 cancel in the draft → 409s
   await burstPin(browser, [{ boxIndex: 0 }, { boxIndex: 0 }, { boxIndex: 0 }], [true, false, true], "same");
+});
+
+// #361 (the P0 ruling: "the animation must begin on the frame I click; a burst 409 is fine if
+// that buys speed"). The old build only flipped the <input> optimistically — every RING was derived
+// from published_md, so all three (body :::todo, title band, sidebar) waited for the POST + refetch.
+// With the server deliberately STALLED, a correct build still moves all three immediately; the old
+// one cannot move any of them, so this pin is round-trip-independent by construction.
+test("#361 P0: with the toggle stalled 2s, the click frame flips the box AND all three rings", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const title = `todo-p0-361-${Date.now()}`;
+  await openScratch(page, title);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::todo[Sprint]\n- [x] alpha\n- [ ] beta\n- [ ] gamma\n:::\n\nbelow\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(600);
+  await expect(page.getByTestId("edit-toggle")).toBeVisible({ timeout: 8000 });
+  await sleep(600);
+
+  const bodyRing = page.locator("[data-pane=preview] [data-testid=todo-ring]");
+  // the band ring and the sidebar tree rings are the same component, so address the band by its own
+  // wrapper testid rather than the shared one.
+  const bandRing = page.getByTestId("band-task-ring").getByTestId("page-task-ring");
+  // scope to THIS page's tree row: the shared scratch space accumulates rows from every other spec in
+  // the run, so an unscoped tree-ring locator matches a dozen unrelated rings.
+  const treeRing = page.locator("[data-testid=sidebar] [data-testid=tree-page]", { hasText: title }).getByTestId("page-task-ring");
+  await expect(bodyRing).toHaveAttribute("data-done", "1", { timeout: 8000 });
+  await expect(bandRing).toHaveAttribute("data-done", "1", { timeout: 8000 });
+  await expect(treeRing).toHaveAttribute("data-done", "1", { timeout: 8000 });
+
+  // Stall the fold well past any assertion window: nothing below may depend on the server answering.
+  await page.route("**/tasks/toggle", async (route) => {
+    await new Promise((r) => setTimeout(r, 2000));
+    await route.continue();
+  });
+
+  const boxes = page.getByTestId("task-checkbox");
+  await boxes.nth(1).click();
+
+  // Short windows on purpose: 2s of server silence remains, so passing here can ONLY come from the
+  // local optimistic update — the doc flip (body + band, both doc-derived) and the cache patch (tree).
+  await expect(boxes.nth(1), "the box flips on the click frame").toBeChecked({ timeout: 700 });
+  await expect(bodyRing, "body :::todo ring moves without the round-trip").toHaveAttribute("data-done", "2", { timeout: 700 });
+  await expect(bandRing, "title-band ring moves without the round-trip").toHaveAttribute("data-done", "2", { timeout: 700 });
+  await expect(treeRing, "sidebar ring moves without the round-trip").toHaveAttribute("data-done", "2", { timeout: 700 });
+
+  // …and once the stalled fold lands, the committed numbers agree (no bounce back).
+  await sleep(2600);
+  await expect(bodyRing).toHaveAttribute("data-done", "2");
+  await expect(bandRing).toHaveAttribute("data-done", "2");
+  await expect(boxes.nth(1)).toBeChecked();
+});
+
+// #361 a BURST no longer waits on the previous round-trip, and the server folds every pending
+// flip, so the final state matches the click count. A transient `task_burst` 409 may occur — it must
+// never surface as an error toast, and must never undo a flip the user is looking at.
+test("#361 a 4-click burst lands every flip; no error toast, no rollback", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, `todo-burst-361-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::todo[Sprint]\n- [ ] a\n- [ ] b\n- [ ] c\n- [ ] d\n:::\n\nbelow\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(600);
+  await expect(page.getByTestId("edit-toggle")).toBeVisible({ timeout: 8000 });
+  await sleep(600);
+
+  const bodyRing = page.locator("[data-pane=preview] [data-testid=todo-ring]");
+  await expect(bodyRing).toHaveAttribute("data-done", "0", { timeout: 8000 });
+  const boxes = page.getByTestId("task-checkbox");
+  for (let i = 0; i < 4; i++) {
+    await boxes.nth(i).click();
+    await sleep(90); // faster than a fold round-trip on purpose
+  }
+  // every click is reflected immediately (no serialization)
+  await expect(bodyRing, "all four flips are visible without waiting").toHaveAttribute("data-done", "4", { timeout: 1500 });
+  // no error surfaced for the transient
+  await expect(page.locator("[data-sonner-toast]"), "a burst 409 is silent").toHaveCount(0);
+  // and the committed state agrees once everything settles (no rollback)
+  await sleep(2500);
+  await expect(bodyRing, "the committed state matches the click count").toHaveAttribute("data-done", "4");
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
 });

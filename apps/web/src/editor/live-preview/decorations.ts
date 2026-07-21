@@ -594,10 +594,17 @@ class CheckboxWidget extends WidgetType {
           // editable surface: flipping the doc re-renders the widget immediately.
           view.dispatch({ changes: { from: from + 1, to: from + 2, insert: cur ? " " : "x" } });
         } else {
-          // read-only published surface: the doc here is NOT the draft, so it won't re-render until the host
-          // refetches — flip the SAME box for responsiveness.
-          box.checked = !cur;
+          // Read-only published surface. #361 (P0): flip the VIEW'S OWN DOC, not just the input.
+          // The box alone used to be the whole optimistic update, so the progress rings — which are
+          // derived from the document (the :::todo widget aggregates it; taskProgressExtension feeds
+          // the title band) — could not move until the server round-trip and refetch landed. That is
+          // the "the animation starts late" the owner reported: it was structural, not slow code.
+          // One local doc edit drives every doc-derived surface on the SAME frame the click lands;
+          // the refetch later replaces the doc with the committed text (identical when the fold
+          // succeeded, so nothing re-animates). `readOnly` is advisory for input handling — a
+          // programmatic dispatch is exactly how the edit surface does it, one line above.
           const index = taskIndexAt(view.state.doc.toString(), from);
+          view.dispatch({ changes: { from: from + 1, to: from + 2, insert: cur ? " " : "x" } });
           ctl.onToggle(index, from, cur);
         }
       });
