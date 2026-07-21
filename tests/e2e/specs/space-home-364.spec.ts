@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { sleep } from "../helpers";
+import postgres from "postgres";
+import { E2E } from "../fixtures";
 
 // #364 / ADR-157: the space HOMEPAGE — member flows in real Chromium.
 // - /spaces/:id renders the EMPTY STATE (space-name heading + the write button for edit-capable)
@@ -87,4 +89,47 @@ test("#364 §6a: switching spaces lands on the space root", async ({ browser }) 
   await page.getByText(`home364-sw-`, { exact: false }).first().click();
   await page.waitForURL(`**/spaces/${spaceId}`, { timeout: 8000 });
   await expect(page.getByTestId("space-home-empty"), "the space root (empty state) is the landing").toBeVisible();
+});
+
+// #364the SUFFIX-DOUBLING regression. A home created before ruling A stored the
+// label suffix in `pages.title`; the title band re-applied the label and rendered "<Space>
+// ". The band now interpolates the SPACE NAME (the single source the sidebar 🏠 already
+// used), so no stored title can double it — pinned here with the exact fixture the earlier pass
+// lacked: a home whose STORED title carries the suffix (only a freshly created home was ever
+// checked before, and that one is correct by construction).
+test("#364a suffix-baked stored title never doubles in the H1 (band reads space.name)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await page.goto("/p/demo");
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  const spaceName = `home364dup-${Date.now().toString(36)}`;
+  const spaceId = await newSpacePage(page, spaceName);
+  const homeId = await page.evaluate(async (sid: string) => {
+    const r = await fetch(`/api/spaces/${sid}/home`, { method: "POST", headers: { authorization: "Bearer dev-token" } });
+    return ((await r.json()) as { id: string }).id;
+  }, spaceId);
+
+  // Bake the suffix into the STORED title, exactly as a pre-ruling home carries it. The API cannot
+  // produce this state any more (createSpaceHome stores the bare name and PATCH title is refused),
+  // so the fixture is written straight to the row — the point is a legacy row reaching the UI.
+  const sql = postgres(E2E.pgAdmin);
+  try {
+    await sql`UPDATE pages SET title = ${`${spaceName} Home`} WHERE id = ${homeId}`;
+  } finally {
+    await sql.end();
+  }
+
+  await page.goto(`/spaces/${spaceId}`);
+  const titleEl = page.getByTestId("page-title");
+  await expect(titleEl).toBeVisible({ timeout: 8000 });
+  // A RETRYING assertion on the settled text: the pre-fix band interpolated the (suffix-baked)
+  // stored title and settles on "<Space> Home Home", so this can only pass by actually reading the
+  // space name. (A one-shot innerText would have gone red on the first, still-loading frame — a
+  // vacuous red that never distinguishes doubled from single.)
+  await expect(titleEl, "H1 = the space name + exactly one suffix").toHaveText(`${spaceName} Home`, { timeout: 8000 });
+  const txt = (await titleEl.innerText()).trim();
+  expect(txt.match(/Home/g)?.length ?? 0, "one suffix occurrence").toBe(1);
+
+  // the sidebar 🏠 (which always read space.name) and the band now agree — one source, one string
+  const homeEntry = (await page.getByTestId("sidebar-home").innerText()).trim();
+  expect(homeEntry, "sidebar 🏠 and the title band render the same label").toBe(txt);
 });
