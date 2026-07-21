@@ -729,7 +729,8 @@
     "copyBlockRef": "ブロック参照をコピー",
     "alignLeft": "左揃え",
     "alignCenter": "中央揃え",
-    "alignRight": "右揃え"
+    "alignRight": "右揃え",
+    "codeSettings": "コードブロックの設定…"
   },
   "members": {
     "title": "メンバー",

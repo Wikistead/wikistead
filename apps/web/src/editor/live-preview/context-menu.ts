@@ -5,7 +5,8 @@ import i18n from "../../i18n";
 import { INLINE_FORMATS } from "./commands";
 import { linkifyPaste, linkCopyRange } from "./paste-linkify";
 import { diagramFenceAt, setDiagramAlign, imageAlignAt, setImageAlign, tableDirectiveAt, setTableAlign } from "./decorations"; // #255: right-click diagram/image alignment; #393: table block alignment
-import { tableBlockAt } from "../macros/fence"; // #393pipe tables get the same align entries
+import { tableBlockAt } from "../macros/fence";
+import { toggleFenceSettings } from "./fence-settings-panel"; // #456 S4: the declared code-fence settings // #393pipe tables get the same align entries
 import type { FenceAlign } from "@wikistead/macro-render";
 
 // M0-4 (ADR-018): the right-click context menu — the superset entry for mouse users.
@@ -23,7 +24,7 @@ interface LinkRange { from: number; to: number; urlFrom: number; urlTo: number }
 // #325 / ADR-137 slice 2b: the block-reference target for a "Copy block reference" entry — the line-end
 // offset to append the marker at, plus any id already present on that line (so a repeat copy is idempotent).
 interface BlockRef { lineTo: number; existingId: string | null }
-interface MenuState { pos: number; kind: MenuKind; link?: LinkRange; diagramFrom?: number; imageFrom?: number; tableFrom?: number; blockRef?: BlockRef } // #393: tableFrom = a :::table block at the click
+interface MenuState { pos: number; kind: MenuKind; link?: LinkRange; diagramFrom?: number; imageFrom?: number; tableFrom?: number; blockRef?: BlockRef; codeFenceFrom?: number } // #456 S4: codeFenceFrom = a plain code fence at the click // #393: tableFrom = a :::table block at the click
 
 // #325 / ADR-137 slice 2b: the current page's id, provided by the mount (member surface only). Absent on
 // guest / template-preview surfaces — the block-reference entry is then hidden (a ref needs a `pageId#^id`).
@@ -261,6 +262,13 @@ function menuTooltip(v: MenuState): Tooltip {
         }
       }
 
+      // #456 S4: a code fence's settings panel — the macro declares the controls, the host renders them
+      // in the tooltip layer (fence-settings-panel.ts).
+      if (v.codeFenceFrom != null && v.diagramFrom == null) {
+        sep();
+        item("codesettings", i18n.t("contextMenu.codeSettings"), () => { toggleFenceSettings(view, v.codeFenceFrom!); close(view); });
+      }
+
       // #255: a rendered diagram fence adds alignment entries (left / center / right). Robust right-click
       // path (the ✎-adjacent hover button is the convenience). Rewrites the fence `align=` attribute.
       if (v.diagramFrom != null) {
@@ -348,9 +356,12 @@ const menuEvents = Prec.highest(
         ?? tableBlockAt(view.state, pos)?.from
         ?? (wrapPos != null ? tableBlockAt(view.state, wrapPos)?.from : null)
         ?? undefined;
+      // #456 S4: a plain code fence (```lang …) offers its declared settings. Diagrams have their own
+      // registry macro and their own entries, so only an unregistered fence lands here.
+      const codeFenceFrom = codeFenceLineAt(view.state, pos) ?? undefined;
       // #325 slice 2b: on a plain (no-selection, no-link) right-click, offer "Copy block reference" for the block under the cursor.
       const blockRef = kind === "plain" ? (blockRefTarget(view.state, pos, view.state.facet(selfPageIdFacet)) ?? undefined) : undefined;
-      view.dispatch({ effects: openMenu.of({ pos, kind, link, diagramFrom, imageFrom, tableFrom, blockRef }) });
+      view.dispatch({ effects: openMenu.of({ pos, kind, link, diagramFrom, imageFrom, tableFrom, blockRef, codeFenceFrom }) });
       e.preventDefault();
       return true;
     },
@@ -364,6 +375,20 @@ const menuEvents = Prec.highest(
     },
   }),
 );
+
+// #456 S4: the opening line of the code fence CONTAINING `pos`, or null. The click usually lands on a
+// body line, so walk up to the fence that opens the block — and stop at a blank line or a close fence,
+// which means `pos` was not inside one.
+function codeFenceLineAt(state: import("@codemirror/state").EditorState, pos: number): number | null {
+  const start = state.doc.lineAt(Math.min(Math.max(pos, 0), state.doc.length));
+  for (let n = start.number; n >= 1; n--) {
+    const line = state.doc.line(n);
+    const opening = /^\s*[`~]{3,}\s*\S+/.exec(line.text); // a fence WITH an info string opens a block
+    if (opening) return line.from;
+    if (n !== start.number && /^\s*[`~]{3,}\s*$/.test(line.text)) return null; // a bare fence above = a closed block
+  }
+  return null;
+}
 
 export function contextMenu(opts: { selfPageId?: string } = {}): Extension {
   return [menuField, menuEvents, selfPageIdFacet.of(opts.selfPageId)];
