@@ -924,6 +924,12 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
   const [guest] = useState(() => ({ name: t("collab.guest"), color: colorFromString(`guest-${Math.random()}`), picture: null }));
   const [publishedMd, setPublishedMd] = useState<string | null>(null);
   const [pageTitle, setPageTitle] = useState(""); // #318: shown in the guest title band (read-only)
+  // #364 a space's HOME page is labelled by its space everywhere else — the sidebar's 🏠 row, the
+  // member band, the empty state. The guest band printed the raw title, which migration 077 normalised to
+  // the bare space name, so the same page read "Acme" here and "Acme Home" one pane away. The label is
+  // built from the title the guest already has; the server sends a boolean, never the space name (a
+  // single-page share link should not disclose the space behind it).
+  const [isHome, setIsHome] = useState(false);
   const [publishing, setPublishing] = useState(false);
   // #100: guest commenting — canComment (comment_open on the page) decides the composer; comments are
   // page-level for a guest (no inline anchoring — the guest editor isn't wired for anchors). The
@@ -960,8 +966,8 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
   const effectiveVim = vim && !coarsePointer;
 
   const reloadPublished = useCallback(() => {
-    apiFetch<{ title?: string; publishedMd: string | null; canComment?: boolean }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
-      .then((r) => { setPublishedMd(r?.publishedMd ?? null); setPageTitle(r?.title ?? ""); setCanComment(!!r?.canComment); })
+    apiFetch<{ title?: string; isHome?: boolean; publishedMd: string | null; canComment?: boolean }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
+      .then((r) => { setPublishedMd(r?.publishedMd ?? null); setPageTitle(r?.title ?? ""); setIsHome(!!r?.isHome); setCanComment(!!r?.canComment); })
       .catch(() => { /* denied/expired → empty view */ });
   }, [pageId, token]);
   useEffect(() => { reloadPublished(); }, [reloadPublished]);
@@ -1079,7 +1085,11 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
               <div aria-hidden="true" className="absolute inset-y-0 left-0 right-2.5 bg-gradient-to-b from-[color-mix(in_srgb,var(--bg)_90%,transparent)] via-[color-mix(in_srgb,var(--bg)_42%,transparent)] to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_50%,transparent)]" />
               <div className="pointer-events-auto relative mx-auto flex w-full max-w-[740px] items-center gap-3 px-6 pt-6">
                 <div className="min-w-0 flex-1" data-testid="guest-title-band">
-                  <PageTitle title={pageTitle} onRename={canEdit ? renameGuestPage : undefined} />
+                  {/* a home page is named by its space, so renaming it here would be renaming the wrong
+                      thing — the member surface hides the rename on home for the same reason */}
+                  <PageTitle
+                    title={isHome ? t("spaceHome.title", { name: pageTitle }) : pageTitle}
+                    onRename={canEdit && !isHome ? renameGuestPage : undefined} />
                 </div>
                 {/* Desktop: the status chip rides the band row (member parity); mobile keeps the ⋯ controls. */}
                 {/* #406 PageStatus stays at every width. It carries the TOC toggle AND the
