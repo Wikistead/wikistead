@@ -63,9 +63,20 @@ async function fga(path: string, body: unknown, apiUrl: string, storeId: string)
 // (kill/timeout) leaves its markers behind, and because markers are deny-side, re-asserting the CORE
 // grants does NOT heal them — page:demo goes byte-invisible for every later run (twice on 2026-07-17).
 // The seed now strips every known marker pair from the shared objects before re-asserting the grants.
-const FIXTURE_OBJECTS = ["page:demo", "space:demo_space", "page:acme_page", "space:acme_space"] as const;
-const DENY_MARKER_RELATIONS = ["trashed", "private"] as const; // model.fga: [user:*, share_link:*] pairs
-const DENY_MARKER_USERS = ["user:*", "share_link:*"] as const;
+// Exported so the #444 pin can loop over the SAME definition: shrink either list and the pin shrinks
+// with it, which is the whole point (the first pin hard-coded one relation and would have stayed green
+// through any narrowing).
+export const FIXTURE_OBJECTS = ["page:demo", "space:demo_space", "page:acme_page", "space:acme_space"] as const;
+// Every relation that a spec can WRITE as a typed wildcard, i.e. every marker a killed spec can strand
+// on a shared object: private (model.fga [user:*, share_link:*]), trashed (same), frozen (same) and
+// frozen_guests ([share_link:*]). frozen is structurally identical to the two that caused the outage —
+// no spec freezes a shared fixture today, so it is latent rather than broken, which is exactly when it
+// is cheap to close. `restricted` is deliberately NOT here: it takes concrete principals
+// ([user, group#member, share_link]), never a wildcard, so it cannot produce this residue class.
+export const DENY_MARKER_RELATIONS = ["trashed", "private", "frozen", "frozen_guests"] as const;
+// frozen_guests only accepts share_link:*; the user:* delete for it fails on type and is swallowed
+// with every other absent-tuple delete below (the loop is a total sweep, not a precise one).
+export const DENY_MARKER_USERS = ["user:*", "share_link:*"] as const;
 
 // Idempotently (re-)assert the core shared-fixture tuples. delete-then-write per tuple: OpenFGA rejects
 // writing a tuple that already exists AND deleting one that doesn't, so each op is tried and its error
