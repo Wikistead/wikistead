@@ -4,6 +4,10 @@
 //   - policy 'admins': write NOTHING                                  → admins only (`or admin`).
 // Identical observable behaviour before and after (the ADR's migration anti-test).
 //
+// SUPERSEDED for new runs by migrate-471-space-creator-userset.ts: #471 narrowed the grant from the
+// `user:*` wildcard this script writes to `tenant:<id>#member`. Kept as-is for the historical record
+// of what the ADR-171 migration did; run the #471 script after it (it rewrites what this wrote).
+//
 // Run AFTER `fga:bootstrap` writes the ADR-171 model (space_creator must exist) and BEFORE DB
 // migration 075 drops the column, against the SAME persistent datastore (dev + prod). Fresh
 // e2e/server-test stacks seed the wildcard directly and do NOT need this. Idempotent: an existing

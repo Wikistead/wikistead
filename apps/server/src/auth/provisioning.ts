@@ -31,8 +31,13 @@ function adminTuples(tenantId: string, sub: string) {
     { user: `user:${sub}`, relation: 'admin', object: `tenant:${tenantId}` },
     { user: `user:${sub}`, relation: 'member', object: `tenant:${tenantId}` },
     // ADR-171 (#445): seed the "all members may create spaces" default. The member default-role
-    // toggle (roles.ts) deletes/re-writes this wildcard; admins keep creating via `or admin`.
-    { user: 'user:*', relation: 'space_creator', object: `tenant:${tenantId}` },
+    // toggle (roles.ts) deletes/re-writes this grant; admins keep creating via `or admin`.
+    // #471 / ADR-176: the grant names THIS TENANT'S MEMBERS, not `user:*`. A typed wildcard matches
+    // every principal of that type, so what was meant as "all members" read as "anyone the server
+    // ever authenticates" — and before the tenant binding that included a stranger from another
+    // tenant, who could then create a space they managed here. A userset says what was meant, and
+    // needs no per-member tuple to maintain.
+    { user: `tenant:${tenantId}#member`, relation: 'space_creator', object: `tenant:${tenantId}` },
   ]
 }
 

@@ -404,16 +404,17 @@ export async function rolesPlugin(app: FastifyInstance) {
   })
 
   // ---- #445 / ADR-171: DEFAULT tenant-role presets (CE — admin-gated, NO entitlement) ----
-  // The member default role's `createSpaces` toggle IS the `tenant#space_creator@user:*` wildcard
-  // tuple (present = all members may create, today's default; absent = admins only via the model's
-  // `or admin` arm). admin.createSpaces is model-hardcoded (`or admin`) — reported locked so the UI
+  // The member default role's `createSpaces` toggle IS the `tenant#space_creator@tenant#member`
+  // grant (present = all members may create, today's default; absent = admins only via the model's
+  // `or admin` arm). #471 / ADR-176: it names this tenant's MEMBERS — it used to be `user:*`, which
+  // matches every user-type principal the server authenticates, not only this tenant's people. admin.createSpaces is model-hardcoded (`or admin`) — reported locked so the UI
   // never shows a toggle that cannot turn off. The object is ALWAYS the caller's own tenant (bound
   // by construction — no cross-tenant surface). Replaces the #399 §2 knob (ADR-158 superseded).
-  const WILDCARD_CREATOR = (tenantId: string) => ({ user: 'user:*', relation: 'space_creator', object: `tenant:${tenantId}` })
+  const MEMBERS_CREATOR = (tenantId: string) => ({ user: `tenant:${tenantId}#member`, relation: 'space_creator', object: `tenant:${tenantId}` })
 
   app.get('/admin/roles/tenant-defaults', async (req) => {
     await adminGate(req)
-    const { tuples } = await app.fga.read({ user: 'user:*', object: `tenant:${req.tenant.id}` })
+    const { tuples } = await app.fga.read({ user: `tenant:${req.tenant.id}#member`, object: `tenant:${req.tenant.id}` })
     const memberCreateSpaces = (tuples ?? []).some((t) => t.key?.relation === 'space_creator')
     return {
       member: { createSpaces: memberCreateSpaces },
@@ -425,13 +426,13 @@ export async function rolesPlugin(app: FastifyInstance) {
     await adminGate(req) // CE preset — deliberately NOT writeGates (no customRoles entitlement)
     const v = req.body?.memberCreateSpaces
     if (typeof v !== 'boolean') return reply.code(400).send({ error: 'memberCreateSpaces (boolean) required' })
-    const { tuples } = await app.fga.read({ user: 'user:*', object: `tenant:${req.tenant.id}` })
+    const { tuples } = await app.fga.read({ user: `tenant:${req.tenant.id}#member`, object: `tenant:${req.tenant.id}` })
     const present = (tuples ?? []).some((t) => t.key?.relation === 'space_creator')
     await req.db.tx(async (tx) => {
       await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.default_preset_changed', target: `tenant:${req.tenant.id}` })
       // Idempotent flip, FGA last-in-tx (a write failure rolls the audit back).
-      if (v && !present) await writeTuples(app.fga, [WILDCARD_CREATOR(req.tenant.id)])
-      if (!v && present) await deleteTuples(app.fga, [WILDCARD_CREATOR(req.tenant.id)])
+      if (v && !present) await writeTuples(app.fga, [MEMBERS_CREATOR(req.tenant.id)])
+      if (!v && present) await deleteTuples(app.fga, [MEMBERS_CREATOR(req.tenant.id)])
     })
     return { member: { createSpaces: v }, admin: { createSpaces: true, locked: true } }
   })

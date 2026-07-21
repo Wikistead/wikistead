@@ -7,7 +7,7 @@ import postgres from 'postgres'
 import IORedis from 'ioredis'
 import { pool } from '../db/pool.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
-import { memberTuples } from './helpers/membership.js'
+import { memberTuples, ensureMembers } from './helpers/membership.js'
 import { buildApp } from '../app.js'
 import { createSession, SESSION_COOKIE } from '../auth/session.js'
 
@@ -149,7 +149,7 @@ describe('tenant isolation', () => {
     // so tenant_dev's comments never surface cross-tenant (RLS + FGA).
     // #471: acme-admin has to be an acme MEMBER for this to test the cross-tenant RESOURCE gate
     // (404 from tenant_dev's page) rather than the authentication one
-    await writeTuples(fgaClient, memberTuples('tenant_acme', ['acme-admin'])).catch(() => {})
+    await ensureMembers('tenant_acme', ['acme-admin'])
     const acmeSid = await createSession(valkey, { tenantId: 'tenant_acme', sub: 'acme-admin' })
     const res = await app.inject({ method: 'GET', url: `/pages/${PAGE}/comments`, headers: { host: 'acme.localhost', cookie: `${SESSION_COOKIE}=${acmeSid}` } })
     expect(res.statusCode).toBe(404)

@@ -17,7 +17,7 @@ import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
-import { memberTuples } from './helpers/membership.js'
+import { memberTuples, ensureMembers } from './helpers/membership.js'
 import { LogicalStorageDriver } from '../storage/index.js'
 import { LogicalSearchDriver } from '../search/index.js'
 import { buildApp } from '../app.js'
@@ -127,7 +127,7 @@ describe('#273 inline proxy route (the XSS boundary headers)', () => {
   it('a NON-viewer gets a uniform 404 (view gate before status/kind — no oracle)', async () => {
     // #471: a member of the tenant who has no view on this attachment — the case being pinned is the
     // 404-not-403 oracle, which only means anything for someone the tenant admits at all
-    await writeTuples(fgaClient, memberTuples(tenant.id, ['att273-stranger']))
+    await ensureMembers(tenant.id, ['att273-stranger'])
     const sid = await createSession(valkey, { tenantId: tenant.id, sub: 'att273-stranger', role: 'member' })
     const h = { host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${sid}` }
     expect((await app.inject({ method: 'GET', url: `/attachments/${pdfId}/inline`, headers: h })).statusCode).toBe(404)

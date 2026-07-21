@@ -9,6 +9,7 @@ import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { memberTuples, ensureMembers } from './helpers/membership.js'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage } from '../routes/pages.js'
@@ -38,10 +39,12 @@ const notifCount = async (sub: string) =>
 beforeAll(async () => {
   await admin`INSERT INTO tenants (id, slug, plan, isolation) VALUES (${TENANT}, ${TENANT}, 'free', 'logical') ON CONFLICT (id) DO NOTHING`
   db = await acquireTenantDb(asTenant(TENANT))
-  // #445 / ADR-171: createSpace now gates on tenant#space_creator — a hand-fabricated tenant must
-  // carry the wildcard provisioning seeds (the production shape for every real tenant).
-  const creatorSeed = { user: 'user:*', relation: 'space_creator', object: `tenant:${TENANT}` }
+  // #445 / ADR-171: createSpace gates on tenant#space_creator — a hand-fabricated tenant must carry
+  // what provisioning seeds (the production shape for every real tenant). #471 / ADR-176: that grant
+  // names the tenant's MEMBERS now, so the subs acting here have to hold membership.
+  const creatorSeed = { user: `tenant:${TENANT}#member`, relation: 'space_creator', object: `tenant:${TENANT}` }
   await writeTuples(fgaClient, [creatorSeed]).catch(() => {})
+  await ensureMembers(TENANT, [ACTOR, A, B, C])
   cleanupTuples.push(creatorSeed)
   const space = await createSpace(db, fgaClient, { tenantId: TENANT, userId: ACTOR, plan: 'free', name: 'N362 Space' })
   spaceId = space.id

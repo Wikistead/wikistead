@@ -42,7 +42,7 @@ type tenant
     # user/group leaves are custom tenant-role expansions. `or admin` = admins always can (the
     # superset precedent). RESTRICT-ONLY: gates creation, grants nothing else. No share_link types —
     # guests never reach tenant-scoped actions.
-    define space_creator: [user, group#member, user:*] or admin
+    define space_creator: [user, group#member, tenant#member] or admin
 
 type space
   relations

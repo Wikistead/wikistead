@@ -8,6 +8,7 @@ import * as Y from 'yjs'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { memberTuples, ensureMembers } from './helpers/membership.js'
 import { LogicalSearchDriver } from '../search/index.js'
 import { LogicalStorageDriver } from '../storage/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
@@ -35,6 +36,10 @@ async function publishAndEvent(pageId: string): Promise<string> {
 
 beforeAll(async () => {
   await driver.ensureIndex(); await storage.ensureBucket()
+  // #471 / ADR-176: space creation is granted to this tenant's MEMBERS (it used to be a `user:*`
+  // wildcard, which matched anyone the server authenticated at all), so a fixture acting as
+  // someone must make them a member — which is what these subs always meant to be.
+  await ensureMembers(TENANT, [OWNER, MOD, RMGR])
   db = await acquireTenantDb(asTenant(TENANT))
   spaceId = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: OWNER, plan: 'free', name: `patrol-${Date.now().toString(36)}` })).id
   // MOD is a space MANAGER (→ page manage via inheritance) but is NOT on the private page's allowlist.

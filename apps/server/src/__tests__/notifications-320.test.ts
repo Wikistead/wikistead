@@ -9,6 +9,7 @@ import * as Y from 'yjs'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { memberTuples, ensureMembers } from './helpers/membership.js'
 import { mintGuestToken } from '@wikistead/auth'
 import { LogicalSearchDriver } from '../search/index.js'
 import { LogicalStorageDriver } from '../storage/index.js'
@@ -44,6 +45,10 @@ function draftYdoc(text: string): Buffer {
 
 beforeAll(async () => {
   db = await acquireTenantDb(asTenant(TENANT))
+  // #471 / ADR-176: space creation is granted to this tenant's MEMBERS (it used to be a `user:*`
+  // wildcard, which matched anyone the server authenticated at all), so a fixture acting as
+  // someone must make them a member — which is what these subs always meant to be.
+  await ensureMembers(TENANT, [ACTOR, A, B])
   app = await buildApp(); await app.ready()
   const space = await createSpace(db, fgaClient, { tenantId: TENANT, userId: ACTOR, plan: 'free', name: 'Notif Space' })
   spaceId = space.id

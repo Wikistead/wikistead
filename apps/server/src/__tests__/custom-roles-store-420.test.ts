@@ -16,7 +16,7 @@ import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import { buildApp } from '../app.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
-import { memberTuples } from './helpers/membership.js'
+import { memberTuples, ensureMembers } from './helpers/membership.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -64,7 +64,7 @@ describe('custom-role store (#420 increment 2)', () => {
     // dev-token on the ACME host authenticates dev-user, who is not acme's admin. #471: they must
     // be an acme MEMBER for this to be the non-admin case — a non-member is refused one layer
     // earlier, which is a different test (tenant-membership-471).
-    await writeTuples(fgaClient, memberTuples('tenant_acme', ['dev-user']))
+    await ensureMembers('tenant_acme', ['dev-user'])
     const AH = { host: 'acme.localhost', authorization: 'Bearer dev-token' }
     for (const [method, url] of [['GET', '/admin/roles'], ['POST', '/admin/roles'], ['DELETE', '/admin/roles/x']] as const) {
       const r = await app.inject({ method, url, headers: AH, ...(method === 'POST' ? { payload: { name: 'n', capabilities: ['view'] } } : {}) })
