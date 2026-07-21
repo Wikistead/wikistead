@@ -76,4 +76,30 @@ describe('search outbox drain (collab body → full-text)', () => {
   it('drainOutbox is idempotent on an empty queue (no rows → 0 processed)', async () => {
     expect(await drainOutbox(app.searchDriver)).toBe(0)
   })
+
+  // #432 the stale window on the NO-extraDue claim path (search/audit). The only stale-window
+  // pin lived in webhooks-228, which exercises the other path — so the window search and audit run
+  // under was unguarded, and (before this fix) the shared OUTBOX_STALE_CLAIM constant was decorative
+  // both queries hard-coded the literal, so editing the constant changed nothing and no test noticed.
+  // Now the constant is interpolated, and this pin fails if it stops matching the SQL.
+  it('#432: a fresh claim is skipped; a claim older than OUTBOX_STALE_CLAIM is re-claimed', async () => {
+    await admin`DELETE FROM search_outbox WHERE page_id = ${PAGE}`
+    await admin`INSERT INTO search_outbox (tenant_id, page_id, operation) VALUES (${TENANT}, ${PAGE}, 'upsert')`
+
+    // another worker holds a FRESH claim → this drain must not touch the row (disjoint batches)
+    await admin`UPDATE search_outbox SET claimed_at = now() WHERE page_id = ${PAGE}`
+    expect(await drainOutbox(app.searchDriver), 'a freshly claimed row is left alone').toBe(0)
+    const [{ n: still }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM search_outbox WHERE page_id = ${PAGE}`
+    expect(still).toBe(1)
+
+    // …but a claim aged past the window is re-claimed (a crashed worker never strands a row). The age
+    // is a FIXED 3 minutes — deliberately not derived from OUTBOX_STALE_CLAIM. A derived age would
+    // scale with the constant and stay green for ANY value, which is precisely the blindness this
+    // pin exists to remove: widen the window past 3 minutes and this must go red. (Same shape as the
+    // webhook-path pin, so both branches fail together when the constant stops reaching the SQL.)
+    await admin`UPDATE search_outbox SET claimed_at = now() - interval '3 minutes' WHERE page_id = ${PAGE}`
+    expect(await drainOutbox(app.searchDriver), 'a stale claim is re-claimed').toBeGreaterThan(0)
+    const [{ n: gone }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM search_outbox WHERE page_id = ${PAGE}`
+    expect(gone).toBe(0)
+  })
 })
