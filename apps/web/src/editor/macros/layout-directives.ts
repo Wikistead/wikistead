@@ -100,7 +100,7 @@ export const columnsMacro: DirectiveMacro = {
 const detailsEditUI: EditUI = {
   present: "inline",
   sourceScope: "block", // the editor owns the WHOLE `:::details[label]…:::` (it rewrites the fence head)
-  mount(container, source, _ctx, save) {
+  mount(container, source, _ctx, save, editEnv) {
     const lines = source.split("\n");
     const open = parseDirectiveOpen(lines[0] ?? "");
     let label = open?.label ?? "";
@@ -137,18 +137,36 @@ const detailsEditUI: EditUI = {
     });
     summaryField.appendChild(summaryIn);
     const bodyField = field(i18n.t("detailsEdit.content"));
-    const bodyTa = document.createElement("textarea");
-    bodyTa.rows = 6;
-    bodyTa.className = "cm-lp-callout-edit-body";
-    bodyTa.value = body;
-    bodyTa.spellcheck = false;
-    bodyTa.setAttribute("data-testid", "details-edit-body");
-    bodyTa.addEventListener("change", () => { body = bodyTa.value; commit(); });
-    bodyField.appendChild(bodyTa);
+    // #456 S3: the body is prose, so it edits on the HOST's surface — the same one the page and the
+    // slot islands use, which is what brings vim, the slash palette, completion and nested rendering
+    // to a details body instead of the plain textarea it used to get. The textarea stays as the
+    // fallback for a host that lends no surface (and for the unit tests, which mount without one).
+    const surface = editEnv?.mountSurface?.({
+      parent: bodyField,
+      doc: asMacroSource(body),
+      kind: "markdown",
+      testid: "details-edit-body",
+      onCommit: (v) => { body = v; commit(); },
+    });
+    let bodyTa: HTMLTextAreaElement | null = null;
+    if (!surface) {
+      bodyTa = document.createElement("textarea");
+      bodyTa.rows = 6;
+      bodyTa.className = "cm-lp-callout-edit-body";
+      bodyTa.value = body;
+      bodyTa.spellcheck = false;
+      bodyTa.setAttribute("data-testid", "details-edit-body");
+      bodyTa.addEventListener("change", () => { body = bodyTa!.value; commit(); });
+      bodyField.appendChild(bodyTa);
+    }
     wrap.append(title, summaryField, bodyField);
     container.appendChild(wrap);
-    const f = setTimeout(() => bodyTa.focus(), 0);
-    return { destroy() { clearTimeout(f); wrap.remove(); } };
+    const f = setTimeout(() => (surface ? surface.focus() : bodyTa?.focus()), 0);
+    return {
+      destroy() { clearTimeout(f); surface?.destroy(); wrap.remove(); },
+      // the surface owns vim's insert→normal Escape; the host exits on every other one
+      handlesEscape: () => surface?.inVimInsert() ?? false,
+    };
   },
 };
 
