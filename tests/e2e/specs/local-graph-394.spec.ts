@@ -165,3 +165,109 @@ test("#440: the modal hop selector switches depth and the space legend names the
   await expect(modal.getByTestId("graph-space-legend-other")).toHaveCount(0);
   void linker;
 });
+
+// #440the two device-visible defects behind the rejection.
+//  (a) the space colour reached the DOM legend but not the nodes: colorFromString returns a
+//      space-separated `hsl(...)`, which sigma's WebGL renderer cannot parse, so every space node fell
+//      back to the default paint while the swatch beside it showed the real colour. Both sides now
+//      take the same hex, so the pin compares them directly.
+//  (b) nodes were not draggable at all. A press that moves past a small threshold drags (and must not
+//      navigate); a press that does not still navigates.
+test("#440node colours equal their legend swatch, and nodes drag without losing click-to-open", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const target = await openScratch(page, `lg-drag-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("drag target.\n");
+  await sleep(300);
+  await page.getByTestId("publish-page").click();
+  await sleep(600);
+  // THREE linkers, not one: with only two nodes the graph's layout is degenerate (identical y, and the
+  // force loop is skipped for order <= 2), which makes sigma's viewport mapping unrepresentative — a
+  // drag there moves one axis only. A real local graph has several nodes; the pin uses that shape.
+  const linkers: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    linkers.push(await openScratch(page, `lg-drag-linker${i}-${Date.now()}`));
+    await enterEdit(page);
+    await page.click("[data-pane=preview] .cm-content");
+    await page.keyboard.insertText(`link ${i} [t](/p/${target})\n`);
+    await sleep(300);
+    await page.getByTestId("publish-page").click();
+    await sleep(700);
+  }
+
+  await page.goto(`/p/${target}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(400);
+  await page.getByTestId("page-overflow-trigger").click();
+  await page.getByTestId("related-toggle").click();
+  await page.getByTestId("local-graph-toggle").click();
+  await expect(page.getByTestId("local-graph-canvas")).toBeVisible({ timeout: 10000 });
+  await sleep(2000); // let the (now ~1s) settle finish so coordinates are stable
+
+  // (a) every non-center node's colour is a hex the renderer understands, and the space swatch matches
+  const colours = await page.evaluate(() => {
+    const el = document.querySelector("[data-testid=local-graph-canvas]") as (HTMLElement & { __wksSigma?: any }) | null;
+    const sigma = el?.__wksSigma;
+    if (!sigma) return null;
+    const nodeColours: string[] = [];
+    sigma.getGraph().forEachNode((_n: string, a: { color: string }) => nodeColours.push(a.color));
+    const swatches = [...document.querySelectorAll("[data-testid=graph-space-legend] span[aria-hidden]")]
+      .map((s) => getComputedStyle(s as HTMLElement).backgroundColor);
+    return { nodeColours, swatches };
+  });
+  expect(colours, "sigma seam present").not.toBeNull();
+  expect(colours!.nodeColours.length).toBeGreaterThan(1);
+  for (const c of colours!.nodeColours) {
+    expect(c, `node colour must be renderer-parseable hex/rgb, got ${c}`).not.toMatch(/^hsl/);
+  }
+  // rgb(r, g, b) → #rrggbb so the legend swatch can be compared with the node attribute directly
+  const toHex = (rgb: string) => {
+    const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(rgb);
+    return m ? `#${[m[1], m[2], m[3]].map((v) => Number(v).toString(16).padStart(2, "0")).join("")}` : rgb;
+  };
+  const swatchHexes = colours!.swatches.map(toHex);
+  expect(swatchHexes.length, "at least one named space swatch").toBeGreaterThan(0);
+  for (const sw of swatchHexes) {
+    expect(colours!.nodeColours, `swatch ${sw} has no node painted with it`).toContain(sw);
+  }
+
+  // (b) drag a non-center node: it follows the pointer and does NOT navigate
+  const box = (await page.getByTestId("local-graph-canvas").first().boundingBox())!;
+  const spots = await page.evaluate(() => {
+    const el = document.querySelector("[data-testid=local-graph-canvas]") as (HTMLElement & { __wksSigma?: any }) | null;
+    const sigma = el!.__wksSigma;
+    const g = sigma.getGraph();
+    const out: { id: string; x: number; y: number }[] = [];
+    g.forEachNode((n: string, a: { x: number; y: number }) => {
+      const v = sigma.graphToViewport({ x: a.x, y: a.y });
+      out.push({ id: n, x: v.x, y: v.y });
+    });
+    return out;
+  });
+  const node = spots[1]!; // not the centre
+  const urlBefore = page.url();
+  await page.mouse.move(box.x + node.x, box.y + node.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 8; i++) {
+    await page.mouse.move(box.x + node.x + i * 8, box.y + node.y + i * 5);
+    await sleep(30);
+  }
+  await page.mouse.up();
+  await sleep(400);
+  const after = await page.evaluate((id: string) => {
+    const el = document.querySelector("[data-testid=local-graph-canvas]") as (HTMLElement & { __wksSigma?: any }) | null;
+    const sigma = el!.__wksSigma;
+    const a = sigma.getGraph().getNodeAttributes(id) as { x: number; y: number };
+    return sigma.graphToViewport({ x: a.x, y: a.y });
+  }, node.id);
+  const followError = Math.hypot(after.x - (node.x + 64), after.y - (node.y + 40));
+  expect(followError, `the node follows the pointer (off by ${Math.round(followError)}px)`).toBeLessThan(25);
+  expect(page.url(), "a drag must not navigate").toBe(urlBefore);
+
+  // …and a plain click still opens the page (the gesture that already existed)
+  await page.mouse.click(box.x + after.x, box.y + after.y);
+  await sleep(1200);
+  expect(page.url(), "a click still navigates").not.toBe(urlBefore);
+  void linkers;
+});
