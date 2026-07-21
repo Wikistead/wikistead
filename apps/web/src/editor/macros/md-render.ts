@@ -223,7 +223,18 @@ class DomSink implements MdSink {
 
   open(role: MdOpenRole, data?: MdRoleData): void {
     switch (role) {
-      case "table": { const t = document.createElement("table"); t.className = "cm-lp-md-table"; this.push(t); return; }
+      case "table": {
+        // #406 the table sits in its own horizontal scroll box, so a wide table scrolls inside
+        // itself instead of widening the prose column (which made the whole page scroll sideways).
+        // Both boxes are pushed so close("table") pops the pair back off.
+        const box = document.createElement("div");
+        box.className = "cm-lp-table-scroll";
+        this.push(box);
+        const t = document.createElement("table");
+        t.className = "cm-lp-md-table";
+        this.push(t);
+        return;
+      }
       case "link": {
         const href = data?.href ?? null;
         const el = document.createElement(href ? "a" : "span");
@@ -261,7 +272,10 @@ class DomSink implements MdSink {
     }
   }
 
-  close(_role: MdOpenRole): void { this.stack.pop(); }
+  close(role: MdOpenRole): void {
+    this.stack.pop();
+    if (role === "table") this.stack.pop(); // #406 the table opened its scroll box too
+  }
 
   text(s: string): void { this.top().appendChild(document.createTextNode(s)); }
 
