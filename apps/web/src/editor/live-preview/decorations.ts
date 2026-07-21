@@ -2764,7 +2764,11 @@ class MacroWidget extends WidgetType {
     // #255an align-only change is applied IN PLACE (keep the rendered SVG/img) — rebuilding would
     // re-render mermaid / re-resolve the diagram async, collapsing its height → the doc shrinks → CM jumps.
     if (DIAGRAM_MACROS.has(this.name)) {
-      for (const a of ["left", "center", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, a === this.align);
+      // #455an EMPTY macro shows its placeholder full width, never nudged left or right
+      // there is no diagram to align yet. toDOM guards for that; this in-place path did not, so
+      // picking an alignment on an empty diagram (or emptying an aligned one) shoved the hint aside.
+      const alignable = this.body.trim() !== "";
+      for (const a of ["left", "center", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, alignable && a === this.align);
       const seg = dom.querySelector<HTMLElement>(".cm-lp-align-seg"); // #255update the segment's active side
       if (seg) updateAlignSegment(seg, this.align);
       if (prev) prev.align = this.align;
@@ -2773,7 +2777,8 @@ class MacroWidget extends WidgetType {
     // rule). Unlike diagrams the default (LEFT) carries no class, so every non-default side is toggled
     // here — listing only left/right was how a fresh centre pick left the DOM untouched.
     if (this.name === "table") {
-      for (const a of ["center", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, a === this.align);
+      const alignable = this.body.trim() !== "" // #455same guard — an empty table's placeholder stays full width
+      for (const a of ["center", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, alignable && a === this.align);
       const seg = dom.querySelector<HTMLElement>(".cm-lp-align-seg");
       if (seg) updateAlignSegment(seg, this.align);
       if (prev) prev.align = this.align;
