@@ -25,13 +25,18 @@ export function SpacePagesTab() {
       {pages.isLoading && <p className="text-sm text-fg-dim">{t("common.loading")}</p>}
       {!pages.isLoading && (pages.data?.length ?? 0) === 0 && <p className="text-sm text-fg-dim">{t("spacePages.empty")}</p>}
 
+      {/* #463: below ~520px the fixed columns (132+88+88) consumed the whole table and the title
+          column — the "remaining width" under table-fixed — collapsed to 0, so rows became
+          unidentifiable. A min-width keeps the title readable-and-truncating, and the table scrolls
+          inside its own box past that (never the page; same shape as the #406 body-table fix). */}
       {(pages.data?.length ?? 0) > 0 && (
-        <table className="w-full table-fixed border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:p-2 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.03em] [&_th]:text-fg-dim">
+        <div className="overflow-x-auto" data-testid="space-pages-scroller">
+        <table className="w-full min-w-[468px] table-fixed border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:p-2 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.03em] [&_th]:text-fg-dim">
           <thead>
             <tr>
               {/* table-fixed: the title column takes the REMAINING width (and truncates); the
                   status/count columns are fixed and never wrap (#439). */}
-              <th className="whitespace-nowrap">{t("spacePages.title")}</th>
+              <th className="min-w-[160px] whitespace-nowrap">{t("spacePages.title")}</th>
               <th className="w-[132px] whitespace-nowrap">{t("spacePages.status")}</th>
               <th className="w-[88px] whitespace-nowrap !text-right">{t("spacePages.grants")}</th>
               <th className="w-[88px] whitespace-nowrap !text-right">{t("spacePages.links")}</th>
@@ -54,6 +59,7 @@ export function SpacePagesTab() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );
