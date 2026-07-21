@@ -9,8 +9,15 @@ import { seedFgaFixtures, FIXTURE_OBJECTS, DENY_MARKER_RELATIONS, DENY_MARKER_US
 //
 // the first version of this pin planted ONE relation on ONE object, so narrowing the cleanup
 // definition would have left it green. It now walks the definition itself (relation × object, both
-// imported from fixtures.ts): drop a relation or an object from the sweep and the corresponding case
-// starts failing here.
+// imported from fixtures.ts).
+//
+// walking the definition is necessary but NOT sufficient — a pin that imports the same list it
+// checks shrinks along with it, so deleting a relation from the sweep would still be green. The list
+// below is a deliberate SECOND copy, written here so that narrowing the sweep has to be argued for in
+// two places. Update it only together with the model: if `type page` gains another deny relation that
+// accepts a typed wildcard (i.e. another marker a killed spec can strand on a shared object), add it
+// here and to DENY_MARKER_RELATIONS. `restricted` stays out — it takes concrete principals only.
+const EXPECTED_MARKER_RELATIONS = ["trashed", "private", "frozen", "frozen_guests"];
 const repoEnv = readFileSync(fileURLToPath(new URL("../../../.env.e2e.local", import.meta.url)), "utf8");
 const STORE = /OPENFGA_STORE_ID=(.+)/.exec(repoEnv)![1]!.trim();
 const MODEL = /OPENFGA_MODEL_ID=(.+)/.exec(repoEnv)![1]!.trim();
@@ -36,6 +43,14 @@ async function plant(object: string, relation: string, user: string): Promise<vo
   }).catch(() => {});
 }
 
+test("#444 the sweep definition itself has not been narrowed", () => {
+  expect([...DENY_MARKER_RELATIONS].sort(), "the sweep must still cover every wildcard-deny relation")
+    .toEqual([...EXPECTED_MARKER_RELATIONS].sort());
+  expect([...DENY_MARKER_USERS].sort(), "both wildcard principal shapes must still be swept").toEqual(["share_link:*", "user:*"]);
+  expect([...FIXTURE_OBJECTS], "every shared fixture object must still be swept")
+    .toEqual(["page:demo", "space:demo_space", "page:acme_page", "space:acme_space"]);
+});
+
 test("#444 one seed pass strips EVERY deny-marker shape from EVERY shared fixture object", async () => {
   // plant the residue a killed spec would leave, across the whole definition
   for (const object of FIXTURE_OBJECTS) {
@@ -43,12 +58,15 @@ test("#444 one seed pass strips EVERY deny-marker shape from EVERY shared fixtur
       for (const user of DENY_MARKER_USERS) await plant(object, relation, user);
     }
   }
-  // at least one marker must actually exist, else the pin proves nothing about the sweep
-  const plantedCounts: number[] = [];
-  for (const object of FIXTURE_OBJECTS) {
-    for (const relation of DENY_MARKER_RELATIONS) plantedCounts.push(await readMarkers(object, relation));
+  // "at least one marker exists" was too weak to notice that half the matrix never plants
+  // anything. These relations are defined on `type page` only, so the space rows CANNOT hold residue
+  // and their post-sweep zero is true either way — they are a forward guard for the day the model
+  // grows them, not coverage. Require the page rows, which carry the real residue, to be armed.
+  for (const object of FIXTURE_OBJECTS.filter((o) => o.startsWith("page:"))) {
+    for (const relation of DENY_MARKER_RELATIONS) {
+      expect(await readMarkers(object, relation), `${relation} residue was never planted on ${object}, so sweeping it proves nothing`).toBeGreaterThan(0);
+    }
   }
-  expect(plantedCounts.reduce((a, b) => a + b, 0), "residue planted").toBeGreaterThan(0);
 
   // one seed pass (what globalSetup runs) heals all of it
   await seedFgaFixtures();
