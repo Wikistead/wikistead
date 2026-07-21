@@ -77,7 +77,9 @@ test("#369 edit_body replace_section rewrites one section in the live draft", as
 test("#369 edit_body from a NON-editor is a uniform 'cannot edit that page' (existence-hiding)", async ({ page }) => {
   const id = await openScratch(page, `mcp-authz-${Date.now()}`);
   await sleep(200);
-  // `stranger` has no grant on this freshly-created page (creator-only draft) → FGA edit denies.
+  // `stranger` is a MEMBER of the tenant (seeded in fixtures.ts) with no grant on this freshly-created
+  // page (creator-only draft) → FGA edit denies. #471 / ADR-176: membership has to be real, or the
+  // refusal comes from the tenant binding one layer earlier and this stops pinning the message.
   const r = await mcp("stranger", "edit_body", { pageId: id, op: "append", content: "x" });
   expect(r.result?.isError).toBe(true);
   expect(r.result?.content?.[0]?.text).toBe("error: cannot edit that page");
