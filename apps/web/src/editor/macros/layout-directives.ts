@@ -1,4 +1,4 @@
-import type { DirectiveMacro, EditUI } from "./registry";
+import type { DirectiveMacro, EditUI, EnterTarget } from "./registry";
 import { asMacroSource } from "./registry";
 import { parseDirectiveOpen } from "./directive-parser";
 import i18n from "../../i18n";
@@ -43,6 +43,37 @@ export function columnsLiveRender(body: string): HTMLElement {
   return row;
 }
 
+
+// #456 S2: where Ctrl+↵ lands inside a CONTAINER. A container has no single body to edit — entering
+// it means entering one of its slots — and which slot is the container's own business, not the
+// host's. So each container declares it here (the S1 `enter` contract), and the host stops
+// hardcoding "tabs → active tab, columns → first". A third-party container answers the same way.
+//
+// The offsets are relative to the macro's own source, exactly like the tier's: the host maps them to
+// the document. `contentOffset` from parseLayoutItems is already that, so this is a lookup, not
+// coordinate work.
+function slotEnterTarget(source: string, itemName: string, index: number): EnterTarget | null {
+  const body = bodyOfDirective(source);
+  if (!body) return null;
+  const items = parseLayoutItems(body.text, itemName);
+  const item = items[Math.min(Math.max(index, 0), items.length - 1)];
+  if (!item) return null;
+  const from = body.offset + item.contentOffset;
+  return { from, to: from + item.content.length };
+}
+
+// The macro's source includes its own fences; the slot offsets are relative to the BODY. Find where
+// the body starts so the two agree (the opening fence line plus its newline).
+function bodyOfDirective(source: string): { text: string; offset: number } | null {
+  const nl = source.indexOf("\n");
+  if (nl < 0) return null;
+  const open = parseDirectiveOpen(source.slice(0, nl));
+  if (!open) return null;
+  const rest = source.slice(nl + 1);
+  const closeAt = rest.lastIndexOf("\n:");
+  return { text: closeAt >= 0 ? rest.slice(0, closeAt) : rest, offset: nl + 1 };
+}
+
 export const columnsMacro: DirectiveMacro = {
   kind: "directive",
   name: "columns",
@@ -54,6 +85,8 @@ export const columnsMacro: DirectiveMacro = {
     caret: 22, // ":::​:columns\n:::column\n" → the first column's blank body line
   },
   liveRender: columnsLiveRender,
+  // #456 S2: Ctrl+↵ on a columns container enters its FIRST column (the approved ruling).
+  enter: (source) => slotEnterTarget(source, "column", 0),
   // #278 §2a: NO editUI panel — a column's content is edited by an inline CM6 island in the slot (click it);
   // structure ops are the per-item inline ×/ (§1). The #257 panel is retired (the user's "no panel" ask).
   htmlRender: columnsHtmlRender, // #85: single source of truth in @wikistead/macro-render
@@ -193,6 +226,15 @@ export function tabsLiveRender(body: string): HTMLElement {
   return wrap;
 }
 
+// #456 S2: which tab is "active" is display-only state the render already keeps (tabActiveIndex,
+// keyed by the macro's anchor). Ctrl+↵ enters THAT tab rather than always the first, which is what
+// makes entry match what the reader is looking at. Without an anchor (an untagged render) it falls
+// back to the first tab.
+export function tabsEnterTarget(source: string, base: number | null): EnterTarget | null {
+  const active = base != null ? (tabActiveIndex.get(base) ?? 0) : 0;
+  return slotEnterTarget(source, "tab", active);
+}
+
 export const tabsMacro: DirectiveMacro = {
   kind: "directive",
   name: "tabs",
@@ -204,6 +246,9 @@ export const tabsMacro: DirectiveMacro = {
     caret: 23, // "::::tabs\n:::tab[Tab 1]\n" → the first tab's blank body line
   },
   liveRender: tabsLiveRender,
+  // #456 S2: the ACTIVE tab (see tabsEnterTarget) — the approved ruling. The macro answers this, not
+  // the host, so a third-party container can define its own entry the same way.
+  enter: (source) => tabsEnterTarget(source, null),
   // #278 §2a: NO editUI panel — the active tab's content is edited by an inline CM6 island in its panel (click
   // it); structure ops are the per-item inline ×/ (§1). The #257 panel is retired.
   // #85/#90 export degrade (meaning-preserving: label → visible heading + body). Single source of
