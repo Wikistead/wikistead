@@ -4577,8 +4577,11 @@ const livePreviewBaseTheme = EditorView.baseTheme({
     fontSize: "0.95em", lineHeight: "inherit", color: "inherit", opacity: "0.75",
   },
   ".cm-lp-attachment-dl:hover": { opacity: "1" },
-  // #273hovering anywhere on the card makes its operations prominent (the ⤓ was too faint at 0.75).
-  ".cm-lp-attachment-wrap:hover .cm-lp-attachment-dl": { opacity: "1" },
+  // #273/hovering the HEADER makes its operations prominent (the ⤓ was too faint at
+  // 0.75). Scoped to the header row, not the whole wrap: on an inline-PDF card the wrap also covers
+  // the preview, andsplit the card into two click targets (header = download, preview =
+  // expand). Hover feedback has to name the target it belongs to, or the split reads as noise.
+  ".cm-lp-attachment-card:hover .cm-lp-attachment-dl": { opacity: "1" },
   ".cm-lp-attachment-wrap": { padding: "2px 0" },
   ".cm-lp-attachment-card": {
     display: "flex", alignItems: "center", gap: "6px", padding: "8px 10px",
@@ -4616,7 +4619,10 @@ const livePreviewBaseTheme = EditorView.baseTheme({
     padding: "8px", borderRadius: "8px", cursor: "zoom-in", opacity: "0", pointerEvents: "none",
     background: "color-mix(in srgb, #000 0%, transparent)", transition: "opacity 120ms, background 120ms",
   },
-  ".cm-lp-attachment-wrap:hover .cm-lp-attachment-expand": {
+  // #273the dim + ⤢ appear when the PREVIEW is hovered — not when anything on the card is.
+  // Keyed on the whole wrap it fired from the header too, dimming the preview while the pointer was
+  // over the download target: the two halvesseparated looked like one control again.
+  ".cm-lp-attachment-framebox:hover .cm-lp-attachment-expand": {
     opacity: "1", pointerEvents: "auto", background: "color-mix(in srgb, #000 8%, transparent)",
   },
   ".cm-lp-attachment-expand-hint": {

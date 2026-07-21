@@ -116,8 +116,8 @@ test("#273the PDF card opens a lightbox with the same containment; Escape closes
 
   // the hover overlay marks the "open large" affordance (cursor:zoom-in) and captures the expand click.
   const expand = pdfCard.locator("[data-testid=attachment-expand]");
-  await pdfCard.hover();
-  // the overlay flips to pointer-events:auto + cursor:zoom-in on wrap:hover (the visible affordance)…
+  await pdfCard.locator(".cm-lp-attachment-framebox").hover(); //the PREVIEW owns "open large"
+  // the overlay flips to pointer-events:auto + cursor:zoom-in on framebox:hover (the visible affordance)…
   const hovered = await expand.evaluate((el) => ({ cursor: getComputedStyle(el).cursor, pe: getComputedStyle(el).pointerEvents }));
   expect(hovered.cursor).toBe("zoom-in");
   expect(hovered.pe).toBe("auto");
@@ -251,4 +251,68 @@ test("#273a PDF inline chip is pointer + download — never the lightbox", async
   await page.getByTestId("attachment-chip").first().click();
   await dl;
   await expect(page.getByTestId("attachment-lightbox"), "the chip never opens the lightbox").toHaveCount(0);
+});
+
+// #273hover feedback must name the region it belongs to.split the inline-PDF card into
+// two click targets — header = download, preview = expand — but the dim+⤢ overlay and the ⤓ icon were
+// both keyed on the WHOLE wrap, so pointing at the download header dimmed the preview. Whatever
+// changes under the pointer has to be what a click would act on. Real Chromium, real hover.
+test("#273hovering the header leaves the preview alone; hovering the preview dims it", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const pageId = await openScratch(page, "pdf-hover-region-273");
+  await enterEdit(page);
+  const name = `e2e-hv-${Date.now().toString(36)}.pdf`;
+  const pdfId = await uploadAttachment(page, pageId, name, "application/pdf", MINIMAL_PDF);
+  const linkName = `hv-${Date.now().toString(36)}.pdf`;
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Control+End");
+  await page.keyboard.insertText(`\n[${linkName}](wks-attachment:${pdfId})\n`);
+  await page.keyboard.press("ArrowUp");
+  await sleep(700);
+
+  const card = page.locator("[data-pane=preview] [data-testid=attachment-card]").filter({ hasText: linkName });
+  await expect(card.locator("[data-testid=attachment-inline-frame]")).toHaveCount(1, { timeout: 8000 });
+  const expand = card.locator("[data-testid=attachment-expand]");
+  const header = card.locator(".cm-lp-attachment-card");
+  const dl = card.locator(".cm-lp-attachment-dl");
+  const overlay = () => expand.evaluate((el) => ({ opacity: getComputedStyle(el).opacity, pe: getComputedStyle(el).pointerEvents }));
+
+  // PREVIEW hover → the dim + ⤢ appear (this is the region whose click opens the lightbox).
+  await card.locator(".cm-lp-attachment-framebox").hover();
+  await sleep(250);
+  const onPreview = await overlay();
+  expect(onPreview.opacity, "the preview dims when the pointer is on the expand target").toBe("1");
+  expect(onPreview.pe).toBe("auto");
+
+  // HEADER hover → the download affordance lights up and the preview overlay goes back to hidden.
+  await header.hover();
+  await sleep(250);
+  const onHeader = await overlay();
+  expect(onHeader.opacity, "the preview is untouched while the pointer is on the download target").toBe("0");
+  expect(onHeader.pe, "and it stays click-through so it can't steal the header's click").toBe("none");
+  expect(await dl.evaluate((el) => getComputedStyle(el).opacity), "the ⤓ is prominent on header hover").toBe("1");
+});
+
+// #273non-regression: a DOWNLOAD card (no preview frame) is one full-surface click target, so
+// hovering it anywhere must still light its ⤓ — the header-scoped rule covers it because the card row
+// IS the whole card there.
+test("#273a download card still lights its ⤓ on hover (single-region card)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const pageId = await openScratch(page, "dl-hover-region-273");
+  await enterEdit(page);
+  const name = `e2e-dlh-${Date.now().toString(36)}.bin`;
+  const binId = await uploadAttachment(page, pageId, name, "application/octet-stream", Buffer.from("binarybytes"));
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.press("Control+End");
+  await page.keyboard.insertText(`\n[${name}](wks-attachment:${binId})\n`);
+  await page.keyboard.press("ArrowUp");
+  await sleep(700);
+  const card = page.locator("[data-pane=preview] [data-testid=attachment-card]").filter({ hasText: name });
+  await expect(card).toHaveCount(1, { timeout: 8000 });
+  await expect(card.locator("[data-testid=attachment-inline-frame]"), "fixture sanity: no preview frame").toHaveCount(0);
+  const dl = card.locator(".cm-lp-attachment-dl");
+  expect(await dl.evaluate((el) => getComputedStyle(el).opacity), "faint before hover").not.toBe("1");
+  await card.locator(".cm-lp-attachment-card").hover();
+  await sleep(250);
+  expect(await dl.evaluate((el) => getComputedStyle(el).opacity), "prominent on hover").toBe("1");
 });
