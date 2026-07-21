@@ -97,9 +97,19 @@ export async function processWebhookEvent(event: Stripe.Event): Promise<void> {
       // Upgrade (or same/higher): apply immediately AND cancel any pending downgrade — more
       // entitlement is always safe, and a re-upgrade during grace voids the pending downgrade.
       await tx`UPDATE tenants SET plan = ${newPlan}, pending_plan = NULL, pending_plan_at = NULL WHERE id = ${tenant.id}`
-      // Reactivate any members frozen by a prior downgrade (ADR-064: re-upgrade restores access;
-      // the cap is re-enforced only if a future downgrade commits while over the new cap).
-      await tx`UPDATE members SET deactivated_at = NULL WHERE tenant_id = ${tenant.id} AND deactivated_at IS NOT NULL`
+      // Reactivate members frozen by a prior downgrade (ADR-064: re-upgrade restores access; the cap
+      // is re-enforced only if a future downgrade commits while over the new cap). #478: ONLY those —
+      // filtering on the reason. A reason='scim' row is a member the IdP deprovisioned, which billing
+      // has no business reviving: un-freezing it re-opens auto-enrolment for someone who is no longer
+      // a member, and leaves SCIM thinking they are active while their FGA grants stay deleted
+      // (reactivateScimUser returns early on an already-cleared deactivated_at).
+      // #478: `members` is FORCE-RLS'd on app.tenant_id and this webhook runs on the BARE pool, so the
+      // un-freeze silently matched ZERO rows — ADR-064's promise that a re-upgrade restores access has
+      // never actually fired (same shape as #428's last_used_at). Set the tenant context for the
+      // statement; the explicit tenant_id predicate stays as belt-and-braces.
+      await tx`SELECT set_config('app.tenant_id', ${tenant.id}, true)`
+      await tx`UPDATE members SET deactivated_at = NULL, deactivation_reason = NULL
+               WHERE tenant_id = ${tenant.id} AND deactivation_reason = 'downgrade_freeze'`
     }
     return true
   })
