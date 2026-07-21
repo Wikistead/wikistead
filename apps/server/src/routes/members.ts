@@ -164,11 +164,20 @@ export async function membersPlugin(app: FastifyInstance) {
       return reply.code(409).send({ error: 'cannot remove the last admin' })
     }
 
+    let revokedKeyIds: string[] = []
     await req.db.tx(async (tx) => {
       await tx`DELETE FROM members WHERE sub = ${req.params.sub}`
       // #362 E1: the removed member's watches go with them (BLIND delete is correct here — the member is
       // gone, unlike the per-watcher-checked revocation sweep). Stops their inbox rows from ever growing.
       await tx`DELETE FROM watches WHERE member_sub = ${req.params.sub}`
+      // #474: the member's API keys go too. Removal already strips every other credential — sessions
+      // (destroyMemberSessions below), membership and group tuples, direct grants (#396) — but an API
+      // key is a longer-lived credential than a session, and it kept authenticating the removed sub.
+      // REVOKED, not deleted, so the row stays auditable exactly as a self-service revoke leaves it.
+      const revoked = await tx<{ id: string }[]>`
+        UPDATE api_keys SET revoked_at = now()
+        WHERE owner_user_id = ${req.params.sub} AND revoked_at IS NULL
+        RETURNING id`
       // Remove the membership grants. Only delete the admin tuple if it exists —
       // FGA rejects the whole batch if asked to delete a non-existent tuple.
       const tuples = [{ user: `user:${req.params.sub}`, relation: 'member', object: `tenant:${req.tenant.id}` }]
@@ -185,11 +194,16 @@ export async function membersPlugin(app: FastifyInstance) {
       }
       // Durable compliance audit (#177), in-tx + EE-gated.
       await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'member.removed', target: `user:${req.params.sub}` })
+      for (const k of revoked) {
+        await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'api_key.revoked', target: `api_key:${k.id}` })
+      }
+      revokedKeyIds = revoked.map((k) => k.id)
     })
     await destroyMemberSessions(req.server.valkey, req.tenant.id, req.params.sub)
     // #396: post-commit residual sweep — the removed sub's direct space/page grants (this tenant only)
     // + the synchronous search reindex. Failures are logged per-tuple, never block the removal.
     await sweepMemberDirectGrants(req.db, req.server.fga, req.server.searchDriver, { tenantId: req.tenant.id, sub: req.params.sub })
+    for (const keyId of revokedKeyIds) emit({ type: 'api_key.revoked', tenantId: req.tenant.id, keyId, actorId: req.user.sub })
     emit({ type: 'member.removed', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: req.params.sub })
     return reply.code(204).send()
   })
