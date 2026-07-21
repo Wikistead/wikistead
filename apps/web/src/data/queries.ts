@@ -12,6 +12,9 @@ export interface Space {
   // The caller's capability on the space (server-derived from FGA). Drives which
   // management actions the sidebar shows — UI convenience; the server is the gate.
   capability?: "view" | "edit" | "manage";
+  // #326: whether the caller may MODERATE this space. Reported separately from `capability` because a
+  // moderator is not a manager — folding it in would hand every moderator rename and delete.
+  canModerate?: boolean;
   // Space branding accent preset key (Phase 5c), or null to inherit. Joined into
   // GET /spaces so the accent cascade applies without a per-space fetch.
   accentKey?: string | null;

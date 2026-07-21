@@ -86,6 +86,23 @@ describe('publishPage abuse filter (#328 / ADR-140)', () => {
       .rejects.toMatchObject({ statusCode: 422, reason: 'banned_content' })
   })
 
+  // #326: the 422 site records a patrol flag through the route's sink. publishPage is called directly
+  // here (as everywhere in this file), so the sink is passed explicitly — which is also the point:
+  // the flag is the CALLER's business, and a refusal without one is still a correct refusal.
+  it('a rejected publish can hand its refusal to the patrol queue', async () => {
+    const id = await publishedPage('clean starting body')
+    await admin`UPDATE pages SET ydoc = ${ydoc('clean starting body with a spamword added')} WHERE id = ${id}`
+    await setAbuse({ bannedWords: ['spamword'] })
+    const seen: { reason: string; spaceId: string }[] = []
+    await expect(publishPage(db, fgaClient, driver, storage, {
+      pageId: id, subject: 'user:dev-user', createdBy: 'user:dev-user',
+      onAbuseReject: (reason, spaceId) => seen.push({ reason, spaceId }),
+    })).rejects.toMatchObject({ statusCode: 422, reason: 'banned_content' })
+    expect(seen.length, 'the refusal was announced exactly once').toBe(1)
+    expect(seen[0]!.reason).toBe('banned_content')
+    expect(seen[0]!.spaceId, 'with the space, so a space-scoped patrol queue can hold it').toBeTruthy()
+  })
+
   it('a banned word already in the published text does NOT block a later benign edit', async () => {
     const id = await publishedPage('this body already has spamword in it')
     await admin`UPDATE pages SET ydoc = ${ydoc('this body already has spamword in it, plus a fix')} WHERE id = ${id}`

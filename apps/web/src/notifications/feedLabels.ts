@@ -18,6 +18,12 @@ export function eventLabel(e: FeedItem, t: TFunction): string {
   switch (e.eventType) {
     case "page.published": return t("notifications.published", { who, title });
     case "page.restored": return t("notifications.restored", { who, title }); // #327 / ADR-143 C-2
+    // #326: a refusal is not a change. Falling through to "changed" would tell a moderator that a
+    // publish they are looking at went through — the opposite of what happened.
+    case "abuse.publish_rejected_mass_delete": return t("notifications.abuseMassDelete", { who, title });
+    case "abuse.publish_rejected_banned": return t("notifications.abuseBanned", { who, title });
+    case "abuse.rate_capped_publish": return t("notifications.abuseRatePublish", { who, title });
+    case "abuse.rate_capped_create": return t("notifications.abuseRateCreate", { who });
     default: return t("notifications.changed", { who, title });
   }
 }

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { Sql } from 'postgres'
+import type IORedis from 'ioredis'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, filterAuthorized } from '@wikistead/authz'
 import type { TenantDb } from '../db/index.js'
@@ -333,6 +334,111 @@ export async function listFeed(
   return (await gateEvents(db, fga, args.subject, rows)).slice(0, limit)
 }
 
+// ── #326 / ADR-142 Addendum 2: abuse FLAGS for the patrol queue ──────────────
+
+// The abuse event types. A fixed enum: the reason rides the TYPE and the row carries nothing else —
+// no draft content, no matched word, no ratio (ADR-070 / the ADR-140 static-reason rule). A patroller
+// learns "this actor was refused here", which is the signature worth reviewing; the text that was
+// refused is not part of it.
+export const ABUSE_EVENT_TYPES = [
+  'abuse.publish_rejected_mass_delete',
+  'abuse.publish_rejected_banned',
+  'abuse.rate_capped_publish',
+  'abuse.rate_capped_create',
+] as const;
+export type AbuseEventType = (typeof ABUSE_EVENT_TYPES)[number]
+
+// One flag per (actor, target, type) per window. Without it the rate limiter becomes a feed
+// AMPLIFIER: a guest hammering a capped endpoint would write a row per refusal and push real activity
+// out of the feed's window — the abuse surface would be the abuse. Valkey SET NX EX, the same infra
+// the caps themselves use.
+const ABUSE_FLAG_WINDOW_S = Number(process.env.ABUSE_FLAG_WINDOW_S ?? 600)
+
+// Record an abuse flag. Deliberately NOT fanOutFeedEvent, for two reasons the review made decisive:
+//   1. That helper returns early when `publishedAt` is null — which would swallow the single most
+//      telling signature, a first-publish rejection on a never-published page (the 422 throws before
+//      any publish, so publishedAt is still null). Patrol reads through the two-stage display gate,
+//      so an insert-only row is fully visible without that guard.
+//   2. Abuse events must not fan out notifications. Patrol is a PULL surface; turning a vandal's
+//      refusals into every watcher's notification bell would hand them an amplifier.
+// The refusal paths have no successful transaction to ride, so this writes on its own and never
+// changes what the caller gets back: a failed flag insert leaves the 422/429 exactly as it was.
+export async function recordAbuseFlag(
+  valkey: IORedis | null,
+  db: TenantDb,
+  // `spaceId` may be a thunk: the throttle runs FIRST, so a flooding caller never pays for the lookup
+  // that only the one recorded refusal needs.
+  args: {
+    tenantId: string
+    eventType: AbuseEventType
+    pageId: string | null
+    spaceId: string | null | (() => Promise<string | null>)
+    actor: string
+    // A SECOND throttle key, scoped to the share link rather than the session. A guest can mint a new
+    // session pseudonym whenever they like (token re-exchange), which would otherwise let them write
+    // one row per rotation and turn the throttle back into an amplifier.
+    linkId?: string | null
+    // The caller MUST prove the actor may write here. A refusal happens before the gate that would
+    // have authorized the action, so without this a token for one space could plant rows in another
+    // space's moderation queue — a write into an authz-gated surface by someone with no rights to it.
+    authorize: () => Promise<boolean>
+    log?: { warn: (o: object, msg: string) => void }
+  },
+): Promise<boolean> {
+  try {
+    if (valkey) {
+      const target = args.pageId ?? (typeof args.spaceId === 'string' ? args.spaceId : '-')
+      const key = `abuseflag:${args.tenantId}:${args.actor}:${target}:${args.eventType}`
+      const first = await valkey.set(key, '1', 'EX', ABUSE_FLAG_WINDOW_S, 'NX')
+      if (first !== 'OK') return false // already flagged in this window
+      if (args.linkId) {
+        const linkKey = `abuseflag:${args.tenantId}:link:${args.linkId}:${target}:${args.eventType}`
+        const firstForLink = await valkey.set(linkKey, '1', 'EX', ABUSE_FLAG_WINDOW_S, 'NX')
+        if (firstForLink !== 'OK') return false // a new session on the same link is the same flood
+      }
+    }
+    if (!(await args.authorize())) return false // no rights to the target ⇒ no row in its queue
+    const spaceId = typeof args.spaceId === 'function' ? await args.spaceId() : args.spaceId
+    await db.sql`
+      INSERT INTO feed_events (tenant_id, event_type, page_id, space_id, actor)
+      VALUES (${args.tenantId}, ${args.eventType}, ${args.pageId}, ${spaceId}, ${args.actor})`
+    return true
+  } catch (e) {
+    // Best-effort: the refusal itself is the contract and must not change. But a flag that silently
+    // never lands is worse than no flag at all — a patrol queue that looks empty because the writes
+    // are failing reads as "nothing happened". So it is logged, never swallowed in silence.
+    const warn = args.log?.warn ?? ((o: object, m: string) => console.warn(m, o))
+    warn({ eventType: args.eventType, err: String(e) }, 'abuse flag insert failed (patrol queue may be missing rows)')
+    return false
+  }
+}
+
+// The patrol queue for one space: the supply the 2026-07-14 ruling named — abuse refusals and
+// anonymous / share-link activity — narrowed from the shared feed query. `space#moderate` is checked
+// by the ROUTE before this runs; the per-event view confirm inside gateEvents is unchanged, so narrowing
+// here can only ever remove rows, never reveal one.
+export async function listPatrol(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { subject: string; spaceId: string; before?: string | null; limit?: number; unpatrolledOnly?: boolean },
+): Promise<FeedItem[]> {
+  const limit = Math.min(args.limit ?? 30, 100)
+  const unpatrolled = args.unpatrolledOnly === true
+  const before = args.before || null
+  const [cur] = before ? await db.sql<{ created_at: Date }[]>`SELECT created_at FROM feed_events WHERE id = ${before}` : []
+  const curAt = cur?.created_at ?? null
+  const rows = await db.sql<RawRow[]>`
+    SELECT fe.id, fe.event_type, fe.page_id, fe.space_id, fe.actor, fe.created_at, pe.patrolled_at
+    FROM feed_events fe LEFT JOIN patrolled_events pe ON pe.feed_event_id = fe.id
+    WHERE fe.space_id = ${args.spaceId}
+      AND (fe.event_type LIKE 'abuse.%' OR fe.actor LIKE 'guest:%' OR fe.actor LIKE 'anon:%')
+      AND (${curAt}::timestamptz IS NULL OR (fe.created_at, fe.id) < (${curAt}, ${before}))
+      AND (${unpatrolled}::bool IS NOT TRUE OR pe.patrolled_at IS NULL)
+      AND fe.event_type <> 'mention'
+    ORDER BY fe.created_at DESC, fe.id DESC LIMIT ${limit * 4}`
+  return (await gateEvents(db, fga, args.subject, rows)).slice(0, limit)
+}
+
 // The member's inbox — per-member rows, but STILL double-gated at display (a revoked-access notification
 // disappears silently; the row stays). member_sub predicate is the isolation boundary.
 export async function listNotifications(
@@ -482,6 +588,26 @@ export async function notificationsPlugin(app: FastifyInstance) {
 
   app.get<{ Querystring: { spaceId?: string; before?: string; unpatrolled?: string } }>('/feed', async (req) =>
     listFeed(req.db, app.fga, { subject: subjectOf(req.user.sub), spaceId: req.query.spaceId ?? null, before: req.query.before ?? null, unpatrolledOnly: req.query.unpatrolled === 'true' }))
+
+  // #326 / ADR-142 Addendum 2: the space patrol queue — abuse refusals and anonymous/share-link
+  // activity for ONE space, for the people who moderate it. `space#manage` is the capability gate and
+  // it runs FIRST (403 on failure); the per-event view confirm behind listPatrol is unchanged, so this
+  // route can only ever show a subset of what /feed would already show the same caller.
+  app.get<{ Params: { spaceId: string }; Querystring: { before?: string; unpatrolled?: string } }>(
+    '/spaces/:spaceId/patrol', async (req, reply) => {
+      // The write gate (canPatrol) asks for `moderate`, which a space moderator holds without being a
+      // manager (#330 / C-5 shipped). Gating the LIST on `manage` would leave a moderator able to mark
+      // items reviewed but unable to open the queue that lists them.
+      if (!(await check(app.fga, subjectOf(req.user.sub), 'moderate', { type: 'space', id: req.params.spaceId }))) {
+        return reply.code(403).send({ error: 'forbidden' })
+      }
+      return listPatrol(req.db, app.fga, {
+        subject: subjectOf(req.user.sub),
+        spaceId: req.params.spaceId,
+        before: req.query.before ?? null,
+        unpatrolledOnly: req.query.unpatrolled === 'true',
+      })
+    })
 
   // #326 / ADR-142 (C-1 patrol): mark / unmark a feed event as reviewed. Member-only (no guest config → a guest
   // is structurally 401, like /feed). The gate order (view-confirm → 404 → capability 403) lives in mark/unmark.

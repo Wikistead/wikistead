@@ -107,6 +107,39 @@ describe('guest publish rate caps (#328 / ADR-140 increment 2)', () => {
     expect((await publish(s2)).statusCode).toBe(429) // link budget is shared across sessions
   })
 
+  // #326 / ADR-142 Addendum 2: the refusal is also the patrol queue's supply — the route records a
+  // flag on the way out. Pinned HERE, over real HTTP, because a test that calls the helper cannot see
+  // whether the route ever reaches it: the first version of this wiring fired the write after the
+  // response, when the tenant connection had already been released, and RLS refused every row.
+  it('a capped publish leaves a patrol flag naming the guest session and the page', async () => {
+    const link = await mkEditLink()
+    const session = anon()
+    const tok = await mkTok(link, session)
+    await setCaps({ sessionMax: 1 })
+    expect((await publish(tok)).statusCode).toBe(200)
+    expect((await publish(tok)).statusCode).toBe(429)
+    const rows = await admin<{ event_type: string; actor: string; page_id: string }[]>`
+      SELECT event_type, actor, page_id FROM feed_events WHERE event_type = 'abuse.rate_capped_publish' AND actor = ${session}`
+    expect(rows.length, 'the refusal reached the patrol queue').toBe(1)
+    expect(rows[0]!.page_id, 'and names the page it was refused on').toBe(pageId)
+    // the actor is the guest's SESSION pseudonym, the same string their ordinary activity carries —
+    // a per-link id would neither join with that activity nor throttle per guest.
+    expect(rows[0]!.actor).toBe(session)
+    await admin`DELETE FROM feed_events WHERE actor = ${session}`
+  })
+
+  it('hammering the cap over HTTP still writes ONE flag (the throttle is on the route, not the test)', async () => {
+    const link = await mkEditLink()
+    const session = anon()
+    const tok = await mkTok(link, session)
+    await setCaps({ sessionMax: 1 })
+    expect((await publish(tok)).statusCode).toBe(200)
+    for (let i = 0; i < 5; i++) expect((await publish(tok)).statusCode).toBe(429)
+    const rows = await admin<{ n: number }[]>`SELECT count(*)::int AS n FROM feed_events WHERE actor = ${session}`
+    expect(rows[0]!.n, 'five refusals, one flag').toBe(1)
+    await admin`DELETE FROM feed_events WHERE actor = ${session}`
+  })
+
   it('the 429 body is a STATIC reason code only (no content / limit / id echo)', async () => {
     const tok = await mkTok(await mkEditLink(), anon())
     await setCaps({ sessionMax: 1 })
