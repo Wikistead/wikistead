@@ -1501,6 +1501,25 @@ export function useAdminSpaces(enabled = true) {
   });
 }
 
+// #420 the tenant-wide member typeahead for the admin roles console. Reuses the existing
+// admin-only /members listing (same tenant-admin gate as the console itself — no new surface) and
+// filters client-side, so assigning a role means picking a person by name instead of pasting a sub.
+export function useTenantMemberCandidates(q: string) {
+  const { token } = useSession();
+  const all = useQuery({
+    queryKey: ["tenant-members"],
+    queryFn: () => apiFetch<{ members: { sub: string; display_name: string | null; email: string | null }[] }>("/members", token).then((r) => r?.members ?? []),
+    staleTime: 30_000,
+    retry: false,
+  });
+  const needle = q.trim().toLowerCase();
+  const matches = !needle ? [] : (all.data ?? [])
+    .filter((m) => (m.display_name ?? "").toLowerCase().includes(needle) || m.sub.toLowerCase().includes(needle) || (m.email ?? "").toLowerCase().includes(needle))
+    .slice(0, 10)
+    .map((m) => ({ sub: m.sub, displayName: m.display_name }));
+  return { candidates: matches, isError: all.isError };
+}
+
 export function useMemberCandidates(spaceId: string, q: string) {
   const { token } = useSession();
   return useQuery({

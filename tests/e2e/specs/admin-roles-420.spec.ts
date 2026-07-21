@@ -32,7 +32,7 @@ test("#420: role manager — create, edit, assign on a space, unassign, delete",
   await page.getByRole("option", { name }).click();
   await page.getByTestId("assign-space").click();
   await page.getByRole("option").first().click(); // the first real space (no placeholder rows)
-  await page.getByTestId("assign-sub").fill(`e2e-holder-${Date.now()}`);
+  await page.getByTestId("assign-sub").fill(`e2e-holder-${Date.now()}`); // a raw sub is still accepted
   await page.getByTestId("assign-add").click();
   await expect(page.getByTestId("assignment-list")).toContainText(name, { timeout: 8000 });
 
@@ -90,4 +90,39 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   await expect(page.getByTestId("assignment-list")).not.toContainText(name, { timeout: 8000 });
   await page.getByTestId("custom-role-row").filter({ hasText: name }).getByTestId("role-delete").click();
   await expect(page.getByTestId("custom-roles")).not.toContainText(name, { timeout: 8000 });
+});
+
+// #420 the console's vocabulary. A built-in role is shown as the SAME capability grid used to
+// build a custom one (checked, disabled) rather than a run-on line of names; the two dropdowns in the
+// assignment row say which is which; and the member field is a name search rather than a request for
+// an internal "sub".
+test("#420 built-ins render as read-only capability checkboxes, and members are picked by name", async ({ page }) => {
+  await page.goto("/admin/roles");
+  await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
+
+  // built-in `manager` shows its capabilities as checked, disabled checkboxes
+  const managerView = page.getByTestId("builtin-manager-cap-view");
+  await expect(managerView).toBeVisible();
+  await expect(managerView).toBeChecked();
+  await expect(managerView).toBeDisabled();
+  // …and a capability it does NOT have is present but unchecked (the grid is the whole vocabulary)
+  const viewerDelete = page.getByTestId("builtin-viewer-cap-delete");
+  await expect(viewerDelete).toBeVisible();
+  await expect(viewerDelete).not.toBeChecked();
+  await expect(page.getByTestId("builtin-roles"), "the cap · cap · cap text is gone").not.toContainText(" · ");
+
+  // the assignment controls carry visible labels, not just aria ones
+  const form = page.getByTestId("assign-form");
+  await expect(form.locator("label", { hasText: /./ }).first()).toBeVisible();
+  const labels = (await form.locator("label").allInnerTexts()).join("|");
+  expect(labels.length, `the assignment row is labelled (got "${labels}")`).toBeGreaterThan(0);
+
+  // the member field searches by name: typing offers candidates, picking one fills the field
+  await page.getByTestId("assign-sub").fill("e");
+  const item = page.getByTestId("assign-sub-item").first();
+  await expect(item, "a tenant member matched the search").toBeVisible({ timeout: 8000 });
+  const picked = (await item.innerText()).split("\n")[0]!.trim();
+  await item.click();
+  await expect(page.getByTestId("assign-sub")).toHaveValue(picked);
+  await expect(page.getByTestId("assign-sub-list"), "the list closes once a member is chosen").toHaveCount(0);
 });
