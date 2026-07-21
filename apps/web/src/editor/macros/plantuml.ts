@@ -54,14 +54,25 @@ export const plantumlMacro: FenceMacro = {
       renderPreview(source);
       wrap.append(src, preview);
       container.appendChild(wrap);
-      const editor = mountSourceEditor({
+      // #456 S5: the source pane comes from the HOST now (kind "code" — this source IS code, so it
+      // keeps the code face and skips the markdown decoration layer). The macro asks for a surface and
+      // gets a handle; it never builds one, so vim and the rest stay configured in exactly one place.
+      // Falls back to the macro-side helper when no host lends a surface (unit tests, older callers).
+      const editor = editEnv?.mountSurface?.({
+        parent: src,
+        doc: asMacroSource(source),
+        kind: "code",
+        testid: "plantuml-edit-src",
+        onInput: (v) => renderPreview(v), // local live preview, no doc write
+        onCommit: (v) => save(v), // one offset-invariant Y.Text edit, on blur
+      }) ?? mountSourceEditor({
         parent: src,
         doc: source,
         dark: ctx.theme === "dark",
-        vim: editEnv?.vim, // #243 C3 slice 2: follow the outer editor's vim setting
+        vim: editEnv?.vim,
         testid: "plantuml-edit-src",
-        onInput: (v) => renderPreview(v), // local preview only, no doc write
-        onCommit: (v) => save(asMacroSource(v)), // commit to Y.Text on blur (offset-invariant replaceSource)
+        onInput: (v) => renderPreview(v),
+        onCommit: (v) => save(asMacroSource(v)),
       });
       const focus = setTimeout(() => editor.focus(), 0);
       return {
