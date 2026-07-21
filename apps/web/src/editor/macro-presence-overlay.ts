@@ -1,7 +1,7 @@
 import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import * as Y from "yjs";
 import { ySyncFacet } from "y-codemirror.next";
-import { livePreview, macroPresence } from "./live-preview/decorations";
+import { livePreview, macroPresence, ATOM_BOX_CLASS } from "./live-preview/decorations";
 import { initials } from "../ui/avatar";
 
 // #92 comment 982 (②③): macro-presence as an OUTLINE + top-right avatar overlay, generalised to EVERY
@@ -108,11 +108,17 @@ const macroPresenceOverlayPlugin = ViewPlugin.fromClass(
       const layerRect = this.layer.getBoundingClientRect();
       const contentRect = view.contentDOM.getBoundingClientRect();
       // #453: hug the MACRO'S OWN rect (the same box the local atom-sel ring wraps) instead of the
-      // full content width — the local and remote frames must be the same size and shape. Wraps are
+      // full content width — the local and remote frames must be the same size and shape. Boxes are
       // matched geometrically per measure (top ≈ block top, height closest to the block height —
-      // robust against nested wraps inside layout containers), so upstream edits can't leave a
-      // stale offset mapping. Blocks without a wrap (non-widget macros) keep the old full-width box.
-      const wraps = Array.from(view.contentDOM.querySelectorAll<HTMLElement>(".cm-lp-macro-wrap")).map(
+      // robust against nested boxes inside layout containers), so upstream edits can't leave a
+      // stale offset mapping.
+      // this asked for `.cm-lp-macro-wrap`, which is only SOME of the roots that take the ring.
+      // A callout, a details block and a table each ring on their own root, so a peer's box around them
+      // fell through to the full content width — 740px drawn around a 692px callout, and around a 153px
+      // table. Ask for the shared marker every ring-taking root wears instead, so this cannot drift out
+      // of step with the ring again. A block with no marked root at all keeps the full-width fallback —
+      // there is no local ring there either, so there is nothing to disagree with.
+      const wraps = Array.from(view.contentDOM.querySelectorAll<HTMLElement>(`.${ATOM_BOX_CLASS}`)).map(
         (el) => ({ el, rect: el.getBoundingClientRect() }),
       );
       const out: Rect[] = [];

@@ -500,7 +500,9 @@ export function renderInlineMarkdownToDom(text: string): DocumentFragment {
 // textContent, body via the sanitized renderMarkdownToDom, icon via data-icon + CSS mask, no innerHTML).
 export function renderCalloutPanel(containerClass: string, icon: string, label: string, body: string, baseOffset?: number): HTMLElement {
   const wrap = document.createElement("div");
-  wrap.className = `${containerClass} cm-lp-callout-panel`;
+  // #453 the callout takes the selection ring, so it wears the shared atom-box marker too
+  // otherwise a peer's presence box measures the full content width around it (740px vs its real 692px).
+  wrap.className = `${containerClass} cm-lp-callout-panel cm-lp-atom-box`;
   wrap.setAttribute("data-testid", "callout-panel");
   const ic = document.createElement("span");
   ic.className = "cm-lp-callout-panel-icon";
