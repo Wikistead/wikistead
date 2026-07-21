@@ -120,6 +120,48 @@ describe('API inventory ↔ OpenAPI spec (#407 anti-drift)', () => {
     ).toEqual([])
   })
 
+  // #459the polish pass (operationId / tags / 4xx / a shared default error) is invisible to the
+  // validator above, which asserts error-severity only — operationId and friends are warnings, so the
+  // whole pass could be reverted and every test here would stay green. That is how a finished spec rots:
+  // the next route gets added without an operationId and nothing objects. These asserts are structural
+  // rather than a redocly severity bump, so a failure names the offending operation instead of a rule id.
+  it('every operation carries an operationId, tags, a 4xx and the shared error response (#459)', () => {
+    const doc = parseYaml(readFileSync(specPath, 'utf8')) as Record<string, any>
+    const METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options'])
+    const ids = new Map<string, string>()
+    const noId: string[] = []
+    const noTags: string[] = []
+    const no4xx: string[] = []
+    const noDefault: string[] = []
+    const dupes: string[] = []
+    for (const [path, item] of Object.entries(doc.paths ?? {})) {
+      for (const [method, op] of Object.entries(item as Record<string, any>)) {
+        if (!METHODS.has(method)) continue
+        const where = `${method.toUpperCase()} ${path}`
+        if (!op?.operationId) noId.push(where)
+        else if (ids.has(op.operationId)) dupes.push(`${op.operationId} (${ids.get(op.operationId)} and ${where})`)
+        else ids.set(op.operationId, where)
+        if (!Array.isArray(op?.tags) || op.tags.length === 0) noTags.push(where)
+        const codes = Object.keys(op?.responses ?? {})
+        if (!codes.some((c) => /^4\d\d$/.test(c))) no4xx.push(where)
+        if (op?.responses?.default?.$ref !== '#/components/responses/Error') noDefault.push(where)
+      }
+    }
+    expect(noId, `operations without an operationId: ${noId.join(', ')}`).toEqual([])
+    expect(dupes, `duplicate operationIds: ${dupes.join(', ')}`).toEqual([])
+    expect(noTags, `operations without tags: ${noTags.join(', ')}`).toEqual([])
+    expect(no4xx, `operations documenting no 4xx: ${no4xx.join(', ')}`).toEqual([])
+    expect(noDefault, `operations not referencing the shared error response: ${noDefault.join(', ')}`).toEqual([])
+    // and the tags the operations use must be declared at document level, so the reference renders grouped
+    const declared = new Set((doc.tags ?? []).map((t: { name: string }) => t.name))
+    const undeclared = [...new Set(Object.values(doc.paths ?? {}).flatMap((item: any) =>
+      Object.entries(item as Record<string, any>).filter(([m]) => METHODS.has(m)).flatMap(([, op]) => op?.tags ?? []),
+    ))].filter((t) => !declared.has(t))
+    expect(undeclared, `tags used but not declared at document level: ${undeclared.join(', ')}`).toEqual([])
+    // the license is part of the AGPL dual-licensing story (ADR-011), not cosmetics
+    expect(doc.info?.license?.identifier ?? doc.info?.license?.name).toBe('AGPL-3.0-only')
+  })
+
   it('every documented path still exists in the source (no dead spec entries)', () => {
     const spec = readFileSync(specPath, 'utf8')
     const routes = new Set(extractRoutes().map((p) => p.replace(/:([A-Za-z]+)/g, '{$1}')))
