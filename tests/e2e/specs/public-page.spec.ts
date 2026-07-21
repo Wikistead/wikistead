@@ -480,7 +480,58 @@ test("#430: the standalone public page has the minimal header — brand + powere
   await expect(spaceCtx.getByTestId("public-space-icon"), "…with an icon (uploaded image or initials chip)").toBeVisible();
   const spaceLabel = (await spaceCtx.innerText()).trim();
   expect(spaceLabel.length, `the space name renders (got "${spaceLabel}")`).toBeGreaterThan(0);
-  // and the left side genuinely has content — the defect was an empty slot
-  const leftText = (await header.innerText()).trim();
-  expect(leftText.length, "header is not blank").toBeGreaterThan(0);
+  // "the header is not blank" used to read header.innerText, which includes the theme and
+  // language toggles on the right — it passed with the left side completely empty, i.e. with the exact
+  // defect it was written for. Name the left slot instead.
+  const brandOrSpace = await header.getByTestId("public-brand").count() + await header.getByTestId("public-brand-logo").count()
+    + await header.getByTestId("public-space-context").count();
+  expect(brandOrSpace, "the header's LEFT slot carries a brand or the space identity").toBeGreaterThan(0);
+});
+
+// ruling: white-labelling REPLACES the Wikistead brand with the tenant's own rather than erasing
+// it, so the mark and the name follow "has this tenant set a brand?", not "is it entitled to one?".
+// The state that made this matter is the one every paying customer starts in — entitled, nothing set
+// which rendered an empty header, so paying looked worse than not paying. Driven through the real
+// branding endpoint (no response mocking): the decision is client-side, but the input must be real.
+test("#430 the public header falls back to the Wikistead brand until the tenant sets its own", async ({ browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  const pageId = await openScratch(member, "pub-brand-430");
+  await enterEdit(member);
+  await member.click("[data-pane=preview] .cm-content");
+  await member.keyboard.insertText("# Brand Test\n\nbody\n");
+  await sleep(300);
+  await member.getByTestId("publish-page").click();
+  await sleep(800);
+  await makePublic(pageId);
+  await setPublicSurface(member, true);
+  const before = await (await member.request.get("/api/branding")).json() as { displayName: string | null; accentKey: string | null };
+  // PATCH writes BOTH fields and nulls whatever it is not given, so carry the accent through or the
+  // test would quietly reset the tenant's colour on its way past.
+  const setName = async (displayName: string | null) => member.evaluate(async (b) => {
+    const r = await fetch("/api/tenant/branding", { method: "PATCH", headers: { Authorization: "Bearer dev-token", "content-type": "application/json" }, body: JSON.stringify(b) });
+    return r.status;
+  }, { displayName, accentKey: before.accentKey });
+
+  try {
+    // (1) nothing of its own set → the default Wikistead brand, on whatever plan this stack runs
+    expect(await setName(null), "clearing the display name").toBe(204);
+    const anon = await (await browser.newContext()).newPage();
+    await anon.goto(`/pub/${pageId}`);
+    const header = anon.getByTestId("public-header");
+    await expect(header).toBeVisible({ timeout: 10000 });
+    await expect(header.getByTestId("brand-mark"), "the Wikistead mark stands in for an unset brand").toBeVisible();
+    await expect(header.getByTestId("public-brand")).toHaveText("Wikistead");
+
+    // (2) a brand of its own → that name, and the Wikistead mark steps aside
+    expect(await setName("Acme Docs"), "setting a display name").toBe(204);
+    await anon.reload();
+    await expect(header.getByTestId("public-brand"), "the tenant's own name replaces Wikistead").toHaveText("Acme Docs");
+    await expect(header.getByTestId("brand-mark"), "…and so does its mark").toHaveCount(0);
+
+    // (3) the attribution is a different thing from the identity: it stays on the entitlement seam
+    const wl = (await (await anon.request.get("/api/branding")).json()).whitelabel as boolean;
+    await expect(header.getByTestId("powered-by")).toHaveCount(wl ? 0 : 1);
+  } finally {
+    await setName(before.displayName);
+  }
 });

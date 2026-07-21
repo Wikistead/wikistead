@@ -1390,12 +1390,18 @@ function PublicHeader({ space }: { space?: PublicSpaceContext | null }) {
   const b = branding.data;
   return (
     <header className="flex h-10 flex-none items-center gap-2 border-b border-border bg-panel px-4" data-testid="public-header">
+      {/* ruling: white-labelling REPLACES the Wikistead brand with the tenant's own — it does not
+          erase it. So the mark and the name are chosen by whether the tenant HAS a brand of its own,
+          not by whether they are entitled to one. A paying tenant that has not set a logo or a display
+          name yet (the state every paying customer passes through) used to get an empty header, which
+          made paying look worse than not paying. "Powered by Wikistead" is a different thing — a free
+          plan's attribution, not an identity — so it stays on the entitlement. */}
       {b?.logoUrl ? (
         <img className="block h-[20px] max-w-[140px] object-contain" src={assetUrl(b.logoUrl)} alt={b.displayName || "logo"} data-testid="public-brand-logo" />
-      ) : b?.whitelabel ? null : (
+      ) : b?.displayName ? null : (
         <WikisteadMark />
       )}
-      {(b?.displayName || !b?.whitelabel) && (
+      {(b?.displayName || !b?.logoUrl) && (
         <span className="text-[14px] font-semibold" data-testid="public-brand">{b?.displayName || "Wikistead"}</span>
       )}
       {space && (
