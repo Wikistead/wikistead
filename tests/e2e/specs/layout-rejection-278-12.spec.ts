@@ -160,3 +160,72 @@ test("#278-12 ⑤: island enter→exit→re-enter round-trips; Escape COMMITS th
   await sleep(700);
   await expect(island, "cycle 3: re-entry after click-out exit").toHaveCount(1);
 });
+
+// #278 the user's repro, in LIVE. Entering a macro in Live REVEALS its raw source, which took the
+// block out of livePreview's block list — so the guard that blanks the fat cursor's glyph stopped firing
+// and the block cursor painted the fence's own `:`. Whether the fence is hidden (WYSIWYG) or revealed
+// (Live), it is macro syntax and not prose, so the cursor never paints it. Both surfaces are pinned here
+// because the earlier fix held in WYSIWYG and quietly did not in Live — the mode was the missing axis.
+const TABS_WITH_CALLOUT =
+  "::::tabs\n:::tab[One]\nlead\n\n:::warning[Careful]\nbody text\n:::\n\nbelow\n:::\n:::tab[Two]\ntwo\n:::\n::::\n\nmid\n";
+
+async function vimLive(page: import("@playwright/test").Page, name: string, doc: string, modeIndex: number) {
+  await openScratch(page, name);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(doc);
+  await sleep(900);
+  await page.getByTestId("vim-toggle").click();
+  await sleep(300);
+  await page.locator("[role=radiogroup] [role=radio]").nth(modeIndex).click();
+  await sleep(700);
+}
+const glyph = (page: import("@playwright/test").Page, scope: string) =>
+  page.evaluate((sel) => {
+    const root = sel ? document.querySelector(sel) : document;
+    const fc = root?.querySelector(".cm-fat-cursor") as HTMLElement | null;
+    return fc ? { color: getComputedStyle(fc).color, txt: (fc.textContent ?? "").slice(0, 2) } : null;
+  }, scope);
+
+for (const [label, modeIndex] of [["Live", 0], ["WYSIWYG", 3]] as const) {
+  test(`#278 (${label}): the block cursor never paints a fence character — top level`, async ({ browser }) => {
+    const page = await (await browser.newContext()).newPage();
+    await vimLive(page, `fence-glyph-top-${label}`, "top\n\n:::warning[Careful]\nbody text\n:::\n\nbelow\n", modeIndex);
+    await page.getByText("below", { exact: true }).click();
+    await sleep(400);
+    await page.keyboard.press("k"); // onto the blank line
+    await sleep(300);
+    await page.keyboard.press("k"); // onto the callout's fence
+    await sleep(500);
+    const g = await glyph(page, "[data-pane=preview]");
+    expect(g, "a fat cursor is showing").not.toBeNull();
+    expect(g!.txt, "fixture sanity: the cursor really is sitting on the fence").toBe(":");
+    expect(g!.color, "…and its glyph is transparent, so the `:` never shows").toBe("rgba(0, 0, 0, 0)");
+  });
+
+  test(`#278 (${label}): …and inside the slot-edit island, then after leaving it`, async ({ browser }) => {
+    const page = await (await browser.newContext()).newPage();
+    await vimLive(page, `fence-glyph-island-${label}`, TABS_WITH_CALLOUT, modeIndex);
+    await page.locator("[data-pane=preview]").getByText("lead", { exact: true }).click();
+    await sleep(900);
+    const island = page.locator("[data-testid=slot-edit-island]");
+    await expect(island, "the island opened").toHaveCount(1);
+    await island.locator(".cm-content").getByText("below", { exact: true }).click();
+    await sleep(300);
+    await page.keyboard.press("k");
+    await sleep(300);
+    await page.keyboard.press("k"); // onto the nested callout's fence
+    await sleep(500);
+    const inner = await glyph(page, "[data-testid=slot-edit-island]");
+    expect(inner, "the island has a fat cursor").not.toBeNull();
+    expect(inner!.txt, "fixture sanity: on the nested fence").toBe(":");
+    expect(inner!.color, "the island's glyph is transparent too").toBe("rgba(0, 0, 0, 0)");
+
+    // the user's second step: click the whole tabs container, leaving the island
+    const tabs = page.locator("[data-pane=preview] [data-testid=macro-tabs], [data-pane=preview] .cm-lp-tabs").first();
+    await tabs.click({ position: { x: 4, y: 4 } });
+    await sleep(700);
+    const after = await glyph(page, "[data-pane=preview]");
+    if (after) expect(after.color, "and the cursor that remains does not paint a fence either").toBe("rgba(0, 0, 0, 0)");
+  });
+}

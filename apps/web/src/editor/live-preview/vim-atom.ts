@@ -323,7 +323,15 @@ export const vimWysiwygCaretGuard: Extension = [atomSelHideFatCursor, ViewPlugin
           if (active && head >= active.from && head <= active.to) onBlockAtom = true;
         }
       }
-      blank(onBlockAtom);
+      // #278 in LIVE, a macro under the caret REVEALS its raw source — so the block drops out of
+      // `lp.blocks` and the test above stops firing, leaving the fat cursor to paint the fence's own `:`
+      // (the user's report: "`:` shows up on the cursor"). The fence line is macro SYNTAX either way:
+      // hidden in WYSIWYG, revealed in Live, but never prose. Blank the glyph on it in both, so the rule
+      // the cursor follows is one rule — "never paint a fence character" — instead of one that happens to
+      // hold only while the widget is rendered. Source mode is exempt: there the fence IS the text.
+      const onFenceLine = mode !== "source" && !!vim && !vim.insertMode
+        && /^\s*(?::{3,}|`{3,})/.test(u.state.doc.lineAt(head).text);
+      blank(onBlockAtom || onFenceLine);
 
       // #286: a blockwise vim visual selection has >1 range. The inline nudge below rebuilds the selection
       // to ONE range, which would collapse the rectangle — bail (the between-char snap is irrelevant to a
