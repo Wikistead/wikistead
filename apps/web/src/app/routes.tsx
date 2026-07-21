@@ -168,6 +168,7 @@ import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, assetUrl, type GuestToken } from "../data/apiClient";
 import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useDirectDeletePage, useCreatePage, useEntitlements, useSpaces, useBranding, type Page } from "../data/queries";
 import { WikisteadMark } from "./BrandLockup"; // #430: the public header brand fallback
+import { Avatar } from "../ui/Avatar"; // #430the public header's space chip (shared primitive)
 import { GuestSidebar } from "./GuestSidebar";
 import { ConfirmDialog } from "../ui/dialogs";
 import { DeleteBacklinkWarning } from "./DeleteBacklinkWarning";
@@ -1215,9 +1216,12 @@ interface PublicChildNode { id: string; title: string; children: PublicChildNode
 // The rendered body of a single public page (no chrome). Reused by PublicPageRoute and PublicSpaceRoute
 // (#227).②: a standalone /pub/:id shows ONLY its page (the old bottom child-tree nav is gone
 // page-level publish = just the page; SPACE-level publish is the sidebar shell with the tree).
-function PublicPageContent({ pageId }: { pageId: string }) {
+// #430the space a public page belongs to — name + (optional) icon, both served publicly.
+export interface PublicSpaceContext { name: string; iconImageUrl: string | null }
+
+function PublicPageContent({ pageId, onSpace }: { pageId: string; onSpace?: (s: PublicSpaceContext | null) => void }) {
   const { t } = useTranslation();
-  const [state, setState] = useState<{ status: "loading" | "notfound" | "ok"; page?: { id: string; title: string; content: string; noindex: boolean; children: PublicChildNode[] } }>({ status: "loading" });
+  const [state, setState] = useState<{ status: "loading" | "notfound" | "ok"; page?: { id: string; title: string; content: string; noindex: boolean; children: PublicChildNode[]; space?: PublicSpaceContext } }>({ status: "loading" });
   const [bodyEl, setBodyEl] = useState<HTMLDivElement | null>(null); // callback ref → reactive for the TOC hook
   const [outerEl, setOuterEl] = useState<HTMLDivElement | null>(null); // #227non-scrolling positioning context
   const [bandEl, setBandEl] = useState<HTMLDivElement | null>(null); // #227②: publish the band's real height
@@ -1242,7 +1246,9 @@ function PublicPageContent({ pageId }: { pageId: string }) {
       .then(async (res) => {
         if (cancelled) return;
         if (!res.ok) { setState({ status: "notfound" }); return; }
-        setState({ status: "ok", page: await res.json() });
+        const payload = await res.json();
+        setState({ status: "ok", page: payload });
+        onSpace?.(payload?.space ?? null); // hoist the space context into the header slot
       })
       .catch(() => { if (!cancelled) setState({ status: "notfound" }); });
     return () => { cancelled = true; };
@@ -1370,11 +1376,15 @@ function PublicPageContent({ pageId }: { pageId: string }) {
   );
 }
 
-// #430: the public reader's MINIMAL header — tenant brand (logo/name), an optional space-name context
-// (#270 parity), the #429 theme toggle, and — on the FREE plan only — a subtle "Powered by Wikistead"
-// (the owner's freemium ruling; paid tenants white-label via the ONE /branding entitlement seam).
-// Language switch is deliberately absent (deferred, ruling b). NEVER any member chrome here.
-function PublicHeader({ spaceName }: { spaceName?: string | null }) {
+// #430: the public reader's MINIMAL header — tenant brand (logo/name), the SPACE this content belongs
+// to (icon + name), the #429 theme + language toggles, and — on the FREE plan only — a subtle "Powered
+// by Wikistead" (the owner's freemium ruling; paid tenants white-label via the ONE /branding
+// entitlement seam). NEVER any member chrome here.
+//the space identity is shown on EVERY plan, white-label included. White-labelling suppresses
+// WIKISTEAD's branding; the tenant's own space name and icon are the tenant's content, so hiding them
+// served nobody — on a self-host tenant (white-label by default, no custom logo) it left the header's
+// entire left side blank.
+function PublicHeader({ space }: { space?: PublicSpaceContext | null }) {
   const { t } = useTranslation();
   const branding = useBranding();
   const b = branding.data;
@@ -1388,7 +1398,18 @@ function PublicHeader({ spaceName }: { spaceName?: string | null }) {
       {(b?.displayName || !b?.whitelabel) && (
         <span className="text-[14px] font-semibold" data-testid="public-brand">{b?.displayName || "Wikistead"}</span>
       )}
-      {spaceName && <span className="min-w-0 truncate text-[13px] text-fg-dim" data-testid="public-space-context">/ {spaceName}</span>}
+      {space && (
+        <span className="flex min-w-0 items-center gap-1.5" data-testid="public-space-context">
+          {space.iconImageUrl ? (
+            <img className="h-[18px] w-[18px] flex-none rounded object-cover" src={assetUrl(space.iconImageUrl)} alt="" data-testid="public-space-icon" />
+          ) : (
+            // no uploaded icon → the same deterministic initials chip the member sidebar uses, so the
+            // slot is never empty and the space still reads as itself
+            <Avatar name={space.name} seed={space.name} size={18} data-testid="public-space-icon" />
+          )}
+          <span className="min-w-0 truncate text-[13px] font-medium">{space.name}</span>
+        </span>
+      )}
       <div className="flex-1" />
       {b && !b.whitelabel && (
         <span className="text-[11px] text-fg-dim opacity-70" data-testid="powered-by">{t("publicReader.poweredBy")}</span>
@@ -1403,14 +1424,17 @@ function PublicHeader({ spaceName }: { spaceName?: string | null }) {
 
 function PublicPageRoute() {
   const { pageId } = useParams<{ pageId: string }>();
+  // #430the standalone reader used to render PublicHeader with NO arguments, so its space slot
+  // was permanently empty — and on a white-label tenant (self-host default) the brand mark and name are
+  // both suppressed, leaving the whole left side blank. The page load now reports its space, which the
+  // header always shows.
+  const [space, setSpace] = useState<PublicSpaceContext | null>(null);
   if (!pageId) return <div data-testid="public-not-found" style={{ padding: 24 }} />;
-  //①: a viewport-height flex column bounds PublicPageContent (the inner scroller keeps working);
-  // #430: the floating #429 theme corner grew into the minimal header (theme toggle now lives there).
   return (
     <div className="flex h-dvh flex-col">
-      <PublicHeader />
+      <PublicHeader space={space} />
       <div className="relative min-h-0 flex-1">
-        <PublicPageContent pageId={pageId} />
+        <PublicPageContent pageId={pageId} onSpace={setSpace} />
       </div>
     </div>
   );
