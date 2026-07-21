@@ -1062,7 +1062,7 @@
   },
   "transparency": {
     "title": "Vendor access",
-    "body": "Operator (vendor) break-glass accesses to this tenant, disclosed with a verifiable per-tenant chain.",
+    "body": "Emergency (break-glass) accesses to this tenant by the service operator (vendor) — disclosed with a per-tenant chain you can verify for tampering.",
     "empty": "No operator access has occurred.",
     "operator": "Operator",
     "reason": "Reason",
