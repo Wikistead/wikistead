@@ -67,7 +67,9 @@ export async function createSpace(
   // ruling carries over).
   if (!args.personal) {
     if (!(await isSpaceCreator(fga, args.userId, args.tenantId))) {
-      throw Object.assign(new Error('space creation is restricted'), { statusCode: 403, reason: 'space_creator' })
+      // `code` (not just `reason`) is what Fastify serialises into the body — the client needs it to
+      // say WHY (#445the denial was silent because nothing reached the browser).
+      throw Object.assign(new Error('space creation is restricted'), { statusCode: 403, code: 'space_creator', reason: 'space_creator' })
     }
   }
   const row = await db.tx(async (tx) => {

@@ -15,11 +15,15 @@ export function RenameDialog({
   title,
   label,
   submitLabel,
+  submitting = false,
 }: {
   open: boolean;
   initial: string;
   onClose: () => void;
   onSubmit: (value: string) => void;
+  // #445the dialog now stays open while a submission is in flight (it closes on success),
+  // so the submit button must refuse a second press rather than fire the mutation twice.
+  submitting?: boolean;
   // Optional overrides so this serves rename AND create flows (default: page rename).
   title?: string;
   label?: string;
@@ -41,7 +45,7 @@ export function RenameDialog({
           onSubmit={(e) => {
             e.preventDefault();
             const v = value.trim();
-            if (v) onSubmit(v);
+            if (v && !submitting) onSubmit(v);
           }}
         >
           <Input
@@ -54,7 +58,7 @@ export function RenameDialog({
             <Button variant="default" type="button" onClick={onClose}>
               {t("common.cancel")}
             </Button>
-            <Button variant="primary" type="submit">
+            <Button variant="primary" type="submit" disabled={submitting}>
               {submitLabel ?? t("common.save")}
             </Button>
           </DialogFooter>
