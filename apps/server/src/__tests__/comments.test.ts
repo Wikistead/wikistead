@@ -7,6 +7,7 @@ import postgres from 'postgres'
 import IORedis from 'ioredis'
 import { pool } from '../db/pool.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { memberTuples } from './helpers/membership.js'
 import { buildApp } from '../app.js'
 import { createSession, SESSION_COOKIE } from '../auth/session.js'
 
@@ -30,6 +31,10 @@ const fgaFixture = [
   { user: `space:${SPACE}`, relation: 'space', object: `page:${PAGE}` },
   grant('cmt-author', 'comment_direct'), // ⇒ also view (#411 / ADR-153: `comment` is computed now; writes land on the leaf)
   grant('cmt-viewer', 'view_direct'), // #218: direct view grant → view_direct leaf (view is computed)
+  // #471: these subs act as members of tenant_dev over HTTP, so they must actually BE members —
+  // including the stranger, whose test is "a member without page view gets a 404", not "a stranger
+  // reaches another tenant" (that one is #471's own suite).
+  ...memberTuples(TENANT, ['cmt-author', 'cmt-viewer', 'cmt-outsider', 'cmt-stranger']),
 ]
 
 beforeAll(async () => {
@@ -142,6 +147,9 @@ describe('tenant isolation', () => {
   it("comments on tenant_dev's page are not reachable from another tenant's host", async () => {
     // acme-user on the acme host has no view on tenant_dev's demo page → uniform 404,
     // so tenant_dev's comments never surface cross-tenant (RLS + FGA).
+    // #471: acme-admin has to be an acme MEMBER for this to test the cross-tenant RESOURCE gate
+    // (404 from tenant_dev's page) rather than the authentication one
+    await writeTuples(fgaClient, memberTuples('tenant_acme', ['acme-admin'])).catch(() => {})
     const acmeSid = await createSession(valkey, { tenantId: 'tenant_acme', sub: 'acme-admin' })
     const res = await app.inject({ method: 'GET', url: `/pages/${PAGE}/comments`, headers: { host: 'acme.localhost', cookie: `${SESSION_COOKIE}=${acmeSid}` } })
     expect(res.statusCode).toBe(404)

@@ -9,7 +9,7 @@ import { acquireTenantDb } from './db/index.js'
 import { pool } from './db/pool.js'
 import { checkReadiness } from './readiness.js'
 import type { TenantDb } from './db/index.js'
-import { fgaClient } from '@wikistead/authz'
+import { fgaClient, isTenantMember } from '@wikistead/authz'
 import { makeMemberVerifier, looksLikeGuestToken, verifyGuestToken } from '@wikistead/auth'
 import { verifyApiKey } from './api-key-auth.js'
 import { resolveEntitlements } from '@wikistead/entitlements'
@@ -237,138 +237,178 @@ export async function buildApp(): Promise<FastifyInstance> {
     // and unauthenticated visitors of the tenant's pages).
     if (req.routeOptions?.config?.public) return
 
-    // ── Browser member path: host-only session cookie (BFF) ──────────────────
-    // Three cases, kept distinct
-    // (i) no cookie → fall through to Bearer (normal).
-    // (ii) cookie, tenant match → member session.
-    // (iii) cookie, tenant MISMATCH → EXPLICIT reject + clear cookie. A
-    // cross-tenant cookie is an anomaly (host-only should prevent it), so
-    // we do NOT silently fall through — we reject so it is distinguishable
-    // from a plain "no credentials" 401, and we clear the offending cookie.
-    const sid = req.cookies?.[SESSION_COOKIE]
-    if (sid) {
-      const sess = await readSession(valkey, sid)
-      if (sess && sess.tenantId === req.tenant.id) {
-        req.user = { sub: sess.sub, groups: sess.groups }
-        return
+    // #471 / ADR-176: every branch below resolves a PRINCIPAL; membership is settled once, after
+    // them all, by the seam at the bottom of this hook. Branches therefore return from here rather
+    // than from the hook itself — that is the whole point of the wrapper. A new provider added
+    // inside it cannot forget the tenant binding, which is exactly how the OIDC branch came to be
+    // missing it.
+    let claimedTenant = ''
+    const resolvePrincipal = async (): Promise<void> => {
+      // ── Browser member path: host-only session cookie (BFF) ──────────────────
+      // Three cases, kept distinct
+      // (i) no cookie → fall through to Bearer (normal).
+      // (ii) cookie, tenant match → member session.
+      // (iii) cookie, tenant MISMATCH → EXPLICIT reject + clear cookie. A
+      // cross-tenant cookie is an anomaly (host-only should prevent it), so
+      // we do NOT silently fall through — we reject so it is distinguishable
+      // from a plain "no credentials" 401, and we clear the offending cookie.
+      const sid = req.cookies?.[SESSION_COOKIE]
+      if (sid) {
+        const sess = await readSession(valkey, sid)
+        if (sess && sess.tenantId === req.tenant.id) {
+          req.user = { sub: sess.sub, groups: sess.groups }
+          return
+        }
+        reply.clearCookie(SESSION_COOKIE, { path: '/' })
+        if (sess && sess.tenantId !== req.tenant.id) {
+          emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'session', reason: 'tenant mismatch' })
+          await reply.code(401).send({ error: 'session tenant mismatch' })
+          return
+        }
+        // sess null (expired/unknown): stale cookie cleared; fall through to Bearer.
       }
-      reply.clearCookie(SESSION_COOKIE, { path: '/' })
-      if (sess && sess.tenantId !== req.tenant.id) {
-        emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'session', reason: 'tenant mismatch' })
-        await reply.code(401).send({ error: 'session tenant mismatch' })
-        return
-      }
-      // sess null (expired/unknown): stale cookie cleared; fall through to Bearer.
-    }
 
-    const token = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
+      const token = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
 
-    // Dev bypass — guarded by NODE_ENV !== 'production' (dead in production).
-    if (process.env.NODE_ENV !== 'production' && token === 'dev-token') {
-      req.user = { sub: 'dev-user', groups: [] }
-      emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: 'dev-user', method: 'dev' })
-      return
-    }
+      // Dev bypass — guarded by NODE_ENV !== 'production' (dead in production).
+      if (process.env.NODE_ENV !== 'production' && token === 'dev-token') {
+        req.user = { sub: 'dev-user', groups: [] }
+        emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: 'dev-user', method: 'dev' })
+        return
+      }
 
-    // Guest (anonymous share) token. Accepted ONLY on routes that opt in via
-    // `config: { guest }`; on any other route a guest token is rejected (member
-    // routes stay member-only). Sets `req.guest`, NEVER `req.user`. The token
-    // asserts intent (tenant/resource/capability); the route handler re-derives
-    // authority from OpenFGA against `share_link:<id>` + binds to the URL resource.
-    if (looksLikeGuestToken(token)) {
-      const need = req.routeOptions?.config?.guest
-      const c = need ? await verifyGuestToken(guestCfg, token).catch(() => null) : null
-      // Convenience guard (FGA is the real gate): an edit route needs an edit token. Comment routes
-      // are `guest: 'view'` (#100) — a view token is admitted here, then the FGA `comment` check gates
-      // on the resource's comment_open setting (so a view guest 403s on comment when it's closed).
-      const capInsufficient = need === 'edit' && c?.capability !== 'edit'
-      if (!need || !c || c.tenantId !== req.tenant.id || capInsufficient) {
-        emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'guest', reason: 'guest token rejected' })
-        await reply.code(401).send({ error: 'unauthorized' })
+      // Guest (anonymous share) token. Accepted ONLY on routes that opt in via
+      // `config: { guest }`; on any other route a guest token is rejected (member
+      // routes stay member-only). Sets `req.guest`, NEVER `req.user`. The token
+      // asserts intent (tenant/resource/capability); the route handler re-derives
+      // authority from OpenFGA against `share_link:<id>` + binds to the URL resource.
+      if (looksLikeGuestToken(token)) {
+        const need = req.routeOptions?.config?.guest
+        const c = need ? await verifyGuestToken(guestCfg, token).catch(() => null) : null
+        // Convenience guard (FGA is the real gate): an edit route needs an edit token. Comment routes
+        // are `guest: 'view'` (#100) — a view token is admitted here, then the FGA `comment` check gates
+        // on the resource's comment_open setting (so a view guest 403s on comment when it's closed).
+        const capInsufficient = need === 'edit' && c?.capability !== 'edit'
+        if (!need || !c || c.tenantId !== req.tenant.id || capInsufficient) {
+          emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'guest', reason: 'guest token rejected' })
+          await reply.code(401).send({ error: 'unauthorized' })
+          return
+        }
+        req.guest = { shareLinkId: c.shareLinkId, resource: c.resource, capability: c.capability, anonId: c.anonId }
+        emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: `guest:${c.shareLinkId}`, method: 'guest' })
         return
       }
-      req.guest = { shareLinkId: c.shareLinkId, resource: c.resource, capability: c.capability, anonId: c.anonId }
-      emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: `guest:${c.shareLinkId}`, method: 'guest' })
-      return
-    }
 
-    // EE auth providers (SAML, LDAP, SCIM, ...) tried first; null = cannot handle.
-    for (const provider of getAuthProviders()) {
-      const result = await provider.verify(token, req.tenant.id)
-      if (result) {
-        req.user = result
-        emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: result.sub, method: provider.name })
-        return
-      }
-    }
-
-    // Token-prefix routing: failing one path does NOT fall through to the other.
-    if (token.startsWith('wks_')) {
-      const apiUser = await verifyApiKey(token, req.tenant.id)
-      if (!apiUser) {
-        emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'invalid or revoked' })
-        await reply.code(401).send({ error: 'invalid or revoked API key' })
-        return
-      }
-      // #476 / ADR-178: the key is good but its owner is deactivated — a seat frozen by a downgrade,
-      // which the tenant fixes by upgrading rather than by rotating credentials. Answered like the
-      // login path (403 `member_deactivated`) so the integration's owner learns what actually happened;
-      // it is only ever shown to someone already holding a valid key for this tenant.
-      if (apiUser.deactivated) {
-        emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'owner deactivated' })
-        await reply.code(403).send({ error: 'account deactivated by a plan change', code: 'member_deactivated' })
-        return
-      }
-      // Scope ceiling (Phase 5f): a 'read' key may only GET/HEAD — any mutation is
-      // 403. This only RESTRICTS; FGA still checks the owner's authority, so a key
-      // can never exceed its owner. GET routes perform no business writes (audited),
-      // so method is a safe read/write proxy.
-      if (apiUser.scope === 'read' && req.method !== 'GET' && req.method !== 'HEAD') {
-        emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'read-only key on a write' })
-        await reply.code(403).send({ error: 'read-only API key' })
-        return
-      }
-      // apiAccess entitlement gate on the REQUEST path (#126 / ADR-063 2 / ADR-064 / ADR-072).
-      // createApiKey is gated at issue time, but a plan downgrade that strips apiAccess must ALSO
-      // stop already-issued keys — otherwise a downgraded tenant's old key keeps working (monotonic-
-      // deny violation). Resolved PER REQUEST so the downgrade takes effect immediately; the key row
-      // is NOT deleted (ADR-064 non-destructive — re-upgrade restores it). Evaluated BEFORE the rate
-      // limit so an unentitled key gets 403, not 429. (401=invalid key / 403=apiAccess off or
-      // read-only scope / 429=rate exceeded.)
-      const ent = resolveEntitlements(req.tenant.plan)
-      if (!ent.apiAccess) {
-        emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'api access not entitled' })
-        await reply.code(403).send({ error: 'API access is not available on this plan' })
-        return
-      }
-      // Request rate limit (#175 / ADR-063): per-key (fairness) AND per-tenant (all-keys
-      // ceiling), stricter trips first → 429. Limits resolve PER REQUEST so a downgrade takes
-      // effect immediately; Infinity (self-host) short-circuits with no Valkey op.
-      const rl = ent.apiRateLimit
-      if (rl.perKey !== Infinity || rl.perTenant !== Infinity) {
-        const okKey = await bumpRateBucket(valkey, `apikey-rl:key:${apiUser.keyId}`, rl.perKey, API_RATE_LIMIT_WINDOW_S)
-        const okTenant = await bumpRateBucket(valkey, `apikey-rl:tenant:${req.tenant.id}`, rl.perTenant, API_RATE_LIMIT_WINDOW_S)
-        if (!okKey || !okTenant) {
-          emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'rate limited' })
-          reply.header('Retry-After', String(API_RATE_LIMIT_WINDOW_S))
-          await reply.code(429).send({ error: 'rate limit exceeded' })
+      // EE auth providers (SAML, LDAP, SCIM, ...) tried first; null = cannot handle.
+      for (const provider of getAuthProviders()) {
+        const result = await provider.verify(token, req.tenant.id)
+        if (result) {
+          req.user = result
+          emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: result.sub, method: provider.name })
           return
         }
       }
-      req.user = { sub: apiUser.sub, groups: [] }
-      req.apiScope = apiUser.scope
-      emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: apiUser.sub, method: 'apikey' })
+
+      // Token-prefix routing: failing one path does NOT fall through to the other.
+      if (token.startsWith('wks_')) {
+        const apiUser = await verifyApiKey(token, req.tenant.id)
+        if (!apiUser) {
+          emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'invalid or revoked' })
+          await reply.code(401).send({ error: 'invalid or revoked API key' })
+          return
+        }
+        // #476 / ADR-178: the key is good but its owner is deactivated — a seat frozen by a downgrade,
+        // which the tenant fixes by upgrading rather than by rotating credentials. Answered like the
+        // login path (403 `member_deactivated`) so the integration's owner learns what actually happened;
+        // it is only ever shown to someone already holding a valid key for this tenant.
+        if (apiUser.deactivated) {
+          emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'owner deactivated' })
+          await reply.code(403).send({ error: 'account deactivated by a plan change', code: 'member_deactivated' })
+          return
+        }
+        // Scope ceiling (Phase 5f): a 'read' key may only GET/HEAD — any mutation is
+        // 403. This only RESTRICTS; FGA still checks the owner's authority, so a key
+        // can never exceed its owner. GET routes perform no business writes (audited),
+        // so method is a safe read/write proxy.
+        if (apiUser.scope === 'read' && req.method !== 'GET' && req.method !== 'HEAD') {
+          emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'read-only key on a write' })
+          await reply.code(403).send({ error: 'read-only API key' })
+          return
+        }
+        // apiAccess entitlement gate on the REQUEST path (#126 / ADR-063 2 / ADR-064 / ADR-072).
+        // createApiKey is gated at issue time, but a plan downgrade that strips apiAccess must ALSO
+        // stop already-issued keys — otherwise a downgraded tenant's old key keeps working (monotonic-
+        // deny violation). Resolved PER REQUEST so the downgrade takes effect immediately; the key row
+        // is NOT deleted (ADR-064 non-destructive — re-upgrade restores it). Evaluated BEFORE the rate
+        // limit so an unentitled key gets 403, not 429. (401=invalid key / 403=apiAccess off or
+        // read-only scope / 429=rate exceeded.)
+        const ent = resolveEntitlements(req.tenant.plan)
+        if (!ent.apiAccess) {
+          emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'api access not entitled' })
+          await reply.code(403).send({ error: 'API access is not available on this plan' })
+          return
+        }
+        // Request rate limit (#175 / ADR-063): per-key (fairness) AND per-tenant (all-keys
+        // ceiling), stricter trips first → 429. Limits resolve PER REQUEST so a downgrade takes
+        // effect immediately; Infinity (self-host) short-circuits with no Valkey op.
+        const rl = ent.apiRateLimit
+        if (rl.perKey !== Infinity || rl.perTenant !== Infinity) {
+          const okKey = await bumpRateBucket(valkey, `apikey-rl:key:${apiUser.keyId}`, rl.perKey, API_RATE_LIMIT_WINDOW_S)
+          const okTenant = await bumpRateBucket(valkey, `apikey-rl:tenant:${req.tenant.id}`, rl.perTenant, API_RATE_LIMIT_WINDOW_S)
+          if (!okKey || !okTenant) {
+            emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'rate limited' })
+            reply.header('Retry-After', String(API_RATE_LIMIT_WINDOW_S))
+            await reply.code(429).send({ error: 'rate limit exceeded' })
+            return
+          }
+        }
+        req.user = { sub: apiUser.sub, groups: [] }
+        req.apiScope = apiUser.scope
+        emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: apiUser.sub, method: 'apikey' })
+        return
+      }
+
+      // OIDC bearer path (programmatic/legacy). Failure → 401, no API key fallback.
+      try {
+        const m = await verifyMember(token)
+        req.user = { sub: m.sub, groups: m.groups }
+        // #471 / ADR-176: the token's own idea of its tenant, kept for the cross-check below. The
+        // Host stays the authority (it already picks the RLS context and the FGA object ids); this
+        // is only used to refuse a token that says out loud it was minted for somewhere else.
+        claimedTenant = m.tenantId
+        emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: m.sub, method: 'oidc' })
+      } catch {
+        emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'oidc', reason: 'token verification failed' })
+        await reply.code(401).send({ error: 'unauthorized' })
+      }
+    }
+    await resolvePrincipal()
+    if (reply.sent || !req.user) return
+
+    // ── #471 / ADR-176: the tenant binding ────────────────────────────────────
+    // Identity is proven above; MEMBERSHIP is settled here, for every principal, once. Until this
+    // existed, only the login path asked the question (`establishMemberSession`) and no request path
+    // did — so under a shared IdP a member of tenant A was accepted verbatim on tenant B's host, and
+    // reached anything granted through a `user:*` wildcard: measurably, `POST /spaces` created a
+    // space they then managed inside someone else's tenant (#471).
+    //
+    // The answer is resolved PER REQUEST, so a removed member is refused on their next call — through
+    // an API key as much as through a cookie — rather than at token expiry.
+    if (claimedTenant && claimedTenant !== req.tenant.id && claimedTenant !== req.tenant.slug) {
+      emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'oidc', reason: 'token tenant claim mismatch' })
+      await reply.code(401).send({ error: 'unauthorized' })
       return
     }
-
-    // OIDC bearer path (programmatic/legacy). Failure → 401, no API key fallback.
-    try {
-      const m = await verifyMember(token)
-      req.user = { sub: m.sub, groups: m.groups }
-      emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: m.sub, method: 'oidc' })
-    } catch {
-      emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'oidc', reason: 'token verification failed' })
+    if (!(await isTenantMember(fgaClient, req.user.sub, req.tenant.id))) {
+      // A DEDICATED audit reason, so an operator can tell a cross-tenant presentation from a bad
+      // token — but the RESPONSE is byte-identical to the generic unauthorized body above. Saying
+      // "not a member of this tenant" would answer, for any sub an attacker can authenticate as,
+      // which tenants they do belong to.
+      // The subject is deliberately NOT recorded: this event reaches the tenant's own webhook
+      // subscribers, and naming the foreign sub would tell tenant B who elsewhere holds a token.
+      emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'membership', reason: 'not a member of this tenant' })
       await reply.code(401).send({ error: 'unauthorized' })
+      return
     }
   })
 

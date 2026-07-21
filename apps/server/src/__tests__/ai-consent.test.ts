@@ -11,6 +11,8 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { buildApp } from '../app.js'
 import { createSession, SESSION_COOKIE } from '../auth/session.js'
 import { registerAIProvider, resetAIProvider } from '@wikistead/hooks'
+import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { memberTuples } from './helpers/membership.js'
 import { setTenantAiEnabled } from '../routes/ai.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -61,8 +63,12 @@ describe('AI tenant consent toggle (#130 / ADR-077 two-stage consent)', () => {
   })
 
   it('a non-admin member cannot toggle (403)', async () => {
+    // #471: a MEMBER who is not an admin — the tenant binding means the sub has to hold membership
+    // for this to be the 403 case rather than the 401 one
+    await writeTuples(fgaClient, memberTuples(TENANT, ['ai-nonadmin-user']))
     const sid = await createSession(valkey, { tenantId: TENANT, sub: 'ai-nonadmin-user' })
     const res = await putSettings(true, { cookie: `${SESSION_COOKIE}=${sid}` })
     expect(res.statusCode).toBe(403)
+    await deleteTuples(fgaClient, memberTuples(TENANT, ['ai-nonadmin-user'])).catch(() => {})
   })
 })

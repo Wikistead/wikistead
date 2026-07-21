@@ -15,6 +15,8 @@ import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import { buildApp } from '../app.js'
+import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { memberTuples } from './helpers/membership.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -59,13 +61,17 @@ describe('custom-role store (#420 increment 2)', () => {
   })
 
   it('anti-test 2: a non-admin is 403 on every route (list included)', async () => {
-    // dev-token on the ACME host authenticates dev-user, who is not acme's admin.
+    // dev-token on the ACME host authenticates dev-user, who is not acme's admin. #471: they must
+    // be an acme MEMBER for this to be the non-admin case — a non-member is refused one layer
+    // earlier, which is a different test (tenant-membership-471).
+    await writeTuples(fgaClient, memberTuples('tenant_acme', ['dev-user']))
     const AH = { host: 'acme.localhost', authorization: 'Bearer dev-token' }
     for (const [method, url] of [['GET', '/admin/roles'], ['POST', '/admin/roles'], ['DELETE', '/admin/roles/x']] as const) {
       const r = await app.inject({ method, url, headers: AH, ...(method === 'POST' ? { payload: { name: 'n', capabilities: ['view'] } } : {}) })
       expect(r.statusCode, `${method} ${url}`).toBe(403)
       expect(r.body, `${method} ${url}`).not.toContain('builtIn')
     }
+    await deleteTuples(fgaClient, memberTuples('tenant_acme', ['dev-user'])).catch(() => {})
   })
 
   it('anti-test 3: definition validation — reserved names, unknown caps, manage, empty, duplicates', async () => {

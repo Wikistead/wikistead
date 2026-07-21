@@ -8,6 +8,16 @@ import type { OpenFgaClient } from '@openfga/sdk'
 // relation check — the same low-level call the copies used, behaviour-identical (ADR-152 §2, Option-B seam:
 // the tenant-admin gate is NOT routed through the EE hook layer, matching the documented page/space scope).
 
+// #471 / ADR-176: is `userId` a member of `tenantId`? THE membership predicate — the same relation
+// login has always checked (`establishMemberSession`), now also asked of every principal a request
+// resolves, so identity can never be mistaken for membership. FGA is the authority rather than a
+// `members` row: the model defines `member: [user, group#member]`, so a group-derived member (SCIM,
+// roles) is a member, and a row read would be a second authority free to drift from this one.
+export async function isTenantMember(fga: OpenFgaClient, userId: string, tenantId: string): Promise<boolean> {
+  const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'member', object: `tenant:${tenantId}` })
+  return !!allowed
+}
+
 // The bare predicate — true iff `userId` is an admin of `tenantId`.
 export async function isTenantAdmin(fga: OpenFgaClient, userId: string, tenantId: string): Promise<boolean> {
   const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'admin', object: `tenant:${tenantId}` })

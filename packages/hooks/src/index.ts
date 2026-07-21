@@ -1,6 +1,6 @@
 export { registerAuthzHooks, getAuthzHooks } from './authz-hooks.js'
 export type { AuthzHooks, AuthzCheckContext } from './authz-hooks.js'
-export { registerAuthProvider, getAuthProviders } from './auth-providers.js'
+export { registerAuthProvider, getAuthProviders, resetAuthProviders } from './auth-providers.js'
 export type { AuthProvider } from './auth-providers.js'
 export { registerSearchDriver, getSearchDriver } from './search-driver.js'
 export type { SearchDriver, SearchHit } from './search-driver.js'

@@ -22,3 +22,9 @@ export function registerAuthProvider(provider: AuthProvider): void {
 export function getAuthProviders(): ReadonlyArray<AuthProvider> {
   return _providers
 }
+
+// Test seam (the resetAIProvider precedent): a suite that registers a provider must be able to take
+// it back out, or it leaks into every later suite in the same process.
+export function resetAuthProviders(): void {
+  _providers.length = 0
+}
