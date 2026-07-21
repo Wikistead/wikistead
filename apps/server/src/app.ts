@@ -310,6 +310,15 @@ export async function buildApp(): Promise<FastifyInstance> {
         await reply.code(401).send({ error: 'invalid or revoked API key' })
         return
       }
+      // #476 / ADR-178: the key is good but its owner is deactivated — a seat frozen by a downgrade,
+      // which the tenant fixes by upgrading rather than by rotating credentials. Answered like the
+      // login path (403 `member_deactivated`) so the integration's owner learns what actually happened;
+      // it is only ever shown to someone already holding a valid key for this tenant.
+      if (apiUser.deactivated) {
+        emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'owner deactivated' })
+        await reply.code(403).send({ error: 'account deactivated by a plan change', code: 'member_deactivated' })
+        return
+      }
       // Scope ceiling (Phase 5f): a 'read' key may only GET/HEAD — any mutation is
       // 403. This only RESTRICTS; FGA still checks the owner's authority, so a key
       // can never exceed its owner. GET routes perform no business writes (audited),
