@@ -112,23 +112,23 @@ function RoundBtn({ label, icon, onClick, testId, primary, disabled, badge, acti
 }
 
 // #368: the page watch is a ⋯-menu ITEM now (not a standalone round button). Its async watching state
-// (react-query) is resolved by the caller and passed in so `overflowItems` — a plain builder, no hooks
+// (react-query) is resolved by the caller and passed in so `overflowItems` — a plain builder, no hooks —
 // can reflect it (Eye = watching / EyeOff = not) and flip it on select.
-// #362: three SCOPES (page / subtree / space — ), each an independent toggle. All are
-// emission scopes only; the server view-gates the write and the display double-gate stays the authority.
+// #362 → #467 (owner ruling, ADR-126 addendum): ONE watch control. The subtree and space scope items
+// are gone from the menu — three toggles for one concept read as clutter, and watching a whole subtree
+// was never asked for in practice. The SERVER still speaks all three scopes, so existing subtree/space
+// watches keep firing and stay listable/removable from /watches (no stranded rows, no migration).
 export interface WatchItem { watching: boolean; toggle: () => void; disabled: boolean }
-export interface WatchItems { page: WatchItem; subtree: WatchItem; space?: WatchItem }
+export interface WatchItems { page: WatchItem }
 
 function overflowItems(p: PageControlsProps, t: (k: string) => string, watch?: WatchItems): OverflowItem[] {
   const items: OverflowItem[] = [];
   // #368: Watch lives in the ⋯ menu in VIEW mode (member-only; only for a real page). Eye = watching,
   // EyeOff = not — a toggle item (trailing ✓ when on). Icon is the EYE glyph per the ticket; the
   // notification-feed bell (NotificationBell) is a different control and is untouched.
-  // #362: the page toggle keeps its slot; subtree/space scopes ride below it (scope selection).
+  // #467: exactly ONE watch item — it reads "watch this page" or "unwatch", nothing else.
   if (!p.editing && p.pageId && watch) {
     items.push({ value: "watch", label: watch.page.watching ? t("watch.unwatch") : t("watch.watch"), icon: watch.page.watching ? <Eye size={14} /> : <EyeOff size={14} />, testId: "watch-toggle", checked: watch.page.watching, disabled: watch.page.disabled });
-    items.push({ value: "watch-subtree", label: t("watch.subtree"), icon: <Eye size={14} />, testId: "watch-subtree-toggle", checked: watch.subtree.watching, disabled: watch.subtree.disabled });
-    if (watch.space) items.push({ value: "watch-space", label: t("watch.space"), icon: <Eye size={14} />, testId: "watch-space-toggle", checked: watch.space.watching, disabled: watch.space.disabled });
   }
   // #212: comments toggle lives here now (was an always-visible bar button). It's a right-panel toggle
   // exactly like history/attachments, so it shows NO ✓ open-state marker (comment 720): the three
@@ -163,8 +163,6 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string, watch?: W
 }
 function runOverflow(p: PageControlsProps, v: string, watch?: WatchItems) {
   if (v === "watch") { watch?.page.toggle(); return; }
-  if (v === "watch-subtree") { watch?.subtree.toggle(); return; }
-  if (v === "watch-space") { watch?.space?.toggle(); return; }
   if (v === "duplicate") { p.onDuplicate?.(); return; }
   if (v === "save-template") { p.onSaveTemplate?.(); return; }
   if (v === "related") { p.onRelated?.(); return; }
@@ -252,24 +250,18 @@ export function PageVim(p: PageControlsProps) {
 // #368: resolve the page's async watch state into a plain, serialisable WatchItem the ⋯-menu builder can
 // consume. Hooks run unconditionally (react-query gates on pageId via `enabled`); returns undefined for a
 // surface with no real page so no watch item is offered. Shared by desktop + mobile controls.
-// #362: three independent scope toggles (page / subtree / space) — the space item only when spaceId is known.
-function useWatchItem(pageId: string | undefined, spaceId?: string): WatchItems | undefined {
+// #467: only the PAGE scope is offered, so only its state/toggle are subscribed — the subtree and
+// space queries are gone (they cost a request each on every page open for a control nobody sees).
+function useWatchItem(pageId: string | undefined): WatchItems | undefined {
   const pageState = useWatchState(pageId, "page");
   const pageToggle = useToggleWatch(pageId, "page");
-  const subState = useWatchState(pageId, "subtree");
-  const subToggle = useToggleWatch(pageId, "subtree");
-  const spaceState = useWatchState(spaceId, "space");
-  const spaceToggle = useToggleWatch(spaceId, "space");
   if (!pageId) return undefined;
-  const item = (state: ReturnType<typeof useWatchState>, toggle: ReturnType<typeof useToggleWatch>): WatchItem => ({
-    watching: state.data?.watching ?? false,
-    toggle: () => toggle.mutate(state.data),
-    disabled: toggle.isPending || state.isLoading,
-  });
   return {
-    page: item(pageState, pageToggle),
-    subtree: item(subState, subToggle),
-    space: spaceId ? item(spaceState, spaceToggle) : undefined,
+    page: {
+      watching: pageState.data?.watching ?? false,
+      toggle: () => pageToggle.mutate(pageState.data),
+      disabled: pageToggle.isPending || pageState.isLoading,
+    },
   };
 }
 
@@ -278,7 +270,7 @@ export function PageActions(p: PageControlsProps) {
   const { t } = useTranslation();
   const dirty = useDirty(p.dirtySignal);
   const canPublish = p.canPublish || dirty;
-  const watch = useWatchItem(p.pageId, p.spaceId);
+  const watch = useWatchItem(p.pageId);
   const overflow = overflowItems(p, t, watch);
   return (
     // Outer stays click-through (pointer-events-none) so the empty bottom-right area doesn't eat editor clicks;
@@ -312,7 +304,7 @@ export function PageControlsMobile(p: PageControlsProps) {
   const { t } = useTranslation();
   const dirty = useDirty(p.dirtySignal);
   const canPublish = p.canPublish || dirty;
-  const watch = useWatchItem(p.pageId, p.spaceId);
+  const watch = useWatchItem(p.pageId);
   const overflow = overflowItems(p, t, watch);
   return (
     <div className="absolute right-4 bottom-4 z-10">
