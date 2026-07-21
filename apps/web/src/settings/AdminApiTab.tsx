@@ -9,8 +9,26 @@ import { Button, IconButton } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
+import { relTime } from "../ui/relative-time";
 
 const label = "mb-1.5 mt-[18px] block text-sm text-fg-dim";
+
+// #461: when a key was last authenticated with — the signal that tells you which keys are dead
+// weight and safe to revoke. The server has always returned lastUsedAt (and #428 made the write
+// actually land under RLS); only the list never showed it. Relative, with the exact time on hover;
+// "never used" is a distinct state, not a blank.
+function LastUsed({ at }: { at: string | null }) {
+  const { t, i18n } = useTranslation();
+  if (!at) {
+    return <span className="flex-none text-xs text-fg-dim" data-testid="api-key-last-used" data-used="never">{t("adminApi.neverUsed")}</span>;
+  }
+  const { rel, abs } = relTime(at, i18n.language);
+  return (
+    <time className="flex-none text-xs text-fg-dim" dateTime={at} title={`${t("adminApi.lastUsed")}: ${abs}`} data-testid="api-key-last-used" data-used="yes">
+      {t("adminApi.lastUsedRel", { rel })}
+    </time>
+  );
+}
 
 // API keys (Phase 5f). Per-member ownership (the list is the current user's keys);
 // scope restricts a key below the owner's authority. The tenant policy (admin) caps
@@ -83,6 +101,7 @@ export function AdminApiTab() {
             <span className="min-w-[48px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-fg-dim data-[scope=write]:border-[var(--accent)] data-[scope=write]:text-[var(--accent)]" data-scope={k.scope}>{t(`adminApi.scope_${k.scope}`)}</span>
             <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{k.name}</span>
             <code className="flex-none font-mono text-xs text-fg-dim">{k.keyPrefix}…</code>
+            <LastUsed at={k.lastUsedAt} />
             <IconButton aria-label={t("adminApi.revoke")} data-testid="api-key-revoke" className="hover:text-destructive"
               onClick={() => revoke.mutate(k.id, { onSuccess: () => notify.success(t("toast.linkRevoked")), onError: () => notify.error(t("toast.actionFailed")) })}>
               <Trash2 size={14} />

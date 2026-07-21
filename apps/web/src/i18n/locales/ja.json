@@ -237,7 +237,10 @@
     "copyOnce": "このキーを今コピーしてください — 再表示されません。",
     "copy": "コピー",
     "revoke": "取り消し",
-    "empty": "API キーはまだありません。"
+    "empty": "API キーはまだありません。",
+    "neverUsed": "未使用",
+    "lastUsed": "最終使用",
+    "lastUsedRel": "{{rel}}に使用"
   },
   "adminAuth": {
     "title": "認証",

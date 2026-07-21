@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { AuthorChip } from "../comments/AuthorChip";
+import { relTime } from "../ui/relative-time";
 
 // #222 (comment 824, option A): the small metadata row under the page title — who CREATED the page, who
 // last PUBLISHED it, and when. Subs resolve to name/avatar via the shared AuthorChip (a deleted member
@@ -7,17 +8,6 @@ import { AuthorChip } from "../comments/AuthorChip";
 // title; wraps (flex-wrap) instead of overflowing when the title clamps to two lines. Shown only to page
 // viewers (the whole page is 404 to non-viewers), so it leaks nothing. Renders nothing until any field
 // exists (pre-migration pages, or a never-published draft with no updater).
-function relTime(iso: string, lang: string): { rel: string; abs: string } {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return { rel: iso, abs: iso };
-  const abs = d.toLocaleString();
-  const secs = Math.round((d.getTime() - Date.now()) / 1000); // negative = past
-  const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
-  const table: [Intl.RelativeTimeFormatUnit, number][] = [["year", 31536000], ["month", 2592000], ["day", 86400], ["hour", 3600], ["minute", 60]];
-  for (const [unit, s] of table) if (Math.abs(secs) >= s) return { rel: rtf.format(Math.round(secs / s), unit), abs };
-  return { rel: rtf.format(secs, "second"), abs };
-}
-
 export function PageMeta({ createdBy, updatedBy, updatedAt }: { createdBy?: string | null; updatedBy?: string | null; updatedAt?: string }) {
   const { t, i18n } = useTranslation();
   if (!createdBy && !updatedBy && !updatedAt) return null;

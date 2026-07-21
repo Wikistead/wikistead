@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
+import { relTime } from "../ui/relative-time";
 import { Button } from "../ui/Button";
 import { RightPanel } from "../ui/RightPanel";
 import { AuthorChip } from "./AuthorChip";
@@ -13,21 +14,6 @@ const hint = "m-0 text-sm text-fg-dim";
 const textareaCls = "box-border min-h-[56px] w-full resize-y rounded-md border border-border bg-background p-2 text-[0.92em] text-foreground focus-visible:border-[var(--accent)] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-[var(--accent)]";
 const suggestCls = "absolute bottom-full left-0 right-0 z-20 m-0 mb-1 list-none rounded-md border border-border bg-panel p-1 shadow-[0_6px_20px_rgba(0,0,0,0.25)]";
 const suggestBtn = "block w-full rounded px-2 py-[5px] text-left text-[0.9em] text-foreground hover:bg-panel-2";
-
-// #214 part 3 (comment 738): a relative timestamp ("3 minutes ago") with the absolute time on hover.
-// Locale-aware via Intl.RelativeTimeFormat (i18n language); the title is the full toLocaleString.
-function relTime(iso: string, lang: string): { rel: string; abs: string } {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return { rel: iso, abs: iso };
-  const abs = d.toLocaleString();
-  const secs = Math.round((d.getTime() - Date.now()) / 1000); // negative = past
-  const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
-  const table: [Intl.RelativeTimeFormatUnit, number][] = [["year", 31536000], ["month", 2592000], ["day", 86400], ["hour", 3600], ["minute", 60]];
-  for (const [unit, s] of table) {
-    if (Math.abs(secs) >= s) return { rel: rtf.format(Math.round(secs / s), unit), abs };
-  }
-  return { rel: rtf.format(secs, "second"), abs };
-}
 
 // Composer with @mention autocomplete. Suggestions come from the page-scoped
 // mentionable directory (server limits it to members who can VIEW this page), so a
