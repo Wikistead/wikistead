@@ -188,3 +188,14 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
 .cm-lp-callout-panel-editable{position:relative}
 .cm-lp-callout-panel-editable .cm-lp-callout-panel-edit{position:absolute;top:-1.5em;left:0;bottom:auto;right:auto;opacity:0;transition:opacity 120ms ease;z-index:2}
 .cm-lp-callout-panel-editable:hover .cm-lp-callout-panel-edit{opacity:1}
+
+/* #456 S4: the code-fence settings panel. It renders in CodeMirror's tooltip layer (a widget child
+   would be reconciled away), so it needs its own surface styling rather than inheriting a panel's. */
+.cm-lp-fence-settings { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; min-width: 220px; }
+.cm-lp-macro-settings { display: flex; flex-direction: column; gap: 6px; }
+.cm-lp-macro-setting { display: flex; align-items: center; gap: 8px; justify-content: space-between; font-size: 0.85em; }
+.cm-lp-macro-setting-label { color: var(--fg-dim); white-space: nowrap; }
+.cm-lp-macro-setting input[type="text"], .cm-lp-macro-setting select {
+  background: var(--panel-2); color: var(--foreground); border: 1px solid var(--border);
+  border-radius: 4px; padding: 2px 6px; font: inherit; min-width: 120px;
+}

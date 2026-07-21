@@ -16,6 +16,7 @@ import { titleLinkDecorations, titleLinkHover, titleLinkSource, type TitleLinkSo
 import { floatingToolbar } from "./live-preview/toolbar";
 import { slashPalette, type PageEmbedPicker, type TemplateInsertPicker } from "./live-preview/palette";
 import { contextMenu } from "./live-preview/context-menu";
+import { fenceSettingsField } from "./live-preview/fence-settings-panel"; // #456 S4: declared code-fence settings, in CM's tooltip layer
 import { vimExCommands } from "./live-preview/vim-ex";
 import { macroFold } from "./macros";
 import { registerVimFold } from "./live-preview/vim-fold";
@@ -400,7 +401,7 @@ export function mountLivePreview(
       // Layer (iii): host chrome (editable surface only; view guests get none). The slash palette itself
       // lives in the shared layer (its vimVisualField still precedes the toolbar's bubble, which reads it
       // to suppress itself in vim visual — the factory sits earlier in this array).
-      ...(!opts.readOnly ? [floatingToolbar(), contextMenu({ selfPageId: opts.selfPageId }), vimExCommands({ exitEdit: opts.onExitEdit, publish: opts.onPublish })] : []),
+      ...(!opts.readOnly ? [floatingToolbar(), contextMenu({ selfPageId: opts.selfPageId }), fenceSettingsField, vimExCommands({ exitEdit: opts.onExitEdit, publish: opts.onPublish })] : []), // #456 S4: fenceSettingsField renders the declared code-fence settings in CM's tooltip layer
       // ADR-122 addendum (b): the nested-editor seam — the slot island builds its decoration/keymap layer
       // from the SAME factory (same opts closure), with nested:true (collab/presence/host chrome excluded).
       nestedLivePreviewConfig.of((env) => buildLivePreviewExtensions(opts, { nested: true, ...env })),
