@@ -1038,14 +1038,14 @@
       "moderate": "Moderate",
       "createSpaces": "create spaces"
     },
-    "tenantDefaultsTitle": "Default tenant roles",
-    "tenantDefaultsBody": "Who may create spaces. Toggling member covers every member; admins always can.",
-    "adminLocked": "Admins can always create spaces (fixed by the permission model).",
-    "locked": "locked",
     "scopeLabel": "Role scope",
     "scopeResource": "Space / page",
     "scopeTenant": "Tenant",
-    "assignTenantScope": "applies tenant-wide"
+    "assignTenantScope": "applies tenant-wide",
+    "builtInTenantTitle": "Built-in tenant roles",
+    "builtInTenantBody": "What every member of this tenant may do. Space and page permissions come from the resource roles below.",
+    "builtInResourceTitle": "Built-in space & page roles",
+    "adminAlways": "create spaces · and everything a tenant admin can do"
   },
   "detailsEdit": {
     "title": "Edit collapsible",

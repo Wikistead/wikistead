@@ -56,10 +56,10 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   await page.goto("/admin/roles");
   await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
 
-  // Default presets: member toggle is live, admin is locked-on.
-  await expect(page.getByTestId("default-admin-create-spaces")).toBeChecked();
-  await expect(page.getByTestId("default-admin-create-spaces")).toBeDisabled();
-  const member = page.getByTestId("default-member-create-spaces");
+  // #469 (owner ruling, supersedes the "locked admin checkbox" pin): the preset lives inside the
+  // TENANT role list; admin's createSpaces is stated as text, not a permanently disabled control.
+  await expect(page.getByTestId("default-admin-create-spaces")).toHaveCount(0);
+  const member = page.getByTestId("builtin-tenant-roles").getByTestId("default-member-create-spaces");
   await expect(member).toBeEnabled({ timeout: 8000 });
   const initial = await member.isChecked();
   await member.click();
