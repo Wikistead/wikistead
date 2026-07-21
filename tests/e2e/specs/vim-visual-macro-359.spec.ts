@@ -196,3 +196,48 @@ test("#359 a mouse drag started INSIDE revealed source survives growing OUT of t
   const s = await sel(page);
   expect(s.to, `the selection grew past the block edge into the text below (sel ${JSON.stringify(s)})`).toBeGreaterThanOrEqual(bottomAt);
 });
+
+// starting a visual selection on the line ABOVE an adjacent cluster and growing down did
+// nothing — the selection never appeared. Pressing `v` puts vim in visual mode without touching
+// CodeMirror's selection (the range materialises on the first motion), and the adjacency interceptor
+// asked for a non-empty CM selection before it would preserve one. So the first `j` collapsed the
+// range that was about to exist, and every `j` after it saw an empty selection and did the same.
+//
+// The pin above could not see this: it reads the head LINE, which steps correctly whether or
+// not a selection exists. This one reads the selection.
+test("#359 a visual selection started ABOVE an adjacent cluster grows from the first press", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await vimReady(page, "vim-visual-from-above-359");
+  // Click PAST the end of the line, the way a writer picks up where they left off. vim's `$` stops on
+  // the last character, so `v` there has something to select and CodeMirror's selection is non-empty
+  // immediately; a click lands the caret after the last character, where `v` selects nothing yet and
+  // the selection is still empty when the first motion arrives. That empty-but-visual state is the one
+  // the interceptor mistook for "not a selection" — and the reason every pin in this file, all of
+  // which position with gg/keys, missed the defect.
+  const topLine = page.locator("[data-pane=preview] .cm-line").first();
+  const lb = (await topLine.boundingBox())!;
+  await page.mouse.click(lb.x + lb.width - 6, lb.y + lb.height / 2);
+  await sleep(200);
+  const start = await sel(page);
+  await page.keyboard.press("v");
+  await sleep(120);
+
+  const seen: { from: number; to: number; anchor: number }[] = [];
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press("j");
+    await sleep(160);
+    const s = await sel(page);
+    seen.push({ from: s.from, to: s.to, anchor: s.anchor });
+  }
+
+  const shown = JSON.stringify(seen);
+  expect(seen[0]!.to - seen[0]!.from, `the FIRST j must open a selection, not collapse it (${shown})`).toBeGreaterThan(0);
+  for (const [i, s] of seen.entries()) {
+    expect(s.to - s.from, `press ${i + 1} keeps the selection non-empty (${shown})`).toBeGreaterThan(0);
+    expect(s.anchor, `the anchor stays where v was pressed (${shown})`).toBe(start.head);
+  }
+  // …and it grows: each press covers more of the document than the last
+  for (let i = 1; i < seen.length; i++) {
+    expect(seen[i]!.to, `press ${i + 1} extends past press ${i} (${shown})`).toBeGreaterThan(seen[i - 1]!.to);
+  }
+});
