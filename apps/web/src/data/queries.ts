@@ -622,13 +622,12 @@ export function useRemoveAvatar() {
 // the previous toggle settled: every fold sees exactly one flip, and every burst click lands in order.
 // The chain lives OUTSIDE the mutation so the mutation itself still starts at click time — which is what
 // keeps therefetch coalescing (isMutating counts the whole burst) and thepoll gate honest.
-const toggleChains = new Map<string, Promise<void>>();
-export function chainPageToggle<T>(pageId: string, run: () => Promise<T>): Promise<T> {
-  const prev = toggleChains.get(pageId) ?? Promise.resolve();
-  const next = prev.then(run, run); // run regardless of the previous toggle's outcome (its failure is handled by its own caller)
-  toggleChains.set(pageId, next.then(() => undefined, () => undefined));
-  return next;
-}
+// #361(P0 ruling: "the animation must start on the click frame; a burst 409 is acceptable if
+// that is the price of speed"): the per-page SERIAL toggle chain is GONE. It existed so every server
+// fold saw exactly one draft flip, but it made each click wait for the previous round-trip — the
+// sluggishness the owner reported. The server now folds every pending checkbox flip (its real
+// invariant, "no non-checkbox content rides into published", is carried by the skeleton check), so
+// the flip + POST can fire immediately and out of order.
 
 // Toggle a single task checkbox on the PUBLISHED page WITHOUT creating a revision
 // (ADR-019). Edit-gated server-side (the bastion); rejects 409 if the draft has any
@@ -646,16 +645,30 @@ export function useToggleTask(pageId: string) {
     // invalidate once everything settled — intermediate toggles skip the refetch, so the widget keeps
     // the optimistic state until the final committed snapshot arrives.
     mutationKey: ["toggle", pageId],
-    // applyFlip (from the Editor) writes this toggle's draft flip; it MUST run inside the serial chain
-    // immediately before its own POST (#361— see chainPageToggle).
-    mutationFn: ({ index, applyFlip }: { index: number; applyFlip?: () => void }) =>
-      chainPageToggle(pageId, () => {
-        applyFlip?.();
-        return apiFetch<{ publishedAt: string | null }>(`/pages/${encodeURIComponent(pageId)}/tasks/toggle`, token, {
-          method: "POST",
-          body: JSON.stringify({ index }),
-        });
-      }),
+    mutationFn: ({ index, applyFlip }: { index: number; applyFlip?: () => void; checked?: boolean }) => {
+      applyFlip?.(); // the draft flip lands NOW (no chain) — see the note above
+      return apiFetch<{ publishedAt: string | null }>(`/pages/${encodeURIComponent(pageId)}/tasks/toggle`, token, {
+        method: "POST",
+        body: JSON.stringify({ index }),
+      });
+    },
+    // #361the SIDEBAR ring is the one progress surface not derived from a document — it reads
+    // the server's task aggregate off the page list. Patch it optimistically so all three rings (body
+    // :::todo, title band, sidebar) start animating on the click frame; the refetch below reconciles
+    // to the committed numbers (identical after a successful fold ⇒ no second animation).
+    onMutate: ({ checked }: { index: number; applyFlip?: () => void; checked?: boolean }) => {
+      if (checked === undefined) return;
+      const delta = checked ? -1 : 1;
+      for (const [key, data] of qc.getQueriesData<Page[]>({ queryKey: ["pages"] })) {
+        if (!Array.isArray(data)) continue;
+        if (!data.some((p) => p.id === pageId)) continue;
+        qc.setQueryData<Page[]>(key, data.map((p) => (
+          p.id === pageId
+            ? { ...p, taskDone: Math.max(0, Math.min(p.taskTotal ?? 0, (p.taskDone ?? 0) + delta)) }
+            : p
+        )));
+      }
+    },
     onSettled: () => {
       if (qc.isMutating({ mutationKey: ["toggle", pageId] }) <= 1) {
         qc.invalidateQueries({ queryKey: ["published", pageId] });
