@@ -3,12 +3,13 @@ import { useTranslation } from "react-i18next";
 import {
   useRoles, useCreateRole, useUpdateRole, useDeleteRole,
   useRoleAssignments, useAssignRole, useUnassignRole, useAdminSpaces,
-  useTenantRoleDefaults, useSetTenantRoleDefaults,
+  useTenantRoleDefaults, useSetTenantRoleDefaults, useTenantMemberCandidates,
   type RoleDef,
 } from "../data/queries";
 import { useSession } from "../session/SessionProvider";
 import { Button, IconButton } from "../ui/Button";
 import { Input } from "../ui/Input";
+import { MemberSearchInput } from "../ui/MemberSearchInput";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
 
@@ -20,17 +21,22 @@ const CAPABILITIES = ["view", "comment", "edit", "publish", "delete", "share", "
 // #445 / ADR-171: the TENANT-scope vocabulary (tenant actions; mutually exclusive with the above).
 const TENANT_CAPABILITIES = ["createSpaces"] as const;
 
-function CapabilityPicker({ value, onChange, idPrefix, list }: { value: string[]; onChange: (caps: string[]) => void; idPrefix: string; list: readonly string[] }) {
+// #420`disabled` renders the SAME control read-only, so a built-in role is shown as the very
+// checkbox grid you would use to build a custom one — the vocabulary and layout match instead of the
+// old "cap · cap · cap" text, and what a role can do reads the same way everywhere.
+function CapabilityPicker({ value, onChange, idPrefix, list, disabled = false }: { value: string[]; onChange?: (caps: string[]) => void; idPrefix: string; list: readonly string[]; disabled?: boolean }) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1">
       {list.map((c) => (
-        <label key={c} className="flex items-center gap-1.5 text-sm">
+        <label key={c} className={`flex items-center gap-1.5 text-sm${disabled ? " text-fg-dim" : ""}`}>
           <input
             type="checkbox"
             data-testid={`${idPrefix}-cap-${c}`}
             checked={value.includes(c)}
-            onChange={(e) => onChange(e.target.checked ? [...value, c] : value.filter((x) => x !== c))}
+            disabled={disabled}
+            onChange={disabled ? undefined : (e) => onChange?.(e.target.checked ? [...value, c] : value.filter((x) => x !== c))}
+            readOnly={disabled}
           />
           <span>{t(`adminRoles.cap.${c}`)}</span>
         </label>
@@ -91,6 +97,11 @@ export function AdminRolesTab() {
   const [assignRoleId, setAssignRoleId] = useState("");
   const [assignSpaceId, setAssignSpaceId] = useState("");
   const [assignSub, setAssignSub] = useState("");
+  // #420the member field is a name search; `assignSub` stays the resolved sub the server wants,
+  // and typing a raw sub still works (the picker assists, it never gates — ADR-161).
+  const [memberQuery, setMemberQuery] = useState("");
+  const [pickedMember, setPickedMember] = useState<{ grantee: string; label: string } | null>(null);
+  const memberCandidates = useTenantMemberCandidates(memberQuery);
   // #445: default tenant-role presets (CE) + the tenant scope for custom-role assignment.
   const { tenantId } = useSession();
   const defaults = useTenantRoleDefaults();
@@ -142,12 +153,11 @@ export function AdminRolesTab() {
 
       {/* Built-in RESOURCE roles: virtual, read-only — shown so the picker vocabulary is uniform. */}
       <h3 className="text-sm font-medium">{t("adminRoles.builtInResourceTitle")}</h3>
-      <div className="mb-4 flex flex-col gap-1" data-testid="builtin-roles">
+      <div className="mb-4 flex flex-col gap-2" data-testid="builtin-roles">
         {(roles.data?.builtIn ?? []).map((r) => (
-          <div key={r.name} className="flex items-baseline gap-2 text-sm">
-            <span className="font-medium">{r.name}</span>
-            <span className="text-xs text-fg-dim">{r.capabilities.join(" · ")}</span>
-            <span className="text-[10px] uppercase tracking-wide text-fg-dim">{t("adminRoles.builtIn")}</span>
+          <div key={r.name} className="flex flex-col gap-1">
+            <span className="text-sm font-medium">{r.name}</span>
+            <CapabilityPicker value={r.capabilities} idPrefix={`builtin-${r.name}`} list={CAPABILITIES} disabled />
           </div>
         ))}
       </div>
@@ -191,22 +201,50 @@ export function AdminRolesTab() {
          reference-counted unassign); provenance shows WHO holds WHICH role. */}
       <h3 className="mt-8 text-sm font-medium">{t("adminRoles.assignTitle")}</h3>
       <p className="mt-0 mb-2 text-xs text-fg-dim">{t("adminRoles.assignBody")}</p>
-      <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="assign-form">
-        <Select size="sm" value={assignRoleId} ariaLabel={t("adminRoles.roleLabel")} testId="assign-role"
-          options={(roles.data?.custom ?? []).map((r) => ({ value: r.id, label: r.name }))}
-          onChange={setAssignRoleId} />
+      {/* #420each control says what it is. Two unlabelled dropdowns side by side gave no way
+          to tell which one was the role and which the space; and the member field asked for a "sub",
+          an internal identifier nobody outside the code knows — it is a name search now, resolving to
+          the same `user:<sub>` principal the server has always expected. */}
+      <div className="mb-3 flex flex-wrap items-end gap-3" data-testid="assign-form">
+        <label className="flex flex-col gap-1 text-xs text-fg-dim">
+          {t("adminRoles.roleLabel")}
+          <Select size="sm" value={assignRoleId} ariaLabel={t("adminRoles.roleLabel")} testId="assign-role"
+            options={(roles.data?.custom ?? []).map((r) => ({ value: r.id, label: r.name }))}
+            onChange={setAssignRoleId} />
+        </label>
         {assignScope === "space" && (
-          <Select size="sm" value={assignSpaceId} ariaLabel={t("adminRoles.spaceLabel")} testId="assign-space"
-            options={(spaces.data ?? []).map((s) => ({ value: s.id, label: s.name || s.id }))}
-            onChange={setAssignSpaceId} />
+          <label className="flex flex-col gap-1 text-xs text-fg-dim">
+            {t("adminRoles.spaceLabel")}
+            <Select size="sm" value={assignSpaceId} ariaLabel={t("adminRoles.spaceLabel")} testId="assign-space"
+              options={(spaces.data ?? []).map((s) => ({ value: s.id, label: s.name || s.id }))}
+              onChange={setAssignSpaceId} />
+          </label>
         )}
-        {assignScope === "tenant" && <span className="text-xs text-fg-dim" data-testid="assign-tenant-note">{t("adminRoles.assignTenantScope")}</span>}
-        <Input inputSize="sm" className="w-56" value={assignSub} placeholder={t("adminRoles.subPlaceholder")}
-          aria-label={t("adminRoles.subLabel")} data-testid="assign-sub" onChange={(e) => setAssignSub(e.target.value)} />
+        {assignScope === "tenant" && <span className="pb-1.5 text-xs text-fg-dim" data-testid="assign-tenant-note">{t("adminRoles.assignTenantScope")}</span>}
+        <label className="flex w-64 flex-col gap-1 text-xs text-fg-dim">
+          {t("adminRoles.subLabel")}
+          <MemberSearchInput
+            inputSize="sm"
+            query={memberQuery}
+            onQueryChange={(q) => { setMemberQuery(q); setAssignSub(q.trim()); }}
+            picked={pickedMember}
+            onPick={(c) => {
+              setPickedMember(c ? { grantee: c.sub, label: c.displayName || c.sub } : null);
+              setAssignSub(c ? c.sub : "");
+              if (c) setMemberQuery("");
+            }}
+            candidates={memberCandidates.candidates}
+            placeholder={t("adminRoles.subPlaceholder")}
+            ariaLabel={t("adminRoles.subLabel")}
+            inputTestId="assign-sub"
+            listTestId="assign-sub-list"
+            itemTestId="assign-sub-item"
+          />
+        </label>
         <Button variant="primary" size="sm" data-testid="assign-add"
           disabled={!assignRoleId || !assignResourceId || !assignSub.trim() || assign.isPending}
           onClick={() => assign.mutate({ roleId: assignRoleId, resourceType: assignScope, resourceId: assignResourceId, principal: `user:${assignSub.trim()}` }, {
-            onSuccess: () => { notify.success(t("toast.saved")); setAssignSub(""); },
+            onSuccess: () => { notify.success(t("toast.saved")); setAssignSub(""); setMemberQuery(""); setPickedMember(null); },
             onError,
           })}>{t("adminRoles.assign")}</Button>
       </div>
