@@ -157,6 +157,7 @@ import { HistoryPanel } from "../history/HistoryPanel";
 import { DiffModal } from "../history/DiffModal";
 import { PermissionsDialog } from "../ui/PermissionsDialog";
 import { Button } from "../ui/Button";
+import { ProseSkeleton, useDelayedFlag } from "../ui/Skeleton";
 import { notify } from "../ui/toast";
 import { useComments } from "../data/comments";
 import { Sidebar } from "../sidebar/Sidebar";
@@ -194,6 +195,39 @@ const COLLAB_URL = resolveCollabUrl();
 // #364 / ADR-157: `pageIdOverride` lets the space-root route /spaces/:id) render the HOME page with
 // the full page machinery (view/edit/publish/history/collab) without a second implementation; the
 // param path additionally canonicalises /p/<home-id> → /spaces/:id (one location for the home).
+// #457: what fills the body area before the real content can. Until now both states drew NOTHING, so a
+// page still fetching was indistinguishable from a page with nothing written in it. Loading → a skeleton
+// (gated by useDelayedFlag so a fast load never flashes it); resolved-and-blank → an explicit empty state.
+// An overlay, not a replacement: the Editor stays mounted underneath so collab/presence are untouched
+// (the project design notes: a reconfigure/remount must never drop them), and it never intercepts clicks.
+function BodyPlaceholder({ loading, empty, canEdit }: { loading: boolean; empty: boolean; canEdit: boolean }) {
+  const { t } = useTranslation();
+  const showSkeleton = useDelayedFlag(loading);
+  if (!showSkeleton && !empty) return null;
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-0 top-0 z-[1] flex justify-center"
+      // the surface pads its content top by exactly --wks-band-h (tokens.css: the band overlays the
+      // scroller), so matching it puts the first bar on the first line of prose.
+      style={{ paddingTop: "var(--wks-band-h, 0px)" }}
+      data-testid="body-placeholder"
+      data-state={showSkeleton ? "loading" : "empty"}
+    >
+      {/* the reading column: same 740px measure + horizontal padding as .cm-content (tokens.css), so
+          the bars sit exactly where the first lines of prose will and nothing shifts on replacement. */}
+      <div className="w-full max-w-[740px] px-[var(--space-5)]">
+        {showSkeleton ? (
+          <ProseSkeleton />
+        ) : (
+          <p className="mt-1 text-sm text-fg-dim" data-testid="page-empty">
+            {canEdit ? t("page.emptyEditable") : t("page.empty")}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string; homeSpaceName?: string } = {}) {
   const { t } = useTranslation();
   const params = useParams<{ pageId: string }>();
@@ -221,7 +255,8 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
 
   // Draft/publish: view renders the PUBLISHED snapshot; edit-capable users get a
   // Publish control + an "unpublished changes" indicator.
-  const { data: published } = usePublished(pageId ?? "");
+  const publishedQ = usePublished(pageId ?? "");
+  const published = publishedQ.data;
   const publish = usePublish(pageId ?? "");
   const renamePage = useRenamePage();
 
@@ -616,6 +651,11 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
                 {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}
               </div>
             </div>
+            <BodyPlaceholder
+              loading={(pageQ.isLoading || publishedQ.isLoading) && !editing}
+              empty={!editing && !pageQ.isLoading && !publishedQ.isLoading && !(published?.publishedMd ?? "").trim()}
+              canEdit={canEdit}
+            />
             <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #192: the TOC rail lives in the content's RIGHT WHITESPACE, inside the editor area, so the
