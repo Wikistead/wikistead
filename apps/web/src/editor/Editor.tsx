@@ -612,7 +612,9 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
     <div className="h-full" data-mode={surfaceKey}>
       <section className="flex h-full min-h-0 min-w-0 flex-col" data-pane="preview">
         {/* Edit/Done/vim controls live in the host PageToolbar. */}
-        <div ref={previewRef} className="flex min-h-0 flex-1 flex-col" />
+        {/* #406 min-w-0 — without it this flex item refuses to shrink below its widest child, so a
+            wide table pushed the whole editor past the viewport instead of scrolling within it. */}
+        <div ref={previewRef} className="flex min-h-0 min-w-0 flex-1 flex-col" />
       </section>
       {/* #205 part 2: the :::embed-page title-search picker (opened from the slash command). */}
       <PageEmbedPicker open={embedPickerOpen} onPick={handleEmbedPick} />

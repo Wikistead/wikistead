@@ -579,10 +579,14 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   return (
     <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
       <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
-        <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+        {/* #406 minWidth 0 all the way down. A flex item defaults to min-width:auto, so a wide
+            child (a table, a long code line) widened the whole editor pane instead of scrolling inside
+            it — on a phone the pane laid out at 667px in a 390px window and <main>'s overflow-hidden
+            simply cut the rest off. */}
+        <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, minWidth: 0 }}>
           {/* Editor area is the positioning context for the floating ACTIONS/VIM groups AND the header
               band overlay (#212 bounce 3). */}
-          <div className="relative" style={{ flex: 1, minHeight: 0 }}>
+          <div className="relative" style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
             {/* #193 part 3 / #212 bounce 2+3: the header band (title + status) fades DOWN into the content
                 — a SEMI-TRANSPARENT vertical gradient (translucent top → transparent bottom) with a
                 backdrop-blur. It is ABSOLUTELY positioned over the TOP of the scrolling editor so content
@@ -648,7 +652,11 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
                     <span className="mt-1 inline-flex self-center" data-testid="band-task-ring"><ProgressRing done={taskProgress.done} total={taskProgress.total} animKey={pageId} /></span>
                   </div>
                 </div>
-                {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}
+                {/* #406 PageStatus stays at every width. It carries the TOC toggle AND the
+                    draft / unpublished badges, so gating it on isDesktop hid the publish state of a
+                    page from anyone on a phone — while the public reader showed the same control
+                    unconditionally, making the member view the odd one out. */}
+                <div className="shrink-0"><PageStatus {...controls} /></div>
               </div>
             </div>
             <BodyPlaceholder
@@ -1073,7 +1081,11 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
                   <PageTitle title={pageTitle} onRename={canEdit ? renameGuestPage : undefined} />
                 </div>
                 {/* Desktop: the status chip rides the band row (member parity); mobile keeps the ⋯ controls. */}
-                {isDesktop && <div className="shrink-0"><PageStatus {...controls} /></div>}
+                {/* #406 PageStatus stays at every width. It carries the TOC toggle AND the
+                    draft / unpublished badges, so gating it on isDesktop hid the publish state of a
+                    page from anyone on a phone — while the public reader showed the same control
+                    unconditionally, making the member view the odd one out. */}
+                <div className="shrink-0"><PageStatus {...controls} /></div>
               </div>
             </div>
             {/* #374 / ADR-149 §1: pass pageId so the guest resolvers (server diagram render, transclude) build

@@ -541,6 +541,10 @@ body {
 .lp-editor-host {
   flex: 1;
   min-height: 0;
+  /* #406 a flex item's default min-width:auto refuses to shrink below its widest child, so a
+     wide table widened the editor past a phone's viewport (and <main>'s overflow-hidden cut it off,
+     unreachable). At 0 the host takes the available width and wide content scrolls inside it. */
+  min-width: 0;
   overflow: auto;
   /* #282: reserve the vertical scrollbar's width at ALL times. A per-keystroke macro RichUI edit makes the
      doc height oscillate across the viewport boundary, so the scrollbar appears/disappears on every key; on

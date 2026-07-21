@@ -95,8 +95,11 @@ import { enterEdit, openScratch, setPublicSurface } from "../helpers";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+// The table is deliberately WIDER than a phone even at its minimum content width — eight columns of
+// unbreakable tokens. A table of short, wrappable cells fits 390px by wrapping, which is exactly the
+// case the old pin measured and the reason it never noticed the squeeze.
 const WIDE_CONTENT =
-  "# Wide\n\nbody paragraph\n\n| colA | colB | colC | colD | colE | colF |\n| --- | --- | --- | --- | --- | --- |\n| a very long cell value here | bbbb | cccc | dddd | eeee | ffff |\n\n```js\nconst aVeryLongLineOfCodeThatWouldOverflowTheNarrowViewportWidthForSureYesReally = 1234567890;\n```\n\ntail\n";
+  "# Wide\n\nbody paragraph\n\n| colA | colB | colC | colD | colE | colF | colG | colH |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| aaaaaaaaaaaaaaa | bbbbbbbbbbbbbbb | ccccccccccccccc | ddddddddddddddd | eeeeeeeeeeeeeee | fffffffffffffff | ggggggggggggggg | hhhhhhhhhhhhhhh |\n\n```js\nconst aVeryLongLineOfCodeThatWouldOverflowTheNarrowViewportWidthForSureYesReally = 1234567890;\n```\n\ntail\n";
 
 async function docOverflow(page: import("@playwright/test").Page) {
   return page.evaluate(() => ({
@@ -122,8 +125,43 @@ test("#406 S2: phone member READ surface — wide content scrolls in-container, 
   await sleep(800);
   const m = await docOverflow(phone);
   expect(m.over, "the page never scrolls horizontally").toBe(false);
-  // the CM read surface WRAPS long code lines (lineWrapping) and the table scrolls in its wrap —
-  // either strategy is fine; the invariant is that nothing widens the page itself.
+  // "the page doesn't scroll" was too weak to notice the actual complaint — a wide table was
+  // being SQUEEZED to fit, wrapping every cell until the table ran off the bottom of the screen. It
+  // never overflowed, so this pin stayed green while the table was unusable. Measure the table: it
+  // must be wider than its container and sit in something that scrolls.
+  const table = await phone.evaluate(() => {
+    const t = document.querySelector("[data-pane=preview] table") as HTMLElement | null;
+    if (!t) return null;
+    let el: HTMLElement | null = t;
+    while (el && !(el.scrollWidth > el.clientWidth + 2 && /auto|scroll/.test(getComputedStyle(el).overflowX))) el = el.parentElement;
+    return { tableW: t.scrollWidth, tableH: t.getBoundingClientRect().height, scrollerFound: !!el, viewport: window.innerWidth };
+  });
+  expect(table, "the read surface rendered the table").not.toBeNull();
+  expect(table!.tableW, "the table keeps its natural width instead of collapsing to the viewport").toBeGreaterThan(table!.viewport);
+  expect(table!.scrollerFound, "…and it lives in a container that scrolls sideways").toBe(true);
+  expect(table!.tableH, "so it stays a table, not a column of wrapped cells").toBeLessThan(200);
+});
+
+// #406 the TOC toggle and the draft / unpublished badges live in PageStatus, which the member
+// view used to render only above md — so on a phone the member surface lost both, while the public
+// reader (which renders the same control unconditionally) kept them. Whatever the layout does, the
+// member view must not be the one that hides the page's publish state.
+test("#406 the member page keeps PageStatus (TOC toggle + badges) on a phone", async ({ browser }) => {
+  const desktop = await (await browser.newContext()).newPage();
+  const id = await openScratch(desktop, "mobile-status-406");
+  await enterEdit(desktop);
+  await desktop.click("[data-pane=preview] .cm-content");
+  await desktop.keyboard.insertText("# Heading one\n\nbody\n\n## Heading two\n\nmore\n");
+  await sleep(500);
+
+  const phone = await (await browser.newContext({ viewport: PHONE })).newPage();
+  await phone.goto(`/p/${id}`);
+  await phone.waitForSelector("[data-pane=preview] .cm-content", { timeout: 15000 });
+  await sleep(800);
+  await expect(phone.getByTestId("page-status"), "the status cluster survives the narrow layout").toBeVisible();
+  await expect(phone.getByTestId("toc-toggle"), "including the TOC toggle the public reader already showed").toBeVisible();
+  // the page was never published, so its draft state must be visible here too
+  await expect(phone.getByTestId("draft-badge")).toBeVisible();
 });
 
 test("#406 S2: phone public reader — no horizontal overflow, readable base font", async ({ browser }) => {

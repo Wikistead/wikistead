@@ -78,8 +78,11 @@
 /* pipe tables (md-render emits .cm-lp-md-table) — the #174 bordered look; cell metrics on the
  * SHARED tokens so they match the CM .cm-lp-table exactly (#381 th-bg was a 0.12 grey wash and
  * the padding an em-derived 4.56/9.12px — both visibly off from the top-level table). */
-.wks-prose .cm-lp-md-table { border-collapse: collapse; margin: 1.5em 0; font-size: 0.95em; }
-.wks-prose .cm-lp-md-table :is(th, td) { border: var(--wks-table-cell-border); padding: var(--wks-table-cell-padding); text-align: left; vertical-align: top; height: 1.8em; }
+/* #406 a table wider than the column scrolls sideways rather than being squeezed into it.
+ * `display: block` makes the table a scroll container (its rows still lay out as a table inside),
+ * so narrow screens get a swipeable table instead of one compressed until every cell wraps. */
+.wks-prose .cm-lp-md-table { border-collapse: collapse; margin: 1.5em 0; font-size: 0.95em; display: block; max-width: 100%; overflow-x: auto; }
+.wks-prose .cm-lp-md-table :is(th, td) { border: var(--wks-table-cell-border); padding: var(--wks-table-cell-padding); text-align: left; vertical-align: top; height: 1.8em; min-width: 5em; /* #406 a column floor, so a wide table scrolls instead of collapsing to one character per line */ }
 .wks-prose .cm-lp-md-table th { font-weight: 700; background: var(--wks-table-th-bg); color: var(--fg); }
 
 /* inline images (#305): Tailwind preflight makes img a block; an image sharing its paragraph with
