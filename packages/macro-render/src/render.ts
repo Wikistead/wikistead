@@ -154,9 +154,15 @@ class HtmlSink implements MdSink {
 
 // #422: the shared alignment wrapper — export parity for `:::table{align=}` and `align=` diagram
 // fences. FIXED class per enum value; anything else (including a crafted attr value) is a no-op.
+// #393 `center` belongs in this enum. It was left out while centre was the DEFAULT and the
+// wrapper only had to express a departure from it; #393 flipped the default to left, at which point
+// an explicit `align=center` stopped reaching this sink at all and the same source rendered centred
+// in the editor and flush left everywhere it is read or exported.
+const ALIGN_CLASS: Record<string, string> = { left: "cm-lp-align-left", right: "cm-lp-align-right", center: "cm-lp-align-center" };
+
 function alignWrap(out: SafeHtml, align: string | undefined): SafeHtml {
-  if (align !== "left" && align !== "right") return out;
-  const cls = align === "left" ? "cm-lp-align-left" : "cm-lp-align-right";
+  const cls = align === undefined ? undefined : ALIGN_CLASS[align];
+  if (!cls) return out; // no attribute, or a crafted value that is not one of the three
   return joinSafe([unsafeHtml(`<div class="${cls}">`), out, unsafeHtml("</div>")]);
 }
 
