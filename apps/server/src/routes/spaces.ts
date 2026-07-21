@@ -17,7 +17,7 @@ import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
 
 interface SpaceRow { id: string; tenant_id: string; name: string; created_at: Date }
-export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage'; accentKey?: string | null; iconImageUrl?: string | null; homePageId?: string | null; deleteMode?: 'trash_only' | 'both' | 'direct_only' }
+export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage'; canModerate?: boolean; accentKey?: string | null; iconImageUrl?: string | null; homePageId?: string | null; deleteMode?: 'trash_only' | 'both' | 'direct_only' }
 function toSpace(r: SpaceRow): Space {
   return { id: r.id, tenantId: r.tenant_id, name: r.name, createdAt: r.created_at }
 }
