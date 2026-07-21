@@ -31,11 +31,13 @@ async function checkSurface(page: Page) {
   await choices.first().click();
   const checked = page.locator('[data-slot=radio-group-choice][data-state="checked"]').first();
   await expect(checked).toBeVisible();
-  // list variant structure: choice > span(circle) > span(dot); the dot carries the selection color
-  const dot = checked.locator("span > span").first();
-  const dotBg = await dot.evaluate((el) => getComputedStyle(el).backgroundColor);
-  expect(dotBg).toBe(accent);
-  expect(dotBg).not.toBe(panel2);
+  // #389the ring paints its own dot as a background gradient (one paint box, so the dot
+  // cannot drift out of the ring at fractional zoom — see control-alignment-389.spec.ts). The colour
+  // therefore lives in the gradient's stops, not in a child element's background-color.
+  const ring = checked.locator("span[class*=rounded-full]").first();
+  const dotPaint = await ring.evaluate((el) => getComputedStyle(el).backgroundImage);
+  expect(dotPaint, "the checked dot is painted in the brand accent").toContain(accent);
+  expect(dotPaint, "…and never in the faint hover grey").not.toContain(panel2);
   // the row border also flips to the brand accent when checked (poll: 120ms color transition)
   await expect
     .poll(() => checked.evaluate((el) => getComputedStyle(el).borderTopColor), { timeout: 3000 })
@@ -54,52 +56,38 @@ test("#389: selected radio dot uses the BRAND accent (dark)", async ({ browser }
   await checkSurface(page);
 });
 
-// #389/the dot centers in the circle by FLEX (never %-position + translate, whose top/left
-// subpixel rounding drifts apart at fractional zoom). Pins the rect-center match at 1x AND a
-// fractional deviceScaleFactor, and that the checked resting dot carries no transform (a persistent
-// transform exempts it from device-pixel snapping — the residual paint-level off-center).
+// #389///the invisible-dot regression must never come back, and no state
+// here may rest on a transform (a resting transform exempts an element from device-pixel snapping,
+// and in Tailwind v4 `scale-*` and `transform-none` are separate properties, which is how a pin that
+// only checked `transform` passed while the dot was invisible). Sincethe ring paints the dot
+// itself, so "visible" means the gradient actually carries the accent — the geometry of that dot is
+// pinned from real screenshots in control-alignment-389.spec.ts.
 for (const dsf of [1, 1.25]) {
-  test(`#389radio dot rect-centers in its circle (dsf ${dsf})`, async ({ browser }) => {
+  test(`#389: the checked radio dot is really painted, and rests transform-free (dsf ${dsf})`, async ({ browser }) => {
     const page = await (await browser.newContext({ deviceScaleFactor: dsf })).newPage();
     await page.goto("/settings/account/editor");
     const choices = page.locator("[data-slot=radio-group-choice]");
     await choices.first().waitFor({ timeout: 10000 });
-    const offs = await page.evaluate(() => {
-      const out: { dx: number; dy: number; w: number; h: number; scale: string; transform: string; opacity: string; state: string | null }[] = [];
+    const { accent } = await resolvedVars(page);
+    const rings = await page.evaluate(() => {
+      const out: { paint: string; scale: string; transform: string; state: string | null }[] = [];
       for (const choice of document.querySelectorAll("[data-slot=radio-group-choice]")) {
-        const circle = choice.querySelector("span[class*=rounded-full][class*=border]");
-        const dot = circle?.querySelector("span");
-        if (!circle || !dot) continue;
-        const c = circle.getBoundingClientRect(), d = dot.getBoundingClientRect();
-        out.push({
-          dx: Math.abs((d.left + d.right) / 2 - (c.left + c.right) / 2),
-          dy: Math.abs((d.top + d.bottom) / 2 - (c.top + c.bottom) / 2),
-          w: d.width, h: d.height,
-          scale: getComputedStyle(dot).scale,
-          transform: getComputedStyle(dot).transform,
-          opacity: getComputedStyle(dot).opacity,
-          state: choice.getAttribute("data-state"),
-        });
+        const ring = choice.querySelector("span[class*=rounded-full]");
+        if (!ring) continue;
+        const cs = getComputedStyle(ring);
+        out.push({ paint: cs.backgroundImage, scale: cs.scale, transform: cs.transform, state: choice.getAttribute("data-state") });
       }
       return out;
     });
-    expect(offs.length).toBeGreaterThan(1);
-    for (const o of offs) {
-      expect(o.dx, "dot horizontally centered").toBeLessThan(0.51);
-      expect(o.dy, "dot vertically centered").toBeLessThan(0.51);
-      if (o.state === "checked") {
-        // #389the"transform === none" pin was a FALSE GREEN — a scale:0 dot also has
-        // transform none in Tailwind v4 (separate properties), so the invisible-dot regression passed.
-        // Pin what the user actually sees: the checked dot has a REAL rendered size…
-        expect(o.w, "checked dot is visibly rendered (width > 0)").toBeGreaterThan(4);
-        expect(o.h, "checked dot is visibly rendered (height > 0)").toBeGreaterThan(4);
-        // …and #389it rests with NO transform of any kind. A resting transform exempts an
-        // element from device-pixel snapping, so the dot must appear by opacity, never by scale.
-        // Both properties are asserted because Tailwind v4 writes them separately (`scale` vs
-        // `transform`) — checking one alone is how the/pins passed while broken.
-        expect(o.scale, `checked dot rests without a scale (got ${o.scale})`).toBe("none");
-        expect(o.transform, `checked dot rests without a transform (got ${o.transform})`).toBe("none");
-        expect(parseFloat(o.opacity), "and it is fully opaque when checked").toBe(1);
+    expect(rings.length).toBeGreaterThan(1);
+    expect(rings.some((r) => r.state === "checked"), "one option is selected").toBe(true);
+    for (const r of rings) {
+      expect(r.scale, `a ring rests without a scale (got ${r.scale})`).toBe("none");
+      expect(r.transform, `a ring rests without a transform (got ${r.transform})`).toBe("none");
+      if (r.state === "checked") {
+        expect(r.paint, "the checked ring paints a dot in the brand accent").toContain(accent);
+      } else {
+        expect(r.paint, "an unchecked ring paints no accent dot").not.toContain(accent);
       }
     }
   });

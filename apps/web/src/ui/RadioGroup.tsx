@@ -75,21 +75,17 @@ export function RadioGroup({
           data-testid={optId(o.value)}
           className="group flex cursor-pointer items-start gap-2.5 rounded-md border border-border p-2.5 text-left outline-none transition-colors duration-[120ms] hover:bg-panel focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-primary data-[state=checked]:bg-panel"
         >
+          {/* #389the ring PAINTS its own dot (a radial-gradient background, faded in via the
+              registered --wks-dot property in ds-controls.css). A child dot is a second paint box
+              that rounds to device pixels independently of the ring, which is what made the dot sit
+              up to 1 device px low at 125%/150% zoom while the geometry matched perfectly. One box
+              cannot drift from itself. Do not put the dot back as an element, and never animate it
+              with a transform (`scale-*` and `transform-none` are separate properties in
+              Tailwind v4, and a resting transform also defeats pixel snapping). */}
           <span
             aria-hidden
-            className="mt-0.5 flex size-4 flex-none items-center justify-center rounded-full border border-input transition-colors duration-[120ms] group-data-[state=checked]:border-primary"
-          >
-            {/* #389the dot appears by OPACITY, never by transform. A resting transform (the
-                old `scale-100`) exempts an element from device-pixel snapping, so at fractional DSF
-                the dot painted ~0.4 device px off-centre — visible as a wobble the geometry never
-                showed (rect matched to 0.008px). Libraries whose radios don't drift simply keep the
-                steady state transform-free; the roundness was never the cause. Opacity animates on
-                the compositor just as cheaply and leaves the raster snapped at every zoom.
-                Do NOT reintroduce `transform-none` to cancel a scale: in Tailwind v4 those are
-                different properties (`transform` vs `scale`), which is howleft the dot
-                invisible. */}
-            <span className="size-2 rounded-full bg-primary opacity-0 transition-opacity duration-[120ms] group-data-[state=checked]:opacity-100" />
-          </span>
+            className="wks-radio-ring mt-0.5 size-4 flex-none rounded-full"
+          />
           <span className="min-w-0 flex-1">
             <span className="block text-sm text-foreground">{o.label}</span>
             {variant === "card" && o.description != null && (
