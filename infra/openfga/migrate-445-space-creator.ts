@@ -4,9 +4,11 @@
 //   - policy 'admins': write NOTHING                                  → admins only (`or admin`).
 // Identical observable behaviour before and after (the ADR's migration anti-test).
 //
-// SUPERSEDED for new runs by migrate-471-space-creator-userset.ts: #471 narrowed the grant from the
-// `user:*` wildcard this script writes to `tenant:<id>#member`. Kept as-is for the historical record
-// of what the ADR-171 migration did; run the #471 script after it (it rewrites what this wrote).
+// RETIRED by #471. It writes `space_creator@user:*`, which the current model no longer accepts — so
+// against a store carrying the #471 model this script FAILS rather than doing something subtly
+// wrong. A store that never ran it wants migrate-471-space-creator-userset.ts, which writes the
+// userset form directly; a store that did run it wants that script too, to rewrite what this wrote.
+// Kept only as the historical record of what the ADR-171 migration did.
 //
 // Run AFTER `fga:bootstrap` writes the ADR-171 model (space_creator must exist) and BEFORE DB
 // migration 075 drops the column, against the SAME persistent datastore (dev + prod). Fresh

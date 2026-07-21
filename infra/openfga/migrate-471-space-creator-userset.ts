@@ -31,19 +31,21 @@ import { OpenFgaClient } from '@openfga/sdk'
     const userset = { user: `${object}#member`, relation: 'space_creator', object }
     const wildcard = { user: 'user:*', relation: 'space_creator', object }
 
-    const already = await fga.read({ user: userset.user, object })
-    if ((already.tuples ?? []).some((x) => x.key?.relation === 'space_creator')) {
-      console.log(`tenant ${t.id}: already grants its members`)
+    const has = async (user: string) =>
+      ((await fga.read({ user, object })).tuples ?? []).some((x) => x.key?.relation === 'space_creator')
+    const hasUserset = await has(userset.user)
+    const hasWildcard = await has(wildcard.user)
+
+    if (!hasWildcard) {
+      console.log(`tenant ${t.id}: ${hasUserset ? 'already grants its members' : 'admins only — nothing to rewrite'}`)
       continue
     }
-    const old = await fga.read({ user: wildcard.user, object })
-    if (!(old.tuples ?? []).some((x) => x.key?.relation === 'space_creator')) {
-      console.log(`tenant ${t.id}: admins only — nothing to rewrite`)
-      continue
-    }
-    // Write first: a crash between the two leaves the tenant over-permitted for a moment rather than
-    // locking every member out of space creation, and the next run cleans it up.
-    await fga.write({ writes: [userset] })
+    // The wildcard decides whether there is work left, NOT the userset: a run that crashed between
+    // the write and the delete leaves BOTH, and keying off the userset would then skip the tenant
+    // forever with the over-permissive `user:*` still in place — the very grant this migration
+    // exists to remove. Write first so a crash over-permits for a moment rather than locking every
+    // member out of space creation.
+    if (!hasUserset) await fga.write({ writes: [userset] })
     await fga.write({ deletes: [wildcard] })
     rewritten += 1
     console.log(`tenant ${t.id}: space_creator now names its members, not user:*`)
