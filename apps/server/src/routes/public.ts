@@ -18,7 +18,7 @@ import { bumpRateBucket, API_RATE_LIMIT_WINDOW_S } from '../rate-limit.js'
 
 // noindex: the page's own flag OR'd with its space's flag (#277 / ADR-116 guardrail 4) — a page
 // reached via space inheritance is noindex if EITHER the page or its space says so.
-export interface PublicPageRow { id: string; title: string; published_md: string | null; noindex: boolean; published_query_snapshot: string | null }
+export interface PublicPageRow { id: string; title: string; published_md: string | null; noindex: boolean; published_query_snapshot: string | null; space_id: string; space_name: string; space_icon_key: string | null }
 
 // Anonymous principal for FGA check/listObjects.
 // user:anonymous has NO tenant memberships, no groups, no explicit grants.
@@ -56,8 +56,10 @@ export async function tenantPublicEnabled(tenantId: string): Promise<boolean> {
 export async function loadPublicPage(tenantId: string, pageId: string): Promise<PublicPageRow | null> {
   return withTenantTx(tenantId, async (tx) => {
     const [r] = await tx<PublicPageRow[]>`
-      SELECT p.id, p.title, p.published_md, (p.noindex OR s.noindex) AS noindex, p.published_query_snapshot
+      SELECT p.id, p.title, p.published_md, (p.noindex OR s.noindex) AS noindex, p.published_query_snapshot,
+             s.id AS space_id, s.name AS space_name, ss.icon_image_key AS space_icon_key
       FROM pages p JOIN spaces s ON s.id = p.space_id
+      LEFT JOIN space_settings ss ON ss.space_id = s.id
       WHERE p.id = ${pageId} AND p.published_at IS NOT NULL
     `
     return r ?? null
@@ -254,12 +256,19 @@ export async function publicPlugin(app: FastifyInstance) {
     // created_by (would leak user IDs), revision history,
     // attachment presigned URLs, non-public children.
     const children = await loadPublicChildTree(tenant.id, page.id)
+    // #430 the reader's header shows WHICH space this page belongs to (name + icon), so the
+    // standalone /pub view is never a nameless slab. Both are labels attached to a page the caller is
+    // already allowed to read in full, and the icon bytes are served by the existing public route.
     return reply.send({
       id: page.id,
       title: page.title,
       content,
       noindex: page.noindex,
       children,
+      space: {
+        name: page.space_name,
+        iconImageUrl: page.space_icon_key ? `/spaces/${page.space_id}/icon-image` : null,
+      },
     })
   })
 

@@ -470,4 +470,17 @@ test("#430: the standalone public page has the minimal header — brand + powere
   }
   // the page body still renders below the header (bounded-height context intact)
   await expect(anon.getByTestId("public-title")).toBeVisible();
+
+  // #430 the header's LEFT side is never empty. The standalone reader rendered the header with
+  // no space context at all, and a white-label tenant (the self-host default) also suppresses the brand
+  // mark and name — so the whole left side was blank. The space identity (icon + name) belongs to the
+  // tenant, not to Wikistead's branding, so it shows on every plan.
+  const spaceCtx = header.getByTestId("public-space-context");
+  await expect(spaceCtx, "the space context is present regardless of white-labelling").toBeVisible({ timeout: 8000 });
+  await expect(spaceCtx.getByTestId("public-space-icon"), "…with an icon (uploaded image or initials chip)").toBeVisible();
+  const spaceLabel = (await spaceCtx.innerText()).trim();
+  expect(spaceLabel.length, `the space name renders (got "${spaceLabel}")`).toBeGreaterThan(0);
+  // and the left side genuinely has content — the defect was an empty slot
+  const leftText = (await header.innerText()).trim();
+  expect(leftText.length, "header is not blank").toBeGreaterThan(0);
 });
