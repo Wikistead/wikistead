@@ -3049,10 +3049,24 @@ function blockRevealed(state: EditorState, from: number, to: number): boolean {
   // operator's deletion over the whole atom — the pre-#359 dd-takes-the-block behaviour. The
   // select-to-copy flow (a charwise drag inside revealed source) is untouched; a deliberate vim `V`
   // inside revealed source now selects the collapsed atom, which is coherent linewise-vim semantics.
+  //
+  // #359for a non-empty selection the test is on the ANCHOR, not on containment of the whole
+  // range. Containment flipped the moment a GROWING selection crossed the block's edge — revealed→atom
+  // (or atom→revealed) mid-drag — and that flip is exactly the atomicRanges churn this function exists
+  // to avoid: the raw offsets the selection was built on fold away, so the selection dies or the vim
+  // head warps. The anchor cannot move while the head does, so keying on it FREEZES each block's
+  // reveal for the whole life of the selection: start outside and the block stays an atom as you grow
+  // over it; start inside revealed source and it stays raw as you grow out. Contained selections are
+  // unaffected (a contained range's anchor is inside it), so thecopy flow is byte-identical.
+  // The #438 linewise exclusion keeps its ORIGINAL scope — a CONTAINED linewise range, which is the
+  // shape an operator materialises. Left unscoped it also swallowed growing charwise selections that
+  // merely happen to be line-aligned at both ends (thej-intercept lands the head exactly on an
+  // atom's first line), collapsing the anchor block mid-growth — the very bug above, wearing a hat.
+  const containedLinewise = (r: { from: number; to: number }) => r.from >= from && r.to <= to && isLinewiseRange(state, r);
   return syntaxRevealsAt(
     state.facet(displayMode),
     state.readOnly,
-    state.selection.ranges.some((r) => (r.empty ? r.head >= from && r.head <= to : r.from >= from && r.to <= to && !isLinewiseRange(state, r))),
+    state.selection.ranges.some((r) => (r.empty ? r.head >= from && r.head <= to : r.anchor >= from && r.anchor <= to && !containedLinewise(r))),
   );
 }
 
