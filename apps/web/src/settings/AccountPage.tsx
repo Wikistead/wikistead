@@ -43,9 +43,11 @@ function useAccountTabs(): SettingsTab[] {
   ];
 }
 
-// #194 (A / ADR-052): a settings page shell — a centered column with a page heading + description,
-// and each setting grouped into a card (surface-2, hairline border, 12px radius) so the screen reads
-// structured (Linear-style) rather than bare full-width rows. Token-driven; visual only.
+// #194 (A / ADR-052) → #466: a settings page shell — the readable column with a page heading +
+// description. The per-group CARD (surface-2 + hairline border + radius) is GONE: every other
+// settings screen (tenant branding / spaces / members / roles) groups with a heading + spacing on a
+// plain surface, and the cards made this one screen read as a different product. Token-driven;
+// visual only.
 function SettingsPage({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
     // #194 (revised): the readable column is LEFT-aligned right after the rail (NO mx-auto — the
@@ -58,9 +60,12 @@ function SettingsPage({ title, description, children }: { title: string; descrip
     </div>
   );
 }
+// #466: a plain section — no card chrome. The vertical rhythm comes from the shell's flex gap plus
+// this bottom margin, matching the other settings tabs; every data-testid is preserved so the
+// existing account e2e keeps targeting the same nodes.
 function SettingsCard({ children, testid }: { children: ReactNode; testid?: string }) {
   return (
-    <section className="rounded-xl border border-border bg-panel-2 p-5" data-testid={testid}>{children}</section>
+    <section className="mb-2" data-testid={testid}>{children}</section>
   );
 }
 
