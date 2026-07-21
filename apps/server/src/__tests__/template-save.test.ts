@@ -8,7 +8,8 @@ import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
-import { fgaClient } from '@wikistead/authz'
+import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { memberTuples, ensureMembers } from './helpers/membership.js'
 import { mintGuestToken } from '@wikistead/auth'
 import { createSpace } from '../routes/spaces.js'
 import { createPage } from '../routes/pages.js'
@@ -33,6 +34,11 @@ const save = (payload: Record<string, unknown>, headers: Record<string, string> 
 beforeAll(async () => {
   app = await buildApp()
   await app.ready()
+  // #471 / ADR-176: space creation is granted to this tenant's MEMBERS (it used to be a `user:*`
+  // wildcard, which matched anyone the server authenticated at all), so a fixture acting as
+  // someone must make them a member — which is what these subs always meant to be.
+  await ensureMembers('tenant_dev', ['dev-user'])
+  await ensureMembers('tenant_acme', ['acme-user']) // the acme fixture below creates a space AS them
   db = await acquireTenantDb(asTenant('tenant_dev'))
   spaceId = (await createSpace(db, fgaClient, { tenantId: 'tenant_dev', userId: 'dev-user', plan: 'free', name: `${tag}-space` })).id
   pubPage = (await createPage(db, fgaClient, app.searchDriver, { tenantId: 'tenant_dev', spaceId, userId: 'dev-user', title: 'Pub' })).id

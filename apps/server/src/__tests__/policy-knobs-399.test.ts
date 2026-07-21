@@ -15,6 +15,7 @@ import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { fgaClient, check, checkRelation, writeTuples, deleteTuples } from '@wikistead/authz'
+import { ensureMembers } from './helpers/membership.js'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace, ensurePersonalSpace } from '../routes/spaces.js'
 import { provisionTenant } from '../auth/provisioning.js'
@@ -37,8 +38,11 @@ const PERSONAL = 'pk399-personal'
 const grants: { user: string; relation: string; object: string }[] = []
 const pages: string[] = []
 
-// #445 / ADR-171: the space-creation control IS the tenant#space_creator wildcard tuple now.
-const wildcardOf = (id: string) => ({ user: 'user:*', relation: 'space_creator', object: `tenant:${id}` })
+// #445 / ADR-171: the space-creation control IS the tenant#space_creator grant. #471 / ADR-176: that
+// grant names the tenant's MEMBERS (`tenant:<id>#member`), not the `user:*` wildcard it used to be —
+// a typed wildcard matched every principal the server authenticated, including someone from another
+// tenant entirely.
+const wildcardOf = (id: string) => ({ user: `tenant:${id}#member`, relation: 'space_creator', object: `tenant:${id}` })
 const setMembersMayCreate = async (id: string, on: boolean) => {
   if (on) await writeTuples(fgaClient, [wildcardOf(id)]).catch(() => {}) // idempotent (already-exists)
   else await deleteTuples(fgaClient, [wildcardOf(id)]).catch(() => {}) // idempotent (may be absent)
@@ -56,6 +60,9 @@ beforeAll(async () => {
   }
   tenantT = t!
   dbT = await acquireTenantDb(tenantT)
+  // #471: the space-creation grant names this tenant's members, so the subs acting here hold membership
+  await ensureMembers(tenant.id, ['dev-user', EDITOR, PERSONAL])
+  await ensureMembers(tenantT.id, ['dev-user', EDITOR, PERSONAL])
   spaceId = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'pk399' })).id
   grants.push({ user: `user:${EDITOR}`, relation: 'editor_member', object: `space:${spaceId}` })
   await writeTuples(fgaClient, grants)

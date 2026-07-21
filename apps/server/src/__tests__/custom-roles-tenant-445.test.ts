@@ -31,6 +31,7 @@ import { buildApp } from '../app.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { resolveCapabilities } from '../routes/account.js' // #445 the refused branch, directly
 import { provisionTenant } from '../auth/provisioning.js'
+import { ensureMembers } from './helpers/membership.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -42,7 +43,9 @@ let app: FastifyInstance
 let tenant: Tenant
 let db: TenantDb
 const MEMBER = 'crt445-member'
-const wildcard = () => ({ user: 'user:*', relation: 'space_creator', object: `tenant:${tenant.id}` })
+// #471 / ADR-176: the "all members may create" grant is a userset over this tenant's members now,
+// not a `user:*` wildcard (which matched anyone the server ever authenticated).
+const wildcard = () => ({ user: `tenant:${tenant.id}#member`, relation: 'space_creator', object: `tenant:${tenant.id}` })
 
 // `tenant` is not a ResourceRef type (the tenant-admin.ts precedent) — raw relation checks.
 const creatorCheck = async (user: string, tenantId: string) => {
@@ -76,8 +79,11 @@ beforeAll(async () => {
   // The throwaway tenant's plan is entitlement-poor — the suite baseline is UNLIMITED (anti-test 5
   // narrows customRoles itself).
   registerEntitlementsResolver(() => UNLIMITED)
-  // Deterministic baseline whatever this tenant's history: wildcard present (the shipped default).
+  // Deterministic baseline whatever this tenant's history: the members grant present (the shipped
+  // default). #471: MEMBER has to actually be a member for that grant to reach them — which is the
+  // point of the narrowing, and what the old `user:*` wildcard silently did not require.
   await writeTuples(fgaClient, [wildcard()]).catch(() => {})
+  await ensureMembers(tenant.id, [MEMBER])
 }, 60_000)
 
 afterAll(async () => {
@@ -156,7 +162,7 @@ describe('tenant-scope custom roles (#445 / ADR-171)', () => {
       expect((g1.json() as { admin: { locked: boolean } }).admin.locked).toBe(true)
       const off = await app.inject({ method: 'PUT', url: '/admin/roles/tenant-defaults', headers: H, payload: { memberCreateSpaces: false } })
       expect(off.statusCode).toBe(200)
-      expect(await creatorCheck('user:*', tenant.id), 'wildcard deleted').toBe(false)
+      expect(await canCreate(MEMBER), 'the members grant is gone → a plain member cannot create').toBe(false)
       expect(await canCreate('dev-user'), 'admin still passes via or-admin').toBe(true)
       const on = await app.inject({ method: 'PUT', url: '/admin/roles/tenant-defaults', headers: H, payload: { memberCreateSpaces: true } })
       expect(on.statusCode).toBe(200)
@@ -173,8 +179,8 @@ describe('tenant-scope custom roles (#445 / ADR-171)', () => {
     const evil = await assign(role.id, 'tenant', 'tenant_dev', `user:${MEMBER}`)
     expect(evil.statusCode, 'cross-tenant assignment refused (uniform 404)').toBe(404)
     // Assert no DIRECT tuple landed on tenant B (the write-bind proof). A check() can't pin this:
-    // the target tenant's own `user:*` wildcard matches any user principal by design — the tuple
-    // READ (exact-match filter) is the authority on what this route wrote.
+    // the target tenant grants its own members space creation, and MEMBER may well be one of them —
+    // the tuple READ (exact-match filter) is the authority on what this route wrote.
     const { tuples } = await fgaClient.read({ user: `user:${MEMBER}`, object: 'tenant:tenant_dev' })
     expect((tuples ?? []).length, 'no leaked tuple on the other tenant').toBe(0)
     const [prov] = await admin<{ id: string }[]>`SELECT id FROM role_assignments WHERE resource_id = 'tenant_dev'`

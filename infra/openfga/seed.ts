@@ -29,7 +29,7 @@ import type { TupleKey, TupleKeyWithoutCondition } from '@openfga/sdk'
   await writeIdempotent([
     { user: 'user:dev-user',      relation: 'admin',   object: 'tenant:tenant_dev'  },
     { user: 'user:dev-user',      relation: 'member',  object: 'tenant:tenant_dev'  },
-    { user: 'user:*',             relation: 'space_creator', object: 'tenant:tenant_dev' }, // ADR-171: all-members-create default
+    { user: 'tenant:tenant_dev#member', relation: 'space_creator', object: 'tenant:tenant_dev' }, // ADR-171 all-members-create default, narrowed to members (#471)
     { user: 'tenant:tenant_dev',  relation: 'tenant',  object: 'space:demo_space'   },
     { user: 'user:dev-user',      relation: 'manager', object: 'space:demo_space'   },
     { user: 'space:demo_space',   relation: 'space',   object: 'page:demo'          },
@@ -67,7 +67,7 @@ import type { TupleKey, TupleKeyWithoutCondition } from '@openfga/sdk'
     // #471 / ADR-176: admin and member are separate relations and provisioning writes BOTH; a seed
     // that grants only admin describes a tenant nobody can authenticate into.
     { user: 'user:acme-admin',    relation: 'member',  object: 'tenant:tenant_acme' },
-    { user: 'user:*',             relation: 'space_creator', object: 'tenant:tenant_acme' }, // ADR-171
+    { user: 'tenant:tenant_acme#member', relation: 'space_creator', object: 'tenant:tenant_acme' }, // ADR-171 + #471
     { user: 'tenant:tenant_acme', relation: 'tenant',  object: 'space:acme_space'   },
     { user: 'user:acme-admin',    relation: 'manager', object: 'space:acme_space'   },
     { user: 'space:acme_space',   relation: 'space',   object: 'page:acme_page'     },

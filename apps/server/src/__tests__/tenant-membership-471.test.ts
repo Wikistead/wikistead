@@ -11,6 +11,7 @@
 // over HTTP, which is the end-to-end demonstration the ADR could only reason about from the code.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { createServer, type Server } from 'node:http'
+import { createHash } from 'node:crypto'
 import { generateKeyPair, exportJWK, SignJWT, type KeyLike } from 'jose'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -82,15 +83,16 @@ beforeAll(async () => {
   // start from an empty tenant: a run of this suite against a build WITHOUT the binding leaves the
   // intruder's space behind, and "nothing landed" must mean this run, not the history of the stack
   await admin`DELETE FROM spaces WHERE tenant_id = ${OTHER_ID}`
-  await writeTuples(fgaClient, [
+  // one at a time: OpenFGA rejects a whole batch if any tuple in it already exists
+  for (const tuple of [
     { user: `user:${INSIDER}`, relation: 'member', object: `tenant:${devTenant.id}` },
     // the group-derived member has NO direct user tuple: membership reaches them only through the group
     { user: `user:${GROUP_MEMBER}`, relation: 'member', object: `group:${groupFgaId(devTenant.id, GROUP_NAME)}` },
     { user: `group:${groupFgaId(devTenant.id, GROUP_NAME)}#member`, relation: 'member', object: `tenant:${devTenant.id}` },
-    // the other tenant is provisioned as a real one would be, wildcard and all (ADR-171's "all
-    // members may create spaces" default) — that grant is what an outsider actually rode in on
-    { user: 'user:*', relation: 'space_creator', object: `tenant:${OTHER_ID}` },
-  ]).catch(() => {})
+    // the other tenant is provisioned the way a real one is, space-creation grant and all — that
+    // grant is what an outsider actually rode in on
+    { user: `tenant:${OTHER_ID}#member`, relation: 'space_creator', object: `tenant:${OTHER_ID}` },
+  ]) await writeTuples(fgaClient, [tuple]).catch(() => {})
 }, 40_000)
 
 afterAll(async () => {
@@ -99,10 +101,9 @@ afterAll(async () => {
     { user: `user:${INSIDER}`, relation: 'member', object: `tenant:${devTenant.id}` },
     { user: `user:${GROUP_MEMBER}`, relation: 'member', object: `group:${groupFgaId(devTenant.id, GROUP_NAME)}` },
     { user: `group:${groupFgaId(devTenant.id, GROUP_NAME)}#member`, relation: 'member', object: `tenant:${devTenant.id}` },
-    // the other tenant is provisioned as a real one would be, wildcard and all (ADR-171's "all
-    // members may create spaces" default) — that grant is what an outsider actually rode in on
-    { user: 'user:*', relation: 'space_creator', object: `tenant:${OTHER_ID}` },
+    { user: `tenant:${OTHER_ID}#member`, relation: 'space_creator', object: `tenant:${OTHER_ID}` },
   ]).catch(() => {})
+  await admin`DELETE FROM api_keys WHERE tenant_id = ${OTHER_ID}`
   await admin`DELETE FROM spaces WHERE tenant_id = ${OTHER_ID}`
   await admin`DELETE FROM tenants WHERE id = ${OTHER_ID}`
   await devDb?.release()
@@ -170,6 +171,33 @@ describe('#471 / ADR-176: the tenant binding', () => {
     await deleteTuples(fgaClient, [{ user: `user:${sub}`, relation: 'member', object: `tenant:${devTenant.id}` }])
     const after = await app.inject({ method: 'GET', url: '/me/capabilities', headers: { host: 'dev.localhost', cookie } })
     expect(after.statusCode, 'resolved per request, so removal takes effect on the next call').toBe(401)
+  })
+
+  it('refuses to mint an API key for someone outside the tenant, and refuses one already minted', async () => {
+    const outsider = await jwks.mint(INSIDER)
+    const mint = await app.inject({
+      method: 'POST', url: '/api-keys',
+      headers: { host: `${OTHER_SLUG}.localhost`, authorization: `Bearer ${outsider}` },
+      payload: { name: 'foothold' },
+    })
+    expect(mint.statusCode, 'the route had no membership gate of its own — the seam is the gate').toBe(401)
+
+    // …and a key minted through the hole before the fix: the binding stops it at use, and the
+    // migration (infra/openfga/migrate-471-nonmember-api-keys.ts) revokes the row itself.
+    // a REAL key row, hashed the way the issuer hashes it, so the refusal below can only be about
+    // membership — a bogus hash would 401 for the boring reason and pin nothing
+    const plaintext = `wks_mb471pre_${'a'.repeat(32)}`
+    const hash = createHash('sha256').update(plaintext).digest('hex')
+    const [row] = await admin`
+      INSERT INTO api_keys (tenant_id, owner_user_id, name, key_prefix, key_hash, scope)
+      VALUES (${OTHER_ID}, ${INSIDER}, 'legacy foothold', 'mb471pre', ${hash}, 'write')
+      RETURNING id` as unknown as { id: string }[]
+    const used = await app.inject({
+      method: 'GET', url: '/me/capabilities',
+      headers: { host: `${OTHER_SLUG}.localhost`, authorization: `Bearer ${plaintext}` },
+    })
+    expect(used.statusCode, 'a key issued through the hole no longer authenticates').toBe(401)
+    await admin`DELETE FROM api_keys WHERE id = ${row.id}`
   })
 
   it('applies to a principal an EE auth provider resolves, not only to the OIDC branch', async () => {
