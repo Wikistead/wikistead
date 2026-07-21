@@ -16,6 +16,8 @@ openapi: 3.1.0
 info:
   title: Wikistead API
   version: 0.1.0
+  # The document, like the CE source it describes, ships under the repository's licence.
+  license: { name: AGPL-3.0-only, identifier: AGPL-3.0-only }
   description: >
     Member REST API for a Wikistead tenant. Every request is scoped to the tenant addressed by the
     request Host. All list endpoints return only what the caller may view (server-side authorization —
@@ -27,6 +29,24 @@ servers:
         default: your-tenant.example.com
 security:
   - apiKey: []
+# Declared so Swagger UI groups operations in this order (an undeclared tag still groups, but the
+# order is then whatever the spec happens to list first).
+tags:
+  - { name: pages, description: "Pages, their content, revisions and trash" }
+  - { name: spaces, description: "Spaces and their page trees" }
+  - { name: discovery, description: "Search, tags, backlinks and the local graph" }
+  - { name: comments, description: "Page comments and threads" }
+  - { name: attachments, description: "File attachments" }
+  - { name: share-links, description: "Guest share links" }
+  - { name: templates, description: "Reusable page templates" }
+  - { name: export, description: "Markdown / HTML export" }
+  - { name: members, description: "Tenant members and groups" }
+  - { name: watches, description: "Watches and notification preferences" }
+  - { name: notifications, description: "The member notification feed" }
+  - { name: pins, description: "Pinned resources" }
+  - { name: api-keys, description: "API keys" }
+  - { name: entitlements, description: "Plan entitlements" }
+  - { name: embed, description: "External embed resolution" }
 components:
   securitySchemes:
     apiKey:
@@ -77,6 +97,13 @@ components:
               to: { type: string }
               type: { type: string, enum: [link, embed] }
         hiddenCount: { type: integer, description: Viewable nodes dropped by the server node cap. }
+  responses:
+    # Every error body in this API is the same shape. Operations reference it as their `default`
+    # response, so a generated client knows what to deserialize on any non-2xx — and the Error schema
+    # is genuinely used rather than decorative.
+    Error:
+      description: Error
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   parameters:
     pageId:
       { name: pageId, in: path, required: true, schema: { type: string } }
@@ -86,10 +113,14 @@ paths:
   # ── Pages ────────────────────────────────────────────────────────────────
   /spaces/{spaceId}/pages:
     get:
+      operationId: listSpacePages
+      tags: [spaces]
       summary: List the space's pages (tree rows) the caller can view
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
-      responses: { "200": { description: Authorized page rows } }
+      responses: { "200": { description: Authorized page rows }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
     post:
+      operationId: createSpacePage
+      tags: [spaces]
       summary: Create a page
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
       requestBody:
@@ -102,138 +133,190 @@ paths:
                 parentId: { type: [string, "null"] }
                 fromPageId: { type: [string, "null"], description: Seed the body from an existing page (view-gated). }
                 templateId: { type: [string, "null"], description: Seed from a template snapshot (view-gated). }
-      responses: { "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Page" } } } } }
+      responses: { "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Page" } } } }, "400": { description: Malformed request body }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}:
     get:
+      operationId: getPage
+      tags: [pages]
       summary: Get a page's metadata
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "200": { description: Page }, "404": { description: Not viewable or absent (uniform) } }
+      responses: { "200": { description: Page }, "404": { description: Not viewable or absent (uniform) }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, default: { $ref: "#/components/responses/Error" } }
     delete:
+      operationId: deletePage
+      tags: [pages]
       summary: Move a page (and its subtree) to the trash
       description: Soft delete — the subtree disappears from every surface but stays restorable for 30 days (then it is purged permanently). Requires manage on the page.
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "204": { description: Moved to trash } }
+      responses: { "204": { description: Moved to trash }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/restore:
     post:
+      operationId: createPageRestore
+      tags: [pages]
       summary: Restore a trashed page (a trash root and everything trashed with it)
       description: "Access comes back exactly as before the trash (grants are never rewritten). If the original parent is gone the root re-parents to the space root (`reparented: true`). Requires manage; a non-root or unknown id is a uniform 404."
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "200": { description: "{ reparented }" }, "404": { description: "Not a trash root, not manageable, or absent (uniform)" } }
+      responses: { "200": { description: "{ reparented }" }, "404": { description: "Not a trash root, not manageable, or absent (uniform)" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/purge:
     delete:
+      operationId: deletePagePurge
+      tags: [pages]
       summary: Permanently delete a trashed page (a trash root) before its retention expires
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "204": { description: Purged }, "404": { description: "Not a trash root, not manageable, or absent (uniform)" } }
+      responses: { "204": { description: Purged }, "404": { description: "Not a trash root, not manageable, or absent (uniform)" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/permanent:
     delete:
+      operationId: deletePagePermanent
+      tags: [pages]
       summary: Permanently delete a LIVE page directly (no trash) — only when the space's delete_mode allows it
       description: "The direct pathway of the delete_mode policy (ADR-167): available under 'both' / 'direct_only', 400 (static policy reason) under 'trash_only'. Requires the delete verb like the trash route; a trashed page stays purge-only (uniform 404 here)."
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "204": { description: Permanently deleted }, "400": { description: Disabled by the delete_mode policy }, "404": { description: "Trashed or absent (uniform)" } }
+      responses: { "204": { description: Permanently deleted }, "400": { description: Disabled by the delete_mode policy }, "404": { description: "Trashed or absent (uniform)" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/published:
     get:
+      operationId: listPagePublished
+      tags: [pages]
       summary: Get the published markdown (the read surface)
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "200": { description: "{ title, publishedMd, publishedAt, … }" } }
+      responses: { "200": { description: "{ title, publishedMd, publishedAt, … }" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/publish:
     post:
+      operationId: createPagePublish
+      tags: [pages]
       summary: Publish the current draft (creates a revision; no-op when unchanged)
       description: May return 422 when the tenant's abuse filter rejects the content (mass deletion / banned words).
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "200": { description: "{ publishedAt, revisionId, noop }" }, "422": { description: Rejected by the abuse filter } }
+      responses: { "200": { description: "{ publishedAt, revisionId, noop }" }, "422": { description: Rejected by the abuse filter }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/revisions:
     get:
+      operationId: listPageRevisions
+      tags: [pages]
       summary: List revisions (explicit publishes)
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "200": { description: Revision metadata list } }
+      responses: { "200": { description: Revision metadata list }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/revisions/{revId}/content:
     get:
+      operationId: listRevisionContent
+      tags: [pages]
       summary: Get one revision's content
       parameters:
         - { $ref: "#/components/parameters/pageId" }
         - { name: revId, in: path, required: true, schema: { type: string } }
-      responses: { "200": { description: Revision content } }
+      responses: { "200": { description: Revision content }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/move:
     post:
+      operationId: createPageMove
+      tags: [pages]
       summary: Move a page (reparent / reorder within the tree)
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "200": { description: Moved } }
+      responses: { "200": { description: Moved }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/revisions/{revId}/restore:
     post:
+      operationId: createRevisionRestore
+      tags: [pages]
       summary: Restore a revision as the current draft
       parameters:
         - { $ref: "#/components/parameters/pageId" }
         - { name: revId, in: path, required: true, schema: { type: string } }
-      responses: { "200": { description: Restored } }
+      responses: { "200": { description: Restored }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/export:
     get:
+      operationId: listPageExport
+      tags: [pages]
       summary: Export the page as Markdown
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "200": { description: Markdown } }
+      responses: { "200": { description: Markdown }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/export.html:
     get:
+      operationId: listPageExport.html
+      tags: [pages]
       summary: Export the page as HTML
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "200": { description: HTML } }
+      responses: { "200": { description: HTML }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   # ── Discovery (all results server-side view-filtered) ────────────────────
   /search:
     get:
+      operationId: listSearch
+      tags: [discovery]
       summary: Full-text search (two-stage; every hit re-authorized before return)
       parameters: [ { name: q, in: query, required: true, schema: { type: string } } ]
       responses:
         "200":
           description: Authorized hits
           content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/SearchHit" } } } }
+        "400": { description: Missing or malformed query }
+        "401": { description: Missing or invalid credentials }
+        default: { $ref: "#/components/responses/Error" }
   /pages/{pageId}/backlinks:
     get:
+      operationId: listPageBacklinks
+      tags: [pages]
       summary: Pages that link to this page
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "200": { description: "PageRef[]" } }
+      responses: { "200": { description: "PageRef[]" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/related:
     get:
+      operationId: listPageRelated
+      tags: [pages]
       summary: 2-hop related pages, grouped by the shared link
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "200": { description: "{ groups, truncated }" } }
+      responses: { "200": { description: "{ groups, truncated }" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/graph:
     get:
+      operationId: listPageGraph
+      tags: [pages]
       summary: The local link graph around this page
       parameters:
         - { $ref: "#/components/parameters/pageId" }
         - { name: depth, in: query, schema: { type: integer, enum: [1, 2], default: 1 } }
       responses:
         "200": { description: Graph, content: { application/json: { schema: { $ref: "#/components/schemas/LocalGraph" } } } }
+        "401": { description: Missing or invalid credentials }
+        "404": { description: Not viewable or absent (uniform — existence hiding) }
+        default: { $ref: "#/components/responses/Error" }
   /pages/{pageId}/list:
     get:
+      operationId: listPageList
+      tags: [pages]
       summary: Resolve a dynamic list directive (`:::tagged` / `:::children`)
       parameters:
         - { $ref: "#/components/parameters/pageId" }
         - { name: name, in: query, required: true, schema: { type: string, enum: [tagged, children] } }
         - { name: body, in: query, schema: { type: string, description: The tag name for `tagged`. } }
-      responses: { "200": { description: "PageRef[] (unknown name → [])" } }
+      responses: { "200": { description: "PageRef[] (unknown name → [])" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /tags/suggest:
     get:
+      operationId: listTagSuggest
+      tags: [discovery]
       summary: Tag-name suggestions (only tags carried by ≥1 page the caller can view)
       parameters: [ { name: q, in: query, schema: { type: string } } ]
-      responses: { "200": { description: "{ tag, display }[]" } }
+      responses: { "200": { description: "{ tag, display }[]" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/excerpt:
     get:
+      operationId: listPageExcerpt
+      tags: [pages]
       summary: Title + published excerpt (hover previews)
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "200": { description: "{ title, excerpt }" } }
+      responses: { "200": { description: "{ title, excerpt }" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/transclude/{refId}:
     get:
+      operationId: getPageTransclude
+      tags: [pages]
       summary: Resolve an `:::embed-page` reference (page / #section / #^block)
       parameters:
         - { $ref: "#/components/parameters/pageId" }
         - { name: refId, in: path, required: true, schema: { type: string } }
-      responses: { "200": { description: Resolved markdown }, "404": { description: Denied/absent (uniform) } }
+      responses: { "200": { description: Resolved markdown }, "404": { description: Denied/absent (uniform) }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, default: { $ref: "#/components/responses/Error" } }
   # ── Comments ─────────────────────────────────────────────────────────────
   /pages/{pageId}/comments:
     get:
+      operationId: listPageComments
+      tags: [pages]
       summary: List the page's comment threads
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
-      responses: { "200": { description: Threads } }
+      responses: { "200": { description: Threads }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
     post:
+      operationId: createPageComment
+      tags: [pages]
       summary: Start a thread (page-level or anchored inline)
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
       requestBody:
@@ -249,186 +332,232 @@ paths:
                 anchorEnd: { type: string }
                 quotedText: { type: string }
                 mentions: { type: array, items: { type: string } }
-      responses: { "201": { description: Created } }
+      responses: { "201": { description: Created }, "400": { description: Malformed request body }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /comments/threads/{threadId}/comments:
     post:
+      operationId: createThreadComment
+      tags: [comments]
       summary: Reply in a thread
       parameters: [ { name: threadId, in: path, required: true, schema: { type: string } } ]
       requestBody: { content: { application/json: { schema: { type: object, required: [body], properties: { body: { type: string }, mentions: { type: array, items: { type: string } } } } } } }
-      responses: { "201": { description: Created } }
+      responses: { "201": { description: Created }, "400": { description: Malformed request body }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /comments/{commentId}:
     patch:
+      operationId: updateComment
+      tags: [comments]
       summary: Edit own comment
       parameters: [ { name: commentId, in: path, required: true, schema: { type: string } } ]
-      responses: { "200": { description: Updated } }
+      responses: { "200": { description: Updated }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
     delete:
+      operationId: deleteComment
+      tags: [comments]
       summary: Delete own comment (or moderate)
       parameters: [ { name: commentId, in: path, required: true, schema: { type: string } } ]
-      responses: { "204": { description: Deleted } }
+      responses: { "204": { description: Deleted }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   # ── Attachments ──────────────────────────────────────────────────────────
   /spaces/{spaceId}/pages/{pageId}/attachments/presign:
     post:
+      operationId: createAttachmentPresign
+      tags: [spaces]
       summary: Presign a browser/direct upload (PUT the file to the returned URL, then confirm)
       parameters:
         - { $ref: "#/components/parameters/spaceId" }
         - { $ref: "#/components/parameters/pageId" }
       requestBody: { content: { application/json: { schema: { type: object, required: [filename, contentType], properties: { filename: { type: string }, contentType: { type: string } } } } } }
-      responses: { "201": { description: "{ id, uploadUrl, … }" } }
+      responses: { "201": { description: "{ id, uploadUrl, … }" }, "400": { description: Malformed request body }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /spaces/{spaceId}/pages/{pageId}/attachments:
     get:
+      operationId: listPageAttachments
+      tags: [spaces]
       summary: List the page's attachments
       parameters:
         - { $ref: "#/components/parameters/spaceId" }
         - { $ref: "#/components/parameters/pageId" }
-      responses: { "200": { description: Attachments } }
+      responses: { "200": { description: Attachments }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /attachments/{id}/confirm:
     post:
+      operationId: createAttachmentConfirm
+      tags: [attachments]
       summary: Confirm a completed upload
       parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
-      responses: { "200": { description: Confirmed } }
+      responses: { "200": { description: Confirmed }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /attachments/{id}/download:
     get:
+      operationId: listAttachmentDownload
+      tags: [attachments]
       summary: Download (redirects/streams; page-view gated)
       parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
-      responses: { "200": { description: File } }
+      responses: { "200": { description: File }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /attachments/{id}/inline:
     get:
+      operationId: listAttachmentInline
+      tags: [attachments]
       summary: Inline view variant (page-view gated)
       parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
-      responses: { "200": { description: File } }
+      responses: { "200": { description: File }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /attachments/{id}:
     delete:
+      operationId: deleteAttachment
+      tags: [attachments]
       summary: Delete an attachment
       parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
-      responses: { "204": { description: Deleted } }
+      responses: { "204": { description: Deleted }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   # ── Spaces ───────────────────────────────────────────────────────────────
   /spaces:
     get:
+      operationId: listSpaces
+      tags: [spaces]
       summary: List spaces the caller can view (with their capability)
-      responses: { "200": { description: Spaces, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Space" } } } } } }
+      responses: { "200": { description: Spaces, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Space" } } } } }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
     post:
+      operationId: createSpace
+      tags: [spaces]
       summary: Create a space
-      responses: { "201": { description: Created } }
+      responses: { "201": { description: Created }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /spaces/{spaceId}:
     patch:
+      operationId: updateSpace
+      tags: [spaces]
       summary: Rename / update a space
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
-      responses: { "200": { description: Updated } }
+      responses: { "200": { description: Updated }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
     delete:
+      operationId: deleteSpace
+      tags: [spaces]
       summary: Delete a space
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
-      responses: { "204": { description: Deleted } }
+      responses: { "204": { description: Deleted }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /spaces/{spaceId}/home:
     post:
+      operationId: createSpaceHome
+      tags: [spaces]
       summary: Create the space HOME page and point the space at it (ADR-157)
       description: "Creates a regular page titled after the space and sets spaces.home_page_id atomically. Gate: space edit. 409 when a home already exists."
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
-      responses: { "201": { description: "{ id }" }, "403": { description: Not edit-capable }, "409": { description: A home already exists } }
+      responses: { "201": { description: "{ id }" }, "403": { description: Not edit-capable }, "409": { description: A home already exists }, "401": { description: Missing or invalid credentials }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /spaces/{spaceId}/info:
     get:
+      operationId: listSpaceInfo
+      tags: [spaces]
       summary: Minimal space info for a viewer
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
-      responses: { "200": { description: "{ id, name, … }" } }
+      responses: { "200": { description: "{ id, name, … }" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /spaces/{spaceId}/trash:
     get:
+      operationId: listSpaceTrash
+      tags: [spaces]
       summary: List the space's trash (roots only)
       description: Each entry is a trashed root with its descendant count. Only entries the caller can manage are listed (others are silently absent). Member-only.
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
-      responses: { "200": { description: "[{ id, title, deletedAt, deletedBy, descendants }]" }, "404": { description: Space not viewable or absent (uniform) } }
+      responses: { "200": { description: "[{ id, title, deletedAt, deletedBy, descendants }]" }, "404": { description: Space not viewable or absent (uniform) }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, default: { $ref: "#/components/responses/Error" } }
   /spaces/{spaceId}/delete-mode:
     get:
+      operationId: listSpaceDeleteMode
+      tags: [spaces]
       summary: Read the space's delete_mode override (manage-gated)
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
-      responses: { "200": { description: "{ deleteMode: 'trash_only'|'both'|'direct_only'|null, tenantDefault, resolved }" } }
+      responses: { "200": { description: "{ deleteMode: 'trash_only'|'both'|'direct_only'|null, tenantDefault, resolved }" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
     put:
+      operationId: setSpaceDeleteMode
+      tags: [spaces]
       summary: Set the space's delete_mode override (null inherits the tenant default; manage-gated)
       description: "The deletion-pathway policy (ADR-167). It only chooses reversibility (trash vs direct) — who may delete is unchanged in every mode."
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
-      responses: { "200": { description: "{ deleteMode }" }, "400": { description: Unknown mode } }
+      responses: { "200": { description: "{ deleteMode }" }, "400": { description: Unknown mode }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /spaces/{spaceId}/export:
     get:
+      operationId: listSpaceExport
+      tags: [spaces]
       summary: Export the space as a Markdown ZIP
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
-      responses: { "200": { description: ZIP } }
+      responses: { "200": { description: ZIP }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /spaces/{spaceId}/import:
     post:
+      operationId: createSpaceImport
+      tags: [spaces]
       summary: Import Markdown content into a space (ZIP / files)
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
-      responses: { "201": { description: Imported pages } }
+      responses: { "201": { description: Imported pages }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /export:
     get:
+      operationId: listExport
+      tags: [export]
       summary: Export the whole tenant as a Markdown ZIP (admin)
-      responses: { "200": { description: ZIP } }
+      responses: { "200": { description: ZIP }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   # ── Sharing & permissions (page/space grants, share links) ──────────────
   /pages/{pageId}/access:
-    get: { summary: List the page's grants, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "200": { description: Grants } } }
-    post: { summary: Grant a capability, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "200": { description: Granted } } }
-    delete: { summary: Revoke a grant, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "204": { description: Revoked } } }
+    get: { operationId: listPageAccess, tags: [pages], summary: List the page's grants, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "200": { description: Grants }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
+    post: { operationId: createPageAccess, tags: [pages], summary: Grant a capability, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "200": { description: Granted }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
+    delete: { operationId: deletePageAccess, tags: [pages], summary: Revoke a grant, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "204": { description: Revoked }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /pages/{pageId}/share-links:
-    get: { summary: List share links, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "200": { description: Links } } }
-    post: { summary: Create a share link (view/comment/edit; optional expiry), parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "201": { description: Created } } }
+    get: { operationId: listPageShareLinks, tags: [pages], summary: List share links, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "200": { description: Links }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
+    post: { operationId: createPageShareLink, tags: [pages], summary: Create a share link (view/comment/edit; optional expiry), parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "201": { description: Created }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /share-links:
-    get: { summary: List share links the caller manages, responses: { "200": { description: Links } } }
+    get: { operationId: listShareLinks, tags: [share-links], summary: List share links the caller manages, responses: { "200": { description: Links }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /share-links/{id}:
-    delete: { summary: Revoke a share link (one tuple delete — immediate), parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Revoked } } }
+    delete: { operationId: deleteShareLink, tags: [share-links], summary: Revoke a share link (one tuple delete — immediate), parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Revoked }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /spaces/{spaceId}/share-links:
-    get: { summary: List space share links, parameters: [ { $ref: "#/components/parameters/spaceId" } ], responses: { "200": { description: Links } } }
-    post: { summary: Create a space share link (view-only), parameters: [ { $ref: "#/components/parameters/spaceId" } ], responses: { "201": { description: Created } } }
+    get: { operationId: listSpaceShareLinks, tags: [spaces], summary: List space share links, parameters: [ { $ref: "#/components/parameters/spaceId" } ], responses: { "200": { description: Links }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
+    post: { operationId: createSpaceShareLink, tags: [spaces], summary: Create a space share link (view-only), parameters: [ { $ref: "#/components/parameters/spaceId" } ], responses: { "201": { description: Created }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   # ── Templates ────────────────────────────────────────────────────────────
   /templates:
-    get: { summary: List templates visible to the caller, responses: { "200": { description: Templates } } }
-    post: { summary: Save a page as a template, responses: { "201": { description: Created } } }
+    get: { operationId: listTemplates, tags: [templates], summary: List templates visible to the caller, responses: { "200": { description: Templates }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
+    post: { operationId: createTemplate, tags: [templates], summary: Save a page as a template, responses: { "201": { description: Created }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /templates/{id}:
-    get: { summary: Get a template, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Template } } }
-    patch: { summary: Update a template, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Updated } } }
-    delete: { summary: Delete a template, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Deleted } } }
+    get: { operationId: getTemplate, tags: [templates], summary: Get a template, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Template }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
+    patch: { operationId: updateTemplate, tags: [templates], summary: Update a template, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Updated }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
+    delete: { operationId: deleteTemplate, tags: [templates], summary: Delete a template, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Deleted }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   # ── Personal state (watches, pins, notifications, feed) ─────────────────
   /members/identities:
     # #379 / ADR-150: display-identity resolution — CUSTOMIZED members only (present ⟺ member AND
     # (override OR avatar)); absent is ambiguous (non-member / cross-tenant / un-customized — no
     # membership oracle). Member-only; never email/role.
     post:
+      operationId: createMemberIdentity
+      tags: [members]
       summary: Resolve author subs to display identity (customized members only)
       requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { subs: { type: array, maxItems: 200, items: { type: string } } }, required: [subs] } } } }
-      responses: { "200": { description: "identities keyed by sub (displayName, hasAvatar)" } }
+      responses: { "200": { description: "identities keyed by sub (displayName, hasAvatar)" }, "400": { description: Malformed request body }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /watches:
-    get: { summary: List the caller's watches, responses: { "200": { description: Watches } } }
-    post: { summary: Watch a page/space, responses: { "201": { description: Watching } } }
+    get: { operationId: listWatches, tags: [watches], summary: List the caller's watches, responses: { "200": { description: Watches }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
+    post: { operationId: createWatche, tags: [watches], summary: Watch a page/space, responses: { "201": { description: Watching }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /watches/{id}:
-    patch: { summary: Update a watch, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Updated } } }
-    delete: { summary: Unwatch, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Removed } } }
+    patch: { operationId: updateWatche, tags: [watches], summary: Update a watch, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Updated }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
+    delete: { operationId: deleteWatche, tags: [watches], summary: Unwatch, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Removed }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /pins:
-    get: { summary: List the caller's pins, responses: { "200": { description: Pins } } }
-    post: { summary: Pin a page/space, responses: { "201": { description: Pinned } } }
+    get: { operationId: listPins, tags: [pins], summary: List the caller's pins, responses: { "200": { description: Pins }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
+    post: { operationId: createPin, tags: [pins], summary: Pin a page/space, responses: { "201": { description: Pinned }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /pins/{id}:
-    delete: { summary: Unpin, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Removed } } }
+    delete: { operationId: deletePin, tags: [pins], summary: Unpin, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Removed }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /pins/reorder:
-    patch: { summary: Reorder pins, responses: { "200": { description: Reordered } } }
+    patch: { operationId: updatePinReorder, tags: [pins], summary: Reorder pins, responses: { "200": { description: Reordered }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /notifications:
-    get: { summary: List notifications, responses: { "200": { description: Notifications } } }
+    get: { operationId: listNotifications, tags: [notifications], summary: List notifications, responses: { "200": { description: Notifications }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /notifications/unread-count:
-    get: { summary: Unread count, responses: { "200": { description: "{ count }" } } }
+    get: { operationId: listNotificationUnreadCount, tags: [notifications], summary: Unread count, responses: { "200": { description: "{ count }" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /notifications/{id}/read:
-    post: { summary: Mark one read, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Read } } }
+    post: { operationId: createNotificationRead, tags: [notifications], summary: Mark one read, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Read }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /notifications/read-all:
-    post: { summary: Mark all read, responses: { "200": { description: Read } } }
+    post: { operationId: createNotificationReadAll, tags: [notifications], summary: Mark all read, responses: { "200": { description: Read }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /feed:
     get:
+      operationId: listFeed
+      tags: [discovery]
       summary: The tenant activity feed (every event view-authorized for the caller)
       parameters: [ { name: unpatrolled, in: query, schema: { type: boolean } } ]
-      responses: { "200": { description: Events } }
+      responses: { "200": { description: Events }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /feed/{eventId}/patrol:
-    post: { summary: Mark an event patrolled (manage/moderate), parameters: [ { name: eventId, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Marked } } }
-    delete: { summary: Unmark, parameters: [ { name: eventId, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Unmarked } } }
+    post: { operationId: createFeedPatrol, tags: [discovery], summary: Mark an event patrolled (manage/moderate), parameters: [ { name: eventId, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: Marked }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
+    delete: { operationId: deleteFeedPatrol, tags: [discovery], summary: Unmark, parameters: [ { name: eventId, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Unmarked }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   # ── Account/tenant meta ──────────────────────────────────────────────────
   /api-keys:
-    get: { summary: List own API keys, responses: { "200": { description: Keys } } }
-    post: { summary: Create an API key (scope read/write; the secret is returned exactly once), responses: { "201": { description: Created } } }
+    get: { operationId: listApiKeys, tags: [api-keys], summary: List own API keys, responses: { "200": { description: Keys }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
+    post: { operationId: createApiKey, tags: [api-keys], summary: Create an API key (scope read/write; the secret is returned exactly once), responses: { "201": { description: Created }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /api-keys/{id}:
-    delete: { summary: Revoke an API key, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Revoked } } }
+    delete: { operationId: deleteApiKey, tags: [api-keys], summary: Revoke an API key, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Revoked }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /entitlements:
-    get: { summary: The tenant's resolved entitlements (plan limits/features), responses: { "200": { description: Entitlements } } }
+    get: { operationId: listEntitlements, tags: [entitlements], summary: The tenant's resolved entitlements (plan limits/features), responses: { "200": { description: Entitlements }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /members:
-    get: { summary: List tenant members, responses: { "200": { description: Members } } }
+    get: { operationId: listMembers, tags: [members], summary: List tenant members, responses: { "200": { description: Members }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /embed/providers:
-    get: { summary: The tenant's external-embed host allowlist, responses: { "200": { description: "{ providers }" } } }
+    get: { operationId: listEmbedProviders, tags: [embed], summary: The tenant's external-embed host allowlist, responses: { "200": { description: "{ providers }" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
