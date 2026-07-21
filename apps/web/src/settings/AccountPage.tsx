@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Navigate, Outlet, Route } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { IdCard, SquarePen, Palette, HardDriveDownload, Loader2, Bell } from "lucide-react";
+import { IdCard, SquarePen, Palette, HardDriveDownload, Loader2, Bell, KeyRound } from "lucide-react";
 import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useSession } from "../session/SessionProvider";
@@ -16,7 +16,8 @@ import { RadioGroup } from "../ui/RadioGroup";
 import { CheckboxRow } from "../ui/Checkbox";
 import { SwitchRow } from "../ui/Switch";
 import { notify } from "../ui/toast";
-import { useAccountSettings, useUpdateAccountSettings, useUploadAvatar, useRemoveAvatar } from "../data/queries";
+import { useAccountSettings, useUpdateAccountSettings, useUploadAvatar, useRemoveAvatar, useMyApiKeys, useMyApiKeyPolicy } from "../data/queries";
+import { ApiKeysPanel } from "./ApiKeysPanel"; // #462: shared with the admin console's key list
 import { downloadTenantExport } from "../data/exportApi"; // #309: whole-tenant Markdown-ZIP export
 import { EditorOnboardingDialog } from "../app/EditorOnboarding"; // #289: "redo the setup questions"
 import { COMMANDS, resolveKey, chordFromEvent, displayChord, validateAssignment, type Keybindings, type CommandDef } from "../app/keybindings";
@@ -39,6 +40,11 @@ function useAccountTabs(): SettingsTab[] {
     // #362notification preferences live in SETTINGS ; the watch LIST lives
     // off the bell. Both are emission-narrowing member prefs — display authz is server-side regardless.
     { key: "notifications", label: t("accountNav.notifications"), to: "/settings/account/notifications", icon: Bell },
+    // #462: a member's own API keys. They were only issuable from the admin console, so a member who
+    // wanted to automate something had to ask an admin — while the server had always accepted their
+    // request. The tenant can still restrict issuing to admins; then this tab lists what they hold
+    // and offers no form.
+    { key: "api-keys", label: t("accountNav.apiKeys"), to: "/settings/account/api-keys", icon: KeyRound },
     { key: "data", label: t("accountNav.data"), to: "/settings/account/data", icon: HardDriveDownload },
   ];
 }
@@ -449,6 +455,31 @@ function ThemeTab() {
 }
 
 // #309: Data — take your knowledge out. One card: export EVERYTHING this member can view as a
+// #462: a member's own API keys — issue, see, revoke. What is offered here depends on the tenant's
+// issuing policy, but only for the affordance: the server refuses an unauthorised issue regardless
+// of what this screen shows, and the list it renders is owner-scoped server-side.
+function ApiKeysTab() {
+  const { t } = useTranslation();
+  const policy = useMyApiKeyPolicy();
+  const keys = useMyApiKeys();
+  const canIssue = policy.data?.canIssue ?? false;
+  return (
+    <SettingsPage title={t("accountApiKeys.title")} description={t("accountApiKeys.body")}>
+      <div data-testid="account-api-keys">
+        {policy.data && !canIssue && (
+          <p className="mt-0 text-sm text-fg-dim" data-testid="api-keys-restricted">{t("accountApiKeys.restricted")}</p>
+        )}
+        <ApiKeysPanel
+          keys={keys.data ?? []}
+          canIssue={canIssue}
+          maxScope={policy.data?.maxScope ?? "write"}
+          emptyText={t("accountApiKeys.empty")}
+        />
+      </div>
+    </SettingsPage>
+  );
+}
+
 // Markdown ZIP (spaces as directories, images bundled). The button disables + spins while the
 // server builds the archive; a 413 (over the size budget) gets its dedicated message.
 function DataTab() {
@@ -502,6 +533,7 @@ export function AccountRoutes() {
       <Route path="editor" element={<EditorTab />} />
       <Route path="theme" element={<ThemeTab />} />
       <Route path="notifications" element={<NotificationsTab />} />
+      <Route path="api-keys" element={<ApiKeysTab />} />
       <Route path="data" element={<DataTab />} />
       <Route path="*" element={<Navigate to="/settings/account" replace />} />
     </Route>

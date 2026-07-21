@@ -79,7 +79,8 @@
     "editor": "Editor",
     "theme": "Theme",
     "data": "Data",
-    "notifications": "Notifications"
+    "notifications": "Notifications",
+    "apiKeys": "API keys"
   },
   "account": {
     "profileHint": "Your identity across the workspace — how collaborators see you.",
@@ -241,7 +242,12 @@
     "empty": "No API keys yet.",
     "neverUsed": "Never used",
     "lastUsed": "Last used",
-    "lastUsedRel": "Used {{rel}}"
+    "lastUsedRel": "Used {{rel}}",
+    "issuePolicy": "Who may create API keys",
+    "issueMembers": "Any member",
+    "issueAdminsOnly": "Administrators only",
+    "issueMembersHint": "Members create their own keys from their account settings. A key never exceeds its owner’s permissions.",
+    "issueAdminsOnlyHint": "Members can see and revoke the keys they already hold, but cannot create new ones."
   },
   "adminAuth": {
     "title": "Authentication",
@@ -1081,5 +1087,11 @@
       "legal": "Legal requirement",
       "unspecified": "Unspecified (pre-disclosure)"
     }
+  },
+  "accountApiKeys": {
+    "title": "API keys",
+    "body": "Keys act with your own permissions — a key can never do more than you can. The plaintext is shown once, when you create it.",
+    "restricted": "This tenant lets only administrators create API keys. Any key you already hold still works, and you can revoke it here.",
+    "empty": "You have no API keys."
   }
 }
