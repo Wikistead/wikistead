@@ -486,6 +486,13 @@ test("#430: the standalone public page has the minimal header — brand + powere
   const brandOrSpace = await header.getByTestId("public-brand").count() + await header.getByTestId("public-brand-logo").count()
     + await header.getByTestId("public-space-context").count();
   expect(brandOrSpace, "the header's LEFT slot carries a brand or the space identity").toBeGreaterThan(0);
+
+  // #430the brand is the shared two-slot TenantBrand now (the same one the member header and
+  // the sign-in card use), so the icon slot and the name slot are always BOTH filled and independent
+  // — the header's old private copy let a custom name blank the mark and a custom logo blank the name.
+  await expect(header.getByTestId("public-brand"), "the name slot is always present").toBeVisible();
+  const iconSlot = await header.getByTestId("brand-mark").count() + await header.getByTestId("public-brand-logo").count();
+  expect(iconSlot, "the icon slot is filled independently of the name slot").toBe(1);
 });
 
 //ruling: white-labelling REPLACES the Wikistead brand with the tenant's own rather than erasing
@@ -522,11 +529,16 @@ test("#430the public header falls back to the Wikistead brand until the tenant s
     await expect(header.getByTestId("brand-mark"), "the Wikistead mark stands in for an unset brand").toBeVisible();
     await expect(header.getByTestId("public-brand")).toHaveText("Wikistead");
 
-    // (2) a brand of its own → that name, and the Wikistead mark steps aside
+    // (2) #143 /a name of its own fills the NAME slot only — the icon slot keeps the default
+    // mark, because the two slots are independent. The header renders the shared TenantBrand now, so
+    // it cannot drift back to the old behaviour where a custom name suppressed the mark. (The
+    // symmetric case — a custom logo leaves the name slot at "Wikistead" — is the same component's
+    // other slot; the logo upload is entitlement-gated, so the name slot is the plan-independent
+    // witness that the two are decoupled.)
     expect(await setName("Acme Docs"), "setting a display name").toBe(204);
     await anon.reload();
-    await expect(header.getByTestId("public-brand"), "the tenant's own name replaces Wikistead").toHaveText("Acme Docs");
-    await expect(header.getByTestId("brand-mark"), "…and so does its mark").toHaveCount(0);
+    await expect(header.getByTestId("public-brand"), "the tenant's own name fills the name slot").toHaveText("Acme Docs");
+    await expect(header.getByTestId("brand-mark"), "…and the icon slot keeps the default mark (independent slots)").toBeVisible();
 
     // (3) the attribution is a different thing from the identity: it stays on the entitlement seam
     const wl = (await (await anon.request.get("/api/branding")).json()).whitelabel as boolean;

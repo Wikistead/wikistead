@@ -167,7 +167,7 @@ import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, assetUrl, type GuestToken } from "../data/apiClient";
 import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useDirectDeletePage, useCreatePage, useEntitlements, useSpaces, useBranding, type Page } from "../data/queries";
-import { WikisteadMark } from "./BrandLockup"; // #430: the public header brand fallback
+import { TenantBrand } from "./BrandLockup"; // #430the public header uses the shared two-slot lockup
 import { Avatar } from "../ui/Avatar"; // #430the public header's space chip (shared primitive)
 import { GuestSidebar } from "./GuestSidebar";
 import { ConfirmDialog } from "../ui/dialogs";
@@ -1400,20 +1400,16 @@ function PublicHeader({ space }: { space?: PublicSpaceContext | null }) {
   const b = branding.data;
   return (
     <header className="flex h-10 flex-none items-center gap-2 border-b border-border bg-panel px-4" data-testid="public-header">
-      {/*ruling: white-labelling REPLACES the Wikistead brand with the tenant's own — it does not
-          erase it. So the mark and the name are chosen by whether the tenant HAS a brand of its own,
-          not by whether they are entitled to one. A paying tenant that has not set a logo or a display
-          name yet (the state every paying customer passes through) used to get an empty header, which
-          made paying look worse than not paying. "Powered by Wikistead" is a different thing — a free
-          plan's attribution, not an identity — so it stays on the entitlement. */}
-      {b?.logoUrl ? (
-        <img className="block h-[20px] max-w-[140px] object-contain" src={assetUrl(b.logoUrl)} alt={b.displayName || "logo"} data-testid="public-brand-logo" />
-      ) : b?.displayName ? null : (
-        <WikisteadMark />
-      )}
-      {(b?.displayName || !b?.logoUrl) && (
-        <span className="text-[14px] font-semibold" data-testid="public-brand">{b?.displayName || "Wikistead"}</span>
-      )}
+      {/* #143 two-slot rule, via the ONE shared lockup (#442 TenantBrand): the icon slot is a custom
+          logo OR the default mark, the name slot is the tenant name OR "Wikistead", and the two are
+          INDEPENDENT — setting one never blanks the other. The public header had grown its own copy
+          of this composition where a custom name suppressed the mark and a custom logo
+          suppressed the name — exactly the drift #442 folded member + sign-in into TenantBrand to
+          stop. White-labelling still REPLACES the Wikistead brand rather than erasing it: an
+          unset slot shows the Wikistead default, which is what TenantBrand does. "Powered by
+          Wikistead" is a free plan's attribution, not an identity, so it stays on the entitlement
+          below. testids kept (public-brand-logo / public-brand) so the existing pins still resolve. */}
+      <TenantBrand logoUrl={b?.logoUrl} name={b?.displayName} logoTestId="public-brand-logo" nameTestId="public-brand" />
       {space && (
         <span className="flex min-w-0 items-center gap-1.5" data-testid="public-space-context">
           {space.iconImageUrl ? (
