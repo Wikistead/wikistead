@@ -549,9 +549,9 @@ export interface AccountSettings {
 // keep the pseudonymous formatting — the endpoint 401s them anyway; the client just never asks).
 export interface MemberIdentity { displayName: string | null; hasAvatar: boolean }
 export function useMemberIdentity(sub: string | null | undefined) {
-  const { token, status } = useSession();
+  const { token, status, sub: selfSub, displayName: selfName } = useSession();
   const memberSub = sub && !sub.startsWith("guest:") && !sub.startsWith("anon:") ? sub : null;
-  return useQuery({
+  const q = useQuery({
     queryKey: ["member-identity", memberSub],
     enabled: status === "authed" && !!memberSub,
     staleTime: 300_000,
@@ -561,14 +561,25 @@ export function useMemberIdentity(sub: string | null | undefined) {
         body: JSON.stringify({ subs: [memberSub] }),
       }).then((r) => r?.identities?.[memberSub!] ?? null),
   });
+  // #431 the caller's OWN sub resolves from the session, which already holds the canonical
+  // display name (/auth/me — the same value the top-right menu and the members roster show). Without
+  // this, a member who never customized their identity was absent from the endpoint (ADR-150 resolves
+  // CUSTOMIZED members only, a user-ratified rule that exists so the endpoint is not a membership
+  // oracle), so their own authored content fell back to the sub-derived label: "DU" in the header and
+  // "DE" on the created/updated meta for the same person. Reading your own name discloses nothing, so
+  // this closes the split without widening what the endpoint tells you about ANYONE ELSE.
+  // The endpoint still WINS when it answers — an override must beat the OIDC name.
+  const selfIdentity: MemberIdentity | null =
+    memberSub != null && memberSub === selfSub && selfName ? { displayName: selfName, hasAvatar: false } : null;
+  return { ...q, data: q.data ?? selfIdentity };
 }
 
 // #379: the batch form for list surfaces (history). Key = the sorted member-sub set; same server
 // contract (customized-only). Small lists (history page ≤ tens of authors) — one request per set.
 export function useMemberIdentities(subs: readonly string[]) {
-  const { token, status } = useSession();
+  const { token, status, sub: selfSub, displayName: selfName } = useSession();
   const memberSubs = [...new Set(subs.filter((s) => s && !s.startsWith("guest:") && !s.startsWith("anon:")))].sort();
-  return useQuery({
+  const q = useQuery({
     queryKey: ["member-identities", memberSubs.join("\u0000")],
     enabled: status === "authed" && memberSubs.length > 0,
     staleTime: 300_000,
@@ -578,6 +589,12 @@ export function useMemberIdentities(subs: readonly string[]) {
         body: JSON.stringify({ subs: memberSubs }),
       }).then((r) => r?.identities ?? {}),
   });
+  // #431 same self-resolution as the single form, so a list surface (history) labels the
+  // caller's own entries exactly like the header and the per-author chip. The server's answer wins.
+  const withSelf = selfSub && selfName && memberSubs.includes(selfSub)
+    ? { [selfSub]: { displayName: selfName, hasAvatar: false }, ...(q.data ?? {}) }
+    : q.data;
+  return { ...q, data: withSelf };
 }
 
 export function useAccountSettings() {
