@@ -127,7 +127,70 @@ export interface EditUI {
   // (the same @replit/codemirror-vim the host uses — not a second engine); absent ⇒ vim off.
   mount(container: HTMLElement, source: MacroSource, ctx: MacroContext, save: (newSource: MacroSource) => void, editEnv?: EditEnv): EditUIController;
 }
-export interface EditEnv { readonly vim?: boolean }
+// #456 S1 (editUI contract v2). Three additions, all optional and additive, so every macro that
+// exists today keeps working unchanged.
+//
+// (1) The editUI body should BE the shared live-preview surface, not a per-macro editor. Macros
+// cannot build that themselves — it belongs to the host (it is the same factory the layout slot
+// islands use, so vim, the slash palette, completion and nested rendering come with it rather than
+// being re-implemented per macro). So the host offers it through editEnv, keeping the render-time
+// trust boundary at {theme}: a macro asks for a surface and gets a handle, never an EditorView.
+export interface HostSurfaceOptions {
+  readonly parent: HTMLElement;
+  readonly doc: MacroSource;
+  // "markdown" = the content IS prose (a callout body, a layout slot) → the surface keeps the
+  // reading typography. "code" = the source IS code (mermaid, plantuml) → code face. The host owns
+  // what each means; the macro only states which it is.
+  readonly kind?: "markdown" | "code";
+  readonly testid?: string;
+  onInput?(value: MacroSource): void; // every keystroke — for a local preview; never a doc write
+  onCommit?(value: MacroSource): void; // blur / explicit commit — the host makes it ONE Y.Text edit
+}
+export interface HostSurfaceHandle {
+  getValue(): MacroSource;
+  focus(): void;
+  inVimInsert(): boolean; // so the host's Escape handling can defer to vim (see EditUIController)
+  destroy(): void;
+}
+
+// (2) Declarative settings. A macro that wants mouse-driven configuration (a code fence's language,
+// highlighted lines, filename, wrap) DECLARES controls and supplies two PURE functions over its own
+// source; the host renders the controls and applies the result. The macro never touches the DOM, the
+// document or the editor, so a third-party macro gets the same settings UI as a first-party one
+// without widening the host-API. Control kinds are a closed set on purpose — the host renders only
+// what it knows how to render safely, and an unknown kind is ignored rather than guessed at.
+export type MacroControl =
+  | { readonly kind: "select"; readonly key: string; readonly label: string; readonly options: readonly { readonly value: string; readonly label: string }[] }
+  | { readonly kind: "toggle"; readonly key: string; readonly label: string }
+  | { readonly kind: "text"; readonly key: string; readonly label: string; readonly placeholder?: string }
+  | { readonly kind: "lineRange"; readonly key: string; readonly label: string; readonly placeholder?: string };
+export const MACRO_CONTROL_KINDS = ["select", "toggle", "text", "lineRange"] as const;
+export type MacroSettingValues = Readonly<Record<string, string | boolean>>;
+export interface MacroSettings {
+  readonly controls: readonly MacroControl[];
+  // Both PURE and source-only (no DOM, no editor, no Yjs) — the host may call them at any time,
+  // including to preview a change it then discards.
+  read(source: MacroSource): MacroSettingValues;
+  write(source: MacroSource, values: MacroSettingValues): MacroSource;
+}
+
+// (3) What Ctrl+↵ means for a macro that CONTAINS editable regions. A container (tabs, columns) has
+// no single body to edit: entering it means entering one of its slots. Rather than the host
+// hardcoding "tabs → active tab, columns → first column", the macro declares it — so a third-party
+// container defines its own entry the same way. Returning null means "no inner target", and the host
+// falls back to the normal editUI.
+export interface EnterTarget {
+  // The slot's offset range within the macro's own source. The host maps it to the document and
+  // mounts the surface there — the macro does no coordinate work of its own.
+  readonly from: number;
+  readonly to: number;
+}
+export interface EditEnv {
+  readonly vim?: boolean;
+  // #456 S1: present when the host can lend its shared surface. Optional so a macro can fall back
+  // to its own pane (and so tests can mount an editUI with no host).
+  mountSurface?(opts: HostSurfaceOptions): HostSurfaceHandle;
+}
 
 // ADR-025 step 3: a macro's source can often be written at more than one "level" — a
 // standard, portable form (CommonMark / GFM) or a richer non-standard one (a ::: directive
@@ -175,6 +238,8 @@ export interface FenceMacro {
   // #174 / ADR-087: the unified edit-UI (supersedes richEditUI as macros migrate). When present, the
   // host opens `editUI.mount` behind the single edit button; `editUI.present` also drives editModeOf.
   readonly editUI?: EditUI;
+  // #456 S1: declarative mouse settings (host-rendered controls over pure source functions).
+  readonly settings?: MacroSettings;
   // Tier levels for host auto-demote (ADR-025 step 3). Optional — most fence macros are
   // single-level (mermaid/excalidraw round-trip verbatim in their fence).
   readonly tier?: MacroTier;
@@ -204,6 +269,10 @@ interface DirectiveMacroBase {
   readonly exportFidelity: "preserve" | "degrade";
   readonly richEditUI?: RichEditUI;
   readonly editUI?: EditUI; // #174 / ADR-087 — unified edit UI (see FenceMacro.editUI)
+  readonly settings?: MacroSettings; // #456 S1 — declarative mouse settings (see FenceMacro.settings)
+  // #456 S1: where Ctrl+↵ lands for a CONTAINER (tabs → the active tab, columns → the first column).
+  // Pure and source-only, like the tier: it reads the macro's own source and returns an offset range.
+  enter?(source: MacroSource): EnterTarget | null;
   // Tier levels for host auto-demote (ADR-025 step 3). The table declares this (pipe ⟷
   // :::table); container directives without alternate representations omit it.
   readonly tier?: MacroTier;
