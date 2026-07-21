@@ -7,18 +7,20 @@
 # plan-freeze mutates members, the tenant/oidc tests INSERT rows) never touch the dev DB.
 # #388: the service definitions live in docker-compose.middleware.yml (shared with dev/e2e);
 # this file carries ONLY the server-test diffs (host ports, srvtest_* volumes, the S3 CORS origin).
-name: wikistead-server-test
+# #484: name/ports interpolate from WKS_STACK_OFFSET-derived env (scripts/stack-offset.mjs); a bare
+# `docker compose -f docker-compose.server-test.yml` with none set resolves to the original values.
+name: ${COMPOSE_PROJECT_NAME:-wikistead-server-test}
 
 services:
   postgres:
     extends: { file: docker-compose.middleware.yml, service: postgres }
-    ports: ["5434:5432"]
+    ports: ["${SRVTEST_PG_PORT:-5434}:5432"]
     volumes:
       - srvtest_pgdata:/var/lib/postgresql/data
 
   valkey:
     extends: { file: docker-compose.middleware.yml, service: valkey }
-    ports: ["6381:6379"]
+    ports: ["${SRVTEST_VALKEY_PORT:-6381}:6379"]
 
   # #338 / ADR-128: postgres datastore (parity with dev + prod). Ephemeral by design — the server-test teardown
   # `down -v` wipes the volume, so isolation is preserved; the migrate just re-runs on the fresh volume.
@@ -31,24 +33,24 @@ services:
     extends: { file: docker-compose.middleware.yml, service: openfga }
     depends_on:
       openfga-migrate: { condition: service_completed_successfully }
-    ports: ["8092:8080", "8093:8081"]
+    ports: ["${SRVTEST_FGA_HTTP_PORT:-8092}:8080", "${SRVTEST_FGA_GRPC_PORT:-8093}:8081"]
 
   meilisearch:
     extends: { file: docker-compose.middleware.yml, service: meilisearch }
-    ports: ["7702:7700"]
+    ports: ["${SRVTEST_MEILI_PORT:-7702}:7700"]
     volumes: ["srvtest_meilidata:/meili_data"]
 
   # SeaweedFS S3 on host :9003 (matches the e2e stack's storage choice).
   seaweedfs:
     extends: { file: docker-compose.middleware.yml, service: seaweedfs }
     command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://dev.localhost:5180"
-    ports: ["9003:8333"]
+    ports: ["${SRVTEST_S3_PORT:-9003}:8333"]
     volumes:
       - srvtest_seaweeddata:/data
 
   mailpit:
     extends: { file: docker-compose.middleware.yml, service: mailpit }
-    ports: ["1027:1025", "8027:8025"] # distinct host ports so dev + e2e + server-test coexist
+    ports: ["${SRVTEST_SMTP_PORT:-1027}:1025", "${SRVTEST_MAILPIT_PORT:-8027}:8025"] # distinct host ports so dev + e2e + server-test coexist
 
 volumes:
   srvtest_pgdata:
