@@ -4585,6 +4585,12 @@ const livePreviewBaseTheme = EditorView.baseTheme({
     // layout `height` acts as a minimum, so every row is at least ~1 line tall whether it has text or not.
     height: "1.8em",
     verticalAlign: "top",
+    // #406and a min COLUMN width, for the same reason in the other axis. The editor wraps text
+    // anywhere (CM's lineWrapping breaks mid-word), so a table's minimum width collapsed to almost
+    // nothing: on a phone an eight-column table squeezed into 332px, one or two characters per line,
+    // and ran off the bottom of the screen. With a floor per column the table simply gets wider than
+    // the surface and scrolls inside its wrap, which is what a wide table should do.
+    minWidth: "5em",
   },
   // #197: a PALE, token-driven header (was a hardcoded grey wash). Neutral surface + --fg text so the
   // header is always readable in any theme — no accent tint that could clash with the header text.
@@ -4807,7 +4813,10 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // #216 comment 836: the pipe-table wrap positions the hover-revealed RichUI-entry button at the table's
   // top-left. fit-content keeps the wrap the table's width so the button aligns to the table's left edge
   // (not the full editor width). The button reuses .cm-lp-macro-edit chrome; reveal it on wrap hover.
-  ".cm-lp-table-wrap": { position: "relative", width: "fit-content", maxWidth: "100%" },
+  // #406a table wider than the surface SCROLLS sideways instead of being squeezed into it.
+  // With only max-width the columns compressed until every cell wrapped, turning a wide table into a
+  // very tall one — and since nothing overflowed, no scrollbar ever appeared to say otherwise.
+  ".cm-lp-table-wrap": { position: "relative", width: "fit-content", maxWidth: "100%", overflowX: "auto" },
   // #216 comment 874 / #174 comment 878 (ADR-087 addendum 2): the SHARED RichUI-entry pill on the RAW-editing
   // state of a macro (pipe table + callout). Anchored to the first revealed line (.cm-lp-macro-raw =
   // position:relative) and floated JUST ABOVE it so it never covers the raw source it advertises. ALWAYS
