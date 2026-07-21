@@ -316,6 +316,27 @@ describe('buildHtmlExport', () => {
     }
   })
 
+  // A callout's `[label]` is its TITLE on screen. calloutHtmlRender ignored the parameter, so every
+  // server-rendered surface — published page, HTML export, and the print/PDF document built from it —
+  // dropped it silently: `:::note[Deploy checklist]` arrived as an untitled note. Content loss, not
+  // styling. (details' <summary> already used the same threaded label, which is what made the gap
+  // visible.) Pinned end to end: the title reaches the document, is styled, and stays inert text.
+  it('a callout keeps its [label] as a title in the export (and the label is escaped)', async () => {
+    const [before] = await admin<[{ published_md: string | null }]>`SELECT published_md FROM pages WHERE id = ${CHILD}`
+    await admin`UPDATE pages SET published_md = ${':::note[Deploy checklist]\nremember the migration\n:::\n\n:::tip[<img src=x onerror=alert(1)>]\nescaped\n:::\n'} WHERE id = ${CHILD}`
+    try {
+      const doc = (await buildHtmlExport(db, fgaClient, { userId: USER, pageId: CHILD }))!.body
+      expect(doc, 'the label survives as the callout title').toContain('<div class="callout-title">Deploy checklist</div>')
+      expect(doc, 'the export styles that title').toContain('.callout-title{')
+      expect(doc, 'the body is still rendered').toContain('remember the migration')
+      // the label is TEXT, never markup — the same boundary the rest of the renderer keeps
+      expect(doc).not.toContain('<img src=x')
+      expect(doc).toContain('&lt;img src=x')
+    } finally {
+      await admin`UPDATE pages SET published_md = ${before!.published_md} WHERE id = ${CHILD}`
+    }
+  })
+
   it('ships the editor-matching stylesheet so the export looks like the app (#85 bounce 635)', async () => {
     const res = await buildHtmlExport(db, fgaClient, { userId: USER, pageId: CHILD })
     const css = res!.body

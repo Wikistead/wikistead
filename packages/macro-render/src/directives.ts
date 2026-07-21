@@ -84,8 +84,16 @@ export function detailsHtmlRender(body: string, renderInner?: (md: string) => Sa
 export const CALLOUT_TYPES = ["note", "info", "tip", "warning", "danger"] as const;
 export type CalloutType = (typeof CALLOUT_TYPES)[number];
 
-export function calloutHtmlRender(type: string): (body: string, renderInner?: (md: string) => SafeHtml) => SafeHtml {
-  return (body, renderInner) => html`<div class="callout callout-${type}">\n\n${inner(body, renderInner)}\n\n</div>`; // #85: recurse
+export function calloutHtmlRender(type: string): (body: string, renderInner?: (md: string) => SafeHtml, label?: string) => SafeHtml {
+  // The `[label]` on the fence is the callout's TITLE — the editor renders it above the body
+  // (.cm-lp-callout-panel-title). This renderer used to ignore the parameter entirely, so every
+  // server-rendered surface (published page, HTML export, and the print/PDF document built from it)
+  // silently dropped it: `:::note[Deploy checklist]` published as an untitled note. The label is bound
+  // as TEXT through html`` (never markup), the same XSS-inert treatment details' <summary> gets.
+  return (body, renderInner, label) => {
+    const title = label && label.trim() ? html`<div class="callout-title">${label.trim()}</div>\n` : html``;
+    return html`<div class="callout callout-${type}">\n\n${title}${inner(body, renderInner)}\n\n</div>`; // #85: recurse
+  };
 }
 
 // #290 / ADR-114: :::todo — the promoted form of a GFM task list. The static export is the task list wrapped
