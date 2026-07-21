@@ -1,9 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
 import { enterEdit, openScratch, sleep } from "../helpers";
 
-// #393 / ADR-151 v1: whole-table BLOCK alignment via the `:::table{align=…}` directive attribute.
-// Right-click (robust path) rewrites the attribute; center is the DEFAULT and writes NO attribute; the
-// widget wears cm-lp-align-left/right only for the non-default (a bare :::table keeps the flow layout).
+// #393 / ADR-151 (+ the addendum): whole-table BLOCK alignment via the `:::table{align=…}`
+// directive attribute. LEFT is the default — a table's natural flow position — so it writes NO
+// attribute and adds no class; centre and right are explicit and really move the table. (v1 borrowed
+// the diagram convention where the default is centre, which made "centre" write nothing at all and
+// therefore render left: centring a table was impossible.) GFM pipe tables are left by definition and
+// carry no attribute, so picking centre/right promotes them to `:::table{align=…}`.
 const TABLE = ":::table\n<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>\n:::";
 
 const srcText = async (p: Page) => {
@@ -12,7 +15,7 @@ const srcText = async (p: Page) => {
   return p.locator("[data-pane=preview] .cm-content").innerText();
 };
 
-test("#393: right-click a :::table → Align right writes {align=right}; center drops it (round-trip)", async ({ browser }) => {
+test("#393: right-click a :::table → Align right writes {align=right}; left drops it (round-trip)", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "table-align-393");
   await enterEdit(page);
@@ -23,7 +26,7 @@ test("#393: right-click a :::table → Align right writes {align=right}; center 
 
   const wrap = page.locator("[data-pane=preview] .cm-lp-macro-wrap").first();
   await expect(wrap).toBeVisible();
-  await expect(wrap).not.toHaveClass(/cm-lp-align-/); // default: NO align class (flow layout unchanged)
+  await expect(wrap).not.toHaveClass(/cm-lp-align-/); // default (left): NO align class — plain flow layout
 
   await wrap.click({ button: "right" });
   await expect(page.getByTestId("context-menu")).toBeVisible({ timeout: 5000 });
@@ -35,13 +38,77 @@ test("#393: right-click a :::table → Align right writes {align=right}; center 
   const tableBox = (await wrap.locator("table").first().boundingBox())!;
   expect(tableBox.x + tableBox.width).toBeGreaterThan(wrapBox.x + wrapBox.width * 0.6);
 
-  // back to center → the attribute is DROPPED (round-trip stable, fence-info convention)
+  // back to LEFT → the attribute is dropped and, since this grid has no spans, the block returns to
+  // plain GFM pipes (Open formats: the default state is the plainest Markdown that can express it).
   await wrap.click({ button: "right" });
-  await page.getByTestId("ctx-item-align-center").click();
-  await expect(wrap).not.toHaveClass(/cm-lp-align-right/, { timeout: 8000 });
+  await page.getByTestId("ctx-item-align-left").click();
+  await sleep(600);
+  // the :::table wrapper is gone entirely — the block is plain pipes again
+  await expect(page.locator("[data-pane=preview] .cm-lp-macro-wrap")).toHaveCount(0, { timeout: 8000 });
   const s = await srcText(page);
-  expect(s).toContain(":::table");
-  expect(s).not.toContain("{align="); // center never persists an attribute
+  expect(s).not.toContain("{align="); // left never persists an attribute
+  expect(s).toMatch(/\|\s*A\s*\|\s*B\s*\|/); // …and the round-trip landed on a pipe table
+});
+
+test("#393 Align center actually CENTRES the table (not the old attribute-less left)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "table-align-center-393");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(`${TABLE}\n\nbelow\n`);
+  await page.getByText("below", { exact: true }).click();
+  await sleep(500);
+
+  const wrap = page.locator("[data-pane=preview] .cm-lp-macro-wrap").first();
+  await wrap.click({ button: "right" });
+  await expect(page.getByTestId("context-menu")).toBeVisible({ timeout: 5000 });
+  await page.getByTestId("ctx-item-align-center").click();
+  await expect(wrap, "centre is a real state with its own class").toHaveClass(/cm-lp-align-center/, { timeout: 8000 });
+
+  // and the table is physically centred: its margins inside the wrap match (this is what "centre
+  // doesn't work" meant — the old build wrote no attribute, so the table stayed hard left).
+  const wrapBox = (await wrap.boundingBox())!;
+  const tableBox = (await wrap.locator("table").first().boundingBox())!;
+  const leftGap = tableBox.x - wrapBox.x;
+  const rightGap = wrapBox.x + wrapBox.width - (tableBox.x + tableBox.width);
+  expect(leftGap, "there is room on the left — the table is not flush against it").toBeGreaterThan(4);
+  expect(Math.abs(leftGap - rightGap), `centred within a pixel or two (l=${leftGap} r=${rightGap})`).toBeLessThan(2);
+  const s = await srcText(page);
+  expect(s, "and centre is written down, since it is not the default").toContain("{align=center}");
+});
+
+test("#393 a GFM pipe table offers alignment and PROMOTES to :::table on centre", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "table-align-pipe-393");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("| A | B |\n| --- | --- |\n| 1 | 2 |\n\nbelow\n");
+  await page.getByText("below", { exact: true }).click();
+  await sleep(600);
+
+  const table = page.locator("[data-pane=preview] table").first();
+  await expect(table).toBeVisible();
+  await table.click({ button: "right" });
+  await expect(page.getByTestId("context-menu"), "a pipe table gets the align entries too").toBeVisible({ timeout: 5000 });
+  await expect(page.getByTestId("ctx-item-align-center")).toBeVisible();
+  await page.getByTestId("ctx-item-align-center").click();
+  await sleep(600);
+
+  const wrap = page.locator("[data-pane=preview] .cm-lp-macro-wrap").first();
+  await expect(wrap, "the promoted block renders as a centred :::table").toHaveClass(/cm-lp-align-center/, { timeout: 8000 });
+  let s = await srcText(page);
+  expect(s).toContain(":::table{align=center}");
+  expect(s).toContain("<table");
+
+  // and back: left returns it to plain pipes (no wrapper left behind)
+  await page.getByTestId("displaymode-live").click();
+  await sleep(400);
+  await page.locator("[data-pane=preview] .cm-lp-macro-wrap").first().click({ button: "right" });
+  await page.getByTestId("ctx-item-align-left").click();
+  await sleep(600);
+  s = await srcText(page);
+  expect(s).not.toContain(":::table");
+  expect(s).toMatch(/\|\s*A\s*\|\s*B\s*\|/);
 });
 
 test("#393: a cell edit preserves the align attribute (the rewrite carries the fence)", async ({ browser }) => {
@@ -49,11 +116,11 @@ test("#393: a cell edit preserves the align attribute (the rewrite carries the f
   await openScratch(page, "table-align-keep-393");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.insertText(`:::table{align=left}\n<table><tr><th>H</th></tr><tr><td>x</td></tr></table>\n:::\n\nbelow\n`);
+  await page.keyboard.insertText(`:::table{align=right}\n<table><tr><th>H</th></tr><tr><td>x</td></tr></table>\n:::\n\nbelow\n`);
   await page.getByText("below", { exact: true }).click();
   await sleep(500);
   const wrap = page.locator("[data-pane=preview] .cm-lp-macro-wrap").first();
-  await expect(wrap).toHaveClass(/cm-lp-align-left/);
+  await expect(wrap).toHaveClass(/cm-lp-align-right/);
 
   // enter the in-editor table edit — a `:::table` (richEditUI inline) enters on a body click directly
   // (#154/#395: the pipe×Live Ctrl+Enter opt-in is the OTHER quadrant). Each per-op commit rewrites the
@@ -69,7 +136,7 @@ test("#393: a cell edit preserves the align attribute (the rewrite carries the f
   await page.keyboard.press("Escape"); // exit edit mode
   await sleep(400);
   const s = await srcText(page);
-  expect(s).toContain(":::table{align=left}"); // the cell edit did NOT strip the block alignment
+  expect(s).toContain(":::table{align=right}"); // the cell edit did NOT strip the block alignment
   expect(s).toContain("edited");
 });
 

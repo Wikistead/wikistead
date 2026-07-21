@@ -212,34 +212,44 @@ describe("table-model: insert/delete rows & columns", () => {
 
 // #393 / ADR-151: whole-table block alignment — parse/serialize + the tier demote rule.
 describe("table block alignment (#393 / ADR-151)", () => {
-  it("tableAlignOf reads the fence attribute; absent/center/garbage → center", () => {
+  // LEFT is the default. A table's natural position is left, so that is the state written as
+  // "no attribute"; centre and right are the ones worth recording.
+  it("tableAlignOf reads the fence attribute; absent/garbage → left", () => {
     expect(tableAlignOf(":::table{align=left}\n<table></table>\n:::")).toBe("left");
     expect(tableAlignOf(":::table{align=right}\n<table></table>\n:::")).toBe("right");
     expect(tableAlignOf(":::table{align=center}\n<table></table>\n:::")).toBe("center");
-    expect(tableAlignOf(":::table\n<table></table>\n:::")).toBe("center");
-    expect(tableAlignOf("| a |\n| - |\n| b |")).toBe("center"); // pipe = default
-    expect(tableAlignOf(":::table{align=weird}\n:::")).toBe("center"); // enum-gated
+    expect(tableAlignOf(":::table\n<table></table>\n:::")).toBe("left");
+    expect(tableAlignOf("| a |\n| - |\n| b |")).toBe("left"); // pipe = default
+    expect(tableAlignOf(":::table{align=weird}\n:::")).toBe("left"); // enum-gated
   });
-  it("tableFence: center is attribute-less; left/right serialize the attr (round-trip stable)", () => {
-    expect(tableFence("center")).toBe(":::table");
-    expect(tableFence("left")).toBe(":::table{align=left}");
+  it("tableFence: left is attribute-less; center/right serialize the attr (round-trip stable)", () => {
+    expect(tableFence("left")).toBe(":::table");
+    expect(tableFence("center")).toBe(":::table{align=center}");
+    expect(tableFence("right")).toBe(":::table{align=right}");
     expect(tableAlignOf(tableFence("right") + "\n<table></table>\n:::")).toBe("right");
+    expect(tableAlignOf(tableFence("center") + "\n<table></table>\n:::")).toBe("center");
   });
 });
 
-// #393: the tier rule — a left/right table can NEVER demote to pipe (the alignment would silently drop);
-// center + plain grid still demotes (pure GFM, no loss). Exercised through tableTier itself.
+// #393 (+): the tier rule — a centred/right table can NEVER demote to pipe (the alignment would
+// silently drop); LEFT is the default, which a pipe table already expresses, so a plain grid demotes
+// with no loss. Exercised through tableTier itself.
 describe("tableTier align demote rule (#393)", () => {
   const plain = (fence: string) => fence + "\n<table><tr><td>a</td><td>b</td></tr></table>\n:::";
-  it("pipe is representable only when align is center", () => {
+  it("pipe is representable only at the left default", () => {
     expect(tableTier.canRepresentAt(asMacroSource(plain(":::table")), { id: "pipe", layer: "gfm" })).toBe(true);
-    expect(tableTier.canRepresentAt(asMacroSource(plain(":::table{align=left}")), { id: "pipe", layer: "gfm" })).toBe(false);
+    expect(tableTier.canRepresentAt(asMacroSource(plain(":::table{align=left}")), { id: "pipe", layer: "gfm" })).toBe(true);
+    expect(tableTier.canRepresentAt(asMacroSource(plain(":::table{align=center}")), { id: "pipe", layer: "gfm" })).toBe(false);
     expect(tableTier.canRepresentAt(asMacroSource(plain(":::table{align=right}")), { id: "pipe", layer: "gfm" })).toBe(false);
   });
-  it("toLevel(html) preserves the align attribute; toLevel(pipe) only reachable at center", () => {
-    const rehtml = String(tableTier.toLevel(asMacroSource(plain(":::table{align=right}")), { id: "html", layer: "directive" }));
-    expect(rehtml.startsWith(":::table{align=right}\n")).toBe(true);
-    const center = String(tableTier.toLevel(asMacroSource(plain(":::table")), { id: "html", layer: "directive" }));
-    expect(center.startsWith(":::table\n")).toBe(true); // center never writes the attribute
+  it("toLevel(html) preserves the align attribute; the left default never writes one", () => {
+    for (const a of ["right", "center"] as const) {
+      const rehtml = String(tableTier.toLevel(asMacroSource(plain(`:::table{align=${a}}`)), { id: "html", layer: "directive" }));
+      expect(rehtml.startsWith(`:::table{align=${a}}\n`)).toBe(true);
+    }
+    const left = String(tableTier.toLevel(asMacroSource(plain(":::table")), { id: "html", layer: "directive" }));
+    expect(left.startsWith(":::table\n")).toBe(true); // the default never writes the attribute
+    const explicitLeft = String(tableTier.toLevel(asMacroSource(plain(":::table{align=left}")), { id: "html", layer: "directive" }));
+    expect(explicitLeft.startsWith(":::table\n")).toBe(true); // …and an explicit left normalises away
   });
 });
