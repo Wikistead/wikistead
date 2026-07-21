@@ -5,7 +5,7 @@ import Sigma from "sigma";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import { useTheme } from "./ThemeProvider";
 import { useSpaces, type LocalGraphResult } from "../data/queries";
-import { colorFromString } from "../ui/avatar";
+import { colorHexFromString } from "../ui/avatar";
 
 // #394 / ADR-147: the local link-graph canvas (sigma.js + graphology — the user-ruled renderer). PURE
 // display: the server already view-filtered both endpoints of every edge, so this never filters, counts,
@@ -72,7 +72,7 @@ export function LocalGraphCanvas({
         size: isCenter ? 9 : Math.min(4 + (degree.get(n.id) ?? 0) * 0.75, 8),
         // #440: center keeps the accent (identity > grouping); others color by space, neutral when
         // the space is not in the viewer's own space list.
-        color: isCenter ? accent : knownSpaces.has(n.spaceId) ? colorFromString(n.spaceId) : fgDim,
+        color: isCenter ? accent : knownSpaces.has(n.spaceId) ? colorHexFromString(n.spaceId) : fgDim,
       });
     });
     data.edges.forEach((e, i) => {
@@ -101,6 +101,8 @@ export function LocalGraphCanvas({
     // worker can't be trusted to animate. Each frame runs a couple of iterations and refreshes sigma,
     // so the spread seed visibly contracts to the compacted settle (scalingRatio down / gravity up vs
     // inferSettings, c2112-2) and stops after a bounded window; unmount cancels the loop.
+    // what the pointer is currently holding (shared by the layout loop and the drag handlers)
+    const draggingRef: { node: string | null; x: number; y: number } = { node: null, x: 0, y: 0 };
     let raf = 0;
     if (graph.order > 2) {
       const inferred = forceAtlas2.inferSettings(graph);
@@ -113,9 +115,17 @@ export function LocalGraphCanvas({
       };
       let frames = 0;
       const step = () => {
-        forceAtlas2.assign(graph, { iterations: 2, settings });
+        // #440 4 iterations per frame over a 70-frame window (~1.1s) instead of 2 over 150
+        // (~2.5s). Same total relaxation work, half the wall clock: the spread→contract motion the
+        // owner asked to keep (#394) still reads, it just stops feeling like a wait.
+        forceAtlas2.assign(graph, { iterations: 4, settings });
+        // a node the pointer is holding must not be yanked back by the layout mid-drag
+        if (draggingRef.node) {
+          graph.setNodeAttribute(draggingRef.node, "x", draggingRef.x);
+          graph.setNodeAttribute(draggingRef.node, "y", draggingRef.y);
+        }
         sigma.refresh();
-        if (++frames < 150) raf = requestAnimationFrame(step); // ~2.5s settle window
+        if (++frames < 70) raf = requestAnimationFrame(step);
       };
       raf = requestAnimationFrame(step);
     }
@@ -143,7 +153,43 @@ export function LocalGraphCanvas({
       el.style.cursor = "";
       sigma.refresh();
     });
-    sigma.on("clickNode", ({ node }) => openRef.current(node));
+    // #440 (owner ruling, option B): nodes are draggable. A press that MOVES beyond a small
+    // threshold drags; anything under it stays a click and still navigates, so the existing gesture is
+    // untouched. Camera panning is suppressed for the duration, otherwise the canvas slides with the
+    // node. Whatever is held is pinned each layout frame (above), so an in-flight settle cannot fight
+    // the pointer.
+    const DRAG_THRESHOLD_PX = 4;
+    let downAt: { x: number; y: number } | null = null;
+    let moved = false;
+    sigma.on("downNode", ({ node, event }) => {
+      draggingRef.node = node;
+      const p = graph.getNodeAttributes(node) as { x: number; y: number };
+      draggingRef.x = p.x;
+      draggingRef.y = p.y;
+      downAt = { x: event.x, y: event.y };
+      moved = false;
+      sigma.getCamera().disable();
+    });
+    sigma.on("moveBody", ({ event }) => {
+      if (!draggingRef.node || !downAt) return;
+      if (!moved && Math.hypot(event.x - downAt.x, event.y - downAt.y) < DRAG_THRESHOLD_PX) return;
+      moved = true;
+      const pos = sigma.viewportToGraph(event);
+      draggingRef.x = pos.x;
+      draggingRef.y = pos.y;
+      graph.setNodeAttribute(draggingRef.node, "x", pos.x);
+      graph.setNodeAttribute(draggingRef.node, "y", pos.y);
+      event.preventSigmaDefault();
+    });
+    const endDrag = () => {
+      draggingRef.node = null;
+      downAt = null;
+      sigma.getCamera().enable();
+    };
+    sigma.on("upNode", endDrag);
+    sigma.on("upStage", endDrag);
+    // a click that never crossed the threshold navigates, exactly as before
+    sigma.on("clickNode", ({ node }) => { if (!moved) openRef.current(node); });
     return () => {
       cancelAnimationFrame(raf);
       sigma.kill();
@@ -174,7 +220,7 @@ export function LocalGraphCanvas({
         {/* #440: per-space color legend (named only via the viewer's own space list + one generic bucket). */}
         {namedSpaces.map((id) => (
           <span key={id} className="inline-flex items-center gap-1" data-testid="graph-space-legend">
-            <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ background: colorFromString(id) }} />
+            <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ background: colorHexFromString(id) }} />
             {knownSpaces.get(id)}
           </span>
         ))}

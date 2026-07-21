@@ -23,6 +23,29 @@ export function colorFromString(seed: string): string {
   return `hsl(${hue} 58% 45%)`;
 }
 
+// #440 the same colour as a HEX string. WebGL renderers (sigma, in the local graph) parse
+// colours themselves and do not understand `hsl` — a space-separated one least of all — so a node
+// handed the CSS form silently fell back to the default paint while the DOM legend swatch beside it,
+// which the browser resolved, showed the real colour. One seed, two renderers, two answers. Both
+// sides now take this, so they cannot disagree.
+export function colorHexFromString(seed: string): string {
+  const hue = hashString(seed || "?") % 360;
+  return hslToHex(hue, 58, 45);
+}
+
+// Minimal HSL→#rrggbb (fixed S/L above, so this only has to be correct, not general).
+function hslToHex(h: number, s: number, l: number): string {
+  const sN = s / 100;
+  const lN = l / 100;
+  const c = (1 - Math.abs(2 * lN - 1)) * sN;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = lN - c / 2;
+  const [r, g, b] =
+    h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  const hex = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
+  return `#${hex(r)}${hex(g)}${hex(b)}`;
+}
+
 // 1–2 letter monogram from a display name. Two words → first letter of the first and
 // last (e.g. "Ada Lovelace" → "AL"); one word → its first 1–2 chars. CJK/emoji names
 // have no word boundaries, so a single leading character reads best. Falls back to "?"
