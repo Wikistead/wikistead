@@ -73,7 +73,11 @@ test("anonymous share: create -> open -> co-edit -> read-only -> revoke denied",
   await expect.poll(() => paneText(member, "preview"), { timeout: 20000, message: "the guest's edit reached the member (anonymous co-editing)" })
     .toContain("from-guest");
 
-  // a VIEW link is read-only
+  // a VIEW link is read-only. asserting contenteditable alone proved nothing here — a viewer
+  // that never enters edit mode renders the read surface, which is contenteditable="false" whatever
+  // capability the link carries, so the assertion held even if a view link were handed edit rights.
+  // Check the capability itself, on both layers: the UI must not offer the affordance, and the server
+  // must not accept the write even if it did.
   await member.bringToFront();
   const viewUrl = await createLink(member, "view");
   const viewer = await (await browser.newContext()).newPage();
@@ -81,6 +85,19 @@ test("anonymous share: create -> open -> co-edit -> read-only -> revoke denied",
   await viewer.waitForSelector("[data-pane=preview] .cm-content", { timeout: 10000 });
   await expect.poll(() => viewer.$eval("[data-pane=preview] .cm-content", (el) => el.getAttribute("contenteditable")),
     { timeout: 15000, message: "a view link stays read-only" }).toBe("false");
+  // the edit affordance is rendered from canEdit, so its absence IS the client-side capability
+  await expect(viewer.locator("[data-testid=edit-toggle]"), "a view guest is not offered the edit button")
+    .toHaveCount(0);
+  await expect(viewer.locator("[data-testid=m-edit-toggle]"), "…nor the overflow-menu entry").toHaveCount(0);
+  // and the fortress: type into the surface anyway and require that nothing reaches the shared doc.
+  // The member is live on the same page, so a leak would surface there within the collab round-trip
+  // we already measured above (the guest's own edit landed well inside 20s).
+  await viewer.click("[data-pane=preview] .cm-content");
+  await viewer.keyboard.type("viewer-must-not-write");
+  await viewer.waitForTimeout(3000); // a NEGATIVE assertion: give a leak time to appear (#470 kept the
+  // positive waits poll-based; there is nothing to poll for when the requirement is that nothing happens)
+  expect(await paneText(viewer, "preview"), "a view guest's typing must not enter the document").not.toContain("viewer-must-not-write");
+  expect(await paneText(member, "preview"), "a view guest's typing must never reach the member's doc").not.toContain("viewer-must-not-write");
 
   // revoke the edit link (authenticated API) -> a fresh guest is denied
   const editId = editUrl.split("/").pop()!;
