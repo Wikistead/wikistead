@@ -770,7 +770,7 @@ export async function getPublished(
   // subject is the FGA principal ("user:<sub>" | "share_link:<id>"); guests pass a
   // context so the share_link's non_expired condition is evaluated (expired = denied).
   args: { pageId: string; subject: string; context?: { current_time: string } },
-): Promise<{ title: string; publishedMd: string | null; publishedAt: Date | null; hasUnpublishedChanges: boolean; canComment: boolean }> {
+): Promise<{ title: string; isHome: boolean; publishedMd: string | null; publishedAt: Date | null; hasUnpublishedChanges: boolean; canComment: boolean }> {
   const canView = await check(fga, args.subject, 'view', { type: 'page', id: args.pageId }, args.context)
   // #262: existence-hiding — view-denied returns the SAME 404 as a missing page (a "published" read is a
   // display path). Uniform 404 with getPage + the public surface.
@@ -778,8 +778,15 @@ export async function getPublished(
   // #318: title rides along so a view-capable GUEST (whose only page read is this route) can render the
   // title band. Minimal-field policy (the #270 space-info precedent): nothing beyond what the surface
   // shows — no space/creator/member data is added here.
-  const [row] = await db.sql<[{ title: string; published_md: string | null; published_at: Date | null; ydoc: Buffer | null; published_query_snapshot: string | null }]>`
-    SELECT title, published_md, published_at, ydoc, published_query_snapshot FROM pages WHERE id = ${args.pageId}
+  // #364whether this page is its space's HOME rides along too — a BOOLEAN, not the space name.
+  // The guest band has to label a home page the way every other surface does ("<Space> Home"), and
+  // migration 077 already set a home page's title to the bare space name, so the label can be built
+  // from the title the guest is being shown anyway. Sending the space name instead would disclose the
+  // space behind a single-page share link, which is a wider surface than this fix needs.
+  const [row] = await db.sql<[{ title: string; is_home: boolean; published_md: string | null; published_at: Date | null; ydoc: Buffer | null; published_query_snapshot: string | null }]>`
+    SELECT p.title, p.published_md, p.published_at, p.ydoc, p.published_query_snapshot,
+           EXISTS (SELECT 1 FROM spaces s WHERE s.home_page_id = p.id) AS is_home
+    FROM pages p WHERE p.id = ${args.pageId}
   `
   if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const hasUnpublishedChanges = decodeYdocContent(row.ydoc) !== (row.published_md ?? '')
@@ -795,7 +802,7 @@ export async function getPublished(
   // page (comment_open on + view, an explicit comment grant, or edit)? The guest page uses it to show
   // the comment composer. Convenience only — the comment routes re-check FGA (fortress).
   const canComment = await check(fga, args.subject, 'comment', { type: 'page', id: args.pageId }, args.context)
-  return { title: row.title, publishedMd, publishedAt: row.published_at, hasUnpublishedChanges, canComment }
+  return { title: row.title, isHome: row.is_home, publishedMd, publishedAt: row.published_at, hasUnpublishedChanges, canComment }
 }
 
 // ── per-page access grant/revoke/list (Phase 4b) ────────────────────────────

@@ -133,3 +133,66 @@ test("#364a suffix-baked stored title never doubles in the H1 (band reads space.
   const homeEntry = (await page.getByTestId("sidebar-home").innerText()).trim();
   expect(homeEntry, "sidebar 🏠 and the title band render the same label").toBe(txt);
 });
+
+//every surface names a space's home page after its space — the sidebar's 🏠 row, the member
+// band, the empty state — except the GUEST band, which printed the raw title. Migration 077 normalised
+// a home page's title to the bare space name, so once it landed the same page read "acme" through a
+// share link and "acme Home" one pane away. Driven through a real share link on both capabilities: the
+// label matches, and the edit guest is not offered a rename (a home page is named by its space, so
+// renaming it here would rename the wrong thing).
+for (const capability of ["view", "edit"] as const) {
+  test(`#364a ${capability} guest sees the home page labelled by its space`, async ({ browser }) => {
+    const page = await (await browser.newContext()).newPage();
+    await page.goto("/p/demo");
+    await page.waitForSelector("[data-pane=preview] .cm-content");
+    const spaceName = `homeguest364-${Date.now().toString(36)}`;
+    const spaceId = await newSpacePage(page, spaceName);
+
+    // create the home through the same button a writer uses, then publish it so a guest can read it
+    await page.goto(`/spaces/${spaceId}`);
+    await page.getByTestId("space-home-create").click();
+    await sleep(1500);
+    const homeId = await page.evaluate(async (sid: string) => {
+      const r = await fetch("/api/spaces", { headers: { authorization: "Bearer dev-token" } });
+      const spaces = (await r.json()) as { id: string; homePageId?: string | null }[];
+      return spaces.find((s) => s.id === sid)?.homePageId ?? null;
+    }, spaceId);
+    expect(homeId, "the space has a home page").toBeTruthy();
+
+    // the home's title is written as part of creating it; wait for it to be there rather than racing it
+    await expect.poll(async () => page.evaluate(async (id: string) => {
+      const r = await fetch(`/api/pages/${id}`, { headers: { authorization: "Bearer dev-token" } });
+      return ((await r.json()) as { title?: string }).title ?? "";
+    }, homeId!), { timeout: 10000, message: "the home page's stored title settles" }).not.toBe("");
+
+    const made = await page.evaluate(async ([id, cap]: string[]) => {
+      const h = { authorization: "Bearer dev-token", "content-type": "application/json" };
+      const pub = await fetch(`/api/pages/${id}/publish`, { method: "POST", headers: h, body: "{}" });
+      const title = ((await (await fetch(`/api/pages/${id}/published`, { headers: h })).json()) as { title?: string }).title ?? null;
+      const r = await fetch("/api/share-links", {
+        method: "POST", headers: h,
+        body: JSON.stringify({ resource: { type: "page", id }, capability: cap, expiresInSeconds: null }),
+      });
+      return { publish: pub.status, title, linkId: ((await r.json()) as { id?: string }).id ?? null };
+    }, [homeId!, capability]);
+    expect(made.linkId, `a share link was created (publish ${made.publish}, stored title ${JSON.stringify(made.title)})`).toBeTruthy();
+    const linkId = made.linkId;
+
+    const guest = await (await browser.newContext()).newPage();
+    await guest.goto(`/share/${linkId}`);
+    const band = guest.getByTestId("guest-title-band");
+    await expect(band).toBeVisible({ timeout: 12000 });
+    // the band renders its placeholder first and fills in when the fetch lands, so poll for the real
+    // label rather than reading once — "Untitled" is non-empty and would satisfy a laxer wait
+    await expect.poll(async () => (await band.innerText()).trim(), { timeout: 12000, message: `the guest band resolves its title (member stored ${JSON.stringify(made.title)}, publish ${made.publish})` })
+      .toContain(spaceName);
+    const label = (await band.innerText()).trim();
+    expect(label, `…and it carries the home suffix the other surfaces use (got "${label}")`).toMatch(/ Home$|のホーム$/);
+
+    if (capability === "edit") {
+      await band.click();
+      await sleep(300);
+      await expect(guest.getByTestId("page-title-input"), "a home page offers no rename, even to an edit guest").toHaveCount(0);
+    }
+  });
+}
