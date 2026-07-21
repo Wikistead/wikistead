@@ -1,4 +1,5 @@
 import type { FenceMacro, MacroContext, MacroModalController, HostEphemeralCollab, MacroSource } from "./registry";
+import { applyIntrinsicSvgSize } from "./svg-intrinsic-size"; // #465
 import { asMacroSource } from "./registry";
 import { writeLocalElements, readSceneElements, allElements, reconcile, elementsMap } from "./excalidraw-collab";
 import { excalidrawHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
@@ -82,6 +83,7 @@ export const excalidrawMacro: FenceMacro = {
           files: scene.files,
         } as any);
         el.appendChild(svg);
+        applyIntrinsicSvgSize(svg); // #465: exportToSvg has the same percentage-width shape as mermaid
       } catch {
         el.classList.add("cm-lp-macro-error");
         el.textContent = "Invalid Excalidraw drawing";
