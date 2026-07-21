@@ -10,6 +10,23 @@ import { encryptSecret } from '../../apps/server/src/auth/secret-crypto.js'
   // Space and page IDs must match the FGA tuples in infra/openfga/seed.ts
   await sql.begin(async (tx) => {
     await tx`SELECT set_config('app.tenant_id', 'tenant_dev', true)`
+    // #482: sweep residue that a killed/interrupted test suite leaves on the SHARED server-test stack,
+    // so the next run starts clean instead of inheriting another run's half-state. Every shape here is
+    // a KNOWN leftover with a KNOWN owning suite (documented on #482): the residue is deleted, never a
+    // real fixture (dev-user / demo page are re-seeded below, and only test-shaped rows are removed).
+    //   - throwaway members that seat-cap tests mint (they change "who is the newest member")
+    await tx`DELETE FROM members WHERE tenant_id = 'tenant_dev' AND (sub LIKE 'gate-%' OR sub LIKE 'pf-out-%' OR sub LIKE 'inv-%' OR sub LIKE 'seat-%')`
+    //   - the tenant's abuse policy: a suite sets it and resets, but a kill mid-run leaves it armed,
+    //     which turns every later publish in an unrelated test into a 422 (reset to permissive here)
+    await tx`UPDATE tenant_settings SET abuse_banned_words = '{}', abuse_shrink_ratio = NULL,
+             abuse_publish_rate_link_max = NULL, abuse_publish_rate_session_max = NULL WHERE tenant_id = 'tenant_dev'`
+    //   - dev-user's editor persona (onboarding-289 restores it in afterEach; a kill leaves the last
+    //     one, and a persona hiding the vim button then fails every vim spec on the next run)
+    await tx`UPDATE members SET editor_chrome = NULL, editor_display_mode = NULL, editor_keymap = NULL
+             WHERE tenant_id = 'tenant_dev' AND sub = 'dev-user'`
+    //   - orphan test pages that outlive their suite and leak into title/dictionary/search assertions
+    await tx`DELETE FROM pages WHERE tenant_id = 'tenant_dev' AND id <> 'demo'
+             AND (title = 'Src' OR title LIKE 'Dict %' OR title LIKE 'PF %' OR title LIKE 'tplman%')`
     await tx`
       INSERT INTO spaces (id, tenant_id, name)
       VALUES ('demo_space', 'tenant_dev', 'Demo Space')

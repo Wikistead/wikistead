@@ -9,7 +9,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteObjectTuples } from '@wikistead/authz'
 import { mintGuestToken } from '@wikistead/auth'
-import { createSpace } from '../routes/spaces.js'
+import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
@@ -34,13 +34,18 @@ beforeAll(async () => {
   await app.ready()
   db = await acquireTenantDb(asTenant('tenant_dev'))
   spaceId = (await createSpace(db, fgaClient, { tenantId: 'tenant_dev', userId: 'dev-user', plan: 'free', name: `${tag}-space` })).id
-  pubPage = (await createPage(db, fgaClient, app.searchDriver, { tenantId: 'tenant_dev', spaceId, userId: 'dev-user', title: 'Src' })).id
+  pubPage = (await createPage(db, fgaClient, app.searchDriver, { tenantId: 'tenant_dev', spaceId, userId: 'dev-user', title: `${tag}-src` })).id
   await admin`UPDATE pages SET published_md = ${'# body'} WHERE id = ${pubPage}`
   viewTok = await mintGuestToken(guestCfg, { tenantId: 'tenant_dev', shareLinkId: `sl-${tag}`, resource: { type: 'space', id: spaceId }, capability: 'view' })
 }, 60_000)
 
 afterAll(async () => {
   await admin`DELETE FROM templates WHERE name LIKE ${tag + '%'}`.catch(() => {})
+  // #482: the source page + space were never cleaned, leaving a dev-user-owned page that leaked into
+  // title-dictionary-224's "creator sees all their titles" set on a shared stack.
+  await admin`DELETE FROM revisions WHERE page_id = ${pubPage}`.catch(() => {})
+  await admin`DELETE FROM pages WHERE id = ${pubPage}`.catch(() => {})
+  await deleteSpace(db, fgaClient, app.searchDriver, { tenantId: 'tenant_dev', spaceId, userId: 'dev-user' }).catch(() => {})
   await db.release()
   await app.close()
   await admin.end()
