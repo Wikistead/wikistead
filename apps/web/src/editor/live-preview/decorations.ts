@@ -324,11 +324,21 @@ export const reAnchorAfterReveal = ViewPlugin.fromClass(
 // range intersects a non-empty selection range; CSS paints a translucent accent overlay (display-only
 // never a decoration/offset change, so remote carets and the #359 no-reveal rule are untouched). Runs on
 // every relevant update (CM may rebuild widget DOM at any time, so the class is re-derived, not cached).
+// #453ONE definition of "this element is the box that IS the atom". Every root that can take
+// the selection ring (`cm-lp-atom-sel`) also carries this marker, permanently — selected or not — so
+// anything that needs to draw around an atom (the local ring, a peer's presence box, the selection
+// tint) measures the SAME rectangle. It used to be enumerated per consumer, and the enumerations
+// drifted: the presence overlay knew only `.cm-lp-macro-wrap`, so a peer's box around a callout,
+// a details block or a table fell back to the full content width — measured at 740px against the
+// callout's real 692px, and 740 against a narrow table's 153px. A new macro now inherits the
+// behaviour by wearing the marker, rather than by everyone remembering to list it.
+export const ATOM_BOX_CLASS = "cm-lp-atom-box";
+
 export const atomSelectionTint: Extension = ViewPlugin.define((view) => {
   const apply = () => {
     const ranges = view.state.selection.ranges.filter((r) => !r.empty);
     const blocks = view.state.field(livePreview, false)?.blocks ?? [];
-    for (const el of Array.from(view.contentDOM.querySelectorAll<HTMLElement>(".cm-lp-macro-wrap, .cm-lp-details-collapsible, .cm-lp-callout-panel, .cm-lp-table"))) {
+    for (const el of Array.from(view.contentDOM.querySelectorAll<HTMLElement>(`.${ATOM_BOX_CLASS}`))) {
       let on = false;
       if (ranges.length && blocks.length) {
         try {
@@ -1126,7 +1136,7 @@ class AttachmentCardWidget extends WidgetType {
   eq(o: AttachmentCardWidget) { return o.id === this.id && o.name === this.name && o.selected === this.selected; }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div") as AtDom;
-    wrap.className = "cm-lp-macro-wrap cm-lp-attachment-wrap";
+    wrap.className = `cm-lp-macro-wrap cm-lp-attachment-wrap ${ATOM_BOX_CLASS}`;
     if (this.selected) wrap.classList.add("cm-lp-atom-sel");
     wrap.setAttribute("data-testid", "attachment-card");
 
@@ -1305,7 +1315,7 @@ class StandaloneImageWidget extends WidgetType {
   eq(o: StandaloneImageWidget) { return o.id === this.id && o.alt === this.alt && o.align === this.align && o.selected === this.selected; }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div") as SiDom;
-    wrap.className = "cm-lp-macro-wrap cm-lp-image-wrap cm-lp-atom-body"; // #395/ADR-156: image = atom, no I-beam
+    wrap.className = `cm-lp-macro-wrap cm-lp-image-wrap cm-lp-atom-body ${ATOM_BOX_CLASS}`; // #395/ADR-156: image = atom, no I-beam
     wrap.classList.add(`cm-lp-align-${this.align}`); // center default; drives text-align (same as diagrams)
     if (this.selected) wrap.classList.add("cm-lp-atom-sel");
     const img = document.createElement("img");
@@ -1419,7 +1429,7 @@ class TableWidget extends WidgetType {
     // #216 comment 836: wrap the table so a hover-revealed RichUI-entry button can sit at its top-left
     // (a <button> can't be a direct child of <table>). The wrap is the widget root + resize target.
     const wrap = document.createElement("div");
-    wrap.className = "cm-lp-table-wrap";
+    wrap.className = `cm-lp-table-wrap ${ATOM_BOX_CLASS}`;
     const table = document.createElement("table");
     table.className = "cm-lp-table";
     // #216 comment 820: a pipe table is Tier1 pure Markdown — a RAW editing layer, not (yet) a rich macro.
@@ -2269,7 +2279,7 @@ class MacroWidget extends WidgetType {
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
-    wrap.className = "cm-lp-macro-wrap";
+    wrap.className = `cm-lp-macro-wrap ${ATOM_BOX_CLASS}`;
     // #395 / ADR-156 rule 2: an atom-class body never shows the text I-beam (cursor: default via CSS).
     if (ATOM_CLASS_MACROS.has(this.name)) wrap.classList.add("cm-lp-atom-body");
     // #255: a rendered DIAGRAM macro (mermaid/plantuml/excalidraw) is centred by DEFAULT (align="center")
@@ -2825,7 +2835,7 @@ class DetailsSummaryWidget extends WidgetType {
   eq(o: DetailsSummaryWidget) { return o.summary === this.summary && o.body === this.body; }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
-    wrap.className = "cm-lp-details-collapsible"; // #337: a SINGLE enclosing box (border + radius); it grows
+    wrap.className = `cm-lp-details-collapsible ${ATOM_BOX_CLASS}`; // #337: a SINGLE enclosing box (border + radius); it grows
     wrap.setAttribute("data-testid", "macro-details");
     const isOpen = detailsOpenState.get(this.from) ?? false;
     wrap.classList.toggle("cm-lp-details-open", isOpen);
