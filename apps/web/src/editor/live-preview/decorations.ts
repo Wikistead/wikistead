@@ -38,7 +38,7 @@ import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost, nested
 import { mountSourceEditor } from "../macros/source-editor";
 import { tableInlineEditor } from "./table-edit";
 import { tableTier } from "../macros/table";
-import type { InlineController } from "../macros/registry";
+import type { InlineController, HostSurfaceOptions, HostSurfaceHandle } from "../macros/registry";
 
 // Whether the vim keymap is active. Set from the vim Compartment (Editor.tsx). Macros no
 // longer reveal-on-cursor (ADR-024: atoms are entered explicitly), so this no longer gates
@@ -1630,7 +1630,14 @@ export class EditableEditUIWidget extends WidgetType {
     // #243 / ADR-111 C3 (slice 2): pass the OUTER editor's vim ON/OFF as a SEPARATE editEnv (not folded into
     // the {theme} MacroContext), so a CM6 source pane (mermaid/plantuml) enables vim following the user's
     // keymap setting. Read from the vimEnabled facet the vim Compartment sets (editor-livepreview.ts).
-    dom.__editUICtrl = this.editUI.mount(dom, asMacroSource(this.source), { theme: this.theme }, save, { vim: view.state.facet(vimEnabled) });
+    dom.__editUICtrl = this.editUI.mount(dom, asMacroSource(this.source), { theme: this.theme }, save, {
+      vim: view.state.facet(vimEnabled),
+      // #456 S1/S3: lend the macro the HOST's editing surface instead of it standing up its own. The
+      // macro gets a handle — never an EditorView — so vim, the slash palette, completion and nested
+      // rendering come from the same factory the page and the slot islands use, and the {theme}
+      // boundary is unchanged.
+      mountSurface: (opts) => mountHostSurface(view, opts),
+    });
     // #239: re-add the Done affordance after each (re)mount — mountInto's replaceChildren above wipes it.
     const done = document.createElement("button");
     done.type = "button";
@@ -2086,6 +2093,37 @@ const slotIslandTheme = EditorView.theme({
   ".cm-scroller": { fontFamily: "inherit", lineHeight: "inherit" },
   "&.cm-focused": { outline: "none" },
 });
+
+// #456 S1/S3: the host's side of the shared-surface seam. A macro asks for an editing surface and
+// gets a handle; the surface itself is the same CM6 mount the slot islands use, built from the shared
+// factory, so behaviour cannot drift per macro. The macro never receives the view.
+function mountHostSurface(view: EditorView, opts: HostSurfaceOptions): HostSurfaceHandle {
+  const factory = view.state.facet(nestedLivePreviewConfig);
+  const markdown = opts.kind !== "code"; // default: the content is prose, so keep reading typography
+  const handle = mountSourceEditor({
+    parent: opts.parent,
+    doc: opts.doc,
+    dark: currentMacroTheme() === "dark",
+    testid: opts.testid ?? "macro-surface",
+    vim: view.state.facet(vimEnabled),
+    // A prose surface gets the page's own decoration/keymap layer (reveal, vim-atom motion, nested
+    // macro render, the slash palette). A code surface stays a plain source pane — the factory would
+    // render markdown inside what is not markdown.
+    extraExtensions: markdown && factory
+      ? [factory({ vim: view.state.facet(vimEnabled), displayMode: view.state.facet(displayMode) === "wysiwyg" ? "wysiwyg" : "live" })]
+      : [],
+    ...(markdown ? { theme: slotIslandTheme } : {}),
+    onInput: (v) => opts.onInput?.(asMacroSource(v)),
+    onCommit: (v) => opts.onCommit?.(asMacroSource(v)),
+  });
+  return {
+    getValue: () => asMacroSource(handle.getValue()),
+    focus: () => handle.focus(),
+    inVimInsert: () => handle.inVimInsert(),
+    destroy: () => handle.destroy(),
+  };
+}
+
 function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { from: number; to: number }, index: number, childName: "column" | "tab", dark: boolean, bodyFrom: number): boolean {
   const doc = view.state.doc;
   const items = resolveDirectiveRanges(doc.toString()).filter((r) => r.name === childName && r.from >= container.from && r.to <= container.to);
