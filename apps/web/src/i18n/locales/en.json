@@ -446,7 +446,9 @@
     "modeReading": "Reading",
     "modeWysiwyg": "WYSIWYG",
     "duplicatePage": "Duplicate page",
-    "deleteForever": "Delete permanently"
+    "deleteForever": "Delete permanently",
+    "empty": "This page is empty.",
+    "emptyEditable": "This page is empty. Choose Edit to start writing."
   },
   "sidebar": {
     "searchSpaces": "Search spaces…",
