@@ -7,6 +7,7 @@
 // space route gating (published+ANON-viewable home only). Real Postgres + OpenFGA + Fastify.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
+import { readFile } from 'node:fs/promises'
 import postgres from 'postgres'
 import { unzipSync, strFromU8 } from 'fflate'
 import { pool } from '../db/pool.js'
@@ -260,5 +261,52 @@ describe('#364 ①: guest space info home pointer (view-gated, existence-hiding)
     }
     const member = await app.inject({ method: 'GET', url: `/spaces/${sid}/info`, headers: dev })
     expect((member.json() as { homePageId: string | null }).homePageId).toBe(hid)
+  })
+})
+
+// #364 the ruling-A BACKFILL. Homes created before stored the LABEL SUFFIX in
+// `pages.title` ("<Space>"); the title band then re-applied the label and rendered it twice.
+// Migration 077 restates the invariant on existing rows (home title IS the space name) and enqueues
+// the search reindex through the trusted outbox path. Pinned by REPLAYING the migration against a
+// deliberately drifted row — the exact fixture the previous pass never had (it only ever checked a
+// FRESHLY created home, which was correct by construction and hid the gap).
+describe('#364 — migration 077 normalises pre-ruling home titles', () => {
+  let mSpaceId: string
+  beforeAll(async () => {
+    mSpaceId = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: 'dev-user', plan: 'free', name: `home364m-${Date.now().toString(36)}` })).id
+  }, 60_000)
+  afterAll(async () => {
+    await deleteSpace(db, fgaClient, driver, { tenantId: TENANT, spaceId: mSpaceId, userId: 'dev-user' }).catch(() => {})
+  }, 60_000)
+
+  it('a suffix-baked (and a drifted) home title is restated to the space name, with a reindex enqueued', async () => {
+    const created = await createSpaceHome(db, fgaClient, driver, { tenantId: TENANT, spaceId: mSpaceId, userId: 'dev-user' })
+    cleanupPages.push(created.id)
+    const [{ name: spaceName }] = await admin<[{ name: string }]>`SELECT name FROM spaces WHERE id = ${mSpaceId}`
+    // publish so the row is search-indexed (the outbox enqueue is scoped to published, live homes)
+    await publishPage(db, fgaClient, driver, storage, { pageId: created.id, subject: 'user:dev-user', createdBy: 'user:dev-user' })
+    // drift it exactly like a pre-c2330 home
+    await admin`UPDATE pages SET title = ${`${spaceName}のホーム`} WHERE id = ${created.id}`
+    await admin`DELETE FROM search_outbox WHERE page_id = ${created.id}`
+
+    const sqlText = await readFile(new URL('../../../../infra/db/migrations/077_home_title_backfill.sql', import.meta.url), 'utf8')
+    await admin.unsafe(sqlText)
+
+    const [after] = await admin<[{ title: string }]>`SELECT title FROM pages WHERE id = ${created.id}`
+    expect(after.title, 'the stored title is the bare space name (no baked suffix)').toBe(spaceName)
+    const [{ n }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM search_outbox WHERE page_id = ${created.id} AND operation = 'upsert'`
+    expect(n, 'the title change is reindexed through the outbox, not silently left stale').toBeGreaterThan(0)
+
+    // Idempotent: a second run changes nothing (and the run is safe to replay on every deploy).
+    await admin.unsafe(sqlText)
+    const [again] = await admin<[{ title: string }]>`SELECT title FROM pages WHERE id = ${created.id}`
+    expect(again.title).toBe(spaceName)
+
+    // And a DRIFTED row (space renamed while the home kept the old name) is restated too — the
+    // invariant is "title = space name", which a suffix-stripping rewrite would have missed.
+    await admin`UPDATE pages SET title = 'stale-drifted-name' WHERE id = ${created.id}`
+    await admin.unsafe(sqlText)
+    const [drift] = await admin<[{ title: string }]>`SELECT title FROM pages WHERE id = ${created.id}`
+    expect(drift.title).toBe(spaceName)
   })
 })

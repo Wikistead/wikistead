@@ -194,7 +194,7 @@ const COLLAB_URL = resolveCollabUrl();
 // #364 / ADR-157: `pageIdOverride` lets the space-root route /spaces/:id) render the HOME page with
 // the full page machinery (view/edit/publish/history/collab) without a second implementation; the
 // param path additionally canonicalises /p/<home-id> → /spaces/:id (one location for the home).
-function PageRoute({ pageIdOverride }: { pageIdOverride?: string } = {}) {
+function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string; homeSpaceName?: string } = {}) {
   const { t } = useTranslation();
   const params = useParams<{ pageId: string }>();
   const pageId = pageIdOverride ?? params.pageId;
@@ -378,7 +378,8 @@ function PageRoute({ pageIdOverride }: { pageIdOverride?: string } = {}) {
   const directDeletePage = useDirectDeletePage();
   // #437 / ADR-167: the space's resolved deletion-pathway policy shapes which delete entries the ⋯
   // menu offers (UI only — the server routes gate regardless).
-  const deleteMode = useSpaces().data?.find((s) => s.id === spaceId)?.deleteMode ?? "trash_only";
+  const activeSpace = useSpaces().data?.find((s) => s.id === spaceId);
+  const deleteMode = activeSpace?.deleteMode ?? "trash_only";
   const duplicatePage = useCreatePage(); // #229/#242: "Duplicate page" → new page seeded from this one
   const navigate = useNavigate();
 
@@ -577,9 +578,16 @@ function PageRoute({ pageIdOverride }: { pageIdOverride?: string } = {}) {
                   {/* #364 the space HOME's title is derived from the space name and locked
                       no rename affordance (pageIdOverride is only ever set when rendering the home at
                       /spaces/:id, and /p/<home-id> canonicalises there). The server refuses the PATCH
-                      too (two-layer defense). */}
+                      too (two-layer defense).
+                      #364 the home label interpolates the SPACE NAME, never `page.title`. Under
+                      ruling A the stored title IS the space name, but a home created before that
+                      ruling still carries the baked-in suffix ("<Space>"), and feeding THAT into
+                      the label produced the doubled "<Space>". The sidebar 🏠 always used
+                      space.name (and read correctly) — this makes the band use the same single source, so
+                      no stored title can ever double the suffix again. Migration 077 backfills the old
+                      rows so search / pins / export agree with what is displayed. */}
                   <PageTitle
-                    title={pageIdOverride ? t("spaceHome.title", { name: page?.title ?? "" }) : page?.title ?? ""}
+                    title={pageIdOverride ? t("spaceHome.title", { name: homeSpaceName ?? activeSpace?.name ?? "" }) : page?.title ?? ""}
                     onRename={canEdit && spaceId && !pageIdOverride ? (title) => renamePage.mutate({ pageId: pageId!, spaceId, title }, {
                       onSuccess: () => notify.success(t("toast.saved")),
                       onError: () => notify.error(t("toast.actionFailed")),
@@ -1466,7 +1474,11 @@ function SpaceHomeRoute() {
       </AppShell>
     );
   }
-  if (space?.homePageId) return <PageRoute pageIdOverride={space.homePageId} />;
+  // #364 hand the RESOLVED space name down. The band must never interpolate `page.title`
+  // (a pre-ruling home carries the baked suffix → doubled label), and reading it from a second
+  // useSpaces inside PageRoute would render an empty name on the first frame; this route already
+  // has the space in hand, so the label is correct on the FIRST paint.
+  if (space?.homePageId) return <PageRoute pageIdOverride={space.homePageId} homeSpaceName={space.name} />;
   const canEdit = space?.capability === "edit" || space?.capability === "manage";
   const createHome = () => {
     if (!spaceId || creating) return;
