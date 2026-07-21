@@ -59,14 +59,21 @@ describe("collab authenticate — member collab token", () => {
   // collab connection rejects writes server-side. Authority is FGA, not the UI.
   it("admits a view-only member as readOnly (server is the write fortress)", async () => {
     const VIEWER = "collab-viewonly-p3";
-    await writeTuples(fgaClient, [{ user: `user:${VIEWER}`, relation: "view_direct", object: `page:${PAGE}` }]);
+    // #471: membership admits them to the tenant; the page grant decides what they may do there
+    await writeTuples(fgaClient, [
+      { user: `user:${VIEWER}`, relation: "view_direct", object: `page:${PAGE}` },
+      { user: `user:${VIEWER}`, relation: "member", object: "tenant:tenant_dev" },
+    ]);
     try {
       const token = await mintMemberCollabToken(cfg, { tenantId: "tenant_dev", sub: VIEWER, groups: [] });
       const r = await authenticate({ token, documentName: DOC });
       expect(r.principal).toMatchObject({ kind: "member", userId: VIEWER });
       expect(r.readOnly).toBe(true); // view ⇒ read-only ⇒ Hocuspocus rejects writes
     } finally {
-      await deleteTuples(fgaClient, [{ user: `user:${VIEWER}`, relation: "view_direct", object: `page:${PAGE}` }]).catch(() => {});
+      await deleteTuples(fgaClient, [
+        { user: `user:${VIEWER}`, relation: "view_direct", object: `page:${PAGE}` },
+        { user: `user:${VIEWER}`, relation: "member", object: "tenant:tenant_dev" },
+      ]).catch(() => {});
     }
   });
 });
