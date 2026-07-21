@@ -105,6 +105,7 @@ export function Sidebar() {
   const currentSpace = spaces.find((s) => s.id === current);
   const canEdit = currentSpace?.capability === "edit" || currentSpace?.capability === "manage";
   const canManage = currentSpace?.capability === "manage";
+  const canModerate = currentSpace?.canModerate === true; // #326: a moderator reaches settings for the moderation tab only
 
   const createSpace = useCreateSpace();
   const myCaps = useMyCapabilities(); // #445hide the create-space entry point when refused
@@ -265,13 +266,13 @@ export function Sidebar() {
           onTogglePin={(spaceId) => togglePin("space", spaceId)}
           onMovePin={(spaceId, dir) => { const pin = spacePins.find((p) => p.resourceId === spaceId); if (pin) movePin("space", pin.id, dir); }}
         />
-        {current && (canEdit || canManage) && (
+        {current && (canEdit || canManage || canModerate) && (
           <div className="flex flex-none gap-0.5">
             {/* #250: split — the button creates a blank page immediately; the adjacent ▾ opens the
                 template picker (blank stays the fast default, templates are one extra click). */}
             {canEdit && <NewPageButton onClick={() => newPage(null)} />}
             {canEdit && <button type="button" className={headerBtn} title={t("templatePicker.title")} aria-label={t("templatePicker.title")} data-testid="new-page-from-template" onClick={() => setPickingTemplate(true)}><ChevronDown size={13} /></button>}
-            {canManage && <button type="button" className={headerBtn} title={t("sidebar.spaceSettings")} aria-label={t("sidebar.spaceSettings")} data-testid="space-settings-open" onClick={() => current && navigate(`/spaces/${current}/settings`)}><Settings size={15} /></button>}
+            {(canManage || canModerate) && <button type="button" className={headerBtn} title={canManage ? t("sidebar.spaceSettings") : t("moderation.title")} aria-label={canManage ? t("sidebar.spaceSettings") : t("moderation.title")} data-testid="space-settings-open" onClick={() => current && navigate(`/spaces/${current}/settings/${canManage ? "general" : "moderation"}`)}><Settings size={15} /></button>}
           </div>
         )}
       </div>

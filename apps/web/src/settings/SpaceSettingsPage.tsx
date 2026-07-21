@@ -37,6 +37,14 @@ function useSpaceTabs(spaceId: string): SettingsTab[] {
   ];
 }
 
+// #326: a manager lands on general; a moderator (who cannot open general) lands on their one tab.
+function SpaceSettingsIndex() {
+  const { spaceId } = useParams<{ spaceId: string }>();
+  const space = (useSpaces().data ?? []).find((s) => s.id === spaceId);
+  const toManager = space == null || space.capability === "manage";
+  return <Navigate to={toManager ? "general" : "moderation"} replace />;
+}
+
 function SpaceSettingsLayout() {
   const { t } = useTranslation();
   const { spaceId } = useParams<{ spaceId: string }>();
@@ -280,7 +288,7 @@ function SpaceGeneralTab() {
 export function SpaceSettingsRoutes() {
   return (
     <Route path="/spaces/:spaceId/settings" element={<SpaceSettingsLayout />}>
-      <Route index element={<Navigate to="general" replace />} />
+      <Route index element={<SpaceSettingsIndex />} />
       <Route path="general" element={<SpaceGeneralTab />} />
       <Route path="members" element={<SpaceMembersTab />} />
       <Route path="pages" element={<SpacePagesTab />} />
