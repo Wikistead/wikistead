@@ -13,6 +13,9 @@ import { buildApp } from '../app.js'
 import { provisionTenant } from '../auth/provisioning.js'
 import { createSession, SESSION_COOKIE } from '../auth/session.js'
 import { drainAuditOutbox } from '../audit/outbox.js'
+import { acquireTenantDb } from '../db/tenant-db.js' // #474: fixture keys for the removal sweep
+import { createApiKey } from '../routes/api-keys.js'
+import { verifyApiKey } from '../api-key-auth.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
@@ -50,11 +53,11 @@ beforeAll(async () => {
   await app.ready()
   adminSid = await createSession(valkey, { tenantId, sub: 'mem-admin', role: 'admin' })
   plainSid = await createSession(valkey, { tenantId, sub: 'mem-plain', role: 'member' })
-})
+}, 60_000)
 
 afterAll(async () => {
   await app.close()
-  for (const sub of ['mem-admin', 'mem-admin2', 'mem-plain', 'mem-victim', 'mem-audit']) {
+  for (const sub of ['mem-admin', 'mem-admin2', 'mem-plain', 'mem-victim', 'mem-audit', 'mem-keyed', 'mem-bystander']) {
     await deleteTuples(fgaClient, [
       { user: `user:${sub}`, relation: 'member', object: `tenant:${tenantId}` },
       { user: `user:${sub}`, relation: 'admin', object: `tenant:${tenantId}` },
@@ -69,7 +72,7 @@ afterAll(async () => {
   await admin.end()
   await valkey.quit()
   await pool.end()
-})
+}, 60_000)
 
 // ── point 7: a non-admin member must not reach ANY management route ──────────
 describe('admin authz matrix', () => {
@@ -279,4 +282,77 @@ describe('member ops → audit log (#177)', () => {
       SELECT actor, action, target FROM audit_log WHERE tenant_id = ${tenantId} ORDER BY seq`
     expect(rows.some((r) => r.action === 'member.role_changed' && r.target === 'user:mem-audit' && r.actor === 'user:mem-admin')).toBe(true)
   })
+
+  // #474: removal already strips sessions, membership/group tuples and direct grants — the member's API
+  // keys were the one credential left behind, and an API key outlives a session. Pinned end to end: the
+  // key authenticates while the member exists, and stops the moment they are removed.
+  it('#474: removal revokes the member\'s API keys — and nobody else\'s', async () => {
+    await seedMember('mem-keyed', 'member')
+    await seedMember('mem-bystander', 'member')
+    // acquireTenantDb RESERVES a pooled connection — release it, or afterAll's pool.end() waits on it
+    // and the hook times out (60s) long after every assertion has passed.
+    const db = await acquireTenantDb({ id: tenantId, slug, plan: 'free', isolation: 'logical' } as never)
+    let victim: Awaited<ReturnType<typeof createApiKey>>
+    let bystander: Awaited<ReturnType<typeof createApiKey>>
+    try {
+      victim = await createApiKey(db, { tenantId, plan: 'free', ownerUserId: 'mem-keyed', name: 'victim key' })
+      bystander = await createApiKey(db, { tenantId, plan: 'free', ownerUserId: 'mem-bystander', name: 'bystander key' })
+    } finally {
+      await db.release()
+    }
+
+    expect(await verifyApiKey(victim.plaintext, tenantId), 'the key works while the member exists').not.toBeNull()
+
+    const res = await app.inject({ method: 'DELETE', url: '/members/mem-keyed', headers: { host, cookie: cookie(adminSid) } })
+    expect(res.statusCode).toBe(204)
+
+    expect(await verifyApiKey(victim.plaintext, tenantId), 'the removed member\'s key no longer authenticates').toBeNull()
+    expect(await verifyApiKey(bystander.plaintext, tenantId), "another member's key is untouched").not.toBeNull()
+
+    // revoked, not deleted — the row stays auditable, exactly as a self-service revoke leaves it
+    await admin`SELECT set_config('app.tenant_id', ${tenantId}, false)`
+    const [row] = await admin<{ revoked_at: Date | null }[]>`SELECT revoked_at FROM api_keys WHERE id = ${victim.id}`
+    expect(row?.revoked_at, 'the key row survives, marked revoked').not.toBeNull()
+
+    // the revocation is in the compliance ledger next to member.removed (same in-tx writer)
+    await drainAuditOutbox()
+    const audit = await admin<{ action: string; target: string }[]>`
+      SELECT action, target FROM audit_log WHERE tenant_id = ${tenantId} AND action = 'api_key.revoked'`
+    expect(audit.some((a) => a.target === `api_key:${victim.id}`), 'the revoke is audited').toBe(true)
+
+    // removing a member with no live keys is a no-op (no double-revoke, no error)
+    const again = await app.inject({ method: 'DELETE', url: '/members/mem-bystander', headers: { host, cookie: cookie(adminSid) } })
+    expect(again.statusCode).toBe(204)
+  })
+
+  // #474: the same sub can exist in two tenants (one shared IdP — the premise ADR-176 works from), so the
+  // sweep must be tenant-scoped in fact, not just in intent. RLS is what makes that true; this pins it.
+  it('#474: revoking on removal is tenant-scoped — the same sub keeps its key in another tenant', async () => {
+    const otherSlug = `p14mem2-${Date.now().toString(36)}`
+    const { tenantId: otherId } = await provisionTenant(fgaClient, { slug: otherSlug, admin: { sub: 'mem-other-admin' } })
+    await admin`SELECT set_config('app.tenant_id', ${otherId}, false)`
+    await admin`INSERT INTO members (tenant_id, sub, role) VALUES (${otherId}, 'mem-shared', 'member')
+                ON CONFLICT (tenant_id, sub) DO NOTHING`
+    await writeTuples(fgaClient, [{ user: 'user:mem-shared', relation: 'member', object: `tenant:${otherId}` }])
+    await seedMember('mem-shared', 'member') // …and in THIS tenant
+
+    const here = await acquireTenantDb({ id: tenantId, slug, plan: 'free', isolation: 'logical' } as never)
+    const there = await acquireTenantDb({ id: otherId, slug: otherSlug, plan: 'free', isolation: 'logical' } as never)
+    let keyHere: Awaited<ReturnType<typeof createApiKey>>
+    let keyThere: Awaited<ReturnType<typeof createApiKey>>
+    try {
+      keyHere = await createApiKey(here, { tenantId, plan: 'free', ownerUserId: 'mem-shared', name: 'here' })
+      keyThere = await createApiKey(there, { tenantId: otherId, plan: 'free', ownerUserId: 'mem-shared', name: 'there' })
+    } finally {
+      await here.release()
+      await there.release()
+    }
+
+    const res = await app.inject({ method: 'DELETE', url: '/members/mem-shared', headers: { host, cookie: cookie(adminSid) } })
+    expect(res.statusCode).toBe(204)
+    expect(await verifyApiKey(keyHere.plaintext, tenantId), 'the removing tenant\'s key is revoked').toBeNull()
+    expect(await verifyApiKey(keyThere.plaintext, otherId), "the other tenant's key for the SAME sub survives").not.toBeNull()
+
+    await deleteTuples(fgaClient, [{ user: 'user:mem-shared', relation: 'member', object: `tenant:${otherId}` }]).catch(() => {})
+  }, 60_000)
 })
