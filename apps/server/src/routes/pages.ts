@@ -726,10 +726,17 @@ export async function toggleTask(
     // so the log can never disagree with the published state. `actor` uses the human-readable
     // principal (`user:`/`guest:` = createdBy), matching the attribution label revisions store
     // NOT the FGA `subject` (`share_link:`), which is the authz check identity only.
-    await tx`
-      INSERT INTO checkbox_events (tenant_id, page_id, actor, checkbox_index, checked)
-      VALUES (${page.tenant_id}, ${args.pageId}, ${args.createdBy}, ${args.index}, ${draftStates[args.index]!})
-    `
+    // #481: ONE ROW PER FOLDED FLIP, not one per request. The fold takes every pending flip,
+    // so a fast clicker publishes N changes through a single call — and the ledger recorded only the
+    // index that happened to arrive with it, silently losing the rest. `diff` is exactly the set that
+    // moved, and it is computed above from the same two snapshots this UPDATE just published, so the
+    // log cannot disagree with the state.
+    for (const index of diff) {
+      await tx`
+        INSERT INTO checkbox_events (tenant_id, page_id, actor, checkbox_index, checked)
+        VALUES (${page.tenant_id}, ${args.pageId}, ${args.createdBy}, ${index}, ${draftStates[index]!})
+      `
+    }
   })
   processOutboxAsync(driver, outboxId, { tenantId, pageId: args.pageId, operation: 'upsert' })
   return { publishedAt }
