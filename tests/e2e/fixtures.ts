@@ -19,7 +19,12 @@ const CORE_FGA_TUPLES = [
   { user: "user:dev-user", relation: "manager", object: "space:demo_space" },
   { user: "space:demo_space", relation: "space", object: "page:demo" },
   { user: "share_link:demo_view_perm", relation: "view_base", object: "page:demo" },
+  // #471 / ADR-176: a request principal must be a member of the tenant it is used against, so every
+  // subject the specs speak as needs real membership — `admin` alone describes a tenant nobody can
+  // authenticate into (admin and member are separate relations; provisioning writes both).
+  { user: "user:stranger", relation: "member", object: "tenant:tenant_dev" },
   { user: "user:acme-admin", relation: "admin", object: "tenant:tenant_acme" },
+  { user: "user:acme-admin", relation: "member", object: "tenant:tenant_acme" },
   { user: "tenant:tenant_acme", relation: "tenant", object: "space:acme_space" },
   { user: "user:acme-admin", relation: "manager", object: "space:acme_space" },
   { user: "space:acme_space", relation: "space", object: "page:acme_page" },
