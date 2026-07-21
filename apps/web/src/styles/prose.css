@@ -78,10 +78,14 @@
 /* pipe tables (md-render emits .cm-lp-md-table) — the #174bordered look; cell metrics on the
  * SHARED tokens so they match the CM .cm-lp-table exactly (#381th-bg was a 0.12 grey wash and
  * the padding an em-derived 4.56/9.12px — both visibly off from the top-level table). */
-/* #406a table wider than the column scrolls sideways rather than being squeezed into it.
- * `display: block` makes the table a scroll container (its rows still lay out as a table inside),
- * so narrow screens get a swipeable table instead of one compressed until every cell wraps. */
-.wks-prose .cm-lp-md-table { border-collapse: collapse; margin: 1.5em 0; font-size: 0.95em; display: block; max-width: 100%; overflow-x: auto; }
+/* #406+a table wider than the column scrolls sideways rather than being squeezed into
+ * it — inside a box of its own. `display: block` alone made the TABLE the scroller, but a block table
+ * still sizes to its content, so the prose column stretched and the page scrolled with it. The table
+ * now sits in a scroll box pinned to the column width (`width: 0; min-width: 100%`), and takes its
+ * natural width inside that. */
+.wks-prose .cm-lp-table-scroll { width: 0; min-width: 100%; max-width: 100%; overflow-x: auto; }
+.wks-prose .cm-lp-table-scroll > .cm-lp-md-table { min-width: max-content; }
+.wks-prose .cm-lp-md-table { border-collapse: collapse; margin: 1.5em 0; font-size: 0.95em; max-width: 100%; }
 .wks-prose .cm-lp-md-table :is(th, td) { border: var(--wks-table-cell-border); padding: var(--wks-table-cell-padding); text-align: left; vertical-align: top; height: 1.8em; min-width: 5em; /* #406a column floor, so a wide table scrolls instead of collapsing to one character per line */ }
 .wks-prose .cm-lp-md-table th { font-weight: 700; background: var(--wks-table-th-bg); color: var(--fg); }
 

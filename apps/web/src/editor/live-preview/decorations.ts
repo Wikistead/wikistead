@@ -1470,7 +1470,17 @@ class TableWidget extends WidgetType {
     }
     if (thead.childNodes.length) table.appendChild(thead);
     if (tbody.childNodes.length) table.appendChild(tbody);
-    wrap.appendChild(table);
+    // #406the horizontal scroll belongs to a box of its OWN, between the wrap and the table.
+    // Putting overflow on the wrap looked equivalent and was not: the wrap sizes to `fit-content`, so a
+    // wide table stretched it, the widget stretched `.cm-content`, and the whole EDITOR scrolled
+    // sideways — text, headings and all. The inner box is pinned to the line width instead
+    // (`width: 0; min-width: 100%`), so it cannot grow, and the table overflows it rather than the page.
+    // The wrap keeps no overflow: it anchors the chrome that floats above the table (top: -1.5em) and is
+    // the ResizeObserver's target, and clipping either of those would be a different bug.
+    const scroller = document.createElement("div");
+    scroller.className = "cm-lp-table-scroll";
+    scroller.appendChild(table);
+    wrap.appendChild(scroller);
     // #216 comment 874: the RichUI-entry pill does NOT belong on the RENDERED table (a finished, non-edited
     // grid needs no entry affordance). It belongs on the RAW-EDITING state — when the caret is in the table
     // and the `| a | b |` source is visible. That pill is emitted by the reveal branch (TableRawRichuiPill),
@@ -4897,7 +4907,12 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // #406a table wider than the surface SCROLLS sideways instead of being squeezed into it.
   // With only max-width the columns compressed until every cell wrapped, turning a wide table into a
   // very tall one — and since nothing overflowed, no scrollbar ever appeared to say otherwise.
-  ".cm-lp-table-wrap": { position: "relative", width: "fit-content", maxWidth: "100%", overflowX: "auto" },
+  // #406the wrap spans the line and never scrolls (chrome anchor + resize target); the inner
+  // box is the only horizontal scroller, held to the line width so a wide table can never widen the
+  // editor; the table takes its natural width inside it.
+  ".cm-lp-table-wrap": { position: "relative", width: "100%", maxWidth: "100%" },
+  ".cm-lp-table-scroll": { width: "0", minWidth: "100%", maxWidth: "100%", overflowX: "auto" },
+  ".cm-lp-table-scroll > table": { minWidth: "max-content" },
   // #216 comment 874 / #174 comment 878 (ADR-087 addendum 2): the SHARED RichUI-entry pill on the RAW-editing
   // state of a macro (pipe table + callout). Anchored to the first revealed line (.cm-lp-macro-raw =
   // position:relative) and floated JUST ABOVE it so it never covers the raw source it advertises. ALWAYS

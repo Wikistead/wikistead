@@ -125,22 +125,44 @@ test("#406 S2: phone member READ surface — wide content scrolls in-container, 
   await sleep(800);
   const m = await docOverflow(phone);
   expect(m.over, "the page never scrolls horizontally").toBe(false);
-  //"the page doesn't scroll" was too weak to notice the actual complaint — a wide table was
-  // being SQUEEZED to fit, wrapping every cell until the table ran off the bottom of the screen. It
-  // never overflowed, so this pin stayed green while the table was unusable. Measure the table: it
-  // must be wider than its container and sit in something that scrolls.
-  const table = await phone.evaluate(() => {
-    const t = document.querySelector("[data-pane=preview] table") as HTMLElement | null;
-    if (!t) return null;
-    let el: HTMLElement | null = t;
-    while (el && !(el.scrollWidth > el.clientWidth + 2 && /auto|scroll/.test(getComputedStyle(el).overflowX))) el = el.parentElement;
-    return { tableW: t.scrollWidth, tableH: t.getBoundingClientRect().height, scrollerFound: !!el, viewport: window.innerWidth };
-  });
-  expect(table, "the read surface rendered the table").not.toBeNull();
-  expect(table!.tableW, "the table keeps its natural width instead of collapsing to the viewport").toBeGreaterThan(table!.viewport);
-  expect(table!.scrollerFound, "…and it lives in a container that scrolls sideways").toBe(true);
-  expect(table!.tableH, "so it stays a table, not a column of wrapped cells").toBeLessThan(200);
+  //→"the page doesn't scroll" was too weak twice over. First it passed while the table
+  // was squeezed into the viewport; then it passed while the fix let the EDITOR scroll sideways —
+  // body text and all — because the only thing asserted about the scroller was that one existed
+  // somewhere above the table. What must hold is narrower: nothing but the table's own box scrolls.
+  await assertOnlyTableScrolls(phone, "member read");
 });
+
+// The horizontal-scroll contract, measured the same way on every surface: no page-level container
+// scrolls sideways, exactly one box does, it is the table's own, and the far edge is reachable inside it.
+async function assertOnlyTableScrolls(page: import("@playwright/test").Page, surface: string) {
+  const m = await page.evaluate(() => {
+    const roots = ["html", "body", "[data-pane=preview] .cm-scroller", "[data-pane=preview] .cm-content", ".wks-prose", "[data-testid=public-body]"];
+    const pageLevel = roots.flatMap((sel) => [...document.querySelectorAll(sel)] as HTMLElement[])
+      .map((el) => ({ sel: el.tagName + "." + String(el.className).split(" ")[0], over: el.scrollWidth - el.clientWidth }))
+      .filter((r) => r.over > 1);
+    const scrollers = ([...document.querySelectorAll("[data-pane=preview] *, [data-testid=public-body] *, .wks-prose *")] as HTMLElement[])
+      .filter((el) => el.scrollWidth > el.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(el).overflowX))
+      .map((el) => ({ cls: String(el.className), holdsTable: !!el.querySelector(":scope > table"), w: el.clientWidth }));
+    const t = document.querySelector("[data-pane=preview] table, [data-testid=public-body] table, .wks-prose table") as HTMLElement | null;
+    return { pageLevel, scrollers, tableW: t?.scrollWidth ?? 0, viewport: window.innerWidth };
+  });
+  expect(m.pageLevel, `${surface}: no page-level container scrolls sideways`).toEqual([]);
+  expect(m.scrollers.length, `${surface}: exactly one horizontal scroller (got ${JSON.stringify(m.scrollers)})`).toBe(1);
+  expect(m.scrollers[0]!.holdsTable, `${surface}: and it is the table's own box`).toBe(true);
+  expect(m.scrollers[0]!.w, `${surface}: that box is no wider than the viewport`).toBeLessThanOrEqual(m.viewport);
+  expect(m.tableW, `${surface}: the table itself keeps its natural width`).toBeGreaterThan(m.viewport);
+  // the far edge is reachable by scrolling that box (and only that box)
+  const reached = await page.evaluate(() => {
+    const box = ([...document.querySelectorAll("[data-pane=preview] *, [data-testid=public-body] *, .wks-prose *")] as HTMLElement[])
+      .find((el) => el.scrollWidth > el.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(el).overflowX));
+    if (!box) return null;
+    const before = document.documentElement.scrollLeft;
+    box.scrollLeft = box.scrollWidth;
+    return { boxScrolled: box.scrollLeft > 0, pageMoved: document.documentElement.scrollLeft !== before };
+  });
+  expect(reached?.boxScrolled, `${surface}: the table box really scrolls`).toBe(true);
+  expect(reached?.pageMoved, `${surface}: and scrolling it never moves the page`).toBe(false);
+}
 
 // #406the TOC toggle and the draft / unpublished badges live in PageStatus, which the member
 // view used to render only above md — so on a phone the member surface lost both, while the public
@@ -190,6 +212,9 @@ test("#406 S2: phone public reader — no horizontal overflow, readable base fon
   await sleep(500);
   const m = await docOverflow(anon);
   expect(m.over, "the public reader never scrolls horizontally").toBe(false);
+  //the same contract as the member surface — the reader's own containers stay put and only the
+  // table's box scrolls. The public reader renders through the prose path, which had the same defect.
+  await assertOnlyTableScrolls(anon, "public reader");
   const font = await anon.getByTestId("public-body").evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
   expect(font, "readable base font on a phone").toBeGreaterThanOrEqual(15);
 });

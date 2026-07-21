@@ -86,6 +86,10 @@ describe("#384 golden corpus (ADR-160 stage 1 — byte-stable through the visito
     expect(renderMarkdownToHtml(CORPUS).value).toMatchSnapshot();
   });
 
+  // #406updated the DOM-sink snapshot on purpose: a table is now wrapped in its own horizontal
+  // scroll box, so a wide table scrolls inside itself instead of widening the page. The SafeHtml sink
+  // (server export) is unchanged — the box is a display concern of the app surfaces, and the exported
+  // document keeps its plain <table>.
   // #472 updated this snapshot on purpose: the callout now emits its `[label]` as a title, which the
   // server renderer used to drop. A golden corpus is meant to make exactly that visible — the diff is
   // the feature, and the surrounding bytes stayed put.
