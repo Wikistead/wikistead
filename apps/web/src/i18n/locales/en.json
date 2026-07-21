@@ -237,7 +237,10 @@
     "copyOnce": "Copy this key now — it won't be shown again.",
     "copy": "Copy",
     "revoke": "Revoke",
-    "empty": "No API keys yet."
+    "empty": "No API keys yet.",
+    "neverUsed": "Never used",
+    "lastUsed": "Last used",
+    "lastUsedRel": "Used {{rel}}"
   },
   "adminAuth": {
     "title": "Authentication",
