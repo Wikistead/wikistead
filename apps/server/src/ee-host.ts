@@ -17,6 +17,7 @@ export { acquireTenantDb, withTenantTx } from './db/index.js' // #382: isolation
 export type { TenantDb } from './db/index.js'
 
 export { resolveTenantFromHost, loadTenant } from './tenant.js'
+export { provisionTenant } from './auth/provisioning.js' // #475: EE tests provision a second tenant to pin RLS scoping
 export { groupFgaId, syncMemberGroups } from './auth/group-sync.js'
 export { billableMemberCount, lockSeats } from './auth/invites.js'
 export { auditIfEntitled, drainAuditOutbox, verifyTenantAuditChain } from './audit/outbox.js'
