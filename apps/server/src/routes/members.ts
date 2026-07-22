@@ -216,6 +216,21 @@ export async function membersPlugin(app: FastifyInstance) {
     return reply.code(204).send()
   })
 
+  // #464 / ADR-175 §6 (DSAR): a tenant admin erases ONE member's page-analytics reading history on request,
+  // WITHOUT removing the member (unlike DELETE /members/:sub — the member keeps their access). Same erasure
+  // as the removal path — roster rows + not-yet-drained outbox rows — in one tx, with an EE-gated audit row.
+  // The un-drained outbox purge stops a pending fold from re-creating the roster (the member still exists,
+  // so the drain's membership re-check does not apply here). Tenant-admin only.
+  app.delete<{ Params: { sub: string } }>('/admin/analytics/member/:sub', async (req, reply) => {
+    if (!(await requireTenantAdmin(req, reply))) return
+    await req.db.tx(async (tx) => {
+      await tx`DELETE FROM page_view_roster WHERE member_sub = ${req.params.sub}`
+      await tx`DELETE FROM analytics_outbox WHERE tenant_id = ${req.tenant.id} AND viewer_class = 'member' AND member_sub = ${req.params.sub}`
+      await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'analytics.erased', target: `user:${req.params.sub}` })
+    })
+    return reply.code(204).send()
+  })
+
   // ── Invites ──────────────────────────────────────────────────────────────
   app.get('/members/invites', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return

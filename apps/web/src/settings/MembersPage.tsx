@@ -6,7 +6,7 @@ import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { Avatar } from "../ui/Avatar";
 import {
-  listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember,
+  listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember, eraseMemberAnalytics,
   ApiError, type Member, type Invite,
 } from "../data/membersApi";
 
@@ -93,6 +93,9 @@ export function MembersPage() {
                 />
               </td>
               <td style={{ textAlign: "right" }}>
+                {/* #464 / ADR-175 §6 (DSAR): erase this member's page-analytics reading history on request
+                    (the member keeps their access — distinct from Remove). */}
+                <Button variant="ghost" size="sm" onClick={() => void guarded(() => eraseMemberAnalytics(token, m.sub))()}>{t("members.eraseAnalytics")}</Button>
                 <Button variant="dangerGhost" size="sm" onClick={() => void guarded(() => removeMember(token, m.sub))()}>{t("members.remove")}</Button>
               </td>
             </tr>

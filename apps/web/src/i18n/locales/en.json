@@ -780,6 +780,7 @@
     "roleAdmin": "admin",
     "you": " (you)",
     "remove": "Remove",
+    "eraseAnalytics": "Erase analytics",
     "inviteTitle": "Invite a member",
     "emailPlaceholder": "email@example.com",
     "inviteEmail": "invite email",
