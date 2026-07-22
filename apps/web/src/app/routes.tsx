@@ -1,12 +1,27 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useParams, useSearchParams, useNavigate, Link as RouterLink } from "react-router-dom";
+
+// #489: route-based code splitting. The admin console, account settings, space settings and the login
+// screen are OFF the initial editor path, so they load from their own chunks behind a Suspense
+// boundary instead of riding the eager main bundle. Behaviour is unchanged — same paths, same
+// components; only the load moment moves (a brief fallback on first navigation to each subtree).
+const AdminRoot = lazy(() => import("../settings/AdminPage").then((m) => ({ default: m.AdminRoot })));
+const AccountRoot = lazy(() => import("../settings/AccountPage").then((m) => ({ default: m.AccountRoot })));
+const SpaceSettingsRoot = lazy(() => import("../settings/SpaceSettingsPage").then((m) => ({ default: m.SpaceSettingsRoot })));
+// A minimal, chrome-free fallback for a lazy subtree (the chunk loads in well under a frame on a warm
+// cache; this only shows on the very first navigation to that area).
+function LazyFallback() {
+  const { t } = useTranslation();
+  return <div style={{ padding: 24, color: "var(--fg-dim)" }}>{t("common.loading")}</div>;
+}
 import { AppShell } from "./AppShell";
 import { LoginScreen } from "./LoginScreen";
-import { AdminRoutes } from "../settings/AdminPage";
-import { AccountRoutes } from "../settings/AccountPage";
-import { SpaceSettingsRoutes } from "../settings/SpaceSettingsPage";
+
+
+
+
 import { Editor, type AnchorGetter } from "../editor/Editor";
 import { createDirtySignal } from "../editor/dirtySignal";
 import { colorFromString } from "../ui/avatar";
@@ -1614,9 +1629,9 @@ export function AppRoutes() {
       <Route path="/templates" element={<TemplatesRoute />} />
       <Route path="/changes" element={<RecentChangesRoute />} />
       <Route path="/watches" element={<WatchListRoute />} /> {/* #362 the bell's watch list */}
-      {AdminRoutes()}
-      {AccountRoutes()}
-      {SpaceSettingsRoutes()}
+      <Route path="/admin/*" element={<Suspense fallback={<LazyFallback />}><AdminRoot /></Suspense>} />
+      <Route path="/settings/account/*" element={<Suspense fallback={<LazyFallback />}><AccountRoot /></Suspense>} />
+      <Route path="/spaces/:spaceId/settings/*" element={<Suspense fallback={<LazyFallback />}><SpaceSettingsRoot /></Suspense>} />
       {/* Back-compat: the old members URL now lives under the admin console. */}
       <Route path="/settings/members" element={<Navigate to="/admin/members" replace />} />
       <Route path="/join" element={<JoinRoute />} />

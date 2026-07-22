@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Navigate, Outlet, Route, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { Navigate, Outlet, Route, useNavigate, useOutletContext, useParams, Routes } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
@@ -284,10 +284,13 @@ function SpaceGeneralTab() {
   );
 }
 
-// Returned as inline <Route> elements so the parent <Routes> can parse them.
-export function SpaceSettingsRoutes() {
+// #489: code-split — the space-settings subtree as its own <Routes> (paths relative to the
+// /spaces/:spaceId/settings/* mount), so the module lazy-loads out of the eager bundle. The layout,
+// the tabs, and the moderator-vs-manager gating are unchanged.
+export function SpaceSettingsRoot() {
   return (
-    <Route path="/spaces/:spaceId/settings" element={<SpaceSettingsLayout />}>
+    <Routes>
+      <Route element={<SpaceSettingsLayout />}>
       <Route index element={<SpaceSettingsIndex />} />
       <Route path="general" element={<SpaceGeneralTab />} />
       <Route path="members" element={<SpaceMembersTab />} />
@@ -295,5 +298,6 @@ export function SpaceSettingsRoutes() {
       <Route path="trash" element={<SpaceTrashTab />} />
       <Route path="moderation" element={<SpaceModerationTab />} />
     </Route>
+    </Routes>
   );
 }

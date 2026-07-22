@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Navigate, Outlet, Route } from "react-router-dom";
+import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { IdCard, SquarePen, Palette, HardDriveDownload, Loader2, Bell, KeyRound } from "lucide-react";
 import { AppShell } from "../app/AppShell";
@@ -525,17 +525,20 @@ function AccountLayout() {
   );
 }
 
-// Inline <Route> elements so the parent <Routes> can parse them.
-export function AccountRoutes() {
+// #489: code-split — a nested <Routes> (paths relative to the /settings/account/* mount) so the module
+// lazy-loads out of the eager bundle. Same paths, same layout.
+export function AccountRoot() {
   return (
-    <Route path="/settings/account" element={<AccountLayout />}>
-      <Route index element={<ProfileTab />} />
-      <Route path="editor" element={<EditorTab />} />
-      <Route path="theme" element={<ThemeTab />} />
-      <Route path="notifications" element={<NotificationsTab />} />
-      <Route path="api-keys" element={<ApiKeysTab />} />
-      <Route path="data" element={<DataTab />} />
-      <Route path="*" element={<Navigate to="/settings/account" replace />} />
-    </Route>
+    <Routes>
+      <Route element={<AccountLayout />}>
+        <Route index element={<ProfileTab />} />
+        <Route path="editor" element={<EditorTab />} />
+        <Route path="theme" element={<ThemeTab />} />
+        <Route path="notifications" element={<NotificationsTab />} />
+        <Route path="api-keys" element={<ApiKeysTab />} />
+        <Route path="data" element={<DataTab />} />
+        <Route path="*" element={<Navigate to="/settings/account" replace />} />
+      </Route>
+    </Routes>
   );
 }
