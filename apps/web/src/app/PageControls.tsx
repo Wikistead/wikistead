@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Copy, Eye, EyeOff, Code, BookOpen, Sparkles, List, FileStack, Check, Link as LinkIcon } from "lucide-react";
+import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Copy, Eye, EyeOff, Code, BookOpen, Zap, List, FileStack, Check, Link as LinkIcon } from "lucide-react";
 import { useWatchState, useToggleWatch } from "../notifications/useNotifications";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui/Button";
@@ -9,12 +9,14 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { useDirty, type DirtySignal } from "../editor/dirtySignal";
 
 // #165 display-mode segment: icon-only entries, in cycle order (matches Ctrl+Alt+E). Icons mirror the
-// per-mode glyphs used elsewhere (Live=Eye, Source=Code, Reading=BookOpen, WYSIWYG=Sparkles).
+// per-mode glyphs (#493): Live=Zap (instant), Source=Code (raw), Reading=BookOpen (read), WYSIWYG=Eye
+// (see-what-you-get — moved off Live, which read as WYSIWYG). Eye also marks the Watch toggle, but the two
+// never share a menu (Watch is a ⋯ item, WYSIWYG a display-mode segment).
 const DISPLAY_MODES = [
-  { mode: "live" as const, Icon: Eye, labelKey: "page.modeLive" },
+  { mode: "live" as const, Icon: Zap, labelKey: "page.modeLive" },
   { mode: "source" as const, Icon: Code, labelKey: "page.modeSource" },
   { mode: "reading" as const, Icon: BookOpen, labelKey: "page.modeReading" },
-  { mode: "wysiwyg" as const, Icon: Sparkles, labelKey: "page.modeWysiwyg" },
+  { mode: "wysiwyg" as const, Icon: Eye, labelKey: "page.modeWysiwyg" },
 ];
 
 // The old full-width top bar is gone. Its controls float, FRAMELESS, as individual round
@@ -335,7 +337,7 @@ export function PageControlsMobile(p: PageControlsProps) {
               {p.onPublish && <DropdownMenuItem disabled={p.publishing || !canPublish} onSelect={() => p.onPublish?.()} data-testid="m-publish-page"><UploadCloud size={14} /> {t("page.publish")}</DropdownMenuItem>}
               <DropdownMenuItem onSelect={p.onDone} data-testid="m-view-toggle"><X size={14} /> {t("page.done")}</DropdownMenuItem>
               {p.onToggleVim && p.showVimToggle !== false && <DropdownMenuItem disabled={p.vimForcedOff} onSelect={p.onToggleVim} data-testid="m-vim-toggle"><SquareTerminal size={14} /> Vim {p.vimForcedOff ? t("common.off") : p.vim ? t("common.on") : t("common.off")}</DropdownMenuItem>}
-              {p.onCycleDisplayMode && <DropdownMenuItem onSelect={p.onCycleDisplayMode} data-testid="m-displaymode-toggle">{p.displayMode === "source" ? <Code size={14} /> : p.displayMode === "reading" ? <BookOpen size={14} /> : p.displayMode === "wysiwyg" ? <Sparkles size={14} /> : <Eye size={14} />} {t("page.displayMode")}: {t(p.displayMode === "source" ? "page.modeSource" : p.displayMode === "reading" ? "page.modeReading" : p.displayMode === "wysiwyg" ? "page.modeWysiwyg" : "page.modeLive")}</DropdownMenuItem>}
+              {p.onCycleDisplayMode && <DropdownMenuItem onSelect={p.onCycleDisplayMode} data-testid="m-displaymode-toggle">{p.displayMode === "source" ? <Code size={14} /> : p.displayMode === "reading" ? <BookOpen size={14} /> : p.displayMode === "wysiwyg" ? <Eye size={14} /> : <Zap size={14} />} {t("page.displayMode")}: {t(p.displayMode === "source" ? "page.modeSource" : p.displayMode === "reading" ? "page.modeReading" : p.displayMode === "wysiwyg" ? "page.modeWysiwyg" : "page.modeLive")}</DropdownMenuItem>}
             </>
           ) : (
             // #368: view mode = just Edit here; Watch + Share are in the overflow section below (built by

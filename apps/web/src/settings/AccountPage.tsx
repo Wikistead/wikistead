@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { IdCard, SquarePen, Palette, HardDriveDownload, Loader2, Bell, KeyRound } from "lucide-react";
+import { IdCard, SquarePen, Palette, HardDriveDownload, Loader2, Bell, KeyRound, Zap, Code, Eye, MonitorSmartphone } from "lucide-react"; // #493: display-mode glyphs
 import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useSession } from "../session/SessionProvider";
@@ -270,7 +270,13 @@ function EditorTab() {
           onChange={(v) => update.mutate({ editorDisplayMode: v as "local" | "live" | "source" | "wysiwyg" })}
           ariaLabel={t("account.displayMode")}
           testId="account-displaymode"
-          options={(["local", "live", "source", "wysiwyg"] as const).map((m) => ({ value: m, label: t(`account.displayMode_${m}`) }))}
+          options={(["local", "live", "source", "wysiwyg"] as const).map((m) => ({
+          value: m,
+          label: t(`account.displayMode_${m}`),
+          // #493: the same per-mode glyphs the editor chrome uses — local follows the device (no fixed
+          // face), live=Zap (instant), source=Code (raw), wysiwyg=Eye (see-what-you-get).
+          icon: { local: <MonitorSmartphone />, live: <Zap />, source: <Code />, wysiwyg: <Eye /> }[m],
+        }))}
         />
       </SettingsCard>
 
