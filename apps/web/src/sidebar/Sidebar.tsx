@@ -7,6 +7,7 @@ import { ChevronDown, ChevronUp, FileText, Home, PinOff, Settings } from "lucide
 import { PageTree, type PageTreeNode } from "./PageTree";
 import { SpaceSwitcher } from "./SpaceSwitcher";
 import { SpaceIcon } from "../ui/SpaceIcon"; // #284show a page pin's owning space
+import { SidebarTreeSkeleton, useDelayedFlag } from "../ui/Skeleton"; // #492: loading vs empty vs error
 import {
   useSpaces,
   useCreateSpace,
@@ -62,8 +63,16 @@ export function Sidebar() {
     queryFn: () => apiFetch<Page[]>(`/spaces/${current}/pages`, token).then((r) => r ?? []),
     enabled: !!current,
     staleTime: 30_000,
+    // #492: the page tree is boot-critical — a transient failure used to stick as an empty sidebar until a
+    // manual reload (the global default is retry:1). Give this one query more headroom so a brief network
+    // blip self-heals; a hard failure still surfaces the error state below (never a silent empty tree).
+    retry: 3,
   });
   const pages = useMemo(() => pagesQ.data ?? [], [pagesQ.data]);
+  // #492: distinguish "still loading" and "failed to load" from "genuinely empty". `pages` is `data ?? []`,
+  // so on error/first-load it is also empty — rendering "No pages yet" then hid a failure and offered no
+  // retry. The delayed flag keeps a fast load from flashing a skeleton (the #457 anti-flicker convention).
+  const pagesLoading = useDelayedFlag(!!current && pagesQ.isLoading);
   const pageById = useMemo(() => new Map(pages.map((p) => [p.id, p])), [pages]);
 
   // #284 / ADR-119: the member's pins. The server list is view-confirmed (double gate
@@ -330,11 +339,17 @@ export function Sidebar() {
       )}
 
       {spacesQ.isLoading ? (
-        <div className="p-3 text-fg-dim">{t("common.loading")}</div>
+        <SidebarTreeSkeleton />
       ) : spacesQ.isError ? (
         <div className="p-3 text-fg-dim">{t("sidebar.loadFailed")} <button type="button" className="cursor-pointer text-[var(--accent)]" onClick={() => spacesQ.refetch()}>{t("sidebar.retry")}</button></div>
       ) : spaces.length === 0 ? (
         <div className="p-3 text-fg-dim">{t("sidebar.noSpaces")}</div>
+      ) : pagesQ.isError ? (
+        /* #492: a failed page-tree fetch shows a retry affordance, NOT the "No pages yet" empty state
+           the two are different truths and conflating them hides the failure until a manual reload. */
+        <div className="p-3 text-fg-dim" data-testid="sidebar-pages-error">{t("sidebar.loadFailed")} <button type="button" className="cursor-pointer text-[var(--accent)]" onClick={() => pagesQ.refetch()}>{t("sidebar.retry")}</button></div>
+      ) : pagesLoading && pages.length === 0 ? (
+        <SidebarTreeSkeleton />
       ) : pages.length === 0 ? (
         <div className="p-3 text-fg-dim">{t("sidebar.noPages")}</div>
       ) : (
