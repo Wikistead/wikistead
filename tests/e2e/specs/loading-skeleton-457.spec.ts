@@ -41,6 +41,51 @@ test("#457: a slow load shows the animated skeleton, then the real content repla
   await expect(page.getByTestId("prose-skeleton")).toHaveCount(0);
 });
 
+test("#457 the loading overlay is OPAQUE and fully covers the editor (no skeleton/body overlap)", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const id = await openScratch(page, `skeleton457-cover-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("# Cover heading\n\ncover body should be hidden while loading\n");
+  await sleep(500);
+  await publishAndWait(page, id, "cover body should be hidden");
+
+  await delayPublished(page, 2500);
+  await page.goto(`/p/${id}`);
+
+  const ph = page.getByTestId("body-placeholder");
+  await expect(ph, "the overlay is up while the body loads").toBeVisible({ timeout: 8000 });
+  await expect(ph).toHaveAttribute("data-state", "loading");
+
+  // (1) the overlay paints an OPAQUE page background (alpha === 1). A transparent overlay is exactly the
+  // regression: the mounted Editor shows through and the skeleton + real body overlap.
+  const bg = await ph.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const alpha = (() => {
+    const m = bg.match(/rgba?\(([^)]+)\)/);
+    if (!m) return 1; // a named/opaque colour with no alpha channel
+    const parts = m[1].split(",").map((s) => s.trim());
+    return parts.length === 4 ? Number(parts[3]) : 1;
+  })();
+  expect(alpha, `the loading overlay is opaque (bg=${bg})`).toBe(1);
+
+  // (2) it COVERS the editor pane vertically (inset-0 within the shared relative container), so nothing
+  // the editor paints underneath is visible until the overlay is removed on resolve.
+  const boxes = await page.evaluate(() => {
+    const el = document.querySelector("[data-testid=body-placeholder]") as HTMLElement | null;
+    const pane = document.querySelector("[data-pane=preview]") as HTMLElement | null;
+    if (!el || !pane) return null;
+    const p = el.getBoundingClientRect(); const c = pane.getBoundingClientRect();
+    return { pTop: p.top, pBottom: p.bottom, cTop: c.top, cBottom: c.bottom };
+  });
+  expect(boxes, "overlay and editor pane are both present").not.toBeNull();
+  expect(boxes!.pTop, "overlay starts at/above the editor pane top").toBeLessThanOrEqual(boxes!.cTop + 1);
+  expect(boxes!.pBottom, "overlay reaches the editor pane bottom (inset-0, not just top-0)").toBeGreaterThanOrEqual(boxes!.cBottom - 1);
+
+  // …and it clears on resolve, revealing the real content (no lingering overlay).
+  await expect(page.locator("[data-pane=preview] .cm-content")).toContainText("cover body should be hidden", { timeout: 15000 });
+  await expect(ph).toHaveCount(0);
+});
+
 test("#457: a genuinely empty page says it is empty — not a skeleton, not a blank surface", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   const id = await openScratch(page, `skeleton457-empty-${Date.now()}`);
