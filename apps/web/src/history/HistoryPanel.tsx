@@ -107,7 +107,9 @@ export function HistoryPanel({
           >
             <div className="flex min-w-0 flex-col">
               <span className="text-[0.85em]">{fmt(rev.createdAt)}</span>
-              <span className="text-[0.75em] text-fg-dim">{author(rev.createdBy, t("history.unknown"), t("common.guest"), identities.data)}</span>
+              {/* #486: prefer the server-resolved name (covers un-customized members too); fall back to the
+                  client formatting (guest labels / customized-only identities) when the server sent none. */}
+              <span className="text-[0.75em] text-fg-dim">{rev.createdByName ?? author(rev.createdBy, t("history.unknown"), t("common.guest"), identities.data)}</span>
             </div>
             <div className="flex flex-none gap-1.5">
               <button type="button" className={rowBtn} data-testid="revision-diff" onClick={() => onCompare(rev.id)}>

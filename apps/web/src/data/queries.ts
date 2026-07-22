@@ -499,6 +499,10 @@ export interface Revision {
   pageId: string;
   title: string;
   createdBy: string | null;
+  // #486 / ADR-150 Addendum 2: author display name resolved server-side on this view-gated history
+  // response (override ?? OIDC name; null = un-customized/cross-tenant/guest → the panel formats it).
+  createdByName?: string | null;
+  createdByHasAvatar?: boolean;
   createdAt: string;
 }
 
