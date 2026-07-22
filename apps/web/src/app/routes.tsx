@@ -530,6 +530,9 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   // mobile ⋯ — same handlers as the old toolbar, only relocated (behaviour unchanged).
   const controls: PageControlsProps = {
     canEdit,
+    // #490: a real page whose capability has not resolved yet (navigation / first load). Keep the edit
+    // slot stable rather than collapsing to view-only and tearing the button out on every page switch.
+    capabilityPending: !!pageId && pageQ.isPending,
     editing,
     onEdit: () => setEditing(true),
     onDone: () => setEditing(false),
