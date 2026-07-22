@@ -620,6 +620,20 @@ export function useAccountSettings() {
     staleTime: 30_000,
   });
 }
+// ADR-180: the caller's own daily activity for the contribution heatmap. Self-scoped on the server
+// (sub from the session, never a parameter); `tz` only chooses the day-bucket boundary. Cached longer
+// than settings — a day's counts don't change minute-to-minute.
+export interface ActivityDay { day: string; count: number }
+export interface MyActivity { tz: string; days: ActivityDay[] }
+export function useMyActivity(tz: string) {
+  const { token, status } = useSession();
+  return useQuery({
+    queryKey: ["me-activity", tz],
+    queryFn: () => apiFetch<MyActivity>(`/me/activity?tz=${encodeURIComponent(tz)}`, token),
+    enabled: status === "authed",
+    staleTime: 5 * 60_000,
+  });
+}
 export function useUpdateAccountSettings() {
   const { token } = useSession();
   const qc = useQueryClient();

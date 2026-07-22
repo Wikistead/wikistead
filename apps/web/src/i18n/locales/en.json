@@ -83,6 +83,16 @@
     "apiKeys": "API keys"
   },
   "account": {
+    "activityTitle": "Activity",
+    "activityHint": "Your own edits and comments over the last year. Only you can see this.",
+    "activityFailed": "Couldn't load your activity.",
+    "activityLess": "Less",
+    "activityMore": "More",
+    "activityAria": "Your activity heatmap — {{count}} contributions in the last year",
+    "activityNone": "No activity on {{date}}",
+    "activityCount": "{{count}} on {{date}}",
+    "activityCount_one": "{{count}} on {{date}}",
+    "activityCount_other": "{{count}} on {{date}}",
     "profileHint": "Your identity across the workspace — how collaborators see you.",
     "editorHint": "How the editor behaves for you: keymap, startup mode, fonts, and shortcuts.",
     "displayName": "Display name",

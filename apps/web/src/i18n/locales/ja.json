@@ -83,6 +83,16 @@
     "apiKeys": "API キー"
   },
   "account": {
+    "activityTitle": "アクティビティ",
+    "activityHint": "直近 1 年のあなた自身の編集とコメント。あなたにだけ表示されます。",
+    "activityFailed": "アクティビティを読み込めませんでした。",
+    "activityLess": "少",
+    "activityMore": "多",
+    "activityAria": "アクティビティのヒートマップ — 直近 1 年で {{count}} 件",
+    "activityNone": "{{date}} は活動なし",
+    "activityCount": "{{date}}：{{count}} 件",
+    "activityCount_one": "{{date}}：{{count}} 件",
+    "activityCount_other": "{{date}}：{{count}} 件",
     "profileHint": "ワークスペース上のあなたの識別情報＝共同編集者からの見え方。",
     "editorHint": "エディタの挙動：キーマップ・起動モード・フォント・ショートカット。",
     "displayName": "表示名",

@@ -84,6 +84,44 @@ export async function getAccountSettings(db: TenantDb, args: { subject: string }
   }
 }
 
+// ADR-180 — the personal activity heatmap. A per-day count of the caller's OWN authored
+// content (revisions + comments) over the last ~12 months, for the contribution calendar on
+// the account page. SELF-SCOPE, enforced TWICE: the subject is the session sub (never a
+// parameter — the endpoint has no "whose activity" input), AND the query filters on it
+// (`created_by = 'user:'||sub` / `author_sub = sub`) on top of the tenant RLS handle. There is
+// no code path to read another member's heatmap. No new table — the counts come from the
+// existing revisions/comments tables (CE, self-only, #464-independent).
+export interface ActivityDay { day: string; count: number } // day = 'YYYY-MM-DD' in the caller's tz
+
+// Validate an IANA time-zone name (the client passes its browser tz). An unknown zone would
+// make `AT TIME ZONE` throw at the DB, so fall back to UTC. It is a BOUND parameter either way
+// (no SQL injection surface) — this only guards against a runtime error from a bogus value.
+function safeTimeZone(tz: string | undefined): string {
+  if (!tz) return 'UTC'
+  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return tz } catch { return 'UTC' }
+}
+
+export async function getMyActivity(db: TenantDb, args: { subject: string; tz?: string }): Promise<{ tz: string; days: ActivityDay[] }> {
+  const tz = safeTimeZone(args.tz)
+  // Bucket by CALENDAR DAY in the member's tz: a heatmap day is a calendar day to the person
+  // looking at it. `created_at` stays UTC in storage; only the bucket expression is tz-shifted.
+  // A soft-deleted comment (deleted_at) is excluded — retracted work is not a contribution.
+  const rows = await db.sql<{ day: string; count: number }[]>`
+    SELECT day, count(*)::int AS count
+    FROM (
+      SELECT to_char((created_at AT TIME ZONE ${tz})::date, 'YYYY-MM-DD') AS day
+      FROM (
+        SELECT created_at FROM revisions WHERE created_by = ${'user:' + args.subject}
+        UNION ALL
+        SELECT created_at FROM comments WHERE author_sub = ${args.subject} AND deleted_at IS NULL
+      ) events
+      WHERE created_at >= now() - interval '12 months'
+    ) bucketed
+    GROUP BY day
+    ORDER BY day`
+  return { tz, days: rows.map((r) => ({ day: r.day, count: Number(r.count) })) }
+}
+
 // Update the caller's own profile prefs. Only the provided fields change. An empty/blank
 // displayNameOverride clears it (→ fall back to the OIDC name). The login upsert writes
 // only display_name, so the override set here survives re-login (ADR-020 D2).
@@ -183,6 +221,11 @@ export async function accountPlugin(app: FastifyInstance) {
   app.get('/me/settings', async (req) => getAccountSettings(req.db, { subject: req.user.sub }))
 
   app.get('/me/capabilities', async (req) => resolveCapabilities(app.fga, { subject: req.user.sub, tenantId: req.tenant.id }))
+
+  // ADR-180: the caller's OWN daily activity for the contribution heatmap. Self-scoped — the
+  // subject is the session sub (req.user.sub), never a parameter; `tz` only chooses the day-bucket
+  // boundary. An empty history returns an empty `days` array (not an error).
+  app.get<{ Querystring: { tz?: string } }>('/me/activity', async (req) => getMyActivity(req.db, { subject: req.user.sub, tz: req.query?.tz }))
 
   app.patch<{ Body: { displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[] } }>('/me/settings', async (req) =>
     updateAccountSettings(req.db, { subject: req.user.sub, displayNameOverride: req.body?.displayNameOverride, editorKeymap: req.body?.editorKeymap, editorDisplayMode: req.body?.editorDisplayMode, keybindings: req.body?.keybindings, editorChrome: req.body?.editorChrome, onboardingCompleted: req.body?.onboardingCompleted, notificationsEnabled: req.body?.notificationsEnabled, defaultEventMask: req.body?.defaultEventMask }),

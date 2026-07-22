@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { IdCard, SquarePen, Palette, HardDriveDownload, Loader2, Bell, KeyRound, Zap, Code, Eye, MonitorSmartphone } from "lucide-react"; // #493: display-mode glyphs
@@ -16,7 +16,8 @@ import { RadioGroup } from "../ui/RadioGroup";
 import { CheckboxRow } from "../ui/Checkbox";
 import { SwitchRow } from "../ui/Switch";
 import { notify } from "../ui/toast";
-import { useAccountSettings, useUpdateAccountSettings, useUploadAvatar, useRemoveAvatar, useMyApiKeys, useMyApiKeyPolicy } from "../data/queries";
+import { useAccountSettings, useUpdateAccountSettings, useUploadAvatar, useRemoveAvatar, useMyApiKeys, useMyApiKeyPolicy, useMyActivity } from "../data/queries";
+import { ActivityHeatmap } from "./ActivityHeatmap"; // #483 / ADR-180: personal contribution heatmap
 import { ApiKeysPanel } from "./ApiKeysPanel"; // #462: shared with the admin console's key list
 import { downloadTenantExport } from "../data/exportApi"; // #309: whole-tenant Markdown-ZIP export
 import { EditorOnboardingDialog } from "../app/EditorOnboarding"; // #289: "redo the setup questions"
@@ -160,9 +161,26 @@ function ProfileTab() {
           )}
         </div>
       </SettingsCard>
+
+      <SettingsCard testid="account-activity">
+        <label className="mb-1 block text-sm font-medium">{t("account.activityTitle")}</label>
+        <p className="mb-3 text-xs text-fg-dim">{t("account.activityHint")}</p>
+        <ActivitySection />
+      </SettingsCard>
     </SettingsPage>
     </div>
   );
+}
+
+// #483 / ADR-180: the caller's own contribution heatmap over the last ~12 months. Self-only (the server
+// resolves the sub from the session), CE, no new store. Buckets follow the browser's timezone.
+function ActivitySection() {
+  const { t } = useTranslation();
+  const tz = useMemo(() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { return "UTC"; } }, []);
+  const activity = useMyActivity(tz);
+  if (activity.isError) return <p className="text-xs text-fg-dim">{t("account.activityFailed")}</p>;
+  if (activity.isLoading || !activity.data) return <div className="h-[98px] w-full animate-pulse rounded bg-panel-2 motion-reduce:animate-none" aria-hidden="true" />;
+  return <ActivityHeatmap days={activity.data.days} />;
 }
 
 // One remappable shortcut (ADR-021). "Change" captures the next chord via event.code
