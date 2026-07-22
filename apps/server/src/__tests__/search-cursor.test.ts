@@ -42,6 +42,13 @@ describe('search cursor (#103 / ADR-068)', () => {
     const c = encodeCursor(60, scope({ principal: 'user:alice' }))
     expect(decodeCursor(c, scope({ principal: 'user:mallory' }))).toBe(0)
     expect(decodeCursor(encodeCursor(60, scope({ tenantId: 'tenant_a' })), scope({ tenantId: 'tenant_b' }))).toBe(0)
+    // #449 / ADR-173: a GUEST cursor is bound to its share_link principal, so a member (or another
+    // link) replaying it restarts at 0 — never resumes the guest's scan. Same scopeKey, so this is
+    // the same guarantee the user/tenant cases above give, pinned for the share_link principal too.
+    const guestCursor = encodeCursor(60, scope({ principal: 'share_link:link-x' }))
+    expect(decodeCursor(guestCursor, scope({ principal: 'user:alice' })), 'a member cannot replay a guest cursor').toBe(0)
+    expect(decodeCursor(guestCursor, scope({ principal: 'share_link:link-y' })), 'nor can another link').toBe(0)
+    expect(decodeCursor(guestCursor, scope({ principal: 'share_link:link-x' })), 'the same guest resumes').toBe(60)
   })
 
   it('absent / malformed / non-positive cursors decode to 0 (no throw)', () => {

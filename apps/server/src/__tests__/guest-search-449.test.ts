@@ -7,11 +7,12 @@ import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
-import { fgaClient, deleteObjectTuples } from '@wikistead/authz'
+import { fgaClient, deleteObjectTuples, writeTuples, deleteTuples } from '@wikistead/authz'
 import { mintGuestToken } from '@wikistead/auth'
 import { createSpace } from '../routes/spaces.js'
 import { createPage, publishPage } from '../routes/pages.js'
 import { setPagePublic, setPagePrivate } from '../routes/pages.js'
+import { revokeShareLink } from '../routes/share-links.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -139,6 +140,53 @@ describe('#449 / ADR-173: guest search leak class', () => {
     // an already-expired token on the same link: the auth hook rejects it before the handler
     const expired = await mintGuestToken({ ...guestCfg, ttlSeconds: -10 }, { tenantId: TENANT, shareLinkId: linkId, resource: { type: 'space', id: spaceId }, capability: 'view', anonId: anon() })
     expect((await search(expired, TAG)).statusCode, 'an expired token never reaches search').toBe(401)
+  })
+
+  it('never returns a TRASHED page in the shared space', async () => {
+    const tok = await mkSpaceTok(await mkSpaceLink(spaceId, 'view'), spaceId, 'view', anon())
+    // the trash marker is a [user:*, share_link:*] pair (#244): the guest is a share_link principal
+    const trash = [
+      { user: 'user:*', relation: 'trashed', object: `page:${visibleId}` },
+      { user: 'share_link:*', relation: 'trashed', object: `page:${visibleId}` },
+    ]
+    await writeTuples(fgaClient, trash)
+    try {
+      expect(titlesOf((await search(tok, TAG)).body), 'a trashed page drops out of guest results').not.toContain(`${TAG} visible one`)
+    } finally { await deleteTuples(fgaClient, trash).catch(() => {}) }
+  })
+
+  it('never returns a page the link is RESTRICTED from (member-restrict marker on the share_link)', async () => {
+    const linkId = await mkSpaceLink(spaceId, 'view')
+    const tok = await mkSpaceTok(linkId, spaceId, 'view', anon())
+    // restricted subtracts from view_live (model.fga: view_live = viewable but not restricted); the
+    // restrict marker enumerates share_link, so a link restricted from this page cannot view it
+    const restr = { user: `share_link:${linkId}`, relation: 'restricted', object: `page:${visibleId}` }
+    await writeTuples(fgaClient, [restr])
+    try {
+      expect(titlesOf((await search(tok, TAG)).body), 'a restricted page is cut at stage 2').not.toContain(`${TAG} visible one`)
+    } finally { await deleteTuples(fgaClient, [restr]).catch(() => {}) }
+  })
+
+  it('a REVOKED link returns nothing, even with a still-live token', async () => {
+    const linkId = await mkSpaceLink(spaceId, 'view')
+    const tok = await mkSpaceTok(linkId, spaceId, 'view', anon())
+    expect(titlesOf((await search(tok, TAG)).body), 'it works before revocation').toContain(`${TAG} visible one`)
+    // revocation is one tuple delete (the #106 invariant) — the token is still validly signed, but
+    // the share_link no longer views the space, so stage 2 refuses every hit
+    await revokeShareLink(db, fgaClient, { id: linkId, userId: 'dev-user', tenantId: TENANT })
+    const after = await search(tok, TAG)
+    expect(after.statusCode).toBe(200)
+    expect(JSON.parse(after.body), 'a revoked link sees nothing (no cached leak)').toEqual([])
+  })
+
+  it('has-more reflects only the AUTHORIZED count, never the candidate density', async () => {
+    const tok = await mkSpaceTok(await mkSpaceLink(spaceId, 'view'), spaceId, 'view', anon())
+    const res = await search(tok, TAG)
+    expect(res.statusCode).toBe(200)
+    // the candidate window includes the private and draft docs the guest cannot see, but only one
+    // page is authorized (< page size), so has-more is false — the density of hidden pages never leaks
+    expect(res.headers['x-search-has-more'], 'has-more is false when the authorized count is below a page').toBe('false')
+    expect(titlesOf(res.body).length).toBe(1)
   })
 
   it('rate-caps a guest with a static reason once the per-link budget is spent', async () => {
