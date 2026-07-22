@@ -67,3 +67,38 @@ test("#456 S4: the panel survives a document change — it is in the tooltip lay
   await sleep(300);
   await expect(page.getByTestId("fence-settings-panel")).toHaveCount(0);
 });
+
+// #456item 2: a keyboard path (Mod-Alt-Enter) and a hover ✎ open the same panel — right-click was
+// the only way in. item 3: the panel can be closed with the × button and with Escape.
+test("#456the settings open from the keyboard and from a hover ✎, and close via × and Escape", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, `fence456c-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("```ts\nconst a = 1\n```\n\nbelow\n");
+  await sleep(600);
+
+  // item 2 (keyboard): caret in the fence body → Mod-Alt-Enter opens the panel
+  await page.getByText("const a = 1", { exact: true }).click();
+  await page.keyboard.press("Control+Alt+Enter");
+  await expect(page.getByTestId("fence-settings-panel"), "keyboard opened the settings").toBeVisible({ timeout: 8000 });
+
+  // item 3 (Escape): focus lands in the panel on a keyboard open, so Escape closes it
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("fence-settings-panel"), "Escape closed the settings").toHaveCount(0);
+
+  // item 2 (hover ✎): hovering the fence shows the ✎ button, whose click opens the panel. Move in steps
+  // (not a single .hover() jump) so CodeMirror's mousemove-driven hover detection registers.
+  await page.mouse.move(2, 2);
+  await sleep(150);
+  const codeBox = (await page.getByText("const a = 1", { exact: true }).boundingBox())!;
+  await page.mouse.move(codeBox.x + 5, codeBox.y + codeBox.height / 2, { steps: 6 });
+  const hint = page.getByTestId("fence-settings-hint");
+  await expect(hint, "the hover ✎ affordance appears on a code fence").toBeVisible({ timeout: 8000 });
+  await hint.click();
+  await expect(page.getByTestId("fence-settings-panel"), "the ✎ opened the settings").toBeVisible({ timeout: 8000 });
+
+  // item 3 (× button): the explicit close dismisses it
+  await page.getByTestId("fence-settings-close").click();
+  await expect(page.getByTestId("fence-settings-panel"), "the × closed the settings").toHaveCount(0);
+});

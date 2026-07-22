@@ -192,6 +192,24 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
 /* #456 S4: the code-fence settings panel. It renders in CodeMirror's tooltip layer (a widget child
    would be reconciled away), so it needs its own surface styling rather than inheriting a panel's. */
 .cm-lp-fence-settings { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; min-width: 220px; }
+/* #456item 3: header with a title + explicit close, so the panel (which never self-dismisses) can be dismissed. */
+.cm-lp-fence-settings-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+.cm-lp-fence-settings-title { color: var(--fg-dim); font-size: 0.8em; font-weight: 600; }
+.cm-lp-fence-settings-close {
+  display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
+  border: none; background: transparent; color: var(--fg-dim); border-radius: 4px; cursor: pointer;
+  font-size: 1.1em; line-height: 1; padding: 0;
+}
+.cm-lp-fence-settings-close:hover { background: var(--panel-2); color: var(--foreground); }
+.cm-lp-fence-settings-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* #456item 2: the hover ✎ affordance — the mouse counterpart to Mod-Alt-Enter, in the tooltip layer. */
+.cm-lp-fence-settings-hint {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  border: 1px solid var(--border); background: var(--panel); color: var(--fg-dim); border-radius: 4px;
+  cursor: pointer; font-size: 0.85em; line-height: 1; padding: 0; box-shadow: var(--shadow-1, 0 1px 2px rgba(0,0,0,.15));
+}
+.cm-lp-fence-settings-hint:hover { background: var(--panel-2); color: var(--foreground); }
+.cm-lp-fence-settings-hint:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .cm-lp-macro-settings { display: flex; flex-direction: column; gap: 6px; }
 .cm-lp-macro-setting { display: flex; align-items: center; gap: 8px; justify-content: space-between; font-size: 0.85em; }
 .cm-lp-macro-setting-label { color: var(--fg-dim); white-space: nowrap; }

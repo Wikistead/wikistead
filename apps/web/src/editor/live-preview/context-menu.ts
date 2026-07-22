@@ -379,6 +379,12 @@ const menuEvents = Prec.highest(
 // #456 S4: the opening line of the code fence CONTAINING `pos`, or null. The click usually lands on a
 // body line, so walk up to the fence that opens the block — and stop at a blank line or a close fence,
 // which means `pos` was not inside one.
+// #456shared with the settings panel's keyboard command + hover hint, so the mouse (context menu),
+// the keyboard, and the hover affordance all resolve "the code fence enclosing this position" identically.
+export function codeFenceOpeningAt(state: import("@codemirror/state").EditorState, pos: number): number | null {
+  return codeFenceLineAt(state, pos);
+}
+
 function codeFenceLineAt(state: import("@codemirror/state").EditorState, pos: number): number | null {
   const start = state.doc.lineAt(Math.min(Math.max(pos, 0), state.doc.length));
   for (let n = start.number; n >= 1; n--) {
