@@ -140,7 +140,7 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
   const CommentRow = ({ c }: { c: (typeof visibleThreads)[number]["comments"][number] }) => (
     <div className="flex flex-col gap-0.5" data-testid="comment-item">
       <div className="flex items-center gap-1.5">
-        <AuthorChip sub={c.authorSub} />
+        <AuthorChip sub={c.authorSub} name={c.authorName} hasAvatar={c.authorHasAvatar} />
         <Stamp iso={c.createdAt} />
         {c.canModify && (
           <button type="button" className="ml-auto cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-[var(--danger)] opacity-80 hover:underline hover:opacity-100" data-testid="comment-delete" onClick={() => remove.mutate(c.id)}>{tr("commentsPanel.delete")}</button>
