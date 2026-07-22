@@ -1034,7 +1034,6 @@
   },
   "adminRoles": {
     "title": "Roles",
-    "body": "Roles bundle atomic capabilities; assigning one expands it into those permissions.",
     "builtInTitle": "Built-in roles",
     "builtIn": "built-in",
     "customTitle": "Custom roles",
@@ -1072,9 +1071,7 @@
     "scopeTenant": "Tenant",
     "assignTenantScope": "applies tenant-wide",
     "builtInTenantTitle": "Built-in tenant roles",
-    "builtInTenantBody": "What every member of this tenant may do. Space and page permissions come from the resource roles below.",
-    "builtInResourceTitle": "Built-in space & page roles",
-    "adminAlways": "create spaces · and everything a tenant admin can do"
+    "builtInResourceTitle": "Built-in space & page roles"
   },
   "detailsEdit": {
     "title": "Edit collapsible",

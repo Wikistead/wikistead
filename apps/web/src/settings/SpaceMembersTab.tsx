@@ -16,6 +16,11 @@ import { Switch } from "../ui/Switch";
 interface SpaceCtx { spaceId: string; name: string }
 // #330 / ADR-141: `moderate` → space#moderator (revert/freeze/patrol + edit; grants/settings stay manage-only).
 const CAPS: PageRelation[] = ["view", "edit", "moderate", "manage"];
+// #445 the WIRE value stays the verb (the internal relation — view→viewer_member, edit→editor_member,
+// etc. — is unchanged), but the LABEL is the noun a role is called, shown as a literal to match the Roles tab
+// (which renders `r.name` verbatim). One noun set across Members and Roles.
+const CAP_NOUN: Record<PageRelation, string> = { view: "viewer", comment: "commenter", edit: "editor", moderate: "moderator", manage: "manager" };
+const capNoun = (c: string): string => CAP_NOUN[c as PageRelation] ?? c;
 
 // Space Members & Permissions (Phase 5b). manage-gated end-to-end: the screen is
 // only reachable by a manager (SpaceSettingsLayout), and every grant/revoke/list
@@ -117,7 +122,7 @@ export function SpaceMembersTab() {
           ariaLabel={t("spaceMembers.capability")}
           testId="space-grant-capability"
           size="sm"
-          options={CAPS.map((c) => ({ value: c, label: t(`spaceMembers.${c}`) }))}
+          options={CAPS.map((c) => ({ value: c, label: capNoun(c) }))}
         />
         <Button variant="primary" size="sm" disabled={(mode === "group" ? !groupName : !picked) || grant.isPending} onClick={add} data-testid="space-grant-add">{t("spaceMembers.add")}</Button>
       </div>
@@ -125,7 +130,7 @@ export function SpaceMembersTab() {
       <div className="flex flex-col gap-1" data-testid="space-grant-list">
         {grants.map((g) => (
           <div key={`${g.grantee}:${g.capability}`} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="space-grant-item">
-            <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={g.capability}>{t(`spaceMembers.${g.capability}`)}</span>
+            <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={g.capability}>{capNoun(g.capability)}</span>
             <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{label(g)}</span>
             <IconButton aria-label={t("spaceMembers.revoke")} data-testid="space-grant-revoke" className="hover:text-destructive"
               onClick={() => revoke.mutate({ grantee: g.grantee, capability: g.capability }, {

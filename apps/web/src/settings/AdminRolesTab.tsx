@@ -119,35 +119,33 @@ export function AdminRolesTab() {
   return (
     <div className="max-w-[860px] p-6" data-testid="admin-roles">
       <h2 className="mt-0">{t("adminRoles.title")}</h2>
-      <p className="mt-0 mb-4 text-sm text-fg-dim">{t("adminRoles.body")}</p>
 
-      {/* #469: ONE place answers "what can this role do". The built-in roles are listed by SCOPE
-          (tenant roles act on the tenant — member/admin; resource roles act on a space or page —
-          viewer/editor/manager), and the tenant-level `createSpaces` capability lives IN that list
-          instead of a separate differently-shaped section. It is the only editable cell on a
-          built-in role (ADR-171 addendum): member's checkbox IS the tenant#space_creator wildcard;
-          admin's is inherent to the model (`or admin`) and is stated ONCE, as text, never as a
-          permanently disabled checkbox that reads "broken". */}
+      {/* #445 / #469: ONE place answers "what can this role do", and every built-in role reads the
+          SAME way — a bold name + a CapabilityPicker — whether it is tenant- or resource-scoped. The
+          tenant-level `createSpaces` capability lives IN that list. member's picker is the only editable
+          cell: its createSpaces box IS the tenant#space_creator wildcard (drives setDefaults). admin's is a
+          read-only picker with createSpaces checked (the model's `or admin`). This OVERTURNS the ADR-171
+          addendum note that admin had to be plain text to avoid a lone disabled checkbox reading "broken":
+          now that EVERY built-in is a uniform read-only picker, a disabled admin cell reads as consistent,
+          not broken. UI only — the member toggle drives the very same wildcard through the unchanged endpoint. */}
       <h3 className="text-sm font-medium">{t("adminRoles.builtInTenantTitle")}</h3>
-      <p className="mt-0 mb-1 text-xs text-fg-dim">{t("adminRoles.builtInTenantBody")}</p>
-      <div className="mb-4 flex flex-col gap-1" data-testid="builtin-tenant-roles">
-        <label className="flex items-center gap-1.5 text-sm">
-          <input
-            type="checkbox"
-            data-testid="default-member-create-spaces"
-            checked={defaults.data?.member.createSpaces ?? true}
+      <div className="mb-4 flex flex-col gap-2" data-testid="builtin-tenant-roles">
+        <div className="flex flex-col gap-1" data-testid="builtin-role-member">
+          <span className="text-sm font-medium">member</span>
+          <CapabilityPicker
+            value={(defaults.data?.member.createSpaces ?? true) ? ["createSpaces"] : []}
+            idPrefix="builtin-member"
+            list={TENANT_CAPABILITIES}
             disabled={defaults.isLoading || setDefaults.isPending}
-            onChange={(e) => setDefaults.mutate(e.target.checked, {
+            onChange={(caps) => setDefaults.mutate(caps.includes("createSpaces"), {
               onSuccess: () => notify.success(t("toast.saved")),
               onError,
             })}
           />
-          <span className="font-medium">member</span>
-          <span className="text-xs text-fg-dim">{t("adminRoles.cap.createSpaces")}</span>
-        </label>
-        <div className="flex items-baseline gap-2 text-sm" data-testid="builtin-role-admin">
-          <span className="font-medium">admin</span>
-          <span className="text-xs text-fg-dim">{t("adminRoles.adminAlways")}</span>
+        </div>
+        <div className="flex flex-col gap-1" data-testid="builtin-role-admin">
+          <span className="text-sm font-medium">admin</span>
+          <CapabilityPicker value={["createSpaces"]} idPrefix="builtin-admin" list={TENANT_CAPABILITIES} disabled />
         </div>
       </div>
 
