@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SquareTerminal, Sparkles, Code, Check, X } from "lucide-react";
+import { SquareTerminal, Eye, Code, Check, X } from "lucide-react"; // #493: WYSIWYG glyph is Eye now
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Button } from "../ui/Button";
 import { useSession } from "../session/SessionProvider";
@@ -92,7 +92,7 @@ export function EditorOnboardingDialog({ open, onClose }: { open: boolean; onClo
             <p className="text-xs text-fg-dim">{t("onboarding.unsureNo")}</p>
             <div className="flex gap-2">
               <Button variant="primary" data-testid="onboarding-q2-yes" onClick={() => apply("markdown")}><Code size={14} /> {t("common.yes")}</Button>
-              <Button data-testid="onboarding-q2-no" onClick={() => apply("wysiwyg")}><Sparkles size={14} /> {t("common.no")}</Button>
+              <Button data-testid="onboarding-q2-no" onClick={() => apply("wysiwyg")}><Eye size={14} /> {t("common.no")}</Button>
             </div>
             <button type="button" className="self-start text-xs text-fg-dim underline hover:text-foreground" data-testid="onboarding-skip" onClick={skip}>
               {t("onboarding.later")}

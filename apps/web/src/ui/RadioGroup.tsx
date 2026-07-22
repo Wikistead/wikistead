@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 export interface RadioOption {
   value: string;
   label: ReactNode;
+  /** #493: an optional leading glyph shown before the label in every variant. */
+  icon?: ReactNode;
   /** card variant only: a one-line explanation under the label */
   description?: ReactNode;
   disabled?: boolean;
@@ -52,6 +54,7 @@ export function RadioGroup({
           >
             {/* glyph = the non-colour selected cue (hidden until this item is checked) */}
             <Check size={14} aria-hidden className="hidden group-data-[state=checked]:inline-block" />
+            {o.icon != null && <span aria-hidden className="flex-none [&_svg]:size-3.5">{o.icon}</span>}
             {o.label}
           </RadioGroupChoice>
         ))}
@@ -87,7 +90,7 @@ export function RadioGroup({
             className="wks-radio-ring mt-0.5 size-4 flex-none rounded-full"
           />
           <span className="min-w-0 flex-1">
-            <span className="block text-sm text-foreground">{o.label}</span>
+            <span className="flex items-center gap-1.5 text-sm text-foreground">{o.icon != null && <span aria-hidden className="flex-none text-fg-dim [&_svg]:size-4">{o.icon}</span>}{o.label}</span>
             {variant === "card" && o.description != null && (
               <span className="block text-xs text-fg-dim">{o.description}</span>
             )}
