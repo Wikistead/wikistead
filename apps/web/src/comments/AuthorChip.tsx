@@ -27,15 +27,19 @@ export function authorLabel(sub: string, guestWord: string): string {
   return at > 0 ? sub.slice(0, at) : sub;
 }
 
-export function AuthorChip({ sub }: { sub: string }) {
+export function AuthorChip({ sub, name, hasAvatar: hasAvatarProp }: { sub: string; name?: string | null; hasAvatar?: boolean }) {
   const { t } = useTranslation();
   const guest = isGuestSub(sub);
-  // #379 / ADR-150: resolve a member sub to their CHOSEN identity (customized members only; the hook
-  // no-ops for guests/anon and on guest sessions). Absent → today's formatting stays (a member with no
-  // override/avatar, a deleted member, a guest surface). Display-only; authz untouched.
-  const identity = useMemberIdentity(guest ? null : sub);
-  const resolvedName = identity.data?.displayName ?? null;
-  const hasAvatar = identity.data?.hasAvatar === true;
+  // #486 / ADR-150 Addendum 2: a VIEW-GATED surface resolves the author server-side (override ?? OIDC
+  // name, i.e. also un-customized members) and passes it here. When that server value is provided we use
+  // it directly and DON'T fire the client resolver — the gated response already carries the fuller name.
+  const serverResolved = name !== undefined;
+  // #379 / ADR-150: otherwise resolve a member sub to their CHOSEN identity (customized members only; the
+  // hook no-ops for guests/anon and on guest sessions). Absent → today's formatting stays (a member with
+  // no override/avatar, a deleted member, a guest surface). Display-only; authz untouched.
+  const identity = useMemberIdentity(guest || serverResolved ? null : sub);
+  const resolvedName = serverResolved ? (name ?? null) : (identity.data?.displayName ?? null);
+  const hasAvatar = serverResolved ? hasAvatarProp === true : identity.data?.hasAvatar === true;
   const label = resolvedName ?? authorLabel(sub, t("common.guest"));
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
