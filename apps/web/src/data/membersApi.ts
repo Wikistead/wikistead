@@ -39,4 +39,9 @@ export async function removeMember(token: string, sub: string): Promise<void> {
   await apiFetch(`/members/${encodeURIComponent(sub)}`, token, { method: "DELETE" });
 }
 
+// #464 / ADR-175 §6 (DSAR): erase ONE member's page-analytics reading history (the member keeps access).
+export async function eraseMemberAnalytics(token: string, sub: string): Promise<void> {
+  await apiFetch(`/admin/analytics/member/${encodeURIComponent(sub)}`, token, { method: "DELETE" });
+}
+
 export { ApiError };
