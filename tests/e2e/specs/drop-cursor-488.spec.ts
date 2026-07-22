@@ -114,3 +114,33 @@ test("#488: the cursor is retracted once the file is dropped, and the file lands
   const refLine = doc.split("\n").findIndex((l) => l.includes("wks-attachment:")) + 1;
   expect(refLine, `inserted on the aimed line (doc: ${JSON.stringify(doc)})`).toBe(aimed.line);
 });
+
+//the drop cursor is an affordance for a drop. attachFileDrop is wired editable-only
+// (editor-livepreview.ts), so on the Reading surface (mountLivePreview with readOnly) a file drag used
+// to draw the cursor over a surface where nothing can drop. dropCursor is gated on !readOnly now, in
+// lockstep with the handler — the affordance appears only where the drop can happen.
+test("#488Reading mode shows no drop cursor (nothing can be dropped there)", async ({ page }) => {
+  await openScratch(page, `drop488ro-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("alpha line\nbeta line\ngamma line\n");
+  await sleep(400);
+  // sanity: the drop cursor DOES draw while editing (the existing behaviour we are keeping)
+  const dt = await fileDrag(page);
+  const gamma = page.getByText("gamma line", { exact: true });
+  const gb = (await gamma.boundingBox())!;
+  const aim = { x: gb.x + gb.width * 0.5, y: gb.y + gb.height / 2 };
+  await page.dispatchEvent("[data-pane=preview] .cm-content", "dragover", { dataTransfer: dt, clientX: aim.x, clientY: aim.y });
+  await sleep(200);
+  await expect(page.locator("[data-pane=preview] .cm-dropCursor"), "the editable surface still shows it").toHaveCount(1);
+
+  // switch to Reading (read-only): a file drag must draw NO cursor, because a drop would do nothing
+  await page.getByTestId("displaymode-reading").click({ force: true });
+  await sleep(500);
+  const dt2 = await fileDrag(page);
+  const g2 = (await page.getByText("gamma line", { exact: true }).boundingBox())!;
+  const aim2 = { x: g2.x + g2.width * 0.5, y: g2.y + g2.height / 2 };
+  await page.dispatchEvent("[data-pane=preview] .cm-content", "dragover", { dataTransfer: dt2, clientX: aim2.x, clientY: aim2.y });
+  await sleep(300);
+  await expect(page.locator("[data-pane=preview] .cm-dropCursor"), "Reading mode offers no drop affordance").toHaveCount(0);
+});

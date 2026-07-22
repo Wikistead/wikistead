@@ -56,8 +56,13 @@ export const vimCompartmentContent = (on: boolean) =>
 // vim fully survives Reading↔Live/Source. Live/Source are fully editable.
 export const displayModeContent = (m: DisplayMode) =>
   m === "reading"
+    // #488no dropCursor in Reading — the mode is read-only (below), so a file cannot drop here
+    // and a cursor would be an affordance for nothing. minimalSetup omits dropCursor, so absence = off.
     ? [displayMode.of(m), EditorState.readOnly.of(true), EditorView.editable.of(true)]
-    : [displayMode.of(m), EditorState.readOnly.of(false), EditorView.editable.of(true)];
+    // #488: the drop cursor draws at the same posAtCoords the drop lands on (image-drop.ts). Display-only
+    // (a div on scrollDOM; no doc/offset change). It rides the mode compartment so it is present exactly
+    // when editing is, and vanishes on the switch to Reading in lockstep with EditorState.readOnly.
+    : [displayMode.of(m), EditorState.readOnly.of(false), EditorView.editable.of(true), dropCursor()];
 
 // Map vim za/zo/zc onto CodeMirror fold commands (codemirror-vim omits them) so vim
 // users can fold macro blocks. Idempotent; runs once at module load.
@@ -270,11 +275,10 @@ export function mountLivePreview(
       // reconfigure them in place (no remount — collab/presence stay attached, the vim-toggle rule).
       ...(opts.searchPhrasesCompartment ? [opts.searchPhrasesCompartment.of(searchPhrasesContent(opts.searchPhrases))] : [searchPhrasesContent(opts.searchPhrases)]),
       minimalSetup,
-      // #488: show WHERE a drag will land. minimalSetup omits dropCursor (basicSetup has it), so a
-      // file dragged over the page gave no clue about its insertion point until it was already
-      // inserted — and the drop lands at posAtCoords (image-drop.ts), which is exactly the position
-      // this draws. Display-only: it appends a div to scrollDOM and touches neither doc nor offsets.
-      dropCursor(),
+      // #488: the drop cursor (which shows WHERE a file drag will land, at the same posAtCoords the drop
+      // uses) lives in displayModeContent below, NOT here — Reading is a live display-mode SWITCH via a
+      // compartment, not a remount, so a mount-time gate would leave it showing after a switch to
+      // Reading. It belongs with the EditorState.readOnly the mode already sets.
       // position:fixed so the palette/bubble/hint escape overflow:hidden ancestors and
       // CM flips them above/below + shifts horizontally to stay within the viewport.
       tooltips({ position: "fixed" }),
