@@ -1033,7 +1033,6 @@
   },
   "adminRoles": {
     "title": "ロール",
-    "body": "原子的な権限を束ねたロール。割り当てるとその権限に展開されます。",
     "builtInTitle": "組込ロール",
     "builtIn": "組込",
     "customTitle": "カスタムロール",
@@ -1071,9 +1070,7 @@
     "scopeTenant": "テナント",
     "assignTenantScope": "テナント全体に適用",
     "builtInTenantTitle": "組み込みのテナントロール",
-    "builtInTenantBody": "このテナントのメンバーができること。スペース／ページの権限は下のリソースロールで決まります。",
-    "builtInResourceTitle": "組み込みのスペース／ページロール",
-    "adminAlways": "スペース作成 ・ ほかテナント管理者の権限すべて"
+    "builtInResourceTitle": "組み込みのスペース／ページロール"
   },
   "detailsEdit": {
     "title": "折りたたみを編集",
