@@ -121,3 +121,48 @@ describe("source-anchor tagging (#215 hit-test wiring)", () => {
     expect((plain.firstChild as HTMLElement | null)?.dataset?.macPos).toBeUndefined();
   });
 });
+
+// #450 / ADR-177 slice 2 prep: a `:::tagged`/`:::children` inside a container resolves through the
+// list-host seam exactly as a top-level one does. This path is the reason the host is a threaded seam
+// at all, and it is the one the re-entrancy anti-test (ADR-177 §"Anti-tests") will build on — but no
+// test reached it, so retiring the `withListHost` module singleton could break it while every existing
+// test stayed green (a false green the ADR calls out). Pins the CURRENT behaviour so the threading
+// refactor is genuinely behaviour-preserving, and so the container-recursion path cannot be dropped
+// silently. columnsLiveRender recurses via appendMarkdownInto, which reads the same seam.
+describe("#450: a list macro nested in a container resolves through the host seam", () => {
+  it("fills a :::children inside a :::column via the list host (not top-level only)", async () => {
+    const { withListHost } = await import("../macros/md-render");
+    const fetched: { name: string; body: string }[] = [];
+    const host = {
+      fetch: async (name: "tagged" | "children", body: string) => {
+        fetched.push({ name, body });
+        return [{ id: "p1", title: "Child One" }, { id: "p2", title: "Child Two" }];
+      },
+      navigate: () => {},
+      emptyLabel: "(empty)",
+      untitledLabel: "(untitled)",
+    };
+    const body = ":::column\n:::children\n:::\n:::\n:::column\nplain\n:::";
+    const row = withListHost(host, () => columnsLiveRender(body));
+    // the nested list dispatched a placeholder synchronously…
+    const holder = row.querySelector<HTMLElement>("[data-testid=macro-children-nested]");
+    expect(holder, "the nested :::children dispatched through the host seam").not.toBeNull();
+    // …and the host's fetch was the ONLY resolution path (no direct network, ADR-177 authz gate)
+    expect(fetched, "the container-nested list resolved through the host, exactly once").toEqual([
+      { name: "children", body: "" },
+    ]);
+    // let the async fill land, then the titles are present as text (XSS-inert), the host's job done
+    await Promise.resolve(); await Promise.resolve();
+    expect(row.textContent).toContain("Child One");
+    expect(row.textContent).toContain("Child Two");
+  });
+
+  it("without a host the container-nested list does not dispatch (top-level parity: seam-gated)", () => {
+    // no withListHost wrapper → activeListHost is null → the nested list falls through, exactly as a
+    // static/hover render does. Pins that the dispatch is SEAM-gated, so the threading can't accidentally
+    // make it fire host-free.
+    const body = ":::column\n:::children\n:::\n:::";
+    const row = columnsLiveRender(body);
+    expect(row.querySelector("[data-testid=macro-children-nested]"), "no host → no host-dispatched list").toBeNull();
+  });
+});
