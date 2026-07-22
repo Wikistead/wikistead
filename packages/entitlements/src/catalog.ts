@@ -147,6 +147,13 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     enforcedAt: 'GET /admin/transparency (+ /verify) entitlement gate',
     downgrade: 'gated; rows retained and hidden (the #401 convention)',
   },
+  analytics: {
+    title: 'Page analytics (who-viewed)',
+    summary: 'Per-viewer page analytics: members named in a roster, guests/anonymous aggregated (#464 / ADR-175, EE).',
+    unit: 'boolean',
+    enforcedAt: 'collection enqueue + dashboard (collection itself is gated — no history for CE/free)',
+    downgrade: 'gated; collection stops, retained rows follow the retention/erasure policy',
+  },
   userMacros: {
     title: 'User/third-party macros',
     summary: 'Whether the tenant may run non-first-party macros (#93 / ADR-073). Requires this AND a tenant-admin allowlist; macros never self-authorize. First-party always allowed.',
