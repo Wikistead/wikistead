@@ -150,7 +150,12 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
       {/* #460 / ADR-174: wider on a large screen — the grant row (type / member / relation / add) had to
           wrap at 560px. The phone gutter is unchanged, and the dialog stays BOUNDED (#416): header,
           tab strip and footer are fixed and the ACTIVE PANEL scrolls, so Close is always reachable. */}
-      <DialogContent data-testid="permissions-dialog" className="flex max-h-[85vh] flex-col sm:max-w-[560px] lg:max-w-3xl">
+      {/* #460①: the height is FIXED, not just capped — with only `max-h` the dialog shrank to each
+          tab's content, so switching tabs jumped its height. A constant height (85vh on a phone, a roomy
+          560px on desktop, still clamped to 85vh on a short window) makes the flex-1 panel a stable box:
+          short tabs leave breathing room at the bottom, the tall Access tab scrolls inside it, and the
+          header / tab strip / footer never move between tabs. */}
+      <DialogContent data-testid="permissions-dialog" className="flex h-[85vh] flex-col sm:h-[560px] sm:max-h-[85vh] sm:max-w-[560px] lg:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{t("permissions.title")}</DialogTitle>
           <DialogDescription>{t("permissions.body")}</DialogDescription>

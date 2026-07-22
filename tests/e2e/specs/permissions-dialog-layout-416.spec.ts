@@ -111,6 +111,43 @@ test("#460: the Access tab reports the restriction count without the Restriction
     .toBeVisible();
 });
 
+// #460①②③: the tab-container polish. The dialog height is FIXED so switching tabs never resizes
+// it; a tab whose content fits does not raise a scrollbar; and the panel is padded on the left so a
+// control's focus ring is not clipped by the scroller. Measured on a real Chromium viewport.
+test("#460the dialog keeps one height across tabs, short tabs don't scroll, the panel is left-padded", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  const pageId = await createScratchPage(page, "perm-height-460");
+  await page.setViewportSize({ width: 1000, height: 900 }); // tall enough that the desktop fixed height (560) is not clamped
+  await page.goto(`/p/${pageId}`);
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await page.click("[data-testid=page-overflow-trigger]");
+  await page.click("[data-testid=permissions-open]");
+  const dialog = page.locator("[data-testid=permissions-dialog]");
+  await expect(dialog).toBeVisible();
+
+  // ① the height is CONSTANT across all three tabs — the reported "height jumps on every tab" is a fixed
+  // height regression: with only max-h the box shrank to each tab's content.
+  const heightOn = async (tabKey: string) => {
+    await page.click(`[data-testid=permissions-tab-${tabKey}]`);
+    await expect(page.locator(`[data-testid=permissions-panel-${tabKey}]`)).toBeVisible();
+    await page.waitForTimeout(80); // let any transition settle
+    return (await dialog.boundingBox())!.height;
+  };
+  const hAccess = await heightOn("access");
+  const hRestrict = await heightOn("restrictions");
+  const hAdvanced = await heightOn("advanced");
+  expect(Math.abs(hRestrict - hAccess), `access ${hAccess} vs restrictions ${hRestrict} — height must not jump`).toBeLessThanOrEqual(2);
+  expect(Math.abs(hAdvanced - hAccess), `access ${hAccess} vs advanced ${hAdvanced} — height must not jump`).toBeLessThanOrEqual(2);
+
+  // ② a short tab (Restrictions, on a page with no restrictions) fits without raising the panel's scrollbar.
+  const restrictScroll = await page.locator("[data-testid=permissions-panel-restrictions]").evaluate((el) => ({ s: el.scrollHeight, c: el.clientHeight }));
+  expect(restrictScroll.s, `the short tab content fits (scrollH ${restrictScroll.s} clientH ${restrictScroll.c})`).toBeLessThanOrEqual(restrictScroll.c + 1);
+
+  // ③ the scroller is padded on the left so a focus ring on a flush control is not clipped by overflow.
+  const padLeft = await page.locator("[data-testid=permissions-panel-restrictions]").evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft));
+  expect(padLeft, "panel has left padding for the focus ring").toBeGreaterThanOrEqual(3);
+});
+
 // #460 / ADR-174: freeze and the comment audience moved out of the main list into Advanced. They are
 // still one click away and still work — the regrouping is presentational, and this says so in the one
 // way that matters: by driving them where they now live.
