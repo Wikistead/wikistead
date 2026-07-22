@@ -35,6 +35,30 @@ export function ProseSkeleton({ testid = "prose-skeleton" }: { testid?: string }
   );
 }
 
+// #492: a sidebar page-tree shaped skeleton — a handful of indented rows (icon + label bar) that read as
+// "the tree is loading", distinct from the "No pages yet" empty state. The ragged indents echo a nested
+// tree without implying a specific shape.
+export function SidebarTreeSkeleton({ testid = "sidebar-skeleton" }: { testid?: string }) {
+  const rows: { pad: string; w: string }[] = [
+    { pad: "pl-2", w: "w-3/4" },
+    { pad: "pl-2", w: "w-2/3" },
+    { pad: "pl-5", w: "w-1/2" },
+    { pad: "pl-5", w: "w-3/5" },
+    { pad: "pl-2", w: "w-4/5" },
+    { pad: "pl-8", w: "w-1/2" },
+  ];
+  return (
+    <div className="flex flex-col gap-1.5 p-2" data-testid={testid} role="status" aria-busy="true">
+      {rows.map((r, i) => (
+        <div key={i} className={`flex items-center gap-1.5 ${r.pad}`}>
+          <Skeleton w="w-4" h="h-4" className="flex-none" />
+          <Skeleton w={r.w} h="h-4" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // The anti-flicker gate: a load that resolves in 50ms must NOT flash a skeleton (worse than showing
 // nothing). Returns true only once `active` has been continuously true for `delayMs`.
 export function useDelayedFlag(active: boolean, delayMs = 150): boolean {
