@@ -40,11 +40,14 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
 // The panel is the scroller (ADR-174): the dialog body used to be one long scroll, so the header, the
 // tab strip and Close scrolled away with it. Only the active panel mounts, which is also what keeps a
 // hidden panel from being asserted as "not visible" in a test — it is simply not there.
+// #460 ③: `overflow-y-auto` makes the panel clip the x-axis too (a non-visible axis forces the
+// other to `auto`), so a focus ring on a control flush to the panel's left edge lost its outer 3px. The
+// scroller gets padding on BOTH sides (px-1) — the ring lands inside the padding box, never clipped.
 function TabsContent({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Content>) {
   return (
     <TabsPrimitive.Content
       data-slot="tabs-content"
-      className={cn("min-h-0 flex-1 overflow-y-auto pr-1 pt-3 focus-visible:outline-none", className)}
+      className={cn("min-h-0 flex-1 overflow-y-auto px-1 pb-2 pt-3 focus-visible:outline-none", className)}
       {...props}
     />
   )
