@@ -1016,6 +1016,29 @@ export function useSetPublicSurface() {
   });
 }
 
+// #491 / ADR-140: the tenant abuse-filter config (mass-delete shrink ratio + banned words). Admin-gated
+// on the server (GET/PATCH re-check tenant#admin, 403 otherwise). The banned-word list is moderation
+// intelligence, so it never loads on a non-admin surface.
+export interface AbuseFilterConfig { shrinkRatio: number | null; bannedWords: string[]; }
+export function useAbuseFilterConfig(enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["admin-abuse-filter"],
+    queryFn: () => apiFetch<AbuseFilterConfig>(`/tenant/abuse-filter`, token).then((r) => r ?? { shrinkRatio: null, bannedWords: [] }),
+    enabled,
+  });
+}
+export function useUpdateAbuseFilterConfig() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    // the server normalizes (clamps the ratio, trims/dedups/caps the words); it returns the stored value.
+    mutationFn: (cfg: AbuseFilterConfig) =>
+      apiFetch<AbuseFilterConfig>(`/tenant/abuse-filter`, token, { method: "PATCH", body: JSON.stringify(cfg) }),
+    onSuccess: (data) => { if (data) qc.setQueryData(["admin-abuse-filter"], data); },
+  });
+}
+
 // The tenant's group-name source for the group-grant picker (#163). manage-gated server-side
 // (group names can be sensitive), so scope the query to a space the caller manages.
 export function useTenantGroups(spaceId: string, enabled = true) {

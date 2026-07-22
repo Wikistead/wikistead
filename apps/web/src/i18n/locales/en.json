@@ -183,11 +183,22 @@
     "api": "API",
     "embeds": "Embeds",
     "public": "Public access",
+    "moderation": "Moderation",
     "billing": "Billing",
     "orphans": "Orphan drafts",
     "webhooks": "Webhooks",
     "audit": "Audit log",
     "roles": "Roles"
+  },
+  "adminModeration": {
+    "title": "Abuse filter",
+    "body": "Publish-boundary checks for this workspace. Both are off by default; they only ever reject a publish (content is never edited).",
+    "shrinkLabel": "Mass-delete guard",
+    "shrinkHint": "Reject a publish whose new text is smaller than this fraction of the published text (0–1, e.g. 0.2 = under 20%). Leave blank to turn off.",
+    "off": "Off",
+    "wordsLabel": "Banned words",
+    "wordsHint": "One per line. A publish is rejected only when a listed word is newly added. Leave blank to turn off.",
+    "saved": "Saved"
   },
   "adminPublic": {
     "title": "Public access",
