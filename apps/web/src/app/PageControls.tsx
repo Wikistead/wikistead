@@ -26,6 +26,12 @@ const DISPLAY_MODES = [
 // labels are hover tooltips (title=); the mobile ⋯ menu carries text labels.
 export interface PageControlsProps {
   canEdit: boolean;
+  // #490: the page's capability is not yet known (usePage still pending, e.g. mid-navigation). Distinct
+  // from "confirmed view-only" (canEdit === false with the capability resolved): while pending, the
+  // edit affordance must NOT be torn out and re-inserted (a flicker on every page switch), but it must
+  // also not become an actionable edit button for a page that may resolve view-only. So the slot holds
+  // an inert placeholder until the capability lands. Undefined on surfaces that always know (scratch).
+  capabilityPending?: boolean;
   editing: boolean;
   onEdit: () => void;
   onDone: () => void;
@@ -289,7 +295,11 @@ export function PageActions(p: PageControlsProps) {
             <RoundBtn label={t("page.done")} testId="view-toggle" onClick={p.onDone} icon={<X size={16} />} />
           </>
         ) : (
-          p.canEdit && <RoundBtn label={t("page.edit")} testId="edit-toggle" primary onClick={p.onEdit} icon={<Pencil size={16} />} />
+          p.capabilityPending
+            // #490: reserve the slot with an inert control so the row does not jump between page loads;
+            // it is not clickable, so a page that resolves view-only never exposed an edit action.
+            ? <RoundBtn label={t("page.edit")} testId="edit-toggle-pending" disabled onClick={undefined} icon={<Pencil size={16} />} />
+            : p.canEdit && <RoundBtn label={t("page.edit")} testId="edit-toggle" primary onClick={p.onEdit} icon={<Pencil size={16} />} />
         )}
         {overflow.length > 0 && (
           <OverflowMenu items={overflow} onSelect={(v) => runOverflow(p, v, watch)} label={t("page.moreActions")} triggerClassName={`${ROUND} ${ROUND_BG}`} />
@@ -330,7 +340,9 @@ export function PageControlsMobile(p: PageControlsProps) {
           ) : (
             // #368: view mode = just Edit here; Watch + Share are in the overflow section below (built by
             // overflowItems, so desktop and mobile stay in sync — no duplicate Share).
-            p.canEdit && <DropdownMenuItem onSelect={p.onEdit} data-testid="m-edit-toggle"><Pencil size={14} /> {t("page.edit")}</DropdownMenuItem>
+            p.capabilityPending
+              ? <DropdownMenuItem disabled data-testid="m-edit-toggle-pending"><Pencil size={14} /> {t("page.edit")}</DropdownMenuItem>
+              : p.canEdit && <DropdownMenuItem onSelect={p.onEdit} data-testid="m-edit-toggle"><Pencil size={14} /> {t("page.edit")}</DropdownMenuItem>
           )}
           {/* #212: comments is part of overflowItems now (rendered below), so no separate entry here. */}
           {overflow.length > 0 && <DropdownMenuSeparator />}
