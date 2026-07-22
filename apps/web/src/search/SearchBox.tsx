@@ -10,7 +10,9 @@ import { SearchModal } from "./SearchModal";
 // ADR-021 `search.focus` chord) opens the modal; its input carries the search-input testid, so the
 // keyboard flow is: chord → modal opens → type → ↑↓/Ctrl-j/k → Enter navigates → Esc closes.
 // All authz lives server-side (two-stage guard); see SearchModal for the render-side invariants.
-export function SearchBox() {
+// #449 / ADR-173: the SAME box a member uses, mounted on the guest space shell. `guestToken` +
+// `onNavigate` thread through to SearchModal; nothing else differs (the server is the fortress).
+export function SearchBox({ guestToken, onNavigate }: { guestToken?: string; onNavigate?: (pageId: string) => void } = {}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const focusChord = resolveKey("search.focus", useAccountSettings().data?.keybindings); // ADR-021 (default Mod-k)
@@ -43,7 +45,7 @@ export function SearchBox() {
         <Search size={14} className="hidden shrink-0 md:block" />
         <span className="hidden truncate md:inline">{t("search.placeholderKbd")}</span>
       </button>
-      <SearchModal open={open} onOpenChange={setOpen} />
+      <SearchModal open={open} onOpenChange={setOpen} guestToken={guestToken} onNavigate={onNavigate} />
     </>
   );
 }

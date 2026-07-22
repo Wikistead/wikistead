@@ -19,17 +19,29 @@ import { PublishedBodyPreview } from "./PublishedBodyPreview";
 //  (c) the preview body renders as PLAIN TEXT (whiteSpace pre-wrap; never dangerouslySetInnerHTML).
 //  (d) the draft badge derives from the view-gated `published` boolean (published_at IS NOT NULL) —
 //      NOT the manage-gated isPagePublic (which would leak publish state).
-export function SearchModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+// #449 / ADR-173: a space-link GUEST reuses this exact modal. `guestToken` routes the search through
+// the guest's own token (the server forces the link's space + gates every hit on the share_link
+// principal); `onNavigate` replaces the member `/p/<id>` route with the guest tree's own open handler
+// so a hit stays inside `/share/…`. The preview pane fetches member-only routes a guest token cannot
+// call, so it is OFF for guests (list + navigate only) — honesty about scope, no leak either way.
+export function SearchModal({ open, onOpenChange, guestToken, onNavigate }: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  guestToken?: string;
+  onNavigate?: (pageId: string) => void;
+}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const isGuest = guestToken != null;
   const [input, setInput] = useState("");
   const debounced = useDebouncedValue(input, 250);
-  const { data: hits, isFetching } = useSearch(open ? debounced : "");
-  const spaces = useSpaces();
+  const { data: hits, isFetching } = useSearch(open ? debounced : "", guestToken);
+  const spaces = useSpaces(!isGuest); // member-only route; a guest has no cross-space list
   // cmdk's highlighted value (a page id) — drives the preview pane, debounced so arrowing through
   // the list doesn't fire a view-gated fetch per keypress.
   const [selected, setSelected] = useState("");
-  const previewId = useDebouncedValue(selected, 200);
+  const debouncedSelected = useDebouncedValue(selected, 200);
+  const previewId = isGuest ? "" : debouncedSelected; // #449: no member-route preview for a guest (never fetch member routes with a guest token)
   const pageQ = usePage(open ? previewId : "");
   const publishedQ = usePublished(open ? previewId : "");
 
@@ -54,7 +66,8 @@ export function SearchModal({ open, onOpenChange }: { open: boolean; onOpenChang
   const go = (id: string) => {
     onOpenChange(false);
     setInput("");
-    navigate(`/p/${id}`);
+    if (onNavigate) onNavigate(id); // #449: guest tree opens the page inside /share/…
+    else navigate(`/p/${id}`);
   };
 
   return (
@@ -89,7 +102,7 @@ export function SearchModal({ open, onOpenChange }: { open: boolean; onOpenChang
             autoFocus
           />
           <div className="flex min-h-0" data-testid="search-results">
-            <CommandList className="max-h-[60vh] w-full overflow-y-auto md:w-2/5 md:border-r">
+            <CommandList className={`max-h-[60vh] w-full overflow-y-auto ${isGuest ? "" : "md:w-2/5 md:border-r"}`}>
               {isFetching && items.length === 0 ? (
                 <div className="p-2 text-sm text-fg-dim">{t("search.searching")}</div>
               ) : items.length === 0 ? (
@@ -118,7 +131,7 @@ export function SearchModal({ open, onOpenChange }: { open: boolean; onOpenChang
             {/* the preview pane (md+ only — narrow screens keep the single-column list). Everything here
                 comes from the view-gated routes for the SELECTED page (b/d above); a deny (404) simply
                 leaves the pane empty — no oracle. */}
-            <div className="hidden max-h-[60vh] flex-1 overflow-y-auto p-4 md:block" data-testid="search-preview">
+            <div className={`max-h-[60vh] flex-1 overflow-y-auto p-4 ${isGuest ? "hidden" : "hidden md:block"}`} data-testid="search-preview">
               {previewId && pageQ.data ? (
                 <>
                   <div className="flex items-center gap-2">

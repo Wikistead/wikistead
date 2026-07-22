@@ -1,0 +1,90 @@
+import { test, expect } from "@playwright/test";
+import { openDemo, openScratch, enterEdit, publishAndWait, sleep } from "../helpers";
+
+const API = "http://dev.localhost:4010";
+
+// #449 / ADR-173: a space-link guest gets the SAME search box the member uses — Ctrl-K + the header
+// field — scoped by the server to the link's space and gated on the share_link principal. The leak
+// class is pinned server-side (guest-search-449.test.ts); this pins the UI reuse: the search chrome
+// mounts on the guest shell, a query returns the space's pages, and a hit opens INSIDE /share/… via
+// the tree's own handler (never a dead /p/<id> member route). No member chrome leaks.
+test("#449: a space-link guest can search their space and a hit opens in the guest shell", async ({ browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  const term = `GuestFind${Date.now()}`;
+
+  // A REAL published page in demo_space (the e2e seed does not populate the search index, so we make
+  // one whose title we can search for). PUBLISHING is what a guest needs — it gives the page its
+  // page#space edge (the stage-2 view_base_from_space) and puts its body in the index.
+  const id = await openScratch(member, term);
+  await enterEdit(member);
+  await member.click("[data-pane=preview] .cm-content");
+  await member.keyboard.insertText(`# ${term}\n\n${term} body text`);
+  await sleep(300);
+  await publishAndWait(member, id, `${term} body`);
+  // indexing is async (outbox → Meili); poll the API directly (not the UI, which would cache)
+  await expect.poll(
+    () => member.evaluate(async ({ api, q }) => {
+      const r = await fetch(`${api}/search?q=${encodeURIComponent(q)}`, { headers: { Authorization: "Bearer dev-token" } });
+      return ((await r.json()) as unknown[]).length;
+    }, { api: API, q: term }),
+    { timeout: 20_000, intervals: [500, 1000, 1000] },
+  ).toBeGreaterThan(0);
+
+  const link = await member.evaluate(async (api) => {
+    const res = await fetch(`${api}/share-links`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "Content-Type": "application/json" },
+      body: JSON.stringify({ resource: { type: "space", id: "demo_space" }, capability: "view", expiresInSeconds: null }),
+    });
+    return { status: res.status, body: await res.json() as { id: string } };
+  }, API);
+  expect(link.status).toBe(201);
+
+  const guest = await (await browser.newContext()).newPage();
+  await guest.goto(`/share/${link.body.id}`);
+  await expect(guest.getByTestId("guest-sidebar")).toBeVisible({ timeout: 15000 });
+
+  // the search trigger is present on the guest shell (it was absent before #449) …
+  const trigger = guest.getByTestId("search-trigger");
+  await expect(trigger, "the guest shell mounts the search box").toBeVisible();
+  await trigger.click();
+  await expect(guest.getByTestId("search-input")).toBeVisible();
+
+  // … a query returns the space's published page (the demo page is public in the demo space) …
+  await guest.getByTestId("search-input").fill(term);
+  const item = guest.getByTestId("search-item").filter({ hasText: term }).first();
+  await expect(item, "the guest sees the space's page in results").toBeVisible({ timeout: 10000 });
+
+  // … the preview pane is OFF for a guest (it would call member-only routes a guest token cannot use) …
+  await expect(guest.getByTestId("search-preview"), "no member-route preview pane for a guest").toBeHidden();
+
+  // … and choosing a hit opens it INSIDE the guest shell (the tree's open handler), not /p/<id>.
+  await item.click();
+  await guest.waitForSelector("[data-pane=preview] .cm-content", { timeout: 10000 });
+  await sleep(500);
+  expect(guest.url(), "stays inside /share/… — never a dead member /p/ route").toContain("/share/");
+  expect(await guest.evaluate(() => document.querySelector("[data-pane=preview] .cm-content")?.textContent ?? "")).toContain(term.slice(0, 9));
+
+  // no member chrome bled in with the search box.
+  await expect(guest.getByTestId("user-menu"), "no member user menu on the guest shell").toHaveCount(0);
+});
+
+// #449: Ctrl-K opens the same modal on the guest shell (keyboard parity with the member surface).
+test("#449: Ctrl-K opens guest search", async ({ browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  await openDemo(member);
+  const link = await member.evaluate(async (api) => {
+    const res = await fetch(`${api}/share-links`, {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-token", "Content-Type": "application/json" },
+      body: JSON.stringify({ resource: { type: "space", id: "demo_space" }, capability: "view", expiresInSeconds: null }),
+    });
+    return (await res.json() as { id: string }).id;
+  }, API);
+
+  const guest = await (await browser.newContext()).newPage();
+  await guest.goto(`/share/${link}`);
+  await expect(guest.getByTestId("guest-sidebar")).toBeVisible({ timeout: 15000 });
+  await guest.keyboard.press("Control+k");
+  await expect(guest.getByTestId("search-input"), "Ctrl-K opens the guest search modal").toBeVisible({ timeout: 5000 });
+});

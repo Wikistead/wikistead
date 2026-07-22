@@ -76,3 +76,13 @@ export async function guestAttachMaxBytes(db: TenantDb, tenantId: string): Promi
   `
   return normalizeRateMax(caps?.abuse_attach_guest_max_bytes == null ? null : Number(caps.abuse_attach_guest_max_bytes))
 }
+
+// #449 / ADR-173 §1: the guest SEARCH cap — same two-bucket window as publish/create/attach, so a
+// share link opened to the public cannot be turned into a query firehose against Meili + FGA. NULL =
+// unlimited (self-host pays nothing). Members are never capped here (unchanged).
+export async function guestSearchRateAllowed(valkey: IORedis, db: TenantDb, id: GuestRateIdentity): Promise<boolean> {
+  const [caps] = await db.sql<[{ abuse_search_rate_link_max: number | null; abuse_search_rate_session_max: number | null }?]>`
+    SELECT abuse_search_rate_link_max, abuse_search_rate_session_max FROM tenant_settings WHERE tenant_id = ${id.tenantId}
+  `
+  return twoBucketAllowed(valkey, id, 'search', caps?.abuse_search_rate_link_max, caps?.abuse_search_rate_session_max)
+}
