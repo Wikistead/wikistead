@@ -1,4 +1,4 @@
-import { Navigate, Outlet, Route } from "react-router-dom";
+import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
@@ -59,23 +59,28 @@ function AdminLayout() {
   );
 }
 
-// Returned as inline <Route> elements so the parent <Routes> can parse them.
-export function AdminRoutes() {
+// #489: the admin console is code-split. AdminRoot renders the subtree as its OWN <Routes> (paths
+// RELATIVE to the /admin/* mount point in routes.tsx), so it can be lazy-imported behind a Suspense
+// boundary and dropped from the eager main bundle. The route STRUCTURE is unchanged — same paths, same
+// components, same AdminLayout wrapper — only where the code loads from moves.
+export function AdminRoot() {
   return (
-    <Route path="/admin" element={<AdminLayout />}>
-      <Route index element={<Navigate to="members" replace />} />
-      <Route path="members" element={<MembersPage />} />
-      <Route path="spaces" element={<AdminSpacesTab />} />
-      <Route path="branding" element={<TenantBrandingTab />} />
-      <Route path="auth" element={<AdminAuthTab />} />
-      <Route path="api" element={<AdminApiTab />} />
-      <Route path="webhooks" element={<AdminWebhooksTab />} />
-      <Route path="audit" element={<AdminAuditTab />} />
-      <Route path="roles" element={<AdminRolesTab />} />
-      <Route path="embeds" element={<AdminEmbedsTab />} />
-      <Route path="public" element={<AdminPublicTab />} />
-      <Route path="billing" element={<AdminBillingTab />} />
-      <Route path="orphan-drafts" element={<AdminOrphanDraftsTab />} />
-    </Route>
+    <Routes>
+      <Route element={<AdminLayout />}>
+        <Route index element={<Navigate to="members" replace />} />
+        <Route path="members" element={<MembersPage />} />
+        <Route path="spaces" element={<AdminSpacesTab />} />
+        <Route path="branding" element={<TenantBrandingTab />} />
+        <Route path="auth" element={<AdminAuthTab />} />
+        <Route path="api" element={<AdminApiTab />} />
+        <Route path="webhooks" element={<AdminWebhooksTab />} />
+        <Route path="audit" element={<AdminAuditTab />} />
+        <Route path="roles" element={<AdminRolesTab />} />
+        <Route path="embeds" element={<AdminEmbedsTab />} />
+        <Route path="public" element={<AdminPublicTab />} />
+        <Route path="billing" element={<AdminBillingTab />} />
+        <Route path="orphan-drafts" element={<AdminOrphanDraftsTab />} />
+      </Route>
+    </Routes>
   );
 }
