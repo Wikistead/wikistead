@@ -446,6 +446,15 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   // Navigating to another page opens it in READ mode (unless ?edit=1) — PageRoute is
   // not remounted on a param change, so reset editing when the page changes.
   useEffect(() => { setEditing(autoEdit); dirtySig.set(false); }, [pageId, autoEdit, dirtySig]);
+  // #464 / ADR-175: signal ONE genuine READ per page open in VIEW mode (not the polled /published fetch,
+  // not an edit open) so analytics counts readers, not editor-openers. Fires once per pageId (PageRoute is
+  // not remounted on a param change, so a ref keyed on pageId gates it); the server view-gates + dedups.
+  const viewSignaledRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pageId || editing || viewSignaledRef.current === pageId) return;
+    viewSignaledRef.current = pageId;
+    apiFetch(`/pages/${encodeURIComponent(pageId)}/view`, token, { method: "POST" }).catch(() => {});
+  }, [pageId, editing, token]);
   const [vim, toggleVim] = useEditorKeymap(); // member: startup-mode pref + device-local toggle
   const keybindings = useAccountSettings().data?.keybindings; // ADR-021 overrides ({} default)
   useVimToggleShortcut(toggleVim, editing, resolveKey("editor.toggleVim", keybindings)); // (#2)
@@ -1000,6 +1009,14 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
       .catch(() => { /* denied/expired → empty view */ });
   }, [pageId, token]);
   useEffect(() => { reloadPublished(); }, [reloadPublished]);
+  // #464 / ADR-175: a view-guest's genuine READ is signalled once per page open (view mode) — the server
+  // view-gates it (guest tokens carry `view`) and aggregates it (guests are never named in the roster).
+  const viewSignaledRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pageId || editing || viewSignaledRef.current === pageId) return;
+    viewSignaledRef.current = pageId;
+    apiFetch(`/pages/${encodeURIComponent(pageId)}/view`, token, { method: "POST" }).catch(() => {});
+  }, [pageId, editing, token]);
 
   // #274 EDIT-capability guests rename via the same title band as members (naming happens in the
   // editor — guest pages are created "Untitled"). The server re-checks FGA edit on the guest token.

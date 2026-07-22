@@ -9,6 +9,7 @@ import { resolveDirectiveRanges } from '@wikistead/macro-render' // #353: scan `
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { resolveAuthorIdentities, authorFields } from '../author-identity.js' // #486 / ADR-150 Addendum 2
+import { collectPageView, analyticsDayUTC } from '../analytics/collect.js' // #464 / ADR-175
 import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc } from './revision-ydoc.js'
 import type { TenantDb } from '../db/index.js'
@@ -3122,6 +3123,28 @@ export async function pagesPlugin(app: FastifyInstance) {
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/published', { config: { guest: 'view' } }, async (req) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
     return getPublished(req.db, app.fga, { pageId: req.params.pageId, subject, context })
+  })
+
+  // #464 / ADR-175: record a genuine READ for page analytics. The reading surface calls this ONCE on mount
+  // (never the polled /published fetch, nor an editor/preview open — the ADR §2 explicit read signal, so
+  // "member views" means readers, not people who opened the editor). VIEW-gated with existence-hiding (a
+  // non-viewer 404s here exactly like /published, so this is never an oracle and only view-able pages are
+  // recorded). A MEMBER is named in the roster (reliable, deduped per day); a view-GUEST is aggregated only
+  // (no durable id). Collection is EE-gated + deduped inside collectPageView; a hiccup never 500s the mount.
+  app.post<{ Params: { pageId: string } }>('/pages/:pageId/view', { config: { guest: 'view' } }, async (req, reply) => {
+    const { subject, context } = principalForPage(req, req.params.pageId)
+    if (!(await check(app.fga, subject, 'view', { type: 'page', id: req.params.pageId }, context))) {
+      return reply.code(404).send({ error: 'not found' }) // existence-hiding — same floor as /published
+    }
+    const viewerClass = req.user ? 'member' : 'guest'
+    const memberSub = req.user ? req.user.sub : null
+    // dedup key: a member by sub, a guest by its pseudonymous per-session anonId (never a durable store)
+    const dedupKey = req.user ? req.user.sub : (req.guest?.anonId ?? `g:${req.guest?.shareLinkId ?? ''}`)
+    await collectPageView({
+      sql: req.db.sql, valkey: app.valkey, tenant: { id: req.tenant.id, plan: req.tenant.plan },
+      pageId: req.params.pageId, viewerClass, memberSub, dedupKey, day: analyticsDayUTC(new Date()),
+    }).catch(() => {})
+    return reply.code(204).send()
   })
 
   // #230: backlinks for a page (member or view-guest). Each returned page is FGA-view-gated for the
