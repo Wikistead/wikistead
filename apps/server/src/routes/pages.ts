@@ -8,6 +8,7 @@ import { docName } from '@wikistead/types'
 import { resolveDirectiveRanges } from '@wikistead/macro-render' // #353: scan `:::query` blocks for the anon snapshot
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
+import { resolveAuthorIdentities, authorFields } from '../author-identity.js' // #486 / ADR-150 Addendum 2
 import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc } from './revision-ydoc.js'
 import type { TenantDb } from '../db/index.js'
@@ -86,7 +87,12 @@ export async function setEmbedProviders(
 }
 
 interface PageRow { id: string; tenant_id: string; space_id: string; parent_id: string | null; title: string; position: number; created_at: Date; updated_at: Date; has_unpublished_changes?: boolean; published?: boolean; created_by?: string | null; updated_by?: string | null; task_done?: number; task_total?: number }
-export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean; canModerate?: boolean; canComment?: boolean; private?: boolean; frozen?: 'full' | 'guests' | null; createdBy?: string | null; updatedBy?: string | null; taskDone?: number; taskTotal?: number }
+export interface Page { id: string; tenantId: string; spaceId: string; parentId: string | null; title: string; position: number; createdAt: Date; updatedAt: Date; capability?: 'view' | 'edit'; hasUnpublishedChanges?: boolean; published?: boolean; canManage?: boolean; canModerate?: boolean; canComment?: boolean; private?: boolean; frozen?: 'full' | 'guests' | null; createdBy?: string | null; updatedBy?: string | null; taskDone?: number; taskTotal?: number;
+  // #486 / ADR-150 Addendum 2: the author display name/avatar, resolved server-side on this ALREADY
+  // view-gated response (getPage is member-only, 404 on deny). `…Name` = override ?? OIDC name (null =
+  // un-customized member / cross-tenant / guest author — the client keeps its own short label); `…HasAvatar`
+  // drives the uploaded-avatar chip. Present only on getPage (not the tree list, which never selects authors).
+  createdByName?: string | null; createdByHasAvatar?: boolean; updatedByName?: string | null; updatedByHasAvatar?: boolean }
 function toPage(r: PageRow): Page {
   // hasUnpublishedChanges + published are only present when the SELECT included the
   // columns (listPages); together they drive the sidebar's 3-state badge
@@ -496,7 +502,16 @@ export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: 
   // any viewer (freeze only removes access — the flag reveals nothing; non-viewers 404 above). A frozen
   // member's `capability` already resolves to 'view' via checkMemberAccess (the model subtracts edit).
   const frozen = await readPageFrozen(fga, args.pageId)
-  return { ...toPage(row), capability: access.readOnly ? 'view' : 'edit', canManage, canModerate, canComment, private: isPrivate, frozen }
+  // #486 / ADR-150 Addendum 2: attach the author display identity. This is a VIEW-GATED response (the 404
+  // above is the fortress), the subs are SERVER-STORED (created_by/updated_by — not client-supplied), and
+  // the resolve runs on the caller's RLS handle `db` (cross-tenant/deleted → absent → null). Full
+  // resolution (override ?? OIDC name) is correct here; the customized-only rule is only for the arbitrary-
+  // sub /members/identities resolver. R3: this is AFTER the access gate, on the single surviving row.
+  const authorIds = await resolveAuthorIdentities(db, [row.created_by, row.updated_by].filter((s): s is string => s != null))
+  const createdByA = authorFields(authorIds, row.created_by)
+  const updatedByA = authorFields(authorIds, row.updated_by)
+  return { ...toPage(row), capability: access.readOnly ? 'view' : 'edit', canManage, canModerate, canComment, private: isPrivate, frozen,
+    createdByName: createdByA.name, createdByHasAvatar: createdByA.hasAvatar, updatedByName: updatedByA.name, updatedByHasAvatar: updatedByA.hasAvatar }
 }
 
 // Update title. Outbox entry written in the same tx as the UPDATE.

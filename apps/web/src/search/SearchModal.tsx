@@ -138,7 +138,7 @@ export function SearchModal({ open, onOpenChange, guestToken, onNavigate }: {
                     <div className="min-w-0 flex-1 truncate text-sm font-bold">{pageQ.data.title || t("common.untitled")}</div>
                     {!pageQ.data.published && <span className="shrink-0 text-xs text-fg-dim" data-testid="search-preview-draft">{t("page.draft")}</span>}
                   </div>
-                  <PageMeta createdBy={pageQ.data.createdBy} updatedBy={pageQ.data.updatedBy} updatedAt={pageQ.data.updatedAt} />
+                  <PageMeta createdBy={pageQ.data.createdBy} updatedBy={pageQ.data.updatedBy} updatedAt={pageQ.data.updatedAt} createdByName={pageQ.data.createdByName} createdByHasAvatar={pageQ.data.createdByHasAvatar} updatedByName={pageQ.data.updatedByName} updatedByHasAvatar={pageQ.data.updatedByHasAvatar} />
                   {/* #285(B): render the view-gated PUBLISHED body with the member read-engine so it
                       looks like the real page (not a source dump). A draft (no published body) shows an
                       explicit placeholder instead of an empty pane. */}

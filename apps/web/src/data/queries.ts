@@ -60,6 +60,14 @@ export interface Page {
   updatedAt?: string;
   createdBy?: string | null;
   updatedBy?: string | null;
+  // #486 / ADR-150 Addendum 2: the author display name/avatar resolved server-side on this view-gated
+  // response (override ?? OIDC name; null = un-customized/cross-tenant/guest author). When present the
+  // AuthorChip uses it directly instead of the customized-only /members/identities lookup — so a member
+  // who never set an override still shows their IdP name here (the gated surface may reveal it).
+  createdByName?: string | null;
+  createdByHasAvatar?: boolean;
+  updatedByName?: string | null;
+  updatedByHasAvatar?: boolean;
 }
 
 export function useSpaces(enabled = true) {
@@ -812,6 +820,12 @@ export interface PageMeta {
   updatedAt?: string;
   createdBy?: string | null;
   updatedBy?: string | null;
+  // #486 / ADR-150 Addendum 2: author display name/avatar resolved server-side on this view-gated
+  // response (override ?? OIDC name; null = un-customized/cross-tenant/guest). AuthorChip prefers it.
+  createdByName?: string | null;
+  createdByHasAvatar?: boolean;
+  updatedByName?: string | null;
+  updatedByHasAvatar?: boolean;
   // #285 (condition 1): the SAFE-side publish flag for the search preview's draft badge —
   // published_at IS NOT NULL from the view-gated getPage (NEVER the manage-gated isPagePublic).
   published?: boolean;
