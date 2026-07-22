@@ -10,8 +10,9 @@
 // Listing is tenant-admin only (no entitlement): the UI shows the uniform role picker (built-ins
 // + any custom rows retained from an entitled period) on every plan.
 import type { FastifyInstance } from 'fastify'
+import type { OpenFgaClient } from '@openfga/sdk'
 import { randomUUID } from 'node:crypto'
-import { requireTenantAdmin, writeTuples, deleteTuples } from '@wikistead/authz'
+import { requireTenantAdmin, isTenantAdmin, check, writeTuples, deleteTuples } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { entitlementDenied } from '../entitlement-ux.js'
 import { auditIfEntitled } from '../audit/outbox.js'
@@ -27,6 +28,13 @@ export type RoleCapability = (typeof ROLE_CAPABILITIES)[number]
 // not exist yet, so they cannot live on page/space). MUTUALLY EXCLUSIVE with the resource vocabulary:
 // a resource role cannot bundle `createSpaces`, a tenant role cannot bundle `edit` (parseDefinition
 // enforces per scope). Grows later (invite members, manage templates, …).
+// #485 / ADR-171 Addendum 2: the ADMIN-CLASS resource capabilities — the ones the page GRANT CEILING
+// (pages.ts `ADMIN_CLASS_RELATIONS`,STRICT fork) gates behind `manage`. `manage` itself is not a
+// role capability (it is the built-in superset), so the role-side set is that page set minus `manage`.
+// A role assignment at PAGE scope requires the assigner's page `manage` iff the role bundles ANY of
+// these — otherwise a `share`-only holder could assign a role that escalates a principal to admin class.
+const ADMIN_CLASS_ROLE_CAPS = new Set<RoleCapability>(['delete', 'share', 'settings', 'publish', 'moderate'])
+
 export const TENANT_ROLE_CAPABILITIES = ['createSpaces'] as const
 export type TenantRoleCapability = (typeof TENANT_ROLE_CAPABILITIES)[number]
 export type AnyRoleCapability = RoleCapability | TenantRoleCapability
@@ -82,6 +90,57 @@ function expansionTuples(resourceType: 'page' | 'space' | 'tenant', resourceId: 
   return rels.map((relation) => ({ user: principal, relation, object: `space:${resourceId}` }))
 }
 
+const forbidden = () => Object.assign(new Error('forbidden'), { statusCode: 403 })
+
+// #485 / ADR-171 Addendum 2: the per-scope AUTHORITY to WRITE a role ASSIGNMENT (assign / unassign).
+// Replaces the flat tenant-admin gate on the assignment paths so a SPACE MANAGER can assign roles inside
+// their own space, at BOTH space and page scope. The gate is the target resource's authority:
+//   - tenant scope  → tenant admin — createSpaces & co. stay closed to a global admin.
+//   - space scope   → space `manage` (= the `manager` relation, the space SUPERSET). No per-capability
+//                     ceiling: a manager already holds every space capability, and the base-tier space
+//                     grant relations (sharer/deleter/…) do NOT union `manager` (model.fga:100-105), so
+//                     the page-style `share`+ceiling would wrongly 403 a legitimate manager.
+//   - page scope    → the page GRANT CEILING extended to the role BUNDLE: always the page `share` verb,
+//                     plus page `manage` iff ANY bundled capability is admin-class (ADMIN_CLASS_ROLE_CAPS).
+//                     This is `requireGrantAuthority` (pages.ts,) applied to every capability at
+//                     once — a partial grant would break theprovenance/ref-count, so ANY
+//                     over-ceiling capability rejects the WHOLE assignment.
+// A TENANT ADMIN short-circuits every resource scope: they could assign anywhere before this change
+// (incl. a private page, from which a space manager is correctly cut via `manage_from_space … but not
+// private`), so the short-circuit preserves that non-regression. `page share` unions `manage`
+// (model.fga:168), so a manager passes the page `share` check with no special case.
+export async function requireAssignmentAuthority(
+  fga: OpenFgaClient,
+  args: { sub: string; tenantId: string; resourceType: 'page' | 'space' | 'tenant'; resourceId: string; capabilities: AnyRoleCapability[] },
+): Promise<void> {
+  const { sub, tenantId, resourceType, resourceId, capabilities } = args
+  if (resourceType === 'tenant') { await requireTenantAdmin(fga, sub, tenantId); return }
+  if (await isTenantAdmin(fga, sub, tenantId)) return // global admin keeps assigning anywhere (non-regression)
+  if (resourceType === 'space') {
+    if (!(await check(fga, `user:${sub}`, 'manage', { type: 'space', id: resourceId }))) throw forbidden()
+    return
+  }
+  // page scope — the grant ceiling over the whole bundle
+  if (!(await check(fga, `user:${sub}`, 'share', { type: 'page', id: resourceId }))) throw forbidden()
+  if (capabilities.some((c) => ADMIN_CLASS_ROLE_CAPS.has(c as RoleCapability))) {
+    if (!(await check(fga, `user:${sub}`, 'manage', { type: 'page', id: resourceId }))) throw forbidden()
+  }
+}
+
+// The authority to READ (list) a resource's assignments: the target's `manage` (space manager / page
+// manage), tenant → admin, tenant-admin short-circuit. Listing is a management view, so it gates on
+// `manage` (not the write-side share ceiling); the endpoint answers for one resourceId, so there is no
+// cross-space enumeration surface.
+export async function requireListAuthority(
+  fga: OpenFgaClient,
+  args: { sub: string; tenantId: string; resourceType: 'page' | 'space' | 'tenant'; resourceId: string },
+): Promise<void> {
+  const { sub, tenantId, resourceType, resourceId } = args
+  if (resourceType === 'tenant') { await requireTenantAdmin(fga, sub, tenantId); return }
+  if (await isTenantAdmin(fga, sub, tenantId)) return
+  if (!(await check(fga, `user:${sub}`, 'manage', { type: resourceType, id: resourceId }))) throw forbidden()
+}
+
 // The validateGrant principal rule (pages.ts): a member or a group member-set — never share_link /
 // user:* / other object types (guest boundary; the FGA model backstops for the new leaves).
 function validatePrincipal(principal: string): void {
@@ -120,6 +179,9 @@ export async function rolesPlugin(app: FastifyInstance) {
   }
   const writeGates = async (req: { user: { sub: string }; tenant: { id: string; plan: string } }) => {
     await adminGate(req)
+    if (!resolveEntitlements(req.tenant.plan).customRoles) throw entitlementDenied('customRoles')
+  }
+  const requireEntitlement = (req: { tenant: { plan: string } }) => {
     if (!resolveEntitlements(req.tenant.plan).customRoles) throw entitlementDenied('customRoles')
   }
 
@@ -249,7 +311,6 @@ export async function rolesPlugin(app: FastifyInstance) {
   // ---- increment 3: ASSIGNMENTS (expand a role to fixed-relation tuples; provenance rows) ----
 
   app.get<{ Querystring: { resourceType?: string; resourceId?: string } }>('/admin/roles/assignments', async (req) => {
-    await adminGate(req)
     const { resourceType, resourceId } = req.query
     if ((resourceType !== 'page' && resourceType !== 'space' && resourceType !== 'tenant') || !resourceId) {
       throw Object.assign(new Error('resourceType (page|space|tenant) and resourceId required'), { statusCode: 400 })
@@ -258,6 +319,9 @@ export async function rolesPlugin(app: FastifyInstance) {
     if (resourceType === 'tenant' && resourceId !== req.tenant.id) {
       throw Object.assign(new Error('not found'), { statusCode: 404 })
     }
+    // #485: a space manager may list the assignments of a resource they manage (space/page); tenant
+    // scope stays admin-only. No cross-space enumeration — the endpoint answers for one resourceId.
+    await requireListAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId })
     const rows = await req.db.sql<{ id: string; role_id: string; name: string; principal: string }[]>`
       SELECT a.id, a.role_id, r.name, a.principal FROM role_assignments a JOIN roles r ON r.id = a.role_id
       WHERE a.resource_type = ${resourceType} AND a.resource_id = ${resourceId} ORDER BY r.name, a.principal`
@@ -266,12 +330,14 @@ export async function rolesPlugin(app: FastifyInstance) {
 
   app.post<{ Params: { roleId: string }; Body: { resourceType?: string; resourceId?: string; principal?: string } }>(
     '/admin/roles/:roleId/assignments', async (req, reply) => {
-      await writeGates(req)
       const { resourceType, resourceId, principal } = req.body ?? {}
       if ((resourceType !== 'page' && resourceType !== 'space' && resourceType !== 'tenant') || !resourceId || !principal) {
         throw Object.assign(new Error('resourceType (page|space|tenant), resourceId, principal required'), { statusCode: 400 })
       }
       validatePrincipal(principal)
+      // Entitlement (customRoles) up front — a plan gate, not an existence oracle, so it may precede the
+      // resource reads (matches the original writeGates order; theentitlement anti-test pins it).
+      requireEntitlement(req)
       const [role] = await req.db.sql<RoleRow[]>`SELECT id, name, capabilities, scope, created_at, updated_at FROM roles WHERE id = ${req.params.roleId}`
       if (!role) throw Object.assign(new Error('not found'), { statusCode: 404 })
       // #445: a role assigns only AT its scope — a tenant role to page/space (or vice versa) is a 400.
@@ -293,6 +359,10 @@ export async function rolesPlugin(app: FastifyInstance) {
       }
       // Validate EVERY capability maps at this scope BEFORE any write (no partial expansion).
       const caps = role.capabilities as AnyRoleCapability[]
+      // #485 / ADR-171 Addendum 2: gate on the TARGET resource's authority (space manager / page
+      // grant-ceiling / tenant admin), AFTER the existence-bind (so a cross-tenant/unknown id is a
+      // uniform 404, never a 403 that confirms it exists). Entitlement was already checked up front.
+      await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId, capabilities: caps })
       const allTuples = caps.map((c) => ({ cap: c, tuples: expansionTuples(resourceType, resourceId, principal, c) }))
 
       // Ownership via a PRE-READ: a capability whose tuples ALL already exist (e.g. a prior
@@ -338,7 +408,16 @@ export async function rolesPlugin(app: FastifyInstance) {
     })
 
   app.delete<{ Params: { assignmentId: string } }>('/admin/roles/assignments/:assignmentId', async (req, reply) => {
-    await writeGates(req)
+    // #485 / ADR-171 Addendum 2: unassign needs the SAME per-scope authority as assign — a space manager
+    // may revoke inside their space. Entitlement up front (as on assign), then pre-read the assignment's
+    // resource + role bundle on the RLS handle (a cross-tenant / unknown id is a uniform 404), then gate.
+    // The mutating tx below re-reads FOR UPDATE for the ref-count discipline; the assignment's
+    // resource/role are immutable, so gating on the pre-read is safe.
+    requireEntitlement(req)
+    const [pre] = await req.db.sql<{ resource_type: 'page' | 'space' | 'tenant'; resource_id: string; capabilities: AnyRoleCapability[] }[]>`
+      SELECT a.resource_type, a.resource_id, r.capabilities FROM role_assignments a JOIN roles r ON r.id = a.role_id WHERE a.id = ${req.params.assignmentId}`
+    if (!pre) throw Object.assign(new Error('not found'), { statusCode: 404 })
+    await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType: pre.resource_type, resourceId: pre.resource_id, capabilities: pre.capabilities as AnyRoleCapability[] })
     interface AsgRow { id: string; role_id: string; resource_type: 'page' | 'space' | 'tenant'; resource_id: string; principal: string; owned_capabilities: string[]; capabilities: string[] }
     // One tx, FGA LAST. All reads run INSIDE the tx with row locks (FOR UPDATE) so two concurrent
     // unassigns of co-covering assignments serialize — without the locks both would see the other as
