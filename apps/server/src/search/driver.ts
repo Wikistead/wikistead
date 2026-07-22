@@ -46,16 +46,24 @@ export class LogicalSearchDriver implements SearchDriver {
     await this.client.waitForTasks([t1.taskUid, t2.taskUid, t3.taskUid])
   }
 
-  async search({ tenantId, userId, groups, q, spaceId, offset, limit }: {
-    tenantId: string; userId: string; groups: string[]; q: string; spaceId?: string; offset?: number; limit?: number
+  async search({ tenantId, userId, groups, q, spaceId, offset, limit, omitViewerFilter }: {
+    tenantId: string; userId: string; groups: string[]; q: string; spaceId?: string; offset?: number; limit?: number; omitViewerFilter?: boolean
   }): Promise<SearchHit[]> {
     // TODO(phase: tenancy-namespace): route to NamespaceSearchDriver
-    const visibilityFilter = [
-      `viewerUsers = "user:${userId}"`,
-      ...groups.map(g => `viewerGroups = "group:${g}"`),
-      'isPublic = true',
-    ].join(' OR ')
-    const filters = [`tenantId = "${tenantId}"`, `(${visibilityFilter})`]
+    // #449 / ADR-173: a guest scan omits the viewer terms (the denorm does not carry share_link
+    // principals) and relies on tenant + space here, with the FGA stage-2 as the fortress. The
+    // route MUST force a spaceId for a guest — a viewer-less filter without a space scope would let
+    // the whole tenant's candidates through stage 1, and while stage 2 would still deny them, it is
+    // a needless widening. That invariant is enforced at the call site (the route), not trusted here.
+    const filters = [`tenantId = "${tenantId}"`]
+    if (!omitViewerFilter) {
+      const visibilityFilter = [
+        `viewerUsers = "user:${userId}"`,
+        ...groups.map(g => `viewerGroups = "group:${g}"`),
+        'isPublic = true',
+      ].join(' OR ')
+      filters.push(`(${visibilityFilter})`)
+    }
     if (spaceId) filters.push(`spaceId = "${spaceId}"`)
 
     // Crop a plain-text body excerpt around the match for the result snippet. No

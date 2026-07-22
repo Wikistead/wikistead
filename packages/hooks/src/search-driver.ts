@@ -31,6 +31,13 @@ export interface SearchDriver {
     // (backward compatible). The caller (two-stage search) loops windows under a scan budget.
     offset?: number
     limit?: number
+    // #449 / ADR-173: a GUEST candidate scan. Stage 1 is performance, never the fortress
+    // (ADR-027) — for a share-link guest the viewer denormalization does not carry them (the
+    // doc-builder excludes share_link principals), so the candidate filter drops the viewer terms
+    // and keeps only tenant + space. Everything the guest must not see (private / trashed / draft /
+    // other spaces) is cut by the AUTHORITATIVE stage-2 FGA check on the share_link principal — the
+    // caller MUST pass a space scope AND run that check; this flag only widens stage 1.
+    omitViewerFilter?: boolean
   }): Promise<SearchHit[]>
   upsertDoc(doc: SearchDoc): Promise<void>
   deleteDoc(pageId: string): Promise<void>

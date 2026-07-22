@@ -1572,11 +1572,15 @@ export function usePageMemberCandidates(pageId: string | null, q: string) {
   });
 }
 
-export function useSearch(q: string) {
-  const { token } = useSession();
+// #449 / ADR-173: a guest space-link surface passes its own token here; the server forces the guest's
+// scope and gates every hit on the share_link principal (stage 2), so the client stays a thin caller.
+// The token is folded into the query key so a member's and a guest's result caches never collide.
+export function useSearch(q: string, tokenOverride?: string) {
+  const { token: sessionToken } = useSession();
+  const token = tokenOverride ?? sessionToken;
   const query = q.trim();
   return useQuery({
-    queryKey: ["search", query],
+    queryKey: ["search", tokenOverride ? "guest" : "member", query],
     queryFn: () => apiFetch<SearchHit[]>(`/search?q=${encodeURIComponent(query)}`, token).then((r) => r ?? []),
     enabled: query.length > 0,
     staleTime: 10_000,

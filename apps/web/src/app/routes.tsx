@@ -908,7 +908,13 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
     : null;
 
   return (
-    <AppShell sidebar={<GuestSidebar pages={pages ?? []} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} />}>
+    <AppShell
+      sidebar={<GuestSidebar pages={pages ?? []} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} />}
+      // #449 / ADR-173: the guest gets the SAME search box (Ctrl-K + the header field), wired to their
+      // own token and opening hits inside this shell via the tree's open handler. The server forces the
+      // link's space scope and gates every hit on the share_link principal — no member chrome leaks here.
+      search={<SearchBox guestToken={token} onNavigate={setOpenId} />}
+    >
       {pageMinted ? (
         // key on the page id so switching pages in the tree remounts the editor cleanly. A page this
         // guest JUST created opens straight in edit mode (member new-page parity,); onTitleChange
