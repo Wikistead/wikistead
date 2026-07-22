@@ -21,9 +21,15 @@ const PUB = 'gs245-published'    // published, in space, guest-viewable → in t
 const DRAFT = 'gs245-draft'      // in space but never published (no page#space) → hidden
 const PRIV = 'gs245-private'     // published but private (pair-marked) → hidden (post-#244)
 const SPACE_LINK = 'gs245-space-link'
-const EDIT_LINK = 'gs245-edit-link'   // #364a SPACE EDIT link (space#editor, the share-links.ts:93 write shape)
+const EDIT_LINK = 'gs245-edit-link'      // #364a SPACE EDIT link (space#editor, the share-links.ts:93 write shape)
+const EDIT_LINK_TB = 'gs245-edit-link-tb'   // a TIME-BOUNDED edit link (non_expired), still in date → visible
+const EDIT_LINK_EXP = 'gs245-edit-link-exp' // a time-bounded edit link past its expiry → hidden
 const PAGE_LINK = 'gs245-page-link'
 const guestCfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 }
+// #364: the route stamps `context.current_time = now` on every guest check; these bracket it so the
+// non_expired condition is exercised in BOTH directions (transported → future passes / past denies).
+const FUTURE_EXPIRY = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+const PAST_EXPIRY = new Date(Date.now() - 60 * 60 * 1000).toISOString()
 
 let app: FastifyInstance
 
@@ -33,6 +39,10 @@ const tuples = [
   // reached through the page-level `viewable`→`comment`→`edit_live` chain (edit ⊇ view), so the guest tree
   // must list the SAME published pages a view link does — an edit link that shows an empty sidebar is the bug.
   { user: `share_link:${EDIT_LINK}`, relation: 'editor', object: `space:${SPACE}` },
+  // Time-bounded edit links (share-links.ts writes the non_expired twin when expiresInSeconds is set). The
+  // route MUST transport current_time so the future link resolves and the expired one denies (design-review note).
+  { user: `share_link:${EDIT_LINK_TB}`, relation: 'editor', object: `space:${SPACE}`, condition: { name: 'non_expired', context: { expires_at: FUTURE_EXPIRY } } },
+  { user: `share_link:${EDIT_LINK_EXP}`, relation: 'editor', object: `space:${SPACE}`, condition: { name: 'non_expired', context: { expires_at: PAST_EXPIRY } } },
   { user: `space:${SPACE}`, relation: 'space', object: `page:${PUB}` },
   { user: `space:${SPACE}`, relation: 'space', object: `page:${PRIV}` },
   // DRAFT deliberately has NO page#space tuple (that's what "unpublished" means for the space inheritance).
@@ -80,6 +90,22 @@ describe('#245 guest sidebar capability boundary', () => {
     expect(ids).toContain(PUB)       // the edit link CAN view the published page → it must appear
     expect(ids).not.toContain(DRAFT) // still no draft leak
     expect(ids).not.toContain(PRIV)  // still no private leak
+  })
+
+  it('a time-bounded edit link still in date lists the tree (current_time transported through listPages)', async () => {
+    // #364: a non_expired edit link resolves ONLY if the route's current_time reaches the batch view check.
+    const tok = await mintGuestToken(guestCfg, { tenantId: TENANT, shareLinkId: EDIT_LINK_TB, resource: { type: 'space', id: SPACE }, capability: 'edit' })
+    const res = await app.inject({ method: 'GET', url: `/spaces/${SPACE}/pages`, headers: { host: 'dev.localhost', authorization: `Bearer ${tok}` } })
+    expect(res.statusCode).toBe(200)
+    expect((res.json() as { id: string }[]).map((p) => p.id)).toContain(PUB)
+  })
+
+  it('an EXPIRED edit link lists nothing (the non_expired condition denies — keeps the future case honest)', async () => {
+    // Makes the in-date case above non-vacuous: same shape, past expiry → the view chain collapses → empty tree.
+    const tok = await mintGuestToken(guestCfg, { tenantId: TENANT, shareLinkId: EDIT_LINK_EXP, resource: { type: 'space', id: SPACE }, capability: 'edit' })
+    const res = await app.inject({ method: 'GET', url: `/spaces/${SPACE}/pages`, headers: { host: 'dev.localhost', authorization: `Bearer ${tok}` } })
+    expect(res.statusCode).toBe(200)
+    expect((res.json() as { id: string }[]).map((p) => p.id)).not.toContain(PUB)
   })
 
   it('a PAGE-scoped guest link cannot reach the space tree at all (403 — no sibling probe)', async () => {
