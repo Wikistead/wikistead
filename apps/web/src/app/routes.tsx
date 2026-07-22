@@ -23,6 +23,7 @@ import { LoginScreen } from "./LoginScreen";
 
 
 import { Editor, type AnchorGetter } from "../editor/Editor";
+import { PageAnalyticsPanel } from "./PageAnalyticsPanel"; // #464 / ADR-175
 import { createDirtySignal } from "../editor/dirtySignal";
 import { colorFromString } from "../ui/avatar";
 
@@ -698,6 +699,10 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
               canEdit={canEdit}
             />
             <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
+            {/* #464 / ADR-175: the who-viewed analytics panel — a MANAGER-only reading affordance (the
+                server 403s a non-manager, 404s a non-viewer; this only renders when the caller manages the
+                page and is reading, not editing). */}
+            {page?.canManage && !editing && pageId && <PageAnalyticsPanel pageId={pageId} />}
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #192: the TOC rail lives in the content's RIGHT WHITESPACE, inside the editor area, so the
                 scrollbar (the editor's, at the far right) is to the RIGHT of the rail — not between them.
