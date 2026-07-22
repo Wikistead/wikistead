@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { enterEdit, createScratchPage, sleep } from "../helpers";
 
-// #453: the LOCAL atom-selection ring and the REMOTE macro-presence box must share one geometry —
+// #453: the LOCAL atom-selection ring and the REMOTE macro-presence box must share one geometry
 // same rect (the macro wrap, not the full content width), same radius/outline — differing only in
 // colour + avatar. Two real clients on one `:::children` atom; the observer holds BOTH frames at
 // once (its own atom-sel + the peer's presence box) so the comparison is same-viewport.
@@ -126,6 +126,69 @@ for (const kind of KINDS) {
     }
   });
 }
+
+// #453 the DYNAMIC case — both peers enter the SAME macro. In Live mode reveal is per-client, so
+// once the OBSERVER (B) also enters the callout it opens the macro's editUI island LOCALLY and the
+// rendered atom-box leaves B's view. The peer's (A) frame must NOT then balloon to the full content
+// width (the reported — a 740px outline around a full-width island). With no
+// compact widget to ring, the peer shows as an avatar CHIP anchored at the macro's start (no outline),
+// staying visible without flying outside.
+test("#453 a peer shows as a chip (no ballooning outline) when the observer also entered the macro", async ({ browser }) => {
+  const ctxA = await browser.newContext();
+  const ctxB = await browser.newContext();
+  const A = await ctxA.newPage();
+  const B = await ctxB.newPage();
+  try {
+    await A.goto("/p/demo");
+    await A.waitForSelector("[data-pane=preview] .cm-content");
+    const id = await createScratchPage(A, "pgeo453-state2");
+    for (const p of [A, B]) {
+      await p.goto(`/p/${id}`);
+      await p.waitForSelector("[data-pane=preview] .cm-content");
+    }
+    await sleep(600);
+    await enterEdit(A);
+    await enterEdit(B);
+
+    await A.click("[data-pane=preview] .cm-content");
+    for (const line of ["intro", "", ":::note", "note body here", ":::", "", "tail"]) {
+      await A.keyboard.type(line);
+      await A.keyboard.press("Enter");
+    }
+    await sleep(1200);
+    const panelB = B.locator("[data-pane=preview] .cm-lp-callout-panel").first();
+    await expect(panelB, "callout rendered for the observer").toBeVisible({ timeout: 9000 });
+
+    // A enters the callout → A's page caret leaves the surface; it publishes presence on the macro block.
+    await A.locator("[data-pane=preview] .cm-lp-callout-panel").first().click();
+    await sleep(400);
+    await A.keyboard.press("Control+Enter");
+    await sleep(700);
+
+    // B ALSO enters the callout → B opens the editUI island locally → the atom-box wrap leaves B's view.
+    await panelB.click();
+    await sleep(400);
+    await B.keyboard.press("Control+Enter");
+    await sleep(1000);
+
+    const box = B.locator("[data-pane=preview] [data-testid=macro-presence]");
+    await expect(box, "the peer stays visible (not vanished) when the observer opens the island").toHaveCount(1, { timeout: 6000 });
+    // it is CHIP-ONLY: no outline ring (which is what ballooned to full width before), avatar still shown.
+    await expect(box, "chip-only, not a ballooning outline").toHaveAttribute("data-chip-only", "1");
+    expect(await box.evaluate((el) => getComputedStyle(el).outlineWidth), "no ring in chip mode").toBe("0px");
+    const geom = await B.evaluate(() => {
+      const b = document.querySelector("[data-pane=preview] [data-testid=macro-presence]")!.getBoundingClientRect();
+      const c = document.querySelector("[data-pane=preview] .cm-content")!.getBoundingClientRect();
+      const av = document.querySelectorAll("[data-pane=preview] .cm-macro-presence-avatar").length;
+      return { boxWidth: b.width, contentWidth: c.width, avatars: av };
+    });
+    expect(geom.boxWidth, `chip anchor is not a full-width box (${Math.round(geom.boxWidth)} vs ${Math.round(geom.contentWidth)})`).toBeLessThan(geom.contentWidth * 0.5);
+    expect(geom.avatars, "the peer's avatar is drawn").toBeGreaterThanOrEqual(1);
+  } finally {
+    await ctxA.close();
+    await ctxB.close();
+  }
+});
 
 // A details block reveals its raw source when a caret enters it, so this harness cannot park a peer's
 // caret on the rendered widget and there is no presence box to measure. What CAN be pinned is the

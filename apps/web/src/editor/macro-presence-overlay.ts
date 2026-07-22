@@ -9,16 +9,16 @@ import { initials } from "../ui/avatar";
 // ✎/Ctrl+↵ button and only covered the Excalidraw modal case.
 //
 // PRESENCE-SAFE BY CONSTRUCTION (same contract as remote-cursors.ts): an ADDITIVE, read-only overlay in
-// its own DOM layer. It NEVER dispatches into CM, never writes awareness, never touches doc/offset/sync —
+// its own DOM layer. It NEVER dispatches into CM, never writes awareness, never touches doc/offset/sync
 // so it cannot re-break yCollab cursor sync (the #92 regression that broke it twice was a re-entrant
 // dispatch inside the awareness "change" handler). yCollab already dispatches a transaction on every remote
-// awareness change, so this plugin's update() re-runs in lockstep; positioning happens in a measure phase.
+// awareness change, so this plugin's update re-runs in lockstep; positioning happens in a measure phase.
 //
-// Two presence sources, unified per macro block:
-//   (a) macroEdit — a peer with a macro's MODAL/editUI open (they left the page surface, so their page
-//       caret vanished): published on the page awareness as `macroEdit=<block from>` (macro-presence.ts).
-//   (b) remote caret — a peer whose page caret/selection head sits ON a macro atom (livePreview.blocks):
-//       read from yCollab awareness exactly as remote-cursors does (offset-critical mapping reused).
+// Two presence sources, unified per macro block
+// (a) macroEdit — a peer with a macro's MODAL/editUI open (they left the page surface, so their page
+// caret vanished): published on the page awareness as `macroEdit=<block from>` (macro-presence.ts).
+// (b) remote caret — a peer whose page caret/selection head sits ON a macro atom (livePreview.blocks)
+// read from yCollab awareness exactly as remote-cursors does (offset-critical mapping reused).
 
 export interface BlockRange { readonly from: number; readonly to: number }
 export interface OverlayPeer { readonly name: string; readonly color: string; readonly picture?: string | null; readonly key: string }
@@ -77,7 +77,11 @@ function remoteCaretPeers(view: EditorView): CaretPeer[] {
   return out;
 }
 
-interface Rect { readonly top: number; readonly left: number; readonly width: number; readonly height: number; readonly peers: OverlayPeer[] }
+// `chipOnly` = draw the avatar(s) WITHOUT the outline ring. Used when the observer has no rendered
+// atom-box for the peer's macro (they locally raw-expanded it / opened its editUI island), so there is
+// no compact widget to ring — an outline would balloon to the full content width (the #453
+// ). The peer stays visible as an avatar anchored at the macro's start instead.
+interface Rect { readonly top: number; readonly left: number; readonly width: number; readonly height: number; readonly peers: OverlayPeer[]; readonly chipOnly?: boolean }
 
 const macroPresenceOverlayPlugin = ViewPlugin.fromClass(
   class {
@@ -106,17 +110,16 @@ const macroPresenceOverlayPlugin = ViewPlugin.fromClass(
       const byBlock = resolvePresenceBlocks(modal, carets, blocks);
       if (!byBlock.size) return [];
       const layerRect = this.layer.getBoundingClientRect();
-      const contentRect = view.contentDOM.getBoundingClientRect();
       // #453: hug the MACRO'S OWN rect (the same box the local atom-sel ring wraps) instead of the
       // full content width — the local and remote frames must be the same size and shape. Boxes are
-      // matched geometrically per measure (top ≈ block top, height closest to the block height —
+      // matched geometrically per measure (top ≈ block top, height closest to the block height
       // robust against nested boxes inside layout containers), so upstream edits can't leave a
       // stale offset mapping.
       // this asked for `.cm-lp-macro-wrap`, which is only SOME of the roots that take the ring.
       // A callout, a details block and a table each ring on their own root, so a peer's box around them
       // fell through to the full content width — 740px drawn around a 692px callout, and around a 153px
       // table. Ask for the shared marker every ring-taking root wears instead, so this cannot drift out
-      // of step with the ring again. A block with no marked root at all keeps the full-width fallback —
+      // of step with the ring again. A block with no marked root at all keeps the full-width fallback
       // there is no local ring there either, so there is nothing to disagree with.
       const wraps = Array.from(view.contentDOM.querySelectorAll<HTMLElement>(`.${ATOM_BOX_CLASS}`)).map(
         (el) => ({ el, rect: el.getBoundingClientRect() }),
@@ -134,23 +137,30 @@ const macroPresenceOverlayPlugin = ViewPlugin.fromClass(
         const wrap = candidates.sort(
           (x, y) => Math.abs(x.rect.height - blockH) - Math.abs(y.rect.height - blockH),
         )[0];
-        out.push(
-          wrap
-            ? {
-                top: wrap.rect.top - layerRect.top,
-                left: wrap.rect.left - layerRect.left,
-                width: wrap.rect.width,
-                height: wrap.rect.height,
-                peers,
-              }
-            : {
-                top: a.top - layerRect.top,
-                left: contentRect.left - layerRect.left,
-                width: contentRect.width,
-                height: blockH,
-                peers,
-              },
-        );
+        if (wrap) {
+          out.push({
+            top: wrap.rect.top - layerRect.top,
+            left: wrap.rect.left - layerRect.left,
+            width: wrap.rect.width,
+            height: wrap.rect.height,
+            peers,
+          });
+          continue;
+        }
+        // #453 no atom-box wrap — the observer has locally raw-expanded this macro (Live per-
+        // client reveal) or opened its editUI island, so there is no compact widget to ring. Drawing a
+        // full-width outline here is the reported regression (the peer's frame "flies outside" — 740px
+        // around a couple of lines / a full-width island). Show the peer as an avatar anchored at the
+        // macro's start instead: visible (not vanished), and never a ballooning outline. A tight anchor
+        // rect at the block head carries the avatar; `chipOnly` suppresses the ring in the write phase.
+        out.push({
+          top: a.top - layerRect.top,
+          left: a.left - layerRect.left,
+          width: 1,
+          height: Math.min(blockH, 20),
+          peers,
+          chipOnly: true,
+        });
       }
       return out;
     }
@@ -160,8 +170,9 @@ const macroPresenceOverlayPlugin = ViewPlugin.fromClass(
       this.layer.replaceChildren();
       for (const r of rects) {
         const box = document.createElement("div");
-        box.className = "cm-macro-presence-box";
+        box.className = r.chipOnly ? "cm-macro-presence-box cm-macro-presence-box-chip" : "cm-macro-presence-box";
         box.setAttribute("data-testid", "macro-presence");
+        if (r.chipOnly) box.setAttribute("data-chip-only", "1");
         box.style.top = `${Math.round(r.top)}px`;
         box.style.left = `${Math.round(r.left)}px`;
         box.style.width = `${Math.round(r.width)}px`;
@@ -212,8 +223,13 @@ const macroPresenceOverlayTheme = EditorView.baseTheme({
     boxShadow: "0 0 0 5px color-mix(in srgb, var(--mp-color, #30bced) 22%, transparent)",
     pointerEvents: "none",
   },
+  // #453 chip-only mode — no ring at all (the observer raw-expanded / opened the editUI island,
+  // so there is nothing compact to frame). Only the avatar remains, anchored at the macro's start.
+  ".cm-macro-presence-box-chip": { outline: "none", borderRadius: "0", boxShadow: "none" },
   // Avatar stack in the TOP-RIGHT corner — deliberately opposite the ✎/Ctrl+↵ edit button (top-left) so
-  // the two never overlap (#92 comment 982 ②).
+  // the two never overlap (#92 comment 982 ②). In chip-only mode the box is a 1px anchor at the macro's
+  // left, so the avatar sits just past the macro's start (left-aligned) rather than at a far-right edge.
+  ".cm-macro-presence-box-chip .cm-macro-presence-avatars": { right: "auto", left: "0" },
   ".cm-macro-presence-avatars": { position: "absolute", top: "-11px", right: "6px", display: "inline-flex", flexDirection: "row-reverse", gap: "0", pointerEvents: "none" },
   ".cm-macro-presence-avatar": {
     width: "20px",
