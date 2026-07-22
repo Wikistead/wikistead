@@ -4,6 +4,7 @@ import type IORedis from 'ioredis'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, filterAuthorized } from '@wikistead/authz'
 import type { TenantDb } from '../db/index.js'
+import { resolveAuthorIdentities, authorFields } from '../author-identity.js' // #486 / ADR-150 Addendum 2
 
 // Watch / notifications / cross-space feed (#320 / ADR-126) — a new subsystem whose READ surfaces are
 // permission-critical (the search-leak class). This module owns the three tables (watches / feed_events /
@@ -175,6 +176,9 @@ export interface FeedItem {
   pageId: string | null
   spaceId: string | null
   actor: string // opaque; the UI renders a generic "Guest" for any non-user: actor (never the raw id)
+  // #486 / ADR-150 Addendum 2: the actor's display name, resolved server-side on the VIEW-FILTERED feed
+  // (override ?? OIDC name; null = un-customized/cross-tenant/guest → the UI keeps its own label).
+  actorName?: string | null
   title: string | null
   createdAt: Date
   notificationId?: string
@@ -223,6 +227,16 @@ async function gateEvents(db: TenantDb, fga: OpenFgaClient, subject: string, row
       if (!spaceTitles.has(r.space_id) || !viewableSpaces.has(r.space_id)) continue
       out.push(toItem(r, spaceTitles.get(r.space_id)!))
     } // an event with neither id is not display-gateable → drop (defensive)
+  }
+  // #486 / ADR-150 Addendum 2: resolve actor display names on the VIEW-FILTERED set (R3 — `out`, never the
+  // raw rows). A member actor is the FGA-principal form `user:<sub>`; strip it before the members lookup.
+  // guest:/anon: actors resolve to null (dropped) so the UI keeps its "Guest" label. RLS handle → a
+  // cross-tenant actor is absent → null. No new fetch path; the name rides the already-authorized feed.
+  const actorSub = (a: string): string | null => (a.startsWith('user:') ? a.slice(5) : a.startsWith('guest:') || a.startsWith('anon:') ? null : a)
+  const actorIds = await resolveAuthorIdentities(db, out.map((i) => actorSub(i.actor)).filter((s): s is string => s != null))
+  for (const item of out) {
+    const s = actorSub(item.actor)
+    item.actorName = s ? authorFields(actorIds, s).name : null
   }
   return out
 }

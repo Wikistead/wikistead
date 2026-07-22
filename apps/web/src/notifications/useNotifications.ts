@@ -11,6 +11,7 @@ export interface FeedItem {
   pageId: string | null;
   spaceId: string | null;
   actor: string;
+  actorName?: string | null; // #486 / ADR-150 Addendum 2: server-resolved actor name (view-filtered feed)
   title: string | null;
   createdAt: string;
   notificationId?: string;
