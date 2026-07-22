@@ -10,6 +10,7 @@ import { withTenantTx } from '../db/index.js' // #382
 import { fanOutFeedEvent } from './notifications.js' // #327 / ADR-143: reliable in-tx restore feed event
 import type { TenantDb } from '../db/index.js'
 import type { StorageDriver } from '../storage/index.js'
+import { resolveAuthorIdentities, authorFields } from '../author-identity.js' // #486 / ADR-150 Addendum 2
 import { storeRevisionYdoc, readRevisionYdoc } from './revision-ydoc.js'
 import { reconcileTaskChecks, requireModerate } from './pages.js' // #316 checkbox reconciliation; #330 the moderation gate
 
@@ -19,6 +20,8 @@ interface RevisionRow {
 }
 export interface RevisionSummary {
   id: string; pageId: string; title: string; createdBy: string | null; createdAt: Date
+  // #486 / ADR-150 Addendum 2: author display name/avatar resolved on this view-gated history response.
+  createdByName?: string | null; createdByHasAvatar?: boolean
 }
 
 // ── computeRestoreUpdate ────────────────────────────────────────────────────
@@ -80,7 +83,16 @@ export async function listRevisions(
     FROM revisions WHERE page_id = ${args.pageId} AND created_at >= ${retentionCutoff(args.plan)}
     ORDER BY created_at DESC
   `
-  return rows.map(r => ({ id: r.id, pageId: r.page_id, title: r.title, createdBy: r.created_by, createdAt: r.created_at }))
+  // #486 / ADR-150 Addendum 2: resolve the revision author names AFTER the view gate, on the caller's
+  // RLS handle (cross-tenant → null), over the surviving rows only. override ?? OIDC name; guest dropped.
+  // NOTE: unlike page-meta/comments (bare sub), a revision's created_by is the FGA-principal form
+  // `user:<sub>` (or guest:/anon:) — strip the `user:` prefix so it matches members.sub.
+  const bareSub = (s: string | null): string | null => (s == null ? null : s.startsWith('user:') ? s.slice(5) : s)
+  const authorIds = await resolveAuthorIdentities(db, rows.map(r => bareSub(r.created_by)).filter((s): s is string => s != null))
+  return rows.map(r => {
+    const by = authorFields(authorIds, bareSub(r.created_by))
+    return { id: r.id, pageId: r.page_id, title: r.title, createdBy: r.created_by, createdByName: by.name, createdByHasAvatar: by.hasAvatar, createdAt: r.created_at }
+  })
 }
 
 // #109 / ADR-072: does this page have revisions HIDDEN by the plan's history-retention window?
