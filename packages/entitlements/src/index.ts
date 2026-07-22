@@ -76,6 +76,12 @@ export interface Entitlements {
   // break-glass. Same compliance family/tier as auditLog.
   accessTransparency: boolean
 
+  // #464 / ADR-175 (EE): per-viewer page analytics (who-viewed). Gates COLLECTION itself, not just the
+  // dashboard — an unentitled tenant records NO reading history (privacy-minimal, the auditIfEntitled
+  // pattern). self-host UNLIMITED on; Cloud paid only (business placeholder — #127). The collection
+  // enqueue and the dashboard both read this resolved boolean.
+  analytics: boolean
+
   // AI assists (#130 / ADR-077): gates the AI features (summarize/ask-KB/etc.). OFF by default
   // except self-host UNLIMITED; AI is also OFF unless an AIProvider is registered (BYOK) — this
   // flag is the PLAN lever, the registered provider is the deployment switch. Business placeholder.
@@ -142,6 +148,7 @@ export const UNLIMITED: Entitlements = {
   scim: true,
   auditLog: true,
   accessTransparency: true,
+  analytics: true,
   aiFeatures: true,
   aiTokenAllowance: Infinity,
   apiRateLimit: { perKey: Infinity, perTenant: Infinity },
