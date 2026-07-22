@@ -170,6 +170,14 @@ export async function membersPlugin(app: FastifyInstance) {
       // #362 E1: the removed member's watches go with them (BLIND delete is correct here — the member is
       // gone, unlike the per-watcher-checked revocation sweep). Stops their inbox rows from ever growing.
       await tx`DELETE FROM watches WHERE member_sub = ${req.params.sub}`
+      // #464 / ADR-175 §6: erase the removed member's personal reading history in this SAME tx, so a
+      // who-viewed record never outlives the member (the #474/#477 cleanup family). Their roster rows
+      // (page_view_roster is FORCE-RLS → this tenant only) AND any not-yet-drained analytics_outbox rows
+      // for them (tenant-scoped explicitly — the outbox has no RLS). The aggregate counts (page_view_daily)
+      // are anonymous and stay. The drain's membership re-check is the second defence against a fold that
+      // lands after this delete (erasure-race double-defence, reviewer condition 1).
+      await tx`DELETE FROM page_view_roster WHERE member_sub = ${req.params.sub}`
+      await tx`DELETE FROM analytics_outbox WHERE tenant_id = ${req.tenant.id} AND viewer_class = 'member' AND member_sub = ${req.params.sub}`
       // #474: the member's API keys go too. Removal already strips every other credential — sessions
       // (destroyMemberSessions below), membership and group tuples, direct grants (#396) — but an API
       // key is a longer-lived credential than a session, and it kept authenticating the removed sub.
