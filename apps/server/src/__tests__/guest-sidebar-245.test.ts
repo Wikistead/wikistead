@@ -21,6 +21,7 @@ const PUB = 'gs245-published'    // published, in space, guest-viewable → in t
 const DRAFT = 'gs245-draft'      // in space but never published (no page#space) → hidden
 const PRIV = 'gs245-private'     // published but private (pair-marked) → hidden (post-#244)
 const SPACE_LINK = 'gs245-space-link'
+const EDIT_LINK = 'gs245-edit-link'   // #364a SPACE EDIT link (space#editor, the share-links.ts:93 write shape)
 const PAGE_LINK = 'gs245-page-link'
 const guestCfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 }
 
@@ -28,6 +29,10 @@ let app: FastifyInstance
 
 const tuples = [
   { user: `share_link:${SPACE_LINK}`, relation: 'viewer', object: `space:${SPACE}` },
+  // #364the edit link writes `editor` ONLY (relationForResource, share-links.ts:93). Page view is
+  // reached through the page-level `viewable`→`comment`→`edit_live` chain (edit ⊇ view), so the guest tree
+  // must list the SAME published pages a view link does — an edit link that shows an empty sidebar is the bug.
+  { user: `share_link:${EDIT_LINK}`, relation: 'editor', object: `space:${SPACE}` },
   { user: `space:${SPACE}`, relation: 'space', object: `page:${PUB}` },
   { user: `space:${SPACE}`, relation: 'space', object: `page:${PRIV}` },
   // DRAFT deliberately has NO page#space tuple (that's what "unpublished" means for the space inheritance).
@@ -63,6 +68,18 @@ describe('#245 guest sidebar capability boundary', () => {
     expect(ids).toContain(PUB)
     expect(ids).not.toContain(DRAFT) // unpublished: no page#space → not view-inherited
     expect(ids).not.toContain(PRIV) // private: pair marker cuts the space-viewer inheritance for the guest
+  })
+
+  it('a space EDIT link lists the SAME tree as a view link (edit ⊇ view — no empty sidebar)', async () => {
+    // #364the reported symptom is "view link full, edit link empty sidebar". Reproduce the server
+    // side directly: an edit-capability space token must return the identical published-page set.
+    const tok = await mintGuestToken(guestCfg, { tenantId: TENANT, shareLinkId: EDIT_LINK, resource: { type: 'space', id: SPACE }, capability: 'edit' })
+    const res = await app.inject({ method: 'GET', url: `/spaces/${SPACE}/pages`, headers: { host: 'dev.localhost', authorization: `Bearer ${tok}` } })
+    expect(res.statusCode).toBe(200)
+    const ids = (res.json() as { id: string }[]).map((p) => p.id)
+    expect(ids).toContain(PUB)       // the edit link CAN view the published page → it must appear
+    expect(ids).not.toContain(DRAFT) // still no draft leak
+    expect(ids).not.toContain(PRIV)  // still no private leak
   })
 
   it('a PAGE-scoped guest link cannot reach the space tree at all (403 — no sibling probe)', async () => {
