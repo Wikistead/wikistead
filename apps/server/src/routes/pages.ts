@@ -10,6 +10,7 @@ import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { resolveAuthorIdentities, authorFields } from '../author-identity.js' // #486 / ADR-150 Addendum 2
 import { collectPageView, analyticsDayUTC } from '../analytics/collect.js' // #464 / ADR-175
+import { resolveEntitlements } from '@wikistead/entitlements' // #464: EE gate for the analytics dashboard
 import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc } from './revision-ydoc.js'
 import type { TenantDb } from '../db/index.js'
@@ -3145,6 +3146,28 @@ export async function pagesPlugin(app: FastifyInstance) {
       pageId: req.params.pageId, viewerClass, memberSub, dedupKey, day: analyticsDayUTC(new Date()),
     }).catch(() => {})
     return reply.code(204).send()
+  })
+
+  // #464 / ADR-175: the page analytics DASHBOARD — who-viewed roster (members named) + the guest/anon
+  // aggregate. MEMBER-ONLY (no config.guest — the roster is strong signal). Two-gated (ADR-126 pattern)
+  // (1) `view` is the floor → a non-viewer 404s (existence-hiding, never an oracle); (2) the roster
+  // requires `manage` → a viewer who is not a manager 403s (they see the page but not who read it). The
+  // data is read on the caller's RLS handle (req.db) scoped to THIS page — never `space#viewer`-gated
+  // (the #464/ADR-126 leak class). EE-gated: an unentitled tenant gets `entitled:false` (the UI shows the
+  // upgrade affordance), never the reading history.
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/analytics', async (req, reply) => {
+    const subject = `user:${req.user.sub}`
+    const ref = { type: 'page', id: req.params.pageId } as const
+    if (!(await check(app.fga, subject, 'view', ref))) return reply.code(404).send({ error: 'not found' }) // existence-hiding floor
+    if (!(await check(app.fga, subject, 'manage', ref))) return reply.code(403).send({ error: 'manage required' }) // roster is manage-gated
+    if (!resolveEntitlements(req.tenant.plan).analytics) return { entitled: false, roster: [], daily: [] } // EE gate (paid feature)
+    // RLS-scoped (req.db → this tenant) + page_id filter (this page). roster = members named; daily = the
+    // per-viewer-class aggregate (members counted distinct/day, guests/anon deduped sessions).
+    const roster = await req.db.sql<{ member_sub: string; day: string }[]>`
+      SELECT member_sub, day::text AS day FROM page_view_roster WHERE page_id = ${req.params.pageId} ORDER BY day DESC, member_sub LIMIT 2000`
+    const daily = await req.db.sql<{ day: string; viewer_class: string; views: number }[]>`
+      SELECT day::text AS day, viewer_class, views::int AS views FROM page_view_daily WHERE page_id = ${req.params.pageId} ORDER BY day DESC LIMIT 400`
+    return { entitled: true, roster: roster.map((r) => ({ memberSub: r.member_sub, day: r.day })), daily: daily.map((d) => ({ day: d.day, viewerClass: d.viewer_class, views: d.views })) }
   })
 
   // #230: backlinks for a page (member or view-guest). Each returned page is FGA-view-gated for the

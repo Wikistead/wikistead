@@ -32,6 +32,14 @@
   "collab": {
     "guest": "Guest"
   },
+  "pageAnalytics": {
+    "title": "Who viewed this page",
+    "members": "Members",
+    "guests": "Guests",
+    "anon": "Anonymous",
+    "readers": "Members who read it",
+    "upsell": "Page analytics is available on a paid plan."
+  },
   "toast": {
     "published": "Published",
     "publishFailed": "Couldn't publish",

@@ -1016,6 +1016,24 @@ export function useSetPublicSurface() {
   });
 }
 
+// #464 / ADR-175: the page analytics dashboard (who-viewed roster + guest/anon aggregate). MANAGE-gated
+// server-side (a non-manager 403s, a non-viewer 404s), so it only loads where the caller manages the page.
+// `entitled:false` = the tenant is not on an analytics plan (show the upgrade affordance, not the history).
+export interface PageAnalytics {
+  entitled: boolean;
+  roster: { memberSub: string; day: string }[];
+  daily: { day: string; viewerClass: "member" | "guest" | "anon"; views: number }[];
+}
+export function usePageAnalytics(pageId: string | null, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["page-analytics", pageId],
+    queryFn: () => apiFetch<PageAnalytics>(`/pages/${encodeURIComponent(pageId!)}/analytics`, token),
+    enabled: enabled && !!pageId,
+    staleTime: 60_000,
+  });
+}
+
 // #491 / ADR-140: the tenant abuse-filter config (mass-delete shrink ratio + banned words). Admin-gated
 // on the server (GET/PATCH re-check tenant#admin, 403 otherwise). The banned-word list is moderation
 // intelligence, so it never loads on a non-admin surface.

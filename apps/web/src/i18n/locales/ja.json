@@ -32,6 +32,14 @@
   "collab": {
     "guest": "ゲスト"
   },
+  "pageAnalytics": {
+    "title": "このページの閲覧者",
+    "members": "メンバー",
+    "guests": "ゲスト",
+    "anon": "匿名",
+    "readers": "読んだメンバー",
+    "upsell": "ページアナリティクスは有料プランで利用できます。"
+  },
   "toast": {
     "published": "公開しました",
     "publishFailed": "公開できませんでした",
