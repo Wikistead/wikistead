@@ -216,13 +216,18 @@ const COLLAB_URL = resolveCollabUrl();
 // (gated by useDelayedFlag so a fast load never flashes it); resolved-and-blank → an explicit empty state.
 // An overlay, not a replacement: the Editor stays mounted underneath so collab/presence are untouched
 // (the project design notes: a reconfigure/remount must never drop them), and it never intercepts clicks.
+// #457the overlay must actually COVER the editor — inset-0 (full height, not just the top edge)
+// with an OPAQUE page background (var(--bg)) so the mounted-but-still-resolving Editor never shows
+// through. Before this it was inset-x-0/top-0 and transparent, so the instant the editor began painting
+// content (before showSkeleton flipped false) the skeleton and the real body were both visible = the
+// overlap. It sits below the title band (z-20) so the band stays crisp, and above the editor.
 function BodyPlaceholder({ loading, empty, canEdit }: { loading: boolean; empty: boolean; canEdit: boolean }) {
   const { t } = useTranslation();
   const showSkeleton = useDelayedFlag(loading);
   if (!showSkeleton && !empty) return null;
   return (
     <div
-      className="pointer-events-none absolute inset-x-0 top-0 z-[1] flex justify-center"
+      className="pointer-events-none absolute inset-0 z-[1] flex justify-center bg-[var(--bg)]"
       // the surface pads its content top by exactly --wks-band-h (tokens.css: the band overlays the
       // scroller), so matching it puts the first bar on the first line of prose.
       style={{ paddingTop: "var(--wks-band-h, 0px)" }}
