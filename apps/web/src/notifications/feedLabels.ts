@@ -13,7 +13,9 @@ export function actorLabel(actor: string, t: TFunction): string {
 }
 
 export function eventLabel(e: FeedItem, t: TFunction): string {
-  const who = actorLabel(e.actor, t);
+  // #486 / ADR-150 Addendum 2: prefer the server-resolved actor name (covers un-customized members too);
+  // fall back to the client formatting (raw sub / "Guest" pseudonym) when the server sent none.
+  const who = e.actorName ?? actorLabel(e.actor, t);
   const title = e.title ?? t("notifications.untitled");
   switch (e.eventType) {
     case "page.published": return t("notifications.published", { who, title });
