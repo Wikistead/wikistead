@@ -183,11 +183,22 @@
     "api": "API",
     "embeds": "外部埋め込み",
     "public": "公開設定",
+    "moderation": "モデレーション",
     "billing": "課金",
     "orphans": "孤立ドラフト",
     "webhooks": "Webhook",
     "audit": "監査ログ",
     "roles": "ロール"
+  },
+  "adminModeration": {
+    "title": "不正フィルタ",
+    "body": "このワークスペースの公開時チェック。どちらも既定はオフで、公開を拒否するだけ（本文を書き換えることはありません）。",
+    "shrinkLabel": "大量削除ガード",
+    "shrinkHint": "新しい本文が公開済み本文のこの割合より小さい公開を拒否します（0〜1・例 0.2 = 20% 未満）。空欄でオフ。",
+    "off": "オフ",
+    "wordsLabel": "禁止語",
+    "wordsHint": "1 行に 1 語。リストの語が新たに追加された公開のみ拒否します。空欄でオフ。",
+    "saved": "保存しました"
   },
   "adminPublic": {
     "title": "公開設定",

@@ -15,6 +15,7 @@ import { AdminEmbedsTab } from "./AdminEmbedsTab";
 import { AdminPublicTab } from "./AdminPublicTab";
 import { AdminBillingTab } from "./AdminBillingTab";
 import { AdminOrphanDraftsTab } from "./AdminOrphanDraftsTab";
+import { AdminModerationTab } from "./AdminModerationTab"; // #491
 import { SettingsShell, SettingsDenied, type SettingsTab } from "./SettingsShell";
 
 // Tenant admin console (Phase 5a). Gate: tenant#admin. All tabs now live (Members,
@@ -34,6 +35,7 @@ function useAdminTabs(): SettingsTab[] {
     { key: "roles", label: t("adminNav.roles"), to: "/admin/roles" },
     { key: "embeds", label: t("adminNav.embeds"), to: "/admin/embeds" },
     { key: "public", label: t("adminNav.public"), to: "/admin/public" },
+    { key: "moderation", label: t("adminNav.moderation"), to: "/admin/moderation" }, // #491
     { key: "billing", label: t("adminNav.billing"), to: "/admin/billing" },
     { key: "orphans", label: t("adminNav.orphans"), to: "/admin/orphan-drafts" },
   ];
@@ -78,6 +80,7 @@ export function AdminRoot() {
         <Route path="roles" element={<AdminRolesTab />} />
         <Route path="embeds" element={<AdminEmbedsTab />} />
         <Route path="public" element={<AdminPublicTab />} />
+        <Route path="moderation" element={<AdminModerationTab />} />
         <Route path="billing" element={<AdminBillingTab />} />
         <Route path="orphan-drafts" element={<AdminOrphanDraftsTab />} />
       </Route>
