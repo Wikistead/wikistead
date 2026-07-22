@@ -8,6 +8,10 @@ export interface CommentItem {
   id: string;
   body: string;
   authorSub: string;
+  // #486 / ADR-150 Addendum 2: author display name/avatar resolved server-side on this view-gated
+  // (comments = the one guest-facing) surface. AuthorChip prefers it; null = un-customized/cross-tenant/guest.
+  authorName?: string | null;
+  authorHasAvatar?: boolean;
   createdAt: string;
   editedAt: string | null;
   canModify: boolean; // #100: server-computed — this principal (author or admin) may delete/edit it
