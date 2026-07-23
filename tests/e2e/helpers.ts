@@ -1,8 +1,17 @@
 import type { Page } from "@playwright/test";
+// @ts-expect-error — repo-root JS helper, no types
+import { e2ePorts } from "../../scripts/stack-offset.mjs";
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const API = "http://dev.localhost:4010";
+// #484 slice 2: the app origins, derived from WKS_STACK_OFFSET (offset 0 = the original literals).
+// Every spec MUST import these instead of hardcoding dev.localhost:4010 / :5180 / :5181 — a hardcoded
+// port would hit the wrong (or another session's) stack once isolation is enabled. dev.localhost (not
+// localhost) so the server resolves tenant slug "dev".
+const P = e2ePorts();
+export const API = `http://dev.localhost:${P.server}`; // server REST base (direct, bypasses the web proxy)
+export const WEB = `http://dev.localhost:${P.web}`; // dev-token web origin (baseURL)
+export const WEB_REAL_PORT = P.webReal; // real-auth web port, for `${slug}.localhost:${WEB_REAL_PORT}`
 
 // #354: publish a page and WAIT until its published body actually contains `expectSubstring`. The publish flush
 // (collab Valkey req/ack) has a timeout and, under parallel-load, can snapshot a stale/empty ydoc so

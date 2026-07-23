@@ -1,5 +1,10 @@
 import postgres from "postgres";
 import { readFileSync } from "node:fs";
+// @ts-expect-error — repo-root JS helper, no types
+import { e2ePorts } from "../../scripts/stack-offset.mjs";
+
+// #484 slice 2: this stack's ports (offset 0 = the original literals).
+const P = e2ePorts();
 
 // #279: the shared demo fixture's FGA tuples (esp. `space:demo_space#space@page:demo`) are seeded once by
 // `fga:seed` at stack init, NOT re-asserted per run — so if a spec deletes one, every later run stays broken
@@ -124,8 +129,8 @@ export async function assertDemoFixtureIntact(): Promise<void> {
 // Coordinates of the ISOLATED e2e middleware (docker-compose.e2e.yml). Fixed by
 // that compose file, so the harness can hardcode them.
 export const E2E = {
-  pgAdmin: "postgres://postgres:postgres@localhost:5433/app",
-  meili: "http://localhost:7701",
+  pgAdmin: `postgres://postgres:postgres@localhost:${P.pg}/app`,
+  meili: `http://localhost:${P.meili}`,
   meiliKey: "dev_master_key_change_me",
   tenant: "tenant_dev",
   index: "pages",
