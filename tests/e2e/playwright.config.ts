@@ -1,10 +1,20 @@
 import { defineConfig } from "@playwright/test";
+// @ts-expect-error — repo-root JS helper, no types
+import { e2ePorts } from "../../scripts/stack-offset.mjs";
 
 // E2E runs against the isolated e2e middleware (docker-compose.e2e.yml, started
-// by `pnpm setup:e2e`). Playwright starts the three app processes on dedicated
-// ports via webServer, pointed at that middleware through .env.e2e(.local).
+// by `pnpm setup:e2e`). Playwright starts the app processes on dedicated ports via
+// webServer, pointed at that middleware through .env.e2e(.local).
+//
+// #484 slice 2: every port here is derived from WKS_STACK_OFFSET so a/b/c can run
+// isolated e2e stacks. Offset 0 (unset) reproduces the original literals exactly.
+// The app processes get their CONNECTION env (DATABASE_URL, OPENFGA_API_URL, …)
+// from .env.e2e.local, which `setup:e2e` writes with this stack's offset URLs; the
+// LISTEN ports + proxy targets + baseURL come from the same port map below.
+const P = e2ePorts();
 const REPO = new URL("../../", import.meta.url).pathname;
 const ENV_FILES = "--env-file=.env.e2e --env-file=.env.e2e.local";
+const HOST = "dev.localhost";
 
 export default defineConfig({
   testDir: "./specs",
@@ -17,7 +27,7 @@ export default defineConfig({
   use: {
     // Same-origin (ADR-016): the browser hits the web origin only; Vite proxies
     // /api + /collab. dev.localhost (not localhost) so the API resolves slug "dev".
-    baseURL: "http://dev.localhost:5180",
+    baseURL: `http://${HOST}:${P.web}`,
     channel: "chrome", // system Chrome — no browser download
     headless: true,
     launchOptions: { args: ["--no-sandbox"] },
@@ -29,43 +39,44 @@ export default defineConfig({
       // exercises the SHIPPING EE build (SCIM etc. mounted via the seam), not the CE-only server.
       // --conditions=source makes @wikistead/server/ee-host resolve to its TS source (tsx), matching how
       // apps/server ran from source before the split (no dist build needed for the dev/e2e server).
+      // SERVER_PORT comes from .env.e2e.local (offset); healthz is polled on the same derived port.
       command: `npx tsx --conditions=source ${ENV_FILES} packages/ee-server/src/main.ts`,
       cwd: REPO,
-      url: "http://localhost:4010/healthz",
+      url: `http://localhost:${P.server}/healthz`,
       reuseExistingServer: false,
       timeout: 60_000,
       env: {
         // Platform IdP (Cloud signup + login fallback) — the fixed-port issuer from
         // globalSetup. Tenant subdomains for created workspaces point at the
-        // real-mode web (5181) so SSO seating is exercised in a real browser.
-        PLATFORM_OIDC_ISSUER: "http://127.0.0.1:4444",
+        // real-mode web so SSO seating is exercised in a real browser.
+        PLATFORM_OIDC_ISSUER: `http://127.0.0.1:${P.issuer}`,
         PLATFORM_OIDC_CLIENT_ID: "e2e-client",
-        PLATFORM_OIDC_REDIRECT_URI: "http://dev.localhost:5181/signup/callback",
-        PUBLIC_TENANT_BASE_HOST: "localhost:5181",
+        PLATFORM_OIDC_REDIRECT_URI: `http://${HOST}:${P.webReal}/signup/callback`,
+        PUBLIC_TENANT_BASE_HOST: `localhost:${P.webReal}`,
       },
     },
     {
       command: `npx tsx ${ENV_FILES} apps/collab/src/index.ts`,
       cwd: REPO,
-      url: "http://localhost:4110/",
+      url: `http://localhost:${P.collab}/`,
       reuseExistingServer: false,
       timeout: 60_000,
     },
     {
-      command: "npx vite --port 5180 --strictPort",
+      command: `npx vite --port ${P.web} --strictPort`,
       cwd: `${REPO}apps/web`,
-      url: "http://localhost:5180",
+      url: `http://localhost:${P.web}`,
       reuseExistingServer: false,
       timeout: 60_000,
       env: {
-        WEB_PORT: "5180",
+        WEB_PORT: String(P.web),
         // Same-origin: relative URLs go through the Vite proxy to the e2e ports.
         // Dev-token bypass comes from .env.development (mode=development); the member
         // specs use it. login.spec/signup.spec cover the real OIDC paths.
         VITE_API_URL: "/api",
         VITE_COLLAB_URL: "/collab",
-        API_PROXY_TARGET: "http://localhost:4010",
-        COLLAB_PROXY_TARGET: "http://localhost:4110",
+        API_PROXY_TARGET: `http://localhost:${P.server}`,
+        COLLAB_PROXY_TARGET: `http://localhost:${P.collab}`,
       },
     },
     {
@@ -73,17 +84,17 @@ export default defineConfig({
       // browser flow: platform signup → tenant → SSO seating with a host-only
       // member session on the new subdomain.
       // --mode realauth loads .env.realauth (VITE_DEV_TOKEN empty) → real auth mode.
-      command: "npx vite --port 5181 --strictPort --mode realauth",
+      command: `npx vite --port ${P.webReal} --strictPort --mode realauth`,
       cwd: `${REPO}apps/web`,
-      url: "http://localhost:5181",
+      url: `http://localhost:${P.webReal}`,
       reuseExistingServer: false,
       timeout: 60_000,
       env: {
-        WEB_PORT: "5181",
+        WEB_PORT: String(P.webReal),
         VITE_API_URL: "/api",
         VITE_COLLAB_URL: "/collab",
-        API_PROXY_TARGET: "http://localhost:4010",
-        COLLAB_PROXY_TARGET: "http://localhost:4110",
+        API_PROXY_TARGET: `http://localhost:${P.server}`,
+        COLLAB_PROXY_TARGET: `http://localhost:${P.collab}`,
       },
     },
   ],

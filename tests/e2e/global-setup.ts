@@ -1,6 +1,11 @@
 import postgres from "postgres";
 import { seedFixtures, seedFgaFixtures, E2E } from "./fixtures";
 import { startE2eIssuer } from "./oidc-issuer";
+// @ts-expect-error — repo-root JS helper, no types
+import { e2ePorts } from "../../scripts/stack-offset.mjs";
+
+// #484 slice 2: derive the issuer port + redirect origin from this stack's offset (0 = the originals).
+const P = e2ePorts();
 
 // Runs once before the suite. Seeds security fixtures, and stands up a real
 // minimal OIDC issuer so login.spec can drive the genuine browser login flow
@@ -8,7 +13,7 @@ import { startE2eIssuer } from "./oidc-issuer";
 // tenant#member via fga:seed), and tenant_dev's OIDC config is pointed at it.
 // The issuer is unref'd and dies with the Playwright process (no teardown needed).
 const CLIENT_ID = "e2e-client";
-const REDIRECT = "http://dev.localhost:5180/auth/callback";
+const REDIRECT = `http://dev.localhost:${P.web}/auth/callback`;
 
 export default async function globalSetup() {
   await seedFixtures();
@@ -19,7 +24,7 @@ export default async function globalSetup() {
   // Fixed port so the (separate) API process can reference the issuer via static
   // env (PLATFORM_OIDC_ISSUER); it serves both tenant_oidc (login.spec) and the
   // platform IdP (signup.spec).
-  const issuer = await startE2eIssuer({ clientId: CLIENT_ID, sub: "dev-user", port: 4444 });
+  const issuer = await startE2eIssuer({ clientId: CLIENT_ID, sub: "dev-user", port: P.issuer });
 
   // Point tenant_dev's OIDC config at the issuer (public client — the issuer does
   // not check client auth). Admin pool bypasses RLS.
