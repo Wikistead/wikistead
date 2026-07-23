@@ -45,17 +45,24 @@ export function Button({
 }
 
 // Icon-only button (square, ghost). aria-label is required for accessibility.
+// #504: `variant="danger"` is the shared destructive-icon treatment — text-destructive AT REST (the
+// policy forbids "red only on hover"), with a danger-tinted hover wash. Every icon that triggers a
+// destructive operation uses this instead of a per-site class.
 export function IconButton({
   className,
   type = "button",
+  variant = "default",
   children,
   ...rest
-}: { "aria-label": string } & ButtonHTMLAttributes<HTMLButtonElement>) {
+}: { "aria-label": string; variant?: "default" | "danger" } & ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       type={type}
       className={cn(
-        "inline-flex items-center justify-center rounded-md border border-transparent bg-transparent p-1.5 leading-none text-fg-dim cursor-pointer transition-colors duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] hover:bg-panel-2 hover:text-foreground disabled:opacity-50 disabled:cursor-default focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
+        "inline-flex items-center justify-center rounded-md border border-transparent bg-transparent p-1.5 leading-none cursor-pointer transition-colors duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] disabled:opacity-50 disabled:cursor-default focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
+        variant === "danger"
+          ? "text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:text-destructive"
+          : "text-fg-dim hover:bg-panel-2 hover:text-foreground",
         className,
       )}
       {...rest}

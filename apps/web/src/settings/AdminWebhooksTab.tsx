@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Copy, Trash2 } from "lucide-react";
 import { useWebhooks, useCreateWebhook, useDeleteWebhook, type WebhookCreated } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
+import { ConfirmDialog } from "../ui/dialogs"; // #504: deleting an endpoint drops its config + secret
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
 
@@ -17,6 +18,8 @@ export function AdminWebhooksTab() {
   const create = useCreateWebhook();
   const del = useDeleteWebhook();
   const [url, setUrl] = useState("");
+  // #504: the endpoint's secret dies with it (a re-add mints a new one) — confirm, by URL.
+  const [deleting, setDeleting] = useState<{ id: string; url: string } | null>(null);
   const [created, setCreated] = useState<WebhookCreated | null>(null);
 
   const onCreate = () => {
@@ -55,14 +58,26 @@ export function AdminWebhooksTab() {
           <div key={h.id} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="webhook-item">
             {!h.active && <span className="flex-none rounded-full border border-[var(--danger)] px-2 py-px text-[11px] uppercase tracking-[0.03em] text-[var(--danger)]" data-testid="webhook-disabled">{t("adminWebhooks.disabled")}</span>}
             <span className="min-w-0 flex-1 truncate font-mono text-xs">{h.url}</span>
-            <IconButton aria-label={t("adminWebhooks.delete")} data-testid="webhook-delete" className="hover:text-destructive"
-              onClick={() => del.mutate(h.id, { onSuccess: () => notify.success(t("toast.saved")), onError: () => notify.error(t("adminWebhooks.createFailed")) })}>
+            {/* #504: red at rest + confirm (the secret cannot be re-shown; a re-add is a new endpoint). */}
+            <IconButton aria-label={t("adminWebhooks.delete")} data-testid="webhook-delete" variant="danger"
+              onClick={() => setDeleting({ id: h.id, url: h.url })}>
               <Trash2 size={14} />
             </IconButton>
           </div>
         ))}
         {(hooks.data?.length ?? 0) === 0 && <p className="text-xs text-fg-dim">{t("adminWebhooks.empty")}</p>}
       </div>
+      {/* #504: the endpoint-delete confirm — names the URL. */}
+      <ConfirmDialog
+        open={deleting !== null}
+        message={deleting ? t("adminWebhooks.deleteConfirm", { url: deleting.url }) : ""}
+        confirmTestId="webhook-delete-confirm"
+        onClose={() => setDeleting(null)}
+        onConfirm={() => {
+          if (deleting) del.mutate(deleting.id, { onSuccess: () => notify.success(t("toast.saved")), onError: () => notify.error(t("adminWebhooks.createFailed")) });
+          setDeleting(null);
+        }}
+      />
     </div>
   );
 }

@@ -71,6 +71,8 @@ export function SpaceTrashTab() {
         message={t("spaceTrash.purgeConfirm", { name: purging?.title || t("common.untitled") })}
         confirmLabel={t("spaceTrash.purge")}
         tone="danger"
+        // #504: a purge destroys the whole trashed subtree — type-to-confirm, page delete-forever parity.
+        typedConfirmText={purging?.title || t("common.untitled")}
         confirmTestId="trash-purge-confirm"
         onClose={() => setPurging(null)}
         onConfirm={() => {

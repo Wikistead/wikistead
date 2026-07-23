@@ -43,12 +43,14 @@ test("#420: role manager — create, edit, assign on a space, unassign, delete",
 
   // Deleting a role with live assignments is refused (the 409 guard) — the toast explains.
   await row.getByTestId("role-delete").click();
+  await page.getByTestId("role-delete-confirm").click(); // #504: delete confirms first
   await expect(page.getByTestId("custom-roles")).toContainText(name); // still there (409)
 
   // Unassign → then delete succeeds.
   await page.getByTestId("assignment-row").filter({ hasText: name }).getByTestId("assignment-remove").click();
   await expect(page.getByTestId("assignment-list")).not.toContainText(name, { timeout: 8000 });
   await row.getByTestId("role-delete").click();
+  await page.getByTestId("role-delete-confirm").click(); // #504: delete confirms first
   await expect(page.getByTestId("custom-roles")).not.toContainText(name, { timeout: 8000 });
 });
 
@@ -93,6 +95,7 @@ test("#445last capability is locked; rename works via the inline affordance", as
 
   // Cleanup.
   await renamedRow.getByTestId("role-delete").click();
+  await page.getByTestId("role-delete-confirm").click(); // #504: delete confirms first
   await expect(page.getByTestId("custom-roles")).not.toContainText(renamed, { timeout: 8000 });
 });
 
@@ -138,6 +141,7 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   await page.getByTestId("assignment-row").filter({ hasText: name }).getByTestId("assignment-remove").click();
   await expect(page.getByTestId("assignment-list")).not.toContainText(name, { timeout: 8000 });
   await page.getByTestId("custom-role-row").filter({ hasText: name }).getByTestId("role-delete").click();
+  await page.getByTestId("role-delete-confirm").click(); // #504: delete confirms first
   await expect(page.getByTestId("custom-roles")).not.toContainText(name, { timeout: 8000 });
 });
 

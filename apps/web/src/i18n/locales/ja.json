@@ -11,7 +11,8 @@
     "off": "OFF",
     "yes": "はい",
     "no": "いいえ",
-    "edit": "編集"
+    "edit": "編集",
+    "confirm": "実行"
   },
   "embedPicker": {
     "title": "ページを埋め込む",
@@ -276,7 +277,8 @@
     "issueMembers": "すべてのメンバー",
     "issueAdminsOnly": "管理者のみ",
     "issueMembersHint": "メンバーは自分のアカウント設定から自分のキーを作成します。キーが所有者の権限を超えることはありません。",
-    "issueAdminsOnlyHint": "メンバーは既に持っているキーの確認と失効はできますが、新規作成はできません。"
+    "issueAdminsOnlyHint": "メンバーは既に持っているキーの確認と失効はできますが、新規作成はできません。",
+    "revokeConfirm": "API キー「{{name}}」を失効しますか？以後この認証は使えません。"
   },
   "adminAuth": {
     "title": "認証",
@@ -557,7 +559,8 @@
     "revoke": "取り消し",
     "copied": "リンクをクリップボードにコピーしました。",
     "done": "完了",
-    "password": "パスワード（任意）"
+    "password": "パスワード（任意）",
+    "revokeConfirm": "このリンクを失効しますか？URL を持つ全員がアクセスできなくなります（再発行は別 URL になります）。"
   },
   "permissions": {
     "title": "権限",
@@ -688,7 +691,8 @@
     "empty": "添付ファイルはありません",
     "uploading": "アップロード中…",
     "failed": "失敗: {{msg}}",
-    "error": "エラー"
+    "error": "エラー",
+    "deleteConfirm": "「{{filename}}」を削除しますか？ファイルは復元できません。"
   },
   "search": {
     "placeholder": "ページを検索…",
@@ -794,7 +798,10 @@
     "notEmailed": "メール未送信 — 上のリンクをコピーしてください。",
     "pendingTitle": "保留中の招待",
     "noEmail": "（メールなし）",
-    "revoke": "取り消し"
+    "revoke": "取り消し",
+    "eraseAnalyticsConfirm": "{{name}} の閲覧履歴を消去しますか？元に戻せません。",
+    "removeConfirm": "{{name}} をこのワークスペースから削除しますか？アクセス・API キー・セッションは即座に失効します。",
+    "revokeConfirm": "{{email}} への招待を取り消しますか？送信済みのリンクは使えなくなります。"
   },
   "commentsPanel": {
     "submit": "コメント",
@@ -804,7 +811,8 @@
     "pagePlaceholder": "ページにコメント…",
     "empty": "コメントはありません。",
     "showReplies": "{{count}}件の返信を表示",
-    "loadOlder": "以前のコメントを読み込む"
+    "loadOlder": "以前のコメントを読み込む",
+    "deleteConfirm": "このコメントを削除しますか？元に戻せません。"
   },
   "pageMeta": {
     "created": "作成",
@@ -910,7 +918,8 @@
     "delete": "Webhook を削除",
     "disabled": "無効",
     "empty": "Webhook はまだありません。",
-    "createFailed": "問題が発生しました"
+    "createFailed": "問題が発生しました",
+    "deleteConfirm": "エンドポイント {{url}} を削除しますか？署名シークレットも失われます。"
   },
   "export": {
     "spaceItem": "スペースをエクスポート",
@@ -1094,7 +1103,8 @@
     "scopeTenant": "テナント",
     "assignTenantScope": "テナント全体に適用",
     "builtInTenantTitle": "組み込みのテナントロール",
-    "builtInResourceTitle": "組み込みのスペース／ページロール"
+    "builtInResourceTitle": "組み込みのスペース／ページロール",
+    "deleteConfirm": "ロール「{{name}}」を削除しますか？割り当ても一緒に削除され、元に戻せません。"
   },
   "detailsEdit": {
     "title": "折りたたみを編集",

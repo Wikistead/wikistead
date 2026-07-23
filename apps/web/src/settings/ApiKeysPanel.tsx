@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Copy, Trash2 } from "lucide-react";
 import { useCreateApiKey, useRevokeApiKey, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
+import { ConfirmDialog } from "../ui/dialogs"; // #504: revoking a key is irreversible — confirm first
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
@@ -44,6 +45,8 @@ export function ApiKeysPanel({
   const [name, setName] = useState("");
   const [scope, setScope] = useState<ApiScope>("read");
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
+  // #504: a revoked key never authenticates again (the member issues a new one) — confirm, by name.
+  const [revoking, setRevoking] = useState<{ id: string; name: string } | null>(null);
 
   // Under a read cap, write isn't offerable.
   const scopeOptions = (maxScope === "read" ? (["read"] as ApiScope[]) : (["read", "write"] as ApiScope[]))
@@ -90,14 +93,27 @@ export function ApiKeysPanel({
             <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{k.name}</span>
             <code className="flex-none font-mono text-xs text-fg-dim">{k.keyPrefix}…</code>
             <LastUsed at={k.lastUsedAt} />
-            <IconButton aria-label={t("adminApi.revoke")} data-testid="api-key-revoke" className="hover:text-destructive"
-              onClick={() => revoke.mutate(k.id, { onSuccess: () => notify.success(t("toast.linkRevoked")), onError: () => notify.error(t("toast.actionFailed")) })}>
+            {/* #504: red at rest (hover-only red is against the policy) + confirm before the kill. */}
+            <IconButton aria-label={t("adminApi.revoke")} data-testid="api-key-revoke" variant="danger"
+              onClick={() => setRevoking({ id: k.id, name: k.name })}>
               <Trash2 size={14} />
             </IconButton>
           </div>
         ))}
         {keys.length === 0 && <p className="text-xs text-fg-dim">{emptyText ?? t("adminApi.empty")}</p>}
       </div>
+      {/* #504: the revoke confirm — names the key, danger tone. */}
+      <ConfirmDialog
+        open={revoking !== null}
+        message={revoking ? t("adminApi.revokeConfirm", { name: revoking.name }) : ""}
+        confirmTestId="api-key-revoke-confirm"
+        confirmLabel={t("adminApi.revoke")}
+        onClose={() => setRevoking(null)}
+        onConfirm={() => {
+          if (revoking) revoke.mutate(revoking.id, { onSuccess: () => notify.success(t("toast.linkRevoked")), onError: () => notify.error(t("toast.actionFailed")) });
+          setRevoking(null);
+        }}
+      />
     </>
   );
 }

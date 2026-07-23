@@ -39,5 +39,6 @@ test("#461: a fresh key reads 'never used'; after the key authenticates a reques
   await expect(cell2).toHaveAttribute("datetime", /\d{4}-\d{2}-\d{2}/);
 
   await row2.getByTestId("api-key-revoke").click();
+  await page.getByTestId("api-key-revoke-confirm").click(); // #504: revoke confirms first
   await expect(page.locator("[data-testid=api-key-item]", { hasText: name })).toHaveCount(0);
 });

@@ -112,7 +112,9 @@ export function WatchListRoute() {
                 aria-label={t("watch.unwatch")}
                 disabled={unwatch.isPending}
                 onClick={() => unwatch.mutate(w.id)}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fg-dim hover:bg-panel-2 hover:text-[var(--danger)]"
+                // #504: red at rest (the policy forbids hover-only red); no confirm — re-watching is
+                // one click on the page (exception candidate)
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]"
                 data-testid="watch-unwatch"
               >
                 <X size={14} />

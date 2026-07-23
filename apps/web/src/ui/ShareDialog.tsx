@@ -7,6 +7,7 @@ import { Select } from "./Select";
 import { Button, IconButton } from "./Button";
 import { Input } from "./Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
+import { ConfirmDialog } from "./dialogs"; // #504: revoking kills the shared URL for everyone holding it
 
 const EXPIRY_OPTIONS: { key: string; seconds: number | null }[] = [
   { key: "shareDialog.never", seconds: null },
@@ -33,6 +34,8 @@ export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | nu
   const [expiry, setExpiry] = useState<number | null>(null);
   const [password, setPassword] = useState(""); // #233: optional password (issuance only)
   const [copied, setCopied] = useState<string | null>(null);
+  // #504: a revoked link is dead for good (a new link is a new URL) — confirm before revoking.
+  const [revokingId, setRevokingId] = useState<string | null>(null);
 
   const linkUrl = (id: string) => `${location.origin}/share/${id}`;
 
@@ -118,15 +121,14 @@ export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | nu
                 >
                   <Copy size={14} />
                 </IconButton>
+                {/* #504: irreversible in effect (the URL dies for everyone; a new link is a new URL) —
+                    confirm first. Red at rest via the shared danger variant. */}
                 <IconButton
                   aria-label={t("shareDialog.revoke")}
                   title={t("shareDialog.revoke")}
                   data-testid="revoke-link"
-                  className="text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:text-destructive"
-                  onClick={() => resource && revoke.mutate({ id: l.id, resource }, {
-                    onSuccess: () => notify.success(t("toast.linkRevoked")),
-                    onError: () => notify.error(t("toast.actionFailed")),
-                  })}
+                  variant="danger"
+                  onClick={() => setRevokingId(l.id)}
                 >
                   <Trash2 size={14} />
                 </IconButton>
@@ -141,6 +143,22 @@ export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | nu
             {t("shareDialog.done")}
           </Button>
         </DialogFooter>
+        {/* #504: the revoke confirm — stacked above this dialog. */}
+        <ConfirmDialog
+          open={revokingId !== null}
+          stacked
+          message={t("shareDialog.revokeConfirm")}
+          confirmTestId="revoke-link-confirm"
+          confirmLabel={t("shareDialog.revoke")}
+          onClose={() => setRevokingId(null)}
+          onConfirm={() => {
+            if (revokingId && resource) revoke.mutate({ id: revokingId, resource }, {
+              onSuccess: () => notify.success(t("toast.linkRevoked")),
+              onError: () => notify.error(t("toast.actionFailed")),
+            });
+            setRevokingId(null);
+          }}
+        />
       </DialogContent>
     </Dialog>
   );

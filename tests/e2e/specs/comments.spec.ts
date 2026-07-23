@@ -145,6 +145,7 @@ test("#214 comment 751: reply preview, no empty thread on delete, no resolve wor
 
   // (2) delete the only comment → the empty thread frame does NOT remain
   await panel.locator("[data-testid=comment-delete]").first().click();
+  await page.getByTestId("comment-delete-confirm").click(); // #504: delete confirms first
   await expect(panel.locator("[data-testid=comment-thread]")).toHaveCount(0);
   await expect(list).not.toContainText("未解決");
 });

@@ -46,8 +46,9 @@ test("admin: user menu opens the tenant console; space settings rename + delete"
   // The rail title is driven by the (refetched) space list — proves the rename stuck.
   await expect(page.getByText("Renamed E2E Space · Settings")).toBeVisible();
 
-  // Delete from the danger zone → confirm → back in the app.
+  // Delete from the danger zone → type-to-confirm (#504: delete-forever parity) → back in the app.
   await page.getByTestId("space-delete").click();
+  await page.getByTestId("typed-confirm-input").fill("Renamed E2E Space");
   await page.getByTestId("space-delete-confirm").click();
   await expect(page).toHaveURL(/\/p\//);
 });
@@ -89,6 +90,7 @@ test("admin API tab: create a key shows the plaintext once, then revoke", async 
   await expect(row).toBeVisible();
 
   await row.getByTestId("api-key-revoke").click();
+  await page.getByTestId("api-key-revoke-confirm").click(); // #504: revoke confirms first
   await expect(page.locator("[data-testid=api-key-item]", { hasText: "e2e key" })).toHaveCount(0);
 });
 
