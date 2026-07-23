@@ -85,9 +85,16 @@ afterAll(async () => {
 describe('GET /me/activity — getMyActivity (ADR-180)', () => {
   it('counts the caller\'s OWN revisions + comments per day, excluding soft-deleted comments', async () => {
     const { days } = await getMyActivity(db, { subject: SUB_A, tz: 'UTC' })
-    const byDay = new Map(days.map((x) => [x.day, x.count]))
-    expect(byDay.get(dayMinus(3))).toBe(3) // 2 revisions + 1 live comment (the retracted one is NOT counted)
-    expect(byDay.get(dayMinus(10))).toBe(1) // 1 revision
+    const byDay = new Map(days.map((x) => [x.day, x]))
+    expect(byDay.get(dayMinus(3))?.count).toBe(3) // 2 revisions + 1 live comment (the retracted one is NOT counted)
+    expect(byDay.get(dayMinus(10))?.count).toBe(1) // 1 revision
+    // #483 the per-kind split the tooltip breakdown reads — and it must SUM to the count
+    // (a drifting split would silently lie in the tooltip).
+    expect(byDay.get(dayMinus(3))?.edits).toBe(2)
+    expect(byDay.get(dayMinus(3))?.comments).toBe(1) // the soft-deleted comment is excluded here too
+    expect(byDay.get(dayMinus(10))?.edits).toBe(1)
+    expect(byDay.get(dayMinus(10))?.comments).toBe(0)
+    for (const d of days) expect(d.edits + d.comments, `${d.day} split sums to count`).toBe(d.count)
   })
 
   it('is SELF-SCOPED — another member\'s activity on the same day never leaks in', async () => {
@@ -99,6 +106,11 @@ describe('GET /me/activity — getMyActivity (ADR-180)', () => {
     // …and the totals are disjoint: A's total excludes every B row and vice-versa.
     expect(a.days.reduce((s, x) => s + x.count, 0)).toBe(4) // 3 + 1
     expect(b.days.reduce((s, x) => s + x.count, 0)).toBe(2)
+    // #483 the split is self-scoped exactly like the total — B's kinds never bleed into A's.
+    const a3 = a.days.find((x) => x.day === dayMinus(3))!
+    const b3 = b.days.find((x) => x.day === dayMinus(3))!
+    expect([a3.edits, a3.comments]).toEqual([2, 1])
+    expect([b3.edits, b3.comments]).toEqual([1, 1])
   })
 
   it('an empty history returns an empty grid, not an error', async () => {

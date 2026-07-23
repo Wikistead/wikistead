@@ -172,7 +172,11 @@
       "enabledHint": "Turn off to stop all in-app notifications (your watches are kept).",
       "defaultMask": "Default event types",
       "defaultMaskHint": "Applied to watches without their own type filter. All types are on by default."
-    }
+    },
+    "activityTooltipNone": "No activity",
+    "activityTooltipTotal": "{{count}} activities",
+    "activityTooltipEdits": "Edits {{count}}",
+    "activityTooltipComments": "Comments {{count}}"
   },
   "settings": {
     "back": "Back to app",

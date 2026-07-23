@@ -57,3 +57,28 @@ test("account settings: name override persists + resets; keymap syncs; theme swi
   await expect.poll(() => settings(page).then((s) => s.hasAvatar), { timeout: 5000 }).toBe(true);
   await sleep(100);
 });
+
+// #483 the heatmap's month/year/weekday labels + the hover tooltip, on the real DOM. The label
+// DERIVATION is unit-pinned (heatmapMonthLabels); this pins that the band actually renders (a year is
+// readable somewhere in it — a 12-month span always crosses a boundary) and that hovering a cell
+// raises the floating tooltip with a formatted date.
+test("#483: the heatmap shows month/year labels and a hover tooltip", async ({ page }) => {
+  await page.goto("/settings/account");
+  await page.click("[data-testid=settings-tab-profile]");
+  const map = page.getByTestId("activity-heatmap");
+  await expect(map).toBeVisible({ timeout: 10_000 });
+
+  // month band: at least 12 labels across a ~53-week grid, and a 4-digit year readable in the band
+  const labels = page.getByTestId("activity-month-label");
+  expect(await labels.count()).toBeGreaterThanOrEqual(12);
+  const texts = await labels.allTextContents();
+  expect(texts.some((s) => /\d{4}/.test(s)), `a year is readable in the band (${texts.join(", ")})`).toBe(true);
+  // weekday gutter
+  expect(await page.getByTestId("activity-weekday-label").count()).toBe(3);
+
+  // hover a cell → the floating tooltip appears with a formatted date (never the raw YYYY-MM-DD key)
+  await page.getByTestId("activity-cell").first().hover();
+  const tip = page.getByTestId("activity-tooltip");
+  await expect(tip).toBeVisible();
+  expect(await tip.textContent(), "the tooltip carries a formatted date").toMatch(/\d{4}/);
+});
