@@ -86,7 +86,11 @@ export type DomainEvent =
   | { type: 'share_link.revoked'; tenantId: string; shareLinkId: string; pageId: string; actorId: string }
   // ── API keys ─────────────────────────────────────────────────────────
   | { type: 'api_key.created'; tenantId: string; keyId: string; actorId: string }
-  | { type: 'api_key.revoked'; tenantId: string; keyId: string; actorId: string }
+  // #495 / ADR-182: `ownerId` (the affected member's sub) is OPTIONAL — set only by the admin-revoke
+  // path so the trail reads "admin X revoked member Y's key"; the self-revoke and member-delete-sweep
+  // emits omit it (they have no separate owner in scope). Whether it reaches an EXTERNAL webhook sink
+  // is a Review-gated opt-in (Q3) — the field on the event feeds the audit trail regardless.
+  | { type: 'api_key.revoked'; tenantId: string; keyId: string; actorId: string; ownerId?: string }
   // ── Tenant / billing ─────────────────────────────────────────────────
   | { type: 'tenant.plan_changed'; tenantId: string; oldPlan: string | null; newPlan: string }
   // ── Auth ─────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Copy, Trash2 } from "lucide-react";
-import { useCreateApiKey, useRevokeApiKey, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
+import { useCreateApiKey, useRevokeApiKey, useAdminRevokeApiKey, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: revoking a key is irreversible — confirm first
 import { Input } from "../ui/Input";
@@ -32,16 +32,21 @@ function LastUsed({ at }: { at: string | null }) {
 // `canIssue` hides the form when the tenant has restricted issuing to admins — the SERVER refuses
 // regardless, this only avoids offering something that will be turned down.
 export function ApiKeysPanel({
-  keys, canIssue, maxScope, emptyText,
+  keys, canIssue, maxScope, emptyText, admin = false,
 }: {
   keys: ApiKeySummary[];
   canIssue: boolean;
   maxScope: ApiScope;
   emptyText?: string;
+  // #495 / ADR-182: the ADMIN console passes admin — it shows the OWNER of each key and revokes via
+  // the admin-gated route (kill any member's key). The member self-view leaves it false (owner-only).
+  admin?: boolean;
 }) {
   const { t } = useTranslation();
   const create = useCreateApiKey();
-  const revoke = useRevokeApiKey();
+  const revokeOwn = useRevokeApiKey();
+  const revokeAdmin = useAdminRevokeApiKey();
+  const revoke = admin ? revokeAdmin : revokeOwn;
   const [name, setName] = useState("");
   const [scope, setScope] = useState<ApiScope>("read");
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
@@ -91,6 +96,8 @@ export function ApiKeysPanel({
           <div key={k.id} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="api-key-item">
             <span className="min-w-[48px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-fg-dim data-[scope=write]:border-[var(--accent)] data-[scope=write]:text-[var(--accent)]" data-scope={k.scope}>{t(`adminApi.scope_${k.scope}`)}</span>
             <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{k.name}</span>
+            {/* #495: the admin view names WHO owns the key (name, or the sub when the name is null) */}
+            {admin && <span className="flex-none max-w-[9rem] truncate text-xs text-fg-dim" data-testid="api-key-owner" title={k.ownerName ?? k.ownerUserId}>{k.ownerName ?? k.ownerUserId}</span>}
             <code className="flex-none font-mono text-xs text-fg-dim">{k.keyPrefix}…</code>
             <LastUsed at={k.lastUsedAt} />
             {/* #504: red at rest (hover-only red is against the policy) + confirm before the kill. */}
