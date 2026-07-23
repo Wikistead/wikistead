@@ -250,6 +250,19 @@ function BodyPlaceholder({ loading, empty, canEdit }: { loading: boolean; empty:
   );
 }
 
+// #364 ②: the guest and public shells drew a bare div (or a "loading" text line) while resolving,
+// so opening a share/public link flashed a blank page. Reuse the member skeleton machinery: ProseSkeleton
+// behind useDelayedFlag (a fast resolve never flashes it), in the same 740px reading column the content
+// lands in, so nothing shifts on replacement.
+function ShellLoading() {
+  const show = useDelayedFlag(true);
+  return (
+    <div className="flex justify-center" data-testid="shell-loading">
+      <div className="w-full max-w-[740px] px-[var(--space-5)] pt-10">{show ? <ProseSkeleton /> : null}</div>
+    </div>
+  );
+}
+
 function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string; homeSpaceName?: string } = {}) {
   const { t } = useTranslation();
   const params = useParams<{ pageId: string }>();
@@ -833,7 +846,8 @@ function ShareRoute() {
   }, [linkId]);
 
   if (state.status === "loading") {
-    return <AppShell><div style={{ padding: 16 }}>{t("share.opening")}</div></AppShell>;
+    // #364 ②: skeleton instead of a text line — same machinery as the member body placeholder.
+    return <AppShell><ShellLoading /></AppShell>;
   }
   if (state.status === "password") {
     return (
@@ -939,9 +953,12 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
         // guest JUST created opens straight in edit mode (member new-page parity); onTitleChange
         // refreshes the tree so the rename shows up without a reload.
         <GuestPageContent key={openId} minted={pageMinted} startEditing={openId === createdId} onTitleChange={refreshPages} />
+      ) : pages == null ? (
+        // #364 ②: still resolving (tree + home pointer) — skeleton, not a centred text line.
+        <ShellLoading />
       ) : (
         <div className="flex h-full items-center justify-center p-8 text-center text-fg-dim" data-testid="guest-space-welcome">
-          {pages == null ? t("share.opening") : t("share.spacePickPrompt")}
+          {t("share.spacePickPrompt")}
         </div>
       )}
     </AppShell>
@@ -1379,7 +1396,8 @@ function PublicPageContent({ pageId, onSpace }: { pageId: string; onSpace?: (s: 
     return () => ro.disconnect();
   }, [outerEl, bandEl, state]);
 
-  if (state.status === "loading") return <div style={{ padding: 24 }} />;
+  // #364 ②: the public reader's loading was a bare empty div = a white page while resolving.
+  if (state.status === "loading") return <ShellLoading />;
   if (state.status === "notfound") {
     return <div data-testid="public-not-found" style={{ padding: 24, fontFamily: "var(--font-body, sans-serif)" }}>{t("publicPage.notFound")}</div>;
   }
@@ -1611,9 +1629,15 @@ function SpaceHomeRoute() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
+  const { setActiveSpaceId } = useActiveSpace();
+  const space = (spacesQ.data ?? []).find((sp) => sp.id === spaceId);
+  // #364 ①: the sidebar follows the URL here, not an opened page. The page-driven sync (PageRoute)
+  // never fires for a home-less space (the empty state opens no page), so a direct /spaces/:id link left
+  // the sidebar on the previous space. Sync from the RESOLVED space (not the raw param) so a bogus id
+  // (the not-found branch) can't hijack the sidebar.
+  useEffect(() => { if (space?.id) setActiveSpaceId(space.id); }, [space?.id, setActiveSpaceId]);
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
-  const space = (spacesQ.data ?? []).find((sp) => sp.id === spaceId);
   if (spacesQ.isSuccess && !space) {
     return (
       <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>

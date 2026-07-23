@@ -196,3 +196,20 @@ for (const capability of ["view", "edit"] as const) {
     }
   });
 }
+
+// #364 ①: the sidebar follows a DIRECT /spaces/:id link even when the space has no home. The
+// active-space sync used to be page-driven only, and the home-less empty state opens no page — so the
+// sidebar silently stayed on whatever space was active before (the reported "sidebar stuck on Demo Space").
+test("#364 a direct link to a home-less space moves the sidebar to that space", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  // land somewhere in the DEFAULT space first, so the sidebar has a previous active space to be stuck on
+  await page.goto("/p/demo");
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  const name = `home364nosync-${Date.now().toString(36)}`;
+  const spaceId = await newSpacePage(page, name);
+
+  await page.goto(`/spaces/${spaceId}`);
+  await expect(page.getByTestId("space-home-empty")).toBeVisible({ timeout: 8000 });
+  // the empty state opened NO page — the sidebar must still follow the URL's space
+  await expect(page.getByTestId("space-switcher"), "the sidebar switched to the space in the URL").toContainText(name, { timeout: 8000 });
+});
