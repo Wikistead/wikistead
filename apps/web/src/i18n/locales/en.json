@@ -440,6 +440,8 @@
     "opening": "Opening shared page…",
     "invalid": "This share link is invalid, expired, or revoked.",
     "spaceTitle": "Shared space",
+    "treeError": "Couldn't load the page list.",
+    "treeRetry": "Retry",
     "spaceEmpty": "This space has no published pages yet.",
     "backToSpace": "Back to pages",
     "spacePickPrompt": "Select a page to read.",
