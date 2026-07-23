@@ -41,7 +41,10 @@ export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | nu
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent data-testid="share-dialog" className="sm:max-w-[540px]">
+      {/* #460same pattern as the permissions dialog — the first tabbable is a Select trigger
+          with a focus-visible ring, so a mouse open painted a ring on it. See PermissionsDialog for
+          why the container is focused explicitly. */}
+      <DialogContent data-testid="share-dialog" onOpenAutoFocus={(e) => { e.preventDefault(); (e.target as HTMLElement | null)?.focus?.(); }} className="sm:max-w-[540px]">
         <DialogHeader>
           <DialogTitle>{isSpace ? t("shareDialog.spaceTitle") : t("shareDialog.title")}</DialogTitle>
         </DialogHeader>

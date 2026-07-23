@@ -155,7 +155,12 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
           560px on desktop, still clamped to 85vh on a short window) makes the flex-1 panel a stable box:
           short tabs leave breathing room at the bottom, the tall Access tab scrolls inside it, and the
           header / tab strip / footer never move between tabs. */}
-      <DialogContent data-testid="permissions-dialog" className="flex h-[85vh] flex-col sm:h-[560px] sm:max-h-[85vh] sm:max-w-[560px] lg:max-w-3xl">
+      {/* #460without this, Radix auto-focuses the first tabbable — the active TabsTrigger —
+          and programmatic focus counts as :focus-visible, so a MOUSE open painted a focus ring on
+          the Access tab. preventDefault alone strands focus outside the dialog (Radix then focuses
+          NOTHING, measured: Tab goes dead), so focus the FocusScope container (e.target,
+          tabIndex=-1) instead — no ring, and Tab still enters the dialog. */}
+      <DialogContent data-testid="permissions-dialog" onOpenAutoFocus={(e) => { e.preventDefault(); (e.target as HTMLElement | null)?.focus?.(); }} className="flex h-[85vh] flex-col sm:h-[560px] sm:max-h-[85vh] sm:max-w-[560px] lg:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{t("permissions.title")}</DialogTitle>
           <DialogDescription>{t("permissions.body")}</DialogDescription>
