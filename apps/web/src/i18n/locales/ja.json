@@ -172,7 +172,11 @@
       "enabledHint": "オフにするとアプリ内通知がすべて止まります（ウォッチ自体は保持されます）。",
       "defaultMask": "既定のイベント種別",
       "defaultMaskHint": "種別フィルタを持たないウォッチに適用されます。既定では全種別オンです。"
-    }
+    },
+    "activityTooltipNone": "活動なし",
+    "activityTooltipTotal": "活動 {{count}} 件",
+    "activityTooltipEdits": "編集 {{count}}",
+    "activityTooltipComments": "コメント {{count}}"
   },
   "settings": {
     "back": "アプリに戻る",

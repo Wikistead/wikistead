@@ -641,7 +641,7 @@ export function useAccountSettings() {
 // ADR-180: the caller's own daily activity for the contribution heatmap. Self-scoped on the server
 // (sub from the session, never a parameter); `tz` only chooses the day-bucket boundary. Cached longer
 // than settings — a day's counts don't change minute-to-minute.
-export interface ActivityDay { day: string; count: number }
+export interface ActivityDay { day: string; count: number; edits: number; comments: number } // #483per-kind split for the tooltip
 export interface MyActivity { tz: string; days: ActivityDay[] }
 export function useMyActivity(tz: string) {
   const { token, status } = useSession();

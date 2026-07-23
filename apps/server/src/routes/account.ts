@@ -91,7 +91,9 @@ export async function getAccountSettings(db: TenantDb, args: { subject: string }
 // (`created_by = 'user:'||sub` / `author_sub = sub`) on top of the tenant RLS handle. There is
 // no code path to read another member's heatmap. No new table — the counts come from the
 // existing revisions/comments tables (CE, self-only, #464-independent).
-export interface ActivityDay { day: string; count: number } // day = 'YYYY-MM-DD' in the caller's tz
+// day = 'YYYY-MM-DD' in the caller's tz. #483the count is split by kind (edits = revisions,
+// comments) so the hover tooltip can show a breakdown; count stays their sum for existing consumers.
+export interface ActivityDay { day: string; count: number; edits: number; comments: number }
 
 // Validate an IANA time-zone name (the client passes its browser tz). An unknown zone would
 // make `AT TIME ZONE` throw at the DB, so fall back to UTC. It is a BOUND parameter either way
@@ -106,20 +108,24 @@ export async function getMyActivity(db: TenantDb, args: { subject: string; tz?: 
   // Bucket by CALENDAR DAY in the member's tz: a heatmap day is a calendar day to the person
   // looking at it. `created_at` stays UTC in storage; only the bucket expression is tz-shifted.
   // A soft-deleted comment (deleted_at) is excluded — retracted work is not a contribution.
-  const rows = await db.sql<{ day: string; count: number }[]>`
-    SELECT day, count(*)::int AS count
+  // #483the UNION ALL carries its kind through, so one pass yields the per-kind split the
+  // tooltip breakdown needs. The predicates — and so the SELF-SCOPE — are byte-identical to before.
+  const rows = await db.sql<{ day: string; count: number; edits: number; comments: number }[]>`
+    SELECT day, count(*)::int AS count,
+           (count(*) FILTER (WHERE kind = 'edit'))::int AS edits,
+           (count(*) FILTER (WHERE kind = 'comment'))::int AS comments
     FROM (
-      SELECT to_char((created_at AT TIME ZONE ${tz})::date, 'YYYY-MM-DD') AS day
+      SELECT to_char((created_at AT TIME ZONE ${tz})::date, 'YYYY-MM-DD') AS day, kind
       FROM (
-        SELECT created_at FROM revisions WHERE created_by = ${'user:' + args.subject}
+        SELECT created_at, 'edit' AS kind FROM revisions WHERE created_by = ${'user:' + args.subject}
         UNION ALL
-        SELECT created_at FROM comments WHERE author_sub = ${args.subject} AND deleted_at IS NULL
+        SELECT created_at, 'comment' AS kind FROM comments WHERE author_sub = ${args.subject} AND deleted_at IS NULL
       ) events
       WHERE created_at >= now() - interval '12 months'
     ) bucketed
     GROUP BY day
     ORDER BY day`
-  return { tz, days: rows.map((r) => ({ day: r.day, count: Number(r.count) })) }
+  return { tz, days: rows.map((r) => ({ day: r.day, count: Number(r.count), edits: Number(r.edits), comments: Number(r.comments) })) }
 }
 
 // Update the caller's own profile prefs. Only the provided fields change. An empty/blank
