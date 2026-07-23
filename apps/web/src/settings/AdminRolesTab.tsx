@@ -4,6 +4,7 @@ import {
   useRoles, useCreateRole, useUpdateRole, useDeleteRole,
   useRoleAssignments, useAssignRole, useUnassignRole, useAdminSpaces,
   useTenantRoleDefaults, useSetTenantRoleDefaults, useTenantMemberCandidates,
+  useRoleMappings, useCreateRoleMapping, useDeleteRoleMapping,
 } from "../data/queries";
 import { useSession } from "../session/SessionProvider";
 import { Button, IconButton } from "../ui/Button";
@@ -123,6 +124,20 @@ export function AdminRolesTab() {
   const assignScope: "space" | "tenant" = assignRole?.scope === "tenant" ? "tenant" : "space";
   const assignResourceId = assignScope === "tenant" ? tenantId : assignSpaceId;
   const assignments = useRoleAssignments(assignScope, assignResourceId);
+
+  // #497 / ADR-183: declarative group → role mappings. A mapping owns a group-principal role
+  // assignment; group members resolve live at check time (no reconcile). The role's scope decides
+  // the target (tenant → this tenant; space → a picked space), mirroring the assignment form.
+  const mappings = useRoleMappings();
+  const createMapping = useCreateRoleMapping();
+  const deleteMapping = useDeleteRoleMapping();
+  const [mapGroup, setMapGroup] = useState("");
+  const [mapRoleId, setMapRoleId] = useState("");
+  const [mapSpaceId, setMapSpaceId] = useState("");
+  const [deletingMapping, setDeletingMapping] = useState<{ id: string; groupName: string; roleName: string } | null>(null);
+  const mapRole = (roles.data?.custom ?? []).find((r) => r.id === mapRoleId);
+  const mapScope: "space" | "tenant" = mapRole?.scope === "tenant" ? "tenant" : "space";
+  const mapResourceId = mapScope === "tenant" ? tenantId : mapSpaceId;
 
   const onError = (e: unknown) => {
     const status = (e as { status?: number })?.status;
@@ -313,6 +328,57 @@ export function AdminRolesTab() {
           {(assignments.data?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("adminRoles.assignEmpty")}</p>}
         </div>
       )}
+      {/* #497 / ADR-183: declarative group → role mappings. A mapping confers a custom role on an IdP
+          group; membership resolves live (no reconcile). Same server machinery as assignment (,
+          #485 per-scope authority) — the console lists every mapping and flags an orphaned one whose
+          group no member currently carries (IdP rename/empty; surfaced, never auto-migrated). */}
+      <h3 className="mt-8 text-sm font-medium">{t("adminRoles.mappingTitle")}</h3>
+      <p className="mt-0 mb-2 text-xs text-fg-dim">{t("adminRoles.mappingBody")}</p>
+      <div className="mb-3 flex flex-wrap items-end gap-3" data-testid="mapping-form">
+        <label className="flex w-56 flex-col gap-1 text-xs text-fg-dim">
+          {t("adminRoles.mappingGroupLabel")}
+          <Input inputSize="sm" value={mapGroup} placeholder={t("adminRoles.mappingGroupPlaceholder")}
+            aria-label={t("adminRoles.mappingGroupLabel")} data-testid="mapping-group" onChange={(e) => setMapGroup(e.target.value)} />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-fg-dim">
+          {t("adminRoles.roleLabel")}
+          <Select size="sm" value={mapRoleId} ariaLabel={t("adminRoles.roleLabel")} testId="mapping-role"
+            options={(roles.data?.custom ?? []).map((r) => ({ value: r.id, label: r.name }))}
+            onChange={setMapRoleId} />
+        </label>
+        {mapScope === "space" && (
+          <label className="flex flex-col gap-1 text-xs text-fg-dim">
+            {t("adminRoles.spaceLabel")}
+            <Select size="sm" value={mapSpaceId} ariaLabel={t("adminRoles.spaceLabel")} testId="mapping-space"
+              options={(spaces.data ?? []).map((s) => ({ value: s.id, label: s.name || s.id }))}
+              onChange={setMapSpaceId} />
+          </label>
+        )}
+        {mapScope === "tenant" && <span className="pb-1.5 text-xs text-fg-dim" data-testid="mapping-tenant-note">{t("adminRoles.assignTenantScope")}</span>}
+        <Button variant="primary" size="sm" data-testid="mapping-add"
+          disabled={!mapGroup.trim() || !mapRoleId || !mapResourceId || createMapping.isPending}
+          onClick={() => createMapping.mutate({ groupName: mapGroup.trim(), roleId: mapRoleId, resourceType: mapScope, resourceId: mapResourceId }, {
+            onSuccess: () => { notify.success(t("toast.saved")); setMapGroup(""); },
+            onError,
+          })}>{t("adminRoles.mappingAdd")}</Button>
+      </div>
+      <div className="flex flex-col gap-1" data-testid="mapping-list">
+        {mappings.data?.map((m) => (
+          <div key={m.id} className="flex items-center gap-2 text-sm" data-testid="mapping-row">
+            <span className="min-w-0 truncate font-medium">{m.groupName}</span>
+            <span className="text-fg-dim">→</span>
+            <span className="min-w-0 flex-1 truncate text-xs text-fg-dim">{m.roleName}{m.resourceType === "tenant" ? ` · ${t("adminRoles.scopeTenant")}` : ""}</span>
+            {m.orphaned && (
+              <span className="rounded border border-[var(--callout-warning)] px-1 text-[10px] uppercase tracking-wide text-[var(--callout-warning)]" data-testid="mapping-orphan" title={t("adminRoles.mappingOrphanHint")}>{t("adminRoles.mappingOrphan")}</span>
+            )}
+            {/* #504: deleting a mapping revokes its group assignment — red trigger + confirm. */}
+            <IconButton aria-label={t("adminRoles.mappingRemove")} data-testid="mapping-remove" variant="danger"
+              onClick={() => setDeletingMapping({ id: m.id, groupName: m.groupName, roleName: m.roleName })}>×</IconButton>
+          </div>
+        ))}
+        {(mappings.data?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("adminRoles.mappingEmpty")}</p>}
+      </div>
+
       {/* #504: the role-delete confirm — names the role, danger tone. */}
       <ConfirmDialog
         open={deletingRole !== null}
@@ -323,6 +389,18 @@ export function AdminRolesTab() {
           if (!deletingRole) return;
           deleteRole.mutate(deletingRole.id, { onSuccess: () => notify.success(t("toast.saved")), onError });
           setDeletingRole(null);
+        }}
+      />
+      {/* #497: deleting a mapping revokes the group's conferred role — name it, danger tone. */}
+      <ConfirmDialog
+        open={deletingMapping !== null}
+        message={deletingMapping ? t("adminRoles.mappingDeleteConfirm", { group: deletingMapping.groupName, role: deletingMapping.roleName }) : ""}
+        confirmTestId="mapping-delete-confirm"
+        onClose={() => setDeletingMapping(null)}
+        onConfirm={() => {
+          if (!deletingMapping) return;
+          deleteMapping.mutate(deletingMapping.id, { onSuccess: () => notify.success(t("toast.saved")), onError });
+          setDeletingMapping(null);
         }}
       />
     </div>
