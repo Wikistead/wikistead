@@ -132,18 +132,34 @@ export function buildIR(files: Record<string, Uint8Array>): ImportIR {
   const byDir = new Map<string, { oldId: string; title: string; published: boolean }>()
   for (const p of manifest?.pages ?? []) if (typeof p.dir === 'string') byDir.set(p.dir, p)
 
-  // Every `<dir>/index.md` is a page. (A plain Markdown folder can also carry loose `<name>.md`; v1 keys on
-  // the export's index.md convention — a bare `.md` file is treated as its own single-page dir.)
+  // Every `<dir>/index.md` is a page, and a bare `<name>.md` is its own single-page dir `<name>` (#501 —
+  // the comment always promised this; a ZIP of loose notes is the most common "bring my markdown" shape).
+  // Precedence and exclusions:
+  //  - `<dir>/index.md` OUTRANKS a sibling bare `<dir>.md` (the export's convention is authoritative);
+  //  - a `.md` sitting in an attachment folder (`…/images/`, `_home_images/`) stays an attachment, never
+  //    becomes a page (it would otherwise be imported twice);
+  //  - the archive-root `_home.md` is the space home (handled below), not a bare page;
+  //  - bare pages get no `images/` co-location of their own (v1: attachments key on the dir convention).
   const pageDirs: string[] = []
   const bodyByDir = new Map<string, string>()
+  const bareBodies = new Map<string, string>()
   for (const [name, bytes] of Object.entries(files)) {
     if (name === 'manifest.json') continue
-    let dir: string | null = null
-    if (name.endsWith('/index.md')) dir = name.slice(0, -'/index.md'.length)
-    else if (name === 'index.md') dir = ''
-    if (dir == null) continue
+    if (name.endsWith('/index.md')) {
+      const dir = name.slice(0, -'/index.md'.length)
+      pageDirs.push(dir)
+      bodyByDir.set(dir, strFromU8(bytes))
+    } else if (name === 'index.md') {
+      pageDirs.push('')
+      bodyByDir.set('', strFromU8(bytes))
+    } else if (name.endsWith('.md') && name !== '_home.md' && !/(^|\/)(images|_home_images)\/[^/]+$/.test(name)) {
+      bareBodies.set(name.slice(0, -'.md'.length), strFromU8(bytes))
+    }
+  }
+  for (const [dir, body] of bareBodies) {
+    if (bodyByDir.has(dir)) continue // index.md precedence
     pageDirs.push(dir)
-    bodyByDir.set(dir, strFromU8(bytes))
+    bodyByDir.set(dir, body)
   }
   const pageDirSet = new Set(pageDirs)
 
