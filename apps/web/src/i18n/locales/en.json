@@ -1123,7 +1123,17 @@
     "assignTenantScope": "applies tenant-wide",
     "builtInTenantTitle": "Built-in tenant roles",
     "builtInResourceTitle": "Built-in space & page roles",
-    "deleteConfirm": "Delete the role \"{{name}}\"? Its assignments are removed with it. This cannot be undone."
+    "deleteConfirm": "Delete the role \"{{name}}\"? Its assignments are removed with it. This cannot be undone.",
+    "mappingTitle": "Group mappings",
+    "mappingBody": "Confer a custom role on everyone in an IdP group. Membership resolves live from your identity provider — no one is added or billed, and the role appears the moment a member is synced into the group.",
+    "mappingGroupLabel": "IdP group",
+    "mappingGroupPlaceholder": "e.g. Engineering",
+    "mappingAdd": "Add mapping",
+    "mappingRemove": "Remove mapping",
+    "mappingEmpty": "No group mappings yet.",
+    "mappingOrphan": "No members",
+    "mappingOrphanHint": "No member currently carries this group — likely renamed or emptied at the identity provider. The mapping stays until you remove it; nothing is auto-migrated.",
+    "mappingDeleteConfirm": "Remove the mapping from group \"{{group}}\" to \"{{role}}\"? The role is revoked from that group. This cannot be undone."
   },
   "detailsEdit": {
     "title": "Edit collapsible",

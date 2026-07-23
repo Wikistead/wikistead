@@ -1445,6 +1445,39 @@ export function useUnassignRole() {
   });
 }
 
+// #497 / ADR-183: declarative group → role MAPPINGS (EE — customRoles). A mapping owns a
+// group-principal role assignment created through the same gated assign path; the tenant-wide list is
+// admin-only. `orphaned` marks a mapping whose group no member currently carries (IdP rename/empty).
+export interface RoleMapping {
+  id: string; groupName: string; roleId: string; roleName: string;
+  resourceType: "space" | "tenant"; resourceId: string; assignmentId: string | null; orphaned: boolean;
+}
+export function useRoleMappings(enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["role-mappings"],
+    queryFn: () => apiFetch<RoleMapping[]>("/admin/roles/mappings", token).then((r) => r ?? []),
+    enabled,
+  });
+}
+export function useCreateRoleMapping() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { groupName: string; roleId: string; resourceType: "space" | "tenant"; resourceId: string }) =>
+      apiFetch<RoleMapping>("/admin/roles/mappings", token, { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["role-mappings"] }),
+  });
+}
+export function useDeleteRoleMapping() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/admin/roles/mappings/${encodeURIComponent(id)}`, token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["role-mappings"] }),
+  });
+}
+
 export function useAuditLog(before: number | null, enabled = true) {
   const { token } = useSession();
   return useQuery({

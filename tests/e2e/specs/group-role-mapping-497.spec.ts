@@ -1,0 +1,77 @@
+import { test, expect } from "@playwright/test";
+
+// #497 / ADR-183: the Admin → Roles → "Group mappings" console. Real Chromium over the full loop:
+// define a custom role → map an IdP group to it on a space → the mapping lists → delete it (with the
+// #504 confirm). The server behaviour (assignment expansion, live group resolution, per-scope
+// authority, orphan badge) is anti-tested server-side; this pins the UI wiring.
+test("#497: group→role mapping — create a custom role, map a group, list, delete", async ({ page }) => {
+  const role = `e2e-maprole-${Date.now()}`;
+  const group = `e2e-grp-${Date.now()}`;
+  await page.goto("/admin/roles");
+  await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
+
+  // A space-scope custom role to confer.
+  await page.getByTestId("role-create").click();
+  await page.getByTestId("role-name-input").fill(role);
+  await page.getByTestId("role-cap-view").check();
+  await page.getByTestId("role-save").click();
+  await expect(page.getByTestId("custom-roles")).toContainText(role, { timeout: 8000 });
+
+  // Map an IdP group to the role on the first space.
+  await page.getByTestId("mapping-group").fill(group);
+  await page.getByTestId("mapping-role").click();
+  await page.getByRole("option", { name: role }).click();
+  await expect(page.getByRole("option")).toHaveCount(0); // the role listbox closed (radix pointer-events restored)
+  await page.getByTestId("mapping-space").click();
+  await page.getByRole("option").first().click();
+  await page.getByTestId("mapping-add").click();
+
+  // The mapping lists: group name → role name.
+  const row = page.getByTestId("mapping-row").filter({ hasText: group });
+  await expect(row).toContainText(group, { timeout: 8000 });
+  await expect(row).toContainText(role);
+
+  // Delete confirms first (#504 danger), then the row is gone.
+  await row.getByTestId("mapping-remove").click();
+  await page.getByTestId("mapping-delete-confirm").click();
+  await expect(page.getByTestId("mapping-list")).not.toContainText(group, { timeout: 8000 });
+
+  // Cleanup: the role now has no live assignment, so delete succeeds.
+  await page.getByTestId("custom-role-row").filter({ hasText: role }).getByTestId("role-delete").click();
+  await page.getByTestId("role-delete-confirm").click();
+  await expect(page.getByTestId("custom-roles")).not.toContainText(role, { timeout: 8000 });
+});
+
+// A tenant-scope mapping needs no space picker — the target is the tenant itself (the tenant-wide note
+// shows, mirroring the assignment form's tenant behaviour).
+test("#497: a tenant-scope role maps tenant-wide (no space picker)", async ({ page }) => {
+  const role = `e2e-tmaprole-${Date.now()}`;
+  const group = `e2e-tgrp-${Date.now()}`;
+  await page.goto("/admin/roles");
+  await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
+
+  await page.getByTestId("role-create").click();
+  await page.getByTestId("role-name-input").fill(role);
+  await page.getByTestId("role-scope").click();
+  await page.getByRole("option", { name: "Tenant" }).click();
+  await page.getByTestId("role-cap-createSpaces").check();
+  await page.getByTestId("role-save").click();
+  await expect(page.getByTestId("custom-roles")).toContainText(role, { timeout: 8000 });
+
+  await page.getByTestId("mapping-group").fill(group);
+  await page.getByTestId("mapping-role").click();
+  await page.getByRole("option", { name: role }).click();
+  await expect(page.getByTestId("mapping-tenant-note")).toBeVisible();
+  await expect(page.getByTestId("mapping-space")).toHaveCount(0);
+  await page.getByTestId("mapping-add").click();
+  const row = page.getByTestId("mapping-row").filter({ hasText: group });
+  await expect(row).toContainText(role, { timeout: 8000 });
+
+  // Cleanup.
+  await row.getByTestId("mapping-remove").click();
+  await page.getByTestId("mapping-delete-confirm").click();
+  await expect(page.getByTestId("mapping-list")).not.toContainText(group, { timeout: 8000 });
+  await page.getByTestId("custom-role-row").filter({ hasText: role }).getByTestId("role-delete").click();
+  await page.getByTestId("role-delete-confirm").click();
+  await expect(page.getByTestId("custom-roles")).not.toContainText(role, { timeout: 8000 });
+});

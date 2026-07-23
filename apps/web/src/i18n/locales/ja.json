@@ -1122,7 +1122,17 @@
     "assignTenantScope": "テナント全体に適用",
     "builtInTenantTitle": "組み込みのテナントロール",
     "builtInResourceTitle": "組み込みのスペース／ページロール",
-    "deleteConfirm": "ロール「{{name}}」を削除しますか？割り当ても一緒に削除され、元に戻せません。"
+    "deleteConfirm": "ロール「{{name}}」を削除しますか？割り当ても一緒に削除され、元に戻せません。",
+    "mappingTitle": "グループマッピング",
+    "mappingBody": "IdP グループのメンバー全員にカスタムロールを付与します。所属は ID プロバイダから随時解決され、メンバーの追加や課金は発生しません。グループに同期された時点でロールが有効になります。",
+    "mappingGroupLabel": "IdP グループ",
+    "mappingGroupPlaceholder": "例: Engineering",
+    "mappingAdd": "マッピングを追加",
+    "mappingRemove": "マッピングを削除",
+    "mappingEmpty": "グループマッピングはまだありません。",
+    "mappingOrphan": "メンバー無し",
+    "mappingOrphanHint": "現在このグループを持つメンバーがいません（IdP 側で改名／空になった可能性）。マッピングは削除するまで残ります（自動移行はしません）。",
+    "mappingDeleteConfirm": "グループ「{{group}}」→「{{role}}」のマッピングを削除しますか？そのグループからロールが取り消されます。元に戻せません。"
   },
   "detailsEdit": {
     "title": "折りたたみを編集",
