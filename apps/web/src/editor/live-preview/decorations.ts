@@ -1,6 +1,6 @@
 import { syntaxTree, foldedRanges, foldEffect, unfoldEffect } from "@codemirror/language";
 import i18n from "../../i18n"; // #455: the shared empty-macro placeholder text is localized (the #174macros precedent)
-import { Facet, StateField, StateEffect, EditorState, EditorSelection, Prec, type Range, type Extension } from "@codemirror/state";
+import { Facet, StateField, StateEffect, EditorState, EditorSelection, Prec, type Range, type Extension, type Text as CmText } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -4213,10 +4213,27 @@ export function motionAtomsForCaret(
   return blocks.filter((b) => !(hLine > lineNo(b.from) && hLine < lineNo(b.to))).map((b) => ({ from: b.from, to: b.to }));
 }
 
+// #506: is this atom INLINE — a replace widget sitting inside a text line (attachment chip, inline
+// image), as opposed to a full-line/multi-line BLOCK atom (macro, table, hr, frontmatter)? An inline
+// atom is single-line with NON-WHITESPACE line text outside its range (the standalone checks at the
+// render sites use the same trim criterion). The distinction matters for motion: a block atom is an
+// ADR-024 caret REST (land on it, step off), but an inline atom inside prose must be SKIPPED like any
+// hidden inline run — resting on it parks the caret on an invisible offset (the reported "l doesn't
+// cross the chip" defect: vim h/l crawled straight through the hidden range, one dead press per char).
+export function isInlineAtom(doc: CmText, b: { from: number; to: number }): boolean {
+  const lf = doc.lineAt(b.from);
+  if (doc.lineAt(b.to).number !== lf.number) return false; // multi-line → block
+  const before = doc.sliceString(lf.from, b.from);
+  const after = doc.sliceString(b.to, lf.to);
+  return before.trim().length > 0 || after.trim().length > 0;
+}
+
 export const blockEntry: Extension = EditorState.transactionFilter.of((tr) => {
   if (tr.docChanged || !tr.selection) return tr;
   if (tr.newSelection.ranges.length > 1) return tr; // #286: a blockwise vim selection (multi-range) — don't rebuild it to one cursor
-  const baseBlocks = tr.startState.field(livePreview, false)?.blocks ?? [];
+  // #506: inline atoms (chip / inline image) are NOT vertical-motion atoms — their line is ordinary
+  // prose; treating them as blocks snapped j/k landings on that line to its start.
+  const baseBlocks = (tr.startState.field(livePreview, false)?.blocks ?? []).filter((b) => !isInlineAtom(tr.startState.doc, b));
   // Merge the base block atoms (excluding any the caret is editing inside — motionAtomsForCaret) with
   // any provider atoms (display math, always collapsed), so motion is corrected over both without
   // hijacking line-by-line editing inside a revealed block.

@@ -1,7 +1,7 @@
 import { Vim, getCM } from "@replit/codemirror-vim";
 import { EditorState, EditorSelection, type Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
-import { livePreview, displayMode, nestedDeleteChange, enterMacroCommand, setVimMotionActive, atomSelectableSelectedAt } from "./decorations";
+import { livePreview, displayMode, nestedDeleteChange, enterMacroCommand, setVimMotionActive, atomSelectableSelectedAt, isInlineAtom } from "./decorations";
 import { nestedSelectionField, setNestedSelection, macroRenderActiveField } from "./macro-edit";
 
 // ADR-024 1b (Mode A): dd treats a macro ATOM as one unit — the WHOLE macro source is the
@@ -316,7 +316,12 @@ export const vimWysiwygCaretGuard: Extension = [atomSelHideFatCursor, ViewPlugin
       // The inline nudge below stays WYSIWYG-only (Live reveals inline syntax under the caret).
       let onBlockAtom = false;
       if (mode !== "source" && vim && !vim.insertMode && lp) {
-        for (const b of lp.blocks) if (head >= b.from && head < b.to) { onBlockAtom = true; break; }
+        // #506: an INLINE atom (attachment chip / inline image inside prose) is NOT a caret rest —
+        // treating it as one disabled the inline nudge below, so vim h/l crawled offset-by-offset
+        // through the widget's hidden range (a dead press per hidden char). Only full-line/multi-line
+        // block atoms keep the ADR-024 rest-on-atom semantics; inline ones fall through to the nudge,
+        // which skips their whole hidden run like any invisible inline syntax.
+        for (const b of lp.blocks) if (head >= b.from && head < b.to && !isInlineAtom(u.state.doc, b)) { onBlockAtom = true; break; }
         // RichUI: Ctrl+Enter expands table-edit but the CM caret can remain on the atom's range.
         if (!onBlockAtom) {
           const active = u.state.field(macroRenderActiveField, false);
