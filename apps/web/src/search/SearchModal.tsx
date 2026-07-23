@@ -8,6 +8,7 @@ import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from ".
 import { PageMeta } from "../app/PageMeta";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import { PublishedBodyPreview } from "./PublishedBodyPreview";
+import { PanelRowsSkeleton, ProseSkeleton, useDelayedFlag } from "../ui/Skeleton"; // #457
 
 // #285 / ADR-118: the search MODAL — a command dialog with the result list on the left and a preview
 // pane (selected hit) on the right. authz invariants (the review's re-check list,):
@@ -53,6 +54,12 @@ export function SearchModal({ open, onOpenChange, guestToken, onNavigate }: {
   const pageQ = usePage(isGuest ? "" : previewId);
   const publishedQ = usePublished(isGuest ? "" : previewId);
   const guestQ = useGuestPublished(isGuest ? previewId : "", guestToken ?? "");
+  // #457result-list and preview loading draw skeletons instead of a "searching…" text line —
+  // both delay-gated so a fast query/fetch never flashes them (the shared anti-flicker rule).
+  const showListSkeleton = useDelayedFlag(isFetching && (hits ?? []).length === 0);
+  const showPreviewSkeleton = useDelayedFlag(
+    previewId.length > 0 && (isGuest ? guestQ.isFetching : pageQ.isFetching || publishedQ.isFetching),
+  );
 
   // #285(C): keep the whole space summary (icon + name), not just the name, so results show a space
   // ICON. iconImageUrl is already assetUrl-prefixed by useSpaces; accentKey/id seed the initials fallback.
@@ -113,7 +120,8 @@ export function SearchModal({ open, onOpenChange, guestToken, onNavigate }: {
           <div className="flex min-h-0" data-testid="search-results">
             <CommandList className="max-h-[60vh] w-full overflow-y-auto md:w-2/5 md:border-r">
               {isFetching && items.length === 0 ? (
-                <div className="p-2 text-sm text-fg-dim">{t("search.searching")}</div>
+                // #457row skeletons while results load (delay-gated: a fast query renders nothing)
+                <div className="p-2">{showListSkeleton ? <PanelRowsSkeleton testid="search-list-skeleton" rows={5} /> : null}</div>
               ) : items.length === 0 ? (
                 input.trim() ? <CommandEmpty>{t("search.noResults")}</CommandEmpty> : <div className="p-2 text-sm text-fg-dim">{t("search.placeholder")}</div>
               ) : (
@@ -154,7 +162,7 @@ export function SearchModal({ open, onOpenChange, guestToken, onNavigate }: {
                     </div>
                   </>
                 ) : (
-                  <div className="text-sm text-fg-dim">{previewId && guestQ.isFetching ? t("search.searching") : ""}</div>
+                  showPreviewSkeleton ? <ProseSkeleton testid="search-preview-skeleton" /> : null
                 )
               ) : previewId && pageQ.data ? (
                 <>
@@ -170,12 +178,12 @@ export function SearchModal({ open, onOpenChange, guestToken, onNavigate }: {
                     {publishedQ.data?.publishedMd
                       ? <PublishedBodyPreview body={publishedQ.data.publishedMd} pageId={previewId} testid="search-preview-rendered" />
                       : publishedQ.isFetching
-                        ? <div className="text-xs text-fg-dim">{t("search.searching")}</div>
+                        ? (showPreviewSkeleton ? <ProseSkeleton testid="search-preview-skeleton" /> : null)
                         : <div className="text-xs text-fg-dim" data-testid="search-preview-unpublished">{t("search.previewUnpublished")}</div>}
                   </div>
                 </>
               ) : (
-                <div className="text-sm text-fg-dim">{previewId && (pageQ.isFetching || publishedQ.isFetching) ? t("search.searching") : ""}</div>
+                showPreviewSkeleton ? <ProseSkeleton testid="search-preview-skeleton" /> : null
               )}
             </div>
           </div>

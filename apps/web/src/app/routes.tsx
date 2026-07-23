@@ -947,7 +947,7 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
 
   return (
     <AppShell
-      sidebar={<GuestSidebar pages={pages ?? []} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} error={pagesError} onRetry={refreshPages} />}
+      sidebar={<GuestSidebar pages={pages ?? []} loading={pages == null && !pagesError} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} error={pagesError} onRetry={refreshPages} />}
       // #449 / ADR-173: the guest gets the SAME search box (Ctrl-K + the header field), wired to their
       // own token and opening hits inside this shell via the tree's open handler. The server forces the
       // link's space scope and gates every hit on the share_link principal — no member chrome leaks here.
@@ -988,6 +988,10 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
   // picture) so multiple guests on a doc are still visually distinguishable (#8).
   const [guest] = useState(() => ({ name: t("collab.guest"), color: colorFromString(`guest-${Math.random()}`), picture: null }));
   const [publishedMd, setPublishedMd] = useState<string | null>(null);
+  // #457has the FIRST /published fetch settled? Until it has, the body area is "loading", not
+  // "empty" — the same distinction the member surface draws. Set on BOTH resolve and deny/expire (a
+  // denied guest sees the empty view, not an eternal skeleton).
+  const [publishedLoaded, setPublishedLoaded] = useState(false);
   const [pageTitle, setPageTitle] = useState(""); // #318: shown in the guest title band (read-only)
   // #364a space's HOME page is labelled by its space everywhere else — the sidebar's 🏠 row, the
   // member band, the empty state. The guest band printed the raw title, which migration 077 normalised to
@@ -1033,7 +1037,8 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
   const reloadPublished = useCallback(() => {
     apiFetch<{ title?: string; isHome?: boolean; publishedMd: string | null; canComment?: boolean }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
       .then((r) => { setPublishedMd(r?.publishedMd ?? null); setPageTitle(r?.title ?? ""); setIsHome(!!r?.isHome); setCanComment(!!r?.canComment); })
-      .catch(() => { /* denied/expired → empty view */ });
+      .catch(() => { /* denied/expired → empty view */ })
+      .finally(() => setPublishedLoaded(true));
   }, [pageId, token]);
   useEffect(() => { reloadPublished(); }, [reloadPublished]);
   // #464 / ADR-175: a view-guest's genuine READ is signalled once per page open (view mode) — the server
@@ -1179,6 +1184,15 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
                 #374guestSurface keeps the MEMBER-ONLY sources (title dictionary / backlinks / query)
                 suppressed — pageId used to double as their gate, so passing it above un-gated them on this
                 guest surface (the title-links-224 guest anti-test: no auto links for a guest, 2-layer rule). */}
+            {/* #457the guest body gets the SAME loading/empty distinction as the member surface
+                the identical opaque inset-0 overlay (thelesson: it must fully cover the mounted
+                Editor so the skeleton and real content never show together). The Editor stays mounted
+                underneath (collab/presence invariant), exactly like the member wiring above. */}
+            <BodyPlaceholder
+              loading={!publishedLoaded && !editing}
+              empty={publishedLoaded && !editing && !(publishedMd ?? "").trim()}
+              canEdit={canEdit}
+            />
             <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #227the shared TocChrome (rail on wide / overlay on narrow); yields to the comments

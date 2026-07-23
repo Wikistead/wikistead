@@ -4,6 +4,7 @@ import { RotateCcw, GitCompare, Undo2 } from "lucide-react";
 import { usePageRevisions, useRestoreRevision, useRevertActorRun, type Revision } from "../data/queries";
 import { ConfirmDialog } from "../ui/dialogs";
 import { RightPanel } from "../ui/RightPanel";
+import { PanelRowsSkeleton, useDelayedFlag } from "../ui/Skeleton"; // #457loading ≠ empty
 import { notify } from "../ui/toast";
 import { authorLabel, isGuestSub } from "../comments/AuthorChip";
 import { latestRun, isRevertableRun } from "./revert-run"; // #327the bulk-revert guards
@@ -79,9 +80,13 @@ export function HistoryPanel({
   const run = isRevertableRun(rawRun) ? rawRun : null;
   const runAuthor = run ? author(run.actor, t("history.unknown"), t("common.guest"), identities.data) : "";
 
+  // #457the list load draws row skeletons (delay-gated — a fast fetch shows nothing), so
+  // "revisions are coming" and "there are none" read differently. The empty wording stays as-is.
+  const showSkeleton = useDelayedFlag(isLoading);
+
   return (
     <RightPanel testId="history-panel" title={t("history.title")} onClose={onClose}>
-      {isLoading && <p className="m-0 text-sm text-fg-dim">{t("common.loading")}</p>}
+      {isLoading && showSkeleton && <PanelRowsSkeleton testid="history-skeleton" />}
       {!isLoading && (revisions?.length ?? 0) === 0 && <p className="m-0 text-sm text-fg-dim">{t("history.empty")}</p>}
 
       {/* #327 increment 2: the one-click per-actor revert, offered ONLY when it is honest (the newest
