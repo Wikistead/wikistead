@@ -48,10 +48,14 @@ function SelectTrigger({
   )
 }
 
+// #498: `position` defaults to POPPER, not Radix's "item-aligned". Item-aligned overlays the trigger and
+// EXPANDS as you wheel-scroll — with enough options the popup grows until it fills the viewport (the
+// reported bug). Popper anchors below the trigger with a collision-aware max-height
+// (--radix-select-content-available-height), so the list scrolls INSIDE a bounded box instead.
 function SelectContent({
   className,
   children,
-  position = "item-aligned",
+  position = "popper",
   align = "center",
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
