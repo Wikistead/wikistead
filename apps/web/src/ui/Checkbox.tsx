@@ -6,12 +6,15 @@ import { cn } from "@/lib/utils";
 // never colour-only) with its label as one clickable unit. Used for lists of independent opt-ins
 // (editor chrome modes); a single on/off STATE wants Switch instead.
 export function CheckboxRow({
-  checked, onChange, label, description, disabled, testId, className,
+  checked, onChange, label, description, icon, disabled, testId, className,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: ReactNode;
   description?: ReactNode;
+  /** #493: optional leading glyph, symmetric with RadioGroup's RadioOption.icon (same fg-dim size-4
+      treatment) so option lists that mirror a RadioGroup (editor chrome modes) keep the same look. */
+  icon?: ReactNode;
   disabled?: boolean;
   testId?: string;
   className?: string;
@@ -26,7 +29,7 @@ export function CheckboxRow({
         data-testid={testId}
       />
       <span className="min-w-0 flex-1">
-        <span className="block text-sm text-foreground">{label}</span>
+        <span className="flex items-center gap-1.5 text-sm text-foreground">{icon != null && <span aria-hidden className="flex-none text-fg-dim [&_svg]:size-4">{icon}</span>}{label}</span>
         {description != null && <span className="block text-xs text-fg-dim">{description}</span>}
       </span>
     </label>

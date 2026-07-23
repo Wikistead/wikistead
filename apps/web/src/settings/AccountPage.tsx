@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { IdCard, SquarePen, Palette, HardDriveDownload, Loader2, Bell, KeyRound, Zap, Code, Eye, MonitorSmartphone } from "lucide-react"; // #493: display-mode glyphs
+import { IdCard, SquarePen, Palette, HardDriveDownload, Loader2, Bell, KeyRound, Zap, Code, Eye, BookOpen, MonitorSmartphone } from "lucide-react"; // #493: display-mode glyphs
 import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useSession } from "../session/SessionProvider";
@@ -321,6 +321,9 @@ function EditorTab() {
               checked={modesVisible[m]}
               onChange={() => toggleMode(m)}
               testId={`account-chrome-mode-${m}`}
+              // #493 same per-mode glyphs as the displayMode RadioGroup above / MODE_META
+              // every surface that enumerates the modes shows the same icons.
+              icon={{ live: <Zap />, source: <Code />, reading: <BookOpen />, wysiwyg: <Eye /> }[m]}
               label={t(`page.mode${m === "live" ? "Live" : m === "source" ? "Source" : m === "reading" ? "Reading" : "Wysiwyg"}`)}
             />
           ))}
