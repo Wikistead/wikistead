@@ -1339,10 +1339,27 @@ export function useCreateRole() {
 export function useUpdateRole() {
   const { token } = useSession();
   const qc = useQueryClient();
+  type Roles = { builtIn: { name: string; capabilities: string[] }[]; custom: RoleDef[] };
   return useMutation({
     mutationFn: ({ id, ...body }: { id: string; name: string; capabilities: string[] }) =>
       apiFetch<RoleDef>(`/admin/roles/${encodeURIComponent(id)}`, token, { method: "PUT", body: JSON.stringify(body) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["roles"] }),
+    // #445 the inline capability toggle commits per-op, so the checkbox must MOVE on click —
+    // a controlled box that waits for the invalidate/refetch reads as a dead click. Standard optimistic
+    // pattern: patch the cache immediately, roll back on error (the 403/409 toast explains why), and
+    // settle with the invalidate so the server row is the final truth either way.
+    onMutate: (vars) => {
+      // Patch SYNCHRONOUSLY (before any await) so the re-render lands in the same event batch as the
+      // click — the checkbox flips in the frame it was clicked in. cancelQueries follows in the same
+      // tick to stop an in-flight refetch from overwriting the patch; onSettled re-invalidates anyway.
+      const prev = qc.getQueryData<Roles>(["roles"]);
+      qc.setQueryData<Roles>(["roles"], (cur) =>
+        cur ? { ...cur, custom: cur.custom.map((r) => (r.id === vars.id ? { ...r, name: vars.name, capabilities: vars.capabilities } : r)) } : cur,
+      );
+      void qc.cancelQueries({ queryKey: ["roles"] });
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["roles"], ctx.prev); },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["roles"] }),
   });
 }
 export function useDeleteRole() {

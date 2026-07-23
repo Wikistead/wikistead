@@ -4,7 +4,6 @@ import {
   useRoles, useCreateRole, useUpdateRole, useDeleteRole,
   useRoleAssignments, useAssignRole, useUnassignRole, useAdminSpaces,
   useTenantRoleDefaults, useSetTenantRoleDefaults, useTenantMemberCandidates,
-  type RoleDef,
 } from "../data/queries";
 import { useSession } from "../session/SessionProvider";
 import { Button, IconButton } from "../ui/Button";
@@ -24,23 +23,31 @@ const TENANT_CAPABILITIES = ["createSpaces"] as const;
 // #420 `disabled` renders the SAME control read-only, so a built-in role is shown as the very
 // checkbox grid you would use to build a custom one — the vocabulary and layout match instead of the
 // old "cap · cap · cap" text, and what a role can do reads the same way everywhere.
-function CapabilityPicker({ value, onChange, idPrefix, list, disabled = false }: { value: string[]; onChange?: (caps: string[]) => void; idPrefix: string; list: readonly string[]; disabled?: boolean }) {
+// #445 `lockLast` keeps a role from losing its LAST capability — the sole checked box renders
+// disabled (with a title explaining why), mirroring the server's non-empty validation (`role-save`'s
+// existing constraint) instead of letting the toggle round-trip to a 400.
+function CapabilityPicker({ value, onChange, idPrefix, list, disabled = false, lockLast = false }: { value: string[]; onChange?: (caps: string[]) => void; idPrefix: string; list: readonly string[]; disabled?: boolean; lockLast?: boolean }) {
   const { t } = useTranslation();
+  const lastLocked = lockLast && value.length === 1;
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1">
-      {list.map((c) => (
-        <label key={c} className={`flex items-center gap-1.5 text-sm${disabled ? " text-fg-dim" : ""}`}>
-          <input
-            type="checkbox"
-            data-testid={`${idPrefix}-cap-${c}`}
-            checked={value.includes(c)}
-            disabled={disabled}
-            onChange={disabled ? undefined : (e) => onChange?.(e.target.checked ? [...value, c] : value.filter((x) => x !== c))}
-            readOnly={disabled}
-          />
-          <span>{t(`adminRoles.cap.${c}`)}</span>
-        </label>
-      ))}
+      {list.map((c) => {
+        const itemLocked = lastLocked && value.includes(c);
+        const itemDisabled = disabled || itemLocked;
+        return (
+          <label key={c} className={`flex items-center gap-1.5 text-sm${disabled ? " text-fg-dim" : ""}`} title={itemLocked ? t("adminRoles.lastCap") : undefined}>
+            <input
+              type="checkbox"
+              data-testid={`${idPrefix}-cap-${c}`}
+              checked={value.includes(c)}
+              disabled={itemDisabled}
+              onChange={itemDisabled ? undefined : (e) => onChange?.(e.target.checked ? [...value, c] : value.filter((x) => x !== c))}
+              readOnly={itemDisabled}
+            />
+            <span>{t(`adminRoles.cap.${c}`)}</span>
+          </label>
+        );
+      })}
     </div>
   );
 }
@@ -87,7 +94,10 @@ export function AdminRolesTab() {
   const updateRole = useUpdateRole();
   const deleteRole = useDeleteRole();
   const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<RoleDef | null>(null);
+  // #445 the full edit form is gone — capabilities toggle INLINE (per-op commit) and only the
+  // NAME keeps a small affordance (pencil → inline input).
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   // Assignment panel: pick a custom role + a space + a member sub → expand. Space-scope only in
   // the v1 console (page-scope assignment is reachable via the API; a page picker is a follow-up).
@@ -160,28 +170,66 @@ export function AdminRolesTab() {
         ))}
       </div>
 
-      {/* Custom roles (EE): create / edit / delete. */}
+      {/* Custom roles (EE): create / inline-edit / delete. #445 a custom role reads and EDITS in
+          the very layout the built-ins read in — bold name + a CapabilityPicker — except its picker is
+          live: each checkbox toggle commits ONE updateRole (per-op, the member-createSpaces operation
+          model), so there is no separate form to open. The server stays the fortress: a non-entitled
+          plan gets the 403 upsell toast on the first toggle; a stale row gets the 409 conflict toast.
+          Only the NAME keeps a small affordance (pencil → inline input); scope is fixed at creation. */}
       <h3 className="text-sm font-medium">{t("adminRoles.customTitle")}</h3>
       <div className="mb-2 flex flex-col gap-2" data-testid="custom-roles">
-        {(roles.data?.custom ?? []).map((r) =>
-          editing?.id === r.id ? (
-            <RoleEditor key={r.id} initial={editing} pending={updateRole.isPending}
-              onCancel={() => setEditing(null)}
-              onSave={(v) => updateRole.mutate({ id: r.id, name: v.name, capabilities: v.capabilities }, {
-                onSuccess: () => { notify.success(t("toast.saved")); setEditing(null); },
-                onError,
-              })} />
-          ) : (
-            <div key={r.id} className="flex items-center gap-2 text-sm" data-testid="custom-role-row">
-              <span className="font-medium">{r.name}</span>
-              {r.scope === "tenant" && <span className="rounded bg-bg-subtle px-1 text-[10px] uppercase tracking-wide text-fg-dim">{t("adminRoles.scopeTenant")}</span>}
-              <span className="min-w-0 flex-1 truncate text-xs text-fg-dim">{r.capabilities.join(" · ")}</span>
-              <Button variant="ghost" size="sm" data-testid="role-edit" onClick={() => setEditing(r)}>{t("common.edit")}</Button>
-              <IconButton aria-label={t("adminRoles.delete")} data-testid="role-delete"
-                onClick={() => deleteRole.mutate(r.id, { onSuccess: () => notify.success(t("toast.saved")), onError })}>×</IconButton>
+        {(roles.data?.custom ?? []).map((r) => {
+          const commitRename = () => {
+            if (renamingId !== r.id) return; // Enter already committed; the trailing blur is a no-op
+            const v = renameValue.trim();
+            setRenamingId(null);
+            if (!v || v === r.name) return;
+            updateRole.mutate({ id: r.id, name: v, capabilities: r.capabilities }, {
+              onSuccess: () => notify.success(t("toast.saved")),
+              onError,
+            });
+          };
+          return (
+            <div key={r.id} className="flex flex-col gap-1" data-testid="custom-role-row">
+              <div className="flex items-center gap-2 text-sm">
+                {renamingId === r.id ? (
+                  <Input inputSize="sm" className="max-w-xs" value={renameValue} autoFocus
+                    aria-label={t("adminRoles.nameLabel")} data-testid="role-rename-input"
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitRename();
+                      else if (e.key === "Escape") setRenamingId(null);
+                    }} />
+                ) : (
+                  <>
+                    <span className="font-medium">{r.name}</span>
+                    {r.scope === "tenant" && <span className="rounded bg-bg-subtle px-1 text-[10px] uppercase tracking-wide text-fg-dim">{t("adminRoles.scopeTenant")}</span>}
+                    <IconButton aria-label={t("adminRoles.rename")} title={t("adminRoles.rename")} data-testid="role-rename"
+                      onClick={() => { setRenamingId(r.id); setRenameValue(r.name); }}>✎</IconButton>
+                  </>
+                )}
+                <span className="flex-1" />
+                <IconButton aria-label={t("adminRoles.delete")} data-testid="role-delete"
+                  onClick={() => deleteRole.mutate(r.id, { onSuccess: () => notify.success(t("toast.saved")), onError })}>×</IconButton>
+              </div>
+              <CapabilityPicker
+                value={r.capabilities}
+                idPrefix="custom"
+                list={r.scope === "tenant" ? TENANT_CAPABILITIES : CAPABILITIES}
+                disabled={updateRole.isPending}
+                lockLast
+                onChange={(caps) => {
+                  if (caps.length === 0) return; // belt + braces under lockLast — never PUT an empty bundle
+                  updateRole.mutate({ id: r.id, name: r.name, capabilities: caps }, {
+                    onSuccess: () => notify.success(t("toast.saved")),
+                    onError,
+                  });
+                }}
+              />
             </div>
-          ),
-        )}
+          );
+        })}
         {(roles.data?.custom.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("adminRoles.customEmpty")}</p>}
       </div>
       {creating ? (
