@@ -1053,6 +1053,8 @@
   },
   "adminRoles": {
     "title": "ロール",
+    "rename": "名前を変更",
+    "lastCap": "ロールには最低 1 つの権限が必要です。",
     "builtInTitle": "組込ロール",
     "builtIn": "組込",
     "customTitle": "カスタムロール",

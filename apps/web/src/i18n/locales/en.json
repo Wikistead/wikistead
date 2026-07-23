@@ -1054,6 +1054,8 @@
   },
   "adminRoles": {
     "title": "Roles",
+    "rename": "Rename role",
+    "lastCap": "A role keeps at least one capability.",
     "builtInTitle": "Built-in roles",
     "builtIn": "built-in",
     "customTitle": "Custom roles",
