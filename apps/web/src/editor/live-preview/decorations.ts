@@ -13,7 +13,7 @@ import { findFenceMacro, findDirectiveMacro, editModeOf, hasEditUI, asMacroSourc
 import { autoDemote } from "../macros/tier-cap";
 export type { MacroTheme }; // #200: re-exported so the Editor can type the redrawMacros payload
 import { fenceLang, fenceBody, macroFenceAt, directiveMacroAt, directiveChainAt, tableBlockAt } from "../macros/fence";
-import { toHtml, toPipe, representableAsPipe, tableFence, type TableAlign } from "../macros/table-model";
+import { toHtml, toPipe, representableAsPipe, tableFence, tableAlignOf, type TableAlign } from "../macros/table-model";
 import { currentMacroTheme } from "../macros/theme";
 import { parseDirectiveOpen, resolveDirectiveRanges, serializeDirectiveAttrs } from "../macros/directive-parser";
 import { parseFrontmatterRange, FrontmatterWidget } from "./frontmatter";
@@ -1485,6 +1485,19 @@ class TableWidget extends WidgetType {
     // grid needs no entry affordance). It belongs on the RAW-EDITING state — when the caret is in the table
     // and the `| a | b |` source is visible. That pill is emitted by the reveal branch (TableRawRichuiPill),
     // not here. The rendered widget stays clean.
+    // #393 / ADR-151 addendum 3: a rendered pipe (GFM) table gets the SAME hover align segment a rendered
+    // `:::table` (MacroWidget) carries at :2651 — so hovering EITHER table exposes left/center/right, not
+    // just `:::table`. A pipe table is invariantly LEFT (any non-left promotes to `:::table` = a MacroWidget,
+    // a different widget), so the current side is always "left"; picking center/right runs setTableAlign,
+    // which promotes the pipe to `:::table{align=…}` (the pipeline). Editable surface only — the
+    // read-only view renders through md-render, never this widget. The btnrow rides in a `.cm-lp-macro-btnrow`
+    // (shared chrome class); its hover-reveal is wired for `.cm-lp-table-wrap` in the theme CSS below.
+    if (!view.state.readOnly) {
+      const btnRow = document.createElement("div");
+      btnRow.className = "cm-lp-macro-btnrow";
+      btnRow.appendChild(makeAlignSegment("left", (a) => setTableAlign(view, view.posAtDOM(wrap), a)));
+      wrap.appendChild(btnRow);
+    }
     // Height can shift after first measure (fonts, reflow, edit-mode chrome) → re-measure
     // so lines below a tall table don't drift (ADR-024 motion correctness — common path).
     this.ro = observeBlockResize(view, wrap);
@@ -1579,6 +1592,16 @@ class EditableTableWidget extends WidgetType {
     dom.__tableCtrl?.destroy();
     dom.replaceChildren(); // clear the previous grid before mounting fresh (mount appends, doesn't clear)
     dom.__tableCtrl = tableInlineEditor.mount(dom, makeInnerEditHost(view, this.from, this.to, tableTier));
+    // #393 / ADR-151 addendum 3: the WHOLE-TABLE align segment stays visible while the RichUI
+    // island is open — orthogonal to the toolbar's per-CELL text-align (patchStyle). mount cleared the
+    // wrap, so (re-)append it here on every mount/updateDOM. Current side reads from the source (a promoted
+    // `:::table{align=…}` keeps its side; a pipe is left); picking runs the same promote/demote setTableAlign.
+    if (!view.state.readOnly) {
+      const btnRow = document.createElement("div");
+      btnRow.className = "cm-lp-macro-btnrow";
+      btnRow.appendChild(makeAlignSegment(tableAlignOf(this.source), (a) => setTableAlign(view, this.from, a)));
+      dom.appendChild(btnRow);
+    }
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div") as TableDom;
@@ -4906,6 +4929,12 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // ✎ was exactly a descendant match) nor an island's (a deep descendant by construction). One rule
   // shape for top level, nested renders and islands alike; no enumeration guards remain.
   ".cm-lp-macro-wrap:hover > .cm-lp-macro-btnrow, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow": { pointerEvents: "auto" },
+  // #393 / ADR-151 addendum 3: the pipe (GFM) table's root is `.cm-lp-table-wrap` (TableWidget) /
+  // `.cm-lp-table-edit` (EditableTableWidget), NOT `.cm-lp-macro-wrap` — so the reveal rules above never
+  // reach its align btnrow. Mirror them for the table wraps so a pipe table's hover align segment reveals
+  // exactly like a `:::table`'s (the #216/ trap: a btnrow mounted but styled only under
+  // `.cm-lp-macro-wrap:hover` is present-but-invisible — the actual non-affordance reported).
+  ".cm-lp-table-wrap:hover > .cm-lp-macro-btnrow, .cm-lp-table-edit:hover > .cm-lp-macro-btnrow": { pointerEvents: "auto" },
   ".cm-lp-macro-btnrow > .cm-lp-macro-edit, .cm-lp-macro-btnrow > .cm-lp-macro-align": { position: "static", top: "auto", left: "auto" },
   // #424: the standalone (non-btnrow) edit button pins to the block's LEFT edge too — one position for
   // every entry affordance. Scoped to the edit button only (retarget is a top-RIGHT control).
@@ -5009,6 +5038,10 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // island's chrome (both are deeper descendants by construction). This retires the
   // `:not(island *)` + island-scoped enumeration entirely: one rule shape everywhere.
   ".cm-lp-macro-wrap:hover > .cm-lp-macro-btnrow .cm-lp-macro-edit, .cm-lp-macro-wrap:hover > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-macro-wrap:hover > .cm-lp-macro-edit, .cm-lp-macro-wrap:hover > .cm-lp-macro-retarget, .cm-lp-macro-wrap:hover > .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-align": { opacity: "1" },
+  // #393 / ADR-151 addendum 3: same opacity reveal for the pipe table's align segment on hover (its wrap
+  // is `.cm-lp-table-wrap` for the rendered widget, `.cm-lp-table-edit` while the RichUI island is open
+  // wants the whole-table align visible in BOTH states, orthogonal to the toolbar's per-cell align).
+  ".cm-lp-table-wrap:hover > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-table-edit:hover > .cm-lp-macro-btnrow .cm-lp-macro-align": { opacity: "1" },
   // #174 point 3: innermost-wins for the edit ✎. Hovering a NESTED macro slot reveals THAT slot's own ✎;
   // while it does, suppress the CONTAINER's ✎ (its own direct btnrow) so the inner and outer buttons never
   // co-occur. `:has([data-mac-pos]:hover)` scopes it to the container holding the hovered slot; `>` keeps it
