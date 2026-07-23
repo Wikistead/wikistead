@@ -188,3 +188,32 @@ test("#460: freeze and the comment audience are reachable under Advanced and sti
     return ((await r.json()) as { frozen?: string | null }).frozen ?? null;
   }, pageId), { timeout: 8000, message: "the freeze reached the server from the Advanced tab" }).toBe("guests");
 });
+
+// #460 Radix auto-focused the first tabbable — the active TabsTrigger — on open, and
+// programmatic focus counts as :focus-visible, so a MOUSE open painted a focus ring on the Access
+// tab. The auto-focus is prevented (FocusScope falls back to the content container); keyboard users
+// still Tab into the strip and arrow-rove between tabs.
+test("#460 a mouse open paints no focus ring on the Access tab; keyboard tabbing still works", async ({ page }) => {
+  await openDemo(page);
+  await page.click("[data-testid=page-overflow-trigger]");
+  await page.click("[data-testid=permissions-open]");
+  await expect(page.locator("[data-testid=permissions-dialog]")).toBeVisible();
+
+  const tab = page.locator("[data-testid=permissions-tab-access]");
+  await expect(tab).toBeVisible();
+  expect(await tab.evaluate((el) => el.matches(":focus-visible")), "no ring on a mouse open").toBe(false);
+
+  // a11y non-regression: tabbing reaches the strip (auto-focus prevention must not make it
+  // unreachable), and arrows rove between tabs once there
+  let focusInStrip = false;
+  for (let i = 0; i < 6 && !focusInStrip; i++) {
+    await page.keyboard.press("Tab");
+    focusInStrip = await page.evaluate(() => !!document.activeElement?.closest("[data-slot=tabs-list]"));
+  }
+  expect(focusInStrip, "tabbing reaches the tab strip").toBe(true);
+  await page.keyboard.press("ArrowRight");
+  // the roving focus lands after the activation re-render — poll, don't read synchronously
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.getAttribute("data-testid")), { message: "arrow roving moves between tabs" })
+    .toBe("permissions-tab-restrictions");
+});
