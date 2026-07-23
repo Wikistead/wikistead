@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui/Button";
 import { ToggleButton } from "../ui/ToggleButton";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel } from "../components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from "../components/ui/dropdown-menu";
 import { useDirty, type DirtySignal } from "../editor/dirtySignal";
 
 // #165 display-mode segment: icon-only entries, in cycle order (matches Ctrl+Alt+E). Icons mirror the
@@ -337,7 +337,29 @@ export function PageControlsMobile(p: PageControlsProps) {
               {p.onPublish && <DropdownMenuItem disabled={p.publishing || !canPublish} onSelect={() => p.onPublish?.()} data-testid="m-publish-page"><UploadCloud size={14} /> {t("page.publish")}</DropdownMenuItem>}
               <DropdownMenuItem onSelect={p.onDone} data-testid="m-view-toggle"><X size={14} /> {t("page.done")}</DropdownMenuItem>
               {p.onToggleVim && p.showVimToggle !== false && <DropdownMenuItem disabled={p.vimForcedOff} onSelect={p.onToggleVim} data-testid="m-vim-toggle"><SquareTerminal size={14} /> Vim {p.vimForcedOff ? t("common.off") : p.vim ? t("common.on") : t("common.off")}</DropdownMenuItem>}
-              {p.onCycleDisplayMode && <DropdownMenuItem onSelect={p.onCycleDisplayMode} data-testid="m-displaymode-toggle">{p.displayMode === "source" ? <Code size={14} /> : p.displayMode === "reading" ? <BookOpen size={14} /> : p.displayMode === "wysiwyg" ? <Eye size={14} /> : <Zap size={14} />} {t("page.displayMode")}: {t(p.displayMode === "source" ? "page.modeSource" : p.displayMode === "reading" ? "page.modeReading" : p.displayMode === "wysiwyg" ? "page.modeWysiwyg" : "page.modeLive")}</DropdownMenuItem>}
+              {/* #507: a submenu that lists the modes for DIRECT selection — the old single item CYCLED
+                  on every tap and closed the menu, so reaching a mode took up to three open-tap-close
+                  rounds. Same direct-selection idea as the desktop segment (ADR-056 / #164); the
+                  Ctrl+Alt+E cycle shortcut is untouched. */}
+              {p.onSetDisplayMode && (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger data-testid="m-displaymode-toggle">
+                    {(() => {
+                      const cur = DISPLAY_MODES.find((m) => m.mode === (p.displayMode ?? "live")) ?? DISPLAY_MODES[0]!;
+                      const CurIcon = cur.Icon;
+                      return <><CurIcon size={14} /> {t("page.displayMode")}: {t(cur.labelKey)}</>;
+                    })()}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent data-testid="m-displaymode-menu">
+                    {DISPLAY_MODES.filter(({ mode }) => !p.visibleModes || p.visibleModes.includes(mode)).map(({ mode, Icon, labelKey }) => (
+                      <DropdownMenuItem key={mode} onSelect={() => p.onSetDisplayMode!(mode)} data-testid={`m-displaymode-${mode}`}>
+                        <Icon size={14} /> {t(labelKey)}
+                        {(p.displayMode ?? "live") === mode && <Check size={14} className="ml-auto text-[var(--accent)]" />}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              )}
             </>
           ) : (
             // #368: view mode = just Edit here; Watch + Share are in the overflow section below (built by
