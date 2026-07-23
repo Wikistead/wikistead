@@ -18,6 +18,7 @@ import { pool, registry, acquireTenantDb } from '../db/index.js' // #411: cross-
 import { flushDraft } from '../collab-flush.js'
 import { countTodoTasks } from '../task-progress.js' // #290: :::todo aggregate for the sidebar ring
 import { evaluatePublishAbuse } from '../abuse-filter.js' // #328 / ADR-140: publish-boundary abuse filter
+import { getEffectiveAbusePolicyForSpace } from './abuse-config.js' // #509 / ADR-187: tenant floor ⊕ space layer
 import { recordAbuseFlag } from './notifications.js' // #326 / ADR-142 Addendum 2: patrol flags at the refusal boundaries
 
 // #326: a flag names its actor the same way every other feed row does — the guest's session pseudonym
@@ -585,15 +586,14 @@ export async function publishPage(
   if (!draft) throw Object.assign(new Error('not found'), { statusCode: 404 })
   const md = decodeYdocContent(draft.ydoc)
 
-  // #328 / ADR-140: the publish-boundary abuse filter (increment 1). The edit gate above has passed; now check
-  // the CONTENT against the tenant's moderation policy (mass-delete shrink + banned words on added content).
-  // Defaults are all-permissive, so this is a no-op (and a single cheap SELECT) until an admin opts in. A
+  // #328 / ADR-140 + #509 / ADR-187: the publish-boundary abuse filter. The edit gate above has passed; now
+  // check the CONTENT against the EFFECTIVE moderation policy = tenant floor ⊕ this space's ADDITIVE layer
+  // (banned words UNIONed, shrink ratio the STRICTER of the two — a space can never weaken the floor).
+  // Defaults are all-permissive, so this stays a no-op (two cheap SELECTs) until someone opts in. A
   // rejection is a 422 with a STATIC reason code — the CRDT/Y.Text is never touched (decide-only).
-  const [ab] = await db.sql<[{ abuse_shrink_ratio: number | null; abuse_banned_words: string[] }?]>`
-    SELECT abuse_shrink_ratio, abuse_banned_words FROM tenant_settings WHERE tenant_id = ${draft.tenant_id}
-  `
-  if (ab && (ab.abuse_shrink_ratio != null || (ab.abuse_banned_words?.length ?? 0) > 0)) {
-    const verdict = evaluatePublishAbuse(draft.published_md, md, { shrinkRatio: ab.abuse_shrink_ratio, bannedWords: ab.abuse_banned_words ?? [] })
+  const effective = await getEffectiveAbusePolicyForSpace(db, draft.space_id)
+  if (effective.shrinkRatio != null || effective.bannedWords.length > 0) {
+    const verdict = evaluatePublishAbuse(draft.published_md, md, effective)
     if (!verdict.ok) {
       // #326: a refused publish is exactly what patrol wants to see — repeated refusals are the vandal
       // signature the ruling asked to surface. Recorded before the throw, from the route's sink, so the

@@ -1063,6 +1063,30 @@ export function useUpdateAbuseFilterConfig() {
   });
 }
 
+// #509 / ADR-187: the per-space abuse layer (moderate-gated on the server: space#moderator OR manager).
+// GET returns the space's OWN additions, the tenant floor (read-only context), and the EFFECTIVE
+// (floor ⊕ space) policy that a publish is actually judged against. A `null` field = inherit.
+export interface SpaceAbuseLayer { shrinkRatio: number | null; bannedWords: string[] | null; }
+export interface SpaceAbuseFilterResponse { space: SpaceAbuseLayer; tenantFloor: AbuseFilterConfig; effective: AbuseFilterConfig; }
+export function useSpaceAbuseFilterConfig(spaceId: string | undefined, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["space-abuse-filter", spaceId],
+    queryFn: () => apiFetch<SpaceAbuseFilterResponse>(`/spaces/${spaceId}/abuse-filter`, token),
+    enabled: enabled && !!spaceId,
+  });
+}
+export function useUpdateSpaceAbuseFilterConfig(spaceId: string | undefined) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    // The server normalizes and UNIONs / MAXes with the tenant floor; a null field clears the space layer.
+    mutationFn: (layer: SpaceAbuseLayer) =>
+      apiFetch<SpaceAbuseLayer>(`/spaces/${spaceId}/abuse-filter`, token, { method: "PATCH", body: JSON.stringify(layer) }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["space-abuse-filter", spaceId] }); },
+  });
+}
+
 // The tenant's group-name source for the group-grant picker (#163). manage-gated server-side
 // (group names can be sensitive), so scope the query to a space the caller manages.
 export function useTenantGroups(spaceId: string, enabled = true) {

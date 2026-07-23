@@ -6,12 +6,20 @@
 // never a regex compiled from input, so a word can never inject a pattern. Read is admin-gated too — the
 // banned-word list is moderation intelligence, not shown to ordinary members.
 import type { FastifyInstance } from 'fastify'
-import { requireTenantAdmin } from '@wikistead/authz'
+import { requireTenantAdmin, check } from '@wikistead/authz'
+import type { OpenFgaClient } from '@openfga/sdk'
 import type { TenantDb } from '../db/index.js'
 
 export interface AbuseFilterConfig {
   shrinkRatio: number | null   // (0,1] enables mass-delete detection; null/anything else = off (matches abuse-filter.ts:38)
   bannedWords: string[]        // normalized: trimmed, non-empty, de-duplicated (case-insensitively), capped
+}
+
+// #509 / ADR-187: a space's OWN moderation layer. NULL fields = inherit (no space addition). Distinct
+// from the resolved policy — this is only what the SPACE set, never the effective floor⊕space value.
+export interface SpaceAbuseFilterConfig {
+  shrinkRatio: number | null   // NULL = inherit the tenant floor
+  bannedWords: string[] | null // NULL = inherit (no additions); a list = words UNIONed onto the tenant floor
 }
 
 const MAX_BANNED_WORDS = 500
@@ -49,6 +57,33 @@ export async function getAbuseFilterConfig(db: TenantDb): Promise<AbuseFilterCon
   return { shrinkRatio: row?.abuse_shrink_ratio ?? null, bannedWords: row?.abuse_banned_words ?? [] }
 }
 
+// #509 / ADR-187: resolve the EFFECTIVE publish policy = tenant floor ⊕ space layer. ADDITIVE only —
+// a space can never weaken the floor:
+//   banned words → UNION (a space adds words; it can never remove a tenant-banned word)
+//   shrink ratio → STRICTER wins = MAX of the two (a higher ratio rejects MORE publishes). A space's
+//                  weaker (lower) ratio can never lower the tenant floor; NULL on either side = off (0).
+// Result shrink 0 → null (off), matching the evaluator's disabled state.
+export function resolveEffectiveAbusePolicy(tenant: AbuseFilterConfig, space: SpaceAbuseFilterConfig): AbuseFilterConfig {
+  const shrink = Math.max(tenant.shrinkRatio ?? 0, space.shrinkRatio ?? 0)
+  const banned = new Set<string>()
+  for (const w of tenant.bannedWords) banned.add(w)
+  for (const w of space.bannedWords ?? []) banned.add(w)
+  return { shrinkRatio: shrink > 0 ? shrink : null, bannedWords: [...banned] }
+}
+
+// The space's own layer (NULL = inherit). No row / no columns set → fully inherit.
+export async function getSpaceAbuseFilterConfig(db: TenantDb, spaceId: string): Promise<SpaceAbuseFilterConfig> {
+  const [row] = await db.sql<{ abuse_shrink_ratio: number | null; abuse_banned_words: string[] | null }[]>`
+    SELECT abuse_shrink_ratio, abuse_banned_words FROM space_settings WHERE space_id = ${spaceId}`
+  return { shrinkRatio: row?.abuse_shrink_ratio ?? null, bannedWords: row?.abuse_banned_words ?? null }
+}
+
+// The effective policy a publish in this space is evaluated against (tenant floor ⊕ space layer).
+export async function getEffectiveAbusePolicyForSpace(db: TenantDb, spaceId: string): Promise<AbuseFilterConfig> {
+  const [tenant, space] = await Promise.all([getAbuseFilterConfig(db), getSpaceAbuseFilterConfig(db, spaceId)])
+  return resolveEffectiveAbusePolicy(tenant, space)
+}
+
 // Admin-only write. requireTenantAdmin THROWS (403) for a non-admin before any DB write. Values are
 // normalized server-side (the fortress) regardless of what the client sent.
 export async function updateAbuseFilterConfig(
@@ -63,6 +98,35 @@ export async function updateAbuseFilterConfig(
   return { shrinkRatio, bannedWords }
 }
 
+// #509 / ADR-187: write the SPACE's own moderation layer. Gated on the space `moderate` capability —
+// NOT `manage` (the deliberate exception to "space settings = manage", ruling/): a moderator
+// runs the patrol queue, so they own the banned-word/shrink knobs that drive it. `moderate` resolves to
+// space#moderator OR manager in the FGA model, so managers keep access and plain members are denied.
+// Values are normalized server-side (the fortress); a null clears the layer (back to inherit). Since the
+// resolver only ever UNIONs / MAXes with the tenant floor, a space write can never weaken it.
+export async function requireSpaceModerate(fga: OpenFgaClient, userId: string, spaceId: string): Promise<void> {
+  const canModerate = await check(fga, `user:${userId}`, 'moderate', { type: 'space', id: spaceId })
+  if (!canModerate) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+}
+
+export async function updateSpaceAbuseFilterConfig(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { tenantId: string; spaceId: string; userId: string; shrinkRatio: unknown; bannedWords: unknown },
+): Promise<SpaceAbuseFilterConfig> {
+  await requireSpaceModerate(fga, args.userId, args.spaceId)
+  // null passes through as "inherit"; a value is normalized. bannedWords: null = inherit, array = the
+  // (sanitized) space additions.
+  const shrinkRatio = args.shrinkRatio == null ? null : normalizeShrinkRatio(args.shrinkRatio)
+  const bannedWords = args.bannedWords == null ? null : normalizeBannedWords(args.bannedWords)
+  // Upsert the space_settings row (it may not exist yet — created lazily like accent_key).
+  await db.sql`
+    INSERT INTO space_settings (space_id, tenant_id, abuse_shrink_ratio, abuse_banned_words, updated_at)
+    VALUES (${args.spaceId}, ${args.tenantId}, ${shrinkRatio}, ${bannedWords}, now())
+    ON CONFLICT (space_id) DO UPDATE SET abuse_shrink_ratio = ${shrinkRatio}, abuse_banned_words = ${bannedWords}, updated_at = now()`
+  return { shrinkRatio, bannedWords }
+}
+
 export async function abuseConfigPlugin(app: FastifyInstance) {
   // Read is admin-gated: the banned-word list is moderation intelligence, not exposed to ordinary members.
   app.get('/tenant/abuse-filter', async (req, reply) => {
@@ -73,6 +137,26 @@ export async function abuseConfigPlugin(app: FastifyInstance) {
     return updateAbuseFilterConfig(req.db, app.fga, {
       tenantId: req.tenant.id, userId: req.user.sub,
       shrinkRatio: req.body?.shrinkRatio ?? null, bannedWords: req.body?.bannedWords ?? [],
+    })
+  })
+
+  // #509 / ADR-187: the per-space layer. moderate-gated (moderator OR manager). Read returns the space's
+  // own layer AND the effective (tenant floor ⊕ space) policy so the UI can show what actually applies.
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/abuse-filter', async (req) => {
+    await requireSpaceModerate(app.fga, req.user.sub, req.params.spaceId) // throws 403 for a non-moderator
+    const [space, tenant, effective] = await Promise.all([
+      getSpaceAbuseFilterConfig(req.db, req.params.spaceId),
+      getAbuseFilterConfig(req.db),
+      getEffectiveAbusePolicyForSpace(req.db, req.params.spaceId),
+    ])
+    return { space, tenantFloor: tenant, effective }
+  })
+  app.patch<{ Params: { spaceId: string }; Body: { shrinkRatio?: unknown; bannedWords?: unknown } }>('/spaces/:spaceId/abuse-filter', async (req) => {
+    return updateSpaceAbuseFilterConfig(req.db, app.fga, {
+      tenantId: req.tenant.id, spaceId: req.params.spaceId, userId: req.user.sub,
+      // `undefined` in the body means "not provided" → keep as inherit (null); an explicit value is stored.
+      shrinkRatio: 'shrinkRatio' in (req.body ?? {}) ? req.body!.shrinkRatio : null,
+      bannedWords: 'bannedWords' in (req.body ?? {}) ? req.body!.bannedWords : null,
     })
   })
 }
