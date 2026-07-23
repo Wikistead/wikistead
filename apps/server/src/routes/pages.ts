@@ -3134,7 +3134,18 @@ export async function pagesPlugin(app: FastifyInstance) {
   // (no durable id). Collection is EE-gated + deduped inside collectPageView; a hiccup never 500s the mount.
   app.post<{ Params: { pageId: string } }>('/pages/:pageId/view', { config: { guest: 'view' } }, async (req, reply) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
-    if (!(await check(app.fga, subject, 'view', { type: 'page', id: req.params.pageId }, context))) {
+    // #489 (HAR fact 1): the view record is a NON-CRITICAL write — if the authz check itself errors
+    // (FGA deadline under saturation), do not 500 the reading surface; skip the record with a warn and
+    // 204. Uniform for every page (viewable/non-viewable/nonexistent alike), so it is never an oracle;
+    // nothing is recorded on an unconfirmed check. A clean `false` still 404s below (existence-hiding).
+    let canView: boolean
+    try {
+      canView = await check(app.fga, subject, 'view', { type: 'page', id: req.params.pageId }, context)
+    } catch (e) {
+      req.log.warn({ err: e, pageId: req.params.pageId }, 'page-view record skipped: authz check unavailable')
+      return reply.code(204).send()
+    }
+    if (!canView) {
       return reply.code(404).send({ error: 'not found' }) // existence-hiding — same floor as /published
     }
     const viewerClass = req.user ? 'member' : 'guest'
@@ -3264,8 +3275,15 @@ export async function pagesPlugin(app: FastifyInstance) {
   // the dictionary itself is viewer-scoped (member = own view set / guest = public-only — see
   // getTitleDictionary). Nothing here is per-link display-time authz — the dictionary content IS
   // the defence (Addendum 2 point 1).
-  app.get<{ Params: { pageId: string } }>('/pages/:pageId/title-dictionary', { config: { guest: 'view' } }, async (req) => {
-    const { subject } = principalForPage(req, req.params.pageId)
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/title-dictionary', { config: { guest: 'view' } }, async (req, reply) => {
+    const { subject, context } = principalForPage(req, req.params.pageId)
+    // #489: gate on the ANCHOR page's `view` FIRST — one check. Without it, a nonexistent (or
+    // non-viewable) page id still ran the FULL listObjects + confirm batch (measured: 3.2s → deadline
+    // 500 for a dead id, while the batch starved every other route). Uniform 404, same floor as
+    // /published — nonexistent and non-viewable are indistinguishable (existence-hiding).
+    if (!(await check(app.fga, subject, 'view', { type: 'page', id: req.params.pageId }, context))) {
+      return reply.code(404).send({ error: 'not found' })
+    }
     return getTitleDictionary(req.db, app.fga, { subject })
   })
 

@@ -121,13 +121,27 @@ export async function filterAuthorized(
   // non_expired condition, so a time-bounded guest link is evaluated against the clock.
   context?: CheckContext,
 ): Promise<Set<string>> {
-  const results = await Promise.all(
-    pageIds.map((id) =>
-      check(fga, user, capability, { type: 'page', id }, context).then((ok) => [id, ok] as const),
-    ),
-  )
-  return new Set(results.filter(([, ok]) => ok).map(([id]) => id))
+  // #489: BOUNDED fan-out. This used to be one unbounded Promise.all — the title dictionary's confirm
+  // pass hands it up to DICT_CAP (2000) ids, and thousands of concurrent checks saturate the FGA
+  // backend so every OTHER route's checks starve behind them (measured: a 2ms /spaces took 3.2s and
+  // the sidebar tree 4.4s while one dictionary batch ran; unrelated routes hit deadline 500s). Chunking
+  // keeps a single caller from monopolising the store; the common tens-of-ids callers are unaffected
+  // (one chunk). Semantics are identical — same checks, same result set, just paced.
+  const out = new Set<string>()
+  for (let i = 0; i < pageIds.length; i += FILTER_AUTHORIZED_CONCURRENCY) {
+    const chunk = pageIds.slice(i, i + FILTER_AUTHORIZED_CONCURRENCY)
+    const results = await Promise.all(
+      chunk.map((id) =>
+        check(fga, user, capability, { type: 'page', id }, context).then((ok) => [id, ok] as const),
+      ),
+    )
+    for (const [id, ok] of results) if (ok) out.add(id)
+  }
+  return out
 }
+// One chunk of concurrent FGA checks per pass — small enough that a big batch leaves headroom for
+// every other in-flight request, large enough that a 2000-id confirm still completes in ~80 passes.
+const FILTER_AUTHORIZED_CONCURRENCY = 25
 
 export interface MemberAccess {
   readOnly: boolean
