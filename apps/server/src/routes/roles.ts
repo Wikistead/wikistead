@@ -17,7 +17,11 @@ import { resolveEntitlements } from '@wikistead/entitlements'
 import { entitlementDenied } from '../entitlement-ux.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
+import type { SearchDriver } from '../search/index.js'
 import { reindexPublishedPages } from './spaces.js'
+import { groupGrantee } from '../auth/group-sync.js' // #497: mappings assign the group principal
+import type { TenantDb } from '../db/index.js'
+import type { Sql } from 'postgres'
 
 // The ADR-164 §1 atomic vocabulary a custom RESOURCE role may bundle. `manage` is deliberately absent —
 // it is the built-in SUPERSET (manager); a custom bundle wanting everything lists the atoms.
@@ -109,6 +113,97 @@ const forbidden = () => Object.assign(new Error('forbidden'), { statusCode: 403 
 // (incl. a private page, from which a space manager is correctly cut via `manage_from_space … but not
 // private`), so the short-circuit preserves that non-regression. `page share` unions `manage`
 // (model.fga:168), so a manager passes the page `share` check with no special case.
+// #497 / ADR-183: the ASSIGN CORE, extracted so the HTTP route AND the group-mapping create path
+// use ONE authz write path (the project design notes single-source). Callers do the scope/existence/authority checks
+// first (a cross-tenant / unknown id must already be a uniform 404, and requireAssignmentAuthority must
+// already have passed). This does the ownership pre-read + one-tx write (FGA LAST) + search reindex,
+// exactly as the route did inline. `origin` labels the provenance row ('manual' | 'mapping' | 'default').
+// Returns the new assignment id. Throws 409 on a duplicate (same role+resource+principal).
+export async function assignRoleInTx(
+  db: TenantDb, fga: OpenFgaClient, searchDriver: SearchDriver,
+  args: {
+    tenant: { id: string; plan: string }; roleId: string; capabilities: AnyRoleCapability[];
+    resourceType: 'page' | 'space' | 'tenant'; resourceId: string; principal: string;
+    actorSub: string; origin?: 'manual' | 'mapping' | 'default';
+    // #497: an optional hook run INSIDE the assign tx, right after the role_assignments INSERT, with
+    // the new assignment id. The mapping-create path writes its owning group_role_mappings row here so
+    // the assignment + its owning row commit ATOMICALLY (no orphaned origin='mapping' assignment on a
+    // crash — the ADR-183 "one tx" invariant). A throw rolls the whole assign back.
+    afterAssign?: (tx: Sql, assignmentId: string) => Promise<void>;
+  },
+): Promise<string> {
+  const { tenant, roleId, capabilities: caps, resourceType, resourceId, principal, actorSub } = args
+  const origin = args.origin ?? 'manual'
+  const allTuples = caps.map((c) => ({ cap: c, tuples: expansionTuples(resourceType, resourceId, principal, c) }))
+  // Principal-scoped read (F4): only this principal's tuples, no paging (see the route comment).
+  const { tuples: existingTuples } = await fga.read({ user: principal, object: `${resourceType}:${resourceId}` })
+  const existing = new Set((existingTuples ?? []).map((t) => `${t.key?.relation}|${t.key?.user}`))
+  const owned: AnyRoleCapability[] = []
+  const toWrite: { user: string; relation: string; object: string }[] = []
+  for (const { cap, tuples } of allTuples) {
+    const missing = tuples.filter((t) => !existing.has(`${t.relation}|${t.user}`))
+    toWrite.push(...missing)
+    if (missing.length === tuples.length) owned.push(cap)
+  }
+  const id = randomUUID()
+  const oid = await db.tx(async (tx) => {
+    const dup = await tx<{ id: string }[]>`
+      SELECT id FROM role_assignments WHERE role_id = ${roleId} AND resource_type = ${resourceType} AND resource_id = ${resourceId} AND principal = ${principal}`
+    if (dup.length) throw Object.assign(new Error('already assigned'), { statusCode: 409 })
+    await tx`INSERT INTO role_assignments (id, tenant_id, role_id, resource_type, resource_id, principal, owned_capabilities, origin)
+             VALUES (${id}, ${tenant.id}, ${roleId}, ${resourceType}, ${resourceId}, ${principal}, ${owned as string[]}, ${origin})`
+    if (args.afterAssign) await args.afterAssign(tx, id)
+    await auditIfEntitled(tx, tenant, { actor: `user:${actorSub}`, action: 'role.assigned', target: `${resourceType}:${resourceId}` })
+    const o = resourceType === 'page' ? await enqueueOutbox(tx, { tenantId: tenant.id, pageId: resourceId, operation: 'upsert' }) : null
+    if (toWrite.length) await writeTuples(fga, toWrite)
+    return o
+  })
+  if (oid) processOutboxAsync(searchDriver, oid, { tenantId: tenant.id, pageId: resourceId, operation: 'upsert' })
+  if (resourceType === 'space') await reindexPublishedPages(db, searchDriver, tenant.id, resourceId)
+  return id
+}
+
+// #497 / ADR-183: the UNASSIGN CORE by assignment id, extracted for the mapping DELETE path. The
+// caller has already checked authority (or, for a mapping delete, the mapping row proves ownership).
+// Returns true if an assignment was deleted.
+export async function unassignRoleInTx(
+  db: TenantDb, fga: OpenFgaClient, searchDriver: SearchDriver,
+  args: { tenant: { id: string; plan: string }; assignmentId: string; actorSub: string },
+): Promise<boolean> {
+  interface AsgRow { id: string; role_id: string; resource_type: 'page' | 'space' | 'tenant'; resource_id: string; principal: string; owned_capabilities: string[]; capabilities: string[] }
+  let deleted = false
+  let resourceType = 'page' as 'page' | 'space' | 'tenant'
+  let resourceId = ''
+  const oid = await db.tx(async (tx) => {
+    const [asg] = await tx<AsgRow[]>`
+      SELECT a.id, a.role_id, a.resource_type, a.resource_id, a.principal, a.owned_capabilities, r.capabilities
+      FROM role_assignments a JOIN roles r ON r.id = a.role_id WHERE a.id = ${args.assignmentId} FOR UPDATE OF a`
+    if (!asg) return null
+    deleted = true
+    resourceType = asg.resource_type
+    resourceId = asg.resource_id
+    const others = await tx<{ id: string; capabilities: string[] }[]>`
+      SELECT a.id, r.capabilities FROM role_assignments a JOIN roles r ON r.id = a.role_id
+      WHERE a.id != ${asg.id} AND a.resource_type = ${asg.resource_type} AND a.resource_id = ${asg.resource_id} AND a.principal = ${asg.principal}
+      FOR UPDATE OF a`
+    const stillCovered = new Set(others.flatMap((o) => o.capabilities))
+    const ownedCaps = asg.owned_capabilities as AnyRoleCapability[]
+    const toDelete = ownedCaps.filter((c) => !stillCovered.has(c)).flatMap((c) => expansionTuples(asg.resource_type, asg.resource_id, asg.principal, c))
+    for (const c of ownedCaps.filter((x) => stillCovered.has(x))) {
+      const heir = others.find((o) => o.capabilities.includes(c))!
+      await tx`UPDATE role_assignments SET owned_capabilities = array_append(owned_capabilities, ${c}) WHERE id = ${heir.id} AND NOT (${c} = ANY(owned_capabilities))`
+    }
+    await tx`DELETE FROM role_assignments WHERE id = ${asg.id}`
+    await auditIfEntitled(tx, args.tenant, { actor: `user:${args.actorSub}`, action: 'role.unassigned', target: `${asg.resource_type}:${asg.resource_id}` })
+    const o = asg.resource_type === 'page' ? await enqueueOutbox(tx, { tenantId: args.tenant.id, pageId: asg.resource_id, operation: 'upsert' }) : null
+    if (toDelete.length) await deleteTuples(fga, toDelete)
+    return o
+  })
+  if (oid) processOutboxAsync(searchDriver, oid, { tenantId: args.tenant.id, pageId: resourceId, operation: 'upsert' })
+  if (deleted && resourceType === 'space') await reindexPublishedPages(db, searchDriver, args.tenant.id, resourceId)
+  return deleted
+}
+
 export async function requireAssignmentAuthority(
   fga: OpenFgaClient,
   args: { sub: string; tenantId: string; resourceType: 'page' | 'space' | 'tenant'; resourceId: string; capabilities: AnyRoleCapability[] },
@@ -363,48 +458,14 @@ export async function rolesPlugin(app: FastifyInstance) {
       // grant-ceiling / tenant admin), AFTER the existence-bind (so a cross-tenant/unknown id is a
       // uniform 404, never a 403 that confirms it exists). Entitlement was already checked up front.
       await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId, capabilities: caps })
-      const allTuples = caps.map((c) => ({ cap: c, tuples: expansionTuples(resourceType, resourceId, principal, c) }))
-
-      // Ownership via a PRE-READ: a capability whose tuples ALL already exist (e.g. a prior
-      // direct grant) is left in place and NOT owned — unassign will never delete it. A partially
-      // existing pair (legacy space view grants) gets its missing half written but stays un-owned
-      // (conservative: unassign never deletes what it might not fully own — over-permission bounded
-      // to the pre-existing grant the admin made deliberately).
-      // Principal-scoped read (F4): an object-wide read is unpaginated and a big space's tuple set
-      // overflows one page — a missed existing tuple would poison the batch write (already-exists →
-      // 500). Filtering by (user, object) returns only this principal's few tuples, no paging needed.
-      const { tuples: existingTuples } = await app.fga.read({ user: principal, object: `${resourceType}:${resourceId}` })
-      const existing = new Set((existingTuples ?? []).map((t) => `${t.key?.relation}|${t.key?.user}`))
-      const owned: AnyRoleCapability[] = []
-      const toWrite: { user: string; relation: string; object: string }[] = []
-      for (const { cap, tuples } of allTuples) {
-        const missing = tuples.filter((t) => !existing.has(`${t.relation}|${t.user}`))
-        toWrite.push(...missing)
-        if (missing.length === tuples.length) owned.push(cap)
-      }
-
-      const id = randomUUID()
-      // One tx, FGA LAST (the grantPageAccess pattern / ADR-164 increment 3): a batched-write failure
-      // rolls the provenance + audit + outbox back, and the single FGA Write call is atomic — no
-      // partially-expanded, unrecorded tuples.
-      const oid = await req.db.tx(async (tx) => {
-        const dup = await tx<{ id: string }[]>`
-          SELECT id FROM role_assignments WHERE role_id = ${role.id} AND resource_type = ${resourceType} AND resource_id = ${resourceId} AND principal = ${principal}`
-        if (dup.length) throw Object.assign(new Error('already assigned'), { statusCode: 409 })
-        await tx`INSERT INTO role_assignments (id, tenant_id, role_id, resource_type, resource_id, principal, owned_capabilities)
-                 VALUES (${id}, ${req.tenant.id}, ${role.id}, ${resourceType}, ${resourceId}, ${principal}, ${owned as string[]})`
-        await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.assigned', target: `${resourceType}:${resourceId}` })
-        // Reindex so the principal appears in the stage-1 viewer set (Rider 3 denorm reads the leaves).
-        const o = resourceType === 'page' ? await enqueueOutbox(tx, { tenantId: req.tenant.id, pageId: resourceId, operation: 'upsert' }) : null
-        if (toWrite.length) await writeTuples(app.fga, toWrite)
-        return o
+      // #497: the assign core is now a shared helper (the HTTP route + the mapping create path).
+      const id = await assignRoleInTx(req.db, app.fga, app.searchDriver, {
+        tenant: req.tenant, roleId: role.id, capabilities: caps, resourceType, resourceId, principal,
+        actorSub: req.user.sub, origin: 'manual',
       })
-      if (oid) processOutboxAsync(app.searchDriver, oid, { tenantId: req.tenant.id, pageId: resourceId, operation: 'upsert' })
-      // A space-scoped grant changes the viewer set of EVERY published page in the space — same
-      // synchronous reindex the space grant path runs (the "revocation reindexes synchronously"
-      // invariant's grant-side twin; F2).
-      if (resourceType === 'space') await reindexPublishedPages(req.db, app.searchDriver, req.tenant.id, resourceId)
-      return reply.code(201).send({ id, roleId: role.id, resourceType, resourceId, principal, ownedCapabilities: owned })
+      // Re-read the row's owned_capabilities for the response (the helper computed them internally).
+      const [saved] = await req.db.sql<{ owned_capabilities: string[] }[]>`SELECT owned_capabilities FROM role_assignments WHERE id = ${id}`
+      return reply.code(201).send({ id, roleId: role.id, resourceType, resourceId, principal, ownedCapabilities: saved?.owned_capabilities ?? [] })
     })
 
   app.delete<{ Params: { assignmentId: string } }>('/admin/roles/assignments/:assignmentId', async (req, reply) => {
@@ -418,48 +479,9 @@ export async function rolesPlugin(app: FastifyInstance) {
       SELECT a.resource_type, a.resource_id, r.capabilities FROM role_assignments a JOIN roles r ON r.id = a.role_id WHERE a.id = ${req.params.assignmentId}`
     if (!pre) throw Object.assign(new Error('not found'), { statusCode: 404 })
     await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType: pre.resource_type, resourceId: pre.resource_id, capabilities: pre.capabilities as AnyRoleCapability[] })
-    interface AsgRow { id: string; role_id: string; resource_type: 'page' | 'space' | 'tenant'; resource_id: string; principal: string; owned_capabilities: string[]; capabilities: string[] }
-    // One tx, FGA LAST. All reads run INSIDE the tx with row locks (FOR UPDATE) so two concurrent
-    // unassigns of co-covering assignments serialize — without the locks both would see the other as
-    // a live coverer and neither would delete the shared leaf (the reference-count TOCTOU; F3).
-    let resourceType = 'page' as 'page' | 'space' | 'tenant'
-    let resourceId = ''
-    const oid = await req.db.tx(async (tx) => {
-      const [asg] = await tx<AsgRow[]>`
-        SELECT a.id, a.role_id, a.resource_type, a.resource_id, a.principal, a.owned_capabilities, r.capabilities
-        FROM role_assignments a JOIN roles r ON r.id = a.role_id WHERE a.id = ${req.params.assignmentId} FOR UPDATE OF a`
-      if (!asg) throw Object.assign(new Error('not found'), { statusCode: 404 })
-      resourceType = asg.resource_type
-      resourceId = asg.resource_id
-      // REFERENCE COUNT: delete a leaf tuple ONLY when (a) THIS assignment owns it (it created
-      // the tuple — a pre-existing direct grant is never owned) AND (b) no OTHER live assignment of
-      // the same principal on the same resource still includes the capability (shared-tuple
-      // protection). A kept tuple's ownership TRANSFERS to a covering assignment — otherwise
-      // unassigning the owner first and the coverer second would leave the tuple orphaned forever.
-      const others = await tx<{ id: string; capabilities: string[] }[]>`
-        SELECT a.id, r.capabilities FROM role_assignments a JOIN roles r ON r.id = a.role_id
-        WHERE a.id != ${asg.id} AND a.resource_type = ${asg.resource_type} AND a.resource_id = ${asg.resource_id} AND a.principal = ${asg.principal}
-        FOR UPDATE OF a`
-      const stillCovered = new Set(others.flatMap((o) => o.capabilities))
-      const ownedCaps = asg.owned_capabilities as AnyRoleCapability[]
-      const toDelete = ownedCaps
-        .filter((c) => !stillCovered.has(c))
-        .flatMap((c) => expansionTuples(asg.resource_type, asg.resource_id, asg.principal, c))
-      for (const c of ownedCaps.filter((x) => stillCovered.has(x))) {
-        const heir = others.find((o) => o.capabilities.includes(c))!
-        await tx`UPDATE role_assignments SET owned_capabilities = array_append(owned_capabilities, ${c})
-                 WHERE id = ${heir.id} AND NOT (${c} = ANY(owned_capabilities))`
-      }
-      await tx`DELETE FROM role_assignments WHERE id = ${asg.id}`
-      await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.unassigned', target: `${asg.resource_type}:${asg.resource_id}` })
-      const o = asg.resource_type === 'page' ? await enqueueOutbox(tx, { tenantId: req.tenant.id, pageId: asg.resource_id, operation: 'upsert' }) : null
-      if (toDelete.length) await deleteTuples(app.fga, toDelete)
-      return o
-    })
-    if (oid) processOutboxAsync(app.searchDriver, oid, { tenantId: req.tenant.id, pageId: resourceId, operation: 'upsert' })
-    // Space-scoped revocation reindexes synchronously (the the project design notes invariant; F2) — same call the
-    // space revoke path runs.
-    if (resourceType === 'space') await reindexPublishedPages(req.db, app.searchDriver, req.tenant.id, resourceId)
+    // #497: the unassign core is the shared helper (HTTP route + mapping delete).
+    const gone = await unassignRoleInTx(req.db, app.fga, app.searchDriver, { tenant: req.tenant, assignmentId: req.params.assignmentId, actorSub: req.user.sub })
+    if (!gone) throw Object.assign(new Error('not found'), { statusCode: 404 })
     return reply.code(204).send()
   })
 
@@ -514,5 +536,112 @@ export async function rolesPlugin(app: FastifyInstance) {
       if (!v && present) await deleteTuples(app.fga, [MEMBERS_CREATOR(req.tenant.id)])
     })
     return { member: { createSpaces: v }, admin: { createSpaces: true, locked: true } }
+  })
+
+  // ---- #497 / ADR-183: declarative group → role MAPPINGS (EE — customRoles entitlement) ----
+  // A mapping is a ROW that OWNS a group-principal role assignment. Creating it = the existing gated
+  // assign path with principal `group:<id>#member` (origin='mapping'); deleting it = the
+  // ref-counted unassign. It adds NO new FGA write path — group membership already resolves LIVE at
+  // check time (#111 sync). v1 maps CUSTOM roles at SPACE or TENANT scope only (built-ins are
+  // virtual — no roles row — so the role lookup 404s them; page scope is out of v1). Per ADR-183 §1
+  // the WRITE surface carries the SAME per-scope authority as assign (`requireAssignmentAuthority`):
+  // tenant-scope mappings are admin-only; space-scope mappings are open to that space's manager (#485).
+
+  app.post<{ Body: { groupName?: string; roleId?: string; resourceType?: string; resourceId?: string } }>(
+    '/admin/roles/mappings', async (req, reply) => {
+      // Entitlement (customRoles) up front — a plan gate, not an existence oracle (mirrors assign).
+      requireEntitlement(req)
+      const { groupName, roleId, resourceType, resourceId } = req.body ?? {}
+      if (!groupName || !groupName.trim() || !roleId || (resourceType !== 'space' && resourceType !== 'tenant') || !resourceId) {
+        throw Object.assign(new Error('groupName, roleId, resourceType (space|tenant), resourceId required'), { statusCode: 400 })
+      }
+      const [role] = await req.db.sql<RoleRow[]>`SELECT id, name, capabilities, scope, created_at, updated_at FROM roles WHERE id = ${roleId}`
+      if (!role) throw Object.assign(new Error('not found'), { statusCode: 404 }) // custom-only: built-ins have no row
+      if ((role.scope === 'tenant') !== (resourceType === 'tenant')) {
+        throw Object.assign(new Error(`a ${role.scope} role cannot be mapped at ${resourceType} scope`), { statusCode: 400 })
+      }
+      // Resource existence bind (RLS) — the same cross-tenant/unknown → uniform 404 as assign.
+      if (resourceType === 'tenant') {
+        if (resourceId !== req.tenant.id) throw Object.assign(new Error('not found'), { statusCode: 404 })
+      } else {
+        const exists = await req.db.sql<{ id: string }[]>`SELECT id FROM spaces WHERE id = ${resourceId}`
+        if (!exists.length) throw Object.assign(new Error('not found'), { statusCode: 404 })
+      }
+      const caps = role.capabilities as AnyRoleCapability[]
+      // Per-scope authority AFTER the existence-bind (a cross-tenant/unknown id is a uniform 404, never
+      // a 403 that confirms it exists) — space manager for space scope, tenant admin for tenant scope.
+      await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId, capabilities: caps })
+      // The group NAME resolves to the SAME FGA id the #111 sync writes (tenant-salted hash), so the
+      // mapping's assignment lands on exactly the members synced into that group.
+      const principal = groupGrantee(req.tenant.id, groupName.trim())
+      const id = randomUUID()
+      // Create the assignment AND its owning mapping row in ONE tx (the afterAssign hook writes the
+      // group_role_mappings row inside the assign tx, referencing the just-inserted assignment). A
+      // duplicate group+role+resource 409s on the assignment dup-check — which mirrors the mapping's
+      // own UNIQUE — so a concurrent double-create can't slip through; a mapping-row UNIQUE violation
+      // rolls the whole assign back (no orphaned origin='mapping' assignment).
+      const assignmentId = await assignRoleInTx(req.db, app.fga, app.searchDriver, {
+        tenant: req.tenant, roleId: role.id, capabilities: caps, resourceType, resourceId, principal,
+        actorSub: req.user.sub, origin: 'mapping',
+        afterAssign: async (tx, asgId) => {
+          await tx`INSERT INTO group_role_mappings (id, tenant_id, group_name, role_id, resource_type, resource_id, assignment_id, created_by)
+                   VALUES (${id}, ${req.tenant.id}, ${groupName.trim()}, ${role.id}, ${resourceType}, ${resourceId}, ${asgId}, ${req.user.sub})`
+          await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.mapping_created', target: `role:${role.id}` })
+        },
+      })
+      return reply.code(201).send({ id, groupName: groupName.trim(), roleId: role.id, roleName: role.name, resourceType, resourceId, assignmentId })
+    })
+
+  app.get<{ Querystring: { resourceType?: string; resourceId?: string } }>('/admin/roles/mappings', async (req) => {
+    requireEntitlement(req)
+    // Filtered by one resource → the #485 per-resource LIST authority (a space manager sees their own
+    // space's mappings). Unfiltered → the tenant-wide config view, which is admin-only (no
+    // cross-space enumeration; same rule as the assignments list).
+    const { resourceType, resourceId } = req.query
+    if (resourceType || resourceId) {
+      if ((resourceType !== 'page' && resourceType !== 'space' && resourceType !== 'tenant') || !resourceId) {
+        throw Object.assign(new Error('resourceType (page|space|tenant) and resourceId required together'), { statusCode: 400 })
+      }
+      if (resourceType === 'tenant' && resourceId !== req.tenant.id) throw Object.assign(new Error('not found'), { statusCode: 404 })
+      await requireListAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId })
+    } else {
+      await adminGate(req)
+    }
+    const rows = await req.db.sql<{ id: string; group_name: string; role_id: string; name: string; resource_type: string; resource_id: string; assignment_id: string | null }[]>`
+      SELECT m.id, m.group_name, m.role_id, r.name, m.resource_type, m.resource_id, m.assignment_id
+      FROM group_role_mappings m JOIN roles r ON r.id = m.role_id
+      WHERE ${resourceType ? req.db.sql`m.resource_type = ${resourceType} AND m.resource_id = ${resourceId!}` : req.db.sql`TRUE`}
+      ORDER BY m.group_name, r.name`
+    // Orphan badge (ADR-183 §1): a mapping whose group NAME no longer appears in any member's groups
+    // (renamed/emptied at the IdP). It still owns its assignment — surfaced, never auto-migrated.
+    const live = await req.db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`
+    const liveSet = new Set(live.map((r) => r.g))
+    return rows.map((r) => ({
+      id: r.id, groupName: r.group_name, roleId: r.role_id, roleName: r.name,
+      resourceType: r.resource_type, resourceId: r.resource_id,
+      assignmentId: r.assignment_id, orphaned: !liveSet.has(r.group_name),
+    }))
+  })
+
+  app.delete<{ Params: { mappingId: string } }>('/admin/roles/mappings/:mappingId', async (req, reply) => {
+    requireEntitlement(req)
+    // Read the mapping + its role's scope/caps on the RLS handle first — a cross-tenant / unknown id is
+    // a uniform 404. The mapping's resource/role are immutable, so gating on this pre-read is safe.
+    const [m] = await req.db.sql<{ id: string; assignment_id: string | null; resource_type: 'page' | 'space' | 'tenant'; resource_id: string; capabilities: AnyRoleCapability[] }[]>`
+      SELECT m.id, m.assignment_id, m.resource_type, m.resource_id, r.capabilities
+      FROM group_role_mappings m JOIN roles r ON r.id = m.role_id WHERE m.id = ${req.params.mappingId}`
+    if (!m) throw Object.assign(new Error('not found'), { statusCode: 404 })
+    // Same per-scope authority as create/assign — a space manager may remove their space's mapping.
+    await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType: m.resource_type, resourceId: m.resource_id, capabilities: m.capabilities as AnyRoleCapability[] })
+    // Remove the owned assignment via the ref-counted unassign (a NULL assignment_id — a
+    // transient/orphaned mapping — just drops the row). Then delete the mapping row + audit.
+    if (m.assignment_id) {
+      await unassignRoleInTx(req.db, app.fga, app.searchDriver, { tenant: req.tenant, assignmentId: m.assignment_id, actorSub: req.user.sub })
+    }
+    await req.db.tx(async (tx) => {
+      await tx`DELETE FROM group_role_mappings WHERE id = ${req.params.mappingId}`
+      await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.mapping_deleted', target: `role:mapping:${req.params.mappingId}` })
+    })
+    return reply.code(204).send()
   })
 }
