@@ -1060,6 +1060,7 @@
     "target": "Target",
     "empty": "No audit entries yet.",
     "loadMore": "Load more",
+    "loadedAll": "You have reached the beginning of the audit log.",
     "lockedTitle": "Audit log is a Team feature",
     "lockedBody": "Your entries are being retained. Upgrade to view, verify, and export the ledger."
   },

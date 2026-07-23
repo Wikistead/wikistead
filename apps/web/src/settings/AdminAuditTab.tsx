@@ -16,6 +16,22 @@ import { notify } from "../ui/toast";
 // tenants see the UpgradeNotice instead of data (tab visible, data locked — ruling b); the server
 // enforces both gates regardless. Actor cells show the raw sub in v1 (display-name resolution is the
 // ruled follow-up d).
+// #503the keyset page size, and the EXPLICIT end-state derivation that replaces the
+// rows.length % 50 heuristic. That heuristic failed both ways: an exact-multiple total kept the
+// button alive (clicking appended an empty page and visibly did nothing), and a fractional total
+// made it vanish silently with no "that's all" signal. A fetched page shorter than the limit
+// (empty included) means the ledger's beginning was reached — pure and pinned in
+// audit-loadmore-503.test.ts. The end notice only shows once the user has actually paged
+// (pages.length > 0): a log that fits its first page needs no marker.
+export const AUDIT_PAGE_LIMIT = 50;
+export function auditListState<T>(firstPage: T[] | undefined, pages: T[][]): { rows: T[]; canLoadMore: boolean; showEndNotice: boolean } {
+  const base = pages.length ? pages : firstPage ? [firstPage] : [];
+  const rows = base.flat();
+  const last = base[base.length - 1];
+  const ended = last != null && last.length < AUDIT_PAGE_LIMIT;
+  return { rows, canLoadMore: rows.length > 0 && !ended, showEndNotice: ended && pages.length > 0 };
+}
+
 export function AdminAuditTab() {
   const { t } = useTranslation();
   const { token } = useSession();
@@ -24,7 +40,7 @@ export function AdminAuditTab() {
   const firstPage = useAuditLog(null, pages.length === 0);
   const verify = useAuditVerify();
 
-  const rows = pages.length ? pages.flat() : (firstPage.data ?? []);
+  const { rows, canLoadMore, showEndNotice } = auditListState(firstPage.data, pages);
   const err = firstPage.error as { code?: string; status?: number } | null;
   const locked = err?.code === "auditLog_not_entitled";
 
@@ -34,7 +50,7 @@ export function AdminAuditTab() {
     const cursor = last?.[last.length - 1]?.seq;
     if (cursor == null) return;
     try {
-      const next = await (await fetch(assetUrl(`/audit?limit=50&before=${cursor}`), { headers: { authorization: `Bearer ${token}` } })).json() as AuditRow[];
+      const next = await (await fetch(assetUrl(`/audit?limit=${AUDIT_PAGE_LIMIT}&before=${cursor}`), { headers: { authorization: `Bearer ${token}` } })).json() as AuditRow[];
       setPages([...base, next]);
     } catch {
       notify.error(t("toast.actionFailed"));
@@ -109,11 +125,12 @@ export function AdminAuditTab() {
           </tbody>
         </table>
         {rows.length === 0 && !firstPage.isLoading && <p className="px-2 py-2 text-sm text-fg-dim">{t("adminAudit.empty")}</p>}
-        {rows.length > 0 && rows.length % 50 === 0 && (
+        {canLoadMore && (
           <div className="px-2 py-2">
             <Button variant="default" size="sm" onClick={() => void loadMore()} data-testid="audit-load-more">{t("adminAudit.loadMore")}</Button>
           </div>
         )}
+        {showEndNotice && <p className="px-2 py-2 text-sm text-fg-dim" data-testid="audit-end">{t("adminAudit.loadedAll")}</p>}
       </div>
 
       <VendorAccessSection />
