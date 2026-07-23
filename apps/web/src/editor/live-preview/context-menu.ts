@@ -377,23 +377,46 @@ const menuEvents = Prec.highest(
 );
 
 // #456 S4: the opening line of the code fence CONTAINING `pos`, or null. The click usually lands on a
-// body line, so walk up to the fence that opens the block — and stop at a blank line or a close fence,
-// which means `pos` was not inside one.
+// body line, so resolve up to the fence that opens the block.
 // #456shared with the settings panel's keyboard command + hover hint, so the mouse (context menu),
 // the keyboard, and the hover affordance all resolve "the code fence enclosing this position" identically.
+// #456the old regex up-scan required an info string on the opening line (to disambiguate it from
+// a closing fence), so a BARE ``` fence — the block whose language you most want to SET — silenced all
+// three affordances. The syntax tree knows open from close regardless of the info string, so it is the
+// primary; ~~~ and indented fences come along for free.
 export function codeFenceOpeningAt(state: import("@codemirror/state").EditorState, pos: number): number | null {
   return codeFenceLineAt(state, pos);
 }
 
 function codeFenceLineAt(state: import("@codemirror/state").EditorState, pos: number): number | null {
-  const start = state.doc.lineAt(Math.min(Math.max(pos, 0), state.doc.length));
-  for (let n = start.number; n >= 1; n--) {
-    const line = state.doc.line(n);
-    const opening = /^\s*[`~]{3,}\s*\S+/.exec(line.text); // a fence WITH an info string opens a block
-    if (opening) return line.from;
-    if (n !== start.number && /^\s*[`~]{3,}\s*$/.test(line.text)) return null; // a bare fence above = a closed block
+  const doc = state.doc;
+  const clamped = Math.min(Math.max(pos, 0), doc.length);
+  // Both sides, like macroFenceAt: a position at the block's far edge misses the node with one side only.
+  for (const side of [1, -1] as const) {
+    let node: ReturnType<ReturnType<typeof syntaxTree>["resolveInner"]> | null = syntaxTree(state).resolveInner(clamped, side);
+    while (node && node.name !== "FencedCode") node = node.parent;
+    if (node) return doc.lineAt(node.from).from;
   }
-  return null;
+  // #174: a fence nested inside a directive container is NOT a FencedCode node in the whole-doc tree
+  // (the directive body isn't block-reparsed). Pair fences with a forward scan from the top — unlike the
+  // old up-scan, pairing keeps a bare ``` unambiguous (the first fence line opens, the next matching
+  // bare one closes).
+  const posLine = doc.lineAt(clamped).number;
+  let open: { lineFrom: number; lineNo: number; marker: string; len: number } | null = null;
+  for (let n = 1; n <= doc.lines; n++) {
+    if (!open && n > posLine) return null; // past pos with no fence open → pos isn't inside one
+    const line = doc.line(n);
+    const m = /^\s*(`{3,}|~{3,})(.*)$/.exec(line.text);
+    if (!m) continue;
+    if (!open) {
+      open = { lineFrom: line.from, lineNo: n, marker: m[1]![0]!, len: m[1]!.length };
+    } else if (m[1]![0] === open.marker && m[1]!.length >= open.len && m[2]!.trim() === "") {
+      // the closing fence (same marker, at least as long, no info string)
+      if (posLine >= open.lineNo && posLine <= n) return open.lineFrom;
+      open = null;
+    }
+  }
+  return open && posLine >= open.lineNo ? open.lineFrom : null; // unterminated fence runs to the doc end
 }
 
 export function contextMenu(opts: { selfPageId?: string } = {}): Extension {
