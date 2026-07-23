@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { relTime } from "../ui/relative-time";
 import { Button } from "../ui/Button";
 import { RightPanel } from "../ui/RightPanel";
+import { PanelRowsSkeleton, useDelayedFlag } from "../ui/Skeleton"; // #457 loading ≠ empty
 import { AuthorChip } from "./AuthorChip";
 import { useSession } from "../session/SessionProvider";
 import { useComments, useCommentMutations, fetchMentionable } from "../data/comments";
@@ -103,6 +104,10 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
   // ADR-102 §3: pages are newest-first (page 0 = newest activity); a thread within a page is also
   // newest-first. Flatten to chat order (oldest at top, newest just above the composer) by reversing both.
   const pages = data?.pages;
+  // #457 while the FIRST page is in flight the list used to fall through to the "no comments"
+  // wording — loading and empty are different truths. Row skeletons (delay-gated) until it settles.
+  const commentsLoading = pages === undefined;
+  const showSkeleton = useDelayedFlag(commentsLoading);
   const notViewable = !!pages && pages[0] === null; // first page 404/403 → not viewable (no-leak)
   const threads = pages ? [...pages].reverse().flatMap((p) => (p ? [...p.threads].reverse() : [])) : [];
   // #214 comment 751 (2): never render an EMPTY thread frame (deleting a thread's last comment).
@@ -163,7 +168,8 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
               {tr("commentsPanel.loadOlder")}
             </button>
           )}
-          {!hasNextPage && visibleThreads.length === 0 && <p className={hint}>{tr("commentsPanel.empty")}</p>}
+          {commentsLoading && showSkeleton && <PanelRowsSkeleton testid="comments-skeleton" />}
+          {!commentsLoading && !hasNextPage && visibleThreads.length === 0 && <p className={hint}>{tr("commentsPanel.empty")}</p>}
           {visibleThreads.map((t) => {
             // ADR-102 §2: a long thread (> threshold) shows the parent + the latest KEEP replies, folding
             // the middle behind a "n replies" button until the user expands it.

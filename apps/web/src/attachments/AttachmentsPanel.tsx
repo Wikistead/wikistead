@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Download, Paperclip, Trash2, Upload } from "lucide-react";
 import { useSession } from "../session/SessionProvider";
 import { RightPanel } from "../ui/RightPanel";
+import { PanelRowsSkeleton, useDelayedFlag } from "../ui/Skeleton"; // #457 loading ≠ empty
 import {
   useAttachments,
   useDeleteAttachment,
@@ -65,6 +66,9 @@ export function AttachmentsPanel({ pageId, readOnly, onClose }: { pageId: string
   }
 
   const count = list.data?.length ?? 0;
+  // #457 row skeletons (delay-gated) while the list loads — "attachments are coming" must not
+  // read as the "no attachments" empty wording below.
+  const showSkeleton = useDelayedFlag(list.isLoading);
 
   return (
     <RightPanel
@@ -92,7 +96,7 @@ export function AttachmentsPanel({ pageId, readOnly, onClose }: { pageId: string
           ))}
 
           {list.isLoading ? (
-            <div className={dim}>{t("common.loading")}</div>
+            showSkeleton ? <PanelRowsSkeleton testid="attachments-skeleton" /> : null
           ) : count === 0 && uploads.length === 0 ? (
             <div className={dim}>{t("attachments.empty")}</div>
           ) : (

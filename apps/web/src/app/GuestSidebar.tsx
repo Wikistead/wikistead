@@ -4,6 +4,7 @@ import { ChevronRight, FileText, Home } from "lucide-react";
 import type { Page } from "../data/queries";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import { NewPageButton } from "../sidebar/NewPageButton";
+import { SidebarTreeSkeleton, useDelayedFlag } from "../ui/Skeleton"; // #457 loading vs empty
 
 // #245 / ADR-112: the guest reader-chrome sidebar. A space share-link guest browses the linked space's
 // page tree exactly like a member — but this is a READ-ONLY, member-chrome-free tree. It renders NO space
@@ -43,8 +44,12 @@ function buildTree(pages: Page[]): TreeNode[] {
 // blank "Untitled" page immediately → the editor; naming happens there), not a guest-specific flow. The
 // template ▾ stays member-only (template non-leak). The server stays the fortress: the route re-checks
 // FGA `edit` on the space and applies the created-page cap regardless of this UI.
-export function GuestSidebar({ pages, space, openId, onOpen, onCreate, homePageId, error, onRetry }: { pages: Page[]; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null; error?: boolean; onRetry?: () => void }) {
+// #457 `loading` distinguishes "the tree hasn't arrived" from "the space has no pages" — the
+// same three-state discipline the member sidebar got in #492 (#500 added the error/retry leg). The
+// skeleton is delay-gated so a fast tree fetch never flashes it.
+export function GuestSidebar({ pages, loading = false, space, openId, onOpen, onCreate, homePageId, error, onRetry }: { pages: Page[]; loading?: boolean; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null; error?: boolean; onRetry?: () => void }) {
   const { t } = useTranslation();
+  const showSkeleton = useDelayedFlag(loading);
   const tree = buildTree(pages);
   const [busy, setBusy] = useState(false);
   // #274 (3): keep the ACTIVE row visible — after creates a page the shell navigates to it,
@@ -101,6 +106,10 @@ export function GuestSidebar({ pages, space, openId, onOpen, onCreate, homePageI
             </button>
           )}
         </div>
+      ) : loading ? (
+        // #457 loading, not empty — the empty wording below must never show for a tree that
+        // simply hasn't arrived. The skeleton itself is delay-gated (a fast fetch renders nothing).
+        showSkeleton ? <SidebarTreeSkeleton testid="guest-sidebar-skeleton" /> : null
       ) : tree.length === 0 ? (
         <div className="px-1 py-2 text-fg-dim" data-testid="guest-sidebar-empty">{t("share.spaceEmpty")}</div>
       ) : (

@@ -59,6 +59,23 @@ export function SidebarTreeSkeleton({ testid = "sidebar-skeleton" }: { testid?: 
   );
 }
 
+// #457 a list-row shaped skeleton for the right panels (comments / history / attachments) and
+// the search result list — a few ragged rows that read as "entries are coming", distinct from each
+// panel's own empty wording. Same bar primitive, same tokens, same reduced-motion fallback.
+export function PanelRowsSkeleton({ rows = 4, testid = "panel-skeleton" }: { rows?: number; testid?: string }) {
+  const widths = ["w-3/4", "w-11/12", "w-3/5", "w-5/6", "w-2/3", "w-4/5"];
+  return (
+    <div className="flex flex-col gap-2.5 py-1" data-testid={testid} role="status" aria-busy="true">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <Skeleton w="w-4" h="h-4" className="flex-none rounded-full" />
+          <Skeleton w={widths[i % widths.length]} h="h-4" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // The anti-flicker gate: a load that resolves in 50ms must NOT flash a skeleton (worse than showing
 // nothing). Returns true only once `active` has been continuously true for `delayMs`.
 export function useDelayedFlag(active: boolean, delayMs = 150): boolean {
