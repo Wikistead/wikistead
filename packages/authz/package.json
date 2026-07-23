@@ -12,7 +12,7 @@
     "lint": "echo 'noop'"
   },
   "dependencies": {
-    "@openfga/sdk": "^0.7.0",
+    "@openfga/sdk": "^0.8.1",
     "@wikistead/hooks": "workspace:*",
     "@wikistead/types": "workspace:*"
   },

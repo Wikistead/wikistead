@@ -18,11 +18,11 @@ function fakeFga(allowed: boolean) {
       calls.push({ user: req.user, relation: req.relation, object: req.object })
       return { allowed }
     },
-    batchCheck: async ({ }: never[] | object) => ({
-      responses: [
-        { _request: { relation: 'edit' }, allowed },
-        { _request: { relation: 'view' }, allowed: true },
-      ],
+    // #500 / ADR-183: SDK ≥0.8.x server-side batchCheck — `{ checks }` in, `{ result }` out, each
+    // item carrying its `request` and `correlationId`. `view` always allowed (the collab RW/RO fixture);
+    // other relations follow the fake's `allowed`.
+    batchCheck: async (body: { checks: { user: string; relation: string; object: string; correlationId?: string }[] }) => ({
+      result: body.checks.map((c) => ({ allowed: c.relation === 'view' ? true : allowed, request: c, correlationId: c.correlationId ?? c.relation })),
     }),
   } as unknown as OpenFgaClient
   return { client, calls }

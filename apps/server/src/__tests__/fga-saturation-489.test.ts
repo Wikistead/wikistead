@@ -49,31 +49,43 @@ afterAll(async () => {
   await pool.end()
 }, 40_000)
 
-describe('filterAuthorized — bounded fan-out (#489 fix 1)', () => {
-  it('never exceeds the concurrency bound, with identical semantics', async () => {
+describe('filterAuthorized — paced server-side BatchCheck (#489 fix 1 → #500 / ADR-183)', () => {
+  it('runs ONE batch in flight at a time (never a store-monopolising burst), with identical semantics', async () => {
+    // #500 / ADR-183 superseded the #489 per-id fan-out with server-side BatchCheck: O(N/50) round-trips
+    // instead of O(N). The saturation guard is now "one batch in flight per caller" — the chunks run
+    // sequentially, so at most ONE /batch-check is outstanding at any instant (was, before #489, 200
+    // concurrent per-id checks; before ADR-183, 25). Semantics stay byte-identical.
     let inFlight = 0
     let maxInFlight = 0
-    let total = 0
+    let batches = 0
+    let checkCalls = 0
     const fake = {
-      check: async ({ object }: { object: string }) => {
+      check: async () => { checkCalls++; return { allowed: true } },
+      batchCheck: async (body: { checks: { object: string; correlationId?: string }[] }) => {
         inFlight++
         maxInFlight = Math.max(maxInFlight, inFlight)
-        total++
-        await new Promise((r) => setTimeout(r, 2)) // hold the slot so overlap is observable
+        batches++
+        await new Promise((r) => setTimeout(r, 2)) // hold the slot so any overlap would be observable
         inFlight--
-        // deny every 7th id — the result set must reflect exactly the allowed ones
-        return { allowed: Number(object.replace('page:p', '')) % 7 !== 0 }
+        return {
+          result: body.checks.map((c) => ({
+            allowed: Number(c.object.replace('page:p', '')) % 7 !== 0, // deny every 7th id
+            request: c,
+            correlationId: c.correlationId!,
+          })),
+        }
       },
     } as unknown as OpenFgaClient
     const ids = Array.from({ length: 200 }, (_, i) => `p${i}`)
     const out = await filterAuthorized(fake, 'user:u', 'view', ids)
-    expect(total).toBe(200) // every id checked exactly once
     expect(out.size).toBe(ids.filter((_, i) => i % 7 !== 0).length) // allow/deny preserved
     expect(out.has('p8')).toBe(true)
     expect(out.has('p7')).toBe(false)
     expect(out.has('p14')).toBe(false)
-    // THE pin: before the fix this was 200 (one unbounded Promise.all) — the saturation mechanism.
-    expect(maxInFlight).toBeLessThanOrEqual(25)
+    expect(batches).toBe(4) // 200 ids @ 50 = 4 chunks
+    expect(checkCalls).toBe(0) // the BATCH path ran — no per-id check fan-out (nor a fallback)
+    // THE pin: chunks are sequential, so only one /batch-check is ever outstanding.
+    expect(maxInFlight).toBe(1)
   })
 })
 

@@ -82,8 +82,8 @@ importers:
         specifier: ^8.0.2
         version: 8.0.2
       '@openfga/sdk':
-        specifier: ^0.7.0
-        version: 0.7.0
+        specifier: ^0.8.1
+        version: 0.8.1
       '@wikistead/auth':
         specifier: workspace:*
         version: link:../../packages/auth
@@ -394,8 +394,8 @@ importers:
   packages/authz:
     dependencies:
       '@openfga/sdk':
-        specifier: ^0.7.0
-        version: 0.7.0
+        specifier: ^0.8.1
+        version: 0.8.1
       '@wikistead/hooks':
         specifier: workspace:*
         version: link:../hooks
@@ -419,8 +419,8 @@ importers:
         specifier: ^5.1.0
         version: 5.1.0
       '@openfga/sdk':
-        specifier: ^0.7.0
-        version: 0.7.0
+        specifier: ^0.8.1
+        version: 0.8.1
       '@wikistead/authz':
         specifier: workspace:*
         version: link:../authz
@@ -1439,9 +1439,9 @@ packages:
     resolution: {integrity: sha512-t3cJnZ4aC7HhPZ6MGylGZULvUtBOZ6FzuUndaHGXjmIZHXnLfC/7L8a57O9Q9V7AxJGKAiRM5zu2wNm9EsvQpw==}
     engines: {node: '>= 18'}
 
-  '@openfga/sdk@0.7.0':
-    resolution: {integrity: sha512-sPsRk3SIrSuKscAccadu7BasQvCLQjNR2FW4QlgnDypoGPMWcviuHGf2SfnB34En0lM4ObiEymypkt4z/OxMkA==}
-    engines: {node: '>=14.17.0'}
+  '@openfga/sdk@0.8.1':
+    resolution: {integrity: sha512-fuVYrR/+Zfl80qwWhfccvptFy+xY5JLXPaPebD3m+5zQbuX8QWsb30AR12DScF/du2Jm6MQxaW+tQWaExeBtdw==}
+    engines: {node: '>=16.15.0'}
 
   '@openfga/syntax-transformer@0.2.1':
     resolution: {integrity: sha512-bF/h4Z8iKjX91roS83BYorGarcJNxrJ1IfDwguU8jLYHRGkKWR6eVK0jPwQu05cSh0SyjKiHxqohgWBgWMEUcA==}
@@ -5849,7 +5849,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@openfga/sdk@0.7.0':
+  '@openfga/sdk@0.8.1':
     dependencies:
       '@opentelemetry/api': 1.9.1
       axios: 1.18.0

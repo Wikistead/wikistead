@@ -112,6 +112,20 @@ export async function checkRelation(
 
 // Filter a candidate page list to the authorized subset.
 // Used by search: confirm the displayed dozen via OpenFGA before rendering.
+//
+// #500 / ADR-183: server-side BatchCheck (SDK ≥0.8.x `batchCheck` = ONE `/batch-check` round-trip per
+// chunk) replaces the #489 per-id fan-out (which was O(N) `fga.check` round-trips — a 155-page tree =
+// 155 checks in 7 serial chunks, at the edge of the <1s bar). Now O(N/50) round-trips.
+//
+// ADR-152 is PRESERVED: every id still passes through the EE `beforeCheck`/`afterCheck` hooks — the
+// batch path runs beforeCheck per id FIRST (a hook that short-circuits keeps that id out of the batch),
+// the server batch, then afterCheck per id. Silently dropping the hooks would be an authz regression
+// (authz-hook-scope-383 pins it on the batch path too).
+//
+// Error semantics (ADR-183 §3, ratified): an ITEM error (one check errored server-side) denies
+// THAT id only — a saturated store degrades to fewer visible items, never a 500. A TRANSPORT error (the
+// whole batchCheck throws: network / 5xx / validation) PROPAGATES — turning it into "deny all" would
+// return 200 + empty, the lying-empty the #500 frontend fix exists to prevent.
 export async function filterAuthorized(
   fga: OpenFgaClient,
   user: string,
@@ -121,27 +135,57 @@ export async function filterAuthorized(
   // non_expired condition, so a time-bounded guest link is evaluated against the clock.
   context?: CheckContext,
 ): Promise<Set<string>> {
-  // #489: BOUNDED fan-out. This used to be one unbounded Promise.all — the title dictionary's confirm
-  // pass hands it up to DICT_CAP (2000) ids, and thousands of concurrent checks saturate the FGA
-  // backend so every OTHER route's checks starve behind them (measured: a 2ms /spaces took 3.2s and
-  // the sidebar tree 4.4s while one dictionary batch ran; unrelated routes hit deadline 500s). Chunking
-  // keeps a single caller from monopolising the store; the common tens-of-ids callers are unaffected
-  // (one chunk). Semantics are identical — same checks, same result set, just paced.
+  const hooks = getAuthzHooks()
+  // The relation is the same for every page id (depends only on capability + type), so resolve once.
+  const relation = resolveRelation(capability, { type: 'page', id: '' })
   const out = new Set<string>()
-  for (let i = 0; i < pageIds.length; i += FILTER_AUTHORIZED_CONCURRENCY) {
-    const chunk = pageIds.slice(i, i + FILTER_AUTHORIZED_CONCURRENCY)
-    const results = await Promise.all(
-      chunk.map((id) =>
-        check(fga, user, capability, { type: 'page', id }, context).then((ok) => [id, ok] as const),
-      ),
-    )
-    for (const [id, ok] of results) if (ok) out.add(id)
+
+  // 1. beforeCheck per id (ADR-152). A hook may short-circuit before FGA; short-circuited ids never
+  //    enter the batch. Common case (no EE hooks): beforeCheck is undefined, so this is a cheap pass.
+  const toBatch: string[] = []
+  for (const id of pageIds) {
+    if (hooks.beforeCheck) {
+      const before = await hooks.beforeCheck({ user, relation, resource: { type: 'page', id }, tenantId: '' })
+      if (before !== undefined) { if (before) out.add(id); continue }
+    }
+    toBatch.push(id)
+  }
+
+  // 2. server-side BatchCheck, chunked at the server's default max (50). The chunks run SEQUENTIALLY —
+  //    #489's pacing: one batch in flight per caller, so a big confirm can't monopolise the store.
+  for (let i = 0; i < toBatch.length; i += BATCH_CHECK_MAX) {
+    const chunk = toBatch.slice(i, i + BATCH_CHECK_MAX)
+    // Index-based correlation ids (not the page id) so any id shape is safe against the id charset/length
+    // constraint on correlation_id; map the response back by correlation id.
+    const byCorr = new Map(chunk.map((id, j) => [String(j), id]))
+    const { result } = await fga.batchCheck({
+      checks: chunk.map((id, j) => ({
+        user,
+        relation,
+        object: `page:${id}`,
+        correlationId: String(j),
+        ...(context ? { context } : {}),
+      })),
+    })
+    // Walk the response by correlation id. Fail closed: an id with NO response entry is simply never
+    // added to `out` (a missing verdict is a deny, never a silent allow).
+    for (const r of result) {
+      const id = byCorr.get(r.correlationId)
+      if (id === undefined) continue
+      // item error → deny that id (ADR-183 §3). Do not consult afterCheck on an errored item.
+      if (r.error) continue
+      const fgaAllowed = Boolean(r.allowed)
+      const final = hooks.afterCheck
+        ? (await hooks.afterCheck({ user, relation, resource: { type: 'page', id }, tenantId: '' }, fgaAllowed) ?? fgaAllowed)
+        : fgaAllowed
+      if (final) out.add(id)
+    }
+    // Any chunk id with no response entry is denied (fail closed) — never silently treated as allowed.
   }
   return out
 }
-// One chunk of concurrent FGA checks per pass — small enough that a big batch leaves headroom for
-// every other in-flight request, large enough that a 2000-id confirm still completes in ~80 passes.
-const FILTER_AUTHORIZED_CONCURRENCY = 25
+// The server's default maxChecksPerBatchCheck (#500 / ADR-183). One `/batch-check` round-trip per chunk.
+const BATCH_CHECK_MAX = 50
 
 export interface MemberAccess {
   readOnly: boolean
@@ -164,12 +208,17 @@ export async function checkMemberAccess(
 ): Promise<MemberAccess | null> {
   const object = `${resource.type}:${resource.id}`
   const user = `user:${userId}`
-  const { responses } = await fga.batchCheck([
-    { user, relation: 'edit', object },
-    { user, relation: 'view', object },
-  ])
-  const canEdit = responses.find((r) => r._request.relation === 'edit')?.allowed ?? false
-  const canView = responses.find((r) => r._request.relation === 'view')?.allowed ?? false
+  // #500 / ADR-183: SDK ≥0.8.x — `batchCheck({ checks })` is the server-side `/batch-check` call and
+  // returns `{ result }` (was `{ responses }` with `_request` in 0.7.0's client-side fan-out). Correlate
+  // by the request relation, exactly as before. Still one round-trip on the collab hot path.
+  const { result } = await fga.batchCheck({
+    checks: [
+      { user, relation: 'edit', object, correlationId: 'edit' },
+      { user, relation: 'view', object, correlationId: 'view' },
+    ],
+  })
+  const canEdit = result.find((r) => r.request.relation === 'edit')?.allowed ?? false
+  const canView = result.find((r) => r.request.relation === 'view')?.allowed ?? false
   if (canEdit) return { readOnly: false }
   if (canView) return { readOnly: true }
   return null
