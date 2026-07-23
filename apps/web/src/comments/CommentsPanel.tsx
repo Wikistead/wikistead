@@ -4,6 +4,7 @@ import { relTime } from "../ui/relative-time";
 import { Button } from "../ui/Button";
 import { RightPanel } from "../ui/RightPanel";
 import { PanelRowsSkeleton, useDelayedFlag } from "../ui/Skeleton"; // #457 loading ≠ empty
+import { ConfirmDialog } from "../ui/dialogs"; // #504: deleting a comment is irreversible
 import { AuthorChip } from "./AuthorChip";
 import { useSession } from "../session/SessionProvider";
 import { useComments, useCommentMutations, fetchMentionable } from "../data/comments";
@@ -97,6 +98,8 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
   // thread (no always-expanded per-comment reply box). Null = the composer posts a new page comment.
   // #214 comment 751 (1): carry the target comment's body so the reply banner previews WHICH comment.
   const [replyTo, setReplyTo] = useState<{ threadId: string; sub: string; body: string } | null>(null);
+  // #504: a deleted comment is unrecoverable — hold the id while the ConfirmDialog is up.
+  const [deletingComment, setDeletingComment] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set()); // ADR-102 §2: threads the user expanded
   const listRef = useRef<HTMLDivElement | null>(null);
   const anchorHeight = useRef<number | null>(null); // ADR-102 §3: scrollHeight snapshot for prepend anchoring
@@ -148,7 +151,8 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
         <AuthorChip sub={c.authorSub} name={c.authorName} hasAvatar={c.authorHasAvatar} />
         <Stamp iso={c.createdAt} />
         {c.canModify && (
-          <button type="button" className="ml-auto cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-[var(--danger)] opacity-80 hover:underline hover:opacity-100" data-testid="comment-delete" onClick={() => remove.mutate(c.id)}>{tr("commentsPanel.delete")}</button>
+          // #504: irreversible — confirm before removing (the trigger was already red at rest).
+          <button type="button" className="ml-auto cursor-pointer border-0 bg-transparent p-0 text-[0.8em] text-[var(--danger)] opacity-80 hover:underline hover:opacity-100" data-testid="comment-delete" onClick={() => setDeletingComment(c.id)}>{tr("commentsPanel.delete")}</button>
         )}
       </div>
       <span className="whitespace-pre-wrap text-[0.92em] [overflow-wrap:anywhere]">{c.body}</span>
@@ -223,6 +227,14 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
           </div>
         )}
       </div>
+      {/* #504: the comment-delete confirm (danger tone). */}
+      <ConfirmDialog
+        open={deletingComment !== null}
+        message={tr("commentsPanel.deleteConfirm")}
+        confirmTestId="comment-delete-confirm"
+        onClose={() => setDeletingComment(null)}
+        onConfirm={() => { if (deletingComment) remove.mutate(deletingComment); setDeletingComment(null); }}
+      />
     </RightPanel>
   );
 }

@@ -270,6 +270,8 @@ function SpaceGeneralTab() {
         message={t("spaceSettings.deleteConfirm", { name })}
         confirmLabel={t("spaceSettings.deleteSpace")}
         tone="danger"
+        // #504: irreversible at space scope — type-to-confirm, same bar as page delete-forever (ADR-167).
+        typedConfirmText={name}
         confirmTestId="space-delete-confirm"
         onClose={() => setConfirming(false)}
         onConfirm={() => {

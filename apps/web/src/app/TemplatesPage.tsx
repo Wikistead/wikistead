@@ -54,7 +54,8 @@ export function TemplatesRoute() {
                   <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground" title={t("templates.rename")} data-testid="template-rename" onClick={() => setRenaming(tpl)}>
                     <Pencil size={14} />
                   </button>
-                  <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-[var(--danger)]" title={t("common.delete")} data-testid="template-delete" onClick={() => setDeleting(tpl)}>
+                  {/* #504: red at rest (was hover-only) — the confirm below already exists. */}
+                  <button type="button" className="flex-none rounded p-1 text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]" title={t("common.delete")} data-testid="template-delete" onClick={() => setDeleting(tpl)}>
                     <Trash2 size={14} />
                   </button>
                 </>

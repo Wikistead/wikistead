@@ -20,6 +20,7 @@ test("#228: admin creates a webhook (secret shown once), sees it listed, deletes
 
   // Delete it → gone.
   await item.getByTestId("webhook-delete").click();
+  await page.getByTestId("webhook-delete-confirm").click(); // #504: delete confirms first
   await sleep(500);
   await expect(page.getByTestId("webhook-item").filter({ hasText: url })).toHaveCount(0);
 });

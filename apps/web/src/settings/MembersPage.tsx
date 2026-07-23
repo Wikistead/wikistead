@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../session/SessionProvider";
 import { Button } from "../ui/Button";
+import { ConfirmDialog } from "../ui/dialogs"; // #504: removal / DSAR erasure / invite revoke confirm first
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { Avatar } from "../ui/Avatar";
@@ -23,6 +24,10 @@ export function MembersPage() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"admin" | "member">("member");
   const [lastLink, setLastLink] = useState<{ url: string; emailed: boolean } | null>(null);
+  // #504: every irreversible action here goes through one ConfirmDialog — removal (access + keys +
+  // sessions die), DSAR erasure (the reading history is gone for good), invite revoke (the sent link
+  // stops working). The pending action carries its own message + handler.
+  const [confirming, setConfirming] = useState<{ message: string; run: () => void } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -94,9 +99,12 @@ export function MembersPage() {
               </td>
               <td style={{ textAlign: "right" }}>
                 {/* #464 / ADR-175 §6 (DSAR): erase this member's page-analytics reading history on request
-                    (the member keeps their access — distinct from Remove). */}
-                <Button variant="ghost" size="sm" onClick={() => void guarded(() => eraseMemberAnalytics(token, m.sub))()}>{t("members.eraseAnalytics")}</Button>
-                <Button variant="dangerGhost" size="sm" onClick={() => void guarded(() => removeMember(token, m.sub))()}>{t("members.remove")}</Button>
+                    (the member keeps their access — distinct from Remove).
+                    #504: both are irreversible — red at rest and confirmed before running. */}
+                <Button variant="dangerGhost" size="sm" data-testid="member-erase-analytics"
+                  onClick={() => setConfirming({ message: t("members.eraseAnalyticsConfirm", { name: m.display_name || m.email || m.sub }), run: () => void guarded(() => eraseMemberAnalytics(token, m.sub))() })}>{t("members.eraseAnalytics")}</Button>
+                <Button variant="dangerGhost" size="sm" data-testid="member-remove"
+                  onClick={() => setConfirming({ message: t("members.removeConfirm", { name: m.display_name || m.email || m.sub }), run: () => void guarded(() => removeMember(token, m.sub))() })}>{t("members.remove")}</Button>
               </td>
             </tr>
           ))}
@@ -132,12 +140,23 @@ export function MembersPage() {
             {invites.map((i) => (
               <li key={i.id} style={{ marginBottom: 4 }}>
                 {i.email || t("members.noEmail")} — {i.role}{" "}
-                <Button variant="dangerGhost" size="sm" onClick={() => void guarded(() => revokeInvite(token, i.id))()}>{t("members.revoke")}</Button>
+                {/* #504: revoking kills the sent link for good — confirm first. */}
+                <Button variant="dangerGhost" size="sm" data-testid="invite-revoke"
+                  onClick={() => setConfirming({ message: t("members.revokeConfirm", { email: i.email || t("members.noEmail") }), run: () => void guarded(() => revokeInvite(token, i.id))() })}>{t("members.revoke")}</Button>
               </li>
             ))}
           </ul>
         </>
       )}
+      {/* #504: the shared confirm for this page's irreversible actions. */}
+      <ConfirmDialog
+        open={confirming !== null}
+        message={confirming?.message ?? ""}
+        confirmTestId="members-confirm"
+        confirmLabel={t("common.confirm")}
+        onClose={() => setConfirming(null)}
+        onConfirm={() => { confirming?.run(); setConfirming(null); }}
+      />
     </div>
   );
 }

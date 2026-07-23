@@ -292,7 +292,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             <div key={`${g.grantee}:${g.relation}`} className="flex items-center gap-2" data-testid="grant-item">
               <span className="whitespace-nowrap text-xs text-fg-dim">{g.relation}</span>
               <span className="min-w-0 flex-1 truncate text-sm text-foreground">{label(g)}</span>
-              <IconButton aria-label={t("permissions.revoke")} data-testid="grant-revoke" className="text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:text-destructive" onClick={() => revoke.mutate({ grantee: g.grantee, relation: g.relation }, {
+              <IconButton aria-label={t("permissions.revoke")} data-testid="grant-revoke" variant="danger" onClick={() => revoke.mutate({ grantee: g.grantee, relation: g.relation }, {
                 onSuccess: () => notify.success(t("toast.accessRevoked")),
                 onError: () => notify.error(t("toast.actionFailed")),
               })}>×</IconButton>

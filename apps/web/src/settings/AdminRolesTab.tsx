@@ -7,6 +7,7 @@ import {
 } from "../data/queries";
 import { useSession } from "../session/SessionProvider";
 import { Button, IconButton } from "../ui/Button";
+import { ConfirmDialog } from "../ui/dialogs"; // #504: deleting a role is irreversible — confirm first
 import { Input } from "../ui/Input";
 import { MemberSearchInput } from "../ui/MemberSearchInput";
 import { Select } from "../ui/Select";
@@ -98,6 +99,8 @@ export function AdminRolesTab() {
   // NAME keeps a small affordance (pencil → inline input).
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  // #504: deleting a role is irreversible (its assignments go with it) — red trigger + confirm.
+  const [deletingRole, setDeletingRole] = useState<{ id: string; name: string } | null>(null);
 
   // Assignment panel: pick a custom role + a space + a member sub → expand. Space-scope only in
   // the v1 console (page-scope assignment is reachable via the API; a page picker is a follow-up).
@@ -210,8 +213,9 @@ export function AdminRolesTab() {
                   </>
                 )}
                 <span className="flex-1" />
-                <IconButton aria-label={t("adminRoles.delete")} data-testid="role-delete"
-                  onClick={() => deleteRole.mutate(r.id, { onSuccess: () => notify.success(t("toast.saved")), onError })}>×</IconButton>
+                {/* #504: red at rest + confirm-before-delete (irreversible — assignments die with it) */}
+                <IconButton aria-label={t("adminRoles.delete")} data-testid="role-delete" variant="danger"
+                  onClick={() => setDeletingRole({ id: r.id, name: r.name })}>×</IconButton>
               </div>
               <CapabilityPicker
                 value={r.capabilities}
@@ -299,13 +303,27 @@ export function AdminRolesTab() {
             <div key={a.id} className="flex items-center gap-2 text-sm" data-testid="assignment-row">
               <span className="min-w-0 flex-1 truncate">{a.principal.replace(/^user:/, "")}</span>
               <span className="text-xs text-fg-dim">{a.roleName}</span>
-              <IconButton aria-label={t("adminRoles.unassign")} data-testid="assignment-remove"
+              {/* #504: red at rest; no confirm — an unassignment is re-assignable in one step
+                  (exception candidate, listed for the review ruling) */}
+              <IconButton aria-label={t("adminRoles.unassign")} data-testid="assignment-remove" variant="danger"
                 onClick={() => unassign.mutate(a.id, { onSuccess: () => notify.success(t("toast.saved")), onError })}>×</IconButton>
             </div>
           ))}
           {(assignments.data?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("adminRoles.assignEmpty")}</p>}
         </div>
       )}
+      {/* #504: the role-delete confirm — names the role, danger tone. */}
+      <ConfirmDialog
+        open={deletingRole !== null}
+        message={deletingRole ? t("adminRoles.deleteConfirm", { name: deletingRole.name }) : ""}
+        confirmTestId="role-delete-confirm"
+        onClose={() => setDeletingRole(null)}
+        onConfirm={() => {
+          if (!deletingRole) return;
+          deleteRole.mutate(deletingRole.id, { onSuccess: () => notify.success(t("toast.saved")), onError });
+          setDeletingRole(null);
+        }}
+      />
     </div>
   );
 }

@@ -155,7 +155,8 @@ function ProfileTab() {
             {t("account.uploadAvatar")}
           </Button>
           {settings.data?.hasAvatar && (
-            <Button variant="ghost" onClick={() => removeAvatar.mutate(undefined, { onSuccess: () => { void refresh(); }, onError: () => notify.error(t("toast.actionFailed")) })} disabled={removeAvatar.isPending} data-testid="account-avatar-remove">
+            // #504: red at rest; no confirm — re-uploading restores it in one step (exception candidate)
+            <Button variant="dangerGhost" onClick={() => removeAvatar.mutate(undefined, { onSuccess: () => { void refresh(); }, onError: () => notify.error(t("toast.actionFailed")) })} disabled={removeAvatar.isPending} data-testid="account-avatar-remove">
               {t("account.removeAvatar")}
             </Button>
           )}

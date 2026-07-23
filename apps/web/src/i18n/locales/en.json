@@ -11,7 +11,8 @@
     "off": "OFF",
     "yes": "Yes",
     "no": "No",
-    "edit": "Edit"
+    "edit": "Edit",
+    "confirm": "Confirm"
   },
   "embedPicker": {
     "title": "Embed a page",
@@ -276,7 +277,8 @@
     "issueMembers": "Any member",
     "issueAdminsOnly": "Administrators only",
     "issueMembersHint": "Members create their own keys from their account settings. A key never exceeds its owner’s permissions.",
-    "issueAdminsOnlyHint": "Members can see and revoke the keys they already hold, but cannot create new ones."
+    "issueAdminsOnlyHint": "Members can see and revoke the keys they already hold, but cannot create new ones.",
+    "revokeConfirm": "Revoke the API key \"{{name}}\"? It never authenticates again."
   },
   "adminAuth": {
     "title": "Authentication",
@@ -557,7 +559,8 @@
     "revoke": "Revoke",
     "copied": "Copied link to clipboard.",
     "done": "Done",
-    "password": "Password (optional)"
+    "password": "Password (optional)",
+    "revokeConfirm": "Revoke this link? Everyone holding the URL loses access — a new link is a new URL."
   },
   "permissions": {
     "title": "Permissions",
@@ -688,7 +691,8 @@
     "empty": "No attachments",
     "uploading": "uploading…",
     "failed": "failed: {{msg}}",
-    "error": "error"
+    "error": "error",
+    "deleteConfirm": "Delete \"{{filename}}\"? The file cannot be recovered."
   },
   "search": {
     "placeholder": "Search pages…",
@@ -794,7 +798,10 @@
     "notEmailed": "Email not sent — copy the link above.",
     "pendingTitle": "Pending invites",
     "noEmail": "(no email)",
-    "revoke": "Revoke"
+    "revoke": "Revoke",
+    "eraseAnalyticsConfirm": "Erase the reading history of {{name}}? This cannot be undone.",
+    "removeConfirm": "Remove {{name}} from this workspace? Their access, API keys and sessions end immediately.",
+    "revokeConfirm": "Revoke the invite for {{email}}? The sent link stops working."
   },
   "commentsPanel": {
     "submit": "Comment",
@@ -804,7 +811,8 @@
     "pagePlaceholder": "Comment on the page…",
     "empty": "No comments yet.",
     "showReplies": "Show {{count}} replies",
-    "loadOlder": "Load older comments"
+    "loadOlder": "Load older comments",
+    "deleteConfirm": "Delete this comment? This cannot be undone."
   },
   "pageMeta": {
     "created": "Created",
@@ -911,7 +919,8 @@
     "delete": "Delete webhook",
     "disabled": "Disabled",
     "empty": "No webhooks yet.",
-    "createFailed": "Something went wrong"
+    "createFailed": "Something went wrong",
+    "deleteConfirm": "Delete the endpoint {{url}}? Its signing secret is gone with it."
   },
   "export": {
     "spaceItem": "Export space",
@@ -1095,7 +1104,8 @@
     "scopeTenant": "Tenant",
     "assignTenantScope": "applies tenant-wide",
     "builtInTenantTitle": "Built-in tenant roles",
-    "builtInResourceTitle": "Built-in space & page roles"
+    "builtInResourceTitle": "Built-in space & page roles",
+    "deleteConfirm": "Delete the role \"{{name}}\"? Its assignments are removed with it. This cannot be undone."
   },
   "detailsEdit": {
     "title": "Edit collapsible",

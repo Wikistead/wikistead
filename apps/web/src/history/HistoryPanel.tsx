@@ -31,6 +31,9 @@ import { useMemberIdentities } from "../data/queries"; // #379 / ADR-150: resolv
 
 // #206: the right-panel chrome (width / bg / slide-in / header / close / Esc) is the shared RightPanel.
 const rowBtn = "inline-flex flex-none items-center gap-1 rounded border border-border bg-panel-2 px-2 py-[3px] text-xs text-foreground hover:bg-border disabled:cursor-default disabled:opacity-50";
+// #504: restore-type triggers (restore / bulk revert) overwrite the CURRENT content, so their triggers
+// carry the destructive tint at rest; the confirm dialogs stay tone=primary (they restore, not delete).
+const rowBtnDanger = "inline-flex flex-none items-center gap-1 rounded border border-border bg-panel-2 px-2 py-[3px] text-xs text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:border-destructive disabled:cursor-default disabled:opacity-50";
 
 function fmt(iso: string): string {
   const d = new Date(iso);
@@ -94,7 +97,7 @@ export function HistoryPanel({
       {run && run.hasBaseline && (
         <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-border bg-panel-2 p-2" data-testid="revert-run-row">
           <span className="min-w-0 text-xs text-fg-dim">{t("history.revertRunLabel", { author: runAuthor, count: run.count })}</span>
-          <button type="button" className={rowBtn} data-testid="revert-run" disabled={revertRun.isPending} onClick={() => setConfirmingRun(true)}>
+          <button type="button" className={rowBtnDanger} data-testid="revert-run" disabled={revertRun.isPending} onClick={() => setConfirmingRun(true)}>
             <Undo2 size={13} aria-hidden /> {t("history.revertRun")}
           </button>
         </div>
@@ -121,7 +124,7 @@ export function HistoryPanel({
                 <GitCompare size={13} aria-hidden /> {t("history.diff")}
               </button>
               {canRestore && (
-                <button type="button" className={rowBtn} data-testid="revision-restore" disabled={restore.isPending} onClick={() => setConfirming(rev)}>
+                <button type="button" className={rowBtnDanger} data-testid="revision-restore" disabled={restore.isPending} onClick={() => setConfirming(rev)}>
                   <RotateCcw size={13} aria-hidden /> {t("history.restore")}
                 </button>
               )}

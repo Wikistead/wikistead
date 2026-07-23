@@ -45,6 +45,7 @@ test("#462: a member issues and revokes their own key from account settings", as
   expect(status).toBeLessThan(400);
 
   await row.getByTestId("api-key-revoke").click();
+  await page.getByTestId("api-key-revoke-confirm").click(); // #504: revoke confirms first
   await expect(row, "and the owner can revoke it from the same screen").toHaveCount(0, { timeout: 8000 });
 });
 

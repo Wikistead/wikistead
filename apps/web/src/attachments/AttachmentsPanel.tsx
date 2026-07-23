@@ -4,6 +4,7 @@ import { Download, Paperclip, Trash2, Upload } from "lucide-react";
 import { useSession } from "../session/SessionProvider";
 import { RightPanel } from "../ui/RightPanel";
 import { PanelRowsSkeleton, useDelayedFlag } from "../ui/Skeleton"; // #457 loading ≠ empty
+import { ConfirmDialog } from "../ui/dialogs"; // #504: deleting an attachment is irreversible
 import {
   useAttachments,
   useDeleteAttachment,
@@ -41,6 +42,8 @@ export function AttachmentsPanel({ pageId, readOnly, onClose }: { pageId: string
 
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  // #504: deleting an attachment destroys the stored object — red trigger + confirm naming the file.
+  const [deleting, setDeleting] = useState<{ id: string; filename: string } | null>(null);
 
   async function onFiles(files: FileList | null) {
     if (!files) return;
@@ -108,7 +111,8 @@ export function AttachmentsPanel({ pageId, readOnly, onClose }: { pageId: string
                   <Download size={14} />
                 </button>
                 {!readOnly && (
-                  <button type="button" className={iconBtn} title={t("attachments.delete")} onClick={() => del.mutate(a.id)}>
+                  // #504: red at rest (not only on hover) + confirm — the stored object is gone for good.
+                  <button type="button" className="flex flex-none rounded border border-border p-[3px] text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:border-destructive" title={t("attachments.delete")} data-testid="attach-delete" onClick={() => setDeleting({ id: a.id, filename: a.filename })}>
                     <Trash2 size={14} />
                   </button>
                 )}
@@ -116,6 +120,14 @@ export function AttachmentsPanel({ pageId, readOnly, onClose }: { pageId: string
             ))
           )}
       </div>
+      {/* #504: the delete confirm — names the file, danger tone. */}
+      <ConfirmDialog
+        open={deleting !== null}
+        message={deleting ? t("attachments.deleteConfirm", { filename: deleting.filename }) : ""}
+        confirmTestId="attach-delete-confirm"
+        onClose={() => setDeleting(null)}
+        onConfirm={() => { if (deleting) del.mutate(deleting.id); setDeleting(null); }}
+      />
     </RightPanel>
   );
 }

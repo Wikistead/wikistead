@@ -71,7 +71,9 @@ export function AdminEmbedsTab() {
         {hosts.map((h) => (
           <div key={h} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="embed-host-item">
             <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{h}</span>
-            <IconButton aria-label={t("adminEmbeds.remove")} data-testid="embed-host-remove" className="hover:text-destructive" onClick={() => remove(h)}>
+            {/* #504: red at rest; no confirm — the removal is STAGED (nothing changes until Save),
+                so it is undoable in place (exception candidate). */}
+            <IconButton aria-label={t("adminEmbeds.remove")} data-testid="embed-host-remove" variant="danger" onClick={() => remove(h)}>
               <Trash2 size={14} />
             </IconButton>
           </div>
