@@ -76,3 +76,41 @@ describe('buildIR (#308 tree reconstruction)', () => {
     expect(ir.roots.map((r) => r.title).sort()).toEqual(['Page A', 'Page B'])
   })
 })
+
+describe('buildIR (#501 bare .md files)', () => {
+  it('a ZIP of loose .md files imports — each bare file is its own single-page dir', () => {
+    const ir = buildIR({ 'notes.md': strToU8('# my notes'), 'ideas.md': strToU8('later') })
+    expect(ir.roots.map((r) => r.dir).sort()).toEqual(['ideas', 'notes'])
+    const notes = ir.roots.find((r) => r.dir === 'notes')!
+    expect(notes.title).toBe('notes')
+    expect(notes.markdown).toBe('# my notes')
+    expect(notes.published).toBe(true)
+  })
+
+  it('index.md outranks a sibling bare <dir>.md — one page, the index body wins', () => {
+    const ir = buildIR({ 'guide.md': strToU8('BARE'), 'guide/index.md': strToU8('INDEX') })
+    expect(ir.roots).toHaveLength(1)
+    expect(ir.roots[0]!.dir).toBe('guide')
+    expect(ir.roots[0]!.markdown).toBe('INDEX')
+  })
+
+  it('a nested bare .md nests under its enclosing page dir (mixed archives keep the tree)', () => {
+    const ir = buildIR({ 'guide/index.md': strToU8('parent'), 'guide/extra.md': strToU8('leaf') })
+    expect(ir.roots).toHaveLength(1)
+    expect(ir.roots[0]!.children.map((c) => c.dir)).toEqual(['guide/extra'])
+  })
+
+  it('a .md inside an attachment folder stays an attachment (never a page); root _home.md stays the home', () => {
+    const ir = buildIR({ 'a/index.md': strToU8('x'), 'a/images/note.md': strToU8('att'), '_home.md': strToU8('home') })
+    expect(ir.roots.map((r) => r.dir).sort()).toEqual(['_home', 'a'])
+    const a = ir.roots.find((r) => r.dir === 'a')!
+    expect(a.attachments.map((t) => t.name)).toEqual(['note.md'])
+    expect(ir.roots.find((r) => r.dir === '_home')!.isHome).toBe(true)
+  })
+
+  it('an unpublished-looking bare file (empty body) imports as a draft, like an empty index.md', () => {
+    const ir = buildIR({ 'todo.md': strToU8('   ') })
+    expect(ir.roots).toHaveLength(1)
+    expect(ir.roots[0]!.published).toBe(false)
+  })
+})
