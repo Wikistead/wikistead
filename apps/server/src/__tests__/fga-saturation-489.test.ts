@@ -92,6 +92,31 @@ describe('title-dictionary anchor gate (#489 fix 2)', () => {
   })
 })
 
+describe('title-dictionary DEGRADES under an ERRORING FGA (#489 remedy 1)', () => {
+  it('an FGA failure yields an empty 200 dictionary (degraded), never a 500 the client retries into', async () => {
+    const original = app.fga.check.bind(app.fga)
+    // page-scoped throw only — the auth/membership hooks also ride app.fga (the fix-3 lesson below)
+    ;(app.fga as { check: unknown }).check = async (args: { object?: string }) => {
+      if (String(args?.object ?? '').startsWith('page:')) throw new Error('rpc deadline exceeded')
+      return original(args as never)
+    }
+    try {
+      const res = await app.inject({ method: 'GET', url: `/pages/${pageId}/title-dictionary`, headers: H })
+      expect(res.statusCode).toBe(200) // RED before the fix: 500 (and the HAR showed the client retrying it into ~6.5s)
+      expect(res.json()).toMatchObject({ entries: [], capped: false, degraded: true })
+    } finally {
+      ;(app.fga as { check: unknown }).check = original
+    }
+    // healthy again: a clean non-viewable/nonexistent anchor still 404s (the gate is untouched)…
+    const dead = await app.inject({ method: 'GET', url: `/pages/no-such-degrade-${tag}/title-dictionary`, headers: H })
+    expect(dead.statusCode).toBe(404)
+    // …and a real page gets a real (non-degraded) dictionary
+    const ok = await app.inject({ method: 'GET', url: `/pages/${pageId}/title-dictionary`, headers: H })
+    expect(ok.statusCode).toBe(200)
+    expect((ok.json() as { degraded?: boolean }).degraded).toBeUndefined()
+  })
+})
+
 describe('POST /pages/:id/view under an ERRORING authz check (#489 fix 3)', () => {
   it('an FGA failure yields 204 (record skipped), never a 500 on the reading surface', async () => {
     const original = app.fga.check.bind(app.fga)
