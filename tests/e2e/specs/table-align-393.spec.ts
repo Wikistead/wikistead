@@ -77,6 +77,73 @@ test("#393Align center actually CENTRES the table (not the old attribute-less le
   expect(s, "and centre is written down, since it is not the default").toContain("{align=center}");
 });
 
+// ADR-151 addendum 3: a rendered GFM pipe table now carries the SAME hover align segment a
+// `:::table` does — not only the right-click menu. Before this change TableWidget built no btnrow and no
+// align control at all, so this whole affordance was absent on the pipe path (RED: the macro-align
+// element does not exist). It must also actually REVEAL on hover (the #216/present-but-invisible
+// trap: a control mounted on .cm-lp-table-wrap but styled only under .cm-lp-macro-wrap:hover).
+test("#393 addendum3a rendered pipe table shows the hover align segment and promotes on center", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "table-align-hover-393");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("| A | B |\n| --- | --- |\n| 1 | 2 |\n\nbelow\n");
+  await page.getByText("below", { exact: true }).click(); // deselect: the table renders (not raw)
+  await sleep(600);
+
+  const wrap = page.locator("[data-pane=preview] .cm-lp-table-wrap").first();
+  await expect(wrap, "the pipe table renders as a widget").toBeVisible();
+  const align = wrap.getByTestId("macro-align");
+  await expect(align, "the align segment is MOUNTED on the pipe table (absent before addendum 3)").toHaveCount(1);
+
+  // it is hidden until hover, then actually revealed (opacity 1) — not present-but-invisible
+  await wrap.hover();
+  await expect(async () => {
+    const op = await align.evaluate((el) => Number(getComputedStyle(el).opacity));
+    expect(op).toBeGreaterThan(0.9);
+  }).toPass({ timeout: 4000 });
+
+  // picking center on the hover segment promotes the pipe → :::table{align=center}
+  await wrap.getByTestId("macro-align-center").click();
+  await sleep(600);
+  const promoted = page.locator("[data-pane=preview] .cm-lp-macro-wrap").first();
+  await expect(promoted, "the promoted block renders as a centred :::table").toHaveClass(/cm-lp-align-center/, { timeout: 8000 });
+  const s = await srcText(page);
+  expect(s).toContain(":::table{align=center}");
+});
+
+// ADR-151 addendum 3: while the table RichUI island is open, the WHOLE-TABLE align segment stays
+// visible — orthogonal to the toolbar's per-CELL text-align (table-align-* buttons). Before this change
+// the edit island exposed only the cell-align toolbar, never the whole-table box align.
+test("#393 addendum3the whole-table align segment shows while the edit island is open", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, "table-align-editing-393");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(`${TABLE}\n\nbelow\n`);
+  await page.getByText("below", { exact: true }).click();
+  await sleep(500);
+
+  // open the RichUI island (a :::table enters on a body cell click)
+  await page.locator("[data-pane=preview] .cm-lp-macro-wrap").first().locator("td").first().click();
+  const island = page.getByTestId("table-edit");
+  await expect(island).toBeVisible({ timeout: 8000 });
+
+  // the whole-table align segment lives on the island wrap (distinct from the per-cell table-align-* toolbar)
+  const wrap = page.locator("[data-pane=preview] .cm-lp-table-edit").first();
+  const align = wrap.getByTestId("macro-align");
+  await expect(align, "the whole-table align segment is present while editing (absent before addendum 3)").toHaveCount(1);
+  await wrap.hover();
+  await expect(async () => {
+    const op = await align.evaluate((el) => Number(getComputedStyle(el).opacity));
+    expect(op).toBeGreaterThan(0.9);
+  }).toPass({ timeout: 4000 });
+  // it reflects the current (left) side, and it is a DIFFERENT control from the per-cell align toolbar
+  // (which is a contextual bar — attached but revealed only on cell selection, so assert attached, not visible).
+  await expect(wrap.getByTestId("macro-align")).toHaveAttribute("data-align", "left");
+  await expect(page.getByTestId("table-align-left"), "the per-cell align toolbar is a separate control").toBeAttached();
+});
+
 test("#393a GFM pipe table offers alignment and PROMOTES to :::table on centre", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "table-align-pipe-393");

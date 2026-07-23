@@ -343,7 +343,12 @@ const menuEvents = Prec.highest(
       // fence. Fall back to the clicked widget element's own doc position (posAtDOM → its `from`), which
       // always lands inside the fence. (Before #243 the widget mousedown moved the caret into the fence,
       // masking this; #243 stopped moving the caret on right-click so the widget stays rendered.)
-      const wrapEl = (e.target as HTMLElement | null)?.closest?.(".cm-lp-macro-wrap") as HTMLElement | null;
+      // #393 / ADR-151 addendum 3 §3: a `:::table`/diagram widget resolves a boundary right-click through
+      // `posAtDOM(wrapEl)` on `.cm-lp-macro-wrap`, but a GFM pipe table's root is `.cm-lp-table-wrap`
+      // (TableWidget) — so a right-click whose posAtCoords overshoots the lezer `Table` node had NO wrap to
+      // fall back through, and offered no Align. Include the table wraps so the same boundary rescue fires
+      // for the pipe path (it now has a resolvable wrap element — a consequence of the §1 hover-chrome work).
+      const wrapEl = (e.target as HTMLElement | null)?.closest?.(".cm-lp-macro-wrap, .cm-lp-table-wrap, .cm-lp-table-edit") as HTMLElement | null;
       let wrapPos: number | null = null;
       if (wrapEl) { try { wrapPos = view.posAtDOM(wrapEl); } catch { wrapPos = null; } }
       const diagramFrom = diagramFenceAt(view.state, pos) ?? (wrapPos != null ? diagramFenceAt(view.state, wrapPos) : null) ?? undefined;
