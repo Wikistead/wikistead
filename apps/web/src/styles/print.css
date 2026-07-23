@@ -30,4 +30,20 @@
   .lp-toolbar {
     display: none !important;
   }
+  /* #505: callout icons (mask + background-color) and panel tints are "background graphics", which
+     browsers drop by default when printing — the panel degraded to bare text + a left border. Force
+     colour fidelity for the WHOLE printed surface (the property inherits), so code-block/table
+     backgrounds keep their on-screen look too — print parity is the point of this stylesheet. */
+  [data-pane="preview"] {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  /* #505: the page title lives in the BAND, outside the preview pane, so the visibility trick dropped
+     it from every print. Un-hide just the title text (the band's frost gradient and status controls
+     stay hidden); it sits in the --wks-band-h padding gap above the first content line, and the
+     two-line clamp is lifted so a long title prints in full. */
+  [data-testid="page-title"] {
+    visibility: visible;
+    -webkit-line-clamp: unset;
+  }
 }

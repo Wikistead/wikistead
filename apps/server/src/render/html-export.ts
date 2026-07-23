@@ -41,7 +41,7 @@ const EXPORT_STYLES = `
   --bg:#1e1e1e;--fg:#dddddd;--fg-dim:#9a9a9a;--border:#3a3a3a;--head:#83c092;
   --callout-info:#4493f8;--callout-note:#9198a1;--callout-tip:#3fb950;--callout-warning:#e3b341;--callout-danger:#f0584d;}}
 body{margin:0;background:var(--bg);color:var(--fg);}
-.wks-export{max-width:46rem;margin:2rem auto;padding:0 1rem;font-family:var(--font-body);line-height:1.7;}
+.wks-export{max-width:46rem;margin:2rem auto;padding:0 1rem;font-family:var(--font-body);line-height:1.7;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
 .wks-export :is(h1,h2,h3,h4,h5,h6){color:var(--head);font-weight:700;line-height:1.3;margin:1.2em 0 .5em;}
 .wks-export h1{font-size:1.8em}.wks-export h2{font-size:1.5em}.wks-export h3{font-size:1.3em}
 .wks-export h4{font-size:1.15em}.wks-export h5{font-size:1.05em}.wks-export h6{font-size:1em;opacity:.85}
