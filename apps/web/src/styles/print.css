@@ -30,6 +30,16 @@
   .lp-toolbar {
     display: none !important;
   }
+  /* #505floating page chrome (the bottom-left Vim/display-mode pills, the bottom-right
+     Edit/Publish/⋯ cluster, the mobile ⋯, the TOC rail) and the toast layer leaked into print. The
+     visibility trick only sets visibility:hidden, which a descendant's visibility:visible can override
+     — and toasts render at body level outside the trick's reach entirely. display:none is stronger:
+     it removes the element and every descendant regardless of any visibility override. `data-print-hide`
+     marks the floating chrome roots so new floating affordances opt in at the source. */
+  [data-print-hide],
+  [data-sonner-toaster] {
+    display: none !important;
+  }
   /* #505: callout icons (mask + background-color) and panel tints are "background graphics", which
      browsers drop by default when printing — the panel degraded to bare text + a left border. Force
      colour fidelity for the WHOLE printed surface (the property inherits), so code-block/table
