@@ -22,15 +22,17 @@ export function OverflowMenu({
   label = "More actions",
   testId = "page-overflow",
   triggerClassName,
+  onOpenChange,
 }: {
   items: OverflowItem[];
   onSelect: (value: string) => void;
   label?: string;
   testId?: string;
   triggerClassName?: string;
+  onOpenChange?: (open: boolean) => void; // #489: lets the host defer per-item data until the menu opens
 }) {
   return (
-    <DropdownMenu modal={false}>
+    <DropdownMenu modal={false} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <IconButton aria-label={label} title={label} data-testid={`${testId}-trigger`} className={triggerClassName}>
           <MoreHorizontal size={16} />

@@ -260,15 +260,18 @@ export function PageVim(p: PageControlsProps) {
 // surface with no real page so no watch item is offered. Shared by desktop + mobile controls.
 // #467: only the PAGE scope is offered, so only its state/toggle are subscribed — the subtree and
 // space queries are gone (they cost a request each on every page open for a control nobody sees).
-function useWatchItem(pageId: string | undefined): WatchItems | undefined {
-  const pageState = useWatchState(pageId, "page");
+// #489 boot slice: the state is DEFERRED until the ⋯ menu actually opens (`active`) — it was one more
+// request on every page open for a row nobody sees until they open the menu. Until the state loads the
+// row stays disabled (isPending), so a fast click cannot toggle in the wrong direction.
+function useWatchItem(pageId: string | undefined, active: boolean): WatchItems | undefined {
+  const pageState = useWatchState(active ? pageId : undefined, "page");
   const pageToggle = useToggleWatch(pageId, "page");
   if (!pageId) return undefined;
   return {
     page: {
       watching: pageState.data?.watching ?? false,
       toggle: () => pageToggle.mutate(pageState.data),
-      disabled: pageToggle.isPending || pageState.isLoading,
+      disabled: pageToggle.isPending || pageState.isPending,
     },
   };
 }
@@ -278,7 +281,8 @@ export function PageActions(p: PageControlsProps) {
   const { t } = useTranslation();
   const dirty = useDirty(p.dirtySignal);
   const canPublish = p.canPublish || dirty;
-  const watch = useWatchItem(p.pageId);
+  const [menuOpen, setMenuOpen] = useState(false); // #489: fetch watch state on menu open, not page open
+  const watch = useWatchItem(p.pageId, menuOpen);
   const overflow = overflowItems(p, t, watch);
   return (
     // Outer stays click-through (pointer-events-none) so the empty bottom-right area doesn't eat editor clicks;
@@ -304,7 +308,7 @@ export function PageActions(p: PageControlsProps) {
             : p.canEdit && <RoundBtn label={t("page.edit")} testId="edit-toggle" primary onClick={p.onEdit} icon={<Pencil size={16} />} />
         )}
         {overflow.length > 0 && (
-          <OverflowMenu items={overflow} onSelect={(v) => runOverflow(p, v, watch)} label={t("page.moreActions")} triggerClassName={`${ROUND} ${ROUND_BG}`} />
+          <OverflowMenu items={overflow} onSelect={(v) => runOverflow(p, v, watch)} label={t("page.moreActions")} triggerClassName={`${ROUND} ${ROUND_BG}`} onOpenChange={setMenuOpen} />
         )}
       </div>
     </div>
@@ -316,11 +320,12 @@ export function PageControlsMobile(p: PageControlsProps) {
   const { t } = useTranslation();
   const dirty = useDirty(p.dirtySignal);
   const canPublish = p.canPublish || dirty;
-  const watch = useWatchItem(p.pageId);
+  const [menuOpen, setMenuOpen] = useState(false); // #489: fetch watch state on menu open, not page open
+  const watch = useWatchItem(p.pageId, menuOpen);
   const overflow = overflowItems(p, t, watch);
   return (
     <div className="absolute right-4 bottom-4 z-10">
-      <DropdownMenu modal={false}>
+      <DropdownMenu modal={false} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <IconButton aria-label={t("page.moreActions")} title={t("page.moreActions")} data-testid="page-controls-mobile" className={`${ROUND} ${ROUND_BG}`}>
             <MoreHorizontal size={18} />
