@@ -87,27 +87,34 @@ export function AdminAuditTab() {
         )}
       </div>
 
-      <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.03em] [&_th]:text-fg-dim">
-        <thead>
-          <tr><th>{t("adminAudit.time")}</th><th>{t("adminAudit.actor")}</th><th>{t("adminAudit.action")}</th><th>{t("adminAudit.target")}</th></tr>
-        </thead>
-        <tbody data-testid="audit-rows">
-          {rows.map((r) => (
-            <tr key={r.seq} data-testid="audit-row">
-              <td className="whitespace-nowrap text-fg-dim">{new Date(r.at).toLocaleString()}</td>
-              <td className="font-mono text-xs [overflow-wrap:anywhere]">{r.actor.replace(/^user:/, "")}</td>
-              <td>{r.action}</td>
-              <td className="font-mono text-xs [overflow-wrap:anywhere]">{r.target}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {rows.length === 0 && !firstPage.isLoading && <p className="text-sm text-fg-dim">{t("adminAudit.empty")}</p>}
-      {rows.length > 0 && rows.length % 50 === 0 && (
-        <div className="mt-3">
-          <Button variant="default" size="sm" onClick={() => void loadMore()} data-testid="audit-load-more">{t("adminAudit.loadMore")}</Button>
-        </div>
-      )}
+      {/* #503: the ledger scrolls INSIDE a bounded box (the #463/#406 box-scroll principle) so the
+          sections below it — Vendor access foremost — sit near the initial viewport instead of below
+          hundreds of rows. The page keeps its own scroll; only this list scrolls. The header is sticky
+          within the box, and "load more" lives at the box's scroll end so paging stays in-box. The
+          initial fetch is already capped (useAuditLog limit=50, keyset paging). */}
+      <div className="max-h-[26rem] overflow-y-auto rounded-md border border-border" data-testid="audit-scrollbox">
+        <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5 [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:border-b [&_th]:border-border [&_th]:bg-background [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.03em] [&_th]:text-fg-dim">
+          <thead>
+            <tr><th>{t("adminAudit.time")}</th><th>{t("adminAudit.actor")}</th><th>{t("adminAudit.action")}</th><th>{t("adminAudit.target")}</th></tr>
+          </thead>
+          <tbody data-testid="audit-rows">
+            {rows.map((r) => (
+              <tr key={r.seq} data-testid="audit-row">
+                <td className="whitespace-nowrap text-fg-dim">{new Date(r.at).toLocaleString()}</td>
+                <td className="font-mono text-xs [overflow-wrap:anywhere]">{r.actor.replace(/^user:/, "")}</td>
+                <td>{r.action}</td>
+                <td className="font-mono text-xs [overflow-wrap:anywhere]">{r.target}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rows.length === 0 && !firstPage.isLoading && <p className="px-2 py-2 text-sm text-fg-dim">{t("adminAudit.empty")}</p>}
+        {rows.length > 0 && rows.length % 50 === 0 && (
+          <div className="px-2 py-2">
+            <Button variant="default" size="sm" onClick={() => void loadMore()} data-testid="audit-load-more">{t("adminAudit.loadMore")}</Button>
+          </div>
+        )}
+      </div>
 
       <VendorAccessSection />
     </div>
