@@ -11,13 +11,22 @@ function Tabs({ className, ...props }: React.ComponentProps<typeof TabsPrimitive
   return <TabsPrimitive.Root data-slot="tabs" className={cn("flex min-h-0 flex-1 flex-col", className)} {...props} />
 }
 
+// #460the strip must never grow its OWN scrollbar. `overflow-x-auto` forces overflow-y to
+// `auto` too (a non-visible axis autos the other), and the old `-mb-px` on each trigger pushed the
+// underline 1px past the strip's content box — a 1px vertical scroll range, i.e. a tiny permanent
+// scrollbar. So the divider (border-b) moves OUT to a plain wrapper, and the Radix list is the
+// scroller (`overflow-y-hidden` kills the vertical axis for good). The 1px underline overlap is now
+// the SCROLLER's job (-mb-px on it, nothing inside overflows): its bottom row paints over the
+// wrapper's border, so the active underline still fuses with the divider — one line, no bar.
 function TabsList({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.List>) {
   return (
-    <TabsPrimitive.List
-      data-slot="tabs-list"
-      className={cn("flex flex-none gap-1 overflow-x-auto border-b border-border", className)}
-      {...props}
-    />
+    <div data-slot="tabs-list-frame" className="flex-none border-b border-border">
+      <TabsPrimitive.List
+        data-slot="tabs-list"
+        className={cn("-mb-px flex gap-1 overflow-x-auto overflow-y-hidden", className)}
+        {...props}
+      />
+    </div>
   )
 }
 
@@ -26,7 +35,7 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
     <TabsPrimitive.Trigger
       data-slot="tabs-trigger"
       className={cn(
-        "-mb-px flex flex-none items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm text-fg-dim transition-colors",
+        "flex flex-none items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm text-fg-dim transition-colors",
         "hover:text-foreground focus-visible:ring-ring/50 focus-visible:outline-none focus-visible:ring-[3px]",
         "data-[state=active]:border-[var(--accent)] data-[state=active]:text-foreground data-[state=active]:font-medium",
         "disabled:cursor-not-allowed disabled:opacity-50",

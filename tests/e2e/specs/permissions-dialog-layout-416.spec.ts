@@ -146,6 +146,20 @@ test("#460the dialog keeps one height across tabs, short tabs don't scroll, the 
   // ③ the scroller is padded on the left so a focus ring on a flush control is not clipped by overflow.
   const padLeft = await page.locator("[data-testid=permissions-panel-restrictions]").evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft));
   expect(padLeft, "panel has left padding for the focus ring").toBeGreaterThanOrEqual(3);
+
+  // #460the② pin measured only the PANEL, so the strip's own 1px vertical overflow
+  // (overflow-x:auto autos the y axis; the trigger's -mb-px pushed the underline past the content
+  // box) sailed through as a tiny permanent scrollbar on the strip itself. Pin EVERY box that could
+  // scroll: the tab strip must have zero vertical scroll range on all three tabs, and the dialog
+  // root must not be a scroller either (nothing overflows past the fixed-height layout).
+  for (const tabKey of ["access", "restrictions", "advanced"]) {
+    await page.click(`[data-testid=permissions-tab-${tabKey}]`);
+    await expect(page.locator(`[data-testid=permissions-panel-${tabKey}]`)).toBeVisible();
+    const strip = await dialog.locator("[data-slot=tabs-list]").evaluate((el) => ({ s: el.scrollHeight, c: el.clientHeight }));
+    expect(strip.s, `tab ${tabKey}: the strip itself never scrolls vertically (scrollH ${strip.s} clientH ${strip.c})`).toBeLessThanOrEqual(strip.c);
+    const root = await dialog.evaluate((el) => ({ s: el.scrollHeight, c: el.clientHeight }));
+    expect(root.s, `tab ${tabKey}: the dialog root is not a scroller (scrollH ${root.s} clientH ${root.c})`).toBeLessThanOrEqual(root.c + 1);
+  }
 });
 
 // #460 / ADR-174: freeze and the comment audience moved out of the main list into Advanced. They are
