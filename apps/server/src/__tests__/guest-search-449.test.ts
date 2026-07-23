@@ -199,3 +199,35 @@ describe('#449 / ADR-173: guest search leak class', () => {
     expect((JSON.parse(capped.body) as { reason: string }).reason, 'a static reason — nothing about the query').toBe('search_rate')
   })
 })
+
+// #449 addendum (thereview ruling): the guest search-PREVIEW pane fetches
+// `GET /pages/:id/published` with the GUEST token — the same guest-authorized route the reading
+// surface uses. These pin the fortress the preview relies on: a viewable published page previews
+// (title + body, view AND edit links), while a draft / another space's page / a private page 404s
+// uniformly (existence-hiding on the preview path — the pane goes empty, never an oracle).
+describe('#449 addendum: the guest preview fetch (/published with a guest token)', () => {
+  const previewFetch = (token: string, pageId: string) =>
+    app.inject({ method: 'GET', url: `/pages/${pageId}/published`, headers: gHeaders(token) })
+
+  it('returns title + published body for a space-published page, on view AND edit links', async () => {
+    for (const cap of ['view', 'edit'] as const) {
+      const tok = await mkSpaceTok(await mkSpaceLink(spaceId, cap), spaceId, cap, anon())
+      const res = await previewFetch(tok, visibleId)
+      expect(res.statusCode, `${cap} link: ${res.body}`).toBe(200)
+      const body = res.json() as { title: string; publishedMd: string | null }
+      expect(body.title).toBe(`${TAG} visible one`)
+      expect(body.publishedMd, 'the published body rides along for the pane').not.toBeNull()
+    }
+  })
+
+  it('404s for a DRAFT page id (existence-hiding on the preview path)', async () => {
+    const tok = await mkSpaceTok(await mkSpaceLink(spaceId, 'view'), spaceId, 'view', anon())
+    expect((await previewFetch(tok, draftId)).statusCode, 'a draft previews as 404, same as missing').toBe(404)
+  })
+
+  it("404s for another space's page and for a private page (uniform deny)", async () => {
+    const tok = await mkSpaceTok(await mkSpaceLink(spaceId, 'view'), spaceId, 'view', anon())
+    expect((await previewFetch(tok, otherId)).statusCode, "another space's page hides").toBe(404)
+    expect((await previewFetch(tok, privateId)).statusCode, 'a private page hides').toBe(404)
+  })
+})

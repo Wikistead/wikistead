@@ -12,8 +12,12 @@ import { makeResolverSet } from "../editor/resolver-set"; // #381 / ADR-163: ima
 // authorized resolver (server re-checks view per attachment); plantuml renders via the page-scoped, view-gated
 // endpoint (the same `renderDiagram` the real page uses); no transclude/embed seams (they degrade, like the
 // template preview) so the preview never fans out to other page-scoped/external resources.
-export function PublishedBodyPreview({ body, pageId, testid }: { body: string; pageId: string; testid?: string }) {
-  const { token } = useSession();
+// #449 addendum: `tokenOverride` lets the GUEST search-preview drive the image/diagram resolvers with
+// the guest token (those endpoints are already guest:'view') instead of the member session token —
+// the guest surface has no member session, and a guest token must never ride member-only routes.
+export function PublishedBodyPreview({ body, pageId, testid, tokenOverride }: { body: string; pageId: string; testid?: string; tokenOverride?: string }) {
+  const { token: sessionToken } = useSession();
+  const token = tokenOverride ?? sessionToken;
   const hostRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const host = hostRef.current;

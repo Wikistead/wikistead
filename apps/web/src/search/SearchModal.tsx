@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { useSearch, useSpaces, usePage, usePublished } from "../data/queries";
+import { useSearch, useSpaces, usePage, usePublished, useGuestPublished } from "../data/queries";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from "../components/ui/command";
@@ -22,8 +22,14 @@ import { PublishedBodyPreview } from "./PublishedBodyPreview";
 // #449 / ADR-173: a space-link GUEST reuses this exact modal. `guestToken` routes the search through
 // the guest's own token (the server forces the link's space + gates every hit on the share_link
 // principal); `onNavigate` replaces the member `/p/<id>` route with the guest tree's own open handler
-// so a hit stays inside `/share/…`. The preview pane fetches member-only routes a guest token cannot
-// call, so it is OFF for guests (list + navigate only) — honesty about scope, no leak either way.
+// so a hit stays inside `/share/…`.
+// #449 addendum (review ruling): the guest gets the preview pane too — fetched through the
+// EXISTING guest-authorized route (`GET /pages/:id/published` with the guest token: share_link FGA
+// view + non_expired context, uniform 404 on deny), NEVER the member meta route (`GET /pages/:id`),
+// which stays disabled for guests (previewId is fed only to the member hooks when !isGuest). Same
+// two-layer posture as (b): a hit that slipped stage-2 still previews nothing (404 → empty pane).
+// The guest pane shows title + rendered body only — /published returns no creator data by design
+// (#318 minimal-field policy), and drafts never reach guest results (fortress), so no draft badge.
 export function SearchModal({ open, onOpenChange, guestToken, onNavigate }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -41,9 +47,12 @@ export function SearchModal({ open, onOpenChange, guestToken, onNavigate }: {
   // the list doesn't fire a view-gated fetch per keypress.
   const [selected, setSelected] = useState("");
   const debouncedSelected = useDebouncedValue(selected, 200);
-  const previewId = isGuest ? "" : debouncedSelected; // #449: no member-route preview for a guest (never fetch member routes with a guest token)
-  const pageQ = usePage(open ? previewId : "");
-  const publishedQ = usePublished(open ? previewId : "");
+  const previewId = open ? debouncedSelected : "";
+  // #449 addendum: the member hooks stay OFF for a guest (a guest token never rides member routes);
+  // the guest preview reads the guest-authorized /published route instead (see the header comment).
+  const pageQ = usePage(isGuest ? "" : previewId);
+  const publishedQ = usePublished(isGuest ? "" : previewId);
+  const guestQ = useGuestPublished(isGuest ? previewId : "", guestToken ?? "");
 
   // #285(C): keep the whole space summary (icon + name), not just the name, so results show a space
   // ICON. iconImageUrl is already assetUrl-prefixed by useSpaces; accentKey/id seed the initials fallback.
@@ -102,7 +111,7 @@ export function SearchModal({ open, onOpenChange, guestToken, onNavigate }: {
             autoFocus
           />
           <div className="flex min-h-0" data-testid="search-results">
-            <CommandList className={`max-h-[60vh] w-full overflow-y-auto ${isGuest ? "" : "md:w-2/5 md:border-r"}`}>
+            <CommandList className="max-h-[60vh] w-full overflow-y-auto md:w-2/5 md:border-r">
               {isFetching && items.length === 0 ? (
                 <div className="p-2 text-sm text-fg-dim">{t("search.searching")}</div>
               ) : items.length === 0 ? (
@@ -131,8 +140,23 @@ export function SearchModal({ open, onOpenChange, guestToken, onNavigate }: {
             {/* the preview pane (md+ only — narrow screens keep the single-column list). Everything here
                 comes from the view-gated routes for the SELECTED page (b/d above); a deny (404) simply
                 leaves the pane empty — no oracle. */}
-            <div className={`max-h-[60vh] flex-1 overflow-y-auto p-4 ${isGuest ? "hidden" : "hidden md:block"}`} data-testid="search-preview">
-              {previewId && pageQ.data ? (
+            <div className="max-h-[60vh] flex-1 overflow-y-auto p-4 hidden md:block" data-testid="search-preview">
+              {isGuest ? (
+                // #449 addendum: the GUEST pane — title + rendered published body from the guest-gated
+                // /published fetch (no PageMeta / draft badge: minimal fields, fortress keeps drafts out).
+                previewId && guestQ.data ? (
+                  <>
+                    <div className="min-w-0 truncate text-sm font-bold">{guestQ.data.title || t("common.untitled")}</div>
+                    <div className="mt-3" data-testid="search-preview-body">
+                      {guestQ.data.publishedMd
+                        ? <PublishedBodyPreview body={guestQ.data.publishedMd} pageId={previewId} testid="search-preview-rendered" tokenOverride={guestToken} />
+                        : <div className="text-xs text-fg-dim" data-testid="search-preview-unpublished">{t("search.previewUnpublished")}</div>}
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-sm text-fg-dim">{previewId && guestQ.isFetching ? t("search.searching") : ""}</div>
+                )
+              ) : previewId && pageQ.data ? (
                 <>
                   <div className="flex items-center gap-2">
                     <div className="min-w-0 flex-1 truncate text-sm font-bold">{pageQ.data.title || t("common.untitled")}</div>

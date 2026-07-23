@@ -41,6 +41,14 @@ test("#449: a space-link guest can search their space and a hit opens in the gue
   expect(link.status).toBe(201);
 
   const guest = await (await browser.newContext()).newPage();
+  // #449 addendum pin: the guest preview must NEVER touch the member meta route (`GET /api/pages/:id`
+  // with no sub-path) — its only page read is the guest-gated `/pages/:id/published`. Record every
+  // matching request for the whole session and assert none occurred after the preview rendered.
+  const memberMetaRequests: string[] = [];
+  guest.on("request", (r) => {
+    const path = new URL(r.url()).pathname;
+    if (/^\/api\/pages\/[^/]+$/.test(path) && r.method() === "GET") memberMetaRequests.push(path);
+  });
   await guest.goto(`/share/${link.body.id}`);
   await expect(guest.getByTestId("guest-sidebar")).toBeVisible({ timeout: 15000 });
 
@@ -55,8 +63,15 @@ test("#449: a space-link guest can search their space and a hit opens in the gue
   const item = guest.getByTestId("search-item").filter({ hasText: term }).first();
   await expect(item, "the guest sees the space's page in results").toBeVisible({ timeout: 10000 });
 
-  // … the preview pane is OFF for a guest (it would call member-only routes a guest token cannot use) …
-  await expect(guest.getByTestId("search-preview"), "no member-route preview pane for a guest").toBeHidden();
+  // … the preview pane renders for the highlighted hit BEFORE selection (#449 addendum: the
+  // ruling withdrew the v1 guest-OFF state; the pane fetches the guest-gated /published route) …
+  await expect(guest.getByTestId("search-preview"), "the guest gets the preview pane").toBeVisible();
+  await expect(guest.getByTestId("search-preview-rendered"), "the published body renders in the pane").toBeVisible({ timeout: 10000 });
+  expect(
+    await guest.evaluate(() => document.querySelector('[data-testid="search-preview-rendered"]')?.textContent ?? ""),
+    "the preview shows the page's published body",
+  ).toContain(term.slice(0, 9));
+  expect(memberMetaRequests, "the guest surface never called the member page-meta route").toEqual([]);
 
   // … and choosing a hit opens it INSIDE the guest shell (the tree's open handler), not /p/<id>.
   await item.click();
