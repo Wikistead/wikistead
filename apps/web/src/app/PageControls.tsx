@@ -225,7 +225,7 @@ export function PageVim(p: PageControlsProps) {
           pressed={!!p.vim}
           onToggle={p.onToggleVim}
           icon={<SquareTerminal size={14} />}
-          label={p.vimForcedOff ? t("page.vimTouchDisabled") : t("page.vimMode")}
+          label={p.vimForcedOff ? t(p.displayMode === "wysiwyg" ? "page.vimWysiwygDisabled" : "page.vimTouchDisabled") : t("page.vimMode")}
           text="Vim"
           testId="vim-toggle"
           disabled={p.vimForcedOff}

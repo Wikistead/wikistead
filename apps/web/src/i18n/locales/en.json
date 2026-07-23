@@ -493,7 +493,8 @@
     "duplicatePage": "Duplicate page",
     "deleteForever": "Delete permanently",
     "empty": "This page is empty.",
-    "emptyEditable": "This page is empty. Choose Edit to start writing."
+    "emptyEditable": "This page is empty. Choose Edit to start writing.",
+    "vimWysiwygDisabled": "Vim is off in WYSIWYG mode (switch to Live/Source to use Vim)"
   },
   "sidebar": {
     "searchSpaces": "Search spaces…",

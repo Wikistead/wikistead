@@ -493,7 +493,8 @@
     "duplicatePage": "ページを複製",
     "deleteForever": "完全に削除",
     "empty": "このページは空です。",
-    "emptyEditable": "このページは空です。「編集」から書き始められます。"
+    "emptyEditable": "このページは空です。「編集」から書き始められます。",
+    "vimWysiwygDisabled": "WYSIWYG モードでは Vim は無効です（Vim を使うには Live/Source へ）"
   },
   "sidebar": {
     "searchSpaces": "スペースを検索…",

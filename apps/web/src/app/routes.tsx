@@ -480,8 +480,11 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   // #406 S4 / ADR-159 (e): a coarse pointer (touch = soft keyboard) forces the EFFECTIVE vim off
   // vim breaks soft-keyboard input. The stored preference is untouched (vim returns on a fine-pointer
   // device); the Compartment reconfigure in Editor swaps keymaps in place (collab/presence unbroken).
+  // #512: WYSIWYG mode joins the same forced-off seam — vim × WYSIWYG is a bug nest (#240 atomic-skip),
+  // so vim is inert while WYSIWYG is active and returns (from the stored pref) on leaving it.
   const coarsePointer = useMediaQuery("(pointer: coarse)");
-  const effectiveVim = vim && !coarsePointer;
+  const vimForcedOff = coarsePointer || displayMode === "wysiwyg";
+  const effectiveVim = vim && !vimForcedOff;
   // Draft / Unpublished-changes chip (read mode); only meaningful for editors.
   const publishState = !canEdit ? null : published?.publishedMd == null ? "draft" : published?.hasUnpublishedChanges ? "unpublished" : null;
 
@@ -571,7 +574,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
     onPublish: canEdit ? publishPage : undefined,
     publishing: publish.isPending,
     vim: effectiveVim,
-    vimForcedOff: coarsePointer,
+    vimForcedOff, // #512: coarse pointer OR WYSIWYG
     onToggleVim: toggleVim,
     displayMode,
     onCycleDisplayMode: cycleDisplayMode,
@@ -1031,8 +1034,10 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const isWide = useMediaQuery("(min-width: 1200px)"); // #192: right whitespace for the TOC rail
   // #406 S4: same coarse-pointer vim force-off as the member surface (ADR-159 (e)).
+  // #512: WYSIWYG also forces vim off (member-surface parity) — vim × WYSIWYG is a bug nest.
   const coarsePointer = useMediaQuery("(pointer: coarse)");
-  const effectiveVim = vim && !coarsePointer;
+  const vimForcedOff = coarsePointer || displayMode === "wysiwyg";
+  const effectiveVim = vim && !vimForcedOff;
 
   const reloadPublished = useCallback(() => {
     apiFetch<{ title?: string; isHome?: boolean; publishedMd: string | null; canComment?: boolean }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
@@ -1129,7 +1134,7 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
     onEdit: () => setEditing(true),
     onDone: () => setEditing(false),
     vim: effectiveVim,
-    vimForcedOff: coarsePointer,
+    vimForcedOff, // #512: coarse pointer OR WYSIWYG
     onToggleVim: toggleVim,
     displayMode,
     onCycleDisplayMode: cycleDisplayMode,
