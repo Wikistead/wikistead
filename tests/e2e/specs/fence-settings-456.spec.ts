@@ -102,3 +102,65 @@ test("#456 the settings open from the keyboard and from a hover ✎, and close v
   await page.getByTestId("fence-settings-close").click();
   await expect(page.getByTestId("fence-settings-panel"), "the × closed the settings").toHaveCount(0);
 });
+
+// #456 a BARE ``` fence (no info string) silenced all three affordances — the old resolver's
+// regex required an info string on the opening line, and every fixture above inserts ```ts, so this
+// spec was structurally unable to catch it. The bare fence is the block whose language you most want
+// to SET, so all three paths must work and the panel must let you set the language from empty.
+test("#456 a bare ``` fence opens the settings from all three affordances", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, `fence456d-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("```\nbare body line\n```\n\nbelow\n");
+  await sleep(600);
+
+  // keyboard: caret in the body → Mod-Alt-Enter
+  await page.getByText("bare body line", { exact: true }).click();
+  await page.keyboard.press("Control+Alt+Enter");
+  await expect(page.getByTestId("fence-settings-panel"), "keyboard works on a bare fence").toBeVisible({ timeout: 8000 });
+  // the language select is EMPTY — and settable from here
+  await expect(page.getByTestId("macro-setting-lang")).toHaveValue("");
+  await page.getByTestId("macro-setting-lang").selectOption("ts");
+  await sleep(400);
+  const doc = await docText(page);
+  expect(doc, "the language landed on the opening fence").toContain("```ts");
+  expect(doc, "the body is untouched").toContain("bare body line");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("fence-settings-panel")).toHaveCount(0);
+
+  // undo the language so the fence is bare again for the remaining two affordances
+  await page.getByTestId("macro-setting-lang").waitFor({ state: "detached" });
+  await page.getByText("bare body line", { exact: true }).click();
+  await page.keyboard.press("Control+Alt+Enter");
+  await page.getByTestId("macro-setting-lang").selectOption("");
+  await sleep(400);
+  await page.keyboard.press("Escape");
+
+  // context menu on a bare fence shows the settings item
+  await page.getByText("bare body line", { exact: true }).click({ button: "right" });
+  await expect(page.getByTestId("ctx-item-codesettings"), "the context-menu item exists on a bare fence").toBeVisible({ timeout: 8000 });
+  await page.keyboard.press("Escape");
+  await sleep(200);
+
+  // hover ✎ appears on a bare fence
+  await page.mouse.move(2, 2);
+  await sleep(150);
+  const codeBox = (await page.getByText("bare body line", { exact: true }).boundingBox())!;
+  await page.mouse.move(codeBox.x + 5, codeBox.y + codeBox.height / 2, { steps: 6 });
+  await expect(page.getByTestId("fence-settings-hint"), "the hover ✎ appears on a bare fence").toBeVisible({ timeout: 8000 });
+});
+
+test("#456 a ~~~ fence resolves too", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, `fence456e-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("~~~\ntilde body line\n~~~\n\nbelow\n");
+  await sleep(600);
+
+  await page.getByText("tilde body line", { exact: true }).click();
+  await page.keyboard.press("Control+Alt+Enter");
+  await expect(page.getByTestId("fence-settings-panel"), "keyboard works on a bare ~~~ fence").toBeVisible({ timeout: 8000 });
+  await expect(page.getByTestId("macro-setting-lang")).toHaveValue("");
+});
