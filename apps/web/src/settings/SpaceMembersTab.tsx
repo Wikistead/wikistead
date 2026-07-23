@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { MemberSearchInput } from "../ui/MemberSearchInput";
 import {
   useSpaceAccess, useGrantSpaceAccess, useRevokeSpaceAccess, useMemberCandidates, useTenantGroups,
-  useCommentOpen, useSetCommentOpen,
+  useCommentOpen, useSetCommentOpen, useMemberIdentities,
   type PageRelation,
 } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
@@ -68,10 +68,18 @@ export function SpaceMembersTab() {
   };
 
   const grants = (access.data ?? []).slice().sort((a, b) => CAPS.indexOf(b.capability) - CAPS.indexOf(a.capability));
-  const label = (g: { grantee: string; groupName?: string }) =>
-    g.groupName ? `${g.groupName} (${t("spaceMembers.group")})`
-    : g.grantee.startsWith("group:") ? `${g.grantee.replace(/^group:/, "").replace(/#member$/, "")} (${t("spaceMembers.group")})`
-    : g.grantee.replace(/^user:/, "");
+  // #513: the grant list showed the raw sub for user grantees while the search that created them showed
+  // the display name — resolve user subs through the same #379 member-identity path so a granted member
+  // reads as their name, not a hash. Customized-only (ADR-150, not a membership oracle) + self via the
+  // session; an unresolved sub (departed / non-customized member) falls back to the sub, unchanged.
+  const userSubs = grants.filter((g) => g.grantee.startsWith("user:") && !g.groupName).map((g) => g.grantee.replace(/^user:/, ""));
+  const identities = useMemberIdentities(userSubs);
+  const label = (g: { grantee: string; groupName?: string }) => {
+    if (g.groupName) return `${g.groupName} (${t("spaceMembers.group")})`;
+    if (g.grantee.startsWith("group:")) return `${g.grantee.replace(/^group:/, "").replace(/#member$/, "")} (${t("spaceMembers.group")})`;
+    const sub = g.grantee.replace(/^user:/, "");
+    return identities.data?.[sub]?.displayName || sub;
+  };
 
   return (
     <div className="max-w-[640px] p-6" data-testid="space-members">
