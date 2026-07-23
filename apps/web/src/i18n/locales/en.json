@@ -213,6 +213,18 @@
     "wordsHint": "One per line. A publish is rejected only when a listed word is newly added. Leave blank to turn off.",
     "saved": "Saved"
   },
+  "spaceModeration": {
+    "abuseTitle": "Space moderation policy",
+    "abuseBody": "Add to this workspace's abuse filter for this space only. Your rules can be stricter than the workspace floor — never weaker: banned words are added to it, and a shrink ratio must be at least the workspace's.",
+    "tenantFloor": "Workspace floor: mass-delete {{ratio}}, {{count}} banned word(s). This space can only add to it.",
+    "shrinkLabel": "Mass-delete guard (this space)",
+    "shrinkHint": "Reject a publish whose new text is smaller than this fraction (0–1). Leave blank to inherit the workspace value; a lower value than the workspace's has no effect (the stricter one wins).",
+    "wordsLabel": "Banned words (this space)",
+    "wordsHint": "One per line, added to the workspace list. A publish is rejected only when a listed word is newly added. Leave blank to add none.",
+    "effective": "In effect here: mass-delete {{ratio}}, {{count}} banned word(s) total.",
+    "off": "off",
+    "inherit": "Inherit"
+  },
   "adminPublic": {
     "title": "Public access",
     "body": "The master switch for this workspace's anonymous public pages. While it's off, every public page is unreachable (returns not-found) — a structural block against accidental exposure. Turning it off is non-destructive: per-page public settings are kept and restored when you turn it back on.",
