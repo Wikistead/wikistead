@@ -1645,6 +1645,22 @@ export function usePageMemberCandidates(pageId: string | null, q: string) {
   });
 }
 
+// #449 / ADR-173 addendum: the guest search-preview's ONLY page read — `GET /pages/:id/published`
+// with the GUEST token (config.guest:'view', share_link-principal FGA view + non_expired context,
+// uniform 404 on deny). Never the member meta route (`GET /pages/:id`), which a guest token cannot
+// call — that constraint is why the preview was v1-OFF before the ruling withdrew it. Minimal
+// fields by design (#318): title + published body, no creator/member data. Keyed separately from
+// the member "published" cache (whose invalidation paths must not sweep guest entries), with the
+// token folded in so two links open in one browser never share entries.
+export function useGuestPublished(pageId: string, guestToken: string) {
+  return useQuery({
+    queryKey: ["guest-published", guestToken, pageId],
+    queryFn: () => apiFetch<{ title: string; publishedMd: string | null }>(`/pages/${encodeURIComponent(pageId)}/published`, guestToken),
+    enabled: pageId.length > 0 && guestToken.length > 0,
+    staleTime: 30_000,
+  });
+}
+
 // #449 / ADR-173: a guest space-link surface passes its own token here; the server forces the guest's
 // scope and gates every hit on the share_link principal (stage 2), so the client stays a thin caller.
 // The token is folded into the query key so a member's and a guest's result caches never collide.
