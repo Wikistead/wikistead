@@ -42,6 +42,7 @@ export function TocChrome({
         // #304 (4): elastic width — grow into the right whitespace instead of a fixed 210px (which truncated
         // items even with room to spare), clamped so it never collides with the reading column or overruns.
         <div
+          data-print-hide
           className="pointer-events-none absolute bottom-2 z-[5]"
           data-testid="toc-rail"
           style={{ left: railLeft, top: railTop, width: "clamp(210px, calc(50vw - 370px - 2rem), 300px)" }}

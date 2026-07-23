@@ -217,7 +217,7 @@ export function PageVim(p: PageControlsProps) {
   if (!p.editing || (!p.onToggleVim && !p.onCycleDisplayMode && !p.onSetDisplayMode)) return null;
   const dm = p.displayMode ?? "live";
   return (
-    <div className="pointer-events-none absolute bottom-4 left-4 z-10 flex items-center gap-2">
+    <div data-print-hide className="pointer-events-none absolute bottom-4 left-4 z-10 flex items-center gap-2">
       {/* #212: vim is the same common ToggleButton as TOC (filled=ON + aria-pressed), not a bespoke
           switch — state reads from the fill (a11y: not colour-only). Keeps the "Vim" text label. */}
       {p.onToggleVim && p.showVimToggle !== false && (
@@ -289,7 +289,7 @@ export function PageActions(p: PageControlsProps) {
     // the inner cluster is pointer-events-auto. #368: the view-mode cluster is a FIXED [Edit][⋯] (edit never
     // moves) — Watch + Share moved INTO the ⋯ menu (the earlier slide-out grew the cluster and shoved the
     // always-present Edit button around, and hovering to reach Edit tripped the reveal).
-    <div className="pointer-events-none absolute right-4 bottom-4 z-10 flex items-center">
+    <div data-print-hide className="pointer-events-none absolute right-4 bottom-4 z-10 flex items-center">
       <div className="pointer-events-auto flex items-center gap-2">
         {p.editing ? (
           <>
@@ -324,7 +324,7 @@ export function PageControlsMobile(p: PageControlsProps) {
   const watch = useWatchItem(p.pageId, menuOpen);
   const overflow = overflowItems(p, t, watch);
   return (
-    <div className="absolute right-4 bottom-4 z-10">
+    <div data-print-hide className="absolute right-4 bottom-4 z-10">
       <DropdownMenu modal={false} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <IconButton aria-label={t("page.moreActions")} title={t("page.moreActions")} data-testid="page-controls-mobile" className={`${ROUND} ${ROUND_BG}`}>

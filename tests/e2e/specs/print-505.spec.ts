@@ -52,3 +52,24 @@ test("#505: under print media the title is visible and the callout keeps exact c
   });
   expect(pubAdjust, "/pub: the callout panel forces exact colour").toBe("exact");
 });
+
+// #505 the floating page chrome (bottom-left Vim/mode pills, bottom-right Edit/Publish/⋯
+// cluster, TOC rail) leaked into print — the visibility trick only sets visibility:hidden, which a
+// descendant visibility:visible overrides. data-print-hide + display:none removes them for good.
+test("#505 floating page chrome computes display:none under print media", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openScratch(page, `print505chrome-${Date.now().toString(36)}`);
+  await enterEdit(page); // edit mode renders the Vim pills + the Edit/Publish/⋯ action cluster
+  await sleep(400);
+
+  const hides = page.locator("[data-print-hide]");
+  const n = await hides.count();
+  expect(n, "the floating chrome clusters are present in edit mode").toBeGreaterThan(0);
+
+  await page.emulateMedia({ media: "print" });
+  await sleep(200);
+  for (let i = 0; i < n; i++) {
+    const disp = await hides.nth(i).evaluate((el) => getComputedStyle(el).display);
+    expect(disp, "a floating chrome cluster is removed from print").toBe("none");
+  }
+});
