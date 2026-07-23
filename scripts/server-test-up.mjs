@@ -12,7 +12,25 @@ import { serverTestPorts, serverTestComposeEnv } from "./stack-offset.mjs";
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
 // #484: the port map + compose env for THIS session's stack. Offset 0 (unset) = the original ports.
 const P = serverTestPorts();
-const composeEnv = { ...process.env, ...serverTestComposeEnv(P) };
+// #484 fix (split-brain at offset>=1): every child step below (migrate / fga bootstrap / seeds) used to
+// load ONLY the static .env.server-test — the ORIGINAL ports — so at an offset they migrated and wrote
+// the FGA model into the SHARED stack while the fga seed (which also loads .env.server-test.local, i.e.
+// the offset URLs) ran against THIS stack with a model id that lives elsewhere → 400 invalid model, and
+// the offset postgres was never migrated at all. Offset 0 made both coincide, which is what hid it.
+// Real environment variables always beat --env-file (Node never lets an env file override an already-set
+// var), so injecting the offset connection URLs here re-points every step at THIS stack regardless of
+// which env files the command names.
+const stackEnv = {
+  DATABASE_URL: `postgres://app:app@localhost:${P.pg}/app`,
+  DATABASE_ADMIN_URL: `postgres://postgres:postgres@localhost:${P.pg}/app`,
+  VALKEY_URL: `redis://localhost:${P.valkey}`,
+  OPENFGA_API_URL: `http://localhost:${P.fgaHttp}`,
+  MEILI_HOST: `http://localhost:${P.meili}`,
+  S3_ENDPOINT: `http://localhost:${P.s3}`,
+  SMTP_PORT: String(P.smtp),
+  MAILPIT_API_URL: `http://localhost:${P.mailpit}/api/v1`,
+};
+const composeEnv = { ...process.env, ...serverTestComposeEnv(P), ...stackEnv };
 const run = (cmd, opts = {}) => execSync(cmd, { cwd: repo, stdio: "inherit", env: composeEnv, ...opts });
 const capture = (cmd) => execSync(cmd, { cwd: repo, encoding: "utf8", env: composeEnv });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
