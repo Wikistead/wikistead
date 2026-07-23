@@ -440,6 +440,8 @@
     "opening": "共有ページを開いています…",
     "invalid": "この共有リンクは無効・期限切れ・取り消し済みです。",
     "spaceTitle": "共有スペース",
+    "treeError": "ページ一覧を読み込めませんでした。",
+    "treeRetry": "再試行",
     "spaceEmpty": "このスペースにはまだ公開ページがありません。",
     "backToSpace": "ページ一覧へ戻る",
     "spacePickPrompt": "ページを選んで閲覧してください。",

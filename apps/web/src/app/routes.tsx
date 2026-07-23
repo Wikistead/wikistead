@@ -886,14 +886,19 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
   const tenant = m?.[1] ?? "";
   const spaceId = m?.[2] ?? "";
   const [pages, setPages] = useState<Page[] | null>(null);
+  // #500: a failed tree fetch used to be swallowed into an EMPTY tree (`.catch( => setPages([]))`), so an
+  // FGA outage read as "this space has no pages" and derailed real-reviews. Track the error separately
+  // so the sidebar can say "couldn't load, retry" instead of lying about emptiness.
+  const [pagesError, setPagesError] = useState(false);
   const [space, setSpace] = useState<{ name: string; iconImageUrl: string | null; homePageId?: string | null } | null>(null);
   const landedHome = useRef(false); // #364①: default-land on the home ONCE (never re-hijack navigation)
   const [openId, setOpenId] = useState<string | null>(null);
 
   const refreshPages = useCallback(() => {
+    setPagesError(false);
     apiFetch<Page[]>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
       .then((r) => setPages(r ?? []))
-      .catch(() => setPages((prev) => prev ?? []));
+      .catch(() => setPagesError(true));
   }, [spaceId, token]);
 
   // #274 / ADR-135 (review ruling): the guest "new page" affordance (edit links only) uses
@@ -918,7 +923,7 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
     let cancelled = false;
     apiFetch<Page[]>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
       .then((r) => { if (!cancelled) setPages(r ?? []); })
-      .catch(() => { if (!cancelled) setPages([]); });
+      .catch(() => { if (!cancelled) { setPages([]); setPagesError(true); } }); // #500: error ≠ empty
     // #270: the space header (name + public icon only) so the guest sidebar shows the real space, not a
     // fixed "Shared space" label. Best-effort — a failure just falls back to the label.
     apiFetch<{ name: string; iconImageUrl: string | null; homePageId?: string | null }>(`/spaces/${encodeURIComponent(spaceId)}/info`, token)
@@ -942,7 +947,7 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
 
   return (
     <AppShell
-      sidebar={<GuestSidebar pages={pages ?? []} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} />}
+      sidebar={<GuestSidebar pages={pages ?? []} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} error={pagesError} onRetry={refreshPages} />}
       // #449 / ADR-173: the guest gets the SAME search box (Ctrl-K + the header field), wired to their
       // own token and opening hits inside this shell via the tree's open handler. The server forces the
       // link's space scope and gates every hit on the share_link principal — no member chrome leaks here.

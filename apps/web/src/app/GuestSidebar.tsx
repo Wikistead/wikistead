@@ -43,7 +43,7 @@ function buildTree(pages: Page[]): TreeNode[] {
 // blank "Untitled" page immediately → the editor; naming happens there), not a guest-specific flow. The
 // template ▾ stays member-only (template non-leak). The server stays the fortress: the route re-checks
 // FGA `edit` on the space and applies the created-page cap regardless of this UI.
-export function GuestSidebar({ pages, space, openId, onOpen, onCreate, homePageId }: { pages: Page[]; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null }) {
+export function GuestSidebar({ pages, space, openId, onOpen, onCreate, homePageId, error, onRetry }: { pages: Page[]; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null; error?: boolean; onRetry?: () => void }) {
   const { t } = useTranslation();
   const tree = buildTree(pages);
   const [busy, setBusy] = useState(false);
@@ -89,7 +89,19 @@ export function GuestSidebar({ pages, space, openId, onOpen, onCreate, homePageI
           <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{space ? t("spaceHome.title", { name: space.name }) : t("sidebar.home")}</span>
         </div>
       )}
-      {tree.length === 0 ? (
+      {/* #500: a failed tree fetch is an ERROR, never "this space is empty" — the swallow used to read as
+          "no pages" and derailed real-reviews. The wording is generic (no content disclosure, so
+          existence-hiding is untouched) and retry re-runs the same guest-gated fetch. */}
+      {error ? (
+        <div className="flex flex-col items-start gap-1.5 px-1 py-2" data-testid="guest-tree-error">
+          <span className="text-fg-dim">{t("share.treeError")}</span>
+          {onRetry && (
+            <button type="button" className="cursor-pointer rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-panel-2" data-testid="guest-tree-retry" onClick={onRetry}>
+              {t("share.treeRetry")}
+            </button>
+          )}
+        </div>
+      ) : tree.length === 0 ? (
         <div className="px-1 py-2 text-fg-dim" data-testid="guest-sidebar-empty">{t("share.spaceEmpty")}</div>
       ) : (
         tree.map((n) => <GuestNode key={n.id} node={n} depth={0} openId={openId} onOpen={onOpen} />)
