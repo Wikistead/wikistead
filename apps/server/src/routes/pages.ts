@@ -3277,14 +3277,25 @@ export async function pagesPlugin(app: FastifyInstance) {
   // the defence (Addendum 2 point 1).
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/title-dictionary', { config: { guest: 'view' } }, async (req, reply) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
-    // #489: gate on the ANCHOR page's `view` FIRST — one check. Without it, a nonexistent (or
-    // non-viewable) page id still ran the FULL listObjects + confirm batch (measured: 3.2s → deadline
-    // 500 for a dead id, while the batch starved every other route). Uniform 404, same floor as
-    // /published — nonexistent and non-viewable are indistinguishable (existence-hiding).
-    if (!(await check(app.fga, subject, 'view', { type: 'page', id: req.params.pageId }, context))) {
-      return reply.code(404).send({ error: 'not found' })
+    // #489 (remedy 1): the dictionary is an ENHANCEMENT (auto internal links) — it must never
+    // take the app down with it. Any FGA failure here (deadline under saturation, backend down)
+    // whether in the anchor check or the dict body — DEGRADES to an empty dictionary (200, links
+    // render as plain text) instead of a 500 the client would retry into a multi-second freeze.
+    // Uniform for every page id → never an oracle; an empty dictionary is strictly UNDER-disclosure,
+    // so the failure mode is authz-safe (fail closed on content, open on availability).
+    try {
+      // #489: gate on the ANCHOR page's `view` FIRST — one check. Without it, a nonexistent (or
+      // non-viewable) page id still ran the FULL listObjects + confirm batch (measured: 3.2s →
+      // deadline 500 for a dead id, while the batch starved every other route). A clean FALSE stays a
+      // uniform 404, same floor as /published (existence-hiding).
+      if (!(await check(app.fga, subject, 'view', { type: 'page', id: req.params.pageId }, context))) {
+        return reply.code(404).send({ error: 'not found' })
+      }
+      return await getTitleDictionary(req.db, app.fga, { subject })
+    } catch (e) {
+      req.log.warn({ err: e, pageId: req.params.pageId }, 'title-dictionary degraded: authz backend unavailable')
+      return { entries: [], capped: false, degraded: true }
     }
-    return getTitleDictionary(req.db, app.fga, { subject })
   })
 
   // #276 / ADR-117: dead-internal-link resolution — "which of these ids can the viewer VIEW?" NEVER "which

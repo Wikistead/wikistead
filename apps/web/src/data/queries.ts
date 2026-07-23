@@ -530,7 +530,13 @@ export function usePublished(pageId: string) {
     // rapid toggles fetched the INTERMEDIATE committed state and repainted the box against the
     // user's optimistic flip (the residual flicker). The toggle's own onSettled coalescing (last
     // in-flight mutation only) refetches the final state once the burst settles.
-    refetchInterval: () => (qc.isMutating({ mutationKey: ["toggle", pageId] }) > 0 ? false : 1500),
+    // #489 (HAR fact 2): a 404'd page id is GONE — polling it every 1.5s forever is pure waste (the
+    // user's HAR showed the poll still running against a dead id). Stop on a confirmed 404; a fresh
+    // navigation/mount recreates the query and polls again.
+    refetchInterval: (query) => {
+      if ((query.state.error as { status?: number } | null)?.status === 404) return false;
+      return qc.isMutating({ mutationKey: ["toggle", pageId] }) > 0 ? false : 1500;
+    },
   });
 }
 
@@ -1156,9 +1162,14 @@ export function useTitleDictionary(pageId: string | undefined) {
   return useQuery({
     queryKey: ["title-dictionary", pageId],
     enabled: !!pageId,
-    queryFn: () => apiFetch<{ entries: { id: string; title: string }[]; capped: boolean }>(`/pages/${encodeURIComponent(pageId!)}/title-dictionary`, token),
+    queryFn: () => apiFetch<{ entries: { id: string; title: string }[]; capped: boolean; degraded?: boolean }>(`/pages/${encodeURIComponent(pageId!)}/title-dictionary`, token),
     staleTime: 30_000,
     refetchInterval: 120_000,
+    // #489 (remedy 1): the dictionary is BEST-EFFORT — an enhancement (auto internal links),
+    // never worth stacking retries against a struggling server (the HAR showed retry:1 turning one
+    // 3.2s deadline-500 into ~6.5s of foreground pain). No immediate retry; the 120s interval is the
+    // gentle background recovery, and a failed dict simply renders links as plain text.
+    retry: false,
   });
 }
 
