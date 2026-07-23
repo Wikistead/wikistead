@@ -5,6 +5,8 @@ import { emit } from '@wikistead/events'
 import { requireTenantAdmin, isTenantAdmin } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { entitlementDenied } from '../entitlement-ux.js'
+import { auditIfEntitled } from '../audit/outbox.js' // #495: admin revoke writes an in-tx tamper-evident audit row
+import { resolveAuthorIdentities } from '../author-identity.js' // #495 / #486: owner-name resolution on the admin list
 import type { TenantDb } from '../db/index.js'
 
 export type ApiScope = 'read' | 'write'
@@ -19,6 +21,11 @@ interface ApiKeyRow {
 }
 export interface ApiKeySummary {
   id: string; name: string; keyPrefix: string; scope: ApiScope; createdAt: Date; lastUsedAt: Date | null
+  // #495 / ADR-182 (Q1): the ADMIN list discloses WHO owns each key so an admin can revoke a specific
+  // member's key. Present only on the admin view (GET /api-keys); the self view (/api-keys/mine) omits
+  // them. ownerName follows #486 (override ?? display_name; null → null, never an email fallback). The
+  // key_hash / plaintext are NEVER surfaced (unchanged).
+  ownerUserId?: string; ownerName?: string | null
 }
 
 // The tenant policy cap on what scope keys may be issued with (admin-set). NULL =
@@ -123,19 +130,26 @@ export async function createApiKey(
 // map out who automates what, which is nobody's business but the owner's and the admin's.
 export async function listApiKeys(db: TenantDb, args: { ownerUserId?: string } = {}): Promise<ApiKeySummary[]> {
   const owner = args.ownerUserId
+  // #495: the ADMIN view (no owner filter) also selects owner_user_id so it can disclose ownership;
+  // the self view keeps its minimal columns. Both stay RLS-tenant-bound.
   const rows = owner
     ? await db.sql<ApiKeyRow[]>`
-        SELECT id, name, key_prefix, scope, created_at, last_used_at
+        SELECT id, name, key_prefix, scope, created_at, last_used_at, owner_user_id
         FROM api_keys WHERE revoked_at IS NULL AND owner_user_id = ${owner}
         ORDER BY created_at DESC`
     : await db.sql<ApiKeyRow[]>`
-        SELECT id, name, key_prefix, scope, created_at, last_used_at
+        SELECT id, name, key_prefix, scope, created_at, last_used_at, owner_user_id
         FROM api_keys WHERE revoked_at IS NULL
         ORDER BY created_at DESC`
+  // #495 / ADR-182 (Q1): resolve owner names on the ADMIN view only — the canonical #486 helper on the
+  // RLS handle (no bare pool), so null-name → null (no email fallback). The self view never discloses.
+  const names = owner ? new Map<string, { displayName: string | null }>()
+    : await resolveAuthorIdentities(db, rows.map((r) => r.owner_user_id))
   return rows.map(r => ({
     id: r.id, name: r.name, keyPrefix: r.key_prefix,
     scope: r.scope === 'read' ? 'read' : 'write',
     createdAt: r.created_at, lastUsedAt: r.last_used_at,
+    ...(owner ? {} : { ownerUserId: r.owner_user_id, ownerName: names.get(r.owner_user_id)?.displayName ?? null }),
   }))
 }
 
@@ -158,6 +172,34 @@ export async function revokeApiKey(
     if (row) emit({ type: 'api_key.revoked', tenantId: row.tenant_id, keyId: args.id, actorId: args.ownerUserId })
   }
   return result.count > 0
+}
+
+// #495 / ADR-182: a TENANT ADMIN revokes ANY member's key (no owner constraint) — the single-compromised-
+// key lever the owner-only revoke could not give. RLS bounds the UPDATE to the caller's tenant, so another
+// tenant's / an unknown / an already-revoked id matches 0 rows → the route returns a uniform 404 (no oracle).
+// On success the tamper-evident audit row is written in the SAME tx as the revoke (auditIfEntitled, #177):
+// an admin killing someone else's key IS the compliance-relevant action, and a failed audit rolls the
+// revocation back (atomicity). The revocation is immediate (the `revoked_at IS NULL` auth gate). The emit
+// names the admin as actor and the owner as `ownerId` so the trail reads "admin X revoked member Y's key".
+export async function revokeApiKeyAsAdmin(
+  db: TenantDb,
+  tenant: { id: string; plan: string },
+  args: { id: string; actorSub: string },
+): Promise<boolean> {
+  return db.tx(async (tx) => {
+    const [row] = await tx<[{ owner_user_id: string }?]>`
+      UPDATE api_keys SET revoked_at = now()
+      WHERE id = ${args.id} AND revoked_at IS NULL
+      RETURNING owner_user_id`
+    if (!row) return false // 0 rows: cross-tenant (RLS) / unknown / already revoked → caller 404s
+    // In-tx tamper-evident audit (#177). A throw here rolls the UPDATE back (atomic).
+    await auditIfEntitled(tx, tenant, { actor: `user:${args.actorSub}`, action: 'api_key.revoked', target: `api_key:${args.id}` })
+    // #495 Q3: ownerId names the affected member. Default OFF for the external webhook payload — see the
+    // route: the event is emitted with ownerId so the AUDIT trail is complete, but the webhook opt-in for
+    // exposing member identity to external sinks is deferred to Review (not shipped unconditionally).
+    emit({ type: 'api_key.revoked', tenantId: tenant.id, keyId: args.id, actorId: args.actorSub, ownerId: row.owner_user_id })
+    return true
+  })
 }
 
 // ── Fastify plugin ────────────────────────────────────────────────────────
@@ -192,6 +234,16 @@ export async function apiKeysPlugin(app: FastifyInstance) {
   app.delete<{ Params: { id: string } }>('/api-keys/:id', async (req, reply) => {
     const revoked = await revokeApiKey(req.db, { id: req.params.id, ownerUserId: req.user.sub })
     if (!revoked) return reply.code(404).send({ error: 'not found or not owned by caller' })
+    return reply.code(204).send()
+  })
+
+  // #495 / ADR-182: the ADMIN revoke door — kill ANY member's key (tenant#admin). Separate route from the
+  // owner-only self-revoke above (one authority per door). A non-admin 403s here; the owner self-revoke
+  // route is unchanged. Cross-tenant / unknown / already-revoked → uniform 404 (RLS 0-row).
+  app.delete<{ Params: { id: string } }>('/admin/api-keys/:id', async (req, reply) => {
+    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    const revoked = await revokeApiKeyAsAdmin(req.db, req.tenant, { id: req.params.id, actorSub: req.user.sub })
+    if (!revoked) return reply.code(404).send({ error: 'not found' })
     return reply.code(204).send()
   })
 

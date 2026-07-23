@@ -1283,7 +1283,10 @@ export function usePortal() {
 // API keys (Phase 5f). Per-member ownership; scope ('read'|'write') restricts a key
 // below its owner's authority. The tenant policy caps issuable scope.
 export type ApiScope = "read" | "write";
-export interface ApiKeySummary { id: string; name: string; keyPrefix: string; scope: ApiScope; createdAt: string; lastUsedAt: string | null }
+export interface ApiKeySummary { id: string; name: string; keyPrefix: string; scope: ApiScope; createdAt: string; lastUsedAt: string | null;
+  // #495 / ADR-182: present ONLY on the admin list (GET /api-keys) so an admin can revoke a specific
+  // member's key. ownerName follows #486 (null → null, no email fallback). Never a secret.
+  ownerUserId?: string; ownerName?: string | null }
 export interface ApiKeyCreated extends ApiKeySummary { plaintext: string }
 // #462: two lists, because they answer different questions. `useApiKeys` is the tenant-wide ADMIN
 // view (it used to be readable by any member, which laid out who automates what); `useMyApiKeys` is
@@ -1316,6 +1319,16 @@ export function useRevokeApiKey() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => apiFetch<null>(`/api-keys/${encodeURIComponent(id)}`, token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }),
+  });
+}
+// #495 / ADR-182: the ADMIN revoke — kill ANY member's key via the admin-gated route (server re-checks
+// tenant#admin; a non-admin 403s). Distinct from useRevokeApiKey (owner self-serve).
+export function useAdminRevokeApiKey() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<null>(`/admin/api-keys/${encodeURIComponent(id)}`, token, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }),
   });
 }
