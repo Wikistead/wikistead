@@ -85,6 +85,37 @@
   ::after {
     border-color: var(--border);
   }
+
+  /* #517: Tailwind v4's preflight sets `button { cursor: default }` (v3 shipped pointer), so shadcn/Radix
+     primitives — buttons, tabs, menu items, switches — lost the hand cursor app-wide. Restore pointer on
+     the interactive set in @layer base so an explicit utility still wins; disabled/aria-disabled stay
+     default. Scoped to real click affordances (buttons + interactive roles), so the CodeMirror text
+     surface — whose caret/text cursor lives on `.cm-content`, not on a button — is untouched; genuine
+     click widgets inside the editor (edit pills, the fence-settings hint) correctly get the pointer too. */
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="menuitemcheckbox"],
+  [role="menuitemradio"],
+  [role="option"],
+  [role="switch"],
+  [role="radio"],
+  summary,
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]) {
+    cursor: pointer;
+  }
+  /* A disabled control is not clickable — keep the default arrow (overrides the rule above). */
+  button:disabled,
+  [role="button"][aria-disabled="true"],
+  [role="tab"][aria-disabled="true"],
+  [role="menuitem"][aria-disabled="true"],
+  [role="option"][aria-disabled="true"],
+  [role="switch"][aria-disabled="true"],
+  [aria-disabled="true"] {
+    cursor: default;
+  }
 }
 
 /* Design tokens + global rules. Component styling is Tailwind (utilities/shadcn); rules
