@@ -914,7 +914,10 @@ export async function spacesPlugin(app: FastifyInstance) {
     const invalid = validateRollupQuery(req.query) // 400 before any FGA/DB work
     if (invalid) return reply.code(400).send({ error: invalid })
     const rows = await req.db.sql<{ id: string }[]>`SELECT id FROM pages WHERE space_id = ${req.params.spaceId}`
-    return rollupPageViews(req.db, app.fga, subject, rows.map((r) => r.id), req.query)
+    // #520 ONE check decides whether the per-page fan-out is needed at all. A space manager manages
+    // every non-private page in the space by the model, so only private ones still get a per-page check.
+    const scopeManager = await check(app.fga, subject, 'manage', { type: 'space', id: req.params.spaceId })
+    return rollupPageViews(req.db, app.fga, subject, rows.map((r) => r.id), req.query, scopeManager)
   })
 
   // ── per-space access (Phase 5b) — all manage-gated ──

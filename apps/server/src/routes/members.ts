@@ -248,7 +248,10 @@ export async function membersPlugin(app: FastifyInstance) {
     if (invalid) return reply.code(400).send({ error: invalid })
     // Every page in THIS tenant (req.db is RLS-scoped, so the tenant boundary is the database's, not a filter).
     const rows = await req.db.sql<{ id: string }[]>`SELECT id FROM pages`
-    return rollupPageViews(req.db, req.server.fga, `user:${req.user.sub}`, rows.map((r) => r.id), req.query)
+    // #520 a tenant admin IS a manager of every space (`space#manager … or admin from tenant`), so the
+    // per-page fan-out — worst here, this scope being the whole tenant — collapses to the private pages only.
+    // The gate above already established tenant#admin, so the hint costs no extra check.
+    return rollupPageViews(req.db, req.server.fga, `user:${req.user.sub}`, rows.map((r) => r.id), req.query, true)
   })
 
   // ── Invites ──────────────────────────────────────────────────────────────
