@@ -887,6 +887,28 @@ export async function spacesPlugin(app: FastifyInstance) {
     return { deleteMode: v }
   })
 
+  // #520 / ADR-189 (analytics v2 · slice 1): SPACE-level page-view aggregation. Rolls up page_view_daily
+  // over ONLY the pages the caller can MANAGE (§5 manage-filter-set) — never space#viewer (the ADR-126 leak
+  // class), so a private page's view activity never surfaces to a non-manager. Existence floor: space `view`
+  // (a 404 hides a space you cannot see). EE-gated exactly like the per-page dashboard (#464). No roster, no
+  // member names, no minted IDs — aggregate counts only (the search-term stream was rejected at Review).
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/analytics', async (req, reply) => {
+    const subject = `user:${req.user.sub}`
+    if (!(await check(app.fga, subject, 'view', { type: 'space', id: req.params.spaceId }))) return reply.code(404).send({ error: 'not found' }) // existence-hiding floor
+    if (!resolveEntitlements(req.tenant.plan).analytics) return { entitled: false, pages: 0, daily: [] } // EE gate (paid feature)
+    // Pages in THIS space (RLS-scoped to the tenant) filtered to the caller's MANAGE set — the aggregate is
+    // built ONLY from pages the caller manages, so a viewer who manages none gets an empty (not leaked) roll-up.
+    const rows = await req.db.sql<{ id: string }[]>`SELECT id FROM pages WHERE space_id = ${req.params.spaceId}`
+    const manageable = rows.length ? await filterAuthorized(app.fga, subject, 'manage', rows.map((r) => r.id)) : new Set<string>()
+    const ids = [...manageable]
+    if (ids.length === 0) return { entitled: true, pages: 0, daily: [] }
+    const daily = await req.db.sql<{ day: string; viewer_class: string; views: number }[]>`
+      SELECT day::text AS day, viewer_class, SUM(views)::int AS views
+      FROM page_view_daily WHERE page_id = ANY(${ids})
+      GROUP BY day, viewer_class ORDER BY day DESC LIMIT 400`
+    return { entitled: true, pages: ids.length, daily: daily.map((d) => ({ day: d.day, viewerClass: d.viewer_class, views: d.views })) }
+  })
+
   // ── per-space access (Phase 5b) — all manage-gated ──
   app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/access', async (req) => {
     return listSpaceAccess(app.fga, req.db, { spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub })
