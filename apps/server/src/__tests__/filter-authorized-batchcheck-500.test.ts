@@ -110,4 +110,31 @@ describe('#500 / ADR-183: filterAuthorized over server-side BatchCheck', () => {
     const out = await filterAuthorized(client, 'user:u', 'view', ['yes1', 'no', 'yes2'])
     expect(out).toEqual(new Set(['yes1', 'yes2']))
   })
+
+  // #489: listSpaces batches the per-space capability fan-out through filterAuthorized with the SPACE
+  // resource type. Pin that the type parameter drives BOTH the relation mapping (RELATION.space) and the
+  // object prefix, and that omitting it stays byte-identical to the page callers.
+  it('#489: a non-page resource type resolves the space relation + `space:` object; default stays page', async () => {
+    const objects: string[] = []
+    const relations = new Set<string>()
+    const client = {
+      check: async () => { throw new Error('per-id check must not run on the batch path') },
+      batchCheck: async (body: { checks: { object: string; relation: string; correlationId?: string }[] }) => {
+        for (const c of body.checks) { objects.push(c.object); relations.add(c.relation) }
+        return { result: body.checks.map((c) => ({ allowed: c.object === 'space:s1', request: c, correlationId: c.correlationId! })) }
+      },
+    } as unknown as OpenFgaClient
+
+    // 'manage' on a SPACE → FGA relation `manager`, object `space:<id>` (not page:). Equivalence: only s1 allowed.
+    const out = await filterAuthorized(client, 'user:u', 'manage', ['s1', 's2'], undefined, 'space')
+    expect(objects).toEqual(['space:s1', 'space:s2'])
+    expect([...relations]).toEqual(['manager']) // RELATION.space.manage → 'manager'
+    expect(out).toEqual(new Set(['s1']))
+
+    // Omitting the type defaults to 'page' — byte-identical to every existing page caller.
+    objects.length = 0; relations.clear()
+    await filterAuthorized(client, 'user:u', 'manage', ['p1'])
+    expect(objects).toEqual(['page:p1'])
+    expect([...relations]).toEqual(['manage']) // RELATION.page.manage → 'manage'
+  })
 })
