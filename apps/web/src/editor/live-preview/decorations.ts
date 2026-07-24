@@ -4850,9 +4850,14 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // inside its box with the header pinned; short tables keep their natural height. Opaque th-bg + an
   // inset box-shadow edge keep the separating border with the sticky cell (a border-collapse border
   // otherwise scrolls away).
-  ".cm-lp-table thead th": { position: "sticky", top: "0", zIndex: "2", boxShadow: "inset 0 -1px 0 var(--border)" },
+  // #518 (re-design): the header follows the PAGE scroll — NOT a box-scroll. The whole table shows
+  // all its rows; as you scroll the editor (`.cm-scroller`, the nearest scroll ancestor now that the wrap
+  // no longer clips), `thead th` sticks at `top: var(--wks-band-h)` so it stops JUST BELOW the frosted app
+  // header band, never under it. The left-column `th:first-child` sticks left on horizontal scroll (secondary
+  // — the .cm-scroller scrolls sideways for a wide table so every column stays reachable/editable).
+  ".cm-lp-table thead th": { position: "sticky", top: "var(--wks-band-h, 0px)", zIndex: "2", boxShadow: "inset 0 -1px 0 var(--border)" },
   ".cm-lp-table th:first-child": { position: "sticky", left: "0", zIndex: "1", boxShadow: "inset -1px 0 0 var(--border)" },
-  ".cm-lp-table thead th:first-child": { zIndex: "3", boxShadow: "inset -1px -1px 0 var(--border)" },
+  ".cm-lp-table thead th:first-child": { top: "var(--wks-band-h, 0px)", zIndex: "3", boxShadow: "inset -1px -1px 0 var(--border)" },
   ".cm-lp-image": { maxWidth: "100%", height: "auto", borderRadius: "4px", verticalAlign: "bottom" },
   // #273: file-attachment affordances. The inline chip flows with the text; the standalone card
   // is a bordered row; the sandboxed PDF frame gets a bounded height (the ResizeObserver keeps
@@ -5084,10 +5089,14 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // box is the only horizontal scroller, held to the line width so a wide table can never widen the
   // editor; the table takes its natural width inside it.
   ".cm-lp-table-wrap": { position: "relative", width: "100%", maxWidth: "100%" },
-  // #518: a max-height turns the wrap into a vertical scroll box too, so a tall table scrolls INSIDE it
-  // with the sticky thead header pinned (page-basis top sticky is impossible while the overflow-x wrap is
-  // the vertical scroll ancestor). Short tables never reach it, so they keep their natural height.
-  ".cm-lp-table-scroll": { width: "0", minWidth: "100%", maxWidth: "100%", overflowX: "auto", overflowY: "auto", maxHeight: "min(70vh, 32rem)" },
+  // #518 (re-design): NO local scroll box. The earlier box-scroll (max-height + overflow) both fought
+  // the user's intent (they want ALL rows shown with the header following the PAGE scroll) AND clipped a wide
+  // table's right columns so they were unreachable/uneditable. So `.cm-lp-table-scroll` is now a passthrough
+  // (overflow: visible): a tall table shows every row, and a wide table overflows onto `.cm-scroller`, which
+  // scrolls sideways so every column stays reachable — the accepted #406 trade-off (page-follow header
+  // and reachable columns beat a contained sidescroll). With no overflow ancestor, `thead th`'s sticky top
+  // now resolves against `.cm-scroller` = the page-basis header-follow the user asked for.
+  ".cm-lp-table-scroll": { display: "block", overflow: "visible" },
   ".cm-lp-table-scroll > table": { minWidth: "max-content" },
   // #216 comment 874 / #174 comment 878 (ADR-087 addendum 2): the SHARED RichUI-entry pill on the RAW-editing
   // state of a macro (pipe table + callout). Anchored to the first revealed line (.cm-lp-macro-raw =

@@ -1,18 +1,15 @@
 import { test, expect } from "@playwright/test";
 import { openScratch, enterEdit, setPublicSurface, sleep } from "../helpers";
 
-// #518: an explicit table header (top row = thead th; a row header = the first-column th) stays pinned
-// while a TALL table scrolls, and a WIDE table gets its OWN horizontal scrollbar (the editor must NOT
-// scroll sideways). Thedevice trace found theattempt was false-green: it exercised a GFM
-// pipe table (which DID get a `.cm-lp-table-scroll` box + a <thead>), while the actual regression was on
-// a :::table macro — a MacroWidget whose table had NO scroll box and NO <thead>, so its th had
-// `position: sticky` but `top: auto` (inert), and its overflow scrolled `.cm-scroller` (the whole editor).
-// This spec pins the :::table path on the real CM read surface (/pub) measuring the th itself, not
-// `.cm-scroller`.
+// #518 (re-design): the table header follows the PAGE scroll — NOT a box-scroll. The user wants ALL
+// rows shown, the header pinned just below the app band as the page scrolls, and (thehard bug) a wide
+// table's columns must stay reachable (the earlier overflow-x box clipped them / broke editing). So there is
+// NO local scroll box: the table overflows onto `.cm-scroller`, which scrolls sideways (columns reachable),
+// and `thead th`'s sticky top resolves against `.cm-scroller` (page-basis header-follow). Pinned on the real
+// CM read surface (/pub) measuring the th itself and the .cm-scroller, in a real browser.
 const API = "http://dev.localhost:4010";
 
-// A tall (45-row) + wide (12-col) :::table: 12 columns overflow a 900px viewport (horizontal box scroll),
-// 45 rows overflow the max-height box (vertical box scroll → sticky thead has something to pin against).
+// A tall (45-row) + wide (12-col) :::table.
 function bigTableMd(): string {
   const head = Array.from({ length: 12 }, (_, c) => `<th>H${c}</th>`).join("");
   let rows = "";
@@ -20,7 +17,7 @@ function bigTableMd(): string {
   return `# Sticky\n\n:::table\n<table><tr>${head}</tr>${rows}</table>\n:::\n\ntail\n`;
 }
 
-test("#518: a tall+wide :::table pins its header (top not auto) and scrolls INSIDE its own box", async ({ browser }) => {
+test("#518a :::table header FOLLOWS the page scroll (not a box), all rows shown, columns reachable", async ({ browser }) => {
   const authed = await (await browser.newContext()).newPage();
   const id = await openScratch(authed, `sticky518-${Date.now().toString(36)}`);
   await enterEdit(authed);
@@ -35,45 +32,44 @@ test("#518: a tall+wide :::table pins its header (top not auto) and scrolls INSI
 
   const anon = await (await browser.newContext({ viewport: { width: 900, height: 520 } })).newPage();
   await anon.goto(`/pub/${id}`);
-  // the :::table renders as .cm-lp-table.cm-lp-table-merged with a <thead> (gridToTable) inside a
-  // .cm-lp-table-scroll box (liveRender wrap) — wait for the header cell specifically.
   await anon.waitForSelector(".cm-lp-table-merged thead th", { timeout: 10000 });
 
   const rep = await anon.evaluate(() => {
     const table = document.querySelector(".cm-lp-table-merged") as HTMLElement;
     const th = table.querySelector("thead th") as HTMLElement;
-    const th0 = table.querySelector("thead th:first-child") as HTMLElement;
     const box = th.closest(".cm-lp-table-scroll") as HTMLElement;
     const scroller = document.querySelector(".cm-scroller") as HTMLElement;
     const cs = getComputedStyle(th);
-    // 1. the box is a real LOCAL scroll container (both axes overflow inside it, not the editor)
-    const boxScrollsY = box.scrollHeight > box.clientHeight + 2;
-    const boxScrollsX = box.scrollWidth > box.clientWidth + 2;
-    const scrollerScrollsX = scroller.scrollWidth > scroller.clientWidth + 2; // must stay false: editor must NOT shift
-    // 2. vertical: header stays pinned when the BOX scrolls down
-    const topBefore = th.getBoundingClientRect().top;
-    box.scrollTop = 260;
-    const topAfter = th.getBoundingClientRect().top;
-    // 3. horizontal: left-column header stays pinned when the BOX scrolls right
-    box.scrollTop = 0;
-    const leftBefore = th0.getBoundingClientRect().left;
-    box.scrollLeft = 300;
-    const leftAfter = th0.getBoundingClientRect().left;
-    return {
-      position: cs.position, top: cs.top,
-      boxScrollsY, boxScrollsX, scrollerScrollsX,
-      vMove: Math.abs(topAfter - topBefore), hMove: Math.abs(leftAfter - leftBefore),
-    };
+    // 1. NOT a local scroll box: the wrapper is a passthrough (overflow visible), so a tall table shows every
+    //    row inside it rather than clipping to a max-height (the whole table's height lives in the box).
+    const boxIsScrollBox = box.scrollHeight > box.clientHeight + 2;
+    const boxOverflow = getComputedStyle(box).overflowY;
+    // 2. a wide table overflows onto the editor scroller (columns reachable via horizontal page scroll)
+    const scrollerScrollsX = scroller.scrollWidth > scroller.clientWidth + 2;
+    // 3. page-basis header-follow: scroll the EDITOR (.cm-scroller) to TWO positions both past the table's
+    //    start. If the header is page-pinned it stays at the SAME viewport top at both (near the band); in the
+    //    old box-scroll model the th tracked the box (which scrolls with .cm-scroller) so it would move ~300px.
+    return new Promise<{ position: string; top: string; boxIsScrollBox: boolean; boxOverflow: string; scrollerScrollsX: boolean; top1: number; top2: number }>((resolve) => {
+      scroller.scrollTop = 300;
+      requestAnimationFrame(() => {
+        const top1 = th.getBoundingClientRect().top;
+        scroller.scrollTop = 600;
+        requestAnimationFrame(() => {
+          const top2 = th.getBoundingClientRect().top;
+          resolve({ position: cs.position, top: cs.top, boxIsScrollBox, boxOverflow, scrollerScrollsX, top1, top2 });
+        });
+      });
+    });
   });
 
-  // the real failure signature the device trace caught: sticky but top:auto (inert)
   expect(rep.position, "header th is sticky").toBe("sticky");
-  expect(rep.top, "sticky top is a real offset, NOT auto (thebug)").not.toBe("auto");
-  // the table scrolls inside its own box on BOTH axes, and the editor does NOT scroll sideways
-  expect(rep.boxScrollsY, "a 45-row :::table overflows its max-height box vertically").toBe(true);
-  expect(rep.boxScrollsX, "a 12-col :::table overflows its box horizontally (its own scrollbar)").toBe(true);
-  expect(rep.scrollerScrollsX, "the editor .cm-scroller does NOT scroll sideways (table box absorbs it)").toBe(false);
-  // header stays put on vertical scroll, left column stays put on horizontal scroll
-  expect(rep.vMove, "the header row stays pinned while the body scrolls under it").toBeLessThan(4);
-  expect(rep.hMove, "the left-column header stays pinned while columns scroll under it").toBeLessThan(4);
+  expect(rep.top, "sticky top resolves to a real offset (band var), NOT auto").not.toBe("auto");
+  expect(rep.boxOverflow, "the wrapper is a passthrough (no local scroll box)").toBe("visible");
+  expect(rep.boxIsScrollBox, "the table is NOT clipped into a max-height box — all rows are shown").toBe(false);
+  expect(rep.scrollerScrollsX, "a wide table overflows onto .cm-scroller so every column is reachable").toBe(true);
+  // page-follow: at two different page-scroll positions the header stays at the SAME viewport top (pinned near
+  // the band), and that top is near the viewport top (not scrolled off). Box-scroll would move it ~300px.
+  expect(rep.top1, "the pinned header sits near the viewport top (below the band), not scrolled away").toBeGreaterThan(-4);
+  expect(rep.top1, "the pinned header sits near the viewport top, not below the fold").toBeLessThan(160);
+  expect(Math.abs(rep.top2 - rep.top1), "the header stays put as the page scrolls further under it (page-pinned)").toBeLessThan(8);
 });
