@@ -423,6 +423,24 @@ export async function rolesPlugin(app: FastifyInstance) {
     return rows.map((r) => ({ id: r.id, roleId: r.role_id, roleName: r.name, principal: r.principal }))
   })
 
+  // #485 / #514: a space MANAGER (not just a tenant admin) needs the role DEFINITION list to populate the
+  // in-space assignment picker — the tenant-admin-gated GET /admin/roles is unreachable for them.
+  // This is the read that lets "assign in space settings" (the #514 IA) work: gated on `manage` of the
+  // space (the SAME authority the assignment write + the assignment list already use — requireListAuthority),
+  // scoped to ONE space (no cross-space enumeration), READ-ONLY (no edit/create), and it returns only the
+  // roles ASSIGNABLE at space/page scope — built-ins plus custom RESOURCE-scope roles. Tenant-scope roles
+  // (createSpaces etc.) are deliberately excluded: they are not assignable at a resource and stay
+  // admin-console-only, so a manager never learns the tenant-admin role surface here.
+  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/assignable-roles', async (req) => {
+    await requireListAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType: 'space', resourceId: req.params.spaceId })
+    const rows = await req.db.sql<RoleRow[]>`
+      SELECT id, name, capabilities, scope FROM roles WHERE scope = 'resource' ORDER BY name`
+    return {
+      builtIn: BUILT_IN_ROLES,
+      custom: rows.map((r) => ({ id: r.id, name: r.name, capabilities: r.capabilities, scope: r.scope })),
+    }
+  })
+
   app.post<{ Params: { roleId: string }; Body: { resourceType?: string; resourceId?: string; principal?: string } }>(
     '/admin/roles/:roleId/assignments', async (req, reply) => {
       const { resourceType, resourceId, principal } = req.body ?? {}
