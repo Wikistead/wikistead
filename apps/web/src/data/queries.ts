@@ -1466,6 +1466,16 @@ export function useUnassignRole() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["role-assignments"] }),
   });
 }
+// #485 / #514: the role DEFINITIONS a SPACE MANAGER may assign in-space — built-ins + custom RESOURCE-scope
+// roles, read-only, manager-gated server-side (GET /admin/roles is tenant-admin-only, unreachable here).
+export function useAssignableRoles(spaceId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["assignable-roles", spaceId],
+    queryFn: () => apiFetch<{ builtIn: { name: string; capabilities: string[] }[]; custom: RoleDef[] }>(`/spaces/${encodeURIComponent(spaceId)}/assignable-roles`, token),
+    enabled: enabled && spaceId.length > 0,
+  });
+}
 
 // #497 / ADR-183: declarative group → role MAPPINGS (EE — customRoles). A mapping owns a
 // group-principal role assignment created through the same gated assign path; the tenant-wide list is
