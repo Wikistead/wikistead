@@ -4,7 +4,7 @@
 // authz is enforced by the route (covered separately).
 import { describe, it, expect } from 'vitest'
 import { inflateSync } from 'node:zlib'
-import { renderPlantuml, injectPlantumlTheme, PLANTUML_DARK_SKINPARAM, MAX_RENDER_BYTES } from '../plantuml-render.js'
+import { renderPlantuml, renderPlantumlResult, injectPlantumlTheme, PLANTUML_DARK_SKINPARAM, MAX_RENDER_BYTES } from '../plantuml-render.js'
 
 const png = (bytes = 8) => new Response(new Uint8Array(bytes), { headers: { 'content-type': 'image/png' } })
 
@@ -115,5 +115,43 @@ describe('injectPlantumlTheme (#342)', () => {
     // a commented-out skinparam must NOT block the dark styling (note 2: line-start, comment-aware)
     const src = "@startuml\n' skinparam mono true\nA->B\n@enduml"
     expect(injectPlantumlTheme(src, STUB)).toBe("@startuml\nskinparam backgroundColor #111\nskinparam defaultFontColor #eee\n' skinparam mono true\nA->B\n@enduml")
+  })
+})
+
+// #525 the caller must be able to tell an INVALID diagram (the author's error — mermaid shows a
+// visible message for its equivalent) from an UNCONFIGURED endpoint (nothing is wrong; degrade to the
+// source fence) and from a TRANSIENT outage (not the author's fault). Collapsing all three to null made
+// the client show "source fence" for every case, which is why a broken diagram looked like a no-op.
+describe('renderPlantumlResult — failure modes are distinguishable (#525)', () => {
+  const png = () =>
+    new Response(Buffer.from([0x89, 0x50, 0x4e, 0x47]), { status: 200, headers: { 'content-type': 'image/png' } })
+
+  it('unconfigured endpoint → { kind: "unconfigured" } (a degrade, not an error)', async () => {
+    expect(await renderPlantumlResult('@startuml\nA->B\n@enduml', { endpoint: '' })).toEqual({ kind: 'unconfigured' })
+  })
+
+  it('a 4xx from the endpoint → { kind: "invalid" } — the DIAGRAM is bad', async () => {
+    const fetcher = async () => new Response('syntax error', { status: 400 })
+    expect(await renderPlantumlResult('@startuml\nnope', { endpoint: 'https://k/', fetcher })).toEqual({ kind: 'invalid' })
+  })
+
+  it('a 5xx / network failure / non-image → { kind: "unavailable" } — never reported as a syntax error', async () => {
+    const five = async () => new Response('boom', { status: 502 })
+    expect(await renderPlantumlResult('x', { endpoint: 'https://k/', fetcher: five })).toEqual({ kind: 'unavailable' })
+    const boom = async () => { throw new Error('offline') }
+    expect(await renderPlantumlResult('x', { endpoint: 'https://k/', fetcher: boom })).toEqual({ kind: 'unavailable' })
+    const html = async () => new Response('<html/>', { status: 200, headers: { 'content-type': 'text/html' } })
+    expect(await renderPlantumlResult('x', { endpoint: 'https://k/', fetcher: html })).toEqual({ kind: 'unavailable' })
+  })
+
+  it('a successful render → { kind: "ok" } with the bytes', async () => {
+    const r = await renderPlantumlResult('@startuml\nA->B\n@enduml', { endpoint: 'https://k/', fetcher: async () => png() })
+    expect(r.kind).toBe('ok')
+    if (r.kind === 'ok') expect(r.png).toBeInstanceOf(Buffer)
+  })
+
+  it('renderPlantuml keeps its buffer-or-null shape (existing callers unchanged)', async () => {
+    expect(await renderPlantuml('x', { endpoint: 'https://k/', fetcher: async () => new Response('e', { status: 400 }) })).toBeNull()
+    expect(await renderPlantuml('x', { endpoint: 'https://k/', fetcher: async () => png() })).toBeInstanceOf(Buffer)
   })
 })

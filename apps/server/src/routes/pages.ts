@@ -35,7 +35,7 @@ import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-
 import { auditIfEntitled } from '../audit/outbox.js'
 import { resolveEmbed, EmbedDeniedError } from '../embed-resolve.js'
 import { resolveTranscludeRef } from '../transclude-resolve.js'
-import { renderPlantuml } from '../plantuml-render.js'
+import { renderPlantumlResult } from '../plantuml-render.js'
 import { assertPageViewable } from '../page-view-gate.js'
 import { revokeResourceShareLinks } from './share-links.js'
 import { getTemplate } from './templates.js'
@@ -3542,9 +3542,14 @@ export async function pagesPlugin(app: FastifyInstance) {
     await assertPageViewable(app.fga, subject, req.params.pageId, context) // 404 not-found if not a viewer (#280)
     const source = req.body?.source
     if (typeof source !== 'string' || !source.trim()) return reply.code(400).send({ error: 'source is required' })
-    const png = await renderPlantuml(source, { dark: req.body?.theme === 'dark' }) // #342: dark → built-in !theme
-    if (!png) return reply.code(204).send() // degrade: caller renders the source fence
-    return reply.header('content-type', 'image/png').send(png)
+    // #525 distinguish the failure modes so the client can match mermaid — an INVALID diagram
+    // gets a visible error, while an unconfigured endpoint stays a silent degrade-to-source (the
+    // operator simply has not opted in) and a transient outage is its own, retryable case.
+    const r = await renderPlantumlResult(source, { dark: req.body?.theme === 'dark' }) // #342: dark → built-in !theme
+    if (r.kind === 'unconfigured') return reply.code(204).send() // degrade: caller renders the source fence
+    if (r.kind === 'invalid') return reply.code(422).send({ error: 'invalid diagram', reason: 'invalid_diagram' })
+    if (r.kind === 'unavailable') return reply.code(503).send({ error: 'renderer unavailable', reason: 'renderer_unavailable' })
+    return reply.header('content-type', 'image/png').send(r.png)
   })
 
   // ── per-page access (manage-gated; member-only, no guest config) ──────────
