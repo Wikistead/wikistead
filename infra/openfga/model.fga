@@ -89,7 +89,10 @@ type space
     # can read + save the space's templates (deliberate widening; moderator has NO share_link type, so
     # the #258 guest boundary is untouched). The page-view SET is unchanged — moderate already implied
     # page view via edit→comment→viewable; this only adds the space-level and template surfaces.
-    define viewer_member: [user, group#member] or editor_member or moderator
+    # #529 / ADR-193 ruling 1: `commenter` joins the same union, for the same reason moderator did —
+    # without it a space commenter can view the PAGES (via page#viewable) while the space itself 404s
+    # and its tree is invisible. Someone allowed to comment across a space can see that space.
+    define viewer_member: [user, group#member] or editor_member or moderator or commenter
     # user:* here means public space — only set this tuple intentionally.
     # space-scoped share links: one tuple (space:S#viewer@share_link:Y) grants
     # view access to every page in S. Revoke = delete that tuple (1 op).
@@ -111,6 +114,12 @@ type space
     define sharer: [user, group#member]
     define settings_editor: [user, group#member]
     define publisher: [user, group#member]
+    # #529 / ADR-193: the per-principal COMMENT grant, space-scoped — the one capability that had no
+    # space leaf, so "let this reviewer comment across the space" was inexpressible (a space-scoped role
+    # assignment carrying `comment` was rejected outright). Pages inherit it through
+    # `comment_from_space`, private-guarded like every other space→page inheritance. Members and groups
+    # only: a share link is a link, not a principal, so guest commenting stays the audience toggle.
+    define commenter: [user, group#member]
 
 # share_link has no relations — the link identity is the principal.
 # Its capability and expiry live in the page relation tuples.
@@ -254,7 +263,15 @@ type page
     # migrated to comment_direct (infra/openfga/migrate-comment-direct.ts). comment_live uses edit_live
     # (pre-subtraction) so the trash subtraction happens exactly once, at `comment`.
     define comment_direct: [user, group#member]
-    define comment_live: comment_direct or edit_live or (view_base and comment_open)
+    # #529 / ADR-193: the two inheritance arms comment was missing while every other verb had them.
+    # `comment_from_space` carries the new space-scoped grant down, private-guarded exactly like
+    # share/delete/publish (a private page cuts space inheritance — #109/ADR-098). `comment_inherited`
+    # is the folder cascade (ruling 2), gated on `published` like the other verbs so an unpublished
+    # draft under a granted folder stays creator-only (the Phase-4 visibility gate).
+    define comment_from_space: commenter from space but not private
+    define comment_from_parent: comment_direct from parent or comment_from_parent from parent
+    define comment_inherited: comment_from_parent and published
+    define comment_live: comment_direct or comment_from_space or comment_inherited or edit_live or (view_base and comment_open)
     define comment: comment_live but not trashed
     # #109 / ADR-072 · #218 / ADR-103 (A5-1): per-page MONOTONIC DENY. `restricted` gains share_link
     # (UNCONDITIONAL — a `with non_expired` deny would be non-monotonic) so a folder-share-link guest can be

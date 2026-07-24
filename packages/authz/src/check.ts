@@ -38,7 +38,9 @@ const RELATION: Record<ResourceRef['type'], Partial<Record<Capability, string>>>
     share:    'sharer',
     settings: 'settings_editor',
     publish:  'publisher',
-    // comment: not defined on space
+    // #529 / ADR-193: comment IS a space capability now (space#commenter), inherited by pages via
+    // comment_from_space (private-guarded).
+    comment:  'commenter',
   },
 }
 

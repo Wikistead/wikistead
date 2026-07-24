@@ -367,16 +367,17 @@ export async function updateSpace(
 // by — someone without authority. Grantees are members (user:<sub>) or groups
 // (group:<id>#member); share_link / wildcard are not hand-grantable.
 // #330 / ADR-141 adds `moderate` → space#moderator (revert/freeze/patrol + page edit via the bypass; NOT manage).
-export type SpaceCapability = 'view' | 'edit' | 'moderate' | 'manage'
-const SPACE_CAPS: SpaceCapability[] = ['view', 'edit', 'moderate', 'manage']
+export type SpaceCapability = 'view' | 'comment' | 'edit' | 'moderate' | 'manage'
+const SPACE_CAPS: SpaceCapability[] = ['view', 'comment', 'edit', 'moderate', 'manage']
 // Capability vocabulary (shared with page access) → the space's FGA relations.
 // #274 / ADR-135: a member EDIT grant writes `editor_member` (the member-only leaf viewer_member /
 // template#view reference); `editor` itself now carries only space edit SHARE-LINKS. The reverse map
 // keeps `editor` → 'edit' so a pre-migration store's legacy member tuples still LIST correctly during
 // the Step-A window (listSpaceAccess filters principals to user/group, so post-migration the mapping
 // only ever sees share_link tuples there — which that filter drops).
-const CAP_TO_RELATION: Record<SpaceCapability, string> = { view: 'viewer', edit: 'editor_member', moderate: 'moderator', manage: 'manager' }
-const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', editor: 'edit', editor_member: 'edit', moderator: 'moderate', manager: 'manage' }
+// #529 / ADR-193: `comment` gains its own space leaf, so a comment-only grant is finally expressible.
+const CAP_TO_RELATION: Record<SpaceCapability, string> = { view: 'viewer', comment: 'commenter', edit: 'editor_member', moderate: 'moderator', manage: 'manager' }
+const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', commenter: 'comment', editor: 'edit', editor_member: 'edit', moderator: 'moderate', manager: 'manage' }
 
 // #258 / ADR-110: a member VIEW grant writes BOTH `viewer` (unchanged — pages inherit view via
 // view_base_from_space = viewer from space, and existing readers of `viewer` are untouched) AND
@@ -391,7 +392,7 @@ function spaceGrantTuples(grantee: string, relation: string, spaceId: string): {
 
 function validateSpaceGrant(grantee: string, capability: string): asserts capability is SpaceCapability {
   if (!SPACE_CAPS.includes(capability as SpaceCapability)) {
-    throw Object.assign(new Error('relation must be view, edit, moderate, or manage'), { statusCode: 400 })
+    throw Object.assign(new Error('relation must be view, comment, edit, moderate, or manage'), { statusCode: 400 })
   }
   if (!/^user:[^*\s]+$/.test(grantee) && !/^group:[^\s]+#member$/.test(grantee)) {
     throw Object.assign(new Error('grantee must be user:<sub> or group:<id>#member'), { statusCode: 400 })

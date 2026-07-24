@@ -63,14 +63,17 @@ interface RoleRow { id: string; name: string; capabilities: string[]; scope: Rol
 // #420 / ADR-164 increment 3: capability → the FGA tuples an ASSIGNMENT expands to. FGA stays the
 // single truth — assignment = write these fixed-relation tuples; check paths never read the tables.
 // Page leaves mirror fgaRelationForCap (pages.ts); space relations mirror the member grant path
-// (spaces.ts CAP_TO_RELATION + the #258 viewer/viewer_member pair). `comment` has NO space-scoped
-// per-principal relation (space comment is the audience toggle), so space assignment rejects it.
+// (spaces.ts CAP_TO_RELATION + the #258 viewer/viewer_member pair). #529 / ADR-193 added the missing
+// space-scoped `comment` leaf, so every capability is assignable at space scope now.
 const PAGE_CAP_RELATION: Record<RoleCapability, string> = {
   view: 'view_direct', comment: 'comment_direct', edit: 'edit_direct', moderate: 'moderate',
   delete: 'delete_direct', share: 'share_direct', settings: 'settings_direct', publish: 'publish_direct',
 }
-const SPACE_CAP_RELATIONS: Partial<Record<RoleCapability, string[]>> = {
+// #529 / ADR-193: total now (every capability has a space leaf) — keep it a full Record so adding a
+// capability without deciding its space mapping fails to compile instead of 400ing at runtime.
+const SPACE_CAP_RELATIONS: Record<RoleCapability, string[]> = {
   view: ['viewer', 'viewer_member'], // the #258 pair — same tuples the member view grant writes
+  comment: ['commenter'], // #529 / ADR-193: the space-scoped comment grant (pages inherit it, private-guarded)
   edit: ['editor_member'],
   moderate: ['moderator'],
   delete: ['deleter'], share: ['sharer'], settings: ['settings_editor'], publish: ['publisher'],
