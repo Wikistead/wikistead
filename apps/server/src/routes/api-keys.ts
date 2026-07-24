@@ -7,6 +7,7 @@ import { resolveEntitlements } from '@wikistead/entitlements'
 import { entitlementDenied } from '../entitlement-ux.js'
 import { auditIfEntitled } from '../audit/outbox.js' // #495: admin revoke writes an in-tx tamper-evident audit row
 import { resolveAuthorIdentities } from '../author-identity.js' // #495 / #486: owner-name resolution on the admin list
+import { enqueueWebhookOutbox } from './webhooks.js' // #495 Q3: api_key.revoked reaches subscribed webhooks
 import type { TenantDb } from '../db/index.js'
 
 export type ApiScope = 'read' | 'write'
@@ -194,9 +195,23 @@ export async function revokeApiKeyAsAdmin(
     if (!row) return false // 0 rows: cross-tenant (RLS) / unknown / already revoked → caller 404s
     // In-tx tamper-evident audit (#177). A throw here rolls the UPDATE back (atomic).
     await auditIfEntitled(tx, tenant, { actor: `user:${args.actorSub}`, action: 'api_key.revoked', target: `api_key:${args.id}` })
-    // #495 Q3: ownerId names the affected member. Default OFF for the external webhook payload — see the
-    // route: the event is emitted with ownerId so the AUDIT trail is complete, but the webhook opt-in for
-    // exposing member identity to external sinks is deferred to Review (not shipped unconditionally).
+    // #495 Q3 (ruled 2026-07-24): the api_key.revoked webhook carries the affected member's identity by
+    // default — ownerId (member sub) + ownerName (display) — matching the GitHub-sender / Okta-actor norm
+    // for audit-class events. Resolved through the #486 resolver on the RLS handle (override ?? display_name,
+    // NEVER an email, null → null; guest/anon subs are structurally dropped). This is a tenant-boundary
+    // egress to an admin-configured sink, not an anonymous oracle, so no opt-in flag (simplicity, per the
+    // ruling). Enqueued in the SAME tx as the revoke (the #228 webhook_outbox is transactional), so a
+    // commit-then-crash still delivers and a rolled-back revoke never emits a webhook. (page.published is
+    // already wired to this outbox in pages.ts and egresses actorId; this is the first event to carry a
+    // RESOLVED member name — the #486 null→null / no-email contract is what keeps that safe.)
+    const ownerName = (await resolveAuthorIdentities(db, [row.owner_user_id])).get(row.owner_user_id)?.displayName ?? null
+    await enqueueWebhookOutbox(tx, {
+      tenantId: tenant.id,
+      eventType: 'api_key.revoked',
+      payload: { keyId: args.id, actorId: args.actorSub, ownerId: row.owner_user_id, ownerName },
+    })
+    // The emit bus (in-memory audit / notifications) also names actor + owner so the internal trail reads
+    // "admin X revoked member Y's key".
     emit({ type: 'api_key.revoked', tenantId: tenant.id, keyId: args.id, actorId: args.actorSub, ownerId: row.owner_user_id })
     return true
   })
