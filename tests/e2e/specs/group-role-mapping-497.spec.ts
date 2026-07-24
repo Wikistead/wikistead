@@ -42,6 +42,37 @@ test("#497: group→role mapping — create a custom role, map a group, list, de
   await expect(page.getByTestId("custom-roles")).not.toContainText(role, { timeout: 8000 });
 });
 
+// #497 / ADR-183 §3: the tenant default role setting persists (a tenant-scope custom role becomes the
+// default; the choice survives a reload = the PUT landed). The login-time application is anti-tested
+// server-side; this pins the console wiring.
+test("#497 §3: the default-role setting persists across a reload", async ({ page }) => {
+  const role = `e2e-defrole-${Date.now()}`;
+  await page.goto("/admin/roles");
+  await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
+
+  await page.getByTestId("role-create").click();
+  await page.getByTestId("role-name-input").fill(role);
+  await page.getByTestId("role-scope").click();
+  await page.getByRole("option", { name: "Tenant" }).click();
+  await page.getByTestId("role-cap-createSpaces").check();
+  await page.getByTestId("role-save").click();
+  await expect(page.getByTestId("custom-roles")).toContainText(role, { timeout: 8000 });
+
+  // Pick it as the default → reload → still selected (the PUT persisted).
+  await page.getByTestId("default-role").click();
+  await page.getByRole("option", { name: role }).click();
+  await expect(page.getByTestId("default-role")).toContainText(role, { timeout: 8000 });
+  await page.reload();
+  await expect(page.getByTestId("default-role")).toContainText(role, { timeout: 10_000 });
+
+  // Back to None, then delete the role (no live assignment yet).
+  await page.getByTestId("default-role").click();
+  await page.getByRole("option", { name: "None (plain member)" }).click();
+  await page.getByTestId("custom-role-row").filter({ hasText: role }).getByTestId("role-delete").click();
+  await page.getByTestId("role-delete-confirm").click();
+  await expect(page.getByTestId("custom-roles")).not.toContainText(role, { timeout: 8000 });
+});
+
 // A tenant-scope mapping needs no space picker — the target is the tenant itself (the tenant-wide note
 // shows, mirroring the assignment form's tenant behaviour).
 test("#497: a tenant-scope role maps tenant-wide (no space picker)", async ({ page }) => {

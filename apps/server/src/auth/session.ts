@@ -13,6 +13,8 @@ import { enrollEligible } from './enroll-policy.js'
 import { getEnrollConfig } from './enroll-domains.js'
 import { enrolUnderSeatCap } from './invites.js'
 import { ensurePersonalSpace } from '../routes/spaces.js'
+import { evaluateDefaultRole } from '../routes/roles.js'
+import type { SearchDriver } from '../search/index.js'
 
 export const SESSION_COOKIE = 'wks_sess'
 
@@ -154,7 +156,7 @@ export async function destroyMemberSessions(valkey: IORedis, tenantId: string, s
 // (FGA tenant#member). Login NEVER creates membership — it only upserts profile.
 // Membership is granted elsewhere (Cloud signup P1.2 / invite P1.4).
 export async function establishMemberSession(
-  deps: { db: TenantDb; fga: OpenFgaClient; valkey: IORedis },
+  deps: { db: TenantDb; fga: OpenFgaClient; valkey: IORedis; searchDriver?: SearchDriver },
   tenant: { id: string; plan: string },
   claims: { sub: string; email?: string | null; emailVerified?: boolean | null; name?: string | null; picture?: string | null; groups?: string[] },
 ): Promise<string> {
@@ -224,6 +226,16 @@ export async function establishMemberSession(
     const name = personalSpaceName(displayName, await tenantDefaultLang(deps.db))
     await ensurePersonalSpace(deps.db, deps.fga, { tenantId: tenant.id, userId: claims.sub, name, plan: tenant.plan })
   } catch { /* personal-space creation is best-effort; never block login */ }
+  // #497 / ADR-183 §3: apply/refresh the tenant default role for this member (conferred when NO
+  // mapping matches their groups; manual-wins; removed once a mapping matches). BEST-EFFORT and
+  // sequenced AFTER the upsert tx — theassign helpers open their own tx, so this is a separate
+  // transaction, never nested. It is idempotent + re-run every login, so a failure self-heals and must
+  // never block sign-in. searchDriver is passed through but a tenant-scope assignment never reindexes.
+  if (deps.searchDriver) {
+    try {
+      await evaluateDefaultRole(deps.db, deps.fga, deps.searchDriver, tenant, claims.sub, row.groups)
+    } catch { /* default-role application is best-effort; it self-heals at the next login */ }
+  }
   return createSession(deps.valkey, {
     tenantId: tenant.id,
     sub: claims.sub,

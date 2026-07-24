@@ -132,7 +132,7 @@ export async function authPlugin(app: FastifyInstance) {
         return reply.redirect('/login?error=auth')
       }
 
-      const deps = { db, fga: app.fga, valkey: app.valkey }
+      const deps = { db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver }
       let sid: string | null = null
       try {
         sid = await establishMemberSession(deps, tenant, claims) // existing member → session
