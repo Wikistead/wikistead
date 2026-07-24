@@ -53,7 +53,10 @@ export function SpaceModerationTab() {
               {unpatrolled ? t("moderation.emptyUnreviewed") : t("moderation.empty")}
             </p>
           ) : (
-            <ul className="flex flex-col divide-y divide-border rounded-md border border-border" data-testid="moderation-list">
+            // #521: cap the patrol queue at a fixed height with internal scroll so a long queue never pushes
+            // the abuse-filter settings below (SpaceAbuseFilterSection) off-screen — mirrors the #503 audit
+            // ledger scrollbox (max-h-[26rem]). The border/rounding wraps the scroll area.
+            <ul className="flex max-h-[26rem] flex-col divide-y divide-border overflow-y-auto rounded-md border border-border" data-testid="moderation-list">
               {items.map((e: FeedItem) => (
                 <li key={e.id} data-testid="moderation-item" data-patrolled={e.patrolled || undefined} className="flex items-center gap-2 px-3 py-2">
                   <button
