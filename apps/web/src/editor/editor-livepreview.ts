@@ -21,6 +21,7 @@ import { codeFenceSettingsPanel } from "./live-preview/fence-settings-panel"; //
 import { vimExCommands } from "./live-preview/vim-ex";
 import { macroFold } from "./macros";
 import { registerVimFold } from "./live-preview/vim-fold";
+import { registerVimHalfPage } from "./live-preview/vim-halfpage";
 import { atomDelete, atomYank, vimWysiwygCaretGuard } from "./live-preview/vim-atom";
 import { blockDrag } from "./live-preview/block-drag";
 import { everforestHighlight } from "./everforest-highlight";
@@ -67,6 +68,9 @@ export const displayModeContent = (m: DisplayMode) =>
 // Map vim za/zo/zc onto CodeMirror fold commands (codemirror-vim omits them) so vim
 // users can fold macro blocks. Idempotent; runs once at module load.
 registerVimFold();
+// #526: replace codemirror-vim's <C-d>/<C-u>, which WRAP at the document ends (Ctrl-D on the last line
+// jumps the caret to offset 0), with a clamped half-page motion. Idempotent; runs once at module load.
+registerVimHalfPage();
 
 import type { ImageUploader } from "./live-preview/commands";
 import { attachFileDrop } from "./live-preview/image-drop";
