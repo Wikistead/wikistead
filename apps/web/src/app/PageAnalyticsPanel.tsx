@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { usePageAnalytics } from "../data/queries";
 import { AuthorChip } from "../comments/AuthorChip";
+import { PageViewsChart } from "./PageViewsChart";
 
 // #464 / ADR-175: the page analytics panel — the who-viewed roster (members named) + the guest/anonymous
 // aggregate. Rendered ONLY for a page manager (the server 403s a non-manager, 404s a non-viewer), so this
@@ -26,7 +27,11 @@ export function PageAnalyticsPanel({ pageId }: { pageId: string }) {
   return (
     <div className="mt-4 rounded-md border border-border p-3" data-testid="page-analytics">
       <h3 className="mt-0 text-sm font-semibold">{t("pageAnalytics.title")}</h3>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-fg-dim" data-testid="analytics-totals">
+      {/* #464 rework slice 1: the interactive daily-views graph (member/guest/anon series, hover tooltip)
+          replaces reading trends off a flat number. The totals stay as the at-a-glance sum. The right-sidebar
+          placement + fullscreen (slices 2–3) move this out of the editor's bottom whitespace. */}
+      <PageViewsChart daily={data.daily} />
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-fg-dim" data-testid="analytics-totals">
         <span>{t("pageAnalytics.members")}: <b className="text-foreground">{totals.member}</b></span>
         <span>{t("pageAnalytics.guests")}: <b className="text-foreground">{totals.guest}</b></span>
         <span>{t("pageAnalytics.anon")}: <b className="text-foreground">{totals.anon}</b></span>
