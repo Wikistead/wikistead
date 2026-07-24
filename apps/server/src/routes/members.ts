@@ -247,11 +247,16 @@ export async function membersPlugin(app: FastifyInstance) {
     const invalid = validateRollupQuery(req.query) // 400 before any FGA/DB work
     if (invalid) return reply.code(400).send({ error: invalid })
     // Every page in THIS tenant (req.db is RLS-scoped, so the tenant boundary is the database's, not a filter).
-    const rows = await req.db.sql<{ id: string }[]>`SELECT id FROM pages`
+    const rows = await req.db.sql<{ id: string; parent_id: string | null }[]>`SELECT id, parent_id FROM pages`
+    // A tenant admin manages every space, so every space's page#space links may be trusted (the read cost
+    // scales with the number of SPACES, not pages).
+    const spaceRows = await req.db.sql<{ id: string }[]>`SELECT id FROM spaces`
     // #520 a tenant admin IS a manager of every space (`space#manager … or admin from tenant`), so the
     // per-page fan-out — worst here, this scope being the whole tenant — collapses to the private pages only.
     // The gate above already established tenant#admin, so the hint costs no extra check.
-    return rollupPageViews(req.db, req.server.fga, `user:${req.user.sub}`, rows.map((r) => r.id), req.query, true)
+    const parentOf = new Map(rows.map((r) => [r.id, r.parent_id] as const))
+    return rollupPageViews(req.db, req.server.fga, `user:${req.user.sub}`, rows.map((r) => r.id), req.query, true,
+      { parentOf, managedSpaceIds: spaceRows.map((r) => r.id) })
   })
 
   // ── Invites ──────────────────────────────────────────────────────────────
