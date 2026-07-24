@@ -131,6 +131,43 @@ describe("IslandCoEditController (#502 co-edit lifecycle)", () => {
     expect(factory.created[0]!.destroy).toHaveBeenCalledTimes(1);
   });
 
+  // #502 review follow-up (a): a NON-seeder can reach its own `synced` before the seeder's text replicates.
+  // Binding then would hand the editor an EMPTY shared body, and since blur is the commit trigger, any blur
+  // in that window writes the emptiness over the canonical text. Wait for content instead.
+  it("a NON-seeder that syncs before the seed arrives does NOT bind until the body has content", () => {
+    const aw = fakeAwareness(99);          // 99 > 1 ⇒ the peer (1) is the elected seeder, not us
+    aw.occupy(99, "10"); aw.occupy(1, "10");
+    const f = fakeSessionFactory();
+    const onBind = vi.fn();
+    const ctrl = new IslandCoEditController(mkDeps(aw, f, { onBind }));
+    f.created[0]!.sync();                  // our provider synced — but the seed has NOT replicated yet
+    expect(ephemeralBody(f.created[0]!.doc).length, "we are not the seeder, so the body is still empty").toBe(0);
+    expect(onBind, "binding to an empty body is what emptied the canon — must not happen").not.toHaveBeenCalled();
+
+    // the seeder's text arrives
+    const body = ephemeralBody(f.created[0]!.doc);
+    f.created[0]!.doc.transact(() => body.insert(0, "graph TD"));
+    expect(onBind, "now there is something to bind to").toHaveBeenCalledTimes(1);
+    ctrl.dispose();
+  });
+
+  it("a torn-down session stops waiting for a seed (no observer left behind, no late bind)", () => {
+    const aw = fakeAwareness(99);
+    aw.occupy(99, "10"); aw.occupy(1, "10");
+    const f = fakeSessionFactory();
+    const onBind = vi.fn();
+    const onUnbind = vi.fn();
+    const ctrl = new IslandCoEditController(mkDeps(aw, f, { onBind, onUnbind }));
+    f.created[0]!.sync();                  // waiting for the seed
+    aw.leave(1); aw.fire();                // the peer leaves first → tearDown while still waiting
+    expect(onUnbind, "never bound ⇒ no empty flush (the shipped guard)").not.toHaveBeenCalled();
+
+    const body = ephemeralBody(f.created[0]!.doc);
+    f.created[0]!.doc.transact(() => body.insert(0, "late"));
+    expect(onBind, "a late seed must not resurrect a dead session's bind").not.toHaveBeenCalled();
+    ctrl.dispose();
+  });
+
   it("does not double-spin-up while a session is already live", () => {
     const aw = fakeAwareness(5);
     aw.occupy(5, "10"); aw.occupy(9, "10");

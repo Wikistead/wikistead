@@ -40,6 +40,8 @@ export interface CoEditDeps {
   readonly onUnbind: (flushed: string) => void; // host: re-mount local + flush `flushed` to the canon
 }
 
+const NOOP = () => {};
+
 export class IslandCoEditController {
   private session: EphemeralSession | null = null;
   private bound = false; // onBind has fired for the CURRENT session (guards the flush below)
@@ -69,21 +71,44 @@ export class IslandCoEditController {
     session.onSynced(() => {
       if (this.disposed || this.session !== session) return; // torn down while syncing → drop it
       // Seed AFTER sync (single-writer election + seeded-guard, slice 2a), then bind the editor to the body.
+      const body = ephemeralBody(session.doc);
       seedEphemeralBodyOnce(
         session.doc,
         this.deps.awareness.clientID,
         coOccupantClientIDs(this.deps.awareness, this.deps.anchor),
         this.deps.fenceText(),
       );
-      this.bound = true;
-      this.deps.onBind(session);
+      const bindNow = () => {
+        if (this.disposed || this.session !== session) return;
+        this.bound = true;
+        this.deps.onBind(session);
+      };
+      if (body.length > 0) { bindNow(); return } // seeded (by us, or already replicated) → bind straight away
+      // #502 review follow-up (a): only ONE co-occupant seeds (the lowest clientID). Everyone else can reach
+      // their own `synced` BEFORE that seed replicates, and binding then hands the editor an EMPTY shared
+      // body — the island shows nothing, and because blur is the commit trigger, any blur / Escape / a peer
+      // leaving in that window writes the emptiness over the canonical text. The user only SAW empty; they
+      // never emptied anything. So wait for the body's first content instead: the LOCAL surface keeps
+      // showing the real text until then, and the swap happens with something in hand.
+      const onBodyChange = () => {
+        if (body.length === 0) return;
+        this.clearPending();
+        bindNow();
+      };
+      body.observe(onBodyChange);
+      this.clearPending = () => { body.unobserve(onBodyChange); this.clearPending = NOOP };
     });
   }
+
+  // Drops a pending "waiting for the seed" observer, if any. Reassigned while one is armed (above) and
+  // called from tearDown/dispose so a session that dies mid-wait leaves nothing observing its doc.
+  private clearPending: () => void = NOOP;
 
   private tearDown(): void {
     const session = this.session;
     if (!session) return;
     this.session = null;
+    this.clearPending(); // #502: stop waiting for a seed that will never arrive on a dead session
     // Flush the merged co-edit back to the canon ONLY if we actually bound. A session torn down BEFORE its
     // initial sync (a co-occupant left during the sync RTT — real providers sync asynchronously) was never
     // seeded and never bound: its body is EMPTY, so flushing "" would make the host wipe the canonical fence
