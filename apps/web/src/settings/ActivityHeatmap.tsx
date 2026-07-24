@@ -69,6 +69,11 @@ export function ActivityHeatmap({ days }: { days: ActivityDay[] }) {
   const byDay = useMemo(() => new Map(days.map((d) => [d.day, d])), [days]);
   // The hovered cell drives a plain-DOM floating tooltip (settings page — no CM tooltip layer here).
   const [hover, setHover] = useState<Cell | null>(null);
+  // #483 rev (review): the tooltip is anchored to the non-scrolling .relative wrapper, but the cell it
+  // points at lives inside the horizontally-scrolling box — so its screen position is the SVG x MINUS the
+  // container's scrollLeft. Track scrollLeft reactively so the tooltip follows even when the user scrolls
+  // while hovering (fix (b): keep the tooltip OUTSIDE the overflow box, so it is never clipped).
+  const [scrollX, setScrollX] = useState(0);
 
   const { cells, months, width, height } = useMemo(() => {
     const end = new Date();
@@ -110,7 +115,7 @@ export function ActivityHeatmap({ days }: { days: ActivityDay[] }) {
   return (
     <div className="relative">
       {/* wide content scrolls inside its own box so the settings column never overflows horizontally */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" onScroll={(e) => setScrollX(e.currentTarget.scrollLeft)}>
         <svg
           width={width}
           height={height}
@@ -162,7 +167,7 @@ export function ActivityHeatmap({ days }: { days: ActivityDay[] }) {
       {hover && (
         <div
           className="pointer-events-none absolute z-10 rounded-md border border-border bg-panel px-2 py-1 text-xs shadow-md"
-          style={{ left: Math.max(0, hover.x - 60), top: hover.y + STEP + 4 }}
+          style={{ left: Math.max(0, hover.x - 60 - scrollX), top: hover.y + STEP + 4 }}
           data-testid="activity-tooltip"
         >
           <div className="font-medium text-foreground">{longDate.format(keyToDate(hover.key))}</div>
