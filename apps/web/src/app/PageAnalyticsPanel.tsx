@@ -24,12 +24,11 @@ export function PageAnalyticsPanel({ pageId }: { pageId: string }) {
   for (const d of data.daily) totals[d.viewerClass] += d.views;
   const members = [...new Set(data.roster.map((r) => r.memberSub))];
 
+  // #464 rework slice 2: BARE content (no outer border / no h3) — it lives inside the shared RightPanel
+  // (AnalyticsRightPanel), which supplies the panel chrome + title. The interactive daily-views graph
+  // replaces reading trends off a flat number; the totals stay as the at-a-glance sum.
   return (
-    <div className="mt-4 rounded-md border border-border p-3" data-testid="page-analytics">
-      <h3 className="mt-0 text-sm font-semibold">{t("pageAnalytics.title")}</h3>
-      {/* #464 rework slice 1: the interactive daily-views graph (member/guest/anon series, hover tooltip)
-          replaces reading trends off a flat number. The totals stay as the at-a-glance sum. The right-sidebar
-          placement + fullscreen (slices 2–3) move this out of the editor's bottom whitespace. */}
+    <div data-testid="page-analytics">
       <PageViewsChart daily={data.daily} />
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-fg-dim" data-testid="analytics-totals">
         <span>{t("pageAnalytics.members")}: <b className="text-foreground">{totals.member}</b></span>

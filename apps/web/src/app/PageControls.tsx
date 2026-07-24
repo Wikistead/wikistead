@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Copy, Eye, EyeOff, Code, BookOpen, Zap, List, FileStack, Check, Link as LinkIcon } from "lucide-react";
+import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Copy, Eye, EyeOff, Code, BookOpen, Zap, List, FileStack, Check, BarChart3, Link as LinkIcon } from "lucide-react";
 import { useWatchState, useToggleWatch } from "../notifications/useNotifications";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui/Button";
@@ -84,6 +84,7 @@ export interface PageControlsProps {
   onDuplicate?: () => void; // #229: create a new page seeded from this one (template)
   onSaveTemplate?: () => void; // #248: save this page's published content as a reusable template
   onRelated?: () => void; // #322 / ADR-133: open the "Related" right-rail panel (§Backlinks 1-hop + future 2-hop/graph/tags)
+  onAnalytics?: () => void; // #464 / ADR-175: open the page-analytics right panel (manager-only; set only for managers)
   dirtySignal?: DirtySignal;
 }
 
@@ -153,6 +154,8 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string, watch?: W
   if (p.onHistory) items.push({ value: "history", label: t("page.history"), icon: <History size={14} />, testId: "history-toggle" });
   // #322 / ADR-133: "Related" — open the related right-rail panel (both modes; §Backlinks 1-hop today).
   if (p.onRelated) items.push({ value: "related", label: t("related.title"), icon: <LinkIcon size={14} />, testId: "related-toggle" });
+  // #464 / ADR-175: "Who viewed this page" analytics — a manager-only right panel (set only for managers in routes).
+  if (p.onAnalytics) items.push({ value: "analytics", label: t("pageAnalytics.title"), icon: <BarChart3 size={14} />, testId: "analytics-toggle" });
   if (p.onPermissions) items.push({ value: "permissions", label: t("page.permissions"), icon: <Shield size={14} />, testId: "permissions-open" });
   // Share in the ⋯ in BOTH modes. #368 removed the dedicated view-mode Share round button (it grew the
   // bottom-right cluster and pushed the always-present Edit button around), so view mode reaches Share here
@@ -174,6 +177,7 @@ function runOverflow(p: PageControlsProps, v: string, watch?: WatchItems) {
   if (v === "duplicate") { p.onDuplicate?.(); return; }
   if (v === "save-template") { p.onSaveTemplate?.(); return; }
   if (v === "related") { p.onRelated?.(); return; }
+  if (v === "analytics") { p.onAnalytics?.(); return; }
   if (v === "comments") p.onToggleComments?.();
   else if (v === "export") p.onExport?.();
   else if (v === "export-html") p.onExportHtml?.();
