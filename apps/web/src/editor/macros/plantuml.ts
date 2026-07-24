@@ -1,4 +1,6 @@
 import { asMacroSource, type FenceMacro } from "./registry";
+import i18n from "../../i18n";
+import { diagramVerdict } from "../live-preview/decorations";
 import { plantumlHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
 import { mountSourceEditor } from "./source-editor"; // #243 / ADR-111 C3: CM6 mini-editor source pane
 
@@ -64,11 +66,24 @@ export const plantumlMacro: FenceMacro = {
         const host = editEnv?.renderDiagram;
         if (!host) { showSource(code); return; }
         const mine = ++seq;
-        void host(asMacroSource(code)).then((blob) => {
+        void host(asMacroSource(code)).then((res) => {
           if (mine !== seq) return; // superseded by a newer keystroke
-          if (!blob) { showSource(code); return; } // degrade — never a broken embed
+          // #525 mermaid parity — an INVALID diagram says so (the author is mid-edit and can fix
+          // it), an outage says so separately, and an unconfigured endpoint just shows the source.
+          const v = diagramVerdict(res);
+          if (!("blob" in v)) {
+            showSource(code); // the source is always kept — never a broken embed
+            if (v.reason !== "degrade") {
+              const msg = document.createElement("div");
+              msg.className = "cm-lp-macro-error-msg";
+              msg.setAttribute("data-testid", "plantuml-edit-error");
+              msg.textContent = i18n.t(v.reason === "invalid" ? "macro.diagramInvalid" : "macro.diagramUnavailable");
+              preview.prepend(msg);
+            }
+            return;
+          }
           dropUrl();
-          objectUrl = URL.createObjectURL(blob);
+          objectUrl = URL.createObjectURL(v.blob);
           const img = document.createElement("img");
           img.className = "cm-lp-macro-rendered";
           img.alt = "plantuml diagram";

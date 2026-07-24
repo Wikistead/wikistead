@@ -717,3 +717,17 @@ body {
   animation: wks-pop var(--dur-fast) var(--ease-out);
 }
 .wks-tip[hidden] { display: none; }
+
+/* #525/ host-rendered diagram states. The renderer is a ~1.4s round trip to the operator's
+   endpoint, so say "rendering" instead of leaving the raw source looking broken; and when the endpoint
+   reports the DIAGRAM is invalid (422) say so above the source the author can fix — the mermaid parity
+   the ticket asked for. An unconfigured endpoint stays a silent degrade (no message at all). */
+.cm-lp-macro-pending,
+.cm-lp-macro-error-msg {
+  font-size: 0.8em;
+  line-height: 1.5;
+  padding: 0.15em 0.4em;
+  border-radius: var(--radius-sm, 4px);
+}
+.cm-lp-macro-pending { color: var(--fg-dim); }
+.cm-lp-macro-error-msg { color: var(--destructive, #d33); background: color-mix(in srgb, var(--destructive, #d33) 10%, transparent); }

@@ -933,7 +933,10 @@
     "pageEmbedEmpty": "空のページ埋め込み — Ctrl+↵ でページを追加",
     "listEmpty": "該当ページはまだありません。",
     "emptyEdit": "空の{{name}} — Ctrl+↵ で編集",
-    "emptyOpen": "空の{{name}} — Ctrl+↵ で開く"
+    "emptyOpen": "空の{{name}} — Ctrl+↵ で開く",
+    "diagramRendering": "図を生成中…",
+    "diagramInvalid": "PlantUML の図が不正です",
+    "diagramUnavailable": "図のレンダラーに接続できませんでした"
   },
   "templates": {
     "title": "テンプレート",

@@ -934,7 +934,10 @@
     "pageEmbedEmpty": "Empty page embed — Ctrl+↵ to add a page",
     "listEmpty": "No pages yet.",
     "emptyEdit": "Empty {{name}} — Ctrl+↵ to edit",
-    "emptyOpen": "Empty {{name}} — Ctrl+↵ to open"
+    "emptyOpen": "Empty {{name}} — Ctrl+↵ to open",
+    "diagramRendering": "Rendering the diagram…",
+    "diagramInvalid": "Invalid PlantUML diagram",
+    "diagramUnavailable": "Could not reach the diagram renderer"
   },
   "templates": {
     "title": "Templates",

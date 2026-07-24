@@ -27,11 +27,19 @@ function makeRenderer(url: string, token: string, fetcher: Fetcher): DiagramRend
         // widget rebuilds on a theme switch (#200 — theme is in its eq() key), so this re-fetches for free.
         body: JSON.stringify({ source, theme }),
       });
-      if (res.status !== 200) return null; // 204 = degrade-to-source; 4xx/5xx → keep the source too
-      if (!(res.headers.get("content-type") ?? "").startsWith("image/")) return null; // raster only
-      return await res.blob();
+      // #525 the server now distinguishes the failure modes, so pass them through instead of
+      // flattening everything to "degrade". 204 (unconfigured) stays a silent degrade; 422 means the
+      // DIAGRAM is invalid (the author can fix it — show it, like mermaid does); 503 is the renderer
+      // being down, which is not a syntax error. Anything else (403/404 existence-hiding, 400, 429)
+      // keeps the old degrade, since those are access/abuse answers, not statements about the diagram.
+      if (res.status === 204) return { ok: false, reason: "degrade" };
+      if (res.status === 422) return { ok: false, reason: "invalid" };
+      if (res.status === 503) return { ok: false, reason: "unavailable" };
+      if (res.status !== 200) return { ok: false, reason: "degrade" };
+      if (!(res.headers.get("content-type") ?? "").startsWith("image/")) return { ok: false, reason: "degrade" }; // raster only
+      return { ok: true, blob: await res.blob() };
     } catch {
-      return null; // network failure → degrade
+      return { ok: false, reason: "unavailable" }; // network failure: the renderer could not be reached
     }
   };
 }
