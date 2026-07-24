@@ -80,7 +80,9 @@ function staticMacroChip(label: string): HTMLElement {
 // trusted constant SVGs (no user input → innerHTML is XSS-safe); title/lang go through textContent.
 export const FENCE_COPY_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
 export const FENCE_CHECK_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
-export function buildFenceHeader(args: { lang: string; title?: string; code: string; canCopy: boolean }): HTMLElement {
+// #502 gear/pencil glyph for the code-settings affordance (trusted constant SVG, XSS-safe like the copy icon).
+export const FENCE_SETTINGS_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+export function buildFenceHeader(args: { lang: string; title?: string; code: string; canCopy: boolean; onSettings?: () => void; settingsLabel?: string }): HTMLElement {
   const row = document.createElement("div");
   row.className = "cm-lp-code-header";
   row.contentEditable = "false";
@@ -100,6 +102,22 @@ export function buildFenceHeader(args: { lang: string; title?: string; code: str
   }
   // #174 comment 948: a lang-less fence must NOT emit an EMPTY tab stub — header is just the copy button.
   if (args.title || args.lang) row.appendChild(tab);
+  // #456 rev (review ①/④): the code-settings ✎ lives in the header chrome, to the LEFT of the copy
+  // button — the same top-right corner group, not a separate floating tooltip. EDIT surface only (the caller
+  // passes onSettings iff the settings field is registered), so guests/the render surface never get it. Being
+  // in the always-rendered header means keyboard/caret users see it too (④), not only on mouse hover.
+  if (args.onSettings) {
+    const gear = document.createElement("button");
+    gear.type = "button";
+    gear.className = "cm-lp-code-settings-btn";
+    gear.setAttribute("data-testid", "fence-settings-hint");
+    gear.setAttribute("aria-label", args.settingsLabel ?? "Code settings");
+    gear.title = args.settingsLabel ?? "Code settings";
+    gear.innerHTML = FENCE_SETTINGS_ICON;
+    gear.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); }); // keep selection put
+    gear.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); args.onSettings!(); });
+    row.appendChild(gear);
+  }
   if (args.canCopy) {
     const btn = document.createElement("button");
     btn.type = "button";

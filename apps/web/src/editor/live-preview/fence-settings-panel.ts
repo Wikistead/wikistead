@@ -1,4 +1,4 @@
-import { EditorView, showTooltip, hoverTooltip, keymap, type Tooltip } from "@codemirror/view";
+import { EditorView, showTooltip, keymap, type Tooltip } from "@codemirror/view";
 import { StateField, StateEffect, Prec, type EditorState, type Extension } from "@codemirror/state";
 import { renderMacroSettings } from "./macro-settings-controls";
 import { codeFenceSettings, fenceInfoOf, withFenceInfo } from "../macros/fence-settings";
@@ -27,6 +27,8 @@ function settingsTooltip(pos: number): Tooltip {
     pos,
     above: false,
     arrow: true,
+    // #456 rev (review ②): the panel's own surface replaces CM's default `.cm-tooltip` chrome, which is
+    // stripped via `.cm-tooltip:has(.cm-lp-fence-settings)` in callout-icons.css (no "second box" double-frame).
     create(view) {
       const dom = document.createElement("div");
       dom.className = "cm-lp-fence-settings";
@@ -112,56 +114,20 @@ function openFenceSettingsAtCaret(view: EditorView): boolean {
   return true;
 }
 
-// #456 item 2: the discoverable affordance. Hovering a code fence shows a small ✎ button anchored at
-// the block's opening line (top-left), whose click opens the same settings panel — the mouse counterpart to
-// the keyboard command, and a hint that the settings exist. It lives in CM's tooltip layer (like the panel
-// itself), so it never enters the heightMap and cannot drift the block motion (the widget-motion lesson).
-// The document range of the whole fenced block starting at `openingFrom` (opening line through the closing
-// ``` line, or end-of-doc if unterminated). Used as the hover tooltip's active range so the ✎ stays put
-// while the pointer is anywhere in the block, while the tooltip itself anchors at the opening line.
-function fenceBlockRange(state: EditorState, openingFrom: number): { from: number; to: number } {
-  const open = state.doc.lineAt(openingFrom);
-  const fence = /^(\s*)([`~]{3,})/.exec(open.text);
-  const marker = fence ? fence[2][0] : "`";
-  for (let n = open.number + 1; n <= state.doc.lines; n++) {
-    const line = state.doc.line(n);
-    if (new RegExp(`^\\s*[${marker}]{3,}\\s*$`).test(line.text)) return { from: open.from, to: line.to };
-  }
-  return { from: open.from, to: state.doc.length };
-}
+// #456 rev: the discoverable ✎ affordance moved from a floating hoverTooltip into the code HEADER chrome
+// (buildFenceHeader, next to the copy button — see decorations.ts FenceHeaderWidget). It is now always
+// visible when the block renders (caret/keyboard users, not only mouse hover — review ④), so the old
+// `fenceBlockRange` + `fenceSettingsHint` hoverTooltip are retired.
 
-function fenceSettingsHint() {
-  return hoverTooltip((view, pos) => {
-    const at = codeFenceOpeningAt(view.state, pos);
-    if (at == null) return null;
-    const block = fenceBlockRange(view.state, at);
-    return {
-      pos: at,
-      end: block.to,
-      above: true,
-      arrow: false,
-      create: () => {
-        const dom = document.createElement("button");
-        dom.type = "button";
-        dom.className = "cm-lp-fence-settings-hint";
-        dom.setAttribute("data-testid", "fence-settings-hint");
-        dom.setAttribute("aria-label", i18n.t("contextMenu.codeSettings"));
-        dom.title = i18n.t("contextMenu.codeSettings");
-        dom.textContent = "✎";
-        dom.addEventListener("mousedown", (e) => e.preventDefault()); // keep the editor selection put
-        dom.addEventListener("click", (e) => { e.preventDefault(); toggleFenceSettings(view, at); });
-        return { dom };
-      },
-    };
-  }, { hoverTime: 120 });
-}
-
-// The whole code-fence settings feature as one extension: the panel field, the keyboard opener, and the
-// hover ✎. Registered in edit mode only (see editor-livepreview).
+// The whole code-fence settings feature as one extension: the panel field + the keyboard opener. The ✎ hint
+// now lives in the header chrome (decorations.ts). Registered in edit mode only (see editor-livepreview).
 export function codeFenceSettingsPanel(): Extension {
   return [
     fenceSettingsField,
     Prec.high(keymap.of([{ key: "Mod-Alt-Enter", run: openFenceSettingsAtCaret }])),
-    fenceSettingsHint(),
+    // #456 rev (review ①): the ✎ affordance moved OUT of a floating hoverTooltip and INTO the code
+    // header chrome (buildFenceHeader, next to the copy button — decorations.ts FenceHeaderWidget), so it sits
+    // in the same top-right corner group and is visible to caret/keyboard users, not only on mouse hover (④).
+    // The former `fenceSettingsHint()` hoverTooltip is retired.
   ];
 }
