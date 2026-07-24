@@ -121,20 +121,32 @@ function ProfileTab() {
     <SettingsPage title={t("accountNav.profile")} description={t("account.profileHint")}>
       <SettingsCard>
         <label className="mb-1 block text-sm font-medium">{t("account.displayName")}</label>
-        <p className="mb-2 text-xs text-fg-dim">{t("account.displayNameHint")}</p>
-        <div className="flex items-center gap-2">
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={settings.data?.oidcDisplayName ?? sub ?? ""}
-            data-testid="account-name-input"
-          />
-          <Button onClick={saveName} disabled={update.isPending} data-testid="account-name-save">{t("common.save")}</Button>
-        </div>
-        {settings.data?.displayNameOverride != null && (
-          <button type="button" className="mt-2 text-xs text-fg-dim underline hover:text-foreground" onClick={resetName} data-testid="account-name-reset">
-            {t("account.resetToIdp", { name: settings.data?.oidcDisplayName ?? sub ?? "" })}
-          </button>
+        {/* #523 / ADR-190 (slice C): an OIDC-sourced user's name is managed by their identity provider
+            authoritative, anti-impersonation — so it is READ-ONLY here (the server also refuses the write).
+            Only a 'local' user may edit it. The override UI is retained, gated to local users. */}
+        {settings.data && settings.data.identitySource !== "local" ? (
+          <>
+            <p className="mb-2 text-xs text-fg-dim">{t("account.displayNameIdpManaged")}</p>
+            <p className="text-sm font-medium" data-testid="account-name-readonly">{settings.data.oidcDisplayName ?? sub ?? ""}</p>
+          </>
+        ) : (
+          <>
+            <p className="mb-2 text-xs text-fg-dim">{t("account.displayNameHint")}</p>
+            <div className="flex items-center gap-2">
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={settings.data?.oidcDisplayName ?? sub ?? ""}
+                data-testid="account-name-input"
+              />
+              <Button onClick={saveName} disabled={update.isPending} data-testid="account-name-save">{t("common.save")}</Button>
+            </div>
+            {settings.data?.displayNameOverride != null && (
+              <button type="button" className="mt-2 text-xs text-fg-dim underline hover:text-foreground" onClick={resetName} data-testid="account-name-reset">
+                {t("account.resetToIdp", { name: settings.data?.oidcDisplayName ?? sub ?? "" })}
+              </button>
+            )}
+          </>
         )}
       </SettingsCard>
 

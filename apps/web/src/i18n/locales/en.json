@@ -108,6 +108,7 @@
     "editorHint": "How the editor behaves for you: keymap, startup mode, fonts, and shortcuts.",
     "displayName": "Display name",
     "displayNameHint": "Overrides the name from your identity provider. It is shown to collaborators.",
+    "displayNameIdpManaged": "Managed by your identity provider and shown to collaborators. Change it with your provider.",
     "resetToIdp": "Reset to \"{{name}}\"",
     "avatar": "Avatar",
     "avatarHint": "PNG, JPEG, WebP or GIF, up to 512KB. Shown on your cursor and in member lists.",

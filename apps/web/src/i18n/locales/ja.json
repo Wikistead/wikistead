@@ -108,6 +108,7 @@
     "editorHint": "エディタの挙動：キーマップ・起動モード・フォント・ショートカット。",
     "displayName": "表示名",
     "displayNameHint": "ID プロバイダの名前を上書きします。共同編集者に表示されます。",
+    "displayNameIdpManaged": "ID プロバイダが管理し、共同編集者に表示されます。変更はプロバイダ側で行ってください。",
     "resetToIdp": "「{{name}}」に戻す",
     "avatar": "アバター",
     "avatarHint": "PNG / JPEG / WebP / GIF、512KB まで。カーソルやメンバー一覧に表示されます。",

@@ -46,6 +46,9 @@ export interface AccountSettings {
   displayName: string | null          // effective: override ?? OIDC ?? null
   oidcDisplayName: string | null      // the IdP value (for the "reset to IdP name" label)
   displayNameOverride: string | null  // the user's override (null = using OIDC)
+  // #523 / ADR-190: where this identity came from. 'oidc' → the name is IdP-managed and the override
+  // is refused (the UI shows it read-only); 'local' → the user may edit it. (slice C)
+  identitySource: string
   editorKeymap: KeymapMode            // startup-mode preference (keymap)
   editorDisplayMode: DisplayModePref  // startup display mode (ADR-056 / #164)
   keybindings: Record<string, string> // commandId → chord override (ADR-021); {} = defaults
@@ -62,8 +65,8 @@ export interface AccountSettings {
 }
 
 export async function getAccountSettings(db: TenantDb, args: { subject: string }): Promise<AccountSettings> {
-  const [m] = await db.sql<[{ display_name: string | null; display_name_override: string | null; avatar_image_key: string | null; editor_keymap: string | null; editor_display_mode: string | null; keybindings: unknown; editor_chrome: unknown; onboarding_completed_at: Date | string | null; notifications_enabled: boolean | null; default_event_mask: string[] | null }?]>`
-    SELECT display_name, display_name_override, avatar_image_key, editor_keymap, editor_display_mode, keybindings, editor_chrome, onboarding_completed_at, notifications_enabled, default_event_mask
+  const [m] = await db.sql<[{ display_name: string | null; display_name_override: string | null; avatar_image_key: string | null; editor_keymap: string | null; editor_display_mode: string | null; keybindings: unknown; editor_chrome: unknown; onboarding_completed_at: Date | string | null; notifications_enabled: boolean | null; default_event_mask: string[] | null; identity_source: string }?]>`
+    SELECT display_name, display_name_override, avatar_image_key, editor_keymap, editor_display_mode, keybindings, editor_chrome, onboarding_completed_at, notifications_enabled, default_event_mask, identity_source
     FROM members WHERE sub = ${args.subject} LIMIT 1`
   if (!m) throw Object.assign(new Error('no member row'), { statusCode: 404 })
   // JSONB comes back as a raw JSON string from this pg driver — parse it (null → {}).
@@ -73,6 +76,7 @@ export async function getAccountSettings(db: TenantDb, args: { subject: string }
     displayName: m.display_name_override ?? m.display_name ?? null,
     oidcDisplayName: m.display_name ?? null,
     displayNameOverride: m.display_name_override ?? null,
+    identitySource: m.identity_source ?? 'oidc',
     editorKeymap: (KEYMAP_MODES as string[]).includes(m.editor_keymap ?? '') ? (m.editor_keymap as KeymapMode) : 'local',
     editorDisplayMode: (DISPLAY_MODE_PREFS as string[]).includes(m.editor_display_mode ?? '') ? (m.editor_display_mode as DisplayModePref) : 'local',
     keybindings: kb as Record<string, string>,
