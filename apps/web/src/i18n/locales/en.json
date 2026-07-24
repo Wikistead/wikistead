@@ -438,7 +438,12 @@
     "bulkDeletePartial": "Deleted {{deleted}}; skipped {{skipped}} (no permission).",
     "publish": "Publish",
     "bulkPublishDone": "Published {{count}} page(s).",
-    "bulkPublishPartial": "Published {{published}}; skipped {{skipped}} (no permission)."
+    "bulkPublishPartial": "Published {{published}}; skipped {{skipped}} (no permission).",
+    "makePrivate": "Make private",
+    "clearPrivate": "Clear private",
+    "bulkPrivateDone": "{{count}} pages made private",
+    "bulkUnprivateDone": "{{count}} pages are no longer private",
+    "bulkVisibilityPartial": "{{changed}} changed, {{skipped}} skipped (no permission)"
   },
   "spaceMembers": {
     "title": "Members & permissions",

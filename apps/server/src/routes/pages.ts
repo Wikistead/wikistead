@@ -2129,6 +2129,64 @@ export async function bulkPublishPages(
   return { results, published, skipped: results.length - published }
 }
 
+// #511 / ADR-185 (slice 3): bulk VISIBILITY — make a selection private, or clear private. Third verb, same
+// shape as delete and publish deliberately: every page goes through the SINGLE-page primitive, so the
+// `share` gate, the private marker PAIR (user:* + share_link:* — a lone user:* leaves guests a way in,
+// #244), the subtree cascade, the public-grant strip and the SYNCHRONOUS outbox reindex (a privatisation is
+// a permission REVOCATION, so search must not learn about it lazily) are the exact same code the per-page
+// route runs. A bulk endpoint that reimplemented any of that would be a second authorizer.
+export const BULK_VISIBILITY_CAP = 500
+export interface BulkVisibilityResult { results: { id: string; ok: boolean; reason?: string }[]; changed: number; skipped: number }
+
+export async function bulkSetPageVisibility(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { spaceId: string; pageIds: string[]; makePrivate: boolean; tenantId: string; userId: string; plan?: string },
+): Promise<BulkVisibilityResult> {
+  // Existence-hiding: a caller who cannot view the space gets a uniform 404 for the whole request, never a
+  // per-item map they could read as an oracle (parity with delete/publish).
+  if (!(await check(fga, `user:${args.userId}`, 'view', { type: 'space', id: args.spaceId }))) {
+    throw Object.assign(new Error('not found'), { statusCode: 404 })
+  }
+  const requested = [...new Set(args.pageIds)]
+  if (requested.length > BULK_VISIBILITY_CAP) {
+    throw Object.assign(new Error(`selection exceeds the ${BULK_VISIBILITY_CAP}-page cap`), { statusCode: 400, reason: 'too_many' })
+  }
+  // RLS-scoped: rows the caller can SELECT, in THIS space, still live. Anything else reports the UNIFORM
+  // 'not_found' — the per-page FGA gate inside the primitive stays the authority either way.
+  const live = requested.length
+    ? (await db.sql<{ id: string }[]>`
+        SELECT id FROM pages
+        WHERE id = ANY(${requested}) AND space_id = ${args.spaceId} AND deleted_root_id IS NULL
+      `).map((r) => r.id)
+    : []
+  const liveSet = new Set(live)
+
+  const results: { id: string; ok: boolean; reason?: string }[] = []
+  for (const id of requested) {
+    if (!liveSet.has(id)) { results.push({ id, ok: false, reason: 'not_found' }); continue }
+    try {
+      const call = args.makePrivate ? setPagePrivate : unsetPagePrivate
+      // per-page `share` gate + trashed guard + marker pair + subtree reindex all live INSIDE this call
+      await call(db, fga, driver, { pageId: id, tenantId: args.tenantId, userId: args.userId, plan: args.plan })
+      results.push({ id, ok: true })
+    } catch (e) {
+      // Classify without leaking (thehole, kept closed): the pre-loop SELECT is RLS/tenant-scoped, NOT
+      // view-scoped, so a same-space page the caller cannot see still reaches this catch and throws 403. Map it
+      // to the SAME 'not_found' an absent id gets, or the reason would tell a member holding a UUID whether the
+      // page exists-but-is-forbidden. One bad page never aborts the batch (partial success).
+      const status = (e as { statusCode?: number })?.statusCode
+      const reason = status === 404 || status === 403 ? 'not_found'
+        : status === 400 ? ((e as { reason?: string }).reason ?? 'policy') : 'error'
+      results.push({ id, ok: false, reason })
+    }
+  }
+  const changed = results.filter((r) => r.ok).length
+  return { results, changed, skipped: results.length - changed }
+}
+
+
 // #411 / ADR-153: the gate-free physical delete — callers authorize (deletePage/purgePage: caller manage;
 // retention sweep: system context, the trash entry itself is the authority). Never routed directly.
 async function physicalDeletePage(
@@ -3198,6 +3256,19 @@ export async function pagesPlugin(app: FastifyInstance) {
     const pageIds = Array.isArray(req.body?.pageIds) ? req.body.pageIds.filter((x): x is string => typeof x === 'string') : []
     const flush = (pageId: string) => flushDraft(app.valkey, docName(req.tenant.id, pageId))
     const r = await bulkPublishPages(req.db, app.fga, app.searchDriver, app.storageDriver, { spaceId: req.params.spaceId, pageIds, userId: req.user.sub, flush })
+    return reply.code(200).send(r)
+  })
+
+  // #511 / ADR-185 (slice 3): bulk visibility (member-only; no guest config). `private: true` makes the
+  // selection private, `false` clears it. The per-page `share` gate, the marker pair, the subtree cascade and
+  // the synchronous reindex all ride inside bulkSetPageVisibility; the response is a partial-success map.
+  app.post<{ Params: { spaceId: string }; Body: { pageIds?: unknown; private?: unknown } }>('/spaces/:spaceId/pages/bulk-visibility', async (req, reply) => {
+    const pageIds = Array.isArray(req.body?.pageIds) ? req.body.pageIds.filter((x): x is string => typeof x === 'string') : []
+    if (typeof req.body?.private !== 'boolean') return reply.code(400).send({ error: 'private (boolean) required' })
+    const r = await bulkSetPageVisibility(req.db, app.fga, app.searchDriver, {
+      spaceId: req.params.spaceId, pageIds, makePrivate: req.body.private,
+      tenantId: req.tenant.id, userId: req.user.sub, plan: req.tenant.plan,
+    })
     return reply.code(200).send(r)
   })
 
