@@ -6,11 +6,9 @@
    FULL published Markdown once via the shared sanitised renderer, and here we hide the live app and show
    ONLY that surface in NORMAL DOCUMENT FLOW, so the browser paginates it across as many sheets as needed. */
 /* #207: the browser default print margin is oversized. Set a compact, even page margin so the content
-   uses the sheet. #505: a DARK print needs the sheet dark to the paper edge, but a page margin is OUTSIDE
-   the page box and the root background cannot paint it (verified: a dark print left a white 14mm frame).
-   So a dark print swaps this for @page{margin:0} + a 14mm padding on [data-print-root], injected by
-   ThemeProvider only when the resolved theme is dark (@page can't read data-theme). Light print keeps
-   this even page margin unchanged — strict non-regression. */
+   uses the sheet. (The dark-print variant that swapped this for margin:0 + padding is gone with #505's
+   light-fixed ruling — with a white sheet the margin needs no colour, so one page margin serves both
+   themes, and it matches the export stylesheet's @page.) */
 @page {
   margin: 14mm;
 }
@@ -46,36 +44,45 @@
   }
 }
 
-/* #505 (dark print): in a DARK theme the reading text uses light tokens (--fg ≈ light grey), but the
-   printed sheet defaulted to white → faint light text on white paper, unreadable (review rejection
-   2026-07-24). Paint the sheet dark. The background is set on :root (the html element), whose background
-   PROPAGATES to the paged canvas, so it fills the content box on every page (not just page 1). The
-   [data-print-root] gets the same dark fill directly so the flowed content box is dark even where the
-   canvas propagation stops at the @page margin edge. Forced with print-color-adjust so the browser
-   actually renders the fill (the callout/code tints already use it). Scoped to dark ONLY — light-theme
-   print (white sheet, dark text) is a strict non-regression; pagination/chrome/callout colours (all
-   PASSED) are untouched. Both the explicit dark toggle (data-theme=dark) and OS-following system-dark
-   are covered. */
+/* #505 (user ruling 2026-07-27): print is LIGHT-FIXED. The earlier "real dark print" (which
+   painted the sheet dark to match a dark theme) is RETRACTED — paper does not print a background colour,
+   the result depends on the reader's printer, and every comparable tool prints light. ADR-191 folds print
+   onto the same canonical renderer as the public HTML, whose print stylesheet already forces light
+   (html-export.ts), so this brings the CLIENT print surface to the same answer and the two paths stop
+   disagreeing.
+
+   Forcing the light TOKENS (not just dropping the dark fill) is the point: in a dark theme the reading
+   text is a light grey, so a white sheet with the dark theme's --fg is the faint, unreadable print this
+   ticket opened with. Re-point the tokens for the duration of the print and every consumer — body text,
+   callout tints and bars, code and table surfaces — comes out in its light form with no per-element
+   handling. print-color-adjust keeps the tinted fills from being dropped. */
 @media print {
-  :root[data-theme="dark"] {
-    background: var(--bg) !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  :root[data-theme="dark"] [data-print-root] {
-    background: var(--bg);
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-}
-@media print and (prefers-color-scheme: dark) {
+  /* MEASURED: `:root` alone does NOT win — tokens.css sets the dark values on `:root[data-theme="dark"]`
+     (two selectors), which outranks a bare `:root`, so a dark print kept the light-grey --fg and the faint
+     text came straight back. Name every theme selector so the print values match that specificity (and,
+     being later in source order, win). */
+  :root,
+  :root[data-theme="light"],
+  :root[data-theme="dark"],
   :root[data-theme="system"] {
-    background: var(--bg) !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --fg-dim: #656d76;
+    --panel: #f6f8fa;
+    --panel-2: #eaeef2;
+    --panel-3: #dfe5eb;
+    --border: #d0d7de;
+    --link: #0969da;
+    --callout-info: #0969da;
+    --callout-note: #57606a;
+    --callout-tip: #2ea043;
+    --callout-warning: #d29922;
+    --callout-danger: #cf222e;
+    color-scheme: light; /* native controls / caret follow the sheet, not the app theme */
   }
-  :root[data-theme="system"] [data-print-root] {
-    background: var(--bg);
+  [data-print-root] {
+    background: #ffffff;
+    color: var(--fg);
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
