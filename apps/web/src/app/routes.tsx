@@ -20,6 +20,7 @@ const WatchListRoute = lazy(() => import("../notifications/WatchListPage").then(
 // ({flag && <Panel/>}), yet they rode the eager main bundle. Split each behind its own chunk; a null
 // fallback is fine (the chunk loads in well under a frame, and the panel is a deliberate open action).
 const CommentsPanel = lazy(() => import("../comments/CommentsPanel").then((m) => ({ default: m.CommentsPanel })));
+const AnalyticsRightPanel = lazy(() => import("./AnalyticsRightPanel").then((m) => ({ default: m.AnalyticsRightPanel }))); // #464
 const HistoryPanel = lazy(() => import("../history/HistoryPanel").then((m) => ({ default: m.HistoryPanel })));
 const DiffModal = lazy(() => import("../history/DiffModal").then((m) => ({ default: m.DiffModal })));
 const AttachmentsPanel = lazy(() => import("../attachments/AttachmentsPanel").then((m) => ({ default: m.AttachmentsPanel })));
@@ -37,7 +38,6 @@ import { LoginScreen } from "./LoginScreen";
 
 
 import { Editor, type AnchorGetter } from "../editor/Editor";
-import { PageAnalyticsPanel } from "./PageAnalyticsPanel"; // #464 / ADR-175
 import { createDirtySignal } from "../editor/dirtySignal";
 import { colorFromString } from "../ui/avatar";
 
@@ -437,13 +437,25 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   };
   const closeRelated = useCallback(() => setRelatedOpen(false), []);
 
-  // #206: mutual exclusion — only one right panel (comments / history / attachments / related) is open
-  // at a time. Opening one closes the others (and clears their persisted-open flag).
-  const closeOtherRightPanels = (keep: "comments" | "history" | "attachments" | "related") => {
+  // #464 rework slice 2: page analytics as a RIGHT panel (was a static block at the editor's bottom the
+  // user couldn't find). Same right-panel zone + #206 exclusion as comments/history. Non-persisted (opened
+  // deliberately, like related). The panel itself is manager/entitled-gated by the endpoint it reads.
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const toggleAnalytics = () => {
+    const willOpen = !analyticsOpen;
+    setAnalyticsOpen(willOpen);
+    if (willOpen) closeOtherRightPanels("analytics");
+  };
+  const closeAnalytics = useCallback(() => setAnalyticsOpen(false), []);
+
+  // #206: mutual exclusion — only one right panel (comments / history / attachments / related / analytics)
+  // is open at a time. Opening one closes the others (and clears their persisted-open flag).
+  const closeOtherRightPanels = (keep: "comments" | "history" | "attachments" | "related" | "analytics") => {
     if (keep !== "comments") { setCommentsOpen(false); try { localStorage.setItem("wks.commentsOpen", "0"); } catch { /* no storage */ } }
     if (keep !== "history") { setHistoryOpen(false); try { localStorage.setItem("wks.historyOpen", "0"); } catch { /* no storage */ } }
     if (keep !== "attachments") setAttachmentsOpen(false);
     if (keep !== "related") setRelatedOpen(false);
+    if (keep !== "analytics") setAnalyticsOpen(false);
   };
 
   // Per-page permissions (manage only). Also the invite-to-draft surface.
@@ -617,6 +629,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
     onHistory: toggleHistory,
     onAttachments: toggleAttachments,
     onRelated: pageId ? toggleRelated : undefined,
+    onAnalytics: page?.canManage && pageId ? toggleAnalytics : undefined, // #464: manager-only analytics right panel
     onExport: () => { if (pageId) void downloadPageExport(token, pageId); },
     // #85 bounce: the HTML-export UI entry is SEALED until the post-launch Option-A redesign (a
     // DOM-free render core shared by client + SSR). The current renderMarkdownToHtml output is
@@ -723,10 +736,9 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
               canEdit={canEdit}
             />
             <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
-            {/* #464 / ADR-175: the who-viewed analytics panel — a MANAGER-only reading affordance (the
-                server 403s a non-manager, 404s a non-viewer; this only renders when the caller manages the
-                page and is reading, not editing). */}
-            {page?.canManage && !editing && pageId && <PageAnalyticsPanel pageId={pageId} />}
+            {/* #464 / ADR-175 rework slice 2/4: the who-viewed analytics moved OUT of this bottom-of-editor
+                spot (the user couldn't find it) into a right panel (analyticsOpen, below) — opened from the
+                ⋯ menu, manager-only. The static bottom render is retired. */}
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #192: the TOC rail lives in the content's RIGHT WHITESPACE, inside the editor area, so the
                 scrollbar (the editor's, at the far right) is to the RIGHT of the rail — not between them.
@@ -748,13 +760,14 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
               subscribeScroll={subscribeTocScroll}
               isWide={isWide}
               tocOn={tocOn}
-              railEnabled={!commentsOpen && !historyOpen && !attachmentsOpen && !relatedOpen}
+              railEnabled={!commentsOpen && !historyOpen && !attachmentsOpen && !relatedOpen && !analyticsOpen}
             />
           </div>
         </div>
         {pageId && commentsOpen && <Suspense fallback={null}><CommentsPanel pageId={pageId} canComment={page?.canComment ?? capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} /></Suspense>}
         {pageId && historyOpen && <Suspense fallback={null}><HistoryPanel pageId={pageId} canRestore={capability === "edit"} canModerate={page?.canModerate ?? false} onCompare={openDiff} onClose={closeHistory} /></Suspense>}
         {pageId && attachmentsOpen && <Suspense fallback={null}><AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} onClose={closeAttachments} /></Suspense>}
+        {pageId && analyticsOpen && <Suspense fallback={null}><AnalyticsRightPanel pageId={pageId} onClose={closeAnalytics} /></Suspense>}
         {pageId && relatedOpen && <Suspense fallback={null}><RelatedPanel pageId={pageId} onClose={closeRelated} /></Suspense>}
       </div>
       {pageId && diffRevId && <Suspense fallback={null}><DiffModal pageId={pageId} revId={diffRevId} onClose={closeDiff} /></Suspense>}
