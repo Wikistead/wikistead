@@ -10,9 +10,9 @@ import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
-import { fgaClient, writeTuples } from '@wikistead/authz'
+import { check, fgaClient, writeTuples } from '@wikistead/authz'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, deletePage, setPagePrivate, bulkSetPageVisibility, BULK_VISIBILITY_CAP } from '../routes/pages.js'
+import { createPage, deletePage, publishPage, setPagePrivate, bulkSetPageVisibility, BULK_VISIBILITY_CAP } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -58,7 +58,11 @@ describe('#511 bulkSetPageVisibility — per-page authz is re-run, never bypasse
   it('privatises what the caller may, SKIPS what they may not, and leaves the skipped page as it was', async () => {
     const a = await mkPage('vis-A')
     const b = await mkPage('vis-B')
-    // C belongs to OTHER and is already private, so the caller's space-manage no longer reaches it.
+    // C belongs to OTHER. corrected the premise here: it is out of the caller's reach BEFORE private
+    // even enters it — an unpublished draft has no `page#space` tuple, so space inheritance never starts.
+    // That still pins the 403 -> not_found fold (which is what this case is for); the separate claim that
+    // "private itself cuts the space manager off" is pinned by the one-way-door case below, on a PUBLISHED
+    // page where space inheritance demonstrably was reaching the caller first.
     await writeTuples(fgaClient, [{ user: `user:${OTHER}`, relation: 'editor_member', object: `space:${spaceId}` }])
     const c = await mkPage('vis-C', OTHER)
     await setPagePrivate(db, fgaClient, app.searchDriver, { pageId: c, tenantId: tenant.id, userId: OTHER })
@@ -117,6 +121,77 @@ describe('#511 bulkSetPageVisibility — per-page authz is re-run, never bypasse
     await expect(bulkSetPageVisibility(db, fgaClient, app.searchDriver, {
       spaceId, pageIds: [], makePrivate: true, tenantId: tenant.id, userId: 'bulk-vis-stranger',
     })).rejects.toMatchObject({ statusCode: 404 })
+  })
+
+  // #511 — the ONE-WAY DOOR. This is the fact the UI's confirm exists for, so it is pinned rather than
+  // described: privatising a PUBLISHED page belonging to someone else takes the caller's own `share` away
+  // (`share_from_space: sharer from space but not private`), and tenant admin sits inside that same
+  // subtraction. Before the private write the caller reaches the page through the space; after it, they
+  // cannot clear what they just set. If the model ever stops cutting the actor off, this goes red and the
+  // confirm's wording must be revisited — it would then be overstating the consequence.
+  it('privatising a published page owned by someone else LOCKS THE CALLER OUT of undoing it', async () => {
+    const p = await createPage(db, fgaClient, app.searchDriver, { tenantId: tenant.id, spaceId, userId: OTHER, title: 'one-way' })
+    ids.push(p.id)
+    await publishPage(db, fgaClient, app.searchDriver, app.storageDriver, { pageId: p.id, subject: `user:${OTHER}`, createdBy: `user:${OTHER}` })
+    // Space inheritance IS reaching the caller at this point — otherwise the privatise below would be a
+    // permission skip and would pin nothing.
+    expect(await check(fgaClient, `user:${CALLER}`, 'share', { type: 'page', id: p.id }), 'reachable via the space before').toBe(true)
+
+    const set = await bulkSetPageVisibility(db, fgaClient, app.searchDriver, {
+      spaceId, pageIds: [p.id], makePrivate: true, tenantId: tenant.id, userId: CALLER,
+    })
+    expect(set.changed).toBe(1)
+    expect(await check(fgaClient, `user:${CALLER}`, 'share', { type: 'page', id: p.id }), 'the actor cut themselves off').toBe(false)
+
+    const undo = await bulkSetPageVisibility(db, fgaClient, app.searchDriver, {
+      spaceId, pageIds: [p.id], makePrivate: false, tenantId: tenant.id, userId: CALLER,
+    })
+    expect(undo.results[0]).toMatchObject({ ok: false, reason: 'not_found' })
+    expect(await privateMarkers(p.id), 'still private — the actor cannot undo it').toHaveLength(2)
+    // Only the page's own direct holder can. (Left cleared so afterAll's delete runs as CALLER.)
+    const byOwner = await bulkSetPageVisibility(db, fgaClient, app.searchDriver, {
+      spaceId, pageIds: [p.id], makePrivate: false, tenantId: tenant.id, userId: OTHER,
+    })
+    expect(byOwner.results[0]).toMatchObject({ ok: true })
+  })
+
+  // #511 — IDEMPOTENT. OpenFGA fails a batch write on an existing tuple, so the second privatise used
+  // to surface as `{ok:false, reason:'policy'}` and the toast blamed permissions for it. Re-running must be
+  // a no-op that says so, distinct from a page the caller genuinely may not touch.
+  it('a page ALREADY in the requested state is a no-op, not a permission skip', async () => {
+    const p = await mkPage('vis-idem')
+    const first = await bulkSetPageVisibility(db, fgaClient, app.searchDriver, { spaceId, pageIds: [p], makePrivate: true, tenantId: tenant.id, userId: CALLER })
+    expect(first).toMatchObject({ changed: 1, unchanged: 0, skipped: 0 })
+
+    const again = await bulkSetPageVisibility(db, fgaClient, app.searchDriver, { spaceId, pageIds: [p], makePrivate: true, tenantId: tenant.id, userId: CALLER })
+    expect(again).toMatchObject({ changed: 0, unchanged: 1, skipped: 0 })
+    expect(again.results[0]).toMatchObject({ ok: true, noop: true })
+    expect(await privateMarkers(p), 'the pair survives the re-run intact').toEqual(['share_link:*', 'user:*'])
+
+    // Same on the clearing side: a page that was never private is unchanged, never counted as changed.
+    const q = await mkPage('vis-idem-clear')
+    const clear = await bulkSetPageVisibility(db, fgaClient, app.searchDriver, { spaceId, pageIds: [q], makePrivate: false, tenantId: tenant.id, userId: CALLER })
+    expect(clear).toMatchObject({ changed: 0, unchanged: 1, skipped: 0 })
+  })
+
+  // #511 — parent + child selected together. private cascades DOWN the parent chain, so the child is
+  // effectively private the moment the parent is. Its own marker is still a real write (it outlives the
+  // parent being cleared), so it must count as changed, and clearing only the parent must not leave the
+  // child looking public when it still carries its own marker.
+  it('selecting a parent AND its child privatises each on its own terms', async () => {
+    const parent = await mkPage('vis-parent')
+    const child = await createPage(db, fgaClient, app.searchDriver, { tenantId: tenant.id, spaceId, userId: CALLER, title: 'vis-child', parentId: parent })
+    ids.push(child.id)
+
+    const res = await bulkSetPageVisibility(db, fgaClient, app.searchDriver, {
+      spaceId, pageIds: [parent, child.id], makePrivate: true, tenantId: tenant.id, userId: CALLER,
+    })
+    expect(res).toMatchObject({ changed: 2, unchanged: 0, skipped: 0 })
+    expect(await privateMarkers(child.id), 'the child holds its OWN pair, not just inherited privacy').toEqual(['share_link:*', 'user:*'])
+
+    // Clearing the parent alone leaves the child private by its own marker — no silent re-exposure.
+    await bulkSetPageVisibility(db, fgaClient, app.searchDriver, { spaceId, pageIds: [parent], makePrivate: false, tenantId: tenant.id, userId: CALLER })
+    expect(await privateMarkers(child.id)).toEqual(['share_link:*', 'user:*'])
   })
 
   it('the selection cap is enforced', async () => {

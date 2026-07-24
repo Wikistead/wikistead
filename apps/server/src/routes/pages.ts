@@ -1147,7 +1147,20 @@ export async function setPagePrivate(
     }
     const os: string[] = []
     for (const id of subtree) os.push(await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: id, operation: 'upsert' }))
-    await writeTuples(fga, PRIVATE_MARKERS(args.pageId)) // marker on the ROOT (cascades to descendants via `private from parent`)
+    // marker on the ROOT (cascades to descendants via `private from parent`).
+    // #511 IDEMPOTENT. OpenFGA fails the whole batch when a tuple already exists, so privatising an
+    // already-private page threw — and a bulk caller saw it reported as a permission skip, which is a lie
+    // about why. On that error the pair is retried marker-by-marker rather than swallowed wholesale: a
+    // LEGACY page holding only `user:*` (privatised before the #244 backfill) would otherwise fail the batch
+    // on the existing marker and never get its `share_link:*` written, leaving the guest hole open.
+    try {
+      await writeTuples(fga, PRIVATE_MARKERS(args.pageId))
+    } catch (e) {
+      if (!String(e).includes('already exists')) throw e
+      for (const m of PRIVATE_MARKERS(args.pageId)) {
+        await writeTuples(fga, [m]).catch((e2) => { if (!String(e2).includes('already exists')) throw e2 })
+      }
+    }
     return os
   })
   // public⊥private invariant, over the whole subtree: strip each page's public grant so is_public can't survive
@@ -2132,11 +2145,22 @@ export async function bulkPublishPages(
 // #511 / ADR-185 (slice 3): bulk VISIBILITY — make a selection private, or clear private. Third verb, same
 // shape as delete and publish deliberately: every page goes through the SINGLE-page primitive, so the
 // `share` gate, the private marker PAIR (user:* + share_link:* — a lone user:* leaves guests a way in,
-// #244), the subtree cascade, the public-grant strip and the SYNCHRONOUS outbox reindex (a privatisation is
-// a permission REVOCATION, so search must not learn about it lazily) are the exact same code the per-page
-// route runs. A bulk endpoint that reimplemented any of that would be a second authorizer.
+// #244), the subtree cascade, the public-grant strip and the outbox reindex are the exact same code the
+// per-page route runs. A bulk endpoint that reimplemented any of that would be a second authorizer.
+//
+// #511 (correction): that reindex is a TRUSTED path, not a synchronous one — the outbox row commits
+// inside the page's transaction and is then fired inline, with the drain worker retrying what the inline
+// call misses (search/outbox.ts). Search never depends on it for safety: a revoked page that is still in
+// the index is cut at read time by the FGA re-check before results are shown.
 export const BULK_VISIBILITY_CAP = 500
-export interface BulkVisibilityResult { results: { id: string; ok: boolean; reason?: string }[]; changed: number; skipped: number }
+// `changed` counts pages this call actually MUTATED. A page already in the requested state is `ok` with
+// `noop: true` and counted in `unchanged` — never in `skipped`, which means "the caller could not touch it".
+export interface BulkVisibilityResult {
+  results: { id: string; ok: boolean; noop?: boolean; reason?: string }[]
+  changed: number
+  unchanged: number
+  skipped: number
+}
 
 export async function bulkSetPageVisibility(
   db: TenantDb,
@@ -2163,14 +2187,39 @@ export async function bulkSetPageVisibility(
     : []
   const liveSet = new Set(live)
 
-  const results: { id: string; ok: boolean; reason?: string }[] = []
+  // #511 which of these pages ALREADY carry their own private marker, read once for the batch. The
+  // predicate is the page's OWN marker (what this verb writes), not effective privacy — a child of a private
+  // folder inherits privacy but writing its own marker still changes something (it survives the parent being
+  // cleared). Store-wide read intersected with the RLS-scoped liveSet, so no other tenant's id can enter an
+  // answer. Used ONLY to label the outcome; the per-page `share` gate inside the primitive is unaffected.
+  const alreadyPrivate = new Set<string>()
+  if (liveSet.size > 0) {
+    let continuationToken: string | undefined
+    do {
+      const res = await fga.read(
+        { user: 'user:*', relation: 'private', object: 'page:' },
+        continuationToken ? { continuationToken } : undefined,
+      )
+      for (const t of res.tuples ?? []) {
+        const object = t.key?.object
+        if (object?.startsWith('page:') && liveSet.has(object.slice(5))) alreadyPrivate.add(object.slice(5))
+      }
+      continuationToken = res.continuation_token || undefined
+    } while (continuationToken)
+  }
+
+  const results: { id: string; ok: boolean; noop?: boolean; reason?: string }[] = []
   for (const id of requested) {
     if (!liveSet.has(id)) { results.push({ id, ok: false, reason: 'not_found' }); continue }
+    // Already in the requested state: still run the primitive (it is idempotent, and its `share` gate must
+    // decide — reporting ok without checking would leak "this page exists and is already private" to someone
+    // who may not touch it), but report it as a no-op so the toast cannot blame permissions for it.
+    const noop = alreadyPrivate.has(id) === args.makePrivate
     try {
       const call = args.makePrivate ? setPagePrivate : unsetPagePrivate
       // per-page `share` gate + trashed guard + marker pair + subtree reindex all live INSIDE this call
       await call(db, fga, driver, { pageId: id, tenantId: args.tenantId, userId: args.userId, plan: args.plan })
-      results.push({ id, ok: true })
+      results.push(noop ? { id, ok: true, noop: true } : { id, ok: true })
     } catch (e) {
       // Classify without leaking (the hole, kept closed): the pre-loop SELECT is RLS/tenant-scoped, NOT
       // view-scoped, so a same-space page the caller cannot see still reaches this catch and throws 403. Map it
@@ -2182,8 +2231,9 @@ export async function bulkSetPageVisibility(
       results.push({ id, ok: false, reason })
     }
   }
-  const changed = results.filter((r) => r.ok).length
-  return { results, changed, skipped: results.length - changed }
+  const ok = results.filter((r) => r.ok)
+  const unchanged = ok.filter((r) => r.noop).length
+  return { results, changed: ok.length - unchanged, unchanged, skipped: results.length - ok.length }
 }
 
 
