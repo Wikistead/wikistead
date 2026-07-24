@@ -385,7 +385,7 @@
     "deleteModeTitle": "Deletion pathway",
     "deleteModeBody": "Choose how pages in this space are deleted. Deleting is always manager-only; this setting only chooses reversibility.",
     "deleteModeInherit": "Inherit tenant default ({{mode}})",
-    "moderation": "Patrol"
+    "moderation": "Moderation"
   },
   "spaceTrash": {
     "title": "Trash",
@@ -1187,7 +1187,7 @@
     "empty": "You have no API keys."
   },
   "moderation": {
-    "title": "Patrol queue",
+    "title": "Moderation queue",
     "body": "Refused publishes, rate-capped guests, and anonymous or share-link activity in this space. Mark an item once you have looked at it.",
     "denied": "You do not moderate this space.",
     "unreviewedOnly": "Needs review",
