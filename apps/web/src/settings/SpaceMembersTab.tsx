@@ -100,17 +100,15 @@ export function SpaceMembersTab() {
   };
 
   const grants = (access.data ?? []).slice().sort((a, b) => CAPS.indexOf(b.capability) - CAPS.indexOf(a.capability));
-  // #513: the grant list showed the raw sub for user grantees while the search that created them showed
-  // the display name — resolve user subs through the same #379 member-identity path so a granted member
-  // reads as their name, not a hash. Customized-only (ADR-150, not a membership oracle) + self via the
-  // session; an unresolved sub (departed / non-customized member) falls back to the sub, unchanged.
-  const userSubs = grants.filter((g) => g.grantee.startsWith("user:") && !g.groupName).map((g) => g.grantee.replace(/^user:/, ""));
-  const identities = useMemberIdentities(userSubs);
-  const label = (g: { grantee: string; groupName?: string }) => {
+  // #523 / ADR-190 slice D: the server now resolves each user grantee's full name (override ?? OIDC
+  // display_name) on the manage-gated grant list (slice A), so an un-customized member reads as their
+  // name, not a sub — the #513 root fix. A departed / cross-tenant sub comes back null and falls back to
+  // the sub, unchanged. (This supersedes the customized-only /members/identities lookup here.)
+  const label = (g: { grantee: string; groupName?: string; displayName?: string | null }) => {
     if (g.groupName) return `${g.groupName} (${t("spaceMembers.group")})`;
     if (g.grantee.startsWith("group:")) return `${g.grantee.replace(/^group:/, "").replace(/#member$/, "")} (${t("spaceMembers.group")})`;
     const sub = g.grantee.replace(/^user:/, "");
-    return identities.data?.[sub]?.displayName || sub;
+    return g.displayName || sub;
   };
 
   return (
