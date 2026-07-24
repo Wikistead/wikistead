@@ -32,6 +32,10 @@ beforeAll(async () => {
       VALUES (${TENANT}, ${sub}, ${`${sub}@x.test`}, 'IdP Name', 'member')
       ON CONFLICT (tenant_id, sub) DO NOTHING`
   }
+  // #523 / ADR-190: display-name override is now LOCAL-user-only. SUB_A is a 'local' user so the
+  // ADR-020 override tests below still exercise that (preserved) path; SUB_B stays 'oidc' (the default)
+  // for the slice-B reject test.
+  await admin`UPDATE members SET identity_source = 'local' WHERE tenant_id = ${TENANT} AND sub = ${SUB_A}`
 }, 30_000)
 
 afterAll(async () => {
@@ -56,6 +60,21 @@ describe('account settings (ADR-020)', () => {
     const after = await updateAccountSettings(db, { subject: SUB_A, displayNameOverride: '   ' })
     expect(after.displayNameOverride).toBeNull()
     expect(after.displayName).toBe('IdP Name')
+  })
+
+  // #523 / ADR-190 §2 (slice B): an OIDC-sourced member cannot override their display name — the IdP is
+  // authoritative (anti-impersonation). The server refuses the write (403); a 'local' user (SUB_A above)
+  // still may. A refused override never touches the row, and OTHER settings on the same member are
+  // unaffected (the reject is scoped to the override field).
+  it('an OIDC member cannot override their display name (403); a local member can', async () => {
+    // SUB_B is oidc (the default) → the override is refused and the row is never written. (No other
+    // field is touched here — SUB_B stays the "untouched member" the later tests rely on.)
+    await expect(updateAccountSettings(db, { subject: SUB_B, displayNameOverride: 'Impostor' }))
+      .rejects.toMatchObject({ statusCode: 403 })
+    const [row] = await admin<{ display_name_override: string | null }[]>`SELECT display_name_override FROM members WHERE tenant_id = ${TENANT} AND sub = ${SUB_B}`
+    expect(row!.display_name_override, 'the refused override never wrote').toBeNull()
+    // the local user (SUB_A) override path is unchanged (identity_source = 'local' set in beforeAll)
+    expect((await updateAccountSettings(db, { subject: SUB_A, displayNameOverride: 'Local Choice' })).displayNameOverride).toBe('Local Choice')
   })
 
   it('the override SURVIVES a re-login OIDC upsert (display_name change does not clobber it)', async () => {
