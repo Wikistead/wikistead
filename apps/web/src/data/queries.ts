@@ -1084,6 +1084,41 @@ export function usePageAnalytics(pageId: string | null, enabled = true) {
   });
 }
 
+// #520 / ADR-189: the SPACE-level page-view roll-up (aggregates page_view_daily over the pages the caller
+// MANAGES — never space#viewer). MANAGE-gated server-side (a non-viewer 404s); `entitled:false` = the tenant
+// is not on an analytics plan (show the upgrade affordance). Optional shaping: period (from/to), viewerClass
+// filter, sort (day|views · asc|desc), and the unique toggle (member = distinct members; guest/anon stay a
+// session/day approximation — the UI labels it).
+export interface SpaceAnalytics {
+  entitled: boolean;
+  pages: number;
+  unique?: boolean;
+  daily: { day: string; viewerClass: "member" | "guest" | "anon"; views: number }[];
+}
+export interface SpaceAnalyticsParams { from?: string; to?: string; viewerClass?: string; sort?: string; dir?: string; unique?: boolean }
+// The server-facing query string for the shaping params. Only NON-empty params are sent (so an untouched
+// control never over-constrains); `unique` maps to the literal 'true' the endpoint checks for.
+export function spaceAnalyticsQuery(params: SpaceAnalyticsParams): string {
+  const qs = new URLSearchParams();
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  if (params.viewerClass) qs.set("viewerClass", params.viewerClass);
+  if (params.sort) qs.set("sort", params.sort);
+  if (params.dir) qs.set("dir", params.dir);
+  if (params.unique) qs.set("unique", "true");
+  return qs.toString();
+}
+export function useSpaceAnalytics(spaceId: string | null, params: SpaceAnalyticsParams = {}, enabled = true) {
+  const { token } = useSession();
+  const q = spaceAnalyticsQuery(params);
+  return useQuery({
+    queryKey: ["space-analytics", spaceId, q],
+    queryFn: () => apiFetch<SpaceAnalytics>(`/spaces/${encodeURIComponent(spaceId!)}/analytics${q ? `?${q}` : ""}`, token),
+    enabled: enabled && !!spaceId,
+    staleTime: 60_000,
+  });
+}
+
 // #491 / ADR-140: the tenant abuse-filter config (mass-delete shrink ratio + banned words). Admin-gated
 // on the server (GET/PATCH re-check tenant#admin, 403 otherwise). The banned-word list is moderation
 // intelligence, so it never loads on a non-admin surface.

@@ -903,8 +903,9 @@ export async function spacesPlugin(app: FastifyInstance) {
   // UI must label as such (slice 4). The roster is personal data, read on the SAME manage-filter-set.
   app.get<{ Params: { spaceId: string }; Querystring: { from?: string; to?: string; viewerClass?: string; sort?: string; dir?: string; unique?: string } }>('/spaces/:spaceId/analytics', async (req, reply) => {
     const subject = `user:${req.user.sub}`
+    const unique = req.query.unique === 'true' || req.query.unique === '1'
     if (!(await check(app.fga, subject, 'view', { type: 'space', id: req.params.spaceId }))) return reply.code(404).send({ error: 'not found' }) // existence-hiding floor
-    if (!resolveEntitlements(req.tenant.plan).analytics) return { entitled: false, pages: 0, daily: [] } // EE gate (paid feature)
+    if (!resolveEntitlements(req.tenant.plan).analytics) return { entitled: false, pages: 0, daily: [], unique } // EE gate (paid feature)
     // Validate the presentation params (400 on a malformed date / unknown class) before any FGA/DB work.
     const { from, to, viewerClass, sort, dir } = req.query
     const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -912,7 +913,6 @@ export async function spacesPlugin(app: FastifyInstance) {
     if (to && !DATE_RE.test(to)) return reply.code(400).send({ error: 'to must be YYYY-MM-DD' })
     if (viewerClass && !['member', 'guest', 'anon'].includes(viewerClass)) return reply.code(400).send({ error: 'viewerClass must be member | guest | anon' })
     const asc = dir === 'asc'
-    const unique = req.query.unique === 'true' || req.query.unique === '1'
     // Pages in THIS space (RLS-scoped to the tenant) filtered to the caller's MANAGE set — the aggregate is
     // built ONLY from pages the caller manages, so a viewer who manages none gets an empty (not leaked) roll-up.
     const rows = await req.db.sql<{ id: string }[]>`SELECT id FROM pages WHERE space_id = ${req.params.spaceId}`

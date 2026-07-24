@@ -19,6 +19,7 @@ import { SpaceMembersTab } from "./SpaceMembersTab";
 import { SpacePagesTab } from "./SpacePagesTab";
 import { SpaceTrashTab } from "./SpaceTrashTab";
 import { SpaceModerationTab } from "./SpaceModerationTab";
+import { SpaceAnalyticsTab } from "./SpaceAnalyticsTab";
 
 interface SpaceCtx { spaceId: string; name: string; accentKey: string | null; iconImageUrl: string | null }
 
@@ -31,6 +32,7 @@ function useSpaceTabs(spaceId: string): SettingsTab[] {
     { key: "general", label: t("spaceSettings.general"), to: `/spaces/${spaceId}/settings/general` },
     { key: "members", label: t("spaceSettings.members"), to: `/spaces/${spaceId}/settings/members` },
     { key: "pages", label: t("spaceSettings.pages"), to: `/spaces/${spaceId}/settings/pages` },
+    { key: "analytics", label: t("spaceSettings.analytics"), to: `/spaces/${spaceId}/settings/analytics` },
     { key: "trash", label: t("spaceSettings.trash"), to: `/spaces/${spaceId}/settings/trash` },
     // #326: the patrol queue lives with the space it moderates (ruling ②), not in a cross-space page.
     { key: "moderation", label: t("spaceSettings.moderation"), to: `/spaces/${spaceId}/settings/moderation` },
@@ -297,6 +299,7 @@ export function SpaceSettingsRoot() {
       <Route path="general" element={<SpaceGeneralTab />} />
       <Route path="members" element={<SpaceMembersTab />} />
       <Route path="pages" element={<SpacePagesTab />} />
+      <Route path="analytics" element={<SpaceAnalyticsTab />} />
       <Route path="trash" element={<SpaceTrashTab />} />
       <Route path="moderation" element={<SpaceModerationTab />} />
     </Route>

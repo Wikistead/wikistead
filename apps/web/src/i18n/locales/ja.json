@@ -43,6 +43,22 @@
     "noViews": "まだ閲覧はありません",
     "chartAria": "閲覧者タイプ別の日次ページビュー"
   },
+  "spaceAnalytics": {
+    "title": "スペースアナリティクス",
+    "hint": "このスペースであなたが管理するページのビュー数です。管理していない非公開ページは集計に含まれません。",
+    "from": "開始日",
+    "to": "終了日",
+    "viewerClass": "閲覧者",
+    "all": "すべて",
+    "sort": "並べ替え",
+    "sortNewest": "新しい順",
+    "sortOldest": "古い順",
+    "sortMost": "ビュー数が多い順",
+    "sortLeast": "ビュー数が少ない順",
+    "unique": "ユニーク閲覧者",
+    "uniqueCaveat": "ユニークはスペース内の distinct なメンバー数です。ゲスト・匿名はページ横断の識別子を持たないため、日次のセッション概算であり実人数ではありません。",
+    "pages": "管理している {{n}} ページを集計"
+  },
   "toast": {
     "published": "公開しました",
     "publishFailed": "公開できませんでした",
@@ -357,6 +373,7 @@
     "general": "一般",
     "members": "メンバーと権限",
     "pages": "ページ",
+    "analytics": "アナリティクス",
     "trash": "ゴミ箱",
     "theme": "テーマ",
     "nameLabel": "スペース名",
