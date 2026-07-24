@@ -207,6 +207,25 @@ export function applyTier(tier: MacroTier, source: MacroSource, cap?: MacroLevel
   return tier.toLevel(source, levels[capIdx]!);
 }
 
+// #502 Option B (ADR-184 addendum 2): the SMALLEST offset-invariant edit that turns `old` into `next`,
+// found by trimming their common prefix and common suffix. A RichUI (the table grid) hands over its WHOLE
+// re-serialised source on every op; dispatching that as a whole-block replace CLOBBERS a peer who is
+// concurrently editing ELSEWHERE in the same block (last-writer-wins on the canonical Y.Text). Writing
+// only the changed middle instead lets the peer's disjoint edit survive the yCollab merge — the
+// mixed-modality co-edit convergence, with canonical as the single source of truth (no second CRDT). The
+// prefix/suffix are compared by UTF-16 code unit (CM offsets are code-unit based, so the returned range is
+// a valid document range). A no-op (old === next) returns an empty change at the block end.
+export function minimalChange(old: string, next: string, base: number): { from: number; to: number; insert: string } {
+  const oldLen = old.length, nextLen = next.length;
+  let p = 0;
+  const maxP = Math.min(oldLen, nextLen);
+  while (p < maxP && old.charCodeAt(p) === next.charCodeAt(p)) p++;
+  let s = 0;
+  const maxS = Math.min(oldLen - p, nextLen - p); // never let the suffix overlap the matched prefix
+  while (s < maxS && old.charCodeAt(oldLen - 1 - s) === next.charCodeAt(nextLen - 1 - s)) s++;
+  return { from: base + p, to: base + oldLen - s, insert: next.slice(p, nextLen - s) };
+}
+
 // ADR-025 step 1: build the narrow InnerEditHost for an inline macro editor at [from, to].
 // The editor commits via replaceSource (one offset-invariant range edit, per-op LWW) and
 // leaves via exit() — it never touches the EditorView/Yjs directly. `to` is the block's
@@ -228,7 +247,13 @@ export function makeInnerEditHost(
     getSource: () => asMacroSource(view.state.doc.sliceString(from, Math.min(to, view.state.doc.length))),
     replaceSource: (next: MacroSource) => {
       const leveled = tier ? applyTier(tier, next, levelCap) : next;
-      view.dispatch({ changes: { from, to, insert: leveled }, effects: setMacroRenderActive.of({ from, to: from + leveled.length }) });
+      // #502 Option B: write the MINIMAL diff against the block's current text, not a whole-block replace,
+      // so a peer editing another cell of the same table isn't clobbered (their disjoint edit survives the
+      // yCollab merge). render-active still re-points at the whole block's new range [from, from+len].
+      const clampedTo = Math.min(to, view.state.doc.length);
+      const cur = view.state.doc.sliceString(from, clampedTo);
+      const ch = minimalChange(cur, leveled, from);
+      view.dispatch({ changes: ch, effects: setMacroRenderActive.of({ from, to: from + leveled.length }) });
       view.focus();
     },
     exit: () => {
