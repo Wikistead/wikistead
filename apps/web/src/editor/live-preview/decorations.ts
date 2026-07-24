@@ -259,7 +259,12 @@ class FenceHeaderWidget extends WidgetType {
     let row: HTMLElement;
     row = buildFenceHeader({
       lang: this.lang, title: this.title, code: this.code, canCopy: this.canCopy,
-      settingsLabel: i18n.t("contextMenu.codeSettings"),
+      // #456 (user, 2026-07-27): the code fence's keyboard route was undiscoverable — every other macro
+      // opens with Ctrl+↵, this one needs Ctrl+Alt+↵ (Ctrl+↵ means something else inside a fence), and
+      // nothing said so, so pressing Ctrl+↵ and getting nothing read as "no keyboard route exists". The
+      // button names the shortcut. Only HERE: the panel heading and the right-click item keep the plain
+      // label (a menu row already implies the click).
+      settingsLabel: i18n.t("contextMenu.codeSettingsWithKey"),
       onSettings: editable ? () => { const pos = view.posAtDOM(row); toggleFenceSettings(view, pos); } : undefined,
     });
     return row;

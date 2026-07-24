@@ -37,6 +37,18 @@ function settingsTooltip(pos: number): Tooltip {
       // the selection and close the panel out from under the control being used.
       dom.addEventListener("mousedown", (e) => e.stopPropagation());
       const dismiss = () => { view.dispatch({ effects: closeFenceSettings.of(null) }); view.focus(); };
+      // #456 (user, 2026-07-27): dismiss on an outside click, like every other popover — pressing ✕ or
+      // Escape should not be the only way out. The panel lives in CM's tooltip layer, so "outside" is
+      // decided by containment, not by the editor's own handlers. Attached on a later task so the very
+      // mousedown that OPENED the panel (still propagating) can't close it again immediately. A native
+      // <select>'s dropdown is drawn by the OS and is NOT in the DOM, so choosing an option fires no
+      // document mousedown — picking a language can't dismiss the panel out from under the user.
+      const onDocMouseDown = (e: MouseEvent) => {
+        const t = e.target as Node | null;
+        if (t && dom.contains(t)) return; // inside the panel (its own controls included) — not a dismissal
+        dismiss();
+      };
+      const attach = setTimeout(() => document.addEventListener("mousedown", onDocMouseDown, true), 0);
       // #456 item 3: an explicit way OUT. The panel deliberately does not close itself when you use
       // a control (its writes ARE document changes), so it needs a close affordance the user drives — a ✕
       // in the header, and Escape while focus is inside the panel. Escape bubbles here from any control.
@@ -72,7 +84,14 @@ function settingsTooltip(pos: number): Tooltip {
       // Opened from the keyboard, focus lands inside the panel so it can be Tab-navigated and Escape-closed
       // without a mouse. Opened by mouse, focusing the first control is harmless (the click intent WAS to edit).
       queueMicrotask(() => (dom.querySelector("select, input, button:not(.cm-lp-fence-settings-close)") as HTMLElement | null)?.focus());
-      return { dom, destroy: () => panel.destroy() };
+      return {
+        dom,
+        destroy: () => {
+          clearTimeout(attach);
+          document.removeEventListener("mousedown", onDocMouseDown, true); // #456: no listener outlives the panel
+          panel.destroy();
+        },
+      };
     },
   };
 }
