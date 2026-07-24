@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { makeMacroPresence, type AwarenessLike } from "./macro-presence";
+import { makeMacroPresence, coOccupantClientIDs, isIslandCoOccupied, type AwarenessLike } from "./macro-presence";
 
 // #92 presence: the page-awareness bridge for "editing a macro's modal". A fake AwarenessLike lets us
 // assert the peer filtering (self excluded; only remote states carrying BOTH a macroEdit anchor and a
@@ -57,5 +57,33 @@ describe("makeMacroPresence (#92 presence bridge)", () => {
     expect(aw.listeners.has(cb)).toBe(true);
     off();
     expect(aw.listeners.has(cb)).toBe(false);
+  });
+});
+
+describe("coOccupantClientIDs / isIslandCoOccupied (#502 slice 2b — the seed roster)", () => {
+  it("returns the clientIDs (INCLUDING self) publishing a given island anchor", () => {
+    const aw = fakeAwareness(1, {
+      1: { macroEdit: "42", user: { name: "me" } }, // self, in island 42
+      2: { macroEdit: "42", user: { name: "Ann" } }, // peer, SAME island → co-occupant
+      3: { macroEdit: "99", user: { name: "Bob" } }, // peer, a DIFFERENT island → excluded
+      4: { user: { name: "Cara" } }, // peer, no island → excluded
+    });
+    expect(coOccupantClientIDs(aw, "42").sort()).toEqual([1, 2]); // self + Ann; NOT Bob(99) or Cara(none)
+    expect(coOccupantClientIDs(aw, "99")).toEqual([3]); // only Bob
+    expect(coOccupantClientIDs(aw, "7")).toEqual([]); // nobody in island 7
+  });
+
+  it("isIslandCoOccupied is true only with 2+ occupants (the ephemeral-doc spin-up gate)", () => {
+    // A lone editor (self only) must NOT be co-occupied → no ephemeral doc spun up (ADR §3 zero-cost).
+    const alone = fakeAwareness(1, { 1: { macroEdit: "42", user: { name: "me" } } });
+    expect(isIslandCoOccupied(alone, "42")).toBe(false);
+    // self + one peer in the same island → co-occupied.
+    const shared = fakeAwareness(1, {
+      1: { macroEdit: "42", user: { name: "me" } },
+      2: { macroEdit: "42", user: { name: "Ann" } },
+    });
+    expect(isIslandCoOccupied(shared, "42")).toBe(true);
+    // peers in a DIFFERENT island don't make MY island co-occupied.
+    expect(isIslandCoOccupied(shared, "99")).toBe(false);
   });
 });
