@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Trash2 } from "lucide-react";
-import { useSpacePagesOverview, useBulkDeletePages } from "../data/queries";
+import { Trash2, Upload } from "lucide-react";
+import { useSpacePagesOverview, useBulkDeletePages, useBulkPublishPages } from "../data/queries";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
@@ -28,6 +28,7 @@ export function SpacePagesTab() {
   const navigate = useNavigate();
   const pages = useSpacePagesOverview(spaceId);
   const bulkDelete = useBulkDeletePages();
+  const bulkPublish = useBulkPublishPages();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -54,6 +55,20 @@ export function SpacePagesTab() {
     });
   };
 
+  // Publish is NON-destructive (no trash, no cascade), so it runs directly on click — no confirm posture,
+  // no type-to-confirm. The server still re-checks the per-page `publish` gate (partial success).
+  const runBulkPublish = () => {
+    const ids = [...selected];
+    bulkPublish.mutate({ spaceId, pageIds: ids }, {
+      onSuccess: (r) => {
+        clearSelection();
+        if (r && r.skipped > 0) notify.info(t("spacePages.bulkPublishPartial", { published: r.published, skipped: r.skipped }));
+        else notify.success(t("spacePages.bulkPublishDone", { count: r?.published ?? 0 }));
+      },
+      onError: () => notify.error(t("toast.actionFailed")),
+    });
+  };
+
   const n = selected.size;
 
   return (
@@ -69,6 +84,9 @@ export function SpacePagesTab() {
       {n > 0 && (
         <div className="mb-3 flex items-center gap-3 rounded-md border border-border bg-panel p-2" data-testid="space-pages-bulkbar">
           <span className="text-sm text-fg-dim" data-testid="bulk-selected-count">{t("spacePages.selectedCount", { count: n })}</span>
+          <Button variant="default" size="sm" data-testid="bulk-publish" disabled={bulkPublish.isPending} onClick={runBulkPublish}>
+            <Upload size={14} /> {t("spacePages.publish")}
+          </Button>
           <Button variant="danger" size="sm" data-testid="bulk-delete" onClick={() => setConfirmOpen(true)}>
             <Trash2 size={14} /> {t("common.delete")}
           </Button>
