@@ -230,3 +230,18 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
   background-image: linear-gradient(45deg, transparent 50%, var(--fg-dim) 50%), linear-gradient(135deg, var(--fg-dim) 50%, transparent 50%);
   background-position: calc(100% - 12px) 50%, calc(100% - 7px) 50%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
 .cm-lp-macro-setting input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+/* #456the settings panels are token-styled and DO follow the theme, but a native <select>'s
+   DROPDOWN popup (and other OS-drawn widgets / the text caret) is painted by the OS in the LIGHT scheme
+   unless `color-scheme` is declared — so in dark mode the option list flashed white. Declare color-scheme
+   on the panels (and their controls, since color-scheme is not inherited) so the native controls match
+   the app theme. The panels are portal'd CM tooltips but still descend from <html data-theme>, so the
+   theme-scoped selectors reach them. Scoped to these panels (not global :root) to stay within #456. */
+.cm-lp-fence-settings, .cm-lp-macro-settings,
+.cm-lp-macro-setting select, .cm-lp-macro-setting input { color-scheme: light; }
+:root[data-theme="dark"] :is(.cm-lp-fence-settings, .cm-lp-macro-settings,
+  .cm-lp-macro-setting select, .cm-lp-macro-setting input) { color-scheme: dark; }
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] :is(.cm-lp-fence-settings, .cm-lp-macro-settings,
+    .cm-lp-macro-setting select, .cm-lp-macro-setting input) { color-scheme: dark; }
+}
