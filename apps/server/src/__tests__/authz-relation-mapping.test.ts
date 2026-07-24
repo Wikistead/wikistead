@@ -59,9 +59,9 @@ describe('checkMemberAccess — RW/RO/reject collapse (collab hot path)', () => 
   function fakeBatch(canEdit: boolean, canView: boolean) {
     return {
       batchCheck: async () => ({
-        responses: [
-          { _request: { relation: 'edit' }, allowed: canEdit },
-          { _request: { relation: 'view' }, allowed: canView },
+        result: [
+          { request: { relation: 'edit' }, allowed: canEdit },
+          { request: { relation: 'view' }, allowed: canView },
         ],
       }),
     } as unknown as OpenFgaClient

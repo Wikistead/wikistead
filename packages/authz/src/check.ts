@@ -1,6 +1,7 @@
 import type { OpenFgaClient } from '@openfga/sdk'
 import type { Capability, ResourceRef } from '@wikistead/types'
 import { getAuthzHooks } from '@wikistead/hooks'
+import { fgaModelId } from './client.js' // #500: batchCheck needs the model id passed explicitly
 
 export interface CheckContext {
   // ISO 8601 timestamp evaluated against the non_expired condition on share_link tuples.
@@ -166,7 +167,7 @@ export async function filterAuthorized(
         correlationId: String(j),
         ...(context ? { context } : {}),
       })),
-    })
+    }, { authorizationModelId: fgaModelId() })
     // Walk the response by correlation id. Fail closed: an id with NO response entry is simply never
     // added to `out` (a missing verdict is a deny, never a silent allow).
     for (const r of result) {
@@ -216,7 +217,7 @@ export async function checkMemberAccess(
       { user, relation: 'edit', object, correlationId: 'edit' },
       { user, relation: 'view', object, correlationId: 'view' },
     ],
-  })
+  }, { authorizationModelId: fgaModelId() })
   const canEdit = result.find((r) => r.request.relation === 'edit')?.allowed ?? false
   const canView = result.find((r) => r.request.relation === 'view')?.allowed ?? false
   if (canEdit) return { readOnly: false }
