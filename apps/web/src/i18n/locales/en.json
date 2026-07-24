@@ -418,7 +418,10 @@
     "bulkDeleteTitle": "Delete pages",
     "bulkDeleteConfirm": "Delete {{count}} page(s) and all their nested pages? This moves them to the trash.",
     "bulkDeleteDone": "Deleted {{count}} page(s).",
-    "bulkDeletePartial": "Deleted {{deleted}}; skipped {{skipped}} (no permission)."
+    "bulkDeletePartial": "Deleted {{deleted}}; skipped {{skipped}} (no permission).",
+    "publish": "Publish",
+    "bulkPublishDone": "Published {{count}} page(s).",
+    "bulkPublishPartial": "Published {{published}}; skipped {{skipped}} (no permission)."
   },
   "spaceMembers": {
     "title": "Members & permissions",

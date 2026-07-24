@@ -2063,6 +2063,72 @@ export async function bulkDeletePages(
   return { results, deleted, skipped: results.length - deleted }
 }
 
+export const BULK_PUBLISH_CAP = 500
+export interface BulkPublishResult { results: { id: string; ok: boolean; reason?: string }[]; published: number; skipped: number }
+
+// #511 / ADR-185 (slice 2): publish a SELECTION of pages in one space. Like bulk delete, this is NOT a bulk
+// bypass — every page re-runs the SAME per-page `publish` FGA gate (inside publishPage) and its own atomic
+// revision + outbox reindex + anonymous list snapshot, exactly as the single-page /publish route does. A page
+// the caller cannot publish is skipped, never touched; a page whose content the effective abuse filter refuses
+// is skipped with the static reason. Partial success (not all-or-nothing): a per-item verdict is returned so
+// the UI can report "N published, M skipped". Member-only (the Pages tab; no guest config). tenant/space
+// binding is enforced by RLS on the SELECT AND by each page's FGA gate — cross-tenant is structurally
+// impossible. `flush` (the route wires flushDraft) drains each page's live collab draft first so a publish
+// issued right after an edit includes it — best-effort, a no-op when collab isn't running (e.g. tests).
+export async function bulkPublishPages(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  storage: StorageDriver,
+  args: { spaceId: string; pageIds: string[]; userId: string; flush?: (pageId: string) => Promise<void> },
+): Promise<BulkPublishResult> {
+  // Existence-hiding: a caller who cannot even view the space gets a uniform 404 for the whole request
+  // never a per-item partial-success map they could read as an oracle (defense-in-depth + parity with delete).
+  if (!(await check(fga, `user:${args.userId}`, 'view', { type: 'space', id: args.spaceId }))) {
+    throw Object.assign(new Error('not found'), { statusCode: 404 })
+  }
+  const requested = [...new Set(args.pageIds)]
+  if (requested.length > BULK_PUBLISH_CAP) {
+    throw Object.assign(new Error(`selection exceeds the ${BULK_PUBLISH_CAP}-page cap`), { statusCode: 400, reason: 'too_many' })
+  }
+  // RLS-scoped: only rows the caller can SELECT, in THIS space, still live. Ids that fall out (wrong space,
+  // cross-tenant, trashed) report as skipped 'not_found' — a UNIFORM reason (no existence oracle; the per-page
+  // FGA gate inside publishPage is the authority regardless of what the SELECT returns).
+  const live = requested.length
+    ? (await db.sql<{ id: string }[]>`
+        SELECT id FROM pages
+        WHERE id = ANY(${requested}) AND space_id = ${args.spaceId} AND deleted_root_id IS NULL
+      `).map((r) => r.id)
+    : []
+  const liveSet = new Set(live)
+
+  const results: { id: string; ok: boolean; reason?: string }[] = []
+  for (const id of requested) {
+    if (!liveSet.has(id)) { results.push({ id, ok: false, reason: 'not_found' }); continue }
+    try {
+      await args.flush?.(id) // best-effort collab flush so publish includes the latest live edits
+      // per-page authz re-check ('publish' gate) + abuse filter + revision + outbox reindex live INSIDE this call
+      await publishPage(db, fga, driver, storage, { pageId: id, subject: `user:${args.userId}`, createdBy: `user:${args.userId}` })
+      results.push({ id, ok: true })
+    } catch (e) {
+      // Classify without leaking. CRITICAL (no existence oracle): publishPage throws 403 for a page the caller
+      // cannot publish, and the pre-loop SELECT's RLS is tenant-scoped (NOT view-scoped), so a same-space
+      // private page the caller cannot even see reaches this catch. Map 403 to the SAME 'not_found' a genuinely
+      // absent id gets — else the reason would tell a member holding a UUID whether that page exists-but-is-
+      // forbidden vs. does-not-exist. 422 is the abuse-filter CONTENT verdict (static reason code, no content).
+      // A 400 is a static policy skip. Anything else is a real per-item error, still skipped so one bad page
+      // never aborts the batch (partial success).
+      const status = (e as { statusCode?: number })?.statusCode
+      const reason = status === 404 || status === 403 ? 'not_found'
+        : status === 422 ? ((e as { reason?: string }).reason ?? 'abuse')
+        : status === 400 ? ((e as { reason?: string }).reason ?? 'policy') : 'error'
+      results.push({ id, ok: false, reason })
+    }
+  }
+  const published = results.filter((r) => r.ok).length
+  return { results, published, skipped: results.length - published }
+}
+
 // #411 / ADR-153: the gate-free physical delete — callers authorize (deletePage/purgePage: caller manage;
 // retention sweep: system context, the trash entry itself is the authority). Never routed directly.
 async function physicalDeletePage(
@@ -3122,6 +3188,16 @@ export async function pagesPlugin(app: FastifyInstance) {
   app.post<{ Params: { spaceId: string }; Body: { pageIds?: unknown } }>('/spaces/:spaceId/pages/bulk-delete', async (req, reply) => {
     const pageIds = Array.isArray(req.body?.pageIds) ? req.body.pageIds.filter((x): x is string => typeof x === 'string') : []
     const r = await bulkDeletePages(req.db, app.fga, app.searchDriver, { spaceId: req.params.spaceId, pageIds, userId: req.user.sub })
+    return reply.code(200).send(r)
+  })
+
+  // #511 / ADR-185 (slice 2): bulk-publish a selection of pages in the space (member-only; no guest config).
+  // Per-page `publish` gate + abuse filter + revision + reindex ride inside bulkPublishPages; the response is a
+  // partial-success map. `flush` drains each page's live collab draft first (same as the single /publish route).
+  app.post<{ Params: { spaceId: string }; Body: { pageIds?: unknown } }>('/spaces/:spaceId/pages/bulk-publish', async (req, reply) => {
+    const pageIds = Array.isArray(req.body?.pageIds) ? req.body.pageIds.filter((x): x is string => typeof x === 'string') : []
+    const flush = (pageId: string) => flushDraft(app.valkey, docName(req.tenant.id, pageId))
+    const r = await bulkPublishPages(req.db, app.fga, app.searchDriver, app.storageDriver, { spaceId: req.params.spaceId, pageIds, userId: req.user.sub, flush })
     return reply.code(200).send(r)
   })
 

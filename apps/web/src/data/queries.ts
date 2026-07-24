@@ -262,6 +262,27 @@ export function useBulkDeletePages() {
   });
 }
 
+// #511 / ADR-185 (slice 2): bulk-publish a selection of pages in a space. The server re-checks the per-page
+// `publish` gate and returns the same partial-success map ({ok, skipped} + per-item result), so a caller who
+// may publish some but not all sees exactly what happened. Non-destructive (no trash), so no confirm posture.
+export interface BulkPublishResult { results: { id: string; ok: boolean; reason?: string }[]; published: number; skipped: number }
+export function useBulkPublishPages() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { spaceId: string; pageIds: string[] }) =>
+      apiFetch<BulkPublishResult>(`/spaces/${encodeURIComponent(args.spaceId)}/pages/bulk-publish`, token, {
+        method: "POST",
+        body: JSON.stringify({ pageIds: args.pageIds }),
+      }),
+    onSuccess: (_r, args) => {
+      qc.invalidateQueries({ queryKey: ["pages-overview", args.spaceId] });
+      qc.invalidateQueries({ queryKey: ["pages", args.spaceId] });
+      qc.invalidateQueries({ queryKey: ["backlinks"] });
+    },
+  });
+}
+
 // #437 / ADR-167: the DIRECT permanent path (modes 'both' / 'direct_only'; the server 400s otherwise).
 export function useDirectDeletePage() {
   const { token } = useSession();

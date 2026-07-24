@@ -418,7 +418,10 @@
     "bulkDeleteTitle": "ページを削除",
     "bulkDeleteConfirm": "{{count}} 件のページとその入れ子ページをすべて削除しますか？ ゴミ箱へ移動します。",
     "bulkDeleteDone": "{{count}} 件のページを削除しました。",
-    "bulkDeletePartial": "{{deleted}} 件を削除・{{skipped}} 件をスキップ（権限なし）。"
+    "bulkDeletePartial": "{{deleted}} 件を削除・{{skipped}} 件をスキップ（権限なし）。",
+    "publish": "公開",
+    "bulkPublishDone": "{{count}} 件のページを公開しました。",
+    "bulkPublishPartial": "{{published}} 件を公開・{{skipped}} 件をスキップ（権限なし）。"
   },
   "spaceMembers": {
     "title": "メンバーと権限",
