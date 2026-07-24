@@ -36,7 +36,7 @@ export function UserMenu({ onLogout }: { onLogout: () => void }) {
       </span>
     )}
     <DropdownMenu modal={false}>
-      <DropdownMenuTrigger className="ml-2 flex cursor-pointer rounded-full p-0 leading-none transition-shadow hover:shadow-[0_0_0_2px_var(--panel-2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" aria-label={t("userMenu.label")} title={name} data-testid="user-menu">
+      <DropdownMenuTrigger className="ml-2 flex cursor-pointer rounded-full p-0 leading-none transition-shadow hover:shadow-[0_0_0_2px_var(--panel-2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" aria-label={t("userMenu.label")} data-tip={name} data-testid="user-menu">
         <Avatar name={name} src={picture} seed={user.seed ?? sub ?? name} size={26} data-testid="user-avatar" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" data-testid="user-menu-content">

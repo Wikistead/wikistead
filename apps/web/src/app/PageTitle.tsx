@@ -65,7 +65,7 @@ export function PageTitle({ title: value, onRename }: { title: string; onRename?
           {value || t("common.untitled")}
         </button>
       ) : (
-        <h1 className={`${title} ${clamp}`} data-testid="page-title" title={value}>{value || t("common.untitled")}</h1>
+        <h1 className={`${title} ${clamp}`} data-testid="page-title" data-tip={value}>{value || t("common.untitled")}</h1>
       )}
     </div>
   );

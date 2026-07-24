@@ -12,7 +12,7 @@ export function LanguageToggle() {
   const current = i18n.resolvedLanguage ?? i18n.language;
   return (
     <DropdownMenu modal={false}>
-      <DropdownMenuTrigger className="ml-2 flex cursor-pointer rounded p-1 text-fg-dim transition-colors hover:bg-panel-2 hover:text-foreground" aria-label={t("language.label")} title={t("language.label")} data-testid="language-toggle">
+      <DropdownMenuTrigger className="ml-2 flex cursor-pointer rounded p-1 text-fg-dim transition-colors hover:bg-panel-2 hover:text-foreground" aria-label={t("language.label")} data-tip={t("language.label")} data-testid="language-toggle">
         <Languages size={15} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" data-testid="language-menu">

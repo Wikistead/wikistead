@@ -15,7 +15,7 @@ export function ThemeToggle() {
   const Icon = ICON[theme];
   return (
     <DropdownMenu modal={false}>
-      <DropdownMenuTrigger className="ml-2 flex cursor-pointer rounded p-1 text-fg-dim transition-colors hover:bg-panel-2 hover:text-foreground" aria-label={t("theme.label")} title={t("theme.label")} data-testid="theme-toggle">
+      <DropdownMenuTrigger className="ml-2 flex cursor-pointer rounded p-1 text-fg-dim transition-colors hover:bg-panel-2 hover:text-foreground" aria-label={t("theme.label")} data-tip={t("theme.label")} data-testid="theme-toggle">
         <Icon size={15} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" data-testid="theme-menu">

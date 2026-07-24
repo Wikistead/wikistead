@@ -323,7 +323,7 @@ export function Sidebar() {
               {/* #284 / #219: native tooltip ONLY when the title is truncated (checked at hover). */}
               <span
                 className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
-                onMouseEnter={(e) => { const el = e.currentTarget; el.title = el.scrollWidth > el.clientWidth ? (pin.title || t("common.untitled")) : ""; }}
+                onMouseEnter={(e) => { const el = e.currentTarget; el.dataset.tip = el.scrollWidth > el.clientWidth ? (pin.title || t("common.untitled")) : ""; }}
               >{pin.title || t("common.untitled")}</span>
               <span
                 className="flex flex-none gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"

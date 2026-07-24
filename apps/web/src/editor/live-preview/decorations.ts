@@ -476,7 +476,7 @@ class TodoDemoteWidget extends WidgetType {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "cm-lp-todo-demote";
-    btn.title = "Remove the progress ring (back to a plain task list)";
+    btn.dataset.tip = "Remove the progress ring (back to a plain task list)";
     btn.setAttribute("data-testid", "todo-demote");
     btn.textContent = "✕";
     btn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); demoteTodoToTaskList(view, this.from); });
@@ -1064,10 +1064,10 @@ function openAttachmentLightbox(view: EditorView, id: string, name: string): voi
   title.textContent = `📎 ${name || "attachment"}`;
   const btnCss = "border:none;background:transparent;cursor:pointer;padding:2px 8px;font-size:1.05em;color:inherit;opacity:.75;border-radius:6px";
   const dl = document.createElement("button");
-  dl.type = "button"; dl.style.cssText = btnCss; dl.title = "Download"; dl.textContent = "⤓";
+  dl.type = "button"; dl.style.cssText = btnCss; dl.dataset.tip = "Download"; dl.textContent = "⤓";
   dl.setAttribute("data-testid", "attachment-lightbox-download");
   const close = document.createElement("button");
-  close.type = "button"; close.style.cssText = btnCss; close.title = "Close"; close.textContent = "✕";
+  close.type = "button"; close.style.cssText = btnCss; close.dataset.tip = "Close"; close.textContent = "✕";
   close.setAttribute("data-testid", "attachment-lightbox-close");
   bar.append(title, dl, close);
   const frame = document.createElement("iframe");
@@ -1129,7 +1129,7 @@ class AttachmentChipWidget extends WidgetType {
     const dl = document.createElement("button");
     dl.type = "button";
     dl.className = "cm-lp-attachment-dl";
-    dl.title = "Download";
+    dl.dataset.tip = "Download";
     dl.setAttribute("aria-label", "Download");
     dl.setAttribute("data-testid", "attachment-download");
     dl.textContent = "⤓";
@@ -1187,7 +1187,7 @@ class AttachmentCardWidget extends WidgetType {
     const dl = document.createElement("button");
     dl.type = "button";
     dl.className = "cm-lp-attachment-dl";
-    dl.title = "Download";
+    dl.dataset.tip = "Download";
     dl.setAttribute("aria-label", "Download");
     dl.setAttribute("data-testid", "attachment-download");
     dl.textContent = "⤓";
@@ -1225,7 +1225,7 @@ class AttachmentCardWidget extends WidgetType {
       const reveal = document.createElement("button");
       reveal.type = "button";
       reveal.className = "cm-lp-macro-edit cm-lp-macro-edit-hint";
-      reveal.title = "Edit";
+      reveal.dataset.tip = "Edit";
       reveal.innerHTML = MACRO_EDIT_BUTTON_HTML;
       reveal.setAttribute("data-testid", "macro-edit");
       reveal.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(wrap), true); });
@@ -1300,7 +1300,7 @@ class AttachmentCardWidget extends WidgetType {
         const expand = document.createElement("div");
         expand.className = "cm-lp-attachment-expand";
         expand.setAttribute("data-testid", "attachment-expand");
-        expand.title = "Open";
+        expand.dataset.tip = "Open";
         const hint = document.createElement("span");
         hint.className = "cm-lp-attachment-expand-hint";
         hint.textContent = "⤢";
@@ -1379,7 +1379,7 @@ class StandaloneImageWidget extends WidgetType {
       const reveal = document.createElement("button");
       reveal.type = "button";
       reveal.className = "cm-lp-macro-edit cm-lp-macro-edit-hint";
-      reveal.title = "Edit";
+      reveal.dataset.tip = "Edit";
       reveal.innerHTML = MACRO_EDIT_BUTTON_HTML;
       reveal.setAttribute("data-testid", "macro-edit");
       reveal.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(wrap), true); });
@@ -1566,7 +1566,7 @@ class MacroRawRichuiPill extends WidgetType {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "cm-lp-macro-edit cm-lp-macro-richui-raw";
-    btn.title = "Rich edit (Ctrl+Enter)";
+    btn.dataset.tip = "Rich edit (Ctrl+Enter)";
     btn.innerHTML = MACRO_EDIT_BUTTON_HTML;
     btn.setAttribute("data-testid", this.testid);
     // Own mousedown → open the RichUI; preventDefault so the caret isn't also re-placed, stopPropagation so it
@@ -2035,7 +2035,7 @@ function makeAlignSegment(current: FenceAlign, pick: (a: FenceAlign) => void): H
     b.type = "button";
     b.className = "cm-lp-align-seg-btn";
     b.innerHTML = ALIGN_ICON[a];
-    b.title = `Align ${a}`;
+    b.dataset.tip = `Align ${a}`;
     b.setAttribute("data-testid", `macro-align-${a}`);
     b.setAttribute("data-align", a);
     b.setAttribute("aria-pressed", String(a === current));
@@ -2555,7 +2555,7 @@ class MacroWidget extends WidgetType {
             const edit = document.createElement("button");
             edit.type = "button";
             edit.className = "cm-lp-macro-edit cm-lp-macro-edit-hint cm-lp-nested-macro-edit";
-            edit.title = "Edit (Ctrl+Enter)";
+            edit.dataset.tip = "Edit (Ctrl+Enter)";
             edit.innerHTML = MACRO_EDIT_BUTTON_HTML; // #424: the uniform face (the macro IS selected here, so Ctrl+↵ works directly)
             edit.setAttribute("data-testid", "nested-macro-edit");
             edit.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterNestedMacroAt(view, this.nestedSel!); });
@@ -2588,7 +2588,7 @@ class MacroWidget extends WidgetType {
             // Hover-gated variant (the base .cm-lp-nested-macro-edit is opacity:1 — only drawn on selection);
             // -hover overrides to opacity:0 + reveals on the slot's :hover (CSS below).
             edit.className = "cm-lp-macro-edit cm-lp-macro-edit-hint cm-lp-nested-macro-edit cm-lp-nested-macro-edit-hover";
-            edit.title = "Edit (Ctrl+Enter)";
+            edit.dataset.tip = "Edit (Ctrl+Enter)";
             // #424 (user ruling, supersedes the bare-pencil rule): ONE face for every entry button
             // icon + Ctrl+↵ — even where the key needs the macro selected first; uniformity beats the nuance.
             edit.innerHTML = MACRO_EDIT_BUTTON_HTML;
@@ -2750,7 +2750,7 @@ class MacroWidget extends WidgetType {
         const entry = document.createElement("button");
         entry.type = "button";
         entry.className = "cm-lp-macro-edit cm-lp-macro-edit-hint";
-        entry.title = "Edit (Ctrl+Enter)";
+        entry.dataset.tip = "Edit (Ctrl+Enter)";
         entry.innerHTML = MACRO_EDIT_BUTTON_HTML;
         entry.setAttribute("data-testid", "macro-entry-pill");
         entry.addEventListener("mousedown", (e) => {
@@ -2769,7 +2769,7 @@ class MacroWidget extends WidgetType {
         // raw reveal; what it opens stays per-macro. Hover/selection gating unchanged (#254: edit-hint is
         // layout-only, never the always-visible richui-raw class).
         edit.className = "cm-lp-macro-edit cm-lp-macro-edit-hint";
-        edit.title = "Edit (Ctrl+Enter)";
+        edit.dataset.tip = "Edit (Ctrl+Enter)";
         edit.innerHTML = MACRO_EDIT_BUTTON_HTML;
         edit.setAttribute("data-testid", "macro-edit");
         edit.addEventListener("mousedown", (e) => {
@@ -2809,7 +2809,7 @@ class MacroWidget extends WidgetType {
         add.type = "button";
         add.className = "cm-lp-layout-item-add";
         add.textContent = "＋";
-        add.title = `Add ${child}`;
+        add.dataset.tip = `Add ${child}`;
         add.setAttribute("data-testid", `layout-add-${child}`);
         // #278 (E continued): the renders in the slot-edit state too — dropping it there
         // reflowed the columns the moment an island opened (the same 315→336px jump). The ACTION stays
@@ -2838,7 +2838,7 @@ class MacroWidget extends WidgetType {
           x.setAttribute("role", "button");
           x.className = this.name === "columns" ? "cm-lp-layout-item-remove" : "cm-lp-tab-remove";
           x.setAttribute("aria-label", `Remove ${child}`);
-          x.title = `Remove ${child}`;
+          x.dataset.tip = `Remove ${child}`;
           x.setAttribute("data-testid", `layout-remove-${child}`);
           // stopPropagation so removing doesn't also select the atom / switch the tab; preventDefault keeps focus.
           // ①: gate at CLICK time — the widget DOM (and these listeners) can be REUSED across a
@@ -2918,7 +2918,7 @@ class MacroWidget extends WidgetType {
         // corner (embeds have no fold button there) + a z-index above the rendered embed content, and use
         // `click` (fires reliably even when a child iframe swallows earlier pointer phases).
         retarget.className = "cm-lp-macro-retarget";
-        retarget.title = "Change embed target";
+        retarget.dataset.tip = "Change embed target";
         retarget.textContent = "⇆";
         retarget.setAttribute("data-testid", "embed-change-target");
         // mousedown only PREVENTS the caret/fall-through (don't open here); `click` does the action, so
@@ -3086,7 +3086,7 @@ class DetailsSummaryWidget extends WidgetType {
       const edit = document.createElement("button");
       edit.type = "button";
       edit.className = "cm-lp-macro-edit cm-lp-macro-edit-hint cm-lp-callout-panel-edit";
-      edit.title = "Edit (Ctrl+Enter)";
+      edit.dataset.tip = "Edit (Ctrl+Enter)";
       edit.innerHTML = MACRO_EDIT_BUTTON_HTML;
       edit.setAttribute("data-testid", "details-edit");
       edit.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(wrap)); view.focus(); });
@@ -3196,7 +3196,7 @@ class CalloutWidget extends WidgetType {
       const edit = document.createElement("button");
       edit.type = "button";
       edit.className = "cm-lp-macro-edit cm-lp-macro-edit-hint cm-lp-callout-panel-edit";
-      edit.title = "Edit (Ctrl+Enter)";
+      edit.dataset.tip = "Edit (Ctrl+Enter)";
       edit.innerHTML = MACRO_EDIT_BUTTON_HTML;
       edit.setAttribute("data-testid", "callout-panel-edit");
       edit.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(el)); });

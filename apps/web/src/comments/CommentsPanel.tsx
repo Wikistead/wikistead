@@ -143,7 +143,7 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
 
   const Stamp = ({ iso }: { iso: string }) => {
     const { rel, abs } = relTime(iso, i18n.language);
-    return <time className="text-[0.75em] text-fg-dim" dateTime={iso} title={abs} data-testid="comment-time">{rel}</time>;
+    return <time className="text-[0.75em] text-fg-dim" dateTime={iso} data-tip={abs} data-testid="comment-time">{rel}</time>;
   };
   const CommentRow = ({ c }: { c: (typeof visibleThreads)[number]["comments"][number] }) => (
     <div className="flex flex-col gap-0.5" data-testid="comment-item">

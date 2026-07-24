@@ -20,7 +20,7 @@ function LastUsed({ at }: { at: string | null }) {
   }
   const { rel, abs } = relTime(at, i18n.language);
   return (
-    <time className="flex-none text-xs text-fg-dim" dateTime={at} title={`${t("adminApi.lastUsed")}: ${abs}`} data-testid="api-key-last-used" data-used="yes">
+    <time className="flex-none text-xs text-fg-dim" dateTime={at} data-tip={`${t("adminApi.lastUsed")}: ${abs}`} data-testid="api-key-last-used" data-used="yes">
       {t("adminApi.lastUsedRel", { rel })}
     </time>
   );
