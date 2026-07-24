@@ -1,6 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
+import { TooltipProvider } from "./components/ui/tooltip"; // #530: one delay for every React tooltip
+import { installTooltipHost } from "./ui/tooltip-host"; // #530: the same tooltip for DOM built outside React
 import "./i18n"; // initialize i18next before the app renders
 import "@fontsource/plus-jakarta-sans/600.css"; // brand wordmark (OFL); self-hosted
 // #158-C1 UI fonts (OFL, self-hosted woff2): Inter (Latin) + Noto Sans JP (JP) → Notion-grade UI.
@@ -32,8 +34,15 @@ import "katex/dist/katex.min.css"; // #158-C3: KaTeX math rendering (MIT, self-h
 // (The old benign dev-only "Cannot read properties of null (reading 'useId')" on
 // StrictMode portal teardown was an Ark Combobox/Dialog artifact; it no longer
 // reproduces after the shadcn/Radix migration — #142.)
+// #530: the delegated tooltip for non-React DOM (CodeMirror widgets, macro chrome). One document-level
+// controller, installed before the first render so a widget built during mount is already covered.
+installTooltipHost();
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    {/* #530: TooltipProvider carries the shared delay (TOOLTIP_DELAY_MS) for every React <Tooltip>. */}
+    <TooltipProvider>
+      <App />
+    </TooltipProvider>
   </StrictMode>,
 );

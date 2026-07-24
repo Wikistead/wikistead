@@ -693,3 +693,27 @@ body {
    via the shared factory). Glyph blanks; the #ff9696 block from the restore rule stays visible. */
 .cm-editor .cm-editor.cm-wys-blank-fatcursor.cm-focused .cm-fat-cursor { color: transparent !important; }
 .cm-editor .cm-editor.cm-atomsel-hide-fatcursor.cm-focused .cm-fat-cursor { background-color: transparent !important; color: transparent !important; }
+
+/* #530: the DELEGATED tooltip bubble (ui/tooltip-host.ts) — the DOM-built counterpart of the React
+   <Tooltip> primitive. Same surface tokens and the same look, so the two can never drift into two
+   different tooltips; the shared delay lives in TOOLTIP_DELAY_MS. Positioned by the host (fixed, in
+   viewport coordinates) and appended to <body>, so CodeMirror never reconciles it away and no widget
+   overflow can clip it. */
+.wks-tip {
+  position: fixed;
+  z-index: 60; /* above the app chrome; dialogs (z-50 stack) still cover it, as a tooltip should not fight a modal */
+  max-width: min(22rem, 90vw);
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  background: var(--panel);
+  color: var(--fg);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: break-word;
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.18));
+  pointer-events: none; /* never steals the hover it describes */
+  animation: wks-pop var(--dur-fast) var(--ease-out);
+}
+.wks-tip[hidden] { display: none; }
