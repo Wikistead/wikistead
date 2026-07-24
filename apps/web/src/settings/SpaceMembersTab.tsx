@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { MemberSearchInput } from "../ui/MemberSearchInput";
 import {
   useSpaceAccess, useGrantSpaceAccess, useRevokeSpaceAccess, useMemberCandidates, useTenantGroups,
-  useCommentOpen, useSetCommentOpen, useMemberIdentities,
+  useCommentOpen, useSetCommentOpen,
   useAssignableRoles, useRoleAssignments, useAssignRole, useUnassignRole,
   type PageRelation,
 } from "../data/queries";
@@ -61,8 +61,13 @@ export function SpaceMembersTab() {
   const [rolePicked, setRolePicked] = useState<{ sub: string; label: string } | null>(null);
   const roleCandidates = useMemberCandidates(spaceId, rolePicked ? "" : roleQuery);
   const customRoles = assignable.data?.custom ?? [];
-  const assignRoleIdentities = useMemberIdentities(
-    (roleAssignments.data ?? []).filter((a) => a.principal.startsWith("user:")).map((a) => a.principal.replace(/^user:/, "")),
+  // #523 / ADR-190 (slice E): the assignment list now arrives with its user principals already NAMED by the
+  // server (the same authorization-bounded resolution as the grant list). The old customized-only lookup is
+  // gone — it left an un-customised member showing a raw sub, the last hash on this screen.
+  const roleNameBySub = new Map(
+    (roleAssignments.data ?? [])
+      .filter((a) => a.principal.startsWith("user:"))
+      .map((a) => [a.principal.replace(/^user:/, ""), a.displayName ?? null] as const),
   );
   const addRoleAssignment = () => {
     if (!roleId || !rolePicked) return;
@@ -77,7 +82,7 @@ export function SpaceMembersTab() {
   const rolePrincipalLabel = (principal: string): string => {
     if (principal.startsWith("group:")) return `${principal.replace(/^group:/, "").replace(/#member$/, "")} (${t("spaceMembers.group")})`;
     const sub = principal.replace(/^user:/, "");
-    return assignRoleIdentities.data?.[sub]?.displayName || sub;
+    return roleNameBySub.get(sub) || sub; // server-resolved name; raw sub only for a departed/cross-tenant one
   };
 
   const add = () => {

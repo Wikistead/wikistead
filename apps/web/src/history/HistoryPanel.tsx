@@ -8,7 +8,6 @@ import { PanelRowsSkeleton, useDelayedFlag } from "../ui/Skeleton"; // #457loadi
 import { notify } from "../ui/toast";
 import { authorLabel, isGuestSub } from "../comments/AuthorChip";
 import { latestRun, isRevertableRun } from "./revert-run"; // #327the bulk-revert guards
-import { useMemberIdentities } from "../data/queries"; // #379 / ADR-150: resolve member authors
 
 // Page history: lists the snapshot revisions (newest first) and, for edit-capable
 // users, restores the page to a chosen one. Backend (GET list / POST restore) has
@@ -76,12 +75,17 @@ export function HistoryPanel({
   const [confirming, setConfirming] = useState<Revision | null>(null);
   const [confirmingRun, setConfirmingRun] = useState(false);
 
-  // #379: one batch resolution for every member author in the visible history (cached by sub set).
-  const identities = useMemberIdentities((revisions ?? []).map((r) => r.createdBy?.startsWith("user:") ? r.createdBy.slice(5) : "").filter(Boolean));
+  // #523 / ADR-190 (slice E sweep): the customized-only /members/identities batch is GONE from this panel.
+  // The server already resolves every member author fully (`createdByName`, #486) on this view-gated list,
+  // so the extra request could only ever add a name the server had refused to resolve — it cannot, since
+  // full resolution over the same RLS handle is a superset of the customized-only one. `author()` stays for
+  // the cases the server deliberately does not name: guests/anon, and an unknown/departed author.
   const rawRun = canModerate ? latestRun(revisions ?? []) : null;
   //bulk revert exists only for an anonymous 2+ run — otherwise the history stays a plain list.
   const run = isRevertableRun(rawRun) ? rawRun : null;
-  const runAuthor = run ? author(run.actor, t("history.unknown"), t("common.guest"), identities.data) : "";
+  // The bulk-revert run is anonymous-only by contract (isRevertableRun requires a guest/anon actor), so
+  // this label never names a member — it is the guest word plus the short id.
+  const runAuthor = run ? author(run.actor, t("history.unknown"), t("common.guest")) : "";
 
   // #457the list load draws row skeletons (delay-gated — a fast fetch shows nothing), so
   // "revisions are coming" and "there are none" read differently. The empty wording stays as-is.
@@ -116,8 +120,8 @@ export function HistoryPanel({
             <div className="flex min-w-0 flex-col">
               <span className="text-[0.85em]">{fmt(rev.createdAt)}</span>
               {/* #486: prefer the server-resolved name (covers un-customized members too); fall back to the
-                  client formatting (guest labels / customized-only identities) when the server sent none. */}
-              <span className="text-[0.75em] text-fg-dim">{rev.createdByName ?? author(rev.createdBy, t("history.unknown"), t("common.guest"), identities.data)}</span>
+                  client formatting (guest labels, unknown author) when the server deliberately sent none. */}
+              <span className="text-[0.75em] text-fg-dim">{rev.createdByName ?? author(rev.createdBy, t("history.unknown"), t("common.guest"))}</span>
             </div>
             <div className="flex flex-none gap-1.5">
               <button type="button" className={rowBtn} data-testid="revision-diff" onClick={() => onCompare(rev.id)}>
