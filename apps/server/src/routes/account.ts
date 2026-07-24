@@ -150,6 +150,15 @@ export async function updateAccountSettings(
     throw Object.assign(new Error('invalid onboardingCompleted'), { statusCode: 400 })
   }
   if (args.displayNameOverride !== undefined) {
+    // #523 / ADR-190 §2: an OIDC-sourced member's display name is the IdP name (authoritative,
+    // anti-impersonation) — they may NOT override it. The account UI hides the field for them (slice C);
+    // the server is the fortress, so a direct write is refused (403). A 'local' user may still set one.
+    // ALLOWLIST (fail-safe): only a 'local' user may override — any other source (today 'oidc', and any
+    // future IdP value like 'saml') is refused, so a new provider can never fail OPEN into an override.
+    const [src] = await db.sql<[{ identity_source: string }?]>`SELECT identity_source FROM members WHERE sub = ${args.subject}`
+    if (src?.identity_source !== 'local') {
+      throw Object.assign(new Error('your display name is managed by your identity provider'), { statusCode: 403 })
+    }
     const v = args.displayNameOverride?.trim() ? args.displayNameOverride.trim() : null
     await db.sql`UPDATE members SET display_name_override = ${v}, updated_at = now() WHERE sub = ${args.subject}`
   }
