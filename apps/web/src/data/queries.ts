@@ -1514,7 +1514,10 @@ export function useDeleteRole() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["roles"] }),
   });
 }
-export interface RoleAssignment { id: string; roleId: string; roleName: string; principal: string }
+// #523 / ADR-190 (slice E): `displayName` is the server-resolved name of a USER principal (override ?? OIDC
+// name), present only for user principals and null when the sub is cross-tenant/departed — the client falls
+// back to the raw sub. Group principals carry their own name in the principal string.
+export interface RoleAssignment { id: string; roleId: string; roleName: string; principal: string; displayName?: string | null }
 export function useRoleAssignments(resourceType: string, resourceId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({

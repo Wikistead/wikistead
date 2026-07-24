@@ -20,6 +20,7 @@ import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { reindexPublishedPages } from './spaces.js'
 import { groupGrantee } from '../auth/group-sync.js' // #497: mappings assign the group principal
+import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-190: name user principals on the gated list
 import type { TenantDb } from '../db/index.js'
 import type { Sql } from 'postgres'
 
@@ -463,7 +464,18 @@ export async function rolesPlugin(app: FastifyInstance) {
     const rows = await req.db.sql<{ id: string; role_id: string; name: string; principal: string }[]>`
       SELECT a.id, a.role_id, r.name, a.principal FROM role_assignments a JOIN roles r ON r.id = a.role_id
       WHERE a.resource_type = ${resourceType} AND a.resource_id = ${resourceId} ORDER BY r.name, a.principal`
-    return rows.map((r) => ({ id: r.id, roleId: r.role_id, roleName: r.name, principal: r.principal }))
+    // #523 / ADR-190 (slice E): name the USER principals. This list is already authorization-bounded and
+    // server-set (requireListAuthority above, one resourceId, no cross-resource enumeration), so resolving
+    // `override ?? OIDC display_name` over it is the SAME precedent as the manage-gated grant list in slice
+    // A — it is not an arbitrary-sub lookup, so the /members/identities oracle boundary is untouched. The
+    // caller's RLS handle does the read: a cross-tenant or departed sub resolves to null and the client
+    // falls back to the raw sub. Group principals are never resolved (they carry their own name).
+    const userSubs = rows.filter((r) => r.principal.startsWith('user:')).map((r) => r.principal.slice(5))
+    const names = userSubs.length ? await resolveAuthorIdentities(req.db, userSubs) : new Map()
+    return rows.map((r) => ({
+      id: r.id, roleId: r.role_id, roleName: r.name, principal: r.principal,
+      ...(r.principal.startsWith('user:') ? { displayName: names.get(r.principal.slice(5))?.displayName ?? null } : {}),
+    }))
   })
 
   // #485 / #514: a space MANAGER (not just a tenant admin) needs the role DEFINITION list to populate the

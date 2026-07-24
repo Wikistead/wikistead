@@ -215,4 +215,44 @@ describe('role-edit re-expansion (#420 increment 4, Fork B1)', () => {
       await unassign(sAsg.id)
     }
   })
+
+  // #523 / ADR-190 (slice E): the assignment list NAMES its user principals, so the in-space role picker
+  // stops showing a raw sub for an un-customised member (the last hash on that screen). The disclosure is
+  // bounded exactly as slice A's grant list is: this endpoint is requireListAuthority-gated and answers for
+  // ONE resource, so it is a server-set view-gated set — NOT an arbitrary-sub lookup. The oracle boundary
+  // (/members/identities stays customized-only) is asserted here too, so a later change cannot widen it
+  // silently.
+  it('#523 slice E: user principals are named on the gated list; the arbitrary-sub oracle stays closed', async () => {
+    const sub = 'cra420-named'
+    // An UN-CUSTOMISED member: an OIDC display_name, no override and no avatar. Under the old
+    // customized-only lookup this member resolved to nothing and the UI printed the raw sub.
+    await admin`INSERT INTO members (tenant_id, sub, role, display_name) VALUES (${tenant.id}, ${sub}, 'member', 'Naomi Ito')
+                ON CONFLICT (tenant_id, sub) DO UPDATE SET display_name = 'Naomi Ito', display_name_override = NULL, avatar_image_key = NULL`
+    const roleId = await makeRole('cra420-named-role', ['view'])
+    const a = (await assign(roleId, 'space', spaceId, `user:${sub}`)).json() as { id: string }
+    try {
+      const list = (await app.inject({ method: 'GET', url: `/admin/roles/assignments?resourceType=space&resourceId=${spaceId}`, headers: H }))
+        .json() as { principal: string; displayName?: string | null }[]
+      const row = list.find((r) => r.principal === `user:${sub}`)
+      expect(row, 'the assignment is listed').toBeTruthy()
+      expect(row!.displayName, 'an un-customised member resolves to their OIDC name, not a sub').toBe('Naomi Ito')
+
+      // A GROUP principal carries its own name and is never resolved through the member table.
+      const gAsg = (await assign(roleId, 'space', spaceId, 'group:cra420-grp#member')).json() as { id: string }
+      try {
+        const withGroup = (await app.inject({ method: 'GET', url: `/admin/roles/assignments?resourceType=space&resourceId=${spaceId}`, headers: H }))
+          .json() as { principal: string; displayName?: string | null }[]
+        expect(withGroup.find((r) => r.principal.startsWith('group:'))!.displayName, 'groups are not name-resolved').toBeUndefined()
+      } finally { await unassign(gAsg.id) }
+
+      // ORACLE BOUNDARY (unchanged): the arbitrary-sub endpoint still answers customized-only, so this
+      // same member — nameable on the gated list above — is NOT nameable by asking about a sub directly.
+      const probe = (await app.inject({ method: 'POST', url: '/members/identities', headers: H, payload: { subs: [sub] } }))
+        .json() as { identities: Record<string, unknown> }
+      expect(probe.identities[sub], 'an un-customised member is not disclosed by arbitrary-sub lookup').toBeUndefined()
+    } finally {
+      await unassign(a.id)
+      await admin`DELETE FROM members WHERE tenant_id = ${tenant.id} AND sub = ${sub}`.catch(() => {})
+    }
+  })
 })
