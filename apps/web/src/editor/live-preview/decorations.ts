@@ -1685,8 +1685,12 @@ interface EditUIDom extends HTMLDivElement { __editUICtrl?: EditUIController; __
 // editUI (no first-party macro does yet), so it adds no behaviour to shipped macros. Exported as the
 // framework primitive the render-path wiring + first macro migration (next slice) will instantiate.
 export class EditableEditUIWidget extends WidgetType {
-  constructor(readonly from: number, readonly to: number, readonly source: string, readonly editUI: EditUI, readonly wrapSource: (body: string) => string, readonly theme: MacroTheme, readonly tier?: MacroTier, readonly caretOutOnExit = false) { super(); }
-  eq(o: EditableEditUIWidget) { return o.from === this.from && o.to === this.to && o.source === this.source && o.editUI === this.editUI && o.theme === this.theme && o.caretOutOnExit === this.caretOutOnExit; }
+  // #525: `diagramLang` is the fence's language when the block is one the HOST renders (plantuml). It
+  // only reaches the editUI as a bound `renderDiagram` in editEnv — the macro never learns the lang or
+  // touches the network. Part of eq: `source` here is the fence BODY, so a ```plantuml → ```mermaid
+  // retag with an unchanged body would otherwise reuse a widget bound to the wrong renderer.
+  constructor(readonly from: number, readonly to: number, readonly source: string, readonly editUI: EditUI, readonly wrapSource: (body: string) => string, readonly theme: MacroTheme, readonly tier?: MacroTier, readonly caretOutOnExit = false, readonly diagramLang?: string) { super(); }
+  eq(o: EditableEditUIWidget) { return o.from === this.from && o.to === this.to && o.source === this.source && o.editUI === this.editUI && o.theme === this.theme && o.caretOutOnExit === this.caretOutOnExit && o.diagramLang === this.diagramLang; }
   private mountInto(dom: EditUIDom, view: EditorView) {
     dom.__editUICtrl?.destroy();
     dom.replaceChildren();
@@ -1705,6 +1709,14 @@ export class EditableEditUIWidget extends WidgetType {
       // rendering come from the same factory the page and the slot islands use, and the {theme}
       // boundary is unchanged.
       mountSurface: (opts) => this.mountCoEditSurface(view, opts),
+      // #525: the same host-mediated render the READ surface does for a host-renderable fence, offered to
+      // the OPEN editUI so its preview shows the diagram instead of the source it was stuck on. Bound to
+      // this block's lang + theme, so the macro passes only its source (ADR-024: it never fetches, and
+      // never learns the endpoint). Omitted entirely when the block isn't host-renderable or the host has
+      // no renderer configured — the macro then keeps its degrade-to-source preview, unchanged.
+      ...(this.diagramLang && HOST_RENDERABLE.has(this.diagramLang) && view.state.facet(diagramRenderer) !== noopDiagramRenderer
+        ? { renderDiagram: (src: MacroSource) => view.state.facet(diagramRenderer)(this.diagramLang!, src, this.theme) }
+        : {}),
     });
     // #239: re-add the Done affordance after each (re)mount — mountInto's replaceChildren above wipes it.
     const done = document.createElement("button");
@@ -3513,7 +3525,9 @@ const RENDERERS: BlockRenderer[] = [
         // The old `!active.raw` guard (which made Ctrl+Enter reveal RAW instead) is dropped — raw is now reached
         // by the bare caret-in reveal below (C1), not an explicit command. So both entry keys land here.
         if (macro.editUI?.present === "inline" && active && active.from <= from && active.to >= to && !ctx.state.readOnly) {
-          ctx.addAtomic(Decoration.replace({ widget: new EditableEditUIWidget(from, to, fenceBody(doc, node.from, node.to), macro.editUI, (b) => "```" + lang + "\n" + b + "\n```", ctx.macroTheme, macro.tier, true), block: true }), from, to);
+          // #525: pass the fence's lang so a host-renderable diagram (plantuml) gets a bound renderDiagram
+          // in its editEnv — the editUI preview then shows the diagram, like the read surface already does.
+          ctx.addAtomic(Decoration.replace({ widget: new EditableEditUIWidget(from, to, fenceBody(doc, node.from, node.to), macro.editUI, (b) => "```" + lang + "\n" + b + "\n```", ctx.macroTheme, macro.tier, true, lang ?? undefined), block: true }), from, to);
           return;
         }
         if (active && !macro.richEditUI && active.from <= from && active.to >= to) return; // entered → source

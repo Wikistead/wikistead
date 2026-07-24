@@ -193,6 +193,13 @@ export interface EditEnv {
   // #456 S1: present when the host can lend its shared surface. Optional so a macro can fall back
   // to its own pane (and so tests can mount an editUI with no host).
   mountSurface?(opts: HostSurfaceOptions): HostSurfaceHandle;
+  // #525: host-mediated diagram render for an editUI's PREVIEW pane. The read surface already swaps a
+  // host-renderable fence (plantuml) for image bytes it fetched itself (HOST_RENDERABLE + the
+  // diagramRenderer facet), but an OPEN editUI had no such seam, so the edit panel kept showing source
+  // while the same block rendered a diagram once closed. The macro still never fetches (ADR-024): it
+  // hands over its source and gets bytes back, or null to keep degrading to source (Open formats).
+  // Absent when the host configures no renderer, or for a macro that renders client-side (mermaid).
+  renderDiagram?(source: MacroSource): Promise<Blob | null>;
 }
 
 // ADR-025 step 3: a macro's source can often be written at more than one "level" — a
