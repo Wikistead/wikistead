@@ -36,6 +36,14 @@ export function isIslandCoOccupied(awareness: AwarenessLike, anchor: string): bo
   return coOccupantClientIDs(awareness, anchor).length >= 2;
 }
 
+// #502 rework (review floor): is a client OTHER than self currently editing the island/macro at
+// `anchor`? Unlike isIslandCoOccupied (2+ incl. self), this is the self-vs-PEER distinction the co-edit
+// floor needs: opening a clobbering inline RichUI while a PEER holds the macro's ephemeral co-edit doc is
+// the loss case, so `enterMacroAt` reveals the (ephemeral-bound, merging) SOURCE instead when this is true.
+export function isPeerEditingIsland(awareness: AwarenessLike, anchor: string): boolean {
+  return coOccupantClientIDs(awareness, anchor).some((id) => id !== awareness.clientID);
+}
+
 export function makeMacroPresence(awareness: AwarenessLike): MacroPresence {
   return {
     set(anchor: string | null) {
