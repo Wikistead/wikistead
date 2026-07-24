@@ -697,8 +697,25 @@ export const attachmentResolver = Facet.define<AttachmentResolver, AttachmentRes
 // the macro (host-API is {theme} only — ADR-024); the HOST resolves the source to image bytes via
 // this injected renderer (it holds pageId/token and calls the gated, SSRF-guarded server endpoint).
 // null ⇒ degrade-to-source (the widget keeps the source fence — Open formats, never a broken embed).
-export type DiagramRenderer = (lang: string, source: string, theme?: MacroTheme) => Promise<Blob | null>;
+// #525the host renderer reports WHY it could not produce an image, because the three cases need
+// three different surfaces: an unconfigured endpoint degrades silently to the source fence (the operator
+// has not opted in — nothing is wrong), an INVALID diagram deserves the visible error mermaid shows for
+// its equivalent, and a transient outage says so without blaming the author's syntax. A bare Blob is
+// still accepted (and read as success) so callers that only ever succeed stay simple.
+export type DiagramRenderResult =
+  | Blob //                          success (legacy shape)
+  | { ok: true; blob: Blob }
+  | { ok: false; reason: "degrade" | "invalid" | "unavailable" }
+  | null; //                         legacy degrade
+export type DiagramRenderer = (lang: string, source: string, theme?: MacroTheme) => Promise<DiagramRenderResult>;
 const noopDiagramRenderer: DiagramRenderer = async () => null;
+
+// Normalise every accepted shape into one verdict the widget can switch on.
+export function diagramVerdict(r: DiagramRenderResult): { blob: Blob } | { reason: "degrade" | "invalid" | "unavailable" } {
+  if (r instanceof Blob) return { blob: r };
+  if (r && "ok" in r) return r.ok ? { blob: r.blob } : { reason: r.reason };
+  return { reason: "degrade" };
+}
 export const diagramRenderer = Facet.define<DiagramRenderer, DiagramRenderer>({
   combine: (values) => values[0] ?? noopDiagramRenderer,
 });
@@ -2605,10 +2622,32 @@ class MacroWidget extends WidgetType {
       // the source — Open formats, never a broken embed. Fires ONCE per widget instance (eq reuses
       // the widget while name+body are stable, so there's no churn / re-fetch on every keystroke).
       const renderDiagram = view.state.facet(diagramRenderer);
-      if (HOST_RENDERABLE.has(this.name) && renderDiagram !== noopDiagramRenderer) {
-        void renderDiagram(this.name, this.body, this.theme).then((blob) => {
-          if (this.destroyed || !blob) return; // torn down mid-fetch, or degrade → leave the source
-          this.objectUrl = URL.createObjectURL(blob);
+      if (HOST_RENDERABLE.has(this.name) && this.body.trim() && renderDiagram !== noopDiagramRenderer) {
+        // #525the round trip to the operator's renderer takes ~1.4s, and until now the raw source
+        // sat there looking like "the preview is broken" (mermaid renders client-side, so it never shows
+        // this gap). Say what is happening instead; the source stays underneath, so nothing is lost.
+        const pending = document.createElement("div");
+        pending.className = "cm-lp-macro-pending";
+        pending.setAttribute("data-testid", `macro-${this.name}-pending`);
+        pending.textContent = i18n.t("macro.diagramRendering");
+        rendered.appendChild(pending);
+        void renderDiagram(this.name, this.body, this.theme).then((res) => {
+          if (this.destroyed) return; // torn down mid-fetch
+          pending.remove();
+          const v = diagramVerdict(res);
+          if (!("blob" in v)) {
+            // #525an INVALID diagram gets the same visible error mermaid shows; an outage says so
+            // separately; an unconfigured endpoint stays a silent degrade (the source fence is the answer).
+            if (v.reason === "degrade") return;
+            wrap.classList.add("cm-lp-macro-error");
+            const err = document.createElement("div");
+            err.className = "cm-lp-macro-error-msg";
+            err.setAttribute("data-testid", `macro-${this.name}-error`);
+            err.textContent = i18n.t(v.reason === "invalid" ? "macro.diagramInvalid" : "macro.diagramUnavailable");
+            rendered.prepend(err); // the source stays below it — the author can still see and fix the text
+            return;
+          }
+          this.objectUrl = URL.createObjectURL(v.blob);
           (wrap as MwDom).__mwObjUrl = this.objectUrl; // #221: travel with the DOM for updateDOM reuse
 
           const img = document.createElement("img");

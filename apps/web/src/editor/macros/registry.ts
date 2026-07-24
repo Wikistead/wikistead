@@ -199,7 +199,7 @@ export interface EditEnv {
   // while the same block rendered a diagram once closed. The macro still never fetches (ADR-024): it
   // hands over its source and gets bytes back, or null to keep degrading to source (Open formats).
   // Absent when the host configures no renderer, or for a macro that renders client-side (mermaid).
-  renderDiagram?(source: MacroSource): Promise<Blob | null>;
+  renderDiagram?(source: MacroSource): Promise<import("../live-preview/decorations").DiagramRenderResult>;
 }
 
 // ADR-025 step 3: a macro's source can often be written at more than one "level" — a
