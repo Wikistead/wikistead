@@ -10,6 +10,20 @@ import { Navigate, Route, Routes, useParams, useSearchParams, useNavigate, Link 
 const AdminRoot = lazy(() => import("../settings/AdminPage").then((m) => ({ default: m.AdminRoot })));
 const AccountRoot = lazy(() => import("../settings/AccountPage").then((m) => ({ default: m.AccountRoot })));
 const SpaceSettingsRoot = lazy(() => import("../settings/SpaceSettingsPage").then((m) => ({ default: m.SpaceSettingsRoot })));
+// #489 (route-split, cont.): the templates gallery, the recent-changes feed and the watch-management
+// list are their own routes OFF the editor path — split them out of the eager main bundle too, behind
+// the same Suspense boundary. Same paths/components; only the load moment moves to first navigation.
+const TemplatesRoute = lazy(() => import("./TemplatesPage").then((m) => ({ default: m.TemplatesRoute })));
+const RecentChangesRoute = lazy(() => import("./RecentChangesPage").then((m) => ({ default: m.RecentChangesRoute })));
+const WatchListRoute = lazy(() => import("../notifications/WatchListPage").then((m) => ({ default: m.WatchListRoute })));
+// #489 (route-split, cont.): the on-demand right-panels are only mounted when the reader OPENS them
+// ({flag && <Panel/>}), yet they rode the eager main bundle. Split each behind its own chunk; a null
+// fallback is fine (the chunk loads in well under a frame, and the panel is a deliberate open action).
+const CommentsPanel = lazy(() => import("../comments/CommentsPanel").then((m) => ({ default: m.CommentsPanel })));
+const HistoryPanel = lazy(() => import("../history/HistoryPanel").then((m) => ({ default: m.HistoryPanel })));
+const DiffModal = lazy(() => import("../history/DiffModal").then((m) => ({ default: m.DiffModal })));
+const AttachmentsPanel = lazy(() => import("../attachments/AttachmentsPanel").then((m) => ({ default: m.AttachmentsPanel })));
+const RelatedPanel = lazy(() => import("./RelatedPanel").then((m) => ({ default: m.RelatedPanel })));
 // A minimal, chrome-free fallback for a lazy subtree (the chunk loads in well under a frame on a warm
 // cache; this only shows on the very first navigation to that area).
 function LazyFallback() {
@@ -162,15 +176,12 @@ import { ProgressRing } from "./ProgressRing"; // #290: title-band page-progress
 import { useTheme } from "./ThemeProvider"; // #376: public reader remounts on theme switch (diagram re-render)
 import { ThemeToggle } from "./ThemeToggle"; // #429/#430: the standalone public reader's header controls
 import { LanguageToggle } from "./LanguageToggle";
-import { RelatedPanel } from "./RelatedPanel";
+// RelatedPanel / CommentsPanel / HistoryPanel / DiffModal / AttachmentsPanel are lazy (see the top block).
 import { Input } from "../ui/Input";
 import { ShareDialog } from "../ui/ShareDialog";
-import { CommentsPanel } from "../comments/CommentsPanel";
 import { TocChrome } from "../toc/TocChrome"; // #227: shared TOC rail/overlay/toggle wiring (member + public)
 import { useTocPref } from "../toc/useTocPref";
 import type { Heading } from "../editor/headings";
-import { HistoryPanel } from "../history/HistoryPanel";
-import { DiffModal } from "../history/DiffModal";
 import { PermissionsDialog } from "../ui/PermissionsDialog";
 import { Button } from "../ui/Button";
 import { ProseSkeleton, useDelayedFlag } from "../ui/Skeleton";
@@ -179,7 +190,6 @@ import { useComments } from "../data/comments";
 import { Sidebar } from "../sidebar/Sidebar";
 import { PageTree, type PageTreeNode } from "../sidebar/PageTree"; // #227: reuse the member page tree in the public reader
 import { SearchBox } from "../search/SearchBox";
-import { AttachmentsPanel } from "../attachments/AttachmentsPanel";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, assetUrl, type GuestToken } from "../data/apiClient";
 import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useDirectDeletePage, useCreatePage, useEntitlements, useSpaces, useBranding, type Page } from "../data/queries";
@@ -189,9 +199,7 @@ import { GuestSidebar } from "./GuestSidebar";
 import { ConfirmDialog } from "../ui/dialogs";
 import { DeleteBacklinkWarning } from "./DeleteBacklinkWarning";
 import { SaveTemplateDialog } from "./SaveTemplateDialog";
-import { TemplatesRoute } from "./TemplatesPage";
-import { RecentChangesRoute } from "./RecentChangesPage";
-import { WatchListRoute } from "../notifications/WatchListPage"; // #362: bell → watch-management list
+// TemplatesRoute / RecentChangesRoute / WatchListRoute are lazy-loaded (see the lazy block at the top).
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport, printPageHtml } from "../data/exportApi";
 import { useActiveSpace } from "./ActiveSpace";
@@ -744,12 +752,12 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
             />
           </div>
         </div>
-        {pageId && commentsOpen && <CommentsPanel pageId={pageId} canComment={page?.canComment ?? capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} />}
-        {pageId && historyOpen && <HistoryPanel pageId={pageId} canRestore={capability === "edit"} canModerate={page?.canModerate ?? false} onCompare={openDiff} onClose={closeHistory} />}
-        {pageId && attachmentsOpen && <AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} onClose={closeAttachments} />}
-        {pageId && relatedOpen && <RelatedPanel pageId={pageId} onClose={closeRelated} />}
+        {pageId && commentsOpen && <Suspense fallback={null}><CommentsPanel pageId={pageId} canComment={page?.canComment ?? capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} /></Suspense>}
+        {pageId && historyOpen && <Suspense fallback={null}><HistoryPanel pageId={pageId} canRestore={capability === "edit"} canModerate={page?.canModerate ?? false} onCompare={openDiff} onClose={closeHistory} /></Suspense>}
+        {pageId && attachmentsOpen && <Suspense fallback={null}><AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} onClose={closeAttachments} /></Suspense>}
+        {pageId && relatedOpen && <Suspense fallback={null}><RelatedPanel pageId={pageId} onClose={closeRelated} /></Suspense>}
       </div>
-      {pageId && diffRevId && <DiffModal pageId={pageId} revId={diffRevId} onClose={closeDiff} />}
+      {pageId && diffRevId && <Suspense fallback={null}><DiffModal pageId={pageId} revId={diffRevId} onClose={closeDiff} /></Suspense>}
       {pageId && <PermissionsDialog pageId={pageId} open={permsOpen} onClose={() => setPermsOpen(false)} />}
       <ShareDialog pageId={sharing ? pageId ?? null : null} onClose={() => setSharing(false)} />
       <SaveTemplateDialog
@@ -1217,7 +1225,7 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
               railTop="calc(var(--wks-band-h, 0px) + 0.5rem)"
             />
           </div>
-          {commentsOpen && <CommentsPanel pageId={pageId} canComment={canComment} anchorGetterRef={anchorGetterRef} onClose={() => setCommentsOpen(false)} token={token} />}
+          {commentsOpen && <Suspense fallback={null}><CommentsPanel pageId={pageId} canComment={canComment} anchorGetterRef={anchorGetterRef} onClose={() => setCommentsOpen(false)} token={token} /></Suspense>}
         </div>
       </div>
   );
@@ -1710,9 +1718,9 @@ export function AppRoutes() {
       <Route path="/pub/:pageId" element={<PublicPageRoute />} />
       <Route path="/share/:linkId" element={<ShareRoute />} />
       <Route path="/invite" element={<InviteRoute />} />
-      <Route path="/templates" element={<TemplatesRoute />} />
-      <Route path="/changes" element={<RecentChangesRoute />} />
-      <Route path="/watches" element={<WatchListRoute />} /> {/* #362the bell's watch list */}
+      <Route path="/templates" element={<Suspense fallback={<LazyFallback />}><TemplatesRoute /></Suspense>} />
+      <Route path="/changes" element={<Suspense fallback={<LazyFallback />}><RecentChangesRoute /></Suspense>} />
+      <Route path="/watches" element={<Suspense fallback={<LazyFallback />}><WatchListRoute /></Suspense>} /> {/* #362the bell's watch list */}
       <Route path="/admin/*" element={<Suspense fallback={<LazyFallback />}><AdminRoot /></Suspense>} />
       <Route path="/settings/account/*" element={<Suspense fallback={<LazyFallback />}><AccountRoot /></Suspense>} />
       <Route path="/spaces/:spaceId/settings/*" element={<Suspense fallback={<LazyFallback />}><SpaceSettingsRoot /></Suspense>} />
