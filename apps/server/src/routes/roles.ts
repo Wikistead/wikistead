@@ -40,7 +40,10 @@ export type RoleCapability = (typeof ROLE_CAPABILITIES)[number]
 // these — otherwise a `share`-only holder could assign a role that escalates a principal to admin class.
 const ADMIN_CLASS_ROLE_CAPS = new Set<RoleCapability>(['delete', 'share', 'settings', 'publish', 'moderate'])
 
-export const TENANT_ROLE_CAPABILITIES = ['createSpaces'] as const
+// #496 / ADR-181 adds `issueApiKeys` (→ the `api_key_issue` relation) as the SECOND tenant capability,
+// retiring #462's api_key_issue_policy enum: who may mint an API key is now a role capability like any
+// other, so authority lives in FGA alone.
+export const TENANT_ROLE_CAPABILITIES = ['createSpaces', 'issueApiKeys'] as const
 export type TenantRoleCapability = (typeof TENANT_ROLE_CAPABILITIES)[number]
 export type AnyRoleCapability = RoleCapability | TenantRoleCapability
 export type RoleScope = 'resource' | 'tenant'
@@ -78,6 +81,7 @@ const SPACE_CAP_RELATIONS: Partial<Record<RoleCapability, string[]>> = {
 // assignments are a search-reindex NO-OP by design — the write paths must not wire one.
 const TENANT_CAP_RELATION: Record<TenantRoleCapability, string> = {
   createSpaces: 'space_creator',
+  issueApiKeys: 'api_key_issue', // #496 / ADR-181 — camelCase token → snake_case relation, same as above
 }
 
 function expansionTuples(resourceType: 'page' | 'space' | 'tenant', resourceId: string, principal: string, cap: AnyRoleCapability): { user: string; relation: string; object: string }[] {
@@ -585,30 +589,55 @@ export async function rolesPlugin(app: FastifyInstance) {
   // never shows a toggle that cannot turn off. The object is ALWAYS the caller's own tenant (bound
   // by construction — no cross-tenant surface). Replaces the #399 §2 knob (ADR-158 superseded).
   const MEMBERS_CREATOR = (tenantId: string) => ({ user: `tenant:${tenantId}#member`, relation: 'space_creator', object: `tenant:${tenantId}` })
+  // #496 / ADR-181 §2: the same member-userset tuple one relation over. Present = "all members may mint
+  // an API key" (the old `members` policy); absent = admins only via the model's `or admin` (the old
+  // `admins_only`). Provisioning seeds NOTHING here, so a new tenant starts admin-only.
+  const MEMBERS_API_KEY_ISSUER = (tenantId: string) => ({ user: `tenant:${tenantId}#member`, relation: 'api_key_issue', object: `tenant:${tenantId}` })
 
   app.get('/admin/roles/tenant-defaults', async (req) => {
     await adminGate(req)
     const { tuples } = await app.fga.read({ user: `tenant:${req.tenant.id}#member`, object: `tenant:${req.tenant.id}` })
-    const memberCreateSpaces = (tuples ?? []).some((t: Tuple) => t.key?.relation === 'space_creator')
+    const has = (relation: string) => (tuples ?? []).some((t: Tuple) => t.key?.relation === relation)
     return {
-      member: { createSpaces: memberCreateSpaces },
-      admin: { createSpaces: true, locked: true },
+      member: { createSpaces: has('space_creator'), issueApiKeys: has('api_key_issue') },
+      // Both are model-hardcoded for admins (`or admin`), so the UI shows them locked-on rather than a
+      // toggle that cannot turn off.
+      admin: { createSpaces: true, issueApiKeys: true, locked: true },
     }
   })
 
-  app.put<{ Body: { memberCreateSpaces?: boolean } }>('/admin/roles/tenant-defaults', async (req, reply) => {
+  app.put<{ Body: { memberCreateSpaces?: boolean; memberIssueApiKeys?: boolean } }>('/admin/roles/tenant-defaults', async (req, reply) => {
     await adminGate(req) // CE preset — deliberately NOT writeGates (no customRoles entitlement)
-    const v = req.body?.memberCreateSpaces
-    if (typeof v !== 'boolean') return reply.code(400).send({ error: 'memberCreateSpaces (boolean) required' })
+    // #496: the body now carries two independent member toggles. Each is optional so a caller may flip one
+    // without restating the other (the UI sends only what changed); at least one must be present.
+    const wantCreate = req.body?.memberCreateSpaces
+    const wantIssue = req.body?.memberIssueApiKeys
+    for (const v of [wantCreate, wantIssue]) {
+      if (v !== undefined && typeof v !== 'boolean') return reply.code(400).send({ error: 'memberCreateSpaces / memberIssueApiKeys must be booleans' })
+    }
+    if (wantCreate === undefined && wantIssue === undefined) {
+      return reply.code(400).send({ error: 'memberCreateSpaces or memberIssueApiKeys (boolean) required' })
+    }
     const { tuples } = await app.fga.read({ user: `tenant:${req.tenant.id}#member`, object: `tenant:${req.tenant.id}` })
-    const present = (tuples ?? []).some((t: Tuple) => t.key?.relation === 'space_creator')
+    const has = (relation: string) => (tuples ?? []).some((t: Tuple) => t.key?.relation === relation)
+    const hadCreate = has('space_creator')
+    const hadIssue = has('api_key_issue')
     await req.db.tx(async (tx) => {
       await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.default_preset_changed', target: `tenant:${req.tenant.id}` })
-      // Idempotent flip, FGA last-in-tx (a write failure rolls the audit back).
-      if (v && !present) await writeTuples(app.fga, [MEMBERS_CREATOR(req.tenant.id)])
-      if (!v && present) await deleteTuples(app.fga, [MEMBERS_CREATOR(req.tenant.id)])
+      // Idempotent flips, FGA last-in-tx (a write failure rolls the audit back).
+      const add: { user: string; relation: string; object: string }[] = []
+      const del: { user: string; relation: string; object: string }[] = []
+      if (wantCreate === true && !hadCreate) add.push(MEMBERS_CREATOR(req.tenant.id))
+      if (wantCreate === false && hadCreate) del.push(MEMBERS_CREATOR(req.tenant.id))
+      if (wantIssue === true && !hadIssue) add.push(MEMBERS_API_KEY_ISSUER(req.tenant.id))
+      if (wantIssue === false && hadIssue) del.push(MEMBERS_API_KEY_ISSUER(req.tenant.id))
+      if (add.length) await writeTuples(app.fga, add)
+      if (del.length) await deleteTuples(app.fga, del)
     })
-    return { member: { createSpaces: v }, admin: { createSpaces: true, locked: true } }
+    return {
+      member: { createSpaces: wantCreate ?? hadCreate, issueApiKeys: wantIssue ?? hadIssue },
+      admin: { createSpaces: true, issueApiKeys: true, locked: true },
+    }
   })
 
   // ---- #497 / ADR-183 §3: the tenant DEFAULT role (EE — customRoles) ----

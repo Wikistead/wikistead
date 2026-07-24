@@ -1421,7 +1421,9 @@ export function useMyApiKeys(enabled = true) {
 }
 // What the CALLER may do here — for showing or hiding the affordance only. The server refuses
 // regardless of what this says.
-export interface ApiKeyPolicy { policy: "members" | "admins_only"; canIssue: boolean; maxScope: ApiScope }
+// #496 / ADR-181: the `policy` enum field is gone — `canIssue` IS the server's capability check
+// (isApiKeyIssuer), so this can never disagree with the gate.
+export interface ApiKeyPolicy { canIssue: boolean; maxScope: ApiScope }
 export function useMyApiKeyPolicy() {
   const { token } = useSession();
   return useQuery({ queryKey: ["api-keys", "policy"], queryFn: () => apiFetch<ApiKeyPolicy>("/api-keys/policy", token) });
@@ -1641,8 +1643,13 @@ export function useSetPageCommentAudience(pageId: string | null) {
   });
 }
 // #445 / ADR-171: the DEFAULT tenant-role presets (CE — replaces the #399 §2 creation-policy knob).
-// member.createSpaces IS the tenant#space_creator wildcard tuple; admin is locked-on by the model.
-export interface TenantRoleDefaults { member: { createSpaces: boolean }; admin: { createSpaces: boolean; locked: boolean } }
+// member.createSpaces IS the tenant#space_creator userset tuple; admin is locked-on by the model.
+// #496 / ADR-181: member.issueApiKeys is the same thing for `api_key_issue` (the retired #462 policy
+// enum) — both toggles write/delete one member-userset tuple, and both are model-locked for admins.
+export interface TenantRoleDefaults {
+  member: { createSpaces: boolean; issueApiKeys: boolean }
+  admin: { createSpaces: boolean; issueApiKeys: boolean; locked: boolean }
+}
 export function useTenantRoleDefaults(enabled = true) {
   const { token } = useSession();
   return useQuery({
@@ -1655,8 +1662,9 @@ export function useSetTenantRoleDefaults() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (memberCreateSpaces: boolean) =>
-      apiFetch<TenantRoleDefaults>(`/admin/roles/tenant-defaults`, token, { method: "PUT", body: JSON.stringify({ memberCreateSpaces }) }),
+    // #496: a patch, so flipping one member toggle never restates (and so never clobbers) the other.
+    mutationFn: (patch: { memberCreateSpaces?: boolean; memberIssueApiKeys?: boolean }) =>
+      apiFetch<TenantRoleDefaults>(`/admin/roles/tenant-defaults`, token, { method: "PUT", body: JSON.stringify(patch) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tenant-role-defaults"] }),
   });
 }
@@ -1699,15 +1707,14 @@ export function useDeleteWebhook() {
 }
 export function useApiPolicy() {
   const { token } = useSession();
-  return useQuery({ queryKey: ["api-policy"], queryFn: () => apiFetch<{ maxScope: ApiScope; issuePolicy: "members" | "admins_only" }>("/admin/api-policy", token) });
+  return useQuery({ queryKey: ["api-policy"], queryFn: () => apiFetch<{ maxScope: ApiScope }>("/admin/api-policy", token) });
 }
-// #462: each switch sends only its own field, so the two on this panel cannot overwrite each other
-// with a stale copy of the other's value.
+// #496: only the scope cap is set here now — "who may issue" moved to the Roles tab (ADR-181 §5).
 export function useUpdateApiPolicy() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (patch: { maxScope?: ApiScope; issuePolicy?: "members" | "admins_only" }) =>
+    mutationFn: (patch: { maxScope?: ApiScope }) =>
       apiFetch<null>("/admin/api-policy", token, { method: "PATCH", body: JSON.stringify(patch) }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ["api-policy"] }); void qc.invalidateQueries({ queryKey: ["api-keys"] }); },
   });

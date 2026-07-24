@@ -1157,7 +1157,8 @@
       "share": "共有",
       "settings": "設定",
       "moderate": "モデレート",
-      "createSpaces": "スペース作成"
+      "createSpaces": "スペース作成",
+      "issueApiKeys": "API キー発行"
     },
     "scopeLabel": "ロールのスコープ",
     "scopeResource": "スペース / ページ",

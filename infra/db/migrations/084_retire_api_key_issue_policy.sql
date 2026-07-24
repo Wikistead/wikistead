@@ -1,0 +1,14 @@
+-- Migration 084: retire tenant_settings.api_key_issue_policy (#496 / ADR-181).
+--
+-- #462 answered "who may mint an API key" with a two-value column ('members' | 'admins_only', NULL =
+-- 'members'). The tenant then asked for a third shape the column cannot express — only SPECIFIC people —
+-- so authority moves to the tenant role capability `issueApiKeys`, i.e. the `api_key_issue` FGA relation,
+-- exactly as #445/ADR-171 moved space creation to `space_creator`. OpenFGA is the single truth again: one
+-- relation check at POST /api-keys, no settings read, no branching.
+--
+-- The old shapes survive as tuples: 'members' == `api_key_issue@tenant:<id>#member` exists;
+-- 'admins_only' == it doesn't (the model's `or admin` still admits admins).
+--
+-- Run infra/openfga/migrate-496-api-key-issue.ts BEFORE this migration on a stateful environment — it
+-- reads this column and writes the equivalent tuple per tenant. This drop is the point of no return.
+ALTER TABLE tenant_settings DROP COLUMN IF EXISTS api_key_issue_policy;

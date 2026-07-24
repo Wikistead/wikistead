@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
-import { requireTenantAdmin, isTenantAdmin } from '@wikistead/authz'
+import { requireTenantAdmin, isTenantAdmin, isApiKeyIssuer } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { entitlementDenied } from '../entitlement-ux.js'
 import { auditIfEntitled } from '../audit/outbox.js' // #495: admin revoke writes an in-tx tamper-evident audit row
@@ -11,10 +11,12 @@ import { enqueueWebhookOutbox } from './webhooks.js' // #495 Q3: api_key.revoked
 import type { TenantDb } from '../db/index.js'
 
 export type ApiScope = 'read' | 'write'
-// #462: who may mint a key here. 'members' is what the server has always done (the admin-only
-// feeling came from the console being the only UI); 'admins_only' is the tenant asking for the
-// stricter rule, and the server — not the UI — is what enforces it.
-export type ApiKeyIssuePolicy = 'members' | 'admins_only'
+// #496 / ADR-181: #462's `ApiKeyIssuePolicy` enum ('members' | 'admins_only') is RETIRED. Who may mint a
+// key is a tenant ROLE CAPABILITY now (`issueApiKeys` → the `api_key_issue` FGA relation), so authority
+// lives in OpenFGA alone instead of a settings column the UI and the gate both had to agree about. Both
+// old shapes survive as tuples: 'members' == the `tenant#member` userset tuple exists, 'admins_only' ==
+// it doesn't (the model's `or admin` still lets admins through) — and "only these people" is now
+// expressible too, which is the whole reason for the change.
 
 interface ApiKeyRow {
   id: string; tenant_id: string; owner_user_id: string; name: string
@@ -36,29 +38,6 @@ export async function getApiKeyMaxScope(db: TenantDb): Promise<ApiScope> {
     SELECT api_key_max_scope FROM tenant_settings LIMIT 1
   `
   return row?.api_key_max_scope === 'read' ? 'read' : 'write'
-}
-
-export async function getApiKeyIssuePolicy(db: TenantDb): Promise<ApiKeyIssuePolicy> {
-  const [row] = await db.sql<{ api_key_issue_policy: string | null }[]>`
-    SELECT api_key_issue_policy FROM tenant_settings LIMIT 1
-  `
-  return row?.api_key_issue_policy === 'admins_only' ? 'admins_only' : 'members'
-}
-
-export async function setApiKeyIssuePolicy(
-  db: TenantDb,
-  fga: OpenFgaClient,
-  args: { tenantId: string; userId: string; policy: ApiKeyIssuePolicy },
-): Promise<void> {
-  await requireTenantAdmin(fga, args.userId, args.tenantId)
-  if (args.policy !== 'members' && args.policy !== 'admins_only') {
-    throw Object.assign(new Error('invalid policy'), { statusCode: 400 })
-  }
-  await db.sql`
-    INSERT INTO tenant_settings (tenant_id, api_key_issue_policy, updated_at)
-    VALUES (${args.tenantId}, ${args.policy}, now())
-    ON CONFLICT (tenant_id) DO UPDATE SET api_key_issue_policy = ${args.policy}, updated_at = now()
-  `
 }
 
 export async function setApiKeyMaxScope(
@@ -221,10 +200,13 @@ export async function revokeApiKeyAsAdmin(
 
 export async function apiKeysPlugin(app: FastifyInstance) {
   app.post<{ Body: { name: string; scope?: ApiScope } }>('/api-keys', async (req, reply) => {
-    // #462: the tenant's issuing policy, enforced HERE. The console hiding the button is a
-    // convenience; this is the gate. (Membership itself is settled before any route runs — #471.)
-    if ((await getApiKeyIssuePolicy(req.db)) === 'admins_only') {
-      await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    // #496 / ADR-181: ONE capability check is the gate — no settings read, no branching. The relation's
+    // `or admin` arm covers what `admins_only` used to mean, the `tenant#member` userset covers `members`,
+    // and a custom tenant role covers "only these people". The console hiding the button is a convenience;
+    // this is the fortress. (Membership itself is settled before any route runs — #471.) The `code` is
+    // surfaced so the console can say WHY it was refused (#445a silent 403 is a bug).
+    if (!(await isApiKeyIssuer(app.fga, req.user.sub, req.tenant.id))) {
+      throw Object.assign(new Error('api key issuance is restricted'), { statusCode: 403, code: 'api_key_issue', reason: 'api_key_issue' })
     }
     const created = await createApiKey(req.db, {
       tenantId: req.tenant.id,
@@ -267,10 +249,12 @@ export async function apiKeysPlugin(app: FastifyInstance) {
   // a member advisorily via /api-keys/policy — a member reads this through THAT door, not this one.
   app.get('/admin/api-policy', async (req) => {
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
-    return { maxScope: await getApiKeyMaxScope(req.db), issuePolicy: await getApiKeyIssuePolicy(req.db) }
+    // #496 / ADR-181: `issuePolicy` is gone with the enum — who may issue is configured on the Roles
+    // tab now (the member toggle / a tenant role capability). Only the scope cap lives here.
+    return { maxScope: await getApiKeyMaxScope(req.db) }
   })
 
-  app.patch<{ Body: { maxScope?: ApiScope; issuePolicy?: ApiKeyIssuePolicy } }>('/admin/api-policy', async (req, reply) => {
+  app.patch<{ Body: { maxScope?: ApiScope } }>('/admin/api-policy', async (req, reply) => {
     // Admin-gate the request itself, not only each setter: an empty body would otherwise call no
     // setter and hand a non-admin a 204, which reads like success on an admin route.
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
@@ -279,17 +263,15 @@ export async function apiKeysPlugin(app: FastifyInstance) {
     if (req.body?.maxScope !== undefined) {
       await setApiKeyMaxScope(req.db, app.fga, { tenantId: req.tenant.id, userId: req.user.sub, maxScope: req.body.maxScope })
     }
-    if (req.body?.issuePolicy !== undefined) {
-      await setApiKeyIssuePolicy(req.db, app.fga, { tenantId: req.tenant.id, userId: req.user.sub, policy: req.body.issuePolicy })
-    }
     return reply.code(204).send()
   })
 
   // What the CALLER may do, so a member surface can show or hide its own affordance without being
   // the authority on it (the server just refused, or will refuse, either way).
   app.get('/api-keys/policy', async (req) => {
-    const policy = await getApiKeyIssuePolicy(req.db)
-    const canIssue = policy === 'members' || (await isTenantAdmin(app.fga, req.user.sub, req.tenant.id))
-    return { policy, canIssue, maxScope: await getApiKeyMaxScope(req.db) }
+    // #496 / ADR-181: `canIssue` is the SAME check the POST gate runs (isApiKeyIssuer), so the console can
+    // never show an affordance the server would refuse. The `policy` enum field is gone with the enum.
+    const canIssue = await isApiKeyIssuer(app.fga, req.user.sub, req.tenant.id)
+    return { canIssue, maxScope: await getApiKeyMaxScope(req.db) }
   })
 }
