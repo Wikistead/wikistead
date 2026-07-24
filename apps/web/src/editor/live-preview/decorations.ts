@@ -4866,14 +4866,6 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // #197: a PALE, token-driven header (was a hardcoded grey wash). Neutral surface + --fg text so the
   // header is always readable in any theme — no accent tint that could clash with the header text.
   ".cm-lp-table th": { background: "var(--wks-table-th-bg, var(--panel-2, #f0f1f3))", color: "var(--fg)", fontWeight: "700" }, // #381 shared value token
-  // #518: explicit headers stick on scroll — the GFM top row (thead th) and a :::table row header (a th
-  // that is the first cell of its row). The scroll wrap gets a max-height (below) so a TALL table scrolls
-  // inside its box with the header pinned; short tables keep their natural height. Opaque th-bg + an
-  // inset box-shadow edge keep the separating border with the sticky cell (a border-collapse border
-  // otherwise scrolls away).
-  ".cm-lp-table thead th": { position: "sticky", top: "0", zIndex: "2", boxShadow: "inset 0 -1px 0 var(--border)" },
-  ".cm-lp-table th:first-child": { position: "sticky", left: "0", zIndex: "1", boxShadow: "inset -1px 0 0 var(--border)" },
-  ".cm-lp-table thead th:first-child": { zIndex: "3", boxShadow: "inset -1px -1px 0 var(--border)" },
   ".cm-lp-image": { maxWidth: "100%", height: "auto", borderRadius: "4px", verticalAlign: "bottom" },
   // #273: file-attachment affordances. The inline chip flows with the text; the standalone card
   // is a bordered row; the sandboxed PDF frame gets a bounded height (the ResizeObserver keeps
@@ -5105,10 +5097,7 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // box is the only horizontal scroller, held to the line width so a wide table can never widen the
   // editor; the table takes its natural width inside it.
   ".cm-lp-table-wrap": { position: "relative", width: "100%", maxWidth: "100%" },
-  // #518: a max-height turns the wrap into a vertical scroll box too, so a tall table scrolls INSIDE it
-  // with the sticky thead header pinned (page-basis top sticky is impossible while the overflow-x wrap is
-  // the vertical scroll ancestor). Short tables never reach it, so they keep their natural height.
-  ".cm-lp-table-scroll": { width: "0", minWidth: "100%", maxWidth: "100%", overflowX: "auto", overflowY: "auto", maxHeight: "min(70vh, 32rem)" },
+  ".cm-lp-table-scroll": { width: "0", minWidth: "100%", maxWidth: "100%", overflowX: "auto" },
   ".cm-lp-table-scroll > table": { minWidth: "max-content" },
   // #216 comment 874 / #174 comment 878 (ADR-087 addendum 2): the SHARED RichUI-entry pill on the RAW-editing
   // state of a macro (pipe table + callout). Anchored to the first revealed line (.cm-lp-macro-raw =
