@@ -407,7 +407,15 @@
     "draft": "Draft",
     "unpublished": "Unpublished changes",
     "published": "Published",
-    "empty": "No pages in this space yet."
+    "empty": "No pages in this space yet.",
+    "selectAll": "Select all pages",
+    "selectRow": "Select page",
+    "selectedCount": "{{count}} selected",
+    "clearSelection": "Clear",
+    "bulkDeleteTitle": "Delete pages",
+    "bulkDeleteConfirm": "Delete {{count}} page(s) and all their nested pages? This moves them to the trash.",
+    "bulkDeleteDone": "Deleted {{count}} page(s).",
+    "bulkDeletePartial": "Deleted {{deleted}}; skipped {{skipped}} (no permission)."
   },
   "spaceMembers": {
     "title": "Members & permissions",

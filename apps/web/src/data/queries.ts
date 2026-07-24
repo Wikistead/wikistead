@@ -240,6 +240,28 @@ export function useDeletePage() {
   });
 }
 
+// #511 / ADR-185: bulk-delete a selection of pages in a space. The server re-checks per-page authz and
+// returns a partial-success map ({ok, skipped} + per-item result) — never all-or-nothing — so a caller
+// who may delete some but not all sees exactly what happened. Invalidates the same views a single delete does.
+export interface BulkDeleteResult { results: { id: string; ok: boolean; reason?: string }[]; deleted: number; skipped: number }
+export function useBulkDeletePages() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { spaceId: string; pageIds: string[] }) =>
+      apiFetch<BulkDeleteResult>(`/spaces/${encodeURIComponent(args.spaceId)}/pages/bulk-delete`, token, {
+        method: "POST",
+        body: JSON.stringify({ pageIds: args.pageIds }),
+      }),
+    onSuccess: (_r, args) => {
+      qc.invalidateQueries({ queryKey: ["pages-overview", args.spaceId] });
+      qc.invalidateQueries({ queryKey: ["pages", args.spaceId] });
+      qc.invalidateQueries({ queryKey: ["backlinks"] });
+      qc.invalidateQueries({ queryKey: ["space-trash", args.spaceId] });
+    },
+  });
+}
+
 // #437 / ADR-167: the DIRECT permanent path (modes 'both' / 'direct_only'; the server 400s otherwise).
 export function useDirectDeletePage() {
   const { token } = useSession();
