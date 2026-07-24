@@ -3,21 +3,24 @@
 // migration from one store to another). It reconstructs only the tuples whose source of truth is the DB:
 //   1. tenant memberships          — user:<sub> member/admin tenant:<tid>            (members table)
 //   2. group memberships           — user:<sub> member group:<hash>                 (members.groups, #111)
-//   3. space-creation default      — tenant:<tid>#member space_creator tenant:<tid>  (unless policy=admins)
-//   4. space hierarchy             — tenant:<tid> tenant space:<sid>                 (spaces table)
-//   5. personal-space owner grant  — user:<owner> manager space:<sid>               (spaces.personal_owner_sub)
-//   6. PUBLISHED-page tuples        — space:<sid> space page:<pid>  +  the published PAIR
+//   3. space hierarchy             — tenant:<tid> tenant space:<sid>                 (spaces table)
+//   4. personal-space owner grant  — user:<owner> manager space:<sid>               (spaces.personal_owner_sub)
+//   5. PUBLISHED-page tuples        — space:<sid> space page:<pid>  +  the published PAIR
 //                                     (user:* / share_link:* published page:<pid>)  (pages, published_at NOT NULL)
-//   7. TRASHED-page marker          — user:* / share_link:* trashed page:<pid>       (pages, deleted_root_id NOT NULL)
+//   6. TRASHED-page marker          — user:* / share_link:* trashed page:<pid>       (pages, deleted_root_id NOT NULL)
 //
 // These tuple SHAPES mirror the runtime write paths exactly — space create (spaces.ts grantSpaceAccess:
 // tenant/manager), page create + publish (pages.ts: space-link + published pair), trash (pages.ts trashPage:
-// the trashed marker pair), member + group provision (admin/member + group#member), and the ADR-171/#471
-// space_creator userset — and the seed (infra/openfga/seed.ts).
+// the trashed marker pair), member + group provision (admin/member + group#member) — and the seed
+// (infra/openfga/seed.ts).
 //
 // KNOWN LIMITATION — NOT recovered here (FGA is their ONLY source of truth; no DB column exists to derive
 // them, so a wiped/migrated store cannot get them back through this script):
 //   - space GRANTS (viewer/editor/moderator/manager assigned via grantSpaceAccess / role assignment) — FGA-only.
+//   - the space-creation default (tenant:<tid>#member space_creator tenant:<tid>) — FGA-only since ADR-171/#471.
+//     migrate-445 wrote the tenant_settings.space_creation_policy value into the wildcard tuple, then DROPped
+//     the column (mig 075 — point of no return). There is no DB column left to derive it from; a default role's
+//     createSpaces capability sets it at runtime, so it lives in FGA only (like the other markers below).
 //   - visibility / policy MARKERS — public view, PRIVATE, RESTRICTED, FROZEN, comment_open audience, and
 //     per-share-link view/edit markers — all FGA-only. (Consequence to be aware of: a PRIVATE published page
 //     gets its space-link back here but NOT its private marker, so after recovery it is space-visible until
@@ -65,17 +68,12 @@ const groupFgaId = (tenantId: string, name: string): string =>
   }
 
   try {
-    // 1/2. tenants → memberships + the space-creation default (respecting the ADR-171/#471 policy knob).
-    const tenants = await sql<{ id: string; policy: string | null }[]>`
-      SELECT t.id, ts.space_creation_policy AS policy
-      FROM tenants t LEFT JOIN tenant_settings ts ON ts.tenant_id = t.id`
-    for (const t of tenants) {
-      // 'admins' policy → space_creator stays `or admin` in the model (no member userset). Any other value
-      // (or no settings row = the default) → all members may create, via the #471 userset form.
-      if (t.policy !== 'admins') {
-        await ensure({ user: `tenant:${t.id}#member`, relation: 'space_creator', object: `tenant:${t.id}` })
-      }
-    }
+    // 1/2. tenant memberships + group memberships (both from the members table). The space-creation default
+    // (tenant:<tid>#member space_creator tenant:<tid>) is NOT rebuilt here — it is FGA-only since ADR-171/#471.
+    // Its DB column (tenant_settings.space_creation_policy) was DROPped in migration 075 after migrate-445
+    // copied its value into the wildcard tuple (point of no return), so there is nothing left to derive it from
+    // (see the KNOWN LIMITATION note above). Querying it here crashed the whole resync at the first statement
+    // with `column ts.space_creation_policy does not exist`, writing zero tuples (#499).
     const members = await sql<{ tenant_id: string; sub: string; role: string; groups: string[] | null }[]>`
       SELECT tenant_id, sub, role, groups FROM members`
     for (const m of members) {
@@ -88,7 +86,7 @@ const groupFgaId = (tenantId: string, name: string): string =>
         await ensure({ user: `user:${m.sub}`, relation: 'member', object: `group:${groupFgaId(m.tenant_id, g)}` })
       }
     }
-    console.log(`tenants: ${tenants.length}, members: ${members.length}`)
+    console.log(`members: ${members.length}`)
 
     // 3/4. spaces → hierarchy + the personal-space owner's manager grant.
     const spaces = await sql<{ id: string; tenant_id: string; personal_owner_sub: string | null }[]>`
@@ -127,5 +125,5 @@ const groupFgaId = (tenantId: string, name: string): string =>
     await sql.end()
   }
 
-  console.log(`fga:resync done — ${wrote} tuple(s) written. NOT recovered (FGA-only): space grants, visibility/policy markers (private/restricted/frozen/public/comment_open/share-link), drafts' creator grant, share_links, custom role assignments.`)
+  console.log(`fga:resync done — ${wrote} tuple(s) written. NOT recovered (FGA-only): space grants, the space-creation default (space_creator, FGA-only since ADR-171), visibility/policy markers (private/restricted/frozen/public/comment_open/share-link), drafts' creator grant, share_links, custom role assignments.`)
 })().catch((err) => { console.error(err); process.exit(1) })
