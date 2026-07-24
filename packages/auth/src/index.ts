@@ -146,8 +146,10 @@ export function makeMemberVerifier(cfg: OidcConfig) {
       issuer: cfg.issuer,
       audience: cfg.audience,
     });
-    // TODO(phase: auth): map IdP claims -> tenant + groups. Tenant may come from
-    // the resolved request host rather than the token; reconcile here.
+    // Claims are surfaced verbatim; the TENANT is deliberately NOT resolved here. The Host-resolved tenant
+    // is the authority (it picks the RLS context and the FGA object ids), so app.ts keeps this `tenant`
+    // claim only to REFUSE a token minted for somewhere else, then re-checks membership (#471 / ADR-176).
+    // Putting the reconciliation in this verifier would hide that the Host, not the token, decides.
     return {
       sub: String(payload.sub),
       tenantId: String((payload as any).tenant ?? ""),
