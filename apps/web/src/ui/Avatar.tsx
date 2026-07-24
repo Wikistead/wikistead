@@ -55,7 +55,7 @@ export function Avatar({ name, src, seed, glyph, size = 24, shape = "circle", ti
     className,
   );
   return (
-    <span className={cls} style={style} title={title ?? name} aria-label={title ?? name} role="img" data-testid={rest["data-testid"]}>
+    <span className={cls} style={style} data-tip={title ?? name} aria-label={title ?? name} role="img" data-testid={rest["data-testid"]}>
       {showImg ? (
         // referrerPolicy: don't leak the app URL to the IdP/CDN serving the picture.
         <img className="block h-full w-full object-cover" src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} />

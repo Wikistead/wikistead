@@ -119,7 +119,7 @@ export function SpacePagesTab() {
                   <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)}
                     aria-label={t("spacePages.selectRow")} data-testid="bulk-select-row" className="cursor-pointer" />
                 </td>
-                <td onClick={() => navigate(`/p/${p.id}`)}><div className="truncate" title={p.title || undefined}>{p.title || t("common.untitled")}</div></td>
+                <td onClick={() => navigate(`/p/${p.id}`)}><div className="truncate" data-tip={p.title || undefined}>{p.title || t("common.untitled")}</div></td>
                 <td className="whitespace-nowrap" onClick={() => navigate(`/p/${p.id}`)}>
                   {!p.published
                     ? <span className={`${chip} border-border text-fg-dim`}>{t("spacePages.draft")}</span>

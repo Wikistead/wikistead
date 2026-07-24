@@ -137,7 +137,7 @@ export function Toc({
                 // background wash on the whole row (low opacity via color-mix), so the current section stands out.
                 activeFrom === h.from && "font-medium text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]",
               )}
-              title={h.text}
+              data-tip={h.text}
             >{h.text || t("common.untitled")}</button>
           </li>
         );

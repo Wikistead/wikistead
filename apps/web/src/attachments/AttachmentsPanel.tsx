@@ -105,14 +105,14 @@ export function AttachmentsPanel({ pageId, readOnly, onClose }: { pageId: string
           ) : (
             list.data!.map((a) => (
               <div key={a.id} className={row} data-testid="attach-item">
-                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" title={a.filename}>{a.filename}</span>
+                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" data-tip={a.filename}>{a.filename}</span>
                 <span className={dim}>{fmtSize(a.sizeBytes)}</span>
-                <button type="button" className={iconBtn} title={t("attachments.download")} data-testid="attach-download" onClick={() => onDownload(a.id)}>
+                <button type="button" className={iconBtn} data-tip={t("attachments.download")} data-testid="attach-download" onClick={() => onDownload(a.id)}>
                   <Download size={14} />
                 </button>
                 {!readOnly && (
                   // #504: red at rest (not only on hover) + confirm — the stored object is gone for good.
-                  <button type="button" className="flex flex-none rounded border border-border p-[3px] text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:border-destructive" title={t("attachments.delete")} data-testid="attach-delete" onClick={() => setDeleting({ id: a.id, filename: a.filename })}>
+                  <button type="button" className="flex flex-none rounded border border-border p-[3px] text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:border-destructive" data-tip={t("attachments.delete")} data-testid="attach-delete" onClick={() => setDeleting({ id: a.id, filename: a.filename })}>
                     <Trash2 size={14} />
                   </button>
                 )}

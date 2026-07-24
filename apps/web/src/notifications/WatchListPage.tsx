@@ -86,7 +86,7 @@ export function WatchListRoute() {
               </div>
               <button
                 type="button"
-                title={t("watches.maskEdit")}
+                data-tip={t("watches.maskEdit")}
                 aria-label={t("watches.maskEdit")}
                 onClick={() => setEditing((cur) => (cur === w.id ? null : w.id))}
                 className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fg-dim hover:bg-panel-2 hover:text-foreground"
@@ -96,7 +96,7 @@ export function WatchListRoute() {
               </button>
               <button
                 type="button"
-                title={w.muted ? t("watches.unmute") : t("watches.mute")}
+                data-tip={w.muted ? t("watches.unmute") : t("watches.mute")}
                 aria-label={w.muted ? t("watches.unmute") : t("watches.mute")}
                 aria-pressed={w.muted}
                 disabled={update.isPending}
@@ -108,7 +108,7 @@ export function WatchListRoute() {
               </button>
               <button
                 type="button"
-                title={t("watch.unwatch")}
+                data-tip={t("watch.unwatch")}
                 aria-label={t("watch.unwatch")}
                 disabled={unwatch.isPending}
                 onClick={() => unwatch.mutate(w.id)}

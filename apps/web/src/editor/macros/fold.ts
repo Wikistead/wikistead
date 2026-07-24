@@ -28,7 +28,7 @@ const macroCodeFolding = codeFolding({
     span.className = "cm-lp-macro-folded";
     span.setAttribute("data-testid", "macro-folded");
     span.textContent = `▶ ${prepared}`;
-    span.title = "Expand";
+    span.dataset.tip = "Expand"; // #530
     span.onclick = onclick; // CM's handler unfolds
     return span;
   },

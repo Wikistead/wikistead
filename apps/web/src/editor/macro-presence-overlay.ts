@@ -185,7 +185,7 @@ const macroPresenceOverlayPlugin = ViewPlugin.fromClass(
           const chip = document.createElement("span");
           chip.className = "cm-macro-presence-avatar";
           chip.style.background = p.color;
-          chip.title = p.name;
+          chip.dataset.tip = p.name; // #530
           if (p.picture) {
             const img = document.createElement("img");
             img.src = p.picture;

@@ -119,14 +119,14 @@ export function SpaceSwitcher({
                         <span className="ml-auto flex flex-none items-center gap-0.5">
                           {pinned && onMovePin && !query.trim() && !expanded && (
                             <span className={cn("flex gap-0.5 transition-opacity duration-[120ms] group-hover/space:opacity-100", "opacity-0")}>
-                              <button type="button" className={ctlBtn} disabled={pinIdx === 0} title={t("sidebar.movePinUp")} aria-label={t("sidebar.movePinUp")} data-testid="space-pin-up" onPointerDown={guard} onClick={(e) => { guard(e); onMovePin(s.id, -1); }}><ChevronUp size={13} /></button>
-                              <button type="button" className={ctlBtn} disabled={pinIdx === pinnedSpaceIds.length - 1} title={t("sidebar.movePinDown")} aria-label={t("sidebar.movePinDown")} data-testid="space-pin-down" onPointerDown={guard} onClick={(e) => { guard(e); onMovePin(s.id, 1); }}><ChevronDown size={13} /></button>
+                              <button type="button" className={ctlBtn} disabled={pinIdx === 0} data-tip={t("sidebar.movePinUp")} aria-label={t("sidebar.movePinUp")} data-testid="space-pin-up" onPointerDown={guard} onClick={(e) => { guard(e); onMovePin(s.id, -1); }}><ChevronUp size={13} /></button>
+                              <button type="button" className={ctlBtn} disabled={pinIdx === pinnedSpaceIds.length - 1} data-tip={t("sidebar.movePinDown")} aria-label={t("sidebar.movePinDown")} data-testid="space-pin-down" onPointerDown={guard} onClick={(e) => { guard(e); onMovePin(s.id, 1); }}><ChevronDown size={13} /></button>
                             </span>
                           )}
                           <button
                             type="button"
                             className={cn(ctlBtn, "transition-opacity duration-[120ms] group-hover/space:opacity-100", pinned ? "opacity-100" : "opacity-0")}
-                            title={pinned ? t("sidebar.unpin") : t("sidebar.pin")}
+                            data-tip={pinned ? t("sidebar.unpin") : t("sidebar.pin")}
                             aria-label={pinned ? t("sidebar.unpin") : t("sidebar.pin")}
                             aria-pressed={pinned}
                             data-testid="space-pin-toggle"

@@ -34,7 +34,7 @@ export function OverflowMenu({
   return (
     <DropdownMenu modal={false} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
-        <IconButton aria-label={label} title={label} data-testid={`${testId}-trigger`} className={triggerClassName}>
+        <IconButton aria-label={label} data-tip={label} data-testid={`${testId}-trigger`} className={triggerClassName}>
           <MoreHorizontal size={16} />
         </IconButton>
       </DropdownMenuTrigger>

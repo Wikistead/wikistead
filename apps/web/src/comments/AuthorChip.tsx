@@ -45,7 +45,7 @@ export function AuthorChip({ sub, name, hasAvatar: hasAvatarProp }: { sub: strin
     <span className="inline-flex min-w-0 items-center gap-1.5">
       {guest ? (
         // Guests are anonymous share-link visitors → a generic link icon, not a personal avatar.
-        <span className="inline-flex h-5 w-5 flex-none items-center justify-center rounded-full bg-panel-2 text-fg-dim" data-testid="comment-avatar-guest" title={t("common.guest")}>
+        <span className="inline-flex h-5 w-5 flex-none items-center justify-center rounded-full bg-panel-2 text-fg-dim" data-testid="comment-avatar-guest" data-tip={t("common.guest")}>
           <Link2 size={12} aria-hidden />
         </span>
       ) : (
@@ -69,7 +69,7 @@ export function AuthorChip({ sub, name, hasAvatar: hasAvatarProp }: { sub: strin
       {/* full identity stays inspectable on hover; authz is unaffected (display-only).
           max-w caps pathological labels (a 64-hex OIDC sub, a very long display name) so `truncate`
           actually engages — without a bound the span grows to its content before any clipping (#415). */}
-      <span className="max-w-[18ch] truncate text-[0.8em] font-semibold text-fg-dim" title={sub}>{label}</span>
+      <span className="max-w-[18ch] truncate text-[0.8em] font-semibold text-fg-dim" data-tip={sub}>{label}</span>
     </span>
   );
 }

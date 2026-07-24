@@ -46,7 +46,7 @@ export function AdminWebhooksTab() {
           <p className="text-xs text-fg-dim">{t("adminWebhooks.secretOnce")}</p>
           <div className="flex items-center gap-2">
             <code className="flex-1 font-mono text-xs [overflow-wrap:anywhere]">{created.secret}</code>
-            <IconButton aria-label={t("adminWebhooks.copy")} title={t("adminWebhooks.copy")} onClick={() => { navigator.clipboard?.writeText(created.secret); notify.success(t("toast.copied")); }}>
+            <IconButton aria-label={t("adminWebhooks.copy")} data-tip={t("adminWebhooks.copy")} onClick={() => { navigator.clipboard?.writeText(created.secret); notify.success(t("toast.copied")); }}>
               <Copy size={14} />
             </IconButton>
           </div>

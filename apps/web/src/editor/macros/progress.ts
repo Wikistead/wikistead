@@ -37,7 +37,7 @@ export function renderProgressRing(done: number, total: number): HTMLElement | n
   wrap.setAttribute("data-testid", "todo-ring");
   wrap.setAttribute("data-done", String(done));
   wrap.setAttribute("data-total", String(total));
-  wrap.title = `${done}/${total}`;
+  wrap.dataset.tip = `/`; // #530
 
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("width", String(size));
@@ -87,6 +87,6 @@ export function updateProgressRing(wrap: HTMLElement, done: number, total: numbe
   label.textContent = `${done}/${total}`;
   wrap.setAttribute("data-done", String(done));
   wrap.setAttribute("data-total", String(total));
-  wrap.title = `${done}/${total}`;
+  wrap.dataset.tip = `/`; // #530
   return true;
 }

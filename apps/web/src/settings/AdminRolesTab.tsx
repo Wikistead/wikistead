@@ -230,7 +230,7 @@ export function AdminRolesTab() {
                   <>
                     <span className="font-medium">{r.name}</span>
                     {r.scope === "tenant" && <span className="rounded bg-bg-subtle px-1 text-[10px] uppercase tracking-wide text-fg-dim">{t("adminRoles.scopeTenant")}</span>}
-                    <IconButton aria-label={t("adminRoles.rename")} title={t("adminRoles.rename")} data-testid="role-rename"
+                    <IconButton aria-label={t("adminRoles.rename")} data-tip={t("adminRoles.rename")} data-testid="role-rename"
                       onClick={() => { setRenamingId(r.id); setRenameValue(r.name); }}>✎</IconButton>
                   </>
                 )}
@@ -396,7 +396,7 @@ export function AdminRolesTab() {
             <span className="text-fg-dim">→</span>
             <span className="min-w-0 flex-1 truncate text-xs text-fg-dim">{m.roleName}{m.resourceType === "tenant" ? ` · ${t("adminRoles.scopeTenant")}` : ""}</span>
             {m.orphaned && (
-              <span className="rounded border border-[var(--callout-warning)] px-1 text-[10px] uppercase tracking-wide text-[var(--callout-warning)]" data-testid="mapping-orphan" title={t("adminRoles.mappingOrphanHint")}>{t("adminRoles.mappingOrphan")}</span>
+              <span className="rounded border border-[var(--callout-warning)] px-1 text-[10px] uppercase tracking-wide text-[var(--callout-warning)]" data-testid="mapping-orphan" data-tip={t("adminRoles.mappingOrphanHint")}>{t("adminRoles.mappingOrphan")}</span>
             )}
             {/* #504: deleting a mapping revokes its group assignment — red trigger + confirm. */}
             <IconButton aria-label={t("adminRoles.mappingRemove")} data-testid="mapping-remove" variant="danger"
