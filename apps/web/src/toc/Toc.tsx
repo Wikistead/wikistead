@@ -25,9 +25,10 @@ export function Toc({
   variant?: "rail" | "overlay";
   subscribeScroll?: (fn: () => void) => () => void;
   // #515: the OVERLAY variant is `fixed right-3` — the same right edge a side panel (comments/related/
-  // history) opens on. On a narrow screen the two can't share that edge, so suppress the overlay TOC while
-  // any right panel is open (it returns when the panel closes). The rail variant sits at the left/center
-  // whitespace and never collides, so this only gates the overlay.
+  // history) opens on. When a right panel is open the overlay SHIFTS LEFT by the panel width so both stay
+  // visible side by side (user ruling: keep the TOC, don't hide it); it returns to right-3 when the panel
+  // closes. The rail variant sits in the left/center whitespace and never collides, so this only shifts the
+  // overlay.
   rightPanelOpen?: boolean;
 }) {
   const { t } = useTranslation();
@@ -145,7 +146,6 @@ export function Toc({
   );
 
   if (variant === "overlay") {
-    if (rightPanelOpen) return null; // #515: don't fight a right side panel for the right edge (narrow screen)
     return (
       <nav
         ref={navRef}
@@ -159,7 +159,10 @@ export function Toc({
         className={cn(
           // #192: `top` is the MEASURED bottom of the control band (see overlayTop) so the overlay never
           // overlaps the TOC/comments buttons. Glass look: translucent panel + backdrop-blur.
-          "fixed right-3 z-30 max-h-[70vh] w-[240px] overflow-y-auto rounded-lg border border-border/60 bg-panel/70 p-3 shadow-lg backdrop-blur-md transition-opacity duration-200",
+          "fixed z-30 max-h-[70vh] w-[240px] overflow-y-auto rounded-lg border border-border/60 bg-panel/70 p-3 shadow-lg backdrop-blur-md transition-opacity duration-200",
+          // #515 rev (user ruling): while a right panel is open, don't HIDE the overlay — SHIFT it LEFT by the
+          // panel width (RightPanel md:w-[320px]) so both stay visible side by side; back to right-3 when closed.
+          rightPanelOpen ? "right-[calc(0.75rem+320px)]" : "right-3",
           scrolling || hovered ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
         )}
       >
