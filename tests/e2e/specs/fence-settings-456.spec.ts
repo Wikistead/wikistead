@@ -61,11 +61,14 @@ test("#456 S4: the panel survives a document change — it is in the tooltip lay
   await sleep(500);
   await expect(page.getByTestId("fence-settings-panel"), "the panel outlived the edit it made").toBeVisible();
 
-  // and it closes when asked
+  // and it closes when asked. #456 (2026-07-27): the panel dismisses on an OUTSIDE click now, so the
+  // right-click below is itself what closes it — the menu item then re-opens it. That is the requested
+  // popover behaviour; the deliberate close paths (✕ / Escape) are pinned in the next test.
   await page.getByText("const a = 1", { exact: true }).click({ button: "right" });
+  await expect(page.getByTestId("fence-settings-panel"), "the right-click outside dismissed it").toHaveCount(0);
   await page.getByTestId("ctx-item-codesettings").click();
   await sleep(300);
-  await expect(page.getByTestId("fence-settings-panel")).toHaveCount(0);
+  await expect(page.getByTestId("fence-settings-panel"), "…and the menu opens it again").toBeVisible();
 });
 
 // #456item 2: a keyboard path (Mod-Alt-Enter) and a hover ✎ open the same panel — right-click was

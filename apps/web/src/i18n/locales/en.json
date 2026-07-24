@@ -827,6 +827,7 @@
     "alignLeft": "Align left",
     "alignCenter": "Align center",
     "alignRight": "Align right",
+    "codeSettingsWithKey": "Code block settings… (Ctrl+Alt+↵)",
     "codeSettings": "Code block settings…"
   },
   "members": {
