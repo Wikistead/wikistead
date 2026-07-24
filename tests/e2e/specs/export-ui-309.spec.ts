@@ -1,13 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { unzipSync, strFromU8 } from "fflate";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, API } from "../helpers";
 
 // #309 (bounce): UI entry points for the space / tenant Markdown-ZIP exports. The server
 // endpoints + authz were verified in export.test.ts; this covers the CLICK → real browser download
 // → ZIP structure path, plus the dedicated 413 (size budget) message. Real Chromium downloads.
-const API = "http://dev.localhost:4010";
-
 async function makeSpaceWithPublishedPage(page: Page, spaceName: string, pageTitle: string): Promise<{ spaceId: string }> {
   return page.evaluate(async ({ api, spaceName, pageTitle }) => {
     const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };

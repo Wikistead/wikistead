@@ -1,12 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, enterEdit, sleep } from "../helpers";
+import { openDemo, enterEdit, sleep, API } from "../helpers";
 
 // P3: a ![alt](wks-attachment:<id>) reference renders as an <img> resolved to a
 // fresh presigned URL. The load-bearing checks are non-persistence (the canonical
 // Y.Text holds only the id — never the presigned URL, so no expiry breakage and no
 // bearer in CRDT history) and that resolution goes through the FGA-checked download
 // endpoint. The image is uploaded via the (proven) attachments panel path.
-const API = "http://dev.localhost:4010";
 const PNG_1x1 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 

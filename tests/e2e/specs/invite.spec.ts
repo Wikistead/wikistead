@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
+import { WEB_REAL_PORT } from "../helpers";
 
 // Invite → accept in a REAL browser (P1.4), on the real-mode web (5181, no
 // dev-token). Proves the whole seat-lever loop end-to-end through the same-origin
@@ -9,7 +10,7 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 // The fresh identity is minted by setting the issuer's `e2e_sub` cookie on the
 // invitee's browser context — the test OP issues that subject (a real OP would use
 // its own login session), so the invitee is genuinely not yet a member.
-const WEB = "http://dev.localhost:5181";
+const WEB = `http://dev.localhost:${WEB_REAL_PORT}`;
 const MAILPIT = "http://localhost:8026/api/v1";
 
 async function mailpitReceived(api: APIRequestContext, to: string): Promise<boolean> {

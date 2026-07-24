@@ -1,8 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
-
-const API = "http://dev.localhost:4010";
-
+import { openDemo, sleep, API } from "../helpers";
 // #336 A(4): pinning lives in the row menu for an UNPINNED page; once pinned the row shows an
 // always-visible ★ (click to unpin, then it disappears) and the menu drops the pin item.
 test("#336: pin lives in the row menu; a pinned page shows an always-visible star", async ({ page }) => {

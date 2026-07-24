@@ -1,12 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { sleep } from "../helpers";
+import { sleep, API } from "../helpers";
 
 // #498: the DS Select must open a BOUNDED popper below its trigger. Radix's "item-aligned" mode (the old
 // default) overlays the trigger and EXPANDS as you wheel-scroll, so a long option list grew until it
 // filled the viewport. Pinned on a real long list (30 spaces in the assign-space select): the popup is
 // anchored under the trigger, never taller than the viewport, and wheel-scrolling scrolls INSIDE it
 // without growing the box.
-const API = "http://dev.localhost:4010";
 const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };
 
 test("#498: the select dropdown stays bounded and scrolls inside, instead of growing to the viewport", async ({ browser }) => {

@@ -1,7 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openScratch, enterEdit, sleep } from "../helpers";
-
-const API = "http://dev.localhost:4010";
+import { openScratch, enterEdit, sleep, API } from "../helpers";
 const content = (p: Page) => p.locator("[data-pane=preview] .cm-content").innerText();
 const publishedMd = (p: Page, pageId: string) =>
   p.evaluate(async ({ api, id }) => {

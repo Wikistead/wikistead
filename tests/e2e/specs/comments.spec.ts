@@ -1,11 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, openScratch, enterEdit, sleep } from "../helpers";
+import { openDemo, openScratch, enterEdit, sleep, API } from "../helpers";
 
 // P4 UX in a REAL browser: page comments + resolve/tabs, inline comment anchored to
 // a selection (blue underline) that FOLLOWS a live edit, and @mention autocomplete
 // scoped to page-viewers. Uses a unique page (not the shared demo doc).
-const API = "http://dev.localhost:4010";
-
 // #212: the comments toggle moved from the always-visible bar INTO the ⋯ overflow menu.
 // Open the overflow, then click the comments item (which toggles the RightPanel, exclusive).
 async function openComments(page: Page) {

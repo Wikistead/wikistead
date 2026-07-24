@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openScratch, sleep } from "../helpers";
+import { openScratch, sleep, API } from "../helpers";
 
 // #362 / ADR-126 addendum S2: the watch-management UI. The bell is the watch entry point (list surface
 // + mark-all-read); /watches lists with server-resolved titles, mute and unwatch; the account settings
@@ -45,20 +45,20 @@ test("#362 (as amended by #467): pre-existing subtree + space watches stay liste
   const page = await (await browser.newContext()).newPage();
   const title = `watch-scope-${Date.now()}`;
   const pageId = await openScratch(page, title);
-  const spaceId = await page.evaluate(async (id) => {
-    const r = await fetch(`http://dev.localhost:4010/pages/${id}`, { headers: { Authorization: "Bearer dev-token" } });
+  const spaceId = await page.evaluate(async ({ id, api }) => {
+    const r = await fetch(`${api}/pages/${id}`, { headers: { Authorization: "Bearer dev-token" } });
     return (await r.json()).spaceId as string;
-  }, pageId);
-  await page.evaluate(async ({ pageId, spaceId }) => {
+  }, { id: pageId, api: API });
+  await page.evaluate(async ({ pageId, spaceId, api }) => {
     const post = (body: unknown) =>
-      fetch("http://dev.localhost:4010/watches", {
+      fetch(`${api}/watches`, {
         method: "POST",
         headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
         body: JSON.stringify(body),
       });
     await post({ resourceType: "subtree", resourceId: pageId });
     await post({ resourceType: "space", resourceId: spaceId });
-  }, { pageId, spaceId });
+  }, { pageId, spaceId, api: API });
 
   await page.goto("/watches");
   const sub = page.locator("[data-testid=watch-row]", { hasText: title }).first();

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, openScratch, enterEdit, publishAndWait, sleep } from "../helpers";
+import { openDemo, openScratch, enterEdit, publishAndWait, sleep, API } from "../helpers";
 
 // #457: a page that is still fetching used to look exactly like a page with nothing in it. Now loading
 // draws an animated skeleton and a resolved-but-blank page says so in words. The skeleton is gated by a
@@ -163,9 +163,6 @@ test("#457: replacing the skeleton with prose does not shift the body", async ({
 
 // ── #457 the remaining surfaces. The member-only pins above let a missing guest/public/panel
 // skeleton sail through green — each surface gets its own pin. ──
-
-const API = "http://dev.localhost:4010";
-
 async function shareLink(page: Page, resource: { type: string; id: string }): Promise<string> {
   const r = await page.evaluate(async ({ api, resource }) => {
     const res = await fetch(`${api}/share-links`, {

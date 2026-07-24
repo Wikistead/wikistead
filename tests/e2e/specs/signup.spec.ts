@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { WEB_REAL_PORT } from "../helpers";
 
 // Cloud self-serve signup in a REAL browser (P1.2 P2d) on the real-mode web (5181,
 // no dev-token). Verifies the cross-subdomain seating the SeaweedFS lesson warns
@@ -7,7 +8,7 @@ import { test, expect } from "@playwright/test";
 // across origins). globalSetup runs the platform IdP (fixed-port issuer, sub dev-user).
 test("signup → tenant → SSO seating with a host-only member session on the new subdomain", async ({ page }) => {
   const slug = `e2esignup${Date.now().toString(36)}`.replace(/[^a-z0-9]/g, "");
-  const WEB = "http://dev.localhost:5181";
+  const WEB = `http://dev.localhost:${WEB_REAL_PORT}`;
 
   // 1) platform signup (real-mode web): /join → platform IdP → /join/workspace
   await page.goto(`${WEB}/join`);
@@ -17,18 +18,18 @@ test("signup → tenant → SSO seating with a host-only member session on the n
   // 2) name the workspace → create the tenant → redirect to its subdomain
   await page.getByLabel("Workspace name").fill(slug);
   await page.getByRole("button", { name: "Create workspace" }).click();
-  await page.waitForURL(new RegExp(`^https?://${slug}\\.localhost:5181`), { timeout: 20_000 });
+  await page.waitForURL(new RegExp(`^https?://${slug}\\.localhost:${WEB_REAL_PORT}`), { timeout: 20_000 });
 
   // 3) the new subdomain has no session yet (real mode) → login screen → SSO seats us
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("button", { name: "Sign in" })).toHaveCount(0, { timeout: 20_000 });
 
   // 4) seated: a host-only member session exists ON THE TENANT SUBDOMAIN
-  const me = await page.request.get(`http://${slug}.localhost:5181/api/auth/me`);
+  const me = await page.request.get(`http://${slug}.localhost:${WEB_REAL_PORT}/api/auth/me`);
   expect(me.status()).toBe(200);
   expect((await me.json()).sub).toBe("dev-user"); // the signup creator (issuer subject)
 
-  const sess = (await page.context().cookies(`http://${slug}.localhost:5181`)).find((c) => c.name === "wks_sess");
+  const sess = (await page.context().cookies(`http://${slug}.localhost:${WEB_REAL_PORT}`)).find((c) => c.name === "wks_sess");
   expect(sess, "member session cookie on the tenant subdomain").toBeTruthy();
   expect(sess!.domain).toContain(`${slug}.localhost`); // host-only — not shared across subdomains
 });

@@ -1,12 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openScratch, enterEdit, sleep } from "../helpers";
+import { openScratch, enterEdit, sleep, API } from "../helpers";
 
 // Design-5 (ADR-019 D6/D7): the history panel's "Compare" opens a near-fullscreen
 // SPLIT diff (DiffModal) — left = revision, right = current published. It is an overlay,
 // so the editor stays mounted and presence/collab are untouched. Because checkbox state
 // is text (D7), a view-mode toggle (updates published_md, NO revision per D1/D2) shows
 // up as a "change" row with old on the left and new on the right; restore rewinds it.
-const API = "http://dev.localhost:4010";
 const publishedMd = (p: Page, id: string) =>
   p.evaluate(async ({ api, id }) => {
     const r = await fetch(`${api}/pages/${id}/published`, { headers: { Authorization: "Bearer dev-token" } });

@@ -1,9 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, API } from "../helpers";
 import { assertConstantChipRatio } from "../avatar-ratio";
-
-const API = "http://dev.localhost:4010";
-
 // #288: a space avatar's initials chip must be a STABLE, single-glyph square — a digit-led CJK name like
 // "246 " used to render "2" (mixed half+full-width) which stretched the chip and, without
 // whitespace-nowrap, wrapped to two stacked rows that overflow-hidden then clipped. Real Chromium (a layout

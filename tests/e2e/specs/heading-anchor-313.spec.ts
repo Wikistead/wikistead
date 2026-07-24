@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { enterEdit, openScratch, setPublicSurface, sleep } from "../helpers";
+import { enterEdit, openScratch, setPublicSurface, sleep, WEB } from "../helpers";
 
 // #313: hover-copy anchor links on headings + #<slug> deep links, in a REAL browser with a REAL
 // clipboard (context clipboard permissions). Three surfaces: the member CM surface (widget button),
@@ -62,7 +62,7 @@ test("#313 member surface: hovering a heading reveals 🔗; click copies /p/:id#
 
   await btn.click();
   const copied = await page.evaluate(() => navigator.clipboard.readText());
-  expect(copied).toBe(`http://dev.localhost:5180/p/${id}#top-title`);
+  expect(copied).toBe(`${WEB}/p/${id}#top-title`);
   // never the transient query (?edit=1 / ?diff=) — an anchor must not force a mode on the receiver
   expect(copied).not.toContain("?");
 });
@@ -183,7 +183,7 @@ test("#313 public reader: heading 🔗 copies /pub/:id#slug and the anchor URL l
   await h2.hover();
   await expect.poll(async () => btn.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
   await btn.click();
-  expect(await anon.evaluate(() => navigator.clipboard.readText())).toBe(`http://dev.localhost:5180/pub/${id}#${encodeURIComponent(SLUG)}`);
+  expect(await anon.evaluate(() => navigator.clipboard.readText())).toBe(`${WEB}/pub/${id}#${encodeURIComponent(SLUG)}`);
 
   // (b) the anchor URL lands the anonymous visitor on the heading (below the public band
   // scroll-margin-top clearance, #304 geometry)

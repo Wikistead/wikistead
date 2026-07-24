@@ -1,8 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openScratch, enterEdit, sleep } from "../helpers";
-
-const API = "http://dev.localhost:4010";
-
+import { openScratch, enterEdit, sleep, API } from "../helpers";
 // #4: the page ⋯ menu offers Delete (view + edit) and Share (edit) to a manage-capable
 // user (dev-user is the page creator → manage). Two-layer authz: the UI shows the items
 // only when canManage; the server re-checks and 403s (covered in spaces-pages.test.ts).

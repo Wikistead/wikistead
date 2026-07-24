@@ -1,11 +1,9 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, createScratchPage } from "../helpers";
+import { openDemo, createScratchPage, API } from "../helpers";
 
 // #416 the Permissions dialog must NEVER outgrow the viewport — bounded max-h flex column,
 // header/footer fixed, ONE scrolling body between them. Pin with a dozen grants (the reported
 // real-device overflow) on a real Chromium viewport.
-const API = "http://dev.localhost:4010";
-
 test("#416 the dialog stays inside the viewport with 12 grants; Close reachable; body scrolls", async ({ page }) => {
   await openDemo(page);
   const pageId = await page.evaluate(async (api) => {

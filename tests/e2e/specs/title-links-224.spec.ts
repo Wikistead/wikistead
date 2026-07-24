@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openScratch, createScratchPage, enterEdit, sleep, publishAndWait } from "../helpers";
+import { openScratch, createScratchPage, enterEdit, sleep, publishAndWait, API } from "../helpers";
 
 // #224 / ADR-104 go-live: auto internal links. Body text matching a viewer-authorized page title is
 // decorated as a link (display-only mark — the SOURCE stays plain text, Open formats); a click routes
@@ -7,7 +7,6 @@ import { openScratch, createScratchPage, enterEdit, sleep, publishAndWait } from
 // a view-re-confirmed endpoint. The dictionary is viewer-scoped (the authz defence) and is refreshed
 // by the security-timing invalidation channel (outbox → Valkey → collab stateless ping → refetch), so
 // a rename/privatise/delete makes stale colored links disappear WITHOUT a reload (anti-test 4).
-const API = "http://dev.localhost:4010";
 const RUN = Date.now().toString(36);
 
 async function renamePage(p: Page, pageId: string, title: string) {

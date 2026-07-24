@@ -1,11 +1,10 @@
 import { test, expect, type Browser } from "@playwright/test";
-import { openDemo, enterEdit, sleep } from "../helpers";
+import { openDemo, enterEdit, sleep, API } from "../helpers";
 
 // 2f-3 guest path in a REAL browser. The load-bearing property: a VIEW share-link
 // guest sees the PUBLISHED snapshot and NEVER the live draft (the guest never joins
 // the collab room — the draft is not delivered to their browser). An EDIT guest can
 // publish.
-const API = "http://dev.localhost:4010";
 const PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
 async function newPage(page: import("@playwright/test").Page, title: string): Promise<string> {

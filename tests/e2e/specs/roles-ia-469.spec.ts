@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { sleep } from "../helpers";
+import { sleep, API } from "../helpers";
 
 // #469 / #445 one place answers "what can this role do", and every built-in role reads the SAME
 // way — a bold name + a CapabilityPicker. createSpaces is a capability inside the built-in TENANT list.
@@ -28,10 +28,10 @@ test("#469: the roles tab lists built-ins by scope; the space-creation preset is
   const member = tenantList.getByTestId("builtin-member-cap-createSpaces");
   await expect(member).toBeEnabled({ timeout: 8000 });
   const read = () =>
-    page.evaluate(async () => {
-      const r = await fetch("http://dev.localhost:4010/admin/roles/tenant-defaults", { headers: { Authorization: "Bearer dev-token" } });
+    page.evaluate(async (api) => {
+      const r = await fetch(`${api}/admin/roles/tenant-defaults`, { headers: { Authorization: "Bearer dev-token" } });
       return (await r.json()) as { member: { createSpaces: boolean } };
-    });
+    }, API);
   const initial = (await read()).member.createSpaces;
   await member.click();
   await expect.poll(() => read().then((d) => d.member.createSpaces), { timeout: 8000 }).toBe(!initial);

@@ -1,8 +1,5 @@
 import { test, expect, type Page, type Browser } from "@playwright/test";
-import { openDemo, resetDoc, paneText, enterSplit, enterEdit } from "../helpers";
-
-const API = "http://dev.localhost:4010";
-
+import { openDemo, resetDoc, paneText, enterSplit, enterEdit, API } from "../helpers";
 async function ensureExpanded(page: Page) {
   // Active space follows the open page (demo), so the demo row is already in the
   // sidebar tree — just wait for it (no space-expand; that would open the switcher).

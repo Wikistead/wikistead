@@ -1,12 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, openScratch, sleep } from "../helpers";
+import { openDemo, openScratch, sleep, API } from "../helpers";
 
 // #504: the destructive-operation policy, pinned on the flows the ticket names. A destructive
 // trigger is RED AT REST (not only on hover), clicking it opens a ConfirmDialog, CANCEL is a no-op,
 // and only the confirm runs the operation. Space delete and trash purge take the type-to-confirm
 // bar (page delete-forever parity). Real Chromium; colours read from computed style.
-const API = "http://dev.localhost:4010";
-
 // the shared danger foreground — resolve var(--danger) once per page and compare computed colours to it
 async function dangerColor(page: Page): Promise<string> {
   return page.evaluate(() => {

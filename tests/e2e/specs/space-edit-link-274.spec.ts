@@ -1,8 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, enterSplit, enterEdit, resetDoc, paneText, sleep } from "../helpers";
-
-const API = "http://dev.localhost:4010";
-
+import { openDemo, enterSplit, enterEdit, resetDoc, paneText, sleep, API } from "../helpers";
 // #274 / ADR-135: the SPACE edit share-link — one link makes every published, non-private page in the
 // space anonymously editable (the wiki use case). End to end in real Chromium: a member mints the
 // space+edit link (the old view-only 400 is gone), an anonymous guest opens it, gets the guest shell

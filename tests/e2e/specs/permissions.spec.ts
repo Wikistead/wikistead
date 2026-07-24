@@ -1,10 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, API } from "../helpers";
 
 // Phase 4c: the per-page Permissions dialog (manager only). Grant a member access
 // (this is also how you invite someone to a draft) and revoke it.
-const API = "http://dev.localhost:4010";
-
 test("manager grants and revokes page access via the Permissions dialog", async ({ page }) => {
   await openDemo(page);
   const pageId = await page.evaluate(async (api) => {

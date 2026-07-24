@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openScratch, enterEdit, sleep } from "../helpers";
+import { openScratch, enterEdit, sleep, API } from "../helpers";
 
 // #315: the sidebar draft indicator is the file icon itself (FilePen replaces FileText) plus a
 // dimmed title — the old text pill (tree-draft-badge) is gone. Three row states stay distinct:
@@ -7,9 +7,6 @@ import { openScratch, enterEdit, sleep } from "../helpers";
 //   published + unpublished edit → FileText + accent dot, NOT the draft icon
 //   published clean              → FileText only
 // Real browser: the assertions are computed colors and rendered DOM, not class names.
-
-const API = "http://dev.localhost:4010";
-
 const publish = (p: Page, pageId: string) =>
   p.evaluate(async ({ api, id }) => {
     await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });

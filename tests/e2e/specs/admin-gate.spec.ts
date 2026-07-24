@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, WEB_REAL_PORT } from "../helpers";
 
 // Phase 5a: the two-layer admin console framework + authz gates.
 //  - Positive (dev-mode 5180, dev-user = tenant admin + space manager): the user
@@ -9,7 +9,7 @@ import { openDemo, sleep } from "../helpers";
 //    UI gate hides the entry and the leak rule applies (admin → 403; a space they
 //    cannot even view → 404, hiding its existence). The server stays the fortress;
 //    these assert the convenience layer behaves and never leaks.
-const REAL_WEB = "http://dev.localhost:5181";
+const REAL_WEB = `http://dev.localhost:${WEB_REAL_PORT}`;
 
 test("admin: user menu opens the tenant console; space settings rename + delete", async ({ page }) => {
   await openDemo(page);
