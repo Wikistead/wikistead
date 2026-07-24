@@ -10,7 +10,7 @@
 // Listing is tenant-admin only (no entitlement): the UI shows the uniform role picker (built-ins
 // + any custom rows retained from an entitled period) on every plan.
 import type { FastifyInstance } from 'fastify'
-import type { OpenFgaClient } from '@openfga/sdk'
+import type { OpenFgaClient, Tuple } from '@openfga/sdk'
 import { randomUUID } from 'node:crypto'
 import { requireTenantAdmin, isTenantAdmin, check, writeTuples, deleteTuples } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
@@ -137,7 +137,7 @@ export async function assignRoleInTx(
   const allTuples = caps.map((c) => ({ cap: c, tuples: expansionTuples(resourceType, resourceId, principal, c) }))
   // Principal-scoped read (F4): only this principal's tuples, no paging (see the route comment).
   const { tuples: existingTuples } = await fga.read({ user: principal, object: `${resourceType}:${resourceId}` })
-  const existing = new Set((existingTuples ?? []).map((t) => `${t.key?.relation}|${t.key?.user}`))
+  const existing = new Set((existingTuples ?? []).map((t: Tuple) => `${t.key?.relation}|${t.key?.user}`))
   const owned: AnyRoleCapability[] = []
   const toWrite: { user: string; relation: string; object: string }[] = []
   for (const { cap, tuples } of allTuples) {
@@ -355,7 +355,7 @@ export async function rolesPlugin(app: FastifyInstance) {
             // already exists — direct grant or another role's expansion — is left and not owned).
             if (added.length) {
               const { tuples: existingTuples } = await app.fga.read({ user: a.principal, object: `${a.resource_type}:${a.resource_id}` })
-              const existing = new Set((existingTuples ?? []).map((t) => `${t.key?.relation}|${t.key?.user}`))
+              const existing = new Set((existingTuples ?? []).map((t: Tuple) => `${t.key?.relation}|${t.key?.user}`))
               const ownedAdd: AnyRoleCapability[] = []
               for (const c of added) {
                 const tuples = expansionTuples(a.resource_type, a.resource_id, a.principal, c)
@@ -534,7 +534,7 @@ export async function rolesPlugin(app: FastifyInstance) {
   app.get('/admin/roles/tenant-defaults', async (req) => {
     await adminGate(req)
     const { tuples } = await app.fga.read({ user: `tenant:${req.tenant.id}#member`, object: `tenant:${req.tenant.id}` })
-    const memberCreateSpaces = (tuples ?? []).some((t) => t.key?.relation === 'space_creator')
+    const memberCreateSpaces = (tuples ?? []).some((t: Tuple) => t.key?.relation === 'space_creator')
     return {
       member: { createSpaces: memberCreateSpaces },
       admin: { createSpaces: true, locked: true },
@@ -546,7 +546,7 @@ export async function rolesPlugin(app: FastifyInstance) {
     const v = req.body?.memberCreateSpaces
     if (typeof v !== 'boolean') return reply.code(400).send({ error: 'memberCreateSpaces (boolean) required' })
     const { tuples } = await app.fga.read({ user: `tenant:${req.tenant.id}#member`, object: `tenant:${req.tenant.id}` })
-    const present = (tuples ?? []).some((t) => t.key?.relation === 'space_creator')
+    const present = (tuples ?? []).some((t: Tuple) => t.key?.relation === 'space_creator')
     await req.db.tx(async (tx) => {
       await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.default_preset_changed', target: `tenant:${req.tenant.id}` })
       // Idempotent flip, FGA last-in-tx (a write failure rolls the audit back).
