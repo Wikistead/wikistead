@@ -158,13 +158,13 @@ export function PageTree({
             />
           ) : null}
         </span>
-        {/* #219: a tooltip ONLY when the title is truncated (checked at hover via scrollWidth). */}
-        {/* #530: `data-tip` (the delegated fast tooltip), not `title` — this row is the tooltip the user
-            named as too slow. Same hover-time truncation check; clearing the attribute when the name fits
-            keeps a full-width name tooltip-free. */}
+        {/* #219 / #530: the delegated fast tooltip (not `title` — this row is the one the user named as
+            too slow), and only when the name is actually clipped. `data-tip-if-truncated` lets the HOST
+            measure that at show time: on mouse-enter the row's hover buttons have not appeared yet, and
+            they are what clips the name. */}
         {/* #315: a draft row also dims its title so "not published yet" reads from the whole row. */}
         <span className={cn("min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap", !d.published && "text-fg-dim")} data-testid="tree-page-name"
-          onMouseEnter={(e) => { const el = e.currentTarget; if (el.scrollWidth > el.clientWidth) el.dataset.tip = d.name || t("common.untitled"); else delete el.dataset.tip; }}>{d.name || t("common.untitled")}</span>
+          data-tip-if-truncated={d.name || t("common.untitled")}>{d.name || t("common.untitled")}</span>
         {/* #109 Fix B: private (allowlist-only) lock. Shown only to viewers of the page — non-viewers 404. */}
         {d.private && <Lock size={12} className="mx-0.5 flex-none text-fg-dim" data-testid="tree-private-lock" aria-label={t("sidebar.private")} />}
         {/* #329 rework: freeze badge, paired with the lock (the title bar shows both, so the tree does too). */}
