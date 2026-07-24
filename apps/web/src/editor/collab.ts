@@ -39,6 +39,36 @@ export function connect(opts: { url: string; docName: string; token: string }) {
   return { doc, provider, socket, ytext, disconnect };
 }
 
+// #502 / ADR-184 slice 2b: a one-shot "synced" latch. A co-occupied island seeds the shared ephemeral body
+// ONLY AFTER the room's initial sync completes — that is the precondition (ephemeral-island.ts) under which
+// the seeded-guard closes the join race the single-writer election alone cannot (a still-syncing late joiner
+// who is the new min could otherwise re-seed). This latch resolves ONCE and, crucially, fires a callback
+// added AFTER sync IMMEDIATELY, so a seeder that checks in late never misses the edge. Pure + unit-testable
+// (no Hocuspocus/network); connectEphemeral wires the provider's onSynced into it below.
+export interface SyncedLatch {
+  readonly synced: boolean;
+  markSynced(): void;
+  onSynced(cb: () => void): void;
+}
+export function makeSyncedLatch(): SyncedLatch {
+  let synced = false;
+  let waiters: (() => void)[] = [];
+  return {
+    get synced() { return synced; },
+    markSynced() {
+      if (synced) return; // idempotent — a second sync event never re-fires the waiters
+      synced = true;
+      const fire = waiters;
+      waiters = [];
+      for (const cb of fire) cb();
+    },
+    onSynced(cb: () => void) {
+      if (synced) cb(); // already synced → fire now (a late seeder must not miss the edge)
+      else waiters.push(cb);
+    },
+  };
+}
+
 // #92 / ADR-093: an EPHEMERAL collab session for level-2 Excalidraw co-editing. Connects to the
 // page's ephemeral room `t:<tenant>:p:<pageId>:x:<anchor>` (the collab server admits it with the same
 // page-EDIT authority and NEVER persists it — the scene is flushed to the fence on close). Returns a
@@ -47,22 +77,28 @@ export function connect(opts: { url: string; docName: string; token: string }) {
 export interface EphemeralSession {
   doc: Y.Doc;
   awareness: HocuspocusProvider["awareness"];
+  // #502 / ADR-184 slice 2b: fire once the room's initial sync has completed (or immediately if already
+  // synced). The island seeds its shared body inside this callback so the seeded-guard closes the join race.
+  onSynced: (cb: () => void) => void;
   destroy: () => void;
 }
 export function connectEphemeral(opts: { url: string; docName: string; anchor: string; token: string }): EphemeralSession {
   const doc = new Y.Doc();
   const socket = new HocuspocusProviderWebsocket({ url: opts.url });
+  const latch = makeSyncedLatch();
   const provider = new HocuspocusProvider({
     websocketProvider: socket,
     name: `${opts.docName}:x:${opts.anchor}`, // the ephemeral room (server: parseDocName ⇒ ephemeral)
     document: doc,
     token: opts.token,
+    onSynced: () => latch.markSynced(), // #502: the seed timing seam (registered before sync, so it fires)
   });
+  if (provider.isSynced) latch.markSynced(); // belt-and-braces: already synced by the time we get here
   const destroy = () => {
     try { provider.awareness?.setLocalState(null); } catch { /* gone */ }
     provider.destroy();
     socket.destroy();
     doc.destroy();
   };
-  return { doc, awareness: provider.awareness, destroy };
+  return { doc, awareness: provider.awareness, onSynced: (cb) => latch.onSynced(cb), destroy };
 }
