@@ -82,8 +82,27 @@ export async function renderPlantuml(
   source: string,
   opts: { fetcher?: Fetcher; endpoint?: string; timeoutMs?: number; dark?: boolean } = {},
 ): Promise<Buffer | null> {
+  const r = await renderPlantumlResult(source, opts)
+  return r.kind === 'ok' ? r.png : null
+}
+
+// #525the caller needs to tell "the operator has not configured an endpoint" from "this DIAGRAM
+// is invalid" — the first is a degrade-to-source (nothing is wrong), the second deserves the same visible
+// error mermaid shows for a bad diagram. Collapsing both to null (the old shape) made that impossible, so
+// the outcome is now typed. A transient endpoint failure stays its own case: it is not the author's fault,
+// so it must not be reported as a syntax error.
+export type PlantumlRenderResult =
+  | { kind: 'ok'; png: Buffer }
+  | { kind: 'unconfigured' } //  no PLANTUML_RENDER_URL → degrade to the source fence (not an error)
+  | { kind: 'invalid' } //       the endpoint rejected the diagram (4xx) → the diagram itself is bad
+  | { kind: 'unavailable' } //   timeout / network / 5xx / non-image / oversized → try again later
+
+export async function renderPlantumlResult(
+  source: string,
+  opts: { fetcher?: Fetcher; endpoint?: string; timeoutMs?: number; dark?: boolean } = {},
+): Promise<PlantumlRenderResult> {
   const base = (opts.endpoint ?? process.env.PLANTUML_RENDER_URL ?? '').replace(/\/+$/, '')
-  if (!base) return null // not configured → operator opt-in not taken → degrade
+  if (!base) return { kind: 'unconfigured' } // operator opt-in not taken → degrade
   const themed = opts.dark ? injectPlantumlTheme(source) : source // #342: dark → inject a built-in !theme
   const encoded = deflateSync(Buffer.from(themed, 'utf8')).toString('base64url')
   const url = `${base}/plantuml/png/${encoded}`
@@ -91,11 +110,15 @@ export async function renderPlantuml(
   try {
     res = await (opts.fetcher ?? ((u) => defaultFetch(u, opts.timeoutMs ?? 5000)))(url)
   } catch {
-    return null // endpoint down / timeout / redirect-blocked → degrade
+    return { kind: 'unavailable' } // endpoint down / timeout / redirect-blocked
   }
-  if (!res.ok) return null
-  if (!(res.headers.get('content-type') ?? '').startsWith('image/')) return null // raster only (no XSS)
-  return readBoundedBytes(res, MAX_RENDER_BYTES)
+  // Kroki answers a syntactically broken diagram with 4xx — that IS the author's error, and the only
+  // signal that distinguishes it from an outage.
+  if (res.status >= 400 && res.status < 500) return { kind: 'invalid' }
+  if (!res.ok) return { kind: 'unavailable' }
+  if (!(res.headers.get('content-type') ?? '').startsWith('image/')) return { kind: 'unavailable' } // raster only (no XSS)
+  const png = await readBoundedBytes(res, MAX_RENDER_BYTES)
+  return png ? { kind: 'ok', png } : { kind: 'unavailable' } // oversized / unreadable body
 }
 
 // Read up to `maxBytes` of the image body, degrading to null if it exceeds the cap. content-length
