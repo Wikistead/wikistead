@@ -1994,6 +1994,75 @@ export async function directDeletePage(
   await physicalDeletePage(db, fga, driver, { pageId: args.pageId, actorId: args.userId })
 }
 
+// #511 / ADR-185: the selection cap — a body-size bound AND a work bound (the loop below runs a per-page
+// authz check + a subtree cascade for every id).
+export const BULK_DELETE_CAP = 500
+export interface BulkDeleteResult { results: { id: string; ok: boolean; reason?: string }[]; deleted: number; skipped: number }
+
+// #511 / ADR-185: delete a SELECTION of pages in one space. This is explicitly NOT a bulk bypass — every
+// page re-runs the SAME per-page authz gate (requireVerb 'delete', inside trashPage / directDeletePage)
+// and its own atomic subtree cascade + outbox reindex, exactly as the single-page routes do. A page the
+// caller cannot delete is skipped, never touched. Partial success (not all-or-nothing): a per-item verdict
+// is returned so the UI can report "N deleted, M skipped (no permission)". The space's delete-mode picks
+// trash vs. permanent (the same choice the single-page UI makes). tenant/space binding is enforced by RLS
+// on the SELECT below AND by each page's FGA gate — cross-tenant is structurally impossible.
+export async function bulkDeletePages(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { spaceId: string; pageIds: string[]; userId: string },
+): Promise<BulkDeleteResult> {
+  // Existence-hiding: a caller who cannot even view the space gets a uniform 404 for the whole request
+  // never a per-item partial-success map they could read as an oracle. (The per-page FGA gate is still the
+  // real authority; this is defense-in-depth + parity with the trash listing.)
+  if (!(await check(fga, `user:${args.userId}`, 'view', { type: 'space', id: args.spaceId }))) {
+    throw Object.assign(new Error('not found'), { statusCode: 404 })
+  }
+  const requested = [...new Set(args.pageIds)]
+  if (requested.length > BULK_DELETE_CAP) {
+    throw Object.assign(new Error(`selection exceeds the ${BULK_DELETE_CAP}-page cap`), { statusCode: 400, reason: 'too_many' })
+  }
+  // RLS-scoped: only rows the caller can SELECT, in THIS space, still live. Ids that fall out (wrong space,
+  // cross-tenant, already trashed) report as skipped 'not_found' — a UNIFORM reason (no existence oracle;
+  // the per-page FGA gate below is the authority regardless of what the SELECT returns).
+  const live = requested.length
+    ? (await db.sql<{ id: string }[]>`
+        SELECT id FROM pages
+        WHERE id = ANY(${requested}) AND space_id = ${args.spaceId} AND deleted_root_id IS NULL
+      `).map((r) => r.id)
+    : []
+  const liveSet = new Set(live)
+  const mode = live.length ? await resolveDeleteMode(db, args.spaceId) : 'both'
+  const del = (pageId: string) =>
+    mode === 'direct_only'
+      ? directDeletePage(db, fga, driver, { pageId, userId: args.userId })
+      : trashPage(db, fga, driver, { pageId, userId: args.userId })
+
+  const results: { id: string; ok: boolean; reason?: string }[] = []
+  for (const id of requested) {
+    if (!liveSet.has(id)) { results.push({ id, ok: false, reason: 'not_found' }); continue }
+    try {
+      await del(id) // per-page authz re-check + atomic cascade + outbox reindex live INSIDE this call
+      results.push({ id, ok: true })
+    } catch (e) {
+      // Classify without leaking. CRITICAL (no existence oracle): requireVerb throws 403 for a page the
+      // caller cannot delete, and the pre-loop SELECT's RLS is tenant-scoped (NOT view-scoped), so a
+      // same-space private page the caller cannot even see reaches this catch. Map 403 to the SAME
+      // 'not_found' a genuinely absent id gets — else the reason ('error' vs 'not_found') would tell a
+      // member holding a UUID whether that page exists-but-is-forbidden vs. does-not-exist. A 400 is the
+      // delete-mode policy skip (static reason, no resource detail). Anything else is a real per-item
+      // error, still skipped so one bad page never aborts the batch (partial success). A page cascaded
+      // into the trash by an ancestor earlier in the SAME batch is a no-op on its own turn (trashPage
+      // early-returns), reported ok — it IS deleted.
+      const status = (e as { statusCode?: number })?.statusCode
+      const reason = status === 404 || status === 403 ? 'not_found' : status === 400 ? ((e as { reason?: string }).reason ?? 'policy') : 'error'
+      results.push({ id, ok: false, reason })
+    }
+  }
+  const deleted = results.filter((r) => r.ok).length
+  return { results, deleted, skipped: results.length - deleted }
+}
+
 // #411 / ADR-153: the gate-free physical delete — callers authorize (deletePage/purgePage: caller manage;
 // retention sweep: system context, the trash entry itself is the authority). Never routed directly.
 async function physicalDeletePage(
@@ -3046,6 +3115,14 @@ export async function pagesPlugin(app: FastifyInstance) {
   // trash even if its own page is in it).
   app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/trash', async (req) => {
     return listSpaceTrash(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub })
+  })
+
+  // #511 / ADR-185: bulk-delete a selection of pages in the space (member-only; no guest config). Per-page
+  // authz + subtree cascade + reindex ride inside bulkDeletePages; the response is a partial-success map.
+  app.post<{ Params: { spaceId: string }; Body: { pageIds?: unknown } }>('/spaces/:spaceId/pages/bulk-delete', async (req, reply) => {
+    const pageIds = Array.isArray(req.body?.pageIds) ? req.body.pageIds.filter((x): x is string => typeof x === 'string') : []
+    const r = await bulkDeletePages(req.db, app.fga, app.searchDriver, { spaceId: req.params.spaceId, pageIds, userId: req.user.sub })
+    return reply.code(200).send(r)
   })
 
   // Publish the current draft as the new published version (edit-gated). Members or
