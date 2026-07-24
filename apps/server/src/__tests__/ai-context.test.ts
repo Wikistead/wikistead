@@ -16,7 +16,12 @@ function fakeDb(pages: Record<string, { title: string; md: string | null }>) {
 }
 const fakeSearch = (ids: string[]) => ({ search: async () => ids.map((id) => ({ id, tenantId: 't', spaceId: 's', title: id })) }) as never
 // fga that authorizes `view` only for the given page ids (object form `page:<id>`).
-const fakeFga = (allow: string[]) => ({ check: async ({ object }: { object: string }) => ({ allowed: allow.includes(object.replace('page:', '')) }) }) as never
+const fakeFga = (allow: string[]) => ({
+  check: async ({ object }: { object: string }) => ({ allowed: allow.includes(object.replace('page:', '')) }),
+  batchCheck: async ({ checks }: { checks: { object: string; correlationId: string }[] }) => ({
+    result: checks.map((c) => ({ correlationId: c.correlationId, allowed: allow.includes(c.object.replace('page:', '')) })),
+  }),
+}) as never
 
 const ARGS = { tenantId: 't', userSub: 'u', groups: [], question: 'q' }
 
