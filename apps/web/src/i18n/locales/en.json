@@ -1158,7 +1158,8 @@
       "share": "Share",
       "settings": "Settings",
       "moderate": "Moderate",
-      "createSpaces": "create spaces"
+      "createSpaces": "create spaces",
+      "issueApiKeys": "issue API keys"
     },
     "scopeLabel": "Role scope",
     "scopeResource": "Space / page",

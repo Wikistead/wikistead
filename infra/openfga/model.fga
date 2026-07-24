@@ -46,6 +46,14 @@ type tenant
     # superset precedent). RESTRICT-ONLY: gates creation, grants nothing else. No share_link types —
     # guests never reach tenant-scoped actions.
     define space_creator: [user, group#member, tenant#member] or admin
+    # ADR-181 (#496): who may MINT an API key in this tenant. Same shape as `space_creator` — the
+    # user/group leaves are custom tenant-role expansions and `tenant#member` is the "all members may
+    # issue" toggle — with one deliberate difference at the PROVISIONING layer, not in the model:
+    # provisioning seeds NOTHING here, so issuance starts ADMIN-ONLY (via `or admin`) until a tenant
+    # admin opts members in. This retires #462's `api_key_issue_policy` enum: `members` and
+    # `admins_only` are now "the member userset tuple exists" and "it doesn't". RESTRICT-ONLY: it
+    # gates minting, grants nothing else. No `user:*` / share_link — guests never reach tenant actions.
+    define api_key_issue: [user, group#member, tenant#member] or admin
 
 type space
   relations

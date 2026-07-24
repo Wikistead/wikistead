@@ -43,3 +43,14 @@ export async function isSpaceCreator(fga: OpenFgaClient, userId: string, tenantI
   const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'space_creator', object: `tenant:${tenantId}` })
   return !!allowed
 }
+
+// #496 / ADR-181: may `userId` MINT an API key in this tenant? The exact `isSpaceCreator` shape one type
+// over: a raw `api_key_issue` check on the tenant object, whose `or admin` arm means an admin (and the
+// bootstrap admin) passes without a separate isTenantAdmin call. This is the ONLY authority — it replaces
+// #462's `api_key_issue_policy` enum, so there is no settings read and no branching left at the call site.
+// Deliberately NOT entitlement-gated: `customRoles` gates DEFINING/ASSIGNING the role that carries the
+// capability, never this runtime check, so an already-granted tuple survives a plan downgrade (ADR-181 §4).
+export async function isApiKeyIssuer(fga: OpenFgaClient, userId: string, tenantId: string): Promise<boolean> {
+  const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'api_key_issue', object: `tenant:${tenantId}` })
+  return !!allowed
+}

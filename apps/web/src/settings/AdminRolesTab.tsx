@@ -21,7 +21,10 @@ import { notify } from "../ui/toast";
 // every write (a non-entitled plan sees the built-ins and gets the 403 upsell on create).
 const CAPABILITIES = ["view", "comment", "edit", "publish", "delete", "share", "settings", "moderate"] as const;
 // #445 / ADR-171: the TENANT-scope vocabulary (tenant actions; mutually exclusive with the above).
-const TENANT_CAPABILITIES = ["createSpaces"] as const;
+// #496 / ADR-181: `issueApiKeys` (the api_key_issue relation) joins the tenant vocabulary, so it shows
+// up BOTH in the built-in member toggle below and in the custom tenant-role editor — the ADR's "one
+// screen configures issuance". The old /admin/api two-choice policy selector is gone with the enum.
+const TENANT_CAPABILITIES = ["createSpaces", "issueApiKeys"] as const;
 
 // #420 `disabled` renders the SAME control read-only, so a built-in role is shown as the very
 // checkbox grid you would use to build a custom one — the vocabulary and layout match instead of the
@@ -168,11 +171,15 @@ export function AdminRolesTab() {
         <div className="flex flex-col gap-1" data-testid="builtin-role-member">
           <span className="text-sm font-medium">member</span>
           <CapabilityPicker
-            value={(defaults.data?.member.createSpaces ?? true) ? ["createSpaces"] : []}
+            value={[
+              ...((defaults.data?.member.createSpaces ?? true) ? ["createSpaces"] : []),
+              // #496: default OFF — provisioning seeds no member tuple, so issuance starts admin-only.
+              ...((defaults.data?.member.issueApiKeys ?? false) ? ["issueApiKeys"] : []),
+            ]}
             idPrefix="builtin-member"
             list={TENANT_CAPABILITIES}
             disabled={defaults.isLoading || setDefaults.isPending}
-            onChange={(caps) => setDefaults.mutate(caps.includes("createSpaces"), {
+            onChange={(caps) => setDefaults.mutate({ memberCreateSpaces: caps.includes("createSpaces"), memberIssueApiKeys: caps.includes("issueApiKeys") }, {
               onSuccess: () => notify.success(t("toast.saved")),
               onError,
             })}
@@ -180,7 +187,7 @@ export function AdminRolesTab() {
         </div>
         <div className="flex flex-col gap-1" data-testid="builtin-role-admin">
           <span className="text-sm font-medium">admin</span>
-          <CapabilityPicker value={["createSpaces"]} idPrefix="builtin-admin" list={TENANT_CAPABILITIES} disabled />
+          <CapabilityPicker value={["createSpaces", "issueApiKeys"]} idPrefix="builtin-admin" list={TENANT_CAPABILITIES} disabled />
         </div>
       </div>
 
