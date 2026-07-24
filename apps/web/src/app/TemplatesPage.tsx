@@ -46,16 +46,16 @@ export function TemplatesRoute() {
                 {t(`template.scope.${tpl.scope}`)}
               </span>
               <span className="min-w-0 flex-1 truncate" data-testid="template-name">{tpl.name}</span>
-              <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground" title={t("templates.preview")} data-testid="template-preview" onClick={() => setPreviewing(tpl)}>
+              <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground" data-tip={t("templates.preview")} data-testid="template-preview" onClick={() => setPreviewing(tpl)}>
                 <Eye size={14} />
               </button>
               {tpl.canManage && (
                 <>
-                  <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground" title={t("templates.rename")} data-testid="template-rename" onClick={() => setRenaming(tpl)}>
+                  <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground" data-tip={t("templates.rename")} data-testid="template-rename" onClick={() => setRenaming(tpl)}>
                     <Pencil size={14} />
                   </button>
                   {/* #504: red at rest (was hover-only) — the confirm below already exists. */}
-                  <button type="button" className="flex-none rounded p-1 text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]" title={t("common.delete")} data-testid="template-delete" onClick={() => setDeleting(tpl)}>
+                  <button type="button" className="flex-none rounded p-1 text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]" data-tip={t("common.delete")} data-testid="template-delete" onClick={() => setDeleting(tpl)}>
                     <Trash2 size={14} />
                   </button>
                 </>
@@ -101,7 +101,7 @@ function TemplatePreview({ tpl, onClose }: { tpl: TemplateSummary; onClose: () =
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <Eye size={14} className="text-fg-dim" />
         <span className="min-w-0 flex-1 truncate font-medium">{tpl.name}</span>
-        <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground" title={t("common.close")} data-testid="template-preview-close" onClick={onClose}>
+        <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground" data-tip={t("common.close")} data-testid="template-preview-close" onClick={onClose}>
           <X size={14} />
         </button>
       </div>

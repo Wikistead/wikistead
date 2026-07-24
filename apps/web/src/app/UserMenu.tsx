@@ -31,7 +31,7 @@ export function UserMenu({ onLogout }: { onLogout: () => void }) {
         active, show a DEV badge so it is never mistaken for a real logged-in identity. A real
         cookie session flips devMode off and the badge disappears. */}
     {devMode && (
-      <span className="ml-2 rounded border border-border bg-panel-2 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-fg-dim" title={t("userMenu.devModeTitle")} data-testid="dev-mode-badge">
+      <span className="ml-2 rounded border border-border bg-panel-2 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-fg-dim" data-tip={t("userMenu.devModeTitle")} data-testid="dev-mode-badge">
         DEV
       </span>
     )}

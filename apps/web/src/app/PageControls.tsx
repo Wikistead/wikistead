@@ -112,7 +112,7 @@ function RoundBtn({ label, icon, onClick, testId, primary, disabled, badge, acti
   return (
     // #192: `active` (e.g. TOC rail ON) shows the accent fill so the toggle state reads at a glance,
     // matching the display-mode segment's active style.
-    <button type="button" title={label} aria-label={label} aria-pressed={active} data-testid={testId} data-active={active || undefined} disabled={disabled} onClick={onClick}
+    <button type="button" data-tip={label} aria-label={label} aria-pressed={active} data-testid={testId} data-active={active || undefined} disabled={disabled} onClick={onClick}
       className={`relative ${ROUND} ${active ? "bg-[var(--accent)] text-white" : primary ? ROUND_PRIMARY : ROUND_BG}`}>
       {icon}
       {badge}
@@ -247,7 +247,7 @@ export function PageVim(p: PageControlsProps) {
             return (
               <button key={mode} type="button" role="radio" aria-checked={active}
                 data-testid={`displaymode-${mode}`} data-active={active}
-                title={t(labelKey)} aria-label={t(labelKey)} onClick={() => p.onSetDisplayMode!(mode)}
+                data-tip={t(labelKey)} aria-label={t(labelKey)} onClick={() => p.onSetDisplayMode!(mode)}
                 className={`inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors ${active ? "bg-[var(--accent)] text-white" : "text-fg-dim hover:bg-panel-2"}`}>
                 <Icon size={14} />
               </button>
@@ -331,7 +331,7 @@ export function PageControlsMobile(p: PageControlsProps) {
     <div data-print-hide className="absolute right-4 bottom-4 z-10">
       <DropdownMenu modal={false} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
-          <IconButton aria-label={t("page.moreActions")} title={t("page.moreActions")} data-testid="page-controls-mobile" className={`${ROUND} ${ROUND_BG}`}>
+          <IconButton aria-label={t("page.moreActions")} data-tip={t("page.moreActions")} data-testid="page-controls-mobile" className={`${ROUND} ${ROUND_BG}`}>
             <MoreHorizontal size={18} />
           </IconButton>
         </DropdownMenuTrigger>

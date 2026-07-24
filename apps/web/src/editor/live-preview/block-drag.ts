@@ -103,7 +103,7 @@ class HoverGrip implements PluginValue {
     const grip = document.createElement("div")
     grip.className = "cm-lp-block-grip"
     grip.textContent = "⠿"
-    grip.title = "Drag to move this block"
+    grip.dataset.tip = "Drag to move this block" // #530
     grip.setAttribute("data-testid", "block-grip")
     grip.style.display = "none"
     grip.addEventListener("mousedown", (e) => e.preventDefault()) // don't move the caret / start a selection

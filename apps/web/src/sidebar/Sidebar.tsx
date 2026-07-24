@@ -280,8 +280,8 @@ export function Sidebar() {
             {/* #250: split — the button creates a blank page immediately; the adjacent ▾ opens the
                 template picker (blank stays the fast default, templates are one extra click). */}
             {canEdit && <NewPageButton onClick={() => newPage(null)} />}
-            {canEdit && <button type="button" className={headerBtn} title={t("templatePicker.title")} aria-label={t("templatePicker.title")} data-testid="new-page-from-template" onClick={() => setPickingTemplate(true)}><ChevronDown size={13} /></button>}
-            {(canManage || canModerate) && <button type="button" className={headerBtn} title={canManage ? t("sidebar.spaceSettings") : t("moderation.title")} aria-label={canManage ? t("sidebar.spaceSettings") : t("moderation.title")} data-testid="space-settings-open" onClick={() => current && navigate(`/spaces/${current}/settings/${canManage ? "general" : "moderation"}`)}><Settings size={15} /></button>}
+            {canEdit && <button type="button" className={headerBtn} data-tip={t("templatePicker.title")} aria-label={t("templatePicker.title")} data-testid="new-page-from-template" onClick={() => setPickingTemplate(true)}><ChevronDown size={13} /></button>}
+            {(canManage || canModerate) && <button type="button" className={headerBtn} data-tip={canManage ? t("sidebar.spaceSettings") : t("moderation.title")} aria-label={canManage ? t("sidebar.spaceSettings") : t("moderation.title")} data-testid="space-settings-open" onClick={() => current && navigate(`/spaces/${current}/settings/${canManage ? "general" : "moderation"}`)}><Settings size={15} /></button>}
           </div>
         )}
       </div>
@@ -315,7 +315,7 @@ export function Sidebar() {
               {/* #284 which space this pinned page lives in — a space icon (hover = space name) left of
                   the file icon, so a deep page's pin isn't ambiguous. Only page pins carry `space`. */}
               {pin.space && (
-                <span className="flex-none inline-flex" title={pin.space.name} data-testid="pinned-page-space">
+                <span className="flex-none inline-flex" data-tip={pin.space.name} data-testid="pinned-page-space">
                   <SpaceIcon id={pin.space.id} name={pin.space.name} image={pin.space.iconImageUrl} size={14} />
                 </span>
               )}
@@ -329,9 +329,9 @@ export function Sidebar() {
                 className="flex flex-none gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
                 onClick={(e) => e.stopPropagation()}
               >
-                <button type="button" className={headerBtn} disabled={i === 0} title={t("sidebar.movePinUp")} aria-label={t("sidebar.movePinUp")} data-testid="pin-up" onClick={() => movePin("page", pin.id, -1)}><ChevronUp size={13} /></button>
-                <button type="button" className={headerBtn} disabled={i === pagePins.length - 1} title={t("sidebar.movePinDown")} aria-label={t("sidebar.movePinDown")} data-testid="pin-down" onClick={() => movePin("page", pin.id, 1)}><ChevronDown size={13} /></button>
-                <button type="button" className={headerBtn} title={t("sidebar.unpin")} aria-label={t("sidebar.unpin")} data-testid="pin-remove" onClick={() => deletePin.mutate(pin.id)}><PinOff size={13} /></button>
+                <button type="button" className={headerBtn} disabled={i === 0} data-tip={t("sidebar.movePinUp")} aria-label={t("sidebar.movePinUp")} data-testid="pin-up" onClick={() => movePin("page", pin.id, -1)}><ChevronUp size={13} /></button>
+                <button type="button" className={headerBtn} disabled={i === pagePins.length - 1} data-tip={t("sidebar.movePinDown")} aria-label={t("sidebar.movePinDown")} data-testid="pin-down" onClick={() => movePin("page", pin.id, 1)}><ChevronDown size={13} /></button>
+                <button type="button" className={headerBtn} data-tip={t("sidebar.unpin")} aria-label={t("sidebar.unpin")} data-testid="pin-remove" onClick={() => deletePin.mutate(pin.id)}><PinOff size={13} /></button>
               </span>
             </div>
           ))}

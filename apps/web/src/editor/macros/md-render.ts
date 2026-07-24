@@ -112,7 +112,7 @@ export function buildFenceHeader(args: { lang: string; title?: string; code: str
     gear.className = "cm-lp-code-settings-btn";
     gear.setAttribute("data-testid", "fence-settings-hint");
     gear.setAttribute("aria-label", args.settingsLabel ?? "Code settings");
-    gear.title = args.settingsLabel ?? "Code settings";
+    gear.dataset.tip = args.settingsLabel ?? "Code settings"; // #530
     gear.innerHTML = FENCE_SETTINGS_ICON;
     gear.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); }); // keep selection put
     gear.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); args.onSettings!(); });
@@ -123,7 +123,7 @@ export function buildFenceHeader(args: { lang: string; title?: string; code: str
     btn.type = "button";
     btn.className = "cm-lp-code-copy";
     btn.setAttribute("aria-label", "Copy code");
-    btn.title = "Copy code";
+    btn.dataset.tip = "Copy code"; // #530
     btn.innerHTML = FENCE_COPY_ICON;
     btn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
     btn.addEventListener("click", (e) => {

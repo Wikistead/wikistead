@@ -30,7 +30,7 @@ class HeadingAnchorWidget extends WidgetType {
     btn.type = "button";
     btn.className = "cm-lp-heading-anchor";
     btn.setAttribute("aria-label", i18n.t("toc.copyAnchor"));
-    btn.title = i18n.t("toc.copyAnchor");
+    btn.dataset.tip = i18n.t("toc.copyAnchor"); // #530
     btn.setAttribute("data-testid", "heading-anchor-copy");
     btn.dataset.slug = this.slug;
     btn.innerHTML = HEADING_LINK_ICON; // trusted constant SVG — no user input

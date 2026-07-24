@@ -48,7 +48,7 @@ export function AccentPicker({
           )}
           role="radio" aria-checked={value === key} disabled={disabled}
           aria-label={t(`accent.${key}`)}
-          title={t(`accent.${key}`)}
+          data-tip={t(`accent.${key}`)}
           data-testid={`accent-${key}`}
           style={{ background: ACCENT_PALETTE[key]![scheme].accent }}
           onClick={() => onChange(key)}

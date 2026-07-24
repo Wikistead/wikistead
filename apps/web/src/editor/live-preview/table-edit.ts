@@ -100,7 +100,7 @@ function svgBtn(svg: string, testid: string, title: string): HTMLButtonElement {
   b.type = "button";
   b.className = "cm-lp-table-edit-btn";
   b.innerHTML = svg; // trusted static icon
-  b.title = title;
+  b.dataset.tip = title; // #530: fast tooltip (was native title)
   b.setAttribute("data-testid", testid);
   return b;
 }
@@ -122,7 +122,7 @@ export const tableInlineEditor: InlineEditor = {
     const alignC = svgBtn(ICON.alignCenter!, "table-align-center", "Align center");
     const alignR = svgBtn(ICON.alignRight!, "table-align-right", "Align right");
     const headerBtn = btn("H", "table-header");
-    headerBtn.title = "Toggle header cells";
+    headerBtn.dataset.tip = "Toggle header cells"; // #530
     const doneBtn = btn("Done", "table-done");
     // Structural ops (#1): insert/delete the selected column or row. Each group is shown
     // only when its kind is selected (via the column/row handle), so before/after is clear.
@@ -152,7 +152,7 @@ export const tableInlineEditor: InlineEditor = {
       const sw = document.createElement("button");
       sw.type = "button";
       sw.className = "cm-lp-table-swatch";
-      sw.title = p.title;
+      sw.dataset.tip = p.title; // #530
       sw.setAttribute("data-testid", "table-bg-" + p.id);
       sw.style.background = p.value ?? "transparent";
       if (!p.value) sw.innerHTML = ICON.noFill!; // #256: "no fill" — trusted static SVG, not a font glyph

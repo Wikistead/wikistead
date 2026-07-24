@@ -12,7 +12,7 @@ export function NewPageButton({ onClick, disabled }: { onClick: () => void; disa
     <button
       type="button"
       className="flex cursor-pointer rounded-sm p-1 text-fg-dim transition-colors duration-[120ms] hover:bg-panel-2 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-      title={t("sidebar.newPage")}
+      data-tip={t("sidebar.newPage")}
       aria-label={t("sidebar.newPage")}
       data-testid="new-page"
       disabled={disabled}

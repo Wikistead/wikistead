@@ -84,7 +84,7 @@ export function ApiKeysPanel({
           <p className="text-xs text-fg-dim">{t("adminApi.copyOnce")}</p>
           <div className="flex items-center gap-2">
             <code className="flex-1 font-mono text-xs [overflow-wrap:anywhere]">{created.plaintext}</code>
-            <IconButton aria-label={t("adminApi.copy")} title={t("adminApi.copy")} onClick={() => { navigator.clipboard?.writeText(created.plaintext); notify.success(t("toast.copied")); }}>
+            <IconButton aria-label={t("adminApi.copy")} data-tip={t("adminApi.copy")} onClick={() => { navigator.clipboard?.writeText(created.plaintext); notify.success(t("toast.copied")); }}>
               <Copy size={14} />
             </IconButton>
           </div>
@@ -97,7 +97,7 @@ export function ApiKeysPanel({
             <span className="min-w-[48px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-fg-dim data-[scope=write]:border-[var(--accent)] data-[scope=write]:text-[var(--accent)]" data-scope={k.scope}>{t(`adminApi.scope_${k.scope}`)}</span>
             <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{k.name}</span>
             {/* #495: the admin view names WHO owns the key (name, or the sub when the name is null) */}
-            {admin && <span className="flex-none max-w-[9rem] truncate text-xs text-fg-dim" data-testid="api-key-owner" title={k.ownerName ?? k.ownerUserId}>{k.ownerName ?? k.ownerUserId}</span>}
+            {admin && <span className="flex-none max-w-[9rem] truncate text-xs text-fg-dim" data-testid="api-key-owner" data-tip={k.ownerName ?? k.ownerUserId}>{k.ownerName ?? k.ownerUserId}</span>}
             <code className="flex-none font-mono text-xs text-fg-dim">{k.keyPrefix}…</code>
             <LastUsed at={k.lastUsedAt} />
             {/* #504: red at rest (hover-only red is against the policy) + confirm before the kill. */}

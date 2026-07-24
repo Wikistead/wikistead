@@ -54,7 +54,7 @@ export function ProgressRing({ done, total, compact = false, animKey }: { done: 
 
   if (total <= 0) return null;
   return (
-    <span className="wks-page-ring" data-testid="page-task-ring" data-done={done} data-total={total} title={`${done}/${total}`}>
+    <span className="wks-page-ring" data-testid="page-task-ring" data-done={done} data-total={total} data-tip={`${done}/${total}`}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
         <circle cx={c} cy={c} r={r} className="cm-lp-todo-ring-track" />
         <circle

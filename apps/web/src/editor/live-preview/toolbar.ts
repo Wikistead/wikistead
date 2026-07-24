@@ -15,7 +15,7 @@ function mkButton(label: string, title: string, run: () => void): HTMLButtonElem
   button.type = "button";
   button.className = "lp-toolbar-btn";
   button.textContent = label;
-  button.title = title;
+  button.dataset.tip = title; // #530
   // mousedown + preventDefault keeps the editor selection/focus intact so the command
   // applies to the user's current selection (and the selection bubble stays up).
   button.addEventListener("mousedown", (e) => { e.preventDefault(); run(); });

@@ -76,7 +76,7 @@ export function SpaceModerationTab() {
                     aria-pressed={e.patrolled}
                     disabled={togglePatrol.isPending}
                     data-testid={`moderation-patrol-${e.id}`}
-                    title={e.patrolled ? t("recentChanges.unmarkPatrolled") : t("recentChanges.markPatrolled")}
+                    data-tip={e.patrolled ? t("recentChanges.unmarkPatrolled") : t("recentChanges.markPatrolled")}
                     onClick={() => togglePatrol.mutate({ eventId: e.id, patrolled: !!e.patrolled })}
                     className={`flex-none rounded p-1 ${e.patrolled ? "text-[var(--accent)]" : "text-fg-dim hover:bg-panel-2 hover:text-foreground"}`}
                   >

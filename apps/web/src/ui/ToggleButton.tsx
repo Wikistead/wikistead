@@ -21,7 +21,7 @@ export function ToggleButton({ pressed, onToggle, icon, label, testId, text, bad
       type="button"
       aria-pressed={pressed}
       aria-label={label}
-      title={label}
+      data-tip={label}
       data-testid={testId}
       data-active={pressed || undefined}
       disabled={disabled}

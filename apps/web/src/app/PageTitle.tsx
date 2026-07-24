@@ -60,7 +60,7 @@ export function PageTitle({ title: value, onRename }: { title: string; onRename?
           onBlur={commit}
         />
       ) : onRename ? (
-        <button type="button" className={`${title} cursor-text text-left ${clamp}`} data-testid="page-title" title={value || t("dialogs.renamePageTitle")}
+        <button type="button" className={`${title} cursor-text text-left ${clamp}`} data-testid="page-title" data-tip={value || t("dialogs.renamePageTitle")}
           onClick={() => { setDraft(value); setEditing(true); }}>
           {value || t("common.untitled")}
         </button>
