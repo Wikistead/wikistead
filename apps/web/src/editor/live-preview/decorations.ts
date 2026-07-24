@@ -36,6 +36,11 @@ import { renderCellInline } from "../macros/table-cell-dom";
 import { openMacroModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost, nestedSelectionField, setNestedSelection, nestedEditActiveField, setNestedEditActive, slotEditField, setSlotEditActive, type NestedSelection, type SlotEdit } from "./macro-edit";
 import { mountSourceEditor } from "../macros/source-editor";
+import type * as Y from "yjs";
+import type { EphemeralSession } from "../collab";
+import { ephemeralBody } from "../ephemeral-island";
+import { IslandCoEditController } from "../island-coedit-controller";
+import type { AwarenessLike } from "../macro-presence";
 import { tableInlineEditor } from "./table-edit";
 import { tableTier } from "../macros/table";
 import type { InlineController, HostSurfaceOptions, HostSurfaceHandle } from "../macros/registry";
@@ -721,6 +726,22 @@ export interface MacroPresence {
   subscribe(cb: () => void): () => void; // notify when peers change (to redraw); returns an unsubscribe
 }
 export const macroPresence = Facet.define<MacroPresence, MacroPresence | null>({
+  combine: (values) => (values.length ? values[values.length - 1]! : null),
+});
+
+// #502 / ADR-184: the host seam for cross-island CO-EDIT. Present on the OUTER EDIT surface whenever there
+// is a live awareness (Editor.tsx): `awareness` is the page awareness the co-occupancy roster reads, and
+// `connect(anchor)` opens the ephemeral `:x:` room for that island. This INCLUDES edit-authority share-link
+// guests — anonymous real-time co-editing is the product's north star, and the `:x:` room carries the same
+// server authz gate as the Excalidraw modal (no new trust boundary). VIEW-only guests never reach here (they
+// get mountPublishedView, which has no editUI surface). Absent a live awareness (no-collab, unit tests) → the
+// island editor stays a private local doc. Co-edit ALSO requires 2+ occupants, so single-user editing (even
+// with the facet present) never spins anything up (ADR §3 zero-cost) — the shipped path is untouched.
+export interface CoEditHost {
+  readonly awareness: AwarenessLike;
+  connect(anchor: string): EphemeralSession;
+}
+export const coEditHost = Facet.define<CoEditHost, CoEditHost | null>({
   combine: (values) => (values.length ? values[values.length - 1]! : null),
 });
 
@@ -1669,7 +1690,7 @@ export class EditableEditUIWidget extends WidgetType {
       // macro gets a handle — never an EditorView — so vim, the slash palette, completion and nested
       // rendering come from the same factory the page and the slot islands use, and the {theme}
       // boundary is unchanged.
-      mountSurface: (opts) => mountHostSurface(view, opts),
+      mountSurface: (opts) => this.mountCoEditSurface(view, opts),
     });
     // #239: re-add the Done affordance after each (re)mount — mountInto's replaceChildren above wipes it.
     const done = document.createElement("button");
@@ -1705,6 +1726,54 @@ export class EditableEditUIWidget extends WidgetType {
       view.dispatch({ effects: setMacroRenderActive.of(null) });
     }
     view.focus();
+  }
+  // #502 / ADR-184 slice 2b-2b (final): a CO-EDIT-AWARE editing surface. Absent the coEditHost facet
+  // (guests, tests, no live collab) it is EXACTLY mountHostSurface — byte-identical to the shipped path.
+  // With the facet it returns a thin PROXY over a swappable inner surface: the IslandCoEditController
+  // watches co-occupancy of this block's anchor and, ONLY when 2+ peers co-occupy, swaps `inner` to a
+  // yCollab-bound shared-ephemeral surface (remote carets included); when occupancy drops it swaps back to
+  // a local surface and flushes the merged body to the canonical Y.Text via the macro's own commit. A LONE
+  // editor never crosses 2, so the controller never spins up and the surface stays the plain local one
+  // shipped single-user editing is untouched. The re-mount focus/flush interaction (and the 2-client caret)
+  // are device-visual: this ships behind a review (needs-human-check) with the 2-client gates.
+  private mountCoEditSurface(view: EditorView, opts: HostSurfaceOptions): HostSurfaceHandle {
+    const coHost = view.state.facet(coEditHost);
+    if (!coHost) return mountHostSurface(view, opts); // no collab host → the shipped private-doc surface
+    const anchor = String(this.from);
+    let inner = mountHostSurface(view, opts);
+    let destroying = false;
+    const swap = (collab?: { text: Y.Text; awareness: unknown }, initial?: string) => {
+      if (destroying) return;
+      inner.destroy();
+      inner = mountHostSurface(view, { ...opts, doc: asMacroSource(initial ?? opts.doc) }, collab);
+      inner.focus();
+    };
+    const ctrl = new IslandCoEditController({
+      awareness: coHost.awareness,
+      anchor,
+      fenceText: () => inner.getValue(),
+      connect: () => coHost.connect(anchor),
+      onBind: (session) => swap({ text: ephemeralBody(session.doc), awareness: session.awareness }),
+      onUnbind: (flushed) => {
+        // Flush the merged co-edit to the canon — but ONLY if it actually changed the body (a no-op flush
+        // dispatches an identical edit → widget updateDOM → churn). CRUCIALLY, defer the flush to a
+        // microtask: onUnbind can fire from the widget's OWN destroy/updateDOM, which runs INSIDE an outer
+        // view.dispatch — and onCommit → the macro save → view.dispatch would be a NESTED dispatch (CM
+        // throws "update in progress", and the merged body would be lost). Deferring runs it after the
+        // current update completes, on the still-alive outer view (design-review). Guarded against a
+        // torn-down view (full editor unmount between here and the microtask).
+        if (flushed !== String(this.source)) {
+          queueMicrotask(() => { try { opts.onCommit?.(asMacroSource(flushed)); } catch { /* outer view gone */ } });
+        }
+        swap(undefined, flushed); // back to a local surface so a now-lone editor keeps editing (no-op if destroying)
+      },
+    });
+    return {
+      getValue: () => inner.getValue(),
+      focus: () => inner.focus(),
+      inVimInsert: () => inner.inVimInsert(),
+      destroy: () => { destroying = true; ctrl.dispose(); inner.destroy(); },
+    };
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div") as EditUIDom;
@@ -2130,7 +2199,7 @@ const slotIslandTheme = EditorView.theme({
 // #456 S1/S3: the host's side of the shared-surface seam. A macro asks for an editing surface and
 // gets a handle; the surface itself is the same CM6 mount the slot islands use, built from the shared
 // factory, so behaviour cannot drift per macro. The macro never receives the view.
-function mountHostSurface(view: EditorView, opts: HostSurfaceOptions): HostSurfaceHandle {
+function mountHostSurface(view: EditorView, opts: HostSurfaceOptions, collab?: { text: Y.Text; awareness: unknown }): HostSurfaceHandle {
   const factory = view.state.facet(nestedLivePreviewConfig);
   const markdown = opts.kind !== "code"; // default: the content is prose, so keep reading typography
   const handle = mountSourceEditor({
@@ -2139,6 +2208,9 @@ function mountHostSurface(view: EditorView, opts: HostSurfaceOptions): HostSurfa
     dark: currentMacroTheme() === "dark",
     testid: opts.testid ?? "macro-surface",
     vim: view.state.facet(vimEnabled),
+    // #502 / ADR-184: when the host has bound this surface to a shared EPHEMERAL Y.Text (co-occupied
+    // island), pass it through so mountSourceEditor live-binds via yCollab; absent → the private-doc path.
+    collab,
     // A prose surface gets the page's own decoration/keymap layer (reveal, vim-atom motion, nested
     // macro render, the slash palette). A code surface stays a plain source pane — the factory would
     // render markdown inside what is not markdown.

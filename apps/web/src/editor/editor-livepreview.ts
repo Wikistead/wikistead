@@ -7,7 +7,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, reAnchorAfterReveal, atomClipboard, atomSelectionTint, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, listSource, linkStatusResolver, embedAllowlist, embedUrlPrompt, tagSuggestSource, tagPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, nestedLivePreviewConfig, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type ListSource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type EmbedUrlPrompt, type TagSuggestSource, type TagPrompt } from "./live-preview/decorations";
+import { livePreview, reAnchorAfterReveal, atomClipboard, atomSelectionTint, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, listSource, linkStatusResolver, embedAllowlist, embedUrlPrompt, tagSuggestSource, tagPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, coEditHost, nestedLivePreviewConfig, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type ListSource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type CoEditHost, type EmbedUrlPrompt, type TagSuggestSource, type TagPrompt } from "./live-preview/decorations";
 import { deadLinks } from "./live-preview/dead-links"; // #276 / ADR-117: dead-internal-link strikethrough overlay
 import { blockAnchors } from "./live-preview/block-anchor"; // #325 / ADR-137 slice 2: hide trailing ` ^id` markers
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
@@ -261,7 +261,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: LivePreviewSharedOpts & { vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; searchPhrasesCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; selfPageId?: string } = {},
+  opts: LivePreviewSharedOpts & { vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; searchPhrasesCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; coEditHost?: CoEditHost; selfPageId?: string } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -412,6 +412,9 @@ export function mountLivePreview(
       // awareness so peers get the same occupancy chip the modal path already gives (additive `macroEdit`
       // field only; never the sync/offset path). OUTER surface only, alongside the overlay above.
       ...(opts.macroPresence ? [macroPresencePublisher] : []),
+      // #502 / ADR-184 slice 2b (final): the co-edit host seam (page awareness + ephemeral-room factory).
+      // OUTER member surface only; a co-occupied island editor binds to a shared ephemeral Y.Text through it.
+      ...(opts.coEditHost ? [coEditHost.of(opts.coEditHost)] : []),
       // Layer (iii): host chrome (editable surface only; view guests get none). The slash palette itself
       // lives in the shared layer (its vimVisualField still precedes the toolbar's bubble, which reads it
       // to suppress itself in vim visual — the factory sits earlier in this array).
