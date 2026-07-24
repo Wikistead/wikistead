@@ -3,7 +3,7 @@
 // the model's 'editor') is a silent authz break. The integration suite (authz.test.ts) exercises this
 // only against a live OpenFGA with seeded data; this pins the MAPPING itself, fast and in isolation,
 // with a fake FGA that captures the relation actually sent. Distinct expected relation per capability
-// so a table typo is caught, and the undefined case (space+comment) must THROW, never silently allow.
+// so a table typo is caught, and an UNMAPPED pair must THROW, never silently allow.
 import { describe, it, expect } from 'vitest'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, checkMemberAccess } from '@wikistead/authz'
@@ -40,10 +40,24 @@ describe('capability -> FGA relation mapping (authz chokepoint)', () => {
     }
   })
 
-  it('THROWS for a capability with no relation on the type (space+comment) — never a silent allow', async () => {
+  // #529 / ADR-193 made `space` total (comment -> commenter), so the pair this used to name is now
+  // mapped and every current Capability resolves on both types. The invariant it pinned is unchanged and
+  // still the one that matters, so it is re-aimed at the regression that can actually happen: the table is
+  // a Partial<Record<>>, so ADDING a Capability to the union without adding its row compiles fine and
+  // would reach resolveRelation unmapped. That must throw before FGA, never fall through to a wrong
+  // relation (or to an undefined one, which some SDKs would send as a wildcard-ish string).
+  it('THROWS for a capability the table does not map — never a silent allow', async () => {
     const { client, calls } = fakeFga(true)
-    await expect(check(client, 'user:u', 'comment', { type: 'space', id: 's1' })).rejects.toThrow(/no FGA relation/)
+    const unmapped = 'archive' as Capability // stands in for a future capability added without a row
+    await expect(check(client, 'user:u', unmapped, { type: 'space', id: 's1' })).rejects.toThrow(/no FGA relation/)
+    await expect(check(client, 'user:u', unmapped, { type: 'page', id: 'p1' })).rejects.toThrow(/no FGA relation/)
     expect(calls).toHaveLength(0) // must reject BEFORE hitting FGA, not fall through to a wrong relation
+  })
+
+  it('maps the #529 space comment capability to `commenter` (not the page-side `comment`)', async () => {
+    const { client, calls } = fakeFga(true)
+    await check(client, 'user:u', 'comment', { type: 'space', id: 's1' })
+    expect(calls.at(-1)).toEqual({ user: 'user:u', relation: 'commenter', object: 'space:s1' })
   })
 
   it('returns the FGA verdict verbatim (true stays true, false stays false)', async () => {
