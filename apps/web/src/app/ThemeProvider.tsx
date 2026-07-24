@@ -43,6 +43,28 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
+  // #505: a DARK print must paint the sheet dark to the paper edge, or the light reading text (--fg) is
+  // faint on white paper. A dark background reaches every edge only when the page has NO @page margin (a
+  // page margin is outside the page box and the root background can't paint it) — so a dark print swaps
+  // print.css's @page{margin:14mm} for @page{margin:0} plus a 14mm padding on the print surface. @page
+  // rules can't read <html data-theme>, so reflect the RESOLVED dark state (this is the one place that
+  // resolves 'system' → OS preference) into a print-scoped stylesheet, appended last so it overrides
+  // print.css. Light print keeps the even page margin untouched — strict non-regression.
+  useEffect(() => {
+    const ID = "wks-print-dark";
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => {
+      const dark = theme === "dark" || (theme === "system" && mq.matches);
+      let el = document.getElementById(ID) as HTMLStyleElement | null;
+      if (!dark) { el?.remove(); return; }
+      if (!el) { el = document.createElement("style"); el.id = ID; document.head.appendChild(el); }
+      el.textContent = "@media print{@page{margin:0}[data-print-root]{padding:14mm;box-sizing:border-box}}";
+    };
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, [theme]);
+
   const setTheme = (t: Theme) => {
     setThemeState(t);
     try { localStorage.setItem(KEY, t); } catch { /* private mode — choice just won't persist */ }

@@ -6,7 +6,11 @@
    FULL published Markdown once via the shared sanitised renderer, and here we hide the live app and show
    ONLY that surface in NORMAL DOCUMENT FLOW, so the browser paginates it across as many sheets as needed. */
 /* #207: the browser default print margin is oversized. Set a compact, even page margin so the content
-   uses the sheet. */
+   uses the sheet. #505: a DARK print needs the sheet dark to the paper edge, but a page margin is OUTSIDE
+   the page box and the root background cannot paint it (verified: a dark print left a white 14mm frame).
+   So a dark print swaps this for @page{margin:0} + a 14mm padding on [data-print-root], injected by
+   ThemeProvider only when the resolved theme is dark (@page can't read data-theme). Light print keeps
+   this even page margin unchanged — strict non-regression. */
 @page {
   margin: 14mm;
 }
@@ -39,5 +43,40 @@
   [data-print-root] .cm-lp-table-scroll {
     max-height: none;
     overflow: visible;
+  }
+}
+
+/* #505 (dark print): in a DARK theme the reading text uses light tokens (--fg ≈ light grey), but the
+   printed sheet defaulted to white → faint light text on white paper, unreadable (review rejection
+   2026-07-24). Paint the sheet dark. The background is set on :root (the html element), whose background
+   PROPAGATES to the paged canvas, so it fills the content box on every page (not just page 1). The
+   [data-print-root] gets the same dark fill directly so the flowed content box is dark even where the
+   canvas propagation stops at the @page margin edge. Forced with print-color-adjust so the browser
+   actually renders the fill (the callout/code tints already use it). Scoped to dark ONLY — light-theme
+   print (white sheet, dark text) is a strict non-regression; pagination/chrome/callout colours (all
+   PASSED) are untouched. Both the explicit dark toggle (data-theme=dark) and OS-following system-dark
+   are covered. */
+@media print {
+  :root[data-theme="dark"] {
+    background: var(--bg) !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  :root[data-theme="dark"] [data-print-root] {
+    background: var(--bg);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+@media print and (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    background: var(--bg) !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  :root[data-theme="system"] [data-print-root] {
+    background: var(--bg);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }
