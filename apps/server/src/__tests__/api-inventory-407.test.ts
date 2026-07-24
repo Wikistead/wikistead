@@ -40,6 +40,7 @@ const EXCLUDED_PATHS = new Set([
   '/spaces/:spaceId/page-creation-policy', // page-creation-policy knob (#399; space settings plumbing)
   '/spaces/:spaceId/abuse-filter', // per-space moderation policy (#509; space settings plumbing)
   '/spaces/:spaceId/pages/bulk-delete', // Pages-tab bulk delete (#511; space settings plumbing, per-page authz inside)
+  '/spaces/:spaceId/assignable-roles', // manager-readable role list for the in-space assignment picker (#485/#514; space settings plumbing)
   '/admin/roles', '/admin/roles/:roleId', '/admin/roles/tenant-defaults', // custom-role definitions + default presets (#420/#445; admin console plumbing)
   '/admin/roles/assignments', '/admin/roles/:roleId/assignments', '/admin/roles/assignments/:assignmentId', // role assignments (#420 inc3)
   '/spaces/:spaceId/branding', '/spaces/:spaceId/icon-image', '/branding', '/branding/logo', '/tenant/branding', '/tenant/branding/logo', // branding/UI
