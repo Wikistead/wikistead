@@ -40,25 +40,7 @@ export const tableTier: MacroTier = {
 export function gridToTable(grid: Grid): HTMLTableElement {
   const out = document.createElement("table");
   out.className = "cm-lp-table cm-lp-table-merged";
-  // #518: group the LEADING all-header rows into a <thead> so the shared sticky-header CSS
-  // (`.cm-lp-table thead th { position: sticky; top: 0 }`) pins them exactly as it does for a GFM pipe
-  // table (which is emitted with a <thead>). Before this, gridToTable put every <tr> directly under the
-  // <table> with no <thead>, so `thead th` never matched a :::table and only the left-column `th:first-child`
-  // rule applied — the header had `position: sticky` but `top: auto` (the device trace). Rows from the
-  // first non-header row on — including a row-header <th> in a body row's first column — stay in <tbody>
-  // (that th sticks LEFT, not top). Display-only: the source HTML is unchanged and round-trips verbatim.
-  const isHeaderRow = (row: Grid[number]) => {
-    const cells = row.filter(Boolean) as NonNullable<Grid[number][number]>[];
-    return cells.length > 0 && cells.every((c) => c.header);
-  };
-  let inBody = false;
-  let thead: HTMLTableSectionElement | null = null;
-  let tbody: HTMLTableSectionElement | null = null;
   for (const row of grid) {
-    if (!isHeaderRow(row)) inBody = true; // the first non-header row (and everything after) is the body
-    const section = !inBody
-      ? (thead ??= out.appendChild(document.createElement("thead")))
-      : (tbody ??= out.appendChild(document.createElement("tbody")));
     const tr = document.createElement("tr");
     for (const cell of row) {
       if (!cell) continue; // covered position
@@ -69,7 +51,7 @@ export function gridToTable(grid: Grid): HTMLTableElement {
       if (cell.style) el.setAttribute("style", styleToCss(cell.style)); // already allowlisted
       tr.appendChild(el);
     }
-    section.appendChild(tr);
+    out.appendChild(tr);
   }
   return out;
 }
@@ -89,18 +71,9 @@ export const tableMacro: DirectiveMacro = {
   richEditUI: { present: "inline", editor: tableInlineEditor }, // #154: in-editor WYSIWYG table editing (was #86 modal)
   tier: tableTier, // ADR-025 step 3: host auto-demotes pipe ⟷ :::table
   liveRender: (body) => {
-    const table = renderHtmlTable(body);
-    table.setAttribute("data-testid", "macro-table");
-    // #518: put the table in the SAME horizontal-scroll + max-height box a GFM pipe table gets (its
-    // TableWidget builds `.cm-lp-table-scroll` itself; md-render's pipe-table `case "table"` does too).
-    // Without it a wide :::table stretched `.cm-lp-macro-wrap` → `.cm-content` and scrolled the WHOLE
-    // editor sideways (point 2), and a tall one had no vertical scroll box for its sticky <thead>
-    // to pin against. The box is the local scroll container: overflow-x gives the table its own
-    // horizontal scrollbar and overflow-y + max-height (baseTheme / prose.css) keeps the header pinned.
-    const box = document.createElement("div");
-    box.className = "cm-lp-table-scroll";
-    box.appendChild(table);
-    return box;
+    const el = renderHtmlTable(body);
+    el.setAttribute("data-testid", "macro-table");
+    return el;
   },
   // The body is already HTML → it round-trips as-is. unsafeHtml marks the ONE place a macro
   // emits verbatim HTML: the server export pipeline (#85) MUST run this through its sanitizer
