@@ -407,7 +407,15 @@
     "draft": "下書き",
     "unpublished": "未公開の変更",
     "published": "公開済み",
-    "empty": "このスペースにはまだページがありません。"
+    "empty": "このスペースにはまだページがありません。",
+    "selectAll": "すべてのページを選択",
+    "selectRow": "ページを選択",
+    "selectedCount": "{{count}} 件選択中",
+    "clearSelection": "選択解除",
+    "bulkDeleteTitle": "ページを削除",
+    "bulkDeleteConfirm": "{{count}} 件のページとその入れ子ページをすべて削除しますか？ ゴミ箱へ移動します。",
+    "bulkDeleteDone": "{{count}} 件のページを削除しました。",
+    "bulkDeletePartial": "{{deleted}} 件を削除・{{skipped}} 件をスキップ（権限なし）。"
   },
   "spaceMembers": {
     "title": "メンバーと権限",

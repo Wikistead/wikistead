@@ -23,7 +23,8 @@ test("#463: at 520px the title column stays readable and the table scrolls in it
   await page.setViewportSize({ width: 520, height: 900 });
   await openPagesTab(page);
 
-  const titleCell = page.locator("[data-testid=space-page-row] td").first();
+  // #511 added a leading checkbox column, so the title is the SECOND cell now.
+  const titleCell = page.locator("[data-testid=space-page-row] td").nth(1);
   const w = await titleCell.evaluate((el) => Math.round(el.getBoundingClientRect().width));
   expect(w, "the title column has real width (was 0)").toBeGreaterThan(120);
 
@@ -33,8 +34,8 @@ test("#463: at 520px the title column stays readable and the table scrolls in it
   const h = await titleCell.evaluate((el) => Math.round(el.getBoundingClientRect().height));
   expect(h, "one line, not a wrapped block").toBeLessThan(60);
 
-  // #439 non-regression: the status badge stays on one line
-  const badgeH = await page.locator("[data-testid=space-page-row] td").nth(1).evaluate((el) => Math.round(el.getBoundingClientRect().height));
+  // #439 non-regression: the status badge stays on one line (now the 3rd cell after the #511 checkbox)
+  const badgeH = await page.locator("[data-testid=space-page-row] td").nth(2).evaluate((el) => Math.round(el.getBoundingClientRect().height));
   expect(badgeH).toBeLessThan(60);
 
   // any overflow is the table's own scroller — the page itself never scrolls sideways
@@ -47,6 +48,7 @@ test("#463: at 520px the title column stays readable and the table scrolls in it
 test("#463: a wide viewport is unchanged (title takes the remaining width)", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openPagesTab(page);
-  const w = await page.locator("[data-testid=space-page-row] td").first().evaluate((el) => Math.round(el.getBoundingClientRect().width));
+  // #511: title is the 2nd cell (after the checkbox column)
+  const w = await page.locator("[data-testid=space-page-row] td").nth(1).evaluate((el) => Math.round(el.getBoundingClientRect().width));
   expect(w, "wide layout still gives the title the leftover width").toBeGreaterThan(300);
 });

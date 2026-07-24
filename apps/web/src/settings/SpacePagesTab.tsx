@@ -1,8 +1,17 @@
+import { useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useSpacePagesOverview } from "../data/queries";
+import { Trash2 } from "lucide-react";
+import { useSpacePagesOverview, useBulkDeletePages } from "../data/queries";
+import { Button } from "../ui/Button";
+import { ConfirmDialog } from "../ui/dialogs";
+import { notify } from "../ui/toast";
 
 interface SpaceCtx { spaceId: string; name: string; accentKey: string | null }
+
+// #511 / ADR-185: above this selection size the delete confirm escalates from a count-only check to a
+// type-to-confirm ("delete"), matching the #504 destructive-op posture for large / high-blast actions.
+const TYPE_CONFIRM_THRESHOLD = 20;
 
 // whitespace-nowrap: a squeezed status column must never wrap the badge text vertically (#439).
 const chip = "whitespace-nowrap rounded-full border px-2 py-px text-[11px]";
@@ -11,11 +20,41 @@ const chip = "whitespace-nowrap rounded-full border px-2 py-px text-[11px]";
 // space: published state, unpublished changes, direct-grant count, active share
 // links. space#manage gated server-side (and the whole settings screen is manager-
 // only), so it never shows pages outside the manager's authority.
+// #511 / ADR-185: the tab also drives BULK operations (delete first) over a multi-select — each page is
+// re-authorized server-side (partial success), so the UI is a convenience over a server that is the fort.
 export function SpacePagesTab() {
   const { t } = useTranslation();
   const { spaceId } = useOutletContext<SpaceCtx>();
   const navigate = useNavigate();
   const pages = useSpacePagesOverview(spaceId);
+  const bulkDelete = useBulkDeletePages();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const rows = pages.data ?? [];
+  const allSelected = rows.length > 0 && rows.every((p) => selected.has(p.id));
+  const toggle = (id: string) =>
+    setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () =>
+    setSelected(allSelected ? new Set() : new Set(rows.map((p) => p.id)));
+  const clearSelection = () => setSelected(new Set());
+
+  const runBulkDelete = () => {
+    const ids = [...selected];
+    setConfirmOpen(false);
+    bulkDelete.mutate({ spaceId, pageIds: ids }, {
+      onSuccess: (r) => {
+        clearSelection();
+        // Partial success is the contract: report BOTH outcomes so a caller who could not delete some
+        // pages (no permission) is told, never silently left thinking it all worked.
+        if (r && r.skipped > 0) notify.info(t("spacePages.bulkDeletePartial", { deleted: r.deleted, skipped: r.skipped }));
+        else notify.success(t("spacePages.bulkDeleteDone", { count: r?.deleted ?? 0 }));
+      },
+      onError: () => notify.error(t("toast.actionFailed")),
+    });
+  };
+
+  const n = selected.size;
 
   return (
     // #439: widened (was 720px) + table-fixed below — the auto layout let long titles squeeze the
@@ -23,17 +62,29 @@ export function SpacePagesTab() {
     <div className="max-w-[920px] p-6" data-testid="space-pages">
       <h2 className="mt-0">{t("spacePages.title")}</h2>
       {pages.isLoading && <p className="text-sm text-fg-dim">{t("common.loading")}</p>}
-      {!pages.isLoading && (pages.data?.length ?? 0) === 0 && <p className="text-sm text-fg-dim">{t("spacePages.empty")}</p>}
+      {!pages.isLoading && rows.length === 0 && <p className="text-sm text-fg-dim">{t("spacePages.empty")}</p>}
 
-      {/* #463: below ~520px the fixed columns (132+88+88) consumed the whole table and the title
-          column — the "remaining width" under table-fixed — collapsed to 0, so rows became
-          unidentifiable. A min-width keeps the title readable-and-truncating, and the table scrolls
-          inside its own box past that (never the page; same shape as the #406 body-table fix). */}
-      {(pages.data?.length ?? 0) > 0 && (
+      {/* #511: the bulk action bar appears only with a selection. Delete is red-at-rest (#504 posture) and
+          confirmed before it runs (the ConfirmDialog's onConfirm is the guard the #510 policy checks). */}
+      {n > 0 && (
+        <div className="mb-3 flex items-center gap-3 rounded-md border border-border bg-panel p-2" data-testid="space-pages-bulkbar">
+          <span className="text-sm text-fg-dim" data-testid="bulk-selected-count">{t("spacePages.selectedCount", { count: n })}</span>
+          <Button variant="danger" size="sm" data-testid="bulk-delete" onClick={() => setConfirmOpen(true)}>
+            <Trash2 size={14} /> {t("common.delete")}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={clearSelection}>{t("spacePages.clearSelection")}</Button>
+        </div>
+      )}
+
+      {rows.length > 0 && (
         <div className="overflow-x-auto" data-testid="space-pages-scroller">
-        <table className="w-full min-w-[468px] table-fixed border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:p-2 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.03em] [&_th]:text-fg-dim">
+        <table className="w-full min-w-[500px] table-fixed border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:p-2 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.03em] [&_th]:text-fg-dim">
           <thead>
             <tr>
+              <th className="w-[32px]">
+                <input type="checkbox" checked={allSelected} onChange={toggleAll}
+                  aria-label={t("spacePages.selectAll")} data-testid="bulk-select-all" className="cursor-pointer" />
+              </th>
               {/* table-fixed: the title column takes the REMAINING width (and truncates); the
                   status/count columns are fixed and never wrap (#439). */}
               <th className="min-w-[160px] whitespace-nowrap">{t("spacePages.title")}</th>
@@ -43,24 +94,43 @@ export function SpacePagesTab() {
             </tr>
           </thead>
           <tbody>
-            {pages.data!.map((p) => (
-              <tr key={p.id} className="cursor-pointer" data-testid="space-page-row" onClick={() => navigate(`/p/${p.id}`)}>
-                <td><div className="truncate" title={p.title || undefined}>{p.title || t("common.untitled")}</div></td>
-                <td className="whitespace-nowrap">
+            {rows.map((p) => (
+              <tr key={p.id} className="cursor-pointer" data-testid="space-page-row"
+                data-selected={selected.has(p.id) ? "true" : undefined}>
+                <td onClick={(e) => e.stopPropagation()}>
+                  <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)}
+                    aria-label={t("spacePages.selectRow")} data-testid="bulk-select-row" className="cursor-pointer" />
+                </td>
+                <td onClick={() => navigate(`/p/${p.id}`)}><div className="truncate" title={p.title || undefined}>{p.title || t("common.untitled")}</div></td>
+                <td className="whitespace-nowrap" onClick={() => navigate(`/p/${p.id}`)}>
                   {!p.published
                     ? <span className={`${chip} border-border text-fg-dim`}>{t("spacePages.draft")}</span>
                     : p.hasUnpublishedChanges
                       ? <span className={`${chip} border-[color-mix(in_srgb,var(--accent)_50%,var(--border))] text-[var(--accent)]`}>{t("spacePages.unpublished")}</span>
                       : <span className="text-sm text-fg-dim">{t("spacePages.published")}</span>}
                 </td>
-                <td className="w-[72px] text-right">{p.grantCount}</td>
-                <td className="w-[72px] text-right">{p.linkCount}</td>
+                <td className="w-[72px] text-right" onClick={() => navigate(`/p/${p.id}`)}>{p.grantCount}</td>
+                <td className="w-[72px] text-right" onClick={() => navigate(`/p/${p.id}`)}>{p.linkCount}</td>
               </tr>
             ))}
           </tbody>
         </table>
         </div>
       )}
+
+      {/* #511 / ADR-185 point 2+3: the confirm names the count AND that nested pages go too (delete
+          cascades to the subtree — never a silent orphan/expansion); a large selection escalates to
+          type-to-confirm. #504 danger tone. */}
+      <ConfirmDialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={runBulkDelete}
+        title={t("spacePages.bulkDeleteTitle")}
+        message={t("spacePages.bulkDeleteConfirm", { count: n })}
+        confirmLabel={t("common.delete")}
+        confirmTestId="bulk-delete-confirm"
+        typedConfirmText={n > TYPE_CONFIRM_THRESHOLD ? "delete" : undefined}
+      />
     </div>
   );
 }
