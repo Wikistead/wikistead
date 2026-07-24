@@ -913,11 +913,15 @@ export async function spacesPlugin(app: FastifyInstance) {
     if (!resolveEntitlements(req.tenant.plan).analytics) return { entitled: false, pages: 0, daily: [], unique } // EE gate (paid feature)
     const invalid = validateRollupQuery(req.query) // 400 before any FGA/DB work
     if (invalid) return reply.code(400).send({ error: invalid })
-    const rows = await req.db.sql<{ id: string }[]>`SELECT id FROM pages WHERE space_id = ${req.params.spaceId}`
+    // Candidates are this space's pages; the ancestry map spans the whole (RLS-scoped) tenant because a
+    // private ANCESTOR that makes a candidate private need not itself be a candidate.
+    const rows = await req.db.sql<{ id: string; parent_id: string | null; space_id: string }[]>`SELECT id, parent_id, space_id FROM pages`
+    const parentOf = new Map(rows.map((r) => [r.id, r.parent_id] as const))
+    const candidates = rows.filter((r) => r.space_id === req.params.spaceId).map((r) => r.id)
     // #520ONE check decides whether the per-page fan-out is needed at all. A space manager manages
     // every non-private page in the space by the model, so only private ones still get a per-page check.
     const scopeManager = await check(app.fga, subject, 'manage', { type: 'space', id: req.params.spaceId })
-    return rollupPageViews(req.db, app.fga, subject, rows.map((r) => r.id), req.query, scopeManager)
+    return rollupPageViews(req.db, app.fga, subject, candidates, req.query, scopeManager, { parentOf, managedSpaceIds: [req.params.spaceId] })
   })
 
   // ── per-space access (Phase 5b) — all manage-gated ──
