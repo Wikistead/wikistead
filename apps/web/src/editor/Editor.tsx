@@ -490,6 +490,21 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       // #92 presence: publish "editing this macro" onto the page awareness so co-editors see a badge
       // at the macro's anchor while its modal is open (they'd otherwise see this user vanish).
       macroPresence: c.provider.awareness ? makeMacroPresence(c.provider.awareness) : undefined,
+      // #502 / ADR-184: the cross-island co-edit seam — the page awareness (co-occupancy roster) + a factory
+      // that opens the ephemeral `:x:` room for an island. Gated on a live awareness (this EDIT surface), which
+      // INCLUDES edit-authority share-link guests — anonymous real-time co-edit is the north star, and the
+      // `:x:` room carries the same server authz gate as Excalidraw (no new trust boundary). No-awareness /
+      // no-collab surfaces get undefined → island editors stay private local docs (co-edit also needs 2+).
+      coEditHost: c.provider.awareness
+        ? {
+            awareness: c.provider.awareness as unknown as import("./macro-presence").AwarenessLike,
+            connect: (anchor: string) => {
+              const session = connectEphemeral({ url: collabUrl, docName, anchor, token });
+              try { session.awareness?.setLocalStateField("user", userField(user)); } catch { /* awareness gone */ }
+              return session;
+            },
+          }
+        : undefined,
       titleLinks, // #224: auto internal links (viewer-scoped dictionary; undefined on guest surfaces)
       list, // #370 / ADR-145: host-mediated :::tagged / :::children (member surface; undefined without a pageId)
       linkStatus, // #276 / ADR-117: dead-internal-link strikethrough (member surface; undefined for guests)
