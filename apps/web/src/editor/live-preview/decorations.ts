@@ -41,7 +41,7 @@ import type * as Y from "yjs";
 import type { EphemeralSession } from "../collab";
 import { ephemeralBody } from "../ephemeral-island";
 import { IslandCoEditController } from "../island-coedit-controller";
-import type { AwarenessLike } from "../macro-presence";
+import { isPeerEditingIsland, type AwarenessLike } from "../macro-presence";
 import { tableInlineEditor } from "./table-edit";
 import { tableTier } from "../macros/table";
 import type { InlineController, HostSurfaceOptions, HostSurfaceHandle } from "../macros/registry";
@@ -3658,7 +3658,10 @@ const RENDERERS: BlockRenderer[] = [
           ctx.addAtomic(Decoration.replace({ widget: new EditableEditUIWidget(from, to, editBody.join("\n"), macro.editUI, (b) => `${openLine}\n${b}\n${closeMark}`, ctx.macroTheme, macro.tier), block: true }), from, to);
           return false; // the inline editor owns the block
         }
-        if (macro.richEditUI?.present === "inline" && active && active.from <= from && active.to >= to && !ctx.state.readOnly) {
+        if (macro.richEditUI?.present === "inline" && active && !active.raw && active.from <= from && active.to >= to && !ctx.state.readOnly) {
+          // #502 floor: `active.raw` (a peer co-edits → enterMacroAt forced the SOURCE reveal) falls THROUGH
+          // to the raw `:::table` source below (canonical, yCollab-merged) instead of the clobbering grid
+          // the same `!active.raw` guard the callout editUI uses above (decorations.ts callout site).
           ctx.addAtomic(Decoration.replace({ widget: new EditableTableWidget(from, to, doc.sliceString(from, to)), block: true }), from, to);
           return false; // skip inner nodes — the inline editor owns the block
         }
@@ -3995,7 +3998,9 @@ const RENDERERS: BlockRenderer[] = [
       // Live × vim's pure-Markdown editing (the deliberate quadrant behaviour). Only :::table/Excalidraw
       // non-typeable macros — never reveal source (#5).
       const active = ctx.state.field(macroRenderActiveField, false);
-      if (active && active.from <= from && active.to >= to && !ctx.state.readOnly) {
+      if (active && !active.raw && active.from <= from && active.to >= to && !ctx.state.readOnly) {
+        // #502 floor: `active.raw` (a peer co-edits → enterMacroAt forced source) falls through to the raw
+        // pipe source below (rangeRevealed → canonical, yCollab-merged) instead of the clobbering grid.
         ctx.addAtomic(Decoration.replace({ widget: new EditableTableWidget(from, to, doc.sliceString(from, to)), block: true }), from, to);
         return;
       }
@@ -4459,18 +4464,42 @@ function enterDeclaredSlot(view: EditorView, dir: { from: number; to: number; ma
   return true; // the rebuild mounts the island and focuses it — do NOT focus the outer view here
 }
 
+// #502 rework (review rejection — correctness FLOOR): is ANOTHER client already co-editing the macro
+// at `macroFrom`? The inline RichUI paths (table grid / callout / fence editUI) write straight to the
+// canonical Y.Text via replaceSource, so opening one WHILE a peer holds the macro's ephemeral co-edit doc
+// (source island) lets the two clobber each other (LWW re-emergence — the very loss ADR-184 prevents for
+// source↔source). Until the RichUI writes are unified onto the ephemeral doc (the merge re-architecture,
+// the follow-up), the safe floor is: don't open the clobbering inline RichUI while a peer edits — reveal
+// the SOURCE instead, which IS ephemeral-bound and merges. The Excalidraw MODAL is exempt: it already
+// co-edits through its own ephemeral room (#92), so it never clobbers.
+function peerEditingMacroAt(view: EditorView, macroFrom: number): boolean {
+  const coHost = view.state.facet(coEditHost);
+  return coHost ? isPeerEditingIsland(coHost.awareness, String(macroFrom)) : false;
+}
+
 export function enterMacroAt(view: EditorView, pos: number, raw = false): boolean {
   if (view.state.readOnly) return false;
-  if (tableBlockAt(view.state, pos)) return openTableEditing(view, pos); // pipe OR :::table (#86)
+  const tbl = tableBlockAt(view.state, pos);
+  if (tbl) {
+    // #502 floor: a peer co-editing → reveal the table SOURCE (merges) instead of the clobbering grid RichUI.
+    if (peerEditingMacroAt(view, tbl.from)) {
+      view.dispatch({ selection: EditorSelection.cursor(tbl.from), effects: setMacroRenderActive.of({ from: tbl.from, to: tbl.to, raw: true }) });
+      view.focus();
+      return true;
+    }
+    return openTableEditing(view, pos); // pipe OR :::table (#86)
+  }
   const fence = macroFenceAt(view.state, pos);
   if (fence) {
     if (fence.macro.richEditUI?.present === "modal") {
-      openMacroModal(view, fence.macro, () => fence.from, currentMacroTheme());
+      openMacroModal(view, fence.macro, () => fence.from, currentMacroTheme()); // modal co-edits via its own ephemeral — exempt
     } else {
       // #174 addendum: a ``` -notation macro's Ctrl+Enter (raw=true) reveals the RAW source (vim-editable);
       // the ✎ button (raw=false) opens the editUI. `raw` only matters for an editUI macro (mermaid); a
       // legacy source macro reveals raw either way.
-      view.dispatch({ selection: EditorSelection.cursor(fence.from), effects: setMacroRenderActive.of({ from: fence.from, to: fence.to, raw }) });
+      // #502 floor: while a peer co-edits, force the SOURCE reveal (merges) over the editUI (clobbers).
+      const rawEff = raw || peerEditingMacroAt(view, fence.from);
+      view.dispatch({ selection: EditorSelection.cursor(fence.from), effects: setMacroRenderActive.of({ from: fence.from, to: fence.to, raw: rawEff }) });
       view.focus();
     }
     return true;
@@ -4489,7 +4518,9 @@ export function enterMacroAt(view: EditorView, pos: number, raw = false): boolea
     // were looking at. The macro answers in ITS OWN source offsets; mapping them to a slot is the
     // host's job, done the same way the island mount does it — by direct children in document order.
     if (dir.macro.enter && enterDeclaredSlot(view, dir)) return true;
-    view.dispatch({ selection: EditorSelection.cursor(dir.from), effects: setMacroRenderActive.of({ from: dir.from, to: dir.to }) });
+    // #502 floor: while a peer co-edits this callout/directive, reveal its SOURCE (merges) instead of the
+    // editUI (whose replaceSource writes canonical and would clobber the peer's ephemeral flush).
+    view.dispatch({ selection: EditorSelection.cursor(dir.from), effects: setMacroRenderActive.of({ from: dir.from, to: dir.to, raw: peerEditingMacroAt(view, dir.from) || undefined }) });
     view.focus();
     return true;
   }

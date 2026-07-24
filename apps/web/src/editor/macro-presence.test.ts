@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { makeMacroPresence, coOccupantClientIDs, isIslandCoOccupied, type AwarenessLike } from "./macro-presence";
+import { makeMacroPresence, coOccupantClientIDs, isIslandCoOccupied, isPeerEditingIsland, type AwarenessLike } from "./macro-presence";
 
 // #92 presence: the page-awareness bridge for "editing a macro's modal". A fake AwarenessLike lets us
 // assert the peer filtering (self excluded; only remote states carrying BOTH a macroEdit anchor and a
@@ -85,5 +85,19 @@ describe("coOccupantClientIDs / isIslandCoOccupied (#502 slice 2b — the seed r
     expect(isIslandCoOccupied(shared, "42")).toBe(true);
     // peers in a DIFFERENT island don't make MY island co-occupied.
     expect(isIslandCoOccupied(shared, "99")).toBe(false);
+  });
+
+  it("isPeerEditingIsland is the self-vs-PEER distinction (#502 co-edit floor)", () => {
+    // Self alone on the macro → NOT a peer edit (opening the RichUI is safe — nobody to clobber).
+    const alone = fakeAwareness(1, { 1: { macroEdit: "42", user: { name: "me" } } });
+    expect(isPeerEditingIsland(alone, "42")).toBe(false);
+    // Another client on the SAME macro → a peer IS editing → the RichUI would clobber → redirect to source.
+    const withPeer = fakeAwareness(1, {
+      1: { macroEdit: "42", user: { name: "me" } },
+      2: { macroEdit: "42", user: { name: "Ann" } },
+    });
+    expect(isPeerEditingIsland(withPeer, "42")).toBe(true);
+    // A peer on a DIFFERENT macro doesn't lock mine.
+    expect(isPeerEditingIsland(withPeer, "99")).toBe(false);
   });
 });
