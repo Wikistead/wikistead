@@ -39,7 +39,9 @@
     "guests": "Guests",
     "anon": "Anonymous",
     "readers": "Members who read it",
-    "upsell": "Page analytics is available on a paid plan."
+    "upsell": "Page analytics is available on a paid plan.",
+    "noViews": "No views yet",
+    "chartAria": "Daily page views by viewer type"
   },
   "toast": {
     "published": "Published",

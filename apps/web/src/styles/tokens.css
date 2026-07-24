@@ -141,6 +141,11 @@
   --accent-fg: #ffffff; /* text/icon on an accent fill */
   --danger: #cf222e;    /* destructive actions (delete / remove / revoke) */
   --danger-fg: #ffffff;
+  /* #464 page-views chart series (dataviz: fixed categorical order; validated on the light surface —
+     lightness/chroma/contrast PASS, adjacent CVD in the 6–8 floor legalised by the legend's direct labels). */
+  --views-member: #2563eb;
+  --views-guest: #d97706;
+  --views-anon: #059669;
   /* Callout accents (#158-C5 / ADR-052; #199): per-type callout colours are FIXED SEMANTIC hues, NOT
      the tenant --accent. A callout's colour carries meaning (info=blue, note=grey, tip=green,
      warning=yellow, danger=red); riding --accent made info/note change with the tenant theme and lose
@@ -188,6 +193,10 @@
   --border: #3a3a3a;
   --accent: #4ea1ff;
   --accent-fg: #06243f;
+  /* #464 chart series — dark's OWN lightened steps (dataviz: not an auto-flip), to clear the dark surface. */
+  --views-member: #60a5fa;
+  --views-guest: #fbbf24;
+  --views-anon: #34d399;
   --danger: #f0584d;
   --danger-fg: #ffffff;
   /* Dark-tuned callout hues (#158-C5 / #199): brighter so the tinted box + bar stay legible on dark.
@@ -228,6 +237,9 @@
     --accent-fg: #06243f;
     --danger: #f0584d;
     --danger-fg: #ffffff;
+    --views-member: #60a5fa; /* #464 chart series — system-dark steps */
+    --views-guest: #fbbf24;
+    --views-anon: #34d399;
     --link: #4ea1ff;         /* #223: link token — system-dark */
     --link-auto: #83c092;    /* #224(5): auto title-link — system-dark */
     --selection: color-mix(in srgb, var(--accent) 30%, transparent);
