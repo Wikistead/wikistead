@@ -1,7 +1,7 @@
 import { Vim, getCM } from "@replit/codemirror-vim";
 import { EditorState, EditorSelection, type Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
-import { livePreview, displayMode, nestedDeleteChange, enterMacroCommand, setVimMotionActive, atomSelectableSelectedAt, isInlineAtom } from "./decorations";
+import { livePreview, displayMode, nestedDeleteChange, enterMacroCommand, atomSelectableSelectedAt, isInlineAtom } from "./decorations";
 import { nestedSelectionField, setNestedSelection, macroRenderActiveField } from "./macro-edit";
 
 // ADR-024 1b (Mode A): dd treats a macro ATOM as one unit — the WHOLE macro source is the
@@ -289,18 +289,8 @@ const atomSelHideFatCursor: Extension = EditorView.editorAttributes.of((view): R
 
 export const vimWysiwygCaretGuard: Extension = [atomSelHideFatCursor, ViewPlugin.fromClass(
   class {
-    vimMotionMirror = false;
     constructor(readonly view: EditorView) {}
     update(u: ViewUpdate) {
-      // #240 comment 960: mirror vim's ON-CHAR motion mode (normal/visual) into a StateField so the
-      // state-level wysiwygInlineSkip filter (which can't read vim) can disable its between-char snap for
-      // vim — otherwise the filter + this guard double-correct and leftward `h` skips a visible char.
-      const vimNow = getCM(u.view)?.state.vim;
-      const motionActive = !!vimNow && !vimNow.insertMode; // normal or visual = on-char rest
-      if (motionActive !== this.vimMotionMirror) {
-        this.vimMotionMirror = motionActive;
-        queueMicrotask(() => { try { this.view.dispatch({ effects: setVimMotionActive.of(motionActive) }); } catch { /* view gone */ } });
-      }
       const blank = (on: boolean) => this.view.dom.classList.toggle("cm-wys-blank-fatcursor", on);
       const mode = u.state.facet(displayMode);
       const vim = getCM(u.view)?.state.vim;
@@ -337,42 +327,11 @@ export const vimWysiwygCaretGuard: Extension = [atomSelHideFatCursor, ViewPlugin
       const onFenceLine = mode !== "source" && !!vim && !vim.insertMode
         && /^\s*(?::{3,}|`{3,})/.test(u.state.doc.lineAt(head).text);
       blank(onBlockAtom || onFenceLine);
-
-      // #286: a blockwise vim visual selection has >1 range. The inline nudge below rebuilds the selection
-      // to ONE range, which would collapse the rectangle — bail (the between-char snap is irrelevant to a
-      // multi-line block selection). The blank/mirror above already ran (display-only).
-      if (u.state.selection.ranges.length > 1) return;
-
-      // Inline nudge (a dispatch) — WYSIWYG-only (Live reveals inline syntax under the caret; the
-      // between-char snap is a WYSIWYG semantic). Skip on a block atom (caret stays per ADR-024), in
-      // insert/non-vim, and on updates that can't have moved the caret onto/off a hidden run.
-      if (mode !== "wysiwyg" || !vim || vim.insertMode || !lp || onBlockAtom) return;
-      const modeChanged = u.startState.facet(displayMode) !== u.state.facet(displayMode);
-      if (!u.selectionSet && !u.docChanged && !modeChanged && !u.focusChanged) return;
-      // Is char[head] inside an INLINE hidden run (single-line)? If so, char[head] is a hidden glyph the
-      // fat cursor would paint — move to the nearest visible char in the last motion direction.
-      let run: { from: number; to: number } | null = null;
-      lp.atomic.between(head, head, (from, to) => {
-        if (from <= head && head < to && u.state.doc.lineAt(from).number === u.state.doc.lineAt(to).number) {
-          run = { from, to };
-          return false;
-        }
-      });
-      if (!run) return;
-      const r = run as { from: number; to: number };
-      const prevHead = u.startState.selection.main.head;
-      const dir = head >= prevHead ? 1 : -1; // forward → exit right of the run; backward → left of it
-      const line = u.state.doc.lineAt(head);
-      // Forward: the position AFTER the run (char[to] is the first visible char). Backward: the last
-      // visible char BEFORE the run (from-1). Clamp to the line so we never jump across a line.
-      const target = dir > 0 ? Math.min(r.to, line.to) : Math.max(r.from - 1, line.from);
-      if (target === head) return;
-      // Defer the dispatch out of the update cycle (a plugin update must not dispatch synchronously).
-      queueMicrotask(() => {
-        const cur = this.view.state.selection.main;
-        if (cur.head !== head) return; // the caret already moved again — don't fight a newer motion
-        this.view.dispatch({ selection: sel.empty ? EditorSelection.cursor(target) : EditorSelection.range(sel.anchor, target) });
-      });
+      // #522: the WYSIWYG-only inline "nudge" (a dispatch that stepped the vim fat cursor off a hidden
+      // inline run) lived here. #512 forces vim OFF in WYSIWYG (vimForcedOff = coarsePointer || wysiwyg),
+      // so `mode === "wysiwyg" && vim` can never hold — the nudge, its #286 multi-range bail, and the
+      // vimMotionActive mirror that told wysiwygInlineSkip to defer to it were all unreachable. Removed.
+      // The block-atom / fence fat-cursor blank() above stays: it runs in Live×vim (a reachable state).
     }
   },
 )];
