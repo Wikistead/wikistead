@@ -12,7 +12,7 @@ import type { Heading } from "../editor/headings";
 // Depth (H1 / H1–H3 / all) and on/off are set in Settings → Editor now, not in the rail itself, so
 // the TOC stays clean (the depth just filters the list here).
 export function Toc({
-  headings, activeFrom, visibleFroms, depth, onJump, variant = "rail", subscribeScroll,
+  headings, activeFrom, visibleFroms, depth, onJump, variant = "rail", subscribeScroll, rightPanelOpen = false,
 }: {
   headings: Heading[];
   activeFrom: number | null;
@@ -24,6 +24,11 @@ export function Toc({
   onJump: (from: number) => void;
   variant?: "rail" | "overlay";
   subscribeScroll?: (fn: () => void) => () => void;
+  // #515: the OVERLAY variant is `fixed right-3` — the same right edge a side panel (comments/related/
+  // history) opens on. On a narrow screen the two can't share that edge, so suppress the overlay TOC while
+  // any right panel is open (it returns when the panel closes). The rail variant sits at the left/center
+  // whitespace and never collides, so this only gates the overlay.
+  rightPanelOpen?: boolean;
 }) {
   const { t } = useTranslation();
   const shown = headings.filter((h) => h.level <= depth);
@@ -140,6 +145,7 @@ export function Toc({
   );
 
   if (variant === "overlay") {
+    if (rightPanelOpen) return null; // #515: don't fight a right side panel for the right edge (narrow screen)
     return (
       <nav
         ref={navRef}
