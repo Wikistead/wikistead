@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
 import { enterEdit, openScratch, setPublicSurface, sleep, API } from "../helpers";
 
-// #505: print fidelity. (a) Callout icons/tints are painted with background-color/background — browser
-// print drops "background graphics" by default, so the panel degraded to bare text + a left border;
-// print-color-adjust: exact (inherited from the preview root) forces them. (b) The page title lives in
-// the band OUTSIDE [data-pane=preview], so the print visibility trick dropped it from every print-out.
-// Pinned as computed styles under print media emulation — the exact contract the print engine consumes.
+// #505: print fidelity + pagination. Every reading surface renders its body with CodeMirror, which
+// VIRTUALISES its viewport — printing the live surface prints one screenful, crushed onto a single sheet.
+// A body-level PrintSurface portal renders the FULL published Markdown statically; @media print hides the
+// live app and shows only the portal in normal document flow, so long content paginates across sheets and
+// the title / callout colours ride along. Pinned under print-media emulation + a real page.pdf().
 async function makePublic(id: string) {
   const r = await fetch(`${API}/pages/${id}/public`, {
     method: "POST",
@@ -15,7 +15,7 @@ async function makePublic(id: string) {
   if (!r.ok) throw new Error(`makePublic ${r.status}`);
 }
 
-test("#505: under print media the title is visible and the callout keeps exact colour", async ({ browser }) => {
+test("#505: print shows the static portal (title + callout, exact colour) and hides the live app", async ({ browser }) => {
   const authed = await (await browser.newContext()).newPage();
   const id = await openScratch(authed, `print505-${Date.now().toString(36)}`);
   await enterEdit(authed);
@@ -23,51 +23,60 @@ test("#505: under print media the title is visible and the callout keeps exact c
   await authed.keyboard.insertText(":::note[Label]\ncallout body five oh five\n:::\n\nplain text\n");
   await sleep(400);
   await authed.getByTestId("publish-page").click();
-  await sleep(800);
+  await sleep(1000);
   await makePublic(id);
   await setPublicSurface(authed, true);
 
-  // ── the APP surface (in-app print) ──
-  await authed.emulateMedia({ media: "print" });
-  const appTitle = await authed.getByTestId("page-title").evaluate((el) => getComputedStyle(el).visibility);
-  expect(appTitle, "in-app: the page title prints").toBe("visible");
-  const appAdjust = await authed.locator(".cm-lp-callout-panel").first().evaluate((el) => {
-    const cs = getComputedStyle(el) as CSSStyleDeclaration & { printColorAdjust?: string; webkitPrintColorAdjust?: string };
-    return cs.printColorAdjust ?? cs.webkitPrintColorAdjust ?? "";
-  });
-  expect(appAdjust, "in-app: the callout panel forces exact colour").toBe("exact");
+  // off-print: the portal is inert (display:none)
+  expect(await authed.locator("[data-print-root]").evaluate((el) => getComputedStyle(el).display), "off-print: portal hidden").toBe("none");
 
-  // ── the PUBLIC reader (/pub) ──
-  const anon = await (await browser.newContext()).newPage();
-  await anon.goto(`/pub/${id}`);
-  await expect(anon.getByText("callout body five oh five")).toBeVisible({ timeout: 10000 });
-  await anon.emulateMedia({ media: "print" });
-  const pubTitle = await anon.getByTestId("page-title").evaluate((el) => getComputedStyle(el).visibility);
-  expect(pubTitle, "/pub: the page title prints").toBe("visible");
-  const pubAdjust = await anon.locator(".cm-lp-callout-panel").first().evaluate((el) => {
+  await authed.emulateMedia({ media: "print" });
+  await sleep(150);
+  // in print: the portal is shown, the live app root (every body child except the portal) is hidden
+  expect(await authed.locator("[data-print-root]").evaluate((el) => getComputedStyle(el).display), "print: portal shown").toBe("block");
+  const appHidden = await authed.evaluate(() =>
+    [...document.body.children]
+      .filter((c) => !c.hasAttribute("data-print-root"))
+      .every((c) => getComputedStyle(c).display === "none"),
+  );
+  expect(appHidden, "print: the live app root is display:none").toBe(true);
+  // and the live CM surface is consequently not visible (ancestor hidden)
+  expect(await authed.locator("[data-pane=preview]").first().isVisible(), "print: live surface not visible").toBe(false);
+  // the title prints (inside the portal) and the callout body is present in the static render
+  await expect(authed.getByTestId("print-title"), "the title prints").toHaveText(/print505/);
+  await expect(authed.locator("[data-print-root]"), "the callout body prints").toContainText("callout body five oh five");
+  // colour fidelity is forced on the portal root (inherits to the callout icon/tint)
+  const adjust = await authed.locator("[data-print-root]").evaluate((el) => {
     const cs = getComputedStyle(el) as CSSStyleDeclaration & { printColorAdjust?: string; webkitPrintColorAdjust?: string };
     return cs.printColorAdjust ?? cs.webkitPrintColorAdjust ?? "";
   });
-  expect(pubAdjust, "/pub: the callout panel forces exact colour").toBe("exact");
+  expect(adjust, "the portal forces exact colour").toBe("exact");
 });
 
-// #505the floating page chrome (bottom-left Vim/mode pills, bottom-right Edit/Publish/⋯
-// cluster, TOC rail) leaked into print — the visibility trick only sets visibility:hidden, which a
-// descendant visibility:visible overrides. data-print-hide + display:none removes them for good.
-test("#505floating page chrome computes display:none under print media", async ({ browser }) => {
+// #505a document longer than one sheet must PAGINATE (was crushed to one page + a printed
+// scrollbar, because the live CM body is virtualised). The static portal holds the whole document, so a
+// real page.pdf() spans multiple sheets and the LAST paragraph is present.
+test("#505a long page paginates across multiple sheets with the full content", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
-  await openScratch(page, `print505chrome-${Date.now().toString(36)}`);
-  await enterEdit(page); // edit mode renders the Vim pills + the Edit/Publish/⋯ action cluster
-  await sleep(400);
+  await openScratch(page, `print505long-${Date.now().toString(36)}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  let md = "# Long\n\nMARKER_TOP first.\n\n";
+  for (let i = 0; i < 120; i++) md += `Paragraph ${i}: the quick brown fox jumps over the lazy dog to fill the sheet.\n\n`;
+  md += "MARKER_BOTTOM final.\n";
+  await page.keyboard.insertText(md);
+  await sleep(600);
+  await page.getByTestId("publish-page").click();
+  await sleep(1200);
 
-  const hides = page.locator("[data-print-hide]");
-  const n = await hides.count();
-  expect(n, "the floating chrome clusters are present in edit mode").toBeGreaterThan(0);
+  // the portal holds the WHOLE document (both the first and the LAST marker — the live CM would virtualise
+  // one of them out of the DOM)
+  const body = page.locator("[data-print-root] [data-testid=print-body]");
+  await expect(body).toContainText("MARKER_TOP");
+  await expect(body).toContainText("MARKER_BOTTOM");
 
-  await page.emulateMedia({ media: "print" });
-  await sleep(200);
-  for (let i = 0; i < n; i++) {
-    const disp = await hides.nth(i).evaluate((el) => getComputedStyle(el).display);
-    expect(disp, "a floating chrome cluster is removed from print").toBe("none");
-  }
+  // a real PDF spans multiple sheets (was 1 before the fix)
+  const pdf = await page.pdf({ format: "A4" });
+  const pages = (pdf.toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length;
+  expect(pages, "the long document paginated").toBeGreaterThan(1);
 });
