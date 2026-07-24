@@ -2180,7 +2180,11 @@ function findNestedSlot(root: HTMLElement, anchor: number): HTMLElement | null {
 // surroundings reveal syntax (the main-editor experience), instead of the earlier source-pane + separate
 // preview stack (two renditions of the same content = the bounce). This changes DISPLAY
 // only: the island still holds its own plain document and still commits on blur exactly as above.
-type SlotHost = HTMLElement & { __slotHandle?: { destroy(): void } };
+// #524: `flush` synchronously commits this island's current body into its parent view. An OUTER island
+// invokes its OPEN nested islands' flush BEFORE reading its own getValue (innermost-first), so the
+// outer body it writes already includes the inner edits — otherwise the outer commit writes a stale body
+// and then destroys the inner island before it can flush (the nested-island data-loss bug).
+type SlotHost = HTMLElement & { __slotHandle?: { flush(): void; destroy(): void } };
 
 // ADR-122 addendum (b) / #278: the HOST supplies the shared live-preview decoration/keymap layer for
 // nested markdown editors. mountLivePreview provides its buildLivePreviewExtensions closure here (the
@@ -2269,9 +2273,24 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
   host.setAttribute("data-testid", "slot-edit-island");
   host.addEventListener("mousedown", (e) => e.stopPropagation()); // #265: the outer atom must not steal the caret
   let committed = false;
-  const commitNow = (value: string) => {
+  // #524: an OUTER slot island (columns/tabs) can host a DEEPER slot island (island-in-island). The deeper
+  // island holds its own private nested doc and only writes back into THIS island's nested view on its own
+  // commit. If we committed our getValue first we'd write a body that omits the deeper island's pending
+  // edits (data loss) and then destroy it before it could flush. So flush any open nested islands FIRST,
+  // innermost-first. The ordering is guaranteed by RECURSION, not by the iteration order: each flush enters
+  // the deeper island's commitNow, which flushes ITS own children before writing — so the deepest chain link
+  // always commits first. querySelectorAll never returns `host` itself (no self-loop) and the `committed`
+  // guard makes the redundant later flush of an already-committed link a no-op.
+  const flushInnerIslands = () => {
+    host.querySelectorAll<SlotHost>(".cm-lp-slot-edit-island").forEach((el) => el.__slotHandle?.flush());
+  };
+  const commitNow = (_value?: string) => {
     if (committed) return; // blur / tab-switch / field-clear can race; write exactly once, never after destroy
+    flushInnerIslands(); // #524: land deeper islands' edits in our nested doc BEFORE we read it
     committed = true;
+    // #524: re-read AFTER the inner flush — getValue now reflects the deeper island's committed text.
+    // (The passed value, if any, was sampled before the flush and would be stale in the nested case.)
+    const value = handle.getValue();
     // #278 an unchanged body commits as a CLEAR-ONLY dispatch — writing identical text is still a
     // doc change (dirty flag, history step, collab traffic) for what the user experienced as "just leaving".
     const next = shape(value);
@@ -2343,7 +2362,9 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
   document.addEventListener("pointerdown", onDocPointerDown, true);
   // Disposed by MacroWidget.destroy(dom) on any unmount path. Marking `committed` on destroy also pins
   // the deferred tab-switch commit (below) against stale offsets: once the island is gone, no write.
-  host.__slotHandle = { destroy: () => { committed = true; document.removeEventListener("pointerdown", onDocPointerDown, true); handle.destroy(); } };
+  // #524: flush lets an ENCLOSING island commit this one synchronously (innermost-first) before it reads
+  // its own body; it is a no-op once committed. destroy marks committed so no stale-offset write follows.
+  host.__slotHandle = { flush: () => commitNow(), destroy: () => { committed = true; document.removeEventListener("pointerdown", onDocPointerDown, true); handle.destroy(); } };
   // ②: the island's keys must NEVER reach the outer editor. The island DOM lives INSIDE the outer
   // contentDOM, so every keydown bubbled into the outer CM — whose vim (normal mode) treated island keys
   // as ITS OWN motions/edits: an island `o`/`e`/`w` moved the outer selection, which clears slotEditField
