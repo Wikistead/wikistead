@@ -59,6 +59,10 @@
     "uniqueCaveat": "Unique counts distinct members across the space. Guests and anonymous readers have no cross-page identity, so their figures remain a per-day session estimate, not a head-count.",
     "pages": "Across {{n}} pages you manage"
   },
+  "tenantAnalytics": {
+    "title": "Workspace analytics",
+    "hint": "Page views across every page you manage in this workspace. Private pages you don't manage are never included, so this is not a workspace-wide total."
+  },
   "toast": {
     "published": "Published",
     "publishFailed": "Couldn't publish",
@@ -220,6 +224,7 @@
     "orphans": "Orphan drafts",
     "webhooks": "Webhooks",
     "audit": "Audit log",
+    "analytics": "Analytics",
     "roles": "Roles"
   },
   "adminModeration": {

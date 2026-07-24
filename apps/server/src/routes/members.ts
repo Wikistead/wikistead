@@ -14,6 +14,8 @@ import { groupFgaId } from '../auth/group-sync.js'
 import { createInvite, revokeInvite, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
 import { auditIfEntitled } from '../audit/outbox.js'
+import { resolveEntitlements } from '@wikistead/entitlements' // #520: EE gate for the tenant analytics roll-up
+import { rollupPageViews, validateRollupQuery, isUniqueMode, type RollupQuery } from '../analytics/rollup.js' // #520 / ADR-189
 import { emit } from '@wikistead/events'
 
 const ROLES: InviteRole[] = ['admin', 'member']
@@ -229,6 +231,24 @@ export async function membersPlugin(app: FastifyInstance) {
       await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'analytics.erased', target: `user:${req.params.sub}` })
     })
     return reply.code(204).send()
+  })
+
+  // #520 / ADR-189 slice 5: the TENANT-level page-view roll-up (the approved scope is "space AND tenant
+  // aggregation"; the space surface is GET /spaces/:id/analytics). Existence floor = tenant#admin (403 for a
+  // non-admin, matching every other /admin route here — a member already knows the tenant exists, so there is
+  // nothing to hide), then the SAME EE gate and the SAME §5 manage-filter-set as the space surface via the
+  // shared rollupPageViews. That filter is what keeps this honest: a tenant admin manages non-private pages
+  // through `manager from space`, so PRIVATE pages they do not manage stay out of the tenant total too — the
+  // aggregate is never "everything in the tenant", it is "everything you manage". Counts only, no roster.
+  app.get<{ Querystring: RollupQuery }>('/admin/analytics', async (req, reply) => {
+    if (!(await requireTenantAdmin(req, reply))) return
+    const unique = isUniqueMode(req.query)
+    if (!resolveEntitlements(req.tenant.plan).analytics) return { entitled: false, pages: 0, daily: [], unique } // EE gate
+    const invalid = validateRollupQuery(req.query) // 400 before any FGA/DB work
+    if (invalid) return reply.code(400).send({ error: invalid })
+    // Every page in THIS tenant (req.db is RLS-scoped, so the tenant boundary is the database's, not a filter).
+    const rows = await req.db.sql<{ id: string }[]>`SELECT id FROM pages`
+    return rollupPageViews(req.db, req.server.fga, `user:${req.user.sub}`, rows.map((r) => r.id), req.query)
   })
 
   // ── Invites ──────────────────────────────────────────────────────────────

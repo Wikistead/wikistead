@@ -1119,6 +1119,20 @@ export function useSpaceAnalytics(spaceId: string | null, params: SpaceAnalytics
   });
 }
 
+// #520 / ADR-189 slice 5/6: the TENANT-level roll-up (admin console). Same response shape and same shaping
+// params as the space surface — and the same §5 manage-filter-set on the server, so even a tenant admin
+// only ever sees the pages they MANAGE (a private page they don't manage stays out of the total).
+export function useTenantAnalytics(params: SpaceAnalyticsParams = {}, enabled = true) {
+  const { token } = useSession();
+  const q = spaceAnalyticsQuery(params);
+  return useQuery({
+    queryKey: ["tenant-analytics", q],
+    queryFn: () => apiFetch<SpaceAnalytics>(`/admin/analytics${q ? `?${q}` : ""}`, token),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
 // #491 / ADR-140: the tenant abuse-filter config (mass-delete shrink ratio + banned words). Admin-gated
 // on the server (GET/PATCH re-check tenant#admin, 403 otherwise). The banned-word list is moderation
 // intelligence, so it never loads on a non-admin surface.

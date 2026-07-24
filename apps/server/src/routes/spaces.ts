@@ -10,6 +10,7 @@ import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-190: full name on the manage-gated grant list
+import { rollupPageViews, validateRollupQuery, isUniqueMode, type RollupQuery } from '../analytics/rollup.js' // #520 / ADR-189
 import { auditIfEntitled } from '../audit/outbox.js'
 import { deletePinsForResources } from './pins.js'
 import { sweepWatchesForResources, sweepUnviewableWatches } from './notifications.js'
@@ -901,61 +902,19 @@ export async function spacesPlugin(app: FastifyInstance) {
   // so a member who read N pages counts ONCE. Guest/anon have NO cross-page session id (ADR-175 §4: no
   // minted ids), so their "unique" stays the per-page deduped-session sum — a session/day approximation the
   // UI must label as such (slice 4). The roster is personal data, read on the SAME manage-filter-set.
-  app.get<{ Params: { spaceId: string }; Querystring: { from?: string; to?: string; viewerClass?: string; sort?: string; dir?: string; unique?: string } }>('/spaces/:spaceId/analytics', async (req, reply) => {
+  // #520 / ADR-189 slice 5: the roll-up itself (manage-filter-set + shaping + unique) now lives in the
+  // SHARED `rollupPageViews` helper so this space surface and the tenant surface /admin/analytics) cannot
+  // drift on the privacy-critical part. This route keeps what is scope-specific: the existence floor
+  // (space `view` → 404), the EE gate, and the candidate page set (this space, RLS-scoped).
+  app.get<{ Params: { spaceId: string }; Querystring: RollupQuery }>('/spaces/:spaceId/analytics', async (req, reply) => {
     const subject = `user:${req.user.sub}`
-    const unique = req.query.unique === 'true' || req.query.unique === '1'
+    const unique = isUniqueMode(req.query)
     if (!(await check(app.fga, subject, 'view', { type: 'space', id: req.params.spaceId }))) return reply.code(404).send({ error: 'not found' }) // existence-hiding floor
     if (!resolveEntitlements(req.tenant.plan).analytics) return { entitled: false, pages: 0, daily: [], unique } // EE gate (paid feature)
-    // Validate the presentation params (400 on a malformed date / unknown class) before any FGA/DB work.
-    const { from, to, viewerClass, sort, dir } = req.query
-    const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-    if (from && !DATE_RE.test(from)) return reply.code(400).send({ error: 'from must be YYYY-MM-DD' })
-    if (to && !DATE_RE.test(to)) return reply.code(400).send({ error: 'to must be YYYY-MM-DD' })
-    if (viewerClass && !['member', 'guest', 'anon'].includes(viewerClass)) return reply.code(400).send({ error: 'viewerClass must be member | guest | anon' })
-    const asc = dir === 'asc'
-    // Pages in THIS space (RLS-scoped to the tenant) filtered to the caller's MANAGE set — the aggregate is
-    // built ONLY from pages the caller manages, so a viewer who manages none gets an empty (not leaked) roll-up.
+    const invalid = validateRollupQuery(req.query) // 400 before any FGA/DB work
+    if (invalid) return reply.code(400).send({ error: invalid })
     const rows = await req.db.sql<{ id: string }[]>`SELECT id FROM pages WHERE space_id = ${req.params.spaceId}`
-    const manageable = rows.length ? await filterAuthorized(app.fga, subject, 'manage', rows.map((r) => r.id)) : new Set<string>()
-    const ids = [...manageable]
-    if (ids.length === 0) return { entitled: true, pages: 0, daily: [], unique }
-    // Sort clause is one of four STATIC fragments — no user text ever reaches the SQL structure.
-    const orderBy = sort === 'views'
-      ? (asc ? req.db.sql`ORDER BY views ASC, day DESC` : req.db.sql`ORDER BY views DESC, day DESC`)
-      : (asc ? req.db.sql`ORDER BY day ASC` : req.db.sql`ORDER BY day DESC`)
-    // The rolled-up rows. In `unique` mode the MEMBER rows come from the roster (distinct members/day across
-    // the space); guest/anon fall through to the page_view_daily sum (no cross-page session id exists).
-    const daily = unique
-      ? await req.db.sql<{ day: string; viewer_class: string; views: number }[]>`
-          SELECT day, viewer_class, views FROM (
-            SELECT day::text AS day, 'member'::text AS viewer_class, COUNT(DISTINCT member_sub)::int AS views
-            FROM page_view_roster
-            WHERE page_id = ANY(${ids})
-              AND (${from ?? null}::date IS NULL OR day >= ${from ?? null}::date)
-              AND (${to ?? null}::date IS NULL OR day <= ${to ?? null}::date)
-            GROUP BY day
-            UNION ALL
-            SELECT day::text AS day, viewer_class, SUM(views)::int AS views
-            FROM page_view_daily
-            WHERE page_id = ANY(${ids}) AND viewer_class <> 'member'
-              AND (${from ?? null}::date IS NULL OR day >= ${from ?? null}::date)
-              AND (${to ?? null}::date IS NULL OR day <= ${to ?? null}::date)
-            GROUP BY day, viewer_class
-          ) u
-          WHERE (${viewerClass ?? null}::text IS NULL OR viewer_class = ${viewerClass ?? null})
-          ${orderBy}
-          LIMIT 400`
-      : await req.db.sql<{ day: string; viewer_class: string; views: number }[]>`
-          SELECT day::text AS day, viewer_class, SUM(views)::int AS views
-          FROM page_view_daily
-          WHERE page_id = ANY(${ids})
-            AND (${from ?? null}::date IS NULL OR day >= ${from ?? null}::date)
-            AND (${to ?? null}::date IS NULL OR day <= ${to ?? null}::date)
-            AND (${viewerClass ?? null}::text IS NULL OR viewer_class = ${viewerClass ?? null})
-          GROUP BY day, viewer_class
-          ${orderBy}
-          LIMIT 400`
-    return { entitled: true, pages: ids.length, unique, daily: daily.map((d) => ({ day: d.day, viewerClass: d.viewer_class, views: d.views })) }
+    return rollupPageViews(req.db, app.fga, subject, rows.map((r) => r.id), req.query)
   })
 
   // ── per-space access (Phase 5b) — all manage-gated ──
