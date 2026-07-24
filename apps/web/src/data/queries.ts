@@ -285,9 +285,12 @@ export function useBulkPublishPages() {
 
 // #511 / ADR-185 (slice 3): bulk VISIBILITY for a selection. The server re-checks the per-page `share`
 // gate, writes the private marker pair, cascades to descendants and reindexes each affected page, and
-// returns the same partial-success map. Reversible (private ⇄ not private), so no destructive posture —
-// but privatising REVOKES access, so the caller is told plainly how many pages actually changed.
-export interface BulkVisibilityResult { results: { id: string; ok: boolean; reason?: string }[]; changed: number; skipped: number }
+// returns the same partial-success map. NOT reversible by the caller in the direction that matters: private
+// is subtracted from the space-inherited chain, so privatising a page you do not own personally takes your
+// own `share` on it away (, measured) — the UI confirms that direction before running it.
+// #511`unchanged` (already in the requested state) is reported apart from `skipped` (the caller's
+// per-page gate said no) — conflating them told people they lacked permission when they simply re-ran it.
+export interface BulkVisibilityResult { results: { id: string; ok: boolean; noop?: boolean; reason?: string }[]; changed: number; unchanged: number; skipped: number }
 export function useBulkSetPageVisibility() {
   const { token } = useSession();
   const qc = useQueryClient();

@@ -35,6 +35,7 @@ export function SpacePagesTab() {
   const { token } = useSession();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [privateConfirmOpen, setPrivateConfirmOpen] = useState(false);
 
   const rows = pages.data ?? [];
   const allSelected = rows.length > 0 && rows.every((p) => selected.has(p.id));
@@ -73,15 +74,24 @@ export function SpacePagesTab() {
     });
   };
 
-  // #511 slice 3: visibility is REVERSIBLE (private ⇄ not), so it runs on click like publish rather than
-  // through the destructive confirm. Privatising still REVOKES reach, so the toast reports what actually
-  // changed — the server skips any page whose `share` gate the caller fails.
+  // #511 slice 3 (revised per): privatising is NOT reversible by the person doing it. The model
+  // subtracts private from the space-inherited chain (`share_from_space: sharer from space but not private`),
+  // so the moment a space manager privatises someone else's page they lose `share` on it and cannot clear it
+  // again — and tenant admin is inside that same subtraction, so there is no way back except the page's own
+  // direct holder. This tab lists the WHOLE space (mostly other people's pages) and the cap is 500, so the
+  // make-private direction gets a confirm that says plainly what the caller is giving up. Clearing private
+  // hands access back and stays a direct click.
   const runBulkVisibility = (makePrivate: boolean) => {
     const ids = [...selected];
+    setPrivateConfirmOpen(false);
     bulkVisibility.mutate({ spaceId, pageIds: ids, makePrivate }, {
       onSuccess: (r) => {
         clearSelection();
+        // Three distinct outcomes, never conflated: changed (mutated), unchanged (already in that state —
+        // NOT a permission problem, which is what the old "skipped (no permission)" wording claimed), and
+        // skipped (the caller's `share` gate said no).
         if (r && r.skipped > 0) notify.info(t("spacePages.bulkVisibilityPartial", { changed: r.changed, skipped: r.skipped }));
+        else if (r && r.unchanged > 0) notify.info(t("spacePages.bulkVisibilityUnchanged", { changed: r.changed, unchanged: r.unchanged }));
         else notify.success(t(makePrivate ? "spacePages.bulkPrivateDone" : "spacePages.bulkUnprivateDone", { count: r?.changed ?? 0 }));
       },
       onError: () => notify.error(t("toast.actionFailed")),
@@ -119,7 +129,7 @@ export function SpacePagesTab() {
           <Button variant="default" size="sm" data-testid="bulk-publish" disabled={bulkPublish.isPending} onClick={runBulkPublish}>
             <Upload size={14} /> {t("spacePages.publish")}
           </Button>
-          <Button variant="default" size="sm" data-testid="bulk-private" disabled={bulkVisibility.isPending} onClick={() => runBulkVisibility(true)}>
+          <Button variant="default" size="sm" data-testid="bulk-private" disabled={bulkVisibility.isPending} onClick={() => setPrivateConfirmOpen(true)}>
             <Lock size={14} /> {t("spacePages.makePrivate")}
           </Button>
           <Button variant="default" size="sm" data-testid="bulk-unprivate" disabled={bulkVisibility.isPending} onClick={() => runBulkVisibility(false)}>
@@ -189,6 +199,19 @@ export function SpacePagesTab() {
         confirmLabel={t("common.delete")}
         confirmTestId="bulk-delete-confirm"
         typedConfirmText={n > TYPE_CONFIRM_THRESHOLD ? "delete" : undefined}
+      />
+
+      {/* #511the one-way-door confirm. Not "are you sure" theatre — it names the specific
+          consequence the model imposes (the caller loses `share` on pages that are not their own and cannot
+          undo this), which is the only thing that makes the action safe to offer from a whole-space list. */}
+      <ConfirmDialog
+        open={privateConfirmOpen}
+        onClose={() => setPrivateConfirmOpen(false)}
+        onConfirm={() => runBulkVisibility(true)}
+        title={t("spacePages.bulkPrivateTitle")}
+        message={t("spacePages.bulkPrivateConfirm", { count: n })}
+        confirmLabel={t("spacePages.makePrivate")}
+        confirmTestId="bulk-private-confirm"
       />
     </div>
   );
