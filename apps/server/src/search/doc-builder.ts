@@ -133,7 +133,7 @@ export async function buildSearchDoc(
       // for published, non-private pages; moderator has no share_link/wildcard types).
       // #420 / ADR-164 (Rider 3): the space-scoped capability relations confer page view (viewable
       // union) on the space's published, non-private pages — same private-cut context as this block.
-      if (!key || !['manager', 'editor', 'editor_member', 'viewer', 'moderator', 'deleter', 'sharer', 'settings_editor', 'publisher'].includes(key.relation)) continue
+      if (!key || !['manager', 'editor', 'editor_member', 'viewer', 'moderator', 'deleter', 'sharer', 'settings_editor', 'publisher', 'commenter'].includes(key.relation)) continue
       categorize(key.user, viewerUsers, viewerGroups, setPublic)
     }
     const { tuples: tenantTuples } = await fga.read({ object: `tenant:${tenantId}` })

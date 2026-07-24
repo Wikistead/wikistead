@@ -16,7 +16,10 @@ import { Switch } from "../ui/Switch";
 
 interface SpaceCtx { spaceId: string; name: string }
 // #330 / ADR-141: `moderate` → space#moderator (revert/freeze/patrol + edit; grants/settings stay manage-only).
-const CAPS: PageRelation[] = ["view", "edit", "moderate", "manage"];
+// #529 / ADR-193: `comment` joined the space capabilities (space#commenter), so it belongs in the grant
+// picker. It also has to be in THIS list for ordering: rows sort by CAPS.indexOf, and a capability
+// missing from it lands at -1 and sorts above everything.
+const CAPS: PageRelation[] = ["view", "comment", "edit", "moderate", "manage"];
 // #445the WIRE value stays the verb (the internal relation — view→viewer_member, edit→editor_member,
 // etc. — is unchanged), but the LABEL is the noun a role is called, shown as a literal to match the Roles tab
 // (which renders `r.name` verbatim). One noun set across Members and Roles.

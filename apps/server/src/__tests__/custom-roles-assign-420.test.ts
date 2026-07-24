@@ -131,7 +131,7 @@ describe('role assignment expansion (#420 increment 3)', () => {
     expect(await check(fgaClient, u, 'settings', P(pageId)), 'the owned leaf is removed').toBe(false)
   })
 
-  it('anti-test 4: space-scope expansion — publisher via inheritance; comment-bearing roles refused at space scope', async () => {
+  it('anti-test 4: space-scope expansion — publisher via inheritance; comment expands too (#529)', async () => {
     const roleId = await makeRole('cra420-publisher', ['publish'])
     const u = 'user:cra420-dave'
     const res = await assign(roleId, 'space', spaceId, u)
@@ -142,10 +142,17 @@ describe('role assignment expansion (#420 increment 3)', () => {
     expect((await unassign(a.id)).statusCode).toBe(204)
     expect(await check(fgaClient, u, 'publish', P(pageId))).toBe(false)
 
+    // #529 / ADR-193: `comment` gained its space leaf (space#commenter), so a comment-bearing role is
+    // assignable at space scope now — it used to be refused outright, which is exactly the gap that
+    // ticket closed. The grant must reach the space's pages as COMMENT, and stay short of edit.
     const commentRole = await makeRole('cra420-commenter', ['comment', 'view'])
-    const bad = await assign(commentRole, 'space', spaceId, u)
-    expect(bad.statusCode, 'comment has no space-scoped relation — whole assignment refused').toBe(400)
-    expect(await check(fgaClient, u, 'view', P(pageId)), 'no partial expansion').toBe(false)
+    const ok = await assign(commentRole, 'space', spaceId, u)
+    expect(ok.statusCode, 'comment IS assignable at space scope (#529)').toBe(201)
+    const c = ok.json() as { id: string }
+    expect(await check(fgaClient, u, 'comment', P(pageId)), 'the space grant reaches the page').toBe(true)
+    expect(await check(fgaClient, u, 'edit', P(pageId)), 'and confers no edit').toBe(false)
+    expect((await unassign(c.id)).statusCode).toBe(204)
+    expect(await check(fgaClient, u, 'comment', P(pageId)), 'revoked cleanly').toBe(false)
   })
 
   it('anti-test 5: guest principals 400; entitlement OFF refuses assign/unassign', async () => {
@@ -194,7 +201,7 @@ describe('role-edit re-expansion (#420 increment 4, Fork B1)', () => {
     }
   })
 
-  it('a direct grant survives a role-edit removal (ownership guard); space assignments refuse a space-inapplicable addition', async () => {
+  it('a direct grant survives a role-edit removal (ownership guard); a resource role refuses a TENANT capability', async () => {
     const u = 'user:cra420-grace'
     await grantPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: 'dev-user', grantee: u, relation: 'publish' })
     const roleId = await makeRole('cra420-pub2', ['publish', 'view'])
@@ -205,8 +212,10 @@ describe('role-edit re-expansion (#420 increment 4, Fork B1)', () => {
       const put = await app.inject({ method: 'PUT', url: `/admin/roles/${roleId}`, headers: H, payload: { name: 'cra420-pub2', capabilities: ['view'] } })
       expect(put.statusCode).toBe(200)
       expect(await check(fgaClient, u, 'publish', P(pageId)), 'direct grant survives the role edit').toBe(true)
-      // Adding a space-inapplicable capability while a SPACE assignment exists → 400, nothing changes.
-      const bad = await app.inject({ method: 'PUT', url: `/admin/roles/${roleId}`, headers: H, payload: { name: 'cra420-pub2', capabilities: ['view', 'comment'] } })
+      // #529 / ADR-193: `comment` is space-assignable now, so the old "space-inapplicable capability"
+      // case no longer exists for resource roles. The rule that still refuses a mismatched addition is
+      // the tenant/resource split: a RESOURCE role cannot carry a TENANT capability.
+      const bad = await app.inject({ method: 'PUT', url: `/admin/roles/${roleId}`, headers: H, payload: { name: 'cra420-pub2', capabilities: ['view', 'createSpaces'] } })
       expect(bad.statusCode).toBe(400)
       const [role] = await admin<{ capabilities: string[] }[]>`SELECT capabilities FROM roles WHERE id = ${roleId}`
       expect(role!.capabilities).toEqual(['view'])
