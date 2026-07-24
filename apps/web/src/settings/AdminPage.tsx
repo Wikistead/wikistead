@@ -11,6 +11,7 @@ import { AdminApiTab } from "./AdminApiTab";
 import { AdminWebhooksTab } from "./AdminWebhooksTab";
 import { AdminAuditTab } from "./AdminAuditTab";
 import { AdminRolesTab } from "./AdminRolesTab";
+import { AdminAnalyticsTab } from "./AdminAnalyticsTab";
 import { AdminEmbedsTab } from "./AdminEmbedsTab";
 import { AdminPublicTab } from "./AdminPublicTab";
 import { AdminBillingTab } from "./AdminBillingTab";
@@ -32,6 +33,7 @@ function useAdminTabs(): SettingsTab[] {
     { key: "api", label: t("adminNav.api"), to: "/admin/api" },
     { key: "webhooks", label: t("adminNav.webhooks"), to: "/admin/webhooks" },
     { key: "audit", label: t("adminNav.audit"), to: "/admin/audit" },
+    { key: "analytics", label: t("adminNav.analytics"), to: "/admin/analytics" }, // #520 / ADR-189: tenant roll-up
     { key: "roles", label: t("adminNav.roles"), to: "/admin/roles" },
     { key: "embeds", label: t("adminNav.embeds"), to: "/admin/embeds" },
     { key: "public", label: t("adminNav.public"), to: "/admin/public" },
@@ -77,6 +79,7 @@ export function AdminRoot() {
         <Route path="api" element={<AdminApiTab />} />
         <Route path="webhooks" element={<AdminWebhooksTab />} />
         <Route path="audit" element={<AdminAuditTab />} />
+        <Route path="analytics" element={<AdminAnalyticsTab />} />
         <Route path="roles" element={<AdminRolesTab />} />
         <Route path="embeds" element={<AdminEmbedsTab />} />
         <Route path="public" element={<AdminPublicTab />} />
