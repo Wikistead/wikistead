@@ -13,6 +13,29 @@ export interface AwarenessLike {
   off(event: "change", cb: () => void): void;
 }
 
+// #502 / ADR-184 slice 2b: the co-occupancy ROSTER for a text-body island. Returns the clientIDs of every
+// peer (INCLUDING self) currently publishing the `macroEdit` anchor `anchor` — i.e. everyone editing that
+// same island right now. This is exactly the roster the seed-once election (ephemeral-island.ts shouldSeed)
+// needs, and its length is the occupancy count the ephemeral-doc spin-up gates on. Read-only over awareness
+// (never writes / touches sync / offset / the canonical Y.Text) — same presence-safe contract as the rest
+// of this module. Self is INCLUDED (self also publishes its island anchor via macroPresencePublisher), so
+// the election ranks self against peers on equal footing.
+export function coOccupantClientIDs(awareness: AwarenessLike, anchor: string): number[] {
+  const out: number[] = [];
+  awareness.getStates().forEach((state, clientID) => {
+    if (state?.["macroEdit"] === anchor) out.push(clientID);
+  });
+  return out;
+}
+
+// #502 / ADR-184 slice 2b: is the island at `anchor` CO-OCCUPIED (2+ peers, incl. self)? The ephemeral
+// shared doc is spun up ONLY when this is true — a lone editor keeps the plain local-CM path and pays zero
+// cost (ADR §3 "single occupant spins up NO ephemeral doc", the common case). Below 2, there is no peer to
+// share a live text with, so there is nothing to seed or bind.
+export function isIslandCoOccupied(awareness: AwarenessLike, anchor: string): boolean {
+  return coOccupantClientIDs(awareness, anchor).length >= 2;
+}
+
 export function makeMacroPresence(awareness: AwarenessLike): MacroPresence {
   return {
     set(anchor: string | null) {
