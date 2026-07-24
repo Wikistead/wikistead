@@ -443,7 +443,10 @@
     "clearPrivate": "非公開を解除",
     "bulkPrivateDone": "{{count}} ページを非公開にしました",
     "bulkUnprivateDone": "{{count}} ページの非公開を解除しました",
-    "bulkVisibilityPartial": "{{changed}} 件変更・{{skipped}} 件スキップ（権限なし）"
+    "bulkVisibilityPartial": "{{changed}} 件変更・{{skipped}} 件スキップ（権限なし）",
+    "exportSelected": "エクスポート",
+    "bulkExportDone": "{{count}} ページをエクスポートしました",
+    "exportTooLarge": "選択が大きすぎて一度にエクスポートできません"
   },
   "spaceMembers": {
     "title": "メンバーと権限",

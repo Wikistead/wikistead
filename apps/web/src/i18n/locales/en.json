@@ -443,7 +443,10 @@
     "clearPrivate": "Clear private",
     "bulkPrivateDone": "{{count}} pages made private",
     "bulkUnprivateDone": "{{count}} pages are no longer private",
-    "bulkVisibilityPartial": "{{changed}} changed, {{skipped}} skipped (no permission)"
+    "bulkVisibilityPartial": "{{changed}} changed, {{skipped}} skipped (no permission)",
+    "exportSelected": "Export",
+    "bulkExportDone": "Exported {{count}} pages",
+    "exportTooLarge": "That selection is too large to export at once"
   },
   "spaceMembers": {
     "title": "Members & permissions",
