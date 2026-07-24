@@ -5,6 +5,15 @@ import { TOOLTIP_DELAY_MS } from "../components/ui/tooltip";
 // grow a SECOND tooltip look either, so this shares the primitive's delay (TOOLTIP_DELAY_MS) and paints
 // the same surface tokens (.wks-tip in tokens.css).
 //
+// Two ways to declare one:
+//   - `el.dataset.tip = "text"` — always show this text.
+//   - `el.dataset.tipIfTruncated = "text"` — show it ONLY while the element is actually clipped.
+// The second exists because callers were deciding that themselves in `onMouseEnter`, which is too early:
+// entering a sidebar row REVEALS its hover buttons, and those take the width that pushes the label into
+// an ellipsis. Measured before the buttons appear, the label still fits, so the tooltip was suppressed on
+// exactly the rows that needed it (#530). The host re-measures when the delay elapses — after the
+// layout settles — so the decision is made against what the user is actually looking at.
+//
 // Contract for callers: set `el.dataset.tip = "text"` instead of `el.title = "text"`. One document-level
 // listener pair handles every one of them (no per-element listeners to leak), and the bubble is a single
 // reused node appended to <body> — NOT to the editor DOM, so CodeMirror never reconciles it away (the
@@ -49,15 +58,28 @@ function hide(): void {
   if (bubble) { bubble.hidden = true; bubble.textContent = ""; }
 }
 
+// `scrollWidth` exceeds `clientWidth` exactly when the content does not fit — i.e. when the ellipsis is
+// showing. Rounded because sub-pixel layout can leave a fractional difference on a label that DOES fit.
+const isTruncated = (el: HTMLElement): boolean => el.scrollWidth - el.clientWidth > 1;
+
+function textFor(target: HTMLElement): string | undefined {
+  const conditional = target.dataset.tipIfTruncated;
+  if (conditional) return isTruncated(target) ? conditional : undefined;
+  return target.dataset.tip || undefined;
+}
+
 function scheduleFor(target: HTMLElement): void {
-  const text = target.dataset.tip;
-  if (!text) return;
+  // Only a cheap presence check here — whether a CONDITIONAL tooltip actually applies is decided when the
+  // delay elapses, because the layout it depends on changes as a result of this very hover.
+  if (!target.dataset.tip && !target.dataset.tipIfTruncated) return;
   if (current === target) return;
   hide();
   current = target;
   showTimer = window.setTimeout(() => {
     // the pointer may have left during the delay
     if (current !== target || !target.isConnected) return hide();
+    const text = textFor(target); // re-measured now: the hover buttons are in place
+    if (!text) return hide();
     const tip = ensureBubble();
     tip.textContent = text;
     place(target, tip);
@@ -65,7 +87,7 @@ function scheduleFor(target: HTMLElement): void {
 }
 
 const tipTargetFrom = (node: EventTarget | null): HTMLElement | null =>
-  (node as HTMLElement | null)?.closest?.("[data-tip]") as HTMLElement | null;
+  (node as HTMLElement | null)?.closest?.("[data-tip], [data-tip-if-truncated]") as HTMLElement | null;
 
 // Idempotent: one install per document (HMR self-accepts + reloads, so no double install in dev).
 export function installTooltipHost(): void {

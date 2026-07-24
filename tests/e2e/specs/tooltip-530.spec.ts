@@ -19,13 +19,19 @@ test("#530: a truncated sidebar page name shows the fast tooltip (not a native t
   const row = page.locator("[data-testid=tree-page-name]").nth(idx);
 
   await row.hover();
-  // the mechanism swapped: a `data-tip` attribute, never a native `title`
-  await expect.poll(async () => row.getAttribute("data-tip"), { timeout: 2000 }).toBeTruthy();
+  // the mechanism swapped: a delegated attribute, never a native `title`. Since the sidebar rows
+  // declare `data-tip-if-truncated` (the host decides at show time), so accept either form here — what
+  // this pin is about is that the row no longer relies on the browser's own tooltip.
+  await expect.poll(
+    async () => (await row.getAttribute("data-tip")) ?? (await row.getAttribute("data-tip-if-truncated")),
+    { timeout: 2000 },
+  ).toBeTruthy();
   expect(await row.getAttribute("title"), "no native title is left behind").toBeNull();
 
   // the bubble appears well inside the native delay (native is ~1000ms+; ours is 180ms)
   const shown = await page.evaluate(async () => {
-    const el = [...document.querySelectorAll<HTMLElement>("[data-testid=tree-page-name]")].find((e) => e.dataset.tip);
+    const el = [...document.querySelectorAll<HTMLElement>("[data-testid=tree-page-name]")]
+      .find((e) => (e.dataset.tip || e.dataset.tipIfTruncated) && e.scrollWidth - e.clientWidth > 1);
     if (!el) return { appeared: false, ms: -1 };
     const t0 = performance.now();
     el.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
@@ -97,4 +103,59 @@ test("#530: the tooltip surface follows the theme (readable in dark)", async ({ 
   expect(rep.bg).not.toBe("rgba(0, 0, 0, 0)");
   expect(rep.bg).not.toBe("");
   expect(rep.pos, "fixed positioning keeps it out of any widget's overflow").toBe("fixed");
+});
+
+// #530 (review rejection): the tooltip was decided in `onMouseEnter`, which runs BEFORE the
+// row's hover buttons appear — and those buttons are what steals the width that clips the name. So the
+// rows that most needed the tooltip were exactly the ones that never got it. The decision now happens in
+// the host when the delay elapses, against the settled layout. These pins drive that timing directly
+// rather than depending on a fixture name being the right length.
+test("#530 a name that becomes truncated only AFTER hover still gets a tooltip", async ({ page }) => {
+  await openDemo(page);
+  await page.waitForSelector("[data-testid=tree-page-name]", { timeout: 15000 });
+
+  const result = await page.evaluate(async () => {
+    const el = document.querySelector<HTMLElement>("[data-testid=tree-page-name]");
+    if (!el) return { ok: false, reason: "no row" };
+    // Start comfortably wide: at pointerover the name FITS, exactly like a row before its buttons show.
+    el.style.width = "600px";
+    el.style.maxWidth = "600px";
+    const fitsAtHover = el.scrollWidth - el.clientWidth <= 1;
+    el.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    // …then the hover affordances take their space and the name clips — mid-delay, as in the real row.
+    await new Promise((r) => setTimeout(r, 40));
+    el.style.width = "40px";
+    el.style.maxWidth = "40px";
+    const clippedAfter = el.scrollWidth - el.clientWidth > 1;
+    for (let i = 0; i < 60; i++) {
+      const tip = document.querySelector(".wks-tip") as HTMLElement | null;
+      if (tip && !tip.hidden) return { ok: true, fitsAtHover, clippedAfter, text: tip.textContent ?? "" };
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return { ok: false, fitsAtHover, clippedAfter, reason: "no bubble" };
+  });
+
+  expect(result.fitsAtHover, "the name fits when the pointer arrives").toBe(true);
+  expect(result.clippedAfter, "and is clipped once the hover affordances take their space").toBe(true);
+  expect(result.ok, "the tooltip appears anyway — the host re-measures at show time").toBe(true);
+});
+
+test("#530 a name that fits the whole time gets NO tooltip (no needless bubbles)", async ({ page }) => {
+  await openDemo(page);
+  await page.waitForSelector("[data-testid=tree-page-name]", { timeout: 15000 });
+
+  const shown = await page.evaluate(async () => {
+    const el = document.querySelector<HTMLElement>("[data-testid=tree-page-name]");
+    if (!el) return "no row";
+    el.style.width = "900px";
+    el.style.maxWidth = "900px";
+    el.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    for (let i = 0; i < 30; i++) {
+      const tip = document.querySelector(".wks-tip") as HTMLElement | null;
+      if (tip && !tip.hidden) return "shown";
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return "not shown";
+  });
+  expect(shown, "a fully visible name needs no tooltip").toBe("not shown");
 });

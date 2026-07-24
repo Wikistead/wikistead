@@ -320,10 +320,12 @@ export function Sidebar() {
                 </span>
               )}
               <FileText size={14} className="flex-none text-fg-dim" />
-              {/* #284 / #219: native tooltip ONLY when the title is truncated (checked at hover). */}
+              {/* #530 the tooltip shows ONLY when the name is clipped, and the host decides that when
+                  it is about to show — not on mouse-enter, which runs BEFORE this row's hover buttons appear
+                  and steal the width that clips the name. */}
               <span
                 className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
-                onMouseEnter={(e) => { const el = e.currentTarget; el.dataset.tip = el.scrollWidth > el.clientWidth ? (pin.title || t("common.untitled")) : ""; }}
+                data-tip-if-truncated={pin.title || t("common.untitled")}
               >{pin.title || t("common.untitled")}</span>
               <span
                 className="flex flex-none gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
