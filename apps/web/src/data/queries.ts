@@ -588,6 +588,7 @@ export interface AccountSettings {
   displayName: string | null;         // effective: override ?? OIDC ?? null
   oidcDisplayName: string | null;     // IdP value (for the "reset to IdP name" affordance)
   displayNameOverride: string | null; // null = using the OIDC name
+  identitySource: string;             // #523 / ADR-190: 'oidc' → name is IdP-managed (read-only); 'local' → editable
   editorKeymap: "default" | "vim" | "local"; // startup-mode preference (keymap)
   editorDisplayMode: "live" | "source" | "wysiwyg" | "local"; // startup display mode (ADR-056 / #164 · #289 wysiwyg)
   keybindings: Record<string, string>; // commandId → chord override (ADR-021); {} = defaults
