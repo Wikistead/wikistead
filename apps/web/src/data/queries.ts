@@ -1662,7 +1662,9 @@ export function useSetTenantRoleDefaults() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    // #496: a patch, so flipping one member toggle never restates (and so never clobbers) the other.
+    // #496: a PATCH shape — the server touches only the fields present, so a caller may flip one member
+    // toggle without naming the other (the Roles tab sends both because the picker knows both current
+    // values; a caller that knows only one, e.g. a test or a future single-switch UI, sends just that one).
     mutationFn: (patch: { memberCreateSpaces?: boolean; memberIssueApiKeys?: boolean }) =>
       apiFetch<TenantRoleDefaults>(`/admin/roles/tenant-defaults`, token, { method: "PUT", body: JSON.stringify(patch) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tenant-role-defaults"] }),

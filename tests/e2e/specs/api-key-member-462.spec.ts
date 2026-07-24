@@ -1,28 +1,33 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep, API } from "../helpers";
+import { openDemo, API } from "../helpers";
 
-// #462: a member can issue their own API key from their account settings, and the tenant can take
-// that away. The e2e session is an admin, so what is pinned here is the SURFACE — the member tab
-// exists, issues, lists owner-scoped keys, and honours the tenant policy — while the server-side
-// refusals for a non-admin member live in api-key-policy-462.test.ts (real sessions, real FGA).
+// #462, updated for #496 / ADR-181: a member can issue their own API key from their account settings,
+// and the tenant can take that away. What changed is WHERE the tenant says so: the two-choice
+// `/admin/api` policy selector is gone, and issuance is the `issueApiKeys` tenant capability configured
+// on the Roles tab (the built-in `member` toggle here; a custom tenant role for specific people).
+// The e2e session is an admin, so what is pinned here is the SURFACE — the member tab exists, issues,
+// lists owner-scoped keys, and follows what the server says THIS caller may do — while the server-side
+// refusals for a real non-admin member live in api-key-issue-capability-496.test.ts (real sessions, real FGA).
 
-const setIssuePolicy = (page: import("@playwright/test").Page, policy: "members" | "admins_only") =>
-  page.evaluate(async ({ p, api }) => {
-    const r = await fetch(`${api}/admin/api-policy`, {
-      method: "PATCH",
+// The member toggle, driven through the same endpoint the Roles tab uses.
+const setMemberIssue = (page: import("@playwright/test").Page, on: boolean) =>
+  page.evaluate(async ({ v, api }) => {
+    const r = await fetch(`${api}/admin/roles/tenant-defaults`, {
+      method: "PUT",
       headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
-      body: JSON.stringify({ issuePolicy: p }),
+      body: JSON.stringify({ memberIssueApiKeys: v }),
     });
     return r.status;
-  }, { p: policy, api: API });
+  }, { v: on, api: API });
 
 test.afterEach(async ({ page }) => {
-  await setIssuePolicy(page, "members").catch(() => {});
+  // Back to the model default (admin-only): provisioning seeds no member tuple.
+  await setMemberIssue(page, false).catch(() => {});
 });
 
 test("#462: a member issues and revokes their own key from account settings", async ({ page }) => {
   await openDemo(page);
-  expect(await setIssuePolicy(page, "members")).toBe(204);
+  expect(await setMemberIssue(page, true)).toBe(200);
 
   await page.goto("/settings/account/api-keys");
   await expect(page.getByTestId("account-api-keys"), "the settings tree has a place for a member's own keys").toBeVisible();
@@ -49,29 +54,38 @@ test("#462: a member issues and revokes their own key from account settings", as
   await expect(row, "and the owner can revoke it from the same screen").toHaveCount(0, { timeout: 8000 });
 });
 
-test("#462: the admin sets who may issue, and the member surface follows what the SERVER says the caller may do", async ({ page }) => {
+test("#496: the Roles tab is where issuance is granted, and the member surface follows what the SERVER says", async ({ page }) => {
   await openDemo(page);
+  await setMemberIssue(page, false); // start from the default so the checkbox has somewhere to go
 
-  // The switch lives in the admin console next to the scope ceiling.
+  // The control lives with every other capability now — not in /admin/api.
+  await page.goto("/admin/roles");
+  await expect(page.getByTestId("admin-roles")).toBeVisible();
+  const memberIssue = page.getByTestId("builtin-member-cap-issueApiKeys");
+  await expect(memberIssue, "the built-in member role carries the capability checkbox").toBeVisible();
+  await expect(memberIssue).not.toBeChecked();
+  // click(), not check(): the box is CONTROLLED by the server's answer, so it flips only after the PUT
+  // and the refetch land. check() asserts the state changed synchronously and would fail on the round-trip.
+  await memberIssue.click();
+  await expect(memberIssue, "the toggle reflects the tuple the server wrote").toBeChecked();
+
+  // it persisted — this is the server's answer (an FGA tuple), not a local toggle
+  await page.reload();
+  await expect(page.getByTestId("builtin-member-cap-issueApiKeys")).toBeChecked();
+
+  // …and the old two-choice selector is gone from the API console (one authority, one screen).
   await page.goto("/admin/api");
   await expect(page.getByTestId("admin-api")).toBeVisible();
-  await page.getByTestId("api-issue-policy").click();
-  await page.getByRole("option", { name: /Administrators only|管理者のみ/ }).click();
-  await sleep(500);
+  await expect(page.getByTestId("api-issue-policy"), "#496 retired the policy enum and its selector").toHaveCount(0);
 
-  // it persisted — this is the server's answer, not a local toggle
-  await page.reload();
-  await expect(page.getByTestId("api-issue-policy")).toHaveText(/Administrators only|管理者のみ/);
-
-  // This session is an ADMIN, so under "administrators only" they may still issue — and the member
-  // screen keeps offering the form, because it follows `canIssue` (what the server would allow THIS
-  // caller) rather than the policy name. A non-admin member gets the refusal and the explanation;
-  // that half needs a real non-admin session and is pinned in api-key-policy-462.test.ts.
+  // The member surface follows `canIssue` — what the server would allow THIS caller — with no policy
+  // name in the payload any more. A non-admin member's refusal is pinned server-side (496 suite).
   const policy = await page.evaluate(async (api) => {
     const r = await fetch(`${api}/api-keys/policy`, { headers: { Authorization: "Bearer dev-token" } });
-    return r.json() as Promise<{ policy: string; canIssue: boolean }>;
+    return r.json() as Promise<{ canIssue: boolean; policy?: string }>;
   }, API);
-  expect(policy).toMatchObject({ policy: "admins_only", canIssue: true });
+  expect(policy.canIssue).toBe(true);
+  expect(policy.policy, "the retired enum field is not served any more").toBeUndefined();
 
   await page.goto("/settings/account/api-keys");
   await expect(page.getByTestId("api-keys-restricted"), "an admin is not told they are restricted").toHaveCount(0);

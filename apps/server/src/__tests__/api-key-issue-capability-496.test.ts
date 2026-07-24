@@ -122,6 +122,33 @@ describe('#496: the issue capability is the gate', () => {
     expect((await mint('member', 'akp496-self-granted')).statusCode, 'and is still refused').toBe(403)
   })
 
+  // The member toggle endpoint carries TWO capabilities now (#445's createSpaces + this one). A patch that
+  // names one must not disturb the other — #445's toggle is a shipped authz control and this is the change
+  // that could have clobbered it.
+  it('flipping one member toggle leaves the other exactly as it was', async () => {
+    const read = async () => (await app.inject({ method: 'GET', url: '/admin/roles/tenant-defaults', headers: H('admin') }))
+      .json() as { member: { createSpaces: boolean; issueApiKeys: boolean } }
+    const before = await read()
+
+    expect((await setMemberToggle(true)).statusCode).toBe(200)
+    expect((await read()).member.createSpaces, "issueApiKeys:true must not touch createSpaces").toBe(before.member.createSpaces)
+
+    const flipCreate = await app.inject({
+      method: 'PUT', url: '/admin/roles/tenant-defaults', headers: H('admin'),
+      payload: { memberCreateSpaces: !before.member.createSpaces },
+    })
+    expect(flipCreate.statusCode).toBe(200)
+    expect((await read()).member.issueApiKeys, 'and the reverse holds too').toBe(true)
+
+    // restore createSpaces so a later suite sees the tenant it expects
+    await app.inject({ method: 'PUT', url: '/admin/roles/tenant-defaults', headers: H('admin'), payload: { memberCreateSpaces: before.member.createSpaces } })
+  })
+
+  it('rejects a body that names neither toggle, and a non-boolean', async () => {
+    expect((await app.inject({ method: 'PUT', url: '/admin/roles/tenant-defaults', headers: H('admin'), payload: {} })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'PUT', url: '/admin/roles/tenant-defaults', headers: H('admin'), payload: { memberIssueApiKeys: 'yes' } })).statusCode).toBe(400)
+  })
+
   it('reports to the caller whether THEY may issue, matching the gate exactly', async () => {
     const canIssue = async (who: 'admin' | 'member') =>
       ((await app.inject({ method: 'GET', url: '/api-keys/policy', headers: H(who) })).json() as { canIssue: boolean }).canIssue
