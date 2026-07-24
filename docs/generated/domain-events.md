@@ -62,7 +62,7 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `attachment.deleted` | An attachment was deleted. |
 | `share_link.revoked` | An anonymous share link was revoked. |
 | `api_key.created` | An API key was issued. |
-| `api_key.revoked` | An API key was revoked. |
+| `api_key.revoked` | An API key was revoked. The webhook payload includes the key owner: ownerId (member sub) and ownerName (display name, never an email; null if unknown). |
 | `auth.success` | A principal authenticated successfully. |
 | `auth.failed` | An authentication attempt failed. |
 | `member.added` | A member was added to the tenant. |

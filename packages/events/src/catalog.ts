@@ -69,7 +69,9 @@ export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   'share_link.revoked': 'An anonymous share link was revoked.',
   // API keys
   'api_key.created': 'An API key was issued.',
-  'api_key.revoked': 'An API key was revoked.',
+  // #495 Q3: the webhook payload names the affected key owner by default — `ownerId` (member sub) and
+  // `ownerName` (display name; never an email, null when unknown) — alongside `keyId` and `actorId`.
+  'api_key.revoked': 'An API key was revoked. The webhook payload includes the key owner: ownerId (member sub) and ownerName (display name, never an email; null if unknown).',
   // Auth
   'auth.success': 'A principal authenticated successfully.',
   'auth.failed': 'An authentication attempt failed.',
