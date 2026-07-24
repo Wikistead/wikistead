@@ -1,4 +1,4 @@
-import { StateField, StateEffect, Prec, EditorSelection, type Extension } from "@codemirror/state";
+import { StateField, StateEffect, Prec, EditorSelection, type EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { currentMacroTheme } from "../macros/theme";
 import type { InnerEditHost, MacroTier, MacroLevel, MacroSource } from "../macros/registry";
@@ -164,6 +164,34 @@ const escExit = Prec.high(
 );
 
 export const macroEdit: Extension = [macroRenderActiveField, nestedSelectionField, nestedEditActiveField, slotEditField, escExit];
+
+// #502 / ADR-184 slice 1: the anchor of the text-body EDIT ISLAND the local user currently has open —
+// a layout slot (slotEditField), a nested editUI island (nestedEditActiveField), or a revealed top-level
+// macro body (macroRenderActiveField) — or null when none is open. It is published on page awareness (the
+// additive `macroEdit` field, via macroPresencePublisher) so peers render the #453 occupancy chip for
+// INLINE islands too, not only the Excalidraw MODAL (which publishes the same field from macro-modal.ts).
+// This is also the co-occupancy signal ADR-184's later ephemeral-shared-doc slices build on.
+//
+// The value is an absolute doc offset INSIDE the occupied block (the same absolute-offset form the modal
+// uses — `String(start.from)`); resolvePresenceBlocks maps it back to a block. It inherits the modal's
+// known containing-block drift under concurrent outer edits (ADR-184 open point 4) — no worse than the
+// modal chip, and deliberately not improved here. Order matters: the innermost open island wins (a slot /
+// nested island sits INSIDE a container whose macroRenderActiveField may also be set), so the more specific
+// fields are checked first.
+//
+// Scope note (honest framing): `macroRenderActiveField` is also set for a revealed TABLE (openTableEditing)
+// and a fence CODE block, so the occupancy CHIP appears for those too — which is fine and additive (it just
+// means "a peer is editing in here", the #453 signal). ADR-184 §4's "table follows separately" concerns the
+// CARET / ephemeral-shared-doc (which needs table cell-position vocabulary), a LATER slice — not this chip.
+export function islandEditAnchor(state: EditorState): string | null {
+  const slot = state.field(slotEditField, false);
+  if (slot) return String(slot.container.from);
+  const nested = state.field(nestedEditActiveField, false);
+  if (nested) return String(nested.anchor);
+  const active = state.field(macroRenderActiveField, false);
+  if (active) return String(active.from);
+  return null;
+}
 
 // ADR-025 step 3: auto-demote `source` to the LOWEST tier level that can represent it (open
 // formats — persist the most portable form). `cap` is a pass-through SEAM: the highest level
