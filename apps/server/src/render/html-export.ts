@@ -56,6 +56,14 @@ body{margin:0;background:var(--bg);color:var(--fg);}
 .wks-export pre code{background:none;padding:0;}
 .wks-export table{border-collapse:collapse;margin:.6em 0;}
 .wks-export th,.wks-export td{border:1px solid var(--border);padding:.3em .6em;}
+/* #518: explicit headers stick on scroll (GFM top row = thead th; :::table row header = a th that is the
+   first cell of its row). The export is a plain scrolling document (no overflow wrapper), so the top row
+   pins against the PAGE. An opaque header background + an inset box-shadow edge keep the body from bleeding
+   through and keep the separating border with the sticky cell. */
+.wks-export th{background:color-mix(in srgb,var(--fg) 6%,var(--bg));}
+.wks-export thead th{position:sticky;top:0;z-index:2;box-shadow:inset 0 -1px 0 var(--border);}
+.wks-export th:first-child{position:sticky;left:0;z-index:1;box-shadow:inset -1px 0 0 var(--border);}
+.wks-export thead th:first-child{z-index:3;box-shadow:inset -1px -1px 0 var(--border);}
 .callout{position:relative;margin:.8em 0;padding:.55em .8em .55em 2.5em;border-radius:6px;border-left:3px solid var(--cb);background:color-mix(in srgb,var(--cb) 8%,transparent);}
 .callout::before{content:"";position:absolute;left:.7em;top:.7em;width:1.3em;height:1.3em;background-color:var(--cb);-webkit-mask:var(--cb-icon) center/contain no-repeat;mask:var(--cb-icon) center/contain no-repeat;}
 .callout>:first-child{margin-top:0}.callout>:last-child{margin-bottom:0}
