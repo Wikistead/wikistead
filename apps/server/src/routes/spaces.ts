@@ -9,6 +9,7 @@ import { emit } from '@wikistead/events'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
+import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-190: full name on the manage-gated grant list
 import { auditIfEntitled } from '../audit/outbox.js'
 import { deletePinsForResources } from './pins.js'
 import { sweepWatchesForResources, sweepUnviewableWatches } from './notifications.js'
@@ -527,13 +528,13 @@ export async function listSpaceAccess(
   fga: OpenFgaClient,
   db: TenantDb,
   args: { spaceId: string; tenantId: string; userId: string },
-): Promise<{ grantee: string; capability: SpaceCapability; groupName?: string }[]> {
+): Promise<{ grantee: string; capability: SpaceCapability; groupName?: string; displayName?: string | null }[]> {
   await requireSpaceManage(fga, args.userId, args.spaceId)
   const { tuples } = await fga.read({ object: `space:${args.spaceId}` })
   // #163: resolve group grantee ids back to names for display (groupFgaId is one-way).
   const names = (await db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`).map((r) => r.g)
   const byId = groupNameByFgaId(args.tenantId, names)
-  const out: { grantee: string; capability: SpaceCapability; groupName?: string }[] = []
+  const out: { grantee: string; capability: SpaceCapability; groupName?: string; displayName?: string | null }[] = []
   for (const { key } of tuples ?? []) {
     if (!key || !(key.relation in RELATION_TO_CAP)) continue
     // Direct member/group grants only — never expose share_link, user:* (public)
@@ -541,6 +542,20 @@ export async function listSpaceAccess(
     if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
     const groupName = resolveGroupName(key.user, byId)
     out.push({ grantee: key.user, capability: RELATION_TO_CAP[key.relation]!, ...(groupName ? { groupName } : {}) })
+  }
+  // #523 / ADR-190: FULL name resolution (override ?? OIDC display_name) for the USER grantees. This is a
+  // server-set, VIEW-GATED result set — the caller already passed requireSpaceManage, so these are grants
+  // they can see; naming them is not a membership oracle (the #486/ADR-150 Addendum-2 precedent). Resolved
+  // on the caller's RLS handle so a cross-tenant sub returns ABSENT (→ null, the client keeps the sub).
+  // NEVER an email (resolveAuthorIdentities); guest/anon subs are structurally dropped there. Unlike
+  // /members/identities (arbitrary client subs → customized-only, no oracle), THIS set is authorization-
+  // bounded, so full resolution — including un-customized members — is safe and is the point of #523.
+  const userSubs = out.filter((g) => g.grantee.startsWith('user:') && !g.groupName).map((g) => g.grantee.slice('user:'.length))
+  if (userSubs.length > 0) {
+    const ids = await resolveAuthorIdentities(db, userSubs)
+    for (const g of out) {
+      if (g.grantee.startsWith('user:') && !g.groupName) g.displayName = ids.get(g.grantee.slice('user:'.length))?.displayName ?? null
+    }
   }
   return out
 }
