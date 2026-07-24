@@ -1783,12 +1783,28 @@ export class EditableEditUIWidget extends WidgetType {
     const coHost = view.state.facet(coEditHost);
     if (!coHost) return mountHostSurface(view, opts); // no collab host → the shipped private-doc surface
     const anchor = String(this.from);
-    let inner = mountHostSurface(view, opts);
+    // #502 review rejection (2026-07-27, MEASURED with a 2-client trace): a swap must not look like the user
+    // leaving. Destroying the old surface blurs it, and a blur is the commit trigger — so binding to the
+    // shared doc fired `save`, whose dispatch re-rendered the block and TORE THE ISLAND DOWN 30ms after
+    // it opened ("the second person can't get in / it breaks"). Worse, the committed text is whatever that
+    // surface held, so a bind that happened before the peer's seed replicated would have written an EMPTY
+    // body over the canonical one. Suppress commits for the duration of the swap: the swap is an internal
+    // re-mount, and the text is already carried across by `initial` / the shared body. (The same class as
+    // #278's guardTeardownBlur, but scoped to the swap — a blanket guard here would break the
+    // mermaid/plantuml Escape exit, which deliberately RELIES on its teardown blur committing.)
+    let swapping = false;
+    const surfaceOpts: HostSurfaceOptions = { ...opts, onCommit: (v) => { if (!swapping) opts.onCommit?.(v) } };
+    let inner = mountHostSurface(view, surfaceOpts);
     let destroying = false;
     const swap = (collab?: { text: Y.Text; awareness: unknown }, initial?: string) => {
       if (destroying) return;
-      inner.destroy();
-      inner = mountHostSurface(view, { ...opts, doc: asMacroSource(initial ?? opts.doc) }, collab);
+      swapping = true;
+      try {
+        inner.destroy(); // its teardown blur would otherwise commit and close the island
+        inner = mountHostSurface(view, { ...surfaceOpts, doc: asMacroSource(initial ?? opts.doc) }, collab);
+      } finally {
+        swapping = false; // synchronous window: the blur handler commits inline, so this covers exactly it
+      }
       inner.focus();
     };
     const ctrl = new IslandCoEditController({
