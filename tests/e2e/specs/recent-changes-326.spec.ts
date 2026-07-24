@@ -1,8 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep, publishAndWait } from "../helpers";
-
-const API = "http://dev.localhost:4010";
-
+import { openDemo, sleep, publishAndWait, API } from "../helpers";
 // #326 / ADR-142: the Recent Changes activity view — the cross-space feed (the #320 backend served it but no
 // web surface consumed it) + the moderation patrol toggle + the "unpatrolled only" filter. Member-only + the
 // server view-filters every event. Real Chromium: publish a page (→ a page.published feed event), then drive

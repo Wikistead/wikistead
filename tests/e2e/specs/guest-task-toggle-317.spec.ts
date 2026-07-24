@@ -1,13 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, API } from "../helpers";
 
 // #317: an EDIT-capability share-link guest can tick a view-mode task checkbox (ADR-019) — the
 // server route already accepted guest:'edit'; the client never passed onToggleTask on the guest
 // surface, so the box rendered permanently disabled. authz boundary: a VIEW-capability guest stays
 // disabled in the UI AND the server 403s a direct call (two-layer). Matrix companion to #300/#303/
 // #314 (member × view/Reading were covered; this adds guest × view and guest × Reading).
-const API = "http://dev.localhost:4010";
-
 async function newPageWithTask(page: Page, title: string): Promise<string> {
   const id = await page.evaluate(async ({ api, title }) => {
     const r = await fetch(`${api}/spaces/demo_space/pages`, {

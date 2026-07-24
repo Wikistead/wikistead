@@ -1,10 +1,10 @@
 import { test, expect } from "@playwright/test";
+import { API } from "../helpers";
 
 // #245 / ADR-112: a space share-link guest browses the linked space in the REAL sidebar (page tree),
 // read-only, with NO member chrome (no new-page/settings/space-switcher). The tree lists only FGA-viewable
 // pages; clicking one opens it in the content area. Real Chromium. The share link is minted via the API
 // (space links are view-only) so the test is deterministic.
-const API = "http://dev.localhost:4010";
 const H = { Authorization: "Bearer dev-token", "content-type": "application/json", host: "dev.localhost" };
 
 test("#245: space-link guest gets the sidebar tree, no member chrome, opens a page", async ({ browser }) => {

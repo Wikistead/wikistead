@@ -11,6 +11,7 @@ export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const P = e2ePorts();
 export const API = `http://dev.localhost:${P.server}`; // server REST base (direct, bypasses the web proxy)
 export const WEB = `http://dev.localhost:${P.web}`; // dev-token web origin (baseURL)
+export const WEB_PORT = P.web; // dev-token web port, for other hosts (e.g. `acme.localhost:${WEB_PORT}`)
 export const WEB_REAL_PORT = P.webReal; // real-auth web port, for `${slug}.localhost:${WEB_REAL_PORT}`
 
 // #354: publish a page and WAIT until its published body actually contains `expectSubstring`. The publish flush

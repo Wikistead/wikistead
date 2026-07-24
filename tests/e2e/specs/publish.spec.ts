@@ -1,13 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, API } from "../helpers";
 
 // 2f-2 draft/publish in a REAL browser:
 //  - creating a page opens it straight in the editor (draft),
 //  - the live draft is NOT visible in view mode until PUBLISH,
 //  - publishing makes the content appear in view,
 //  - a later draft edit surfaces the "unpublished changes" indicator + sidebar dot.
-const API = "http://dev.localhost:4010";
-
 test("publish flow: create→edit, draft hidden in view until publish, then visible + unpublished badge", async ({ page }) => {
   await openDemo(page);
 

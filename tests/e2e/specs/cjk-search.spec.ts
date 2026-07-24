@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, API } from "../helpers";
 import { E2E } from "../fixtures";
 
 // P2 UX proof in a REAL browser: searching a mid-text Japanese keyword shows a
@@ -7,8 +7,6 @@ import { E2E } from "../fixtures";
 // match — the part only a real browser confirms. Server anti-tests already cover
 // CJK matching + the two-stage guard (snippet never leaks for unauthorized docs);
 // this covers rendering.
-const API = "http://dev.localhost:4010";
-
 async function meiliUpsert(doc: Record<string, unknown>) {
   await fetch(`${E2E.meili}/indexes/${E2E.index}/documents`, {
     method: "POST",

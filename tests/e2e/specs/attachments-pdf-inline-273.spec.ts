@@ -1,8 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, openScratch, enterEdit, sleep } from "../helpers";
-
-const API = "http://dev.localhost:4010";
-
+import { openDemo, openScratch, enterEdit, sleep, API } from "../helpers";
 // #273 / ADR-120 (Option B,): a sniffed PDF attachment renders inline via OUR pdf.js inside an
 // OPAQUE-ORIGIN iframe — `sandbox="allow-scripts"` (so pdf.js runs) but NO `allow-same-origin` (the frame
 // can't reach the app origin / cookies / storage). That containment attribute is the security contract the

@@ -1,13 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, API } from "../helpers";
 
 // #318: the guest share surface renders the SAME frosted title band as the member page / public reader
 // (it had none — the body started with no page title anywhere). The title arrives on the guest's only
 // page read (GET /pages/:id/published, view-gated); the band is READ-ONLY chrome: no rename affordance
 // leaks to a guest even with edit capability (rename stays member-only server-side), and the band
 // height is published as --wks-band-h so the editor's first line and TOC/anchor jumps clear it.
-const API = "http://dev.localhost:4010";
-
 async function newPublishedPage(page: Page, title: string): Promise<string> {
   const id = await page.evaluate(async ({ api, title }) => {
     const r = await fetch(`${api}/spaces/demo_space/pages`, {

@@ -1,13 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { enterEdit, openScratch, setPublicSurface, sleep } from "../helpers";
+import { enterEdit, openScratch, setPublicSurface, sleep, API } from "../helpers";
 
 // #505: print fidelity. (a) Callout icons/tints are painted with background-color/background — browser
 // print drops "background graphics" by default, so the panel degraded to bare text + a left border;
 // print-color-adjust: exact (inherited from the preview root) forces them. (b) The page title lives in
 // the band OUTSIDE [data-pane=preview], so the print visibility trick dropped it from every print-out.
 // Pinned as computed styles under print media emulation — the exact contract the print engine consumes.
-const API = "http://dev.localhost:4010";
-
 async function makePublic(id: string) {
   const r = await fetch(`${API}/pages/${id}/public`, {
     method: "POST",

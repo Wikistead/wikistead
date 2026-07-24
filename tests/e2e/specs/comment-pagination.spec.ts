@@ -1,12 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
-import { sleep } from "../helpers";
+import { sleep, API } from "../helpers";
 
 // ADR-102 (#214): comment list ordering (latest-activity), long-thread collapse, and cursor pagination
 // with scroll anchoring. Seeds > one page of threads via the API, then drives the real panel. The scroll
 // anchoring (no viewport jump on prepend) is the reviewer-flagged crux — asserted by a fixed comment's
 // on-screen Y staying put across a load-older.
-const API = "http://dev.localhost:4010";
-
 async function openComments(page: Page) {
   await page.click("[data-testid=page-overflow-trigger]");
   await page.click("[data-testid=comments-toggle]");

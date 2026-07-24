@@ -1,13 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, openScratch, enterEdit, paneText, sleep } from "../helpers";
+import { openDemo, openScratch, enterEdit, paneText, sleep, API } from "../helpers";
 
 // 2e-2 + 2f-1: page history & restore. In the draft/publish model a revision is
 // created by an explicit PUBLISH (the auto-snapshot was removed); history IS the
 // publish history. So we author "ALPHA", PUBLISH it (→ one revision holding ALPHA),
 // then add "BETA" to the draft (published stays ALPHA). Restoring the revision
 // reverts the OPEN editor live (Valkey propagation), with no reload.
-const API = "http://dev.localhost:4010";
-
 test("history: a revision is listed and restoring it reverts the live editor", async ({ page }) => {
   await openDemo(page);
   const pageId = await page.evaluate(async (api) => {

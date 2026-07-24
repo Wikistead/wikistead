@@ -1,10 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, API } from "../helpers";
 
 // ADR-020 / Design-6: the personal account settings page (Profile / Editor / Theme).
 // Self-scope server-side; this checks the UI wiring (save persists, keymap syncs, theme
 // switches, avatar uploads). Cleans up the shared dev-user row at the end.
-const API = "http://dev.localhost:4010";
 const settings = (p: Page) =>
   p.evaluate(async (api) => {
     const r = await fetch(`${api}/me/settings`, { headers: { Authorization: "Bearer dev-token" } });

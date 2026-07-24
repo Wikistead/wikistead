@@ -1,8 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openScratch, enterEdit, sleep } from "../helpers";
-
-const API = "http://dev.localhost:4010";
-
+import { openScratch, enterEdit, sleep, API } from "../helpers";
 // #437 / ADR-167: delete_mode UI pins.
 //  - default (trash_only): the ⋯ menu offers "Move to trash" only — no permanent entry.
 //  - both: BOTH entries; the permanent path opens a TYPED confirmation (button disabled until the

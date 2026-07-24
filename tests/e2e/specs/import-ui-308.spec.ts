@@ -1,11 +1,9 @@
 import { test, expect } from "@playwright/test";
-import { openDemo } from "../helpers";
+import { openDemo, API } from "../helpers";
 
 // #308 / ADR-132: the import UI. The server materializer + authz are covered by import.test.ts / import-unit;
 // this covers the real-browser flow: IMPORT an export ZIP into a space via the switcher menu → hidden file
 // input, and assert the imported draft appears + the report toast. Real Chromium.
-const API = "http://dev.localhost:4010";
-
 test("#308 import an export ZIP into a space via the menu (imported draft appears)", async ({ browser, request }) => {
   const page = await (await browser.newContext()).newPage();
   await openDemo(page);

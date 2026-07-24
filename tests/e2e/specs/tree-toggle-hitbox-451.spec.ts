@@ -1,11 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, API } from "../helpers";
 
 // #451: the sidebar expand toggle's hit area. The ▶ used to be clickable only on its 14×14 icon;
 // now a 24×24 hit box (icon unchanged, negative margins keep the occupied width at ~14px so the
 // title indent and childless-row alignment don't move). Real Chromium — happy-dom has no layout.
-const API = "http://dev.localhost:4010";
-
 async function mkPage(page: Page, title: string, parentId?: string): Promise<string> {
   return page.evaluate(async ({ api, title, parentId }) => {
     const r = await fetch(`${api}/spaces/demo_space/pages`, {

@@ -1,9 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, sleep, publishAndWait } from "../helpers";
+import { openDemo, sleep, publishAndWait, API } from "../helpers";
 import { STALE_TITLE } from "../fixtures";
-
-const API = "http://dev.localhost:4010";
-
 async function typeSearch(page: Page, q: string) {
   // #285: search is a MODAL now — the header trigger (or Ctrl-K) opens it; the input lives inside.
   if ((await page.getByTestId("search-input").count()) === 0) await page.getByTestId("search-trigger").click();

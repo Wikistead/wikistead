@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, API } from "../helpers";
 
 // #463: the space settings "Pages" tab is table-fixed, so the title column is whatever the fixed
 // columns leave over — and below ~520px they left nothing, collapsing the title to 0px and making
@@ -8,11 +8,11 @@ import { openDemo, sleep } from "../helpers";
 
 async function openPagesTab(page: import("@playwright/test").Page) {
   await openDemo(page);
-  const spaceId = await page.evaluate(async () => {
-    const r = await fetch("http://dev.localhost:4010/spaces", { headers: { Authorization: "Bearer dev-token" } });
+  const spaceId = await page.evaluate(async (api) => {
+    const r = await fetch(`${api}/spaces`, { headers: { Authorization: "Bearer dev-token" } });
     const spaces = (await r.json()) as { id: string; name: string }[];
     return spaces[0]!.id;
-  });
+  }, API);
   await page.goto(`/spaces/${spaceId}/settings/pages`);
   await expect(page.getByTestId("space-pages")).toBeVisible({ timeout: 10000 });
   await page.waitForSelector("[data-testid=space-page-row]", { timeout: 10000 });

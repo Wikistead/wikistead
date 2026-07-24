@@ -1,8 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
-
-const API = "http://dev.localhost:4010";
-
+import { openDemo, sleep, API } from "../helpers";
 // #263: the space switcher shows a BOUNDED default set and an incremental SEARCH over all viewable spaces
 // (cmdk). Real Chromium: create uniquely-named spaces, open the switcher, type a query → the list filters;
 // pick a match → it becomes the active space.

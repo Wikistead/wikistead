@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { enterEdit, openScratch, sleep } from "../helpers";
+import { enterEdit, openScratch, sleep, API } from "../helpers";
 
 // #370 / ADR-145: frontmatter tags + the :::tagged / :::children dynamic lists. Real Chromium:
 // the leading `---` fence renders as a tag-chip widget (not raw YAML), the chip editor writes ONE
@@ -107,17 +107,17 @@ test("#370:::children resolves and lists the published child pages (member edit 
   const page = await (await browser.newContext()).newPage();
   const parent = await openScratch(page, "fm-children-parent");
   // two published children under the parent, via the API (deterministic fixture)
-  const childIds = await page.evaluate(async ({ parent }) => {
+  const childIds = await page.evaluate(async ({ parent, api }) => {
     const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };
     const ids: string[] = [];
     for (const title of ["fm-child-A", "fm-child-B"]) {
-      const r = await fetch(`http://dev.localhost:4010/spaces/demo_space/pages`, { method: "POST", headers: H, body: JSON.stringify({ title, parentId: parent }) });
+      const r = await fetch(`${api}/spaces/demo_space/pages`, { method: "POST", headers: H, body: JSON.stringify({ title, parentId: parent }) });
       const { id } = (await r.json()) as { id: string };
-      await fetch(`http://dev.localhost:4010/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+      await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
       ids.push(id);
     }
     return ids;
-  }, { parent });
+  }, { parent, api: API });
 
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
@@ -137,18 +137,18 @@ test("#370:::children resolves and lists the published child pages (member edit 
 test("#370:::children nests grandchildren and renders without the box chrome", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   const parent = await openScratch(page, "fm-children-tree");
-  const { child, grand } = await page.evaluate(async ({ parent }) => {
+  const { child, grand } = await page.evaluate(async ({ parent, api }) => {
     const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };
     const mk = async (title: string, parentId: string) => {
-      const r = await fetch(`http://dev.localhost:4010/spaces/demo_space/pages`, { method: "POST", headers: H, body: JSON.stringify({ title, parentId }) });
+      const r = await fetch(`${api}/spaces/demo_space/pages`, { method: "POST", headers: H, body: JSON.stringify({ title, parentId }) });
       const { id } = (await r.json()) as { id: string };
-      await fetch(`http://dev.localhost:4010/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+      await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
       return id;
     };
     const child = await mk("fm-tree-child", parent);
     const grand = await mk("fm-tree-grand", child);
     return { child, grand };
-  }, { parent });
+  }, { parent, api: API });
 
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
@@ -184,18 +184,18 @@ test("#370:::children nests grandchildren and renders without the box chrome", a
 test("#370:::children nested in details and columns resolves the real list", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   const parent = await openScratch(page, "fm-children-nested-seam");
-  const { child, grand } = await page.evaluate(async ({ parent }) => {
+  const { child, grand } = await page.evaluate(async ({ parent, api }) => {
     const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };
     const mk = async (title: string, parentId: string) => {
-      const r = await fetch(`http://dev.localhost:4010/spaces/demo_space/pages`, { method: "POST", headers: H, body: JSON.stringify({ title, parentId }) });
+      const r = await fetch(`${api}/spaces/demo_space/pages`, { method: "POST", headers: H, body: JSON.stringify({ title, parentId }) });
       const { id } = (await r.json()) as { id: string };
-      await fetch(`http://dev.localhost:4010/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+      await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
       return id;
     };
     const child = await mk("fm-seam-child", parent);
     const grand = await mk("fm-seam-grand", child);
     return { child, grand };
-  }, { parent });
+  }, { parent, api: API });
 
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");

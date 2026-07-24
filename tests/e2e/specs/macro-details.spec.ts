@@ -1,7 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { enterEdit, openScratch, sleep } from "../helpers";
-
-const API = "http://dev.localhost:4010";
+import { enterEdit, openScratch, sleep, API } from "../helpers";
 const publish = (p: Page, id: string) =>
   p.evaluate(async ({ api, id }) => { await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } }); }, { api: API, id });
 

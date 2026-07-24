@@ -1,13 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, enterEdit, sleep } from "../helpers";
+import { openDemo, enterEdit, sleep, API } from "../helpers";
 
 // #374 ② / ADR-149 §1: macros must render on the GUEST edit-share reader. mermaid is pure-client (no server, no
 // pageId), so it proves the live-preview extension is ACTIVE on the guest surface (the "all macros stay raw"
 // hypothesis is disproven). The pageId-dependent SERVER-render macros (plantuml/Kroki, transclude) are wired by
 // passing pageId to the guest Editor mount (the /pages/:id/plantuml/render route is already `guest: 'view'`),
 // but the e2e stack has no Kroki so plantuml always degrades to source here → those stay needs-human-check.
-const API = "http://dev.localhost:4010";
-
 async function newPage(page: Page, title: string): Promise<string> {
   return page.evaluate(async ({ api, title }) => {
     const r = await fetch(`${api}/spaces/demo_space/pages`, {

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { WEB_REAL_PORT } from "../helpers";
 
 // #372: "another member's uploaded avatar shows for a NEW member". The server trace (ticket)
 // proved every path is sub-scoped (storage key / /auth/me row / per-sub image URL / JIT copies no
@@ -11,7 +12,7 @@ import { test, expect, type Page } from "@playwright/test";
 // the shape that would catch any session/HTTP-cache carry-over across logins.
 // dev-user's avatar is uploaded for the test and ALWAYS removed again (avatar.spec relies on dev-user
 // having no picture — initials "DE").
-const WEB = "http://dev.localhost:5181";
+const WEB = `http://dev.localhost:${WEB_REAL_PORT}`;
 const ISSUER = "http://127.0.0.1:4444";
 
 // A valid 1x1 red PNG (magic-byte sniff requires a real PNG header).

@@ -1,8 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
-
-const API = "http://dev.localhost:4010";
-
+import { openDemo, sleep, API } from "../helpers";
 // The #2 follow-up: publishing right after typing (within the collab persist debounce)
 // must NOT leave the just-typed edits behind as "unpublished changes". The publish
 // route flushes the live draft before snapshotting, and storeYdoc sets the flag

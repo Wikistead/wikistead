@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, API } from "../helpers";
 
 // #461: the API-key list shows WHEN each key was last authenticated with, so an admin can tell a live
 // key from dead weight before revoking. The server has always returned lastUsedAt (#428 made the write
@@ -23,10 +23,10 @@ test("#461: a fresh key reads 'never used'; after the key authenticates a reques
   await expect(cell).toHaveText(/Never used|未使用/);
 
   // Authenticate a real request WITH the key (this is what moves last_used_at).
-  const status = await page.evaluate(async (key) => {
-    const r = await fetch("http://dev.localhost:4010/spaces", { headers: { Authorization: `Bearer ${key}` } });
+  const status = await page.evaluate(async ({ key, api }) => {
+    const r = await fetch(`${api}/spaces`, { headers: { Authorization: `Bearer ${key}` } });
     return r.status;
-  }, plaintext);
+  }, { key: plaintext, api: API });
   expect(status, "the key authenticates").toBeLessThan(400);
   await sleep(600); // last_used_at is written fire-and-forget off the auth hot path
 

@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { WEB_REAL_PORT } from "../helpers";
 
 // #442: the header and the sign-in card render the SAME TenantBrand lockup. The header's old copy
 // let the name span inherit a line-height taller than the 22px mark (arbitrary text-[15px] sets no
@@ -26,7 +27,7 @@ test("#442: header brand name is glyph-box centred against the mark (leading-non
 test("#442: the sign-in card uses the same lockup behaviour (real-auth web)", async ({ browser }) => {
   // The 5181 real-auth web shows the LoginScreen to an anonymous visitor.
   const page = await (await browser.newContext()).newPage();
-  await page.goto("http://dev.localhost:5181/");
+  await page.goto(`http://dev.localhost:${WEB_REAL_PORT}/`);
   await expect(page.getByTestId("login-brand")).toBeVisible({ timeout: 15_000 });
   const m = await page.evaluate(() => {
     const name = document.querySelector('[data-testid="login-brand"]')!;

@@ -1,13 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, API } from "../helpers";
 
 // #448: vim :w/:wq/:q on the GUEST edit surface. The server publish route has been guest:'edit'
 // since #328/ADR-140 (FGA edit gate + rate cap + abuse filter + anonId attribution) — only the
 // client wiring was missing: the guest Editor got no onExitEdit/onPublish, so the vim ex commands
 // resolved to undefined and silently no-opped. This drives a real EDIT-link guest through
 // :wq (publish + exit) and :q (exit only), and pins that a VIEW-link guest still cannot publish.
-const API = "http://dev.localhost:4010";
-
 async function newPage(page: Page, title: string): Promise<string> {
   return page.evaluate(async ({ api, title }) => {
     const r = await fetch(`${api}/spaces/demo_space/pages`, {

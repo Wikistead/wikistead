@@ -1,8 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, openScratch, enterEdit, publishAndWait, sleep } from "../helpers";
-
-const API = "http://dev.localhost:4010";
-
+import { openDemo, openScratch, enterEdit, publishAndWait, sleep, API } from "../helpers";
 // #449 / ADR-173: a space-link guest gets the SAME search box the member uses — Ctrl-K + the header
 // field — scoped by the server to the link's space and gated on the share_link principal. The leak
 // class is pinned server-side (guest-search-449.test.ts); this pins the UI reuse: the search chrome

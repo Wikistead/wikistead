@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createHmac } from "node:crypto";
-import { openScratch, enterEdit, paneText, sleep } from "../helpers";
+import { openScratch, enterEdit, paneText, sleep, API } from "../helpers";
 
 // Mint an MCP access token the same way @wikistead/auth does (HS256, header typ "mcp+jwt") without importing the
 // package (the e2e workspace has no built dist of it) — a dependency-free HMAC JWT the server verifies.
@@ -22,12 +22,12 @@ function mintMcpToken(secret: string, claims: object): string {
 // the real e2e stack (server + collab + Valkey + OpenFGA).
 //
 // The MCP access token is HS256-signed with the same GUEST_TOKEN_SECRET the server verifies (mcp+jwt). Host
-// dev.localhost:4010 resolves slug "dev" → tenant_dev, so we hit the server's /mcp directly (a public endpoint,
+// the API origin (helpers.API) resolves slug "dev" → tenant_dev, so we hit the server's /mcp directly (a public endpoint,
 // tenant-by-Host). dev-token (the browser session) and the token's sub are both `dev-user`, the page creator.
 const SECRET = /GUEST_TOKEN_SECRET=(.+)/.exec(
   readFileSync(fileURLToPath(new URL("../../../.env.e2e", import.meta.url)), "utf8"),
 )![1]!.trim();
-const MCP_URL = "http://dev.localhost:4010/mcp";
+const MCP_URL = `${API}/mcp`;
 
 async function mcp(sub: string, name: string, args: object) {
   const token = mintMcpToken(SECRET, { tenantId: "tenant_dev", sub, scopes: ["read", "write"], groups: [] });

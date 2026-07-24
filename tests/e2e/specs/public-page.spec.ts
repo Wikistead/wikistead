@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { enterEdit, openScratch, setPublicSurface, sleep } from "../helpers";
+import { enterEdit, openScratch, setPublicSurface, sleep, API } from "../helpers";
 
 // #227 / ADR-030: the PUBLIC page view /pub/:pageId) — the frontend consumer of GET /public/pages/:id.
 // An ANONYMOUS browser context (no session/cookies) renders a published-public page's title + sanitized
@@ -237,7 +237,6 @@ test("#253: the tenant parent switch OFF hides an otherwise-public page (404), O
 // publish shows ONLY the page — no bottom child tree even when public children exist; ③ the band is
 // sticky on the standalone route too (it had no bounded-height ancestor, so sticky never engaged).
 test("#227/standalone /pub/:id — member toggle in the band, NO child tree, sticky band", async ({ browser }) => {
-  const API = "http://dev.localhost:4010";
   const authed = await (await browser.newContext()).newPage();
   const id = await openScratch(authed, "pub-standalone");
   await enterEdit(authed);

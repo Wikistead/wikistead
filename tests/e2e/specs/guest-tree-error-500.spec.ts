@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
+import { API } from "../helpers";
 
 // #500: a failed guest tree fetch must read as an ERROR with a retry, never as "this space has no
 // published pages" — the swallow (`.catch(() => setPages([]))`) turned FGA outages into a lying empty
 // sidebar and derailed real-reviews. The wording is generic (no content disclosure).
-const API = "http://dev.localhost:4010";
 const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };
 
 test("#500: a 500 from the guest tree shows an error + retry, not the empty message; retry recovers", async ({ browser }) => {

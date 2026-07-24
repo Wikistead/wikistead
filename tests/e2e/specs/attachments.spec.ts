@@ -1,9 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, API } from "../helpers";
 import { LOCKED_SPACE_ID, LOCKED_PAGE_ID } from "../fixtures";
-
-const API = "http://dev.localhost:4010";
-
 test("attachments: upload -> confirm -> download, and unauthorized page is forbidden", async ({ page, request }) => {
   await openDemo(page);
 

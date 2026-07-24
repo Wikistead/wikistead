@@ -1,8 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo } from "../helpers";
-
-const API = "http://dev.localhost:4010";
-
+import { openDemo, API } from "../helpers";
 // #495 / ADR-182: the admin API view names WHO owns each key and revokes it through the admin route
 // (DELETE /admin/api-keys/:id). The authz matrix is pinned server-side (admin-revoke-api-key-495.test);
 // this pins the console: the owner column renders, and revoking a key the admin does NOT own succeeds

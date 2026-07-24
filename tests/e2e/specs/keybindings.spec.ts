@@ -1,9 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openScratch, enterEdit, sleep } from "../helpers";
+import { openScratch, enterEdit, sleep, API } from "../helpers";
 
 // ADR-021: rebind a shortcut from Account → Editor (capture via event.code), it persists
 // server-side and the new chord drives the command. dev-user keybindings reset after.
-const API = "http://dev.localhost:4010";
 const kb = (p: Page) =>
   p.evaluate(async (api) => {
     const r = await fetch(`${api}/me/settings`, { headers: { Authorization: "Bearer dev-token" } });

@@ -1,13 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
 import postgres from "postgres";
-import { openDemo, enterEdit, sleep } from "../helpers";
+import { openDemo, enterEdit, sleep, API } from "../helpers";
 
 // #289 / ADR-115: editor persona onboarding + per-user chrome visibility, in a real browser.
 // The first-run gate fires on `onboarding_completed_at IS NULL`; the dev member is backfilled
 // completed by migration 058, so each test arms the gate by nulling the column directly (the same
 // admin-DB access fixtures.ts uses), and afterEach RESTORES the shared member's state so the other
 // specs are untouched (the dev-token member is a shared fixture).
-const API = "http://dev.localhost:4010";
 const PG = "postgres://postgres:postgres@localhost:5433/app";
 const SUB = "dev-user";
 
