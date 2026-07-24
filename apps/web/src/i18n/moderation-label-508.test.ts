@@ -2,24 +2,23 @@ import { describe, it, expect } from "vitest";
 import ja from "./locales/ja.json";
 import en from "./locales/en.json";
 
-// #508: the same "Moderation" label sat on two DIFFERENT features on two different layers — the
-// tenant /admin tab (abuse POLICY settings, tenant-admin) and the space-settings tab (the patrol
-// QUEUE, space moderator) — and a real user read them as one thing. The space side now follows its
-// design name, Patrol (#326 / ADR-142); the tenant side keeps Moderation. This pin is about the
-// collision, not the exact words: the two labels must never converge again, in either locale.
-describe("#508: the tenant and space moderation tabs carry distinct labels", () => {
-  it("English: /admin and space settings do not share a label", () => {
-    expect(en.adminNav.moderation).not.toBe(en.spaceSettings.moderation);
+// #508 (user ruling 2026-07-24): the tenant /admin tab (abuse POLICY settings) and the
+// space-settings tab (the patrol QUEUE) may BOTH read "Moderation" — they sit on different layers
+// (tenant vs space), so the shared label carries little risk, and the earlier "Patrol / " rename
+// did not land the intended feel. This reverts to Moderation on the space side. The internal name
+// (patrol / patrolled testids, ADR-142) is unchanged — this is display text only. The pin now guards
+// the INTENDED strings (a future accidental edit that re-renames the space side is caught), NOT a
+// non-collision the ruling deliberately allows.
+describe("#508: the space and tenant moderation labels are the intended (shared) 'Moderation'", () => {
+  it("English: the space-settings tab reads Moderation, its queue heading Moderation queue", () => {
+    expect(en.spaceSettings.moderation).toBe("Moderation");
+    expect(en.moderation.title).toBe("Moderation queue");
+    expect(en.adminNav.moderation).toBe("Moderation"); // the /admin tab is unchanged
   });
 
-  it("Japanese: /admin and space settings do not share a label", () => {
-    expect(ja.adminNav.moderation).not.toBe(ja.spaceSettings.moderation);
-  });
-
-  it("the space queue heading matches the space tab's naming, not the tenant tab's", () => {
-    // the heading inside the tab (moderation.title) should read as the queue of the SPACE feature —
-    // it must not re-introduce the tenant tab's bare label as its lead word
-    expect(en.moderation.title.startsWith(en.adminNav.moderation)).toBe(false);
-    expect(ja.moderation.title.startsWith(ja.adminNav.moderation)).toBe(false);
+  it("Japanese: the space-settings tab reads モデレーション, its queue heading モデレーションキュー", () => {
+    expect(ja.spaceSettings.moderation).toBe("モデレーション");
+    expect(ja.moderation.title).toBe("モデレーションキュー");
+    expect(ja.adminNav.moderation).toBe("モデレーション"); // the /admin tab is unchanged
   });
 });
