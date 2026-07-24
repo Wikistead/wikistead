@@ -2,6 +2,7 @@ import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import * as Y from "yjs";
 import { ySyncFacet } from "y-codemirror.next";
 import { livePreview, macroPresence, ATOM_BOX_CLASS } from "./live-preview/decorations";
+import { islandEditAnchor } from "./live-preview/macro-edit";
 import { initials } from "../ui/avatar";
 
 // #92 comment 982 (②③): macro-presence as an OUTLINE + top-right avatar overlay, generalised to EVERY
@@ -253,3 +254,36 @@ const macroPresenceOverlayTheme = EditorView.baseTheme({
 });
 
 export const macroPresenceOverlay = [macroPresenceOverlayTheme, macroPresenceOverlayPlugin];
+
+// #502 / ADR-184 slice 1: publish the local user's open text-body EDIT-ISLAND anchor (islandEditAnchor)
+// onto page awareness, so peers render the #453 occupancy chip for INLINE islands (a revealed macro body,
+// a layout slot, a nested editUI island), not only for the Excalidraw MODAL — which already publishes the
+// same `macroEdit` field from macro-modal.ts. This is the co-occupancy signal ADR-184's ephemeral-shared-
+// doc slices build on.
+//
+// PRESENCE-SAFE BY CONSTRUCTION (same contract as the overlay above): it only ever writes the ADDITIVE
+// `macroEdit` field via macroPresence.set — the SAME field the modal and #453 use — and NEVER touches
+// the page Y.Text, yCollab's sync, or the offset path (the #92 re-entrancy regression class). It does not
+// fight the modal's publish: it writes ONLY when ITS OWN derived island anchor CHANGES. While a modal owns
+// the anchor no island field is set, so this plugin's value stays null and it issues no write — the modal's
+// set/clear stands; it clears only the anchor IT published. (The island holds its own doc and commits on
+// blur, so typing inside it does not update THIS outer view — the anchor is stable during island editing,
+// republished only on enter/leave or a concurrent OUTER edit that shifts the block.)
+const macroPresencePublisherPlugin = ViewPlugin.fromClass(
+  class {
+    published: string | null = null;
+    constructor(readonly view: EditorView) { this.sync(view); }
+    update(u: ViewUpdate) { this.sync(u.view); }
+    sync(view: EditorView) {
+      const anchor = islandEditAnchor(view.state);
+      if (anchor === this.published) return; // only write on a real transition (never stomp the modal)
+      this.published = anchor;
+      view.state.facet(macroPresence)?.set(anchor);
+    }
+    // Tearing the surface down with an island open must not strand a ghost chip on peers. Clearing here is
+    // belt-and-braces (the collab disconnect drops all local awareness state); the set is try/caught.
+    destroy() { if (this.published !== null) { this.published = null; this.view.state.facet(macroPresence)?.set(null); } }
+  },
+);
+
+export const macroPresencePublisher = macroPresencePublisherPlugin;

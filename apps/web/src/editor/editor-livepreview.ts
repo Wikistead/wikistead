@@ -72,7 +72,7 @@ import type { ImageUploader } from "./live-preview/commands";
 import { attachFileDrop } from "./live-preview/image-drop";
 import { cmTheme } from "../styles/cm-theme";
 import { remoteCursors } from "./remote-cursors";
-import { macroPresenceOverlay } from "./macro-presence-overlay";
+import { macroPresenceOverlay, macroPresencePublisher } from "./macro-presence-overlay";
 
 // The CodeMirror EditorView is built ONCE (a React effect that doesn't re-run on HMR),
 // so hot-swapping this module would leave a STALE view running the old extensions (a
@@ -408,6 +408,10 @@ export function mountLivePreview(
       // #92 comment 982 (②③): macro-presence as an outline + top-right avatar on EVERY occupied macro block
       // (modal-editing OR remote caret on the atom). Read-only overlay AFTER yCollab (it reads its awareness).
       ...(opts.macroPresence ? [macroPresenceOverlay] : []),
+      // #502 / ADR-184 slice 1: publish the local user's open text-body INLINE-island anchor onto page
+      // awareness so peers get the same occupancy chip the modal path already gives (additive `macroEdit`
+      // field only; never the sync/offset path). OUTER surface only, alongside the overlay above.
+      ...(opts.macroPresence ? [macroPresencePublisher] : []),
       // Layer (iii): host chrome (editable surface only; view guests get none). The slash palette itself
       // lives in the shared layer (its vimVisualField still precedes the toolbar's bubble, which reads it
       // to suppress itself in vim visual — the factory sits earlier in this array).
