@@ -1,6 +1,7 @@
 import { EditorView, minimalSetup } from "codemirror"; // meta-package: history + default/history keymaps + drawSelection (same as the host surface)
 import { EditorState, type Extension } from "@codemirror/state";
 import { vim, getCM } from "@replit/codemirror-vim"; // the SAME vim the outer editor uses (not a second engine)
+import { yCollab } from "y-codemirror.next"; // #502: shared-ephemeral-doc binding (library, not host internals — sandbox boundary unchanged)
 
 // #243 / ADR-111 C3 (slice 1): the editUI source pane for a text-source fence macro (mermaid / plantuml)
 // upgrades from a bare <textarea> to a small CodeMirror 6 editor — the "rich panel" the ticket asks for
@@ -8,11 +9,19 @@ import { vim, getCM } from "@replit/codemirror-vim"; // the SAME vim the outer e
 // LIBRARY only (the same libraries fence.ts / fold.ts already import), never the host editor's internals,
 // so the ADR-023 sandbox boundary ({theme} + save host-API) is unchanged.
 //
-// Single Y.Text safety (ADR-111 C3 condition 1): this mini-editor holds its OWN document; it commits to the
-// host's canonical Y.Text ONLY through the macro's `save` callback (an offset-invariant replaceSource — see
-// editUISaveChange). There is NO live binding of this EditorView to a Y.Text sub-range (that would be a second
-// CRDT / echo loop, which the single-Y.Text invariant forbids). Commit granularity is on BLUR, not per
-// keystroke — a per-keystroke commit re-runs the host doc and would re-mount this widget mid-typing.
+// Single Y.Text safety (ADR-111 C3 condition 1): by default this mini-editor holds its OWN document; it
+// commits to the host's canonical Y.Text ONLY through the macro's `save` callback (an offset-invariant
+// replaceSource — see editUISaveChange). There is NO live binding of this EditorView to the CANONICAL
+// Y.Text (that would be a second CRDT / echo loop on the canon, which the single-Y.Text invariant forbids).
+// Commit granularity is on BLUR, not per keystroke — a per-keystroke commit re-runs the host doc and would
+// re-mount this widget mid-typing.
+//
+// #502 / ADR-184 exception (opts.collab): when TWO+ peers co-occupy the same island, the editor instead
+// live-binds via yCollab to a shared EPHEMERAL Y.Text (never the canonical one) — the sanctioned "temporary
+// CRDT in a modal → flush on close" surface (the project design notes; the Excalidraw pattern). The canonical Y.Text stays
+// the sole PERSISTENT CRDT: the ephemeral body is flushed back to it via the macro save path on occupancy
+// changes (slice 4). Absent opts.collab — the overwhelmingly common single-editor case — behaviour is
+// BYTE-IDENTICAL to the private-doc, commit-on-blur path above; a lone editor spins up nothing.
 //
 // vim is intentionally NOT wired here: ADR-111 C3 condition 4 requires the panel to REUSE the outer editor's
 // vim (not stand up a SECOND vim engine) and must not widen the {theme} host-API — that needs a host-side CM6
@@ -52,6 +61,12 @@ export interface SourceEditorOptions {
   // the mermaid/plantuml panes: their keyboard exit (Escape → programmatic blur, relatedTarget null) RELIES
   // on the synchronous commit — guarding them would drop the save.
   guardTeardownBlur?: boolean;
+  // #502 / ADR-184: OPTIONAL shared-document binding for a CO-OCCUPIED island. When present, the editor
+  // live-binds to a shared EPHEMERAL Y.Text via yCollab (remote carets come for free) instead of holding a
+  // private local doc, and the initial doc is taken from that shared text (not `doc`). ABSENT — the common
+  // single-editor case — leaves the private-doc / commit-on-blur behaviour BYTE-IDENTICAL. Never the
+  // canonical Y.Text; the shared body is flushed to canon via the macro save path (slice 4).
+  collab?: { text: import("yjs").Text; awareness: unknown };
   onInput: (value: string) => void; // fires on every doc change — drives the local live preview (no doc write)
   onCommit: (value: string) => void; // fires on blur — the single Y.Text write via the macro's save()
 }
@@ -75,8 +90,13 @@ export function mountSourceEditor(opts: SourceEditorOptions): SourceEditorHandle
   const view = new EditorView({
     parent: opts.parent,
     state: EditorState.create({
-      doc: opts.doc,
+      // #502 / ADR-184: with a shared ephemeral binding, the initial doc IS the shared body (yCollab keeps
+      // CM and the Y.Text in sync); otherwise the caller's plain `doc`.
+      doc: opts.collab ? opts.collab.text.toString() : opts.doc,
       extensions: [
+        // #502 / ADR-184: co-occupied → live-bind to the shared EPHEMERAL Y.Text (remote carets included).
+        // First so its sync/undo sit under the rest; only ever the ephemeral doc, never the canonical one.
+        ...(opts.collab ? [yCollab(opts.collab.text, opts.collab.awareness)] : []),
         // #243 C3 slice 2: vim FIRST so its keymap takes precedence (mirrors the outer editor's ordering).
         // Same @replit/codemirror-vim the host uses — a per-view vim state, NOT a second/different engine.
         ...(opts.vim ? [vim()] : []),
