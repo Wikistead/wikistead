@@ -25,7 +25,7 @@ export function PageMeta({ createdBy, updatedBy, updatedAt, createdByName, creat
         <span className="flex min-w-0 items-center gap-1">{t("pageMeta.updated")}<AuthorChip sub={updatedBy} name={updatedByName} hasAvatar={updatedByHasAvatar} /></span>
       )}
       {time && (
-        <time dateTime={updatedAt} title={time.abs} data-testid="page-meta-time">{time.rel}</time>
+        <time dateTime={updatedAt} data-tip={time.abs} data-testid="page-meta-time">{time.rel}</time>
       )}
     </div>
   );

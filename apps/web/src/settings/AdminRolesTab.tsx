@@ -38,7 +38,7 @@ function CapabilityPicker({ value, onChange, idPrefix, list, disabled = false, l
         const itemLocked = lastLocked && value.includes(c);
         const itemDisabled = disabled || itemLocked;
         return (
-          <label key={c} className={`flex items-center gap-1.5 text-sm${disabled ? " text-fg-dim" : ""}`} title={itemLocked ? t("adminRoles.lastCap") : undefined}>
+          <label key={c} className={`flex items-center gap-1.5 text-sm${disabled ? " text-fg-dim" : ""}`} data-tip={itemLocked ? t("adminRoles.lastCap") : undefined}>
             <input
               type="checkbox"
               data-testid={`${idPrefix}-cap-${c}`}
