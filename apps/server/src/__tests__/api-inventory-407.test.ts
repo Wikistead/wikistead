@@ -54,6 +54,7 @@ const EXCLUDED_PATHS = new Set([
   '/pages/:pageId/revisions/revert-actor', // moderation one-click revert (moderation UI surface)
   '/me/activity',                  // personal contribution-heatmap feed (account UI-shaped; #483 / ADR-180)
   '/pages/:pageId/analytics', '/pages/:pageId/view', // page-analytics readout + view beacon (EE analytics UI plumbing; #464)
+  '/spaces/:spaceId/analytics',    // space-level page-view roll-up (EE analytics UI plumbing; #520 / ADR-189)
   '/tenant/abuse-filter',          // tenant-admin abuse-filter config (admin surface like /tenant/branding; #491)
   '/webhooks', '/webhooks/:id',    // admin-configured outbound webhooks (admin surface)
   '/audit', '/audit/verify', '/audit/export', // audit-log viewer (admin+entitlement surface, #401 / ADR-155)
