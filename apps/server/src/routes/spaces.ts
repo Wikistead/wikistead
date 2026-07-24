@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, writeTuples, deleteTuples, deleteObjectTuples, requireTenantAdmin, isSpaceCreator } from '@wikistead/authz'
+import { check, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, requireTenantAdmin, isSpaceCreator } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
@@ -166,37 +166,39 @@ export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: strin
   // Per space, derive the caller's capability (view|edit|manage) so the sidebar can
   // show/hide management actions (the UI signal; the server stays the fortress).
   // Spaces are few, so a few checks each is cheap. Non-viewable spaces are dropped.
-  const caps = await Promise.all(
-    rows.map(async (r) => {
-      const ref = { type: 'space', id: r.id } as const
-      const user = `user:${userId}`
-      // #326: `moderate` is reported ALONGSIDE the capability rather than folded into it. A space
-      // moderator is not a manager (model.fga: `moderator … or manager`), and collapsing the two would
-      // hand every moderator the rename/delete affordances. The UI needs to know both to offer the
-      // moderation queue without offering space settings.
-      const [view, edit, manage, moderate] = await Promise.all([
-        check(fga, user, 'view', ref),
-        check(fga, user, 'edit', ref),
-        check(fga, user, 'manage', ref),
-        check(fga, user, 'moderate', ref),
-      ])
-      const capability: Space['capability'] | null = manage ? 'manage' : edit ? 'edit' : view ? 'view' : null
-      return [r.id, { capability, canModerate: moderate }] as const
-    }),
-  )
-  const capById = new Map(caps)
+  const user = `user:${userId}`
+  const spaceIds = rows.map((r) => r.id)
+  // #489 / ADR-183: batch the per-space capability fan-out — it was 4 individual FGA checks × N spaces
+  // (676+ round-trips for 169 spaces, ~1.16s cold) — into 4 server-side BatchCheck passes, one per
+  // capability, exactly as #500 batched the page tree. Each pass returns the authorized subset for that
+  // capability; the per-space derivation below is byte-equivalent to the old per-check version (pinned by
+  // the anti-test).
+  // #326: `moderate` is reported ALONGSIDE the capability rather than folded into it. A space moderator is
+  // not a manager (model.fga: `moderator … or manager`), and collapsing the two would hand every moderator
+  // the rename/delete affordances. The UI needs both to offer the moderation queue without space settings.
+  const [viewSet, editSet, manageSet, moderateSet] = await Promise.all([
+    filterAuthorized(fga, user, 'view', spaceIds, undefined, 'space'),
+    filterAuthorized(fga, user, 'edit', spaceIds, undefined, 'space'),
+    filterAuthorized(fga, user, 'manage', spaceIds, undefined, 'space'),
+    filterAuthorized(fga, user, 'moderate', spaceIds, undefined, 'space'),
+  ])
+  const capById = new Map(rows.map((r) => {
+    const capability: Space['capability'] | null =
+      manageSet.has(r.id) ? 'manage' : editSet.has(r.id) ? 'edit' : viewSet.has(r.id) ? 'view' : null
+    return [r.id, { capability, canModerate: moderateSet.has(r.id) }] as const
+  }))
   // iconImageUrl is a relative API path (the client prefixes it with the API base for
   // the <img> src). Public bytes are served by GET /spaces/:id/icon-image.
-  // #364 / ADR-157 §2 (the pointer must not become an existence oracle): expose homePageId ONLY when
-  // the CALLER can `view` the pointed page — via the shared FGA primitive, never a bespoke check. A
-  // denied pointer is OMITTED (null), byte-identical to "no home set".
-  const homeVisible = new Map(await Promise.all(
-    rows.map(async (r) => {
-      if (!r.home_page_id || capById.get(r.id)?.capability == null) return [r.id, false] as const
-      const ok = await check(fga, `user:${userId}`, 'view', { type: 'page', id: r.home_page_id }).catch(() => false)
-      return [r.id, ok] as const
-    }),
-  ))
+  // #364 / ADR-157 §2 (the pointer must not become an existence oracle): expose homePageId ONLY when the
+  // CALLER can `view` the pointed page — via the shared FGA primitive, never a bespoke check. A denied
+  // pointer is OMITTED (null), byte-identical to "no home set". #489: batched too — ONE BatchCheck over the
+  // home pages of the VIEWABLE spaces (same gate as before: a non-viewable space's pointer is never
+  // consulted, so its home page id never enters the batch).
+  const homePageIds = rows
+    .filter((r) => r.home_page_id != null && capById.get(r.id)?.capability != null)
+    .map((r) => r.home_page_id as string)
+  const homeOk = await filterAuthorized(fga, user, 'view', homePageIds) // type defaults to 'page'
+  const homeVisible = new Map(rows.map((r) => [r.id, r.home_page_id != null && homeOk.has(r.home_page_id)] as const))
   return rows.filter((r) => capById.get(r.id)?.capability != null).map((r) => ({
     ...toSpace(r), capability: capById.get(r.id)!.capability!, canModerate: capById.get(r.id)!.canModerate, accentKey: r.accent_key,
     iconImageUrl: r.icon_image_key ? `/spaces/${r.id}/icon-image` : null,

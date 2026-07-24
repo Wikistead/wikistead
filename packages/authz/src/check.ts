@@ -111,8 +111,9 @@ export async function checkRelation(
   return Boolean(allowed)
 }
 
-// Filter a candidate page list to the authorized subset.
-// Used by search: confirm the displayed dozen via OpenFGA before rendering.
+// Filter a candidate id list to the authorized subset for one capability, in ONE batched round-trip per
+// chunk. Used by search (confirm the displayed dozen), the page tree, and #489 the space list (batching
+// each of a space's capabilities). The resource type defaults to 'page'; pass 'space' for a space list.
 //
 // #500 / ADR-183: server-side BatchCheck (SDK ≥0.8.x `batchCheck` = ONE `/batch-check` round-trip per
 // chunk) replaces the #489 per-id fan-out (which was O(N) `fga.check` round-trips — a 155-page tree =
@@ -131,22 +132,26 @@ export async function filterAuthorized(
   fga: OpenFgaClient,
   user: string,
   capability: Capability,
-  pageIds: string[],
+  ids: string[],
   // Optional FGA context (e.g. current_time) — required when `user` is a share_link with a
   // non_expired condition, so a time-bounded guest link is evaluated against the clock.
   context?: CheckContext,
+  // #489: the resource type these ids belong to. Defaults to 'page', so every existing page caller is
+  // byte-identical; listSpaces passes 'space' to batch its per-space capability fan-out the same way the
+  // page tree does. The capability→relation mapping already differs per type (RELATION[type]).
+  resourceType: ResourceRef['type'] = 'page',
 ): Promise<Set<string>> {
   const hooks = getAuthzHooks()
-  // The relation is the same for every page id (depends only on capability + type), so resolve once.
-  const relation = resolveRelation(capability, { type: 'page', id: '' })
+  // The relation is the same for every id (depends only on capability + type), so resolve once.
+  const relation = resolveRelation(capability, { type: resourceType, id: '' })
   const out = new Set<string>()
 
   // 1. beforeCheck per id (ADR-152). A hook may short-circuit before FGA; short-circuited ids never
   //    enter the batch. Common case (no EE hooks): beforeCheck is undefined, so this is a cheap pass.
   const toBatch: string[] = []
-  for (const id of pageIds) {
+  for (const id of ids) {
     if (hooks.beforeCheck) {
-      const before = await hooks.beforeCheck({ user, relation, resource: { type: 'page', id }, tenantId: '' })
+      const before = await hooks.beforeCheck({ user, relation, resource: { type: resourceType, id }, tenantId: '' })
       if (before !== undefined) { if (before) out.add(id); continue }
     }
     toBatch.push(id)
@@ -163,7 +168,7 @@ export async function filterAuthorized(
       checks: chunk.map((id, j) => ({
         user,
         relation,
-        object: `page:${id}`,
+        object: `${resourceType}:${id}`,
         correlationId: String(j),
         ...(context ? { context } : {}),
       })),
@@ -177,7 +182,7 @@ export async function filterAuthorized(
       if (r.error) continue
       const fgaAllowed = Boolean(r.allowed)
       const final = hooks.afterCheck
-        ? (await hooks.afterCheck({ user, relation, resource: { type: 'page', id }, tenantId: '' }, fgaAllowed) ?? fgaAllowed)
+        ? (await hooks.afterCheck({ user, relation, resource: { type: resourceType, id }, tenantId: '' }, fgaAllowed) ?? fgaAllowed)
         : fgaAllowed
       if (final) out.add(id)
     }
