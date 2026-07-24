@@ -36,6 +36,7 @@ import { renderCellInline } from "../macros/table-cell-dom";
 import { openMacroModal } from "./macro-modal";
 import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost, nestedSelectionField, setNestedSelection, nestedEditActiveField, setNestedEditActive, slotEditField, setSlotEditActive, type NestedSelection, type SlotEdit } from "./macro-edit";
 import { mountSourceEditor } from "../macros/source-editor";
+import { fenceSettingsField, toggleFenceSettings } from "./fence-settings-panel";
 import type * as Y from "yjs";
 import type { EphemeralSession } from "../collab";
 import { ephemeralBody } from "../ephemeral-island";
@@ -249,7 +250,20 @@ class FenceHeaderWidget extends WidgetType {
   eq(o: FenceHeaderWidget) { return o.lang === this.lang && o.title === this.title && o.code === this.code && o.canCopy === this.canCopy; }
   // #381the header DOM (filename tab + lang + copy button) is the SHARED builder in md-render
   // the static prose fence renders the identical structure, so the two read surfaces cannot drift.
-  toDOM() { return buildFenceHeader({ lang: this.lang, title: this.title, code: this.code, canCopy: this.canCopy }); }
+  // #456 rev (review ①/④): pass onSettings so the code-settings ✎ renders in the header chrome (left of
+  // copy) — but ONLY when the fence-settings field is registered (edit surface), so the read/guest surfaces
+  // are untouched. The click resolves the fence from the header's LIVE doc position (posAtDOM) and toggles the
+  // panel, so it survives upstream edits without a captured offset going stale.
+  toDOM(view: EditorView) {
+    const editable = view.state.field(fenceSettingsField, false) !== undefined;
+    let row: HTMLElement;
+    row = buildFenceHeader({
+      lang: this.lang, title: this.title, code: this.code, canCopy: this.canCopy,
+      settingsLabel: i18n.t("contextMenu.codeSettings"),
+      onSettings: editable ? () => { const pos = view.posAtDOM(row); toggleFenceSettings(view, pos); } : undefined,
+    });
+    return row;
+  }
   ignoreEvent(e: Event) { return e.type !== "mousedown" && e.type !== "click"; }
 }
 
@@ -4746,6 +4760,17 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   },
   ".cm-lp-code-copy:hover": { opacity: "1", background: "var(--hover, rgba(128,128,128,0.16))", color: "var(--fg)" },
   ".cm-lp-code-copy.cm-lp-code-copied": { opacity: "1", color: "var(--accent, #4ea1ff)" },
+  // #456 rev (review ①): the code-settings ✎ shares the copy button's chrome, placed to its LEFT — the
+  // ✎ carries the marginLeft:auto that pushes the whole corner group right, and the adjacent copy drops its
+  // own auto-margin so the two sit together (a single top-right control cluster).
+  ".cm-lp-code-settings-btn": {
+    display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+    marginLeft: "auto", padding: "0.2em", marginBottom: "0.15em", borderRadius: "5px", border: "1px solid transparent",
+    background: "transparent", color: "var(--fg-dim, #888)", opacity: "0.65", transition: "opacity 120ms ease, background 120ms ease, color 120ms ease",
+  },
+  ".cm-lp-code-settings-btn:hover": { opacity: "1", background: "var(--hover, rgba(128,128,128,0.16))", color: "var(--fg)" },
+  ".cm-lp-code-settings-btn:focus-visible": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "1px" },
+  ".cm-lp-code-settings-btn + .cm-lp-code-copy": { marginLeft: "2px" }, // sit next to ✎, not pushed apart by a 2nd auto-margin
   // #198 (comment 752): the code card corners — SAME base card for plain and attributed fences. Individual
   // corner radii (not the shorthand) so a single-line fence (first AND last) rounds all four corners. When a
   // tab is present (cm-lp-code-tabbed, declared AFTER so it wins) the top-left flattens to connect the tab.

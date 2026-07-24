@@ -189,31 +189,44 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
 .cm-lp-callout-panel-editable .cm-lp-callout-panel-edit{position:absolute;top:-1.5em;left:0;bottom:auto;right:auto;opacity:0;transition:opacity 120ms ease;z-index:2}
 .cm-lp-callout-panel-editable:hover .cm-lp-callout-panel-edit{opacity:1}
 
-/* #456 S4: the code-fence settings panel. It renders in CodeMirror's tooltip layer (a widget child
-   would be reconciled away), so it needs its own surface styling rather than inheriting a panel's. */
-.cm-lp-fence-settings { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; min-width: 220px; }
+/* #456 S4 + rev: the code-fence settings panel. It renders in CodeMirror's tooltip layer.
+   review ②: strip CM's default `.cm-tooltip` chrome (border/bg/padding/shadow) so the panel shows
+   only its OWN frame — no "second box outside the panel". The panel therefore carries its own surface. */
+.cm-tooltip:has(.cm-lp-fence-settings) { border: none; background: transparent; padding: 0; box-shadow: none; }
+.cm-tooltip:has(.cm-lp-fence-settings) .cm-tooltip-arrow:before,
+.cm-tooltip:has(.cm-lp-fence-settings) .cm-tooltip-arrow:after { border-bottom-color: var(--panel); border-top-color: var(--panel); }
+.cm-lp-fence-settings {
+  display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; min-width: 232px;
+  /* review ③: DS surface — match the app's popovers (shadcn/Tailwind): panel bg, hairline border,
+     the token radius + elevation, DS font. */
+  background: var(--panel); color: var(--foreground); border: 1px solid var(--border);
+  border-radius: var(--radius, 8px); box-shadow: var(--shadow-2, 0 4px 16px rgba(0,0,0,.18));
+  font-family: var(--font-sans, inherit);
+}
 /* #456item 3: header with a title + explicit close, so the panel (which never self-dismisses) can be dismissed. */
 .cm-lp-fence-settings-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
-.cm-lp-fence-settings-title { color: var(--fg-dim); font-size: 0.8em; font-weight: 600; }
+.cm-lp-fence-settings-title { color: var(--fg-dim); font-size: 0.78em; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
 .cm-lp-fence-settings-close {
-  display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
-  border: none; background: transparent; color: var(--fg-dim); border-radius: 4px; cursor: pointer;
-  font-size: 1.1em; line-height: 1; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  border: none; background: transparent; color: var(--fg-dim); border-radius: 6px; cursor: pointer;
+  font-size: 1.15em; line-height: 1; padding: 0; transition: background .12s, color .12s;
 }
 .cm-lp-fence-settings-close:hover { background: var(--panel-2); color: var(--foreground); }
 .cm-lp-fence-settings-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-/* #456item 2: the hover ✎ affordance — the mouse counterpart to Mod-Alt-Enter, in the tooltip layer. */
-.cm-lp-fence-settings-hint {
-  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
-  border: 1px solid var(--border); background: var(--panel); color: var(--fg-dim); border-radius: 4px;
-  cursor: pointer; font-size: 0.85em; line-height: 1; padding: 0; box-shadow: var(--shadow-1, 0 1px 2px rgba(0,0,0,.15));
-}
-.cm-lp-fence-settings-hint:hover { background: var(--panel-2); color: var(--foreground); }
-.cm-lp-fence-settings-hint:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.cm-lp-macro-settings { display: flex; flex-direction: column; gap: 6px; }
-.cm-lp-macro-setting { display: flex; align-items: center; gap: 8px; justify-content: space-between; font-size: 0.85em; }
+.cm-lp-macro-settings { display: flex; flex-direction: column; gap: 8px; }
+.cm-lp-macro-setting { display: flex; align-items: center; gap: 10px; justify-content: space-between; font-size: 0.86em; }
 .cm-lp-macro-setting-label { color: var(--fg-dim); white-space: nowrap; }
+/* review ③: controls styled to the DS (not the browser default select/input/checkbox). Token radius,
+   hairline border, DS focus ring, comfortable padding — to match ui/Select · Input · Switch. */
 .cm-lp-macro-setting input[type="text"], .cm-lp-macro-setting select {
   background: var(--panel-2); color: var(--foreground); border: 1px solid var(--border);
-  border-radius: 4px; padding: 2px 6px; font: inherit; min-width: 120px;
+  border-radius: var(--radius-sm, 6px); padding: 4px 8px; font: inherit; min-width: 132px;
+  transition: border-color .12s, box-shadow .12s;
 }
+.cm-lp-macro-setting input[type="text"]:focus-visible, .cm-lp-macro-setting select:focus-visible {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 32%, transparent);
+}
+.cm-lp-macro-setting select { appearance: none; -webkit-appearance: none; padding-right: 22px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--fg-dim) 50%), linear-gradient(135deg, var(--fg-dim) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 50%, calc(100% - 7px) 50%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+.cm-lp-macro-setting input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
