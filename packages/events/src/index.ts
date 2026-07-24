@@ -82,7 +82,9 @@ export type DomainEvent =
   | { type: 'attachment.confirmed'; tenantId: string; attachmentId: string; pageId: string; actorId: string }
   | { type: 'attachment.deleted';   tenantId: string; attachmentId: string; pageId: string; actorId: string }
   // ── Share links ──────────────────────────────────────────────────────
-  // TODO(phase: guest): emit share_link.revoked in the share link revocation API.
+  // Emitted by every revocation path: the explicit revoke API (routes/share-links.ts) and the implicit
+  // sweeps when a page is made private or deleted (routes/pages.ts) — always AFTER the DB revoke commits,
+  // never on a rolled-back tx. app.ts forwards it to the collab layer so live guests disconnect (ADR-028).
   | { type: 'share_link.revoked'; tenantId: string; shareLinkId: string; pageId: string; actorId: string }
   // ── API keys ─────────────────────────────────────────────────────────
   | { type: 'api_key.created'; tenantId: string; keyId: string; actorId: string }

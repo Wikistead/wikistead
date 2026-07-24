@@ -20,7 +20,9 @@ export interface Entitlements {
   guestAccess: boolean
 
   // PRIMARY paid lever: billable members (seats). Infinity = pay-per-seat / no cap.
-  // TODO(phase: auth): enforce in POST /members when member invite is added.
+  // Enforced at invite ACCEPT (auth/invites.ts — a per-tenant advisory lock makes count→compare→insert one
+  // indivisible decision; over-cap → 402) and on SCIM provisioning (ee-server scim/provision.ts). Issuing an
+  // invite only warns, since a seat can free up before it is accepted. Guests never consume a seat (ADR-034).
   maxSeats: number
 
   // Generous on purpose (NOT a paid lever): spaces don't gate the viral hook.
