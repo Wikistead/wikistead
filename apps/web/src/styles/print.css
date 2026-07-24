@@ -1,59 +1,43 @@
 /* P5 PDF (v1 = browser print → "Save as PDF"). No server, no headless Chrome.
-   When printing, show ONLY the rendered page surface (the live-preview pane) and
-   hide all app chrome — sidebar, search, comments, attachments, toolbars, the
-   export/print strip. The visibility trick prints just that subtree regardless of
-   layout structure; the rendered preview prints as formatted text. */
-/* #207: the browser default print margin is oversized. Set a compact, even page margin so the
-   content uses the sheet. (Part 2 of #207 — macros printing as raw ::: markers — stems from CM's
-   viewport virtualisation: only the on-screen slice is in the DOM to print, and the reveal-on-cursor
-   raw source of the focused macro leaks; the robust fix is to print the full server-rendered HTML from
-   the shared macro renderer (#85), tracked there.) */
+   #505 every reading surface renders its body with CodeMirror, which VIRTUALISES its viewport —
+   only the on-screen slice of a long document is in the DOM. The old visibility trick printed that one
+   screenful, and `position:absolute; inset:0` pinned it to a single sheet (crushed content + a printed
+   scrollbar). Instead we print a dedicated STATIC surface: PrintSurface (a body-level portal) renders the
+   FULL published Markdown once via the shared sanitised renderer, and here we hide the live app and show
+   ONLY that surface in NORMAL DOCUMENT FLOW, so the browser paginates it across as many sheets as needed. */
+/* #207: the browser default print margin is oversized. Set a compact, even page margin so the content
+   uses the sheet. */
 @page {
   margin: 14mm;
 }
+
+/* Off-print, the print portal is inert and invisible (it still renders in the DOM so print has it ready). */
+[data-print-root] {
+  display: none;
+}
+
 @media print {
-  body * {
-    visibility: hidden;
-  }
-  [data-pane="preview"],
-  [data-pane="preview"] * {
-    visibility: visible;
-  }
-  [data-pane="preview"] {
-    position: absolute;
-    inset: 0;
-    border: none;
-    overflow: visible;
-  }
-  /* In-pane chrome (mode bar, insert toolbar) must not print. */
-  [data-testid="editor-modebar"],
-  .lp-toolbar {
+  /* Hide the entire live app (chrome, the virtualised CM reading surface, floating controls, toasts —
+     everything), show ONLY the static print portal. display:none removes them from layout entirely, so
+     the portal flows from the top of the sheet and paginates naturally. */
+  body > *:not([data-print-root]) {
     display: none !important;
   }
-  /* #505 floating page chrome (the bottom-left Vim/display-mode pills, the bottom-right
-     Edit/Publish/⋯ cluster, the mobile ⋯, the TOC rail) and the toast layer leaked into print. The
-     visibility trick only sets visibility:hidden, which a descendant's visibility:visible can override
-     — and toasts render at body level outside the trick's reach entirely. display:none is stronger:
-     it removes the element and every descendant regardless of any visibility override. `data-print-hide`
-     marks the floating chrome roots so new floating affordances opt in at the source. */
-  [data-print-hide],
-  [data-sonner-toaster] {
-    display: none !important;
-  }
-  /* #505: callout icons (mask + background-color) and panel tints are "background graphics", which
-     browsers drop by default when printing — the panel degraded to bare text + a left border. Force
-     colour fidelity for the WHOLE printed surface (the property inherits), so code-block/table
-     backgrounds keep their on-screen look too — print parity is the point of this stylesheet. */
-  [data-pane="preview"] {
+  [data-print-root] {
+    display: block !important;
+    position: static;
+    max-width: 100%;
+    margin: 0;
+    /* #505: callout icons (mask + background-color), code/table backgrounds and other "background
+       graphics" are dropped by browsers when printing; force colour fidelity on the whole printed
+       surface (the property inherits) so the print matches the screen. */
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-  /* #505: the page title lives in the BAND, outside the preview pane, so the visibility trick dropped
-     it from every print. Un-hide just the title text (the band's frost gradient and status controls
-     stay hidden); it sits in the --wks-band-h padding gap above the first content line, and the
-     two-line clamp is lifted so a long title prints in full. */
-  [data-testid="page-title"] {
-    visibility: visible;
-    -webkit-line-clamp: unset;
+  /* A table taller than a sheet must paginate too — the #518 box-scroll (max-height) would clip it to
+     one screenful in print, so let printed tables take their natural height and flow across pages. */
+  [data-print-root] .cm-lp-table-scroll {
+    max-height: none;
+    overflow: visible;
   }
 }

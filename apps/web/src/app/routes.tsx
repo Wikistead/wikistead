@@ -171,6 +171,7 @@ function useDisplayModeShortcut(cycle: () => void, enabled: boolean, chord: stri
 import { Home, Lock, Snowflake } from "lucide-react";
 import { useHeadingHashLanding, replaceHashWith } from "../toc/useHashLanding"; // #313: #<slug> deep links
 import { PageTitle } from "./PageTitle";
+import { PrintSurface } from "./PrintSurface"; // #505 the print-only static (paginating) surface
 import { PageMeta } from "./PageMeta";
 import { ProgressRing } from "./ProgressRing"; // #290: title-band page-progress ring
 import { useTheme } from "./ThemeProvider"; // #376: public reader remounts on theme switch (diagram re-render)
@@ -736,6 +737,8 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
               canEdit={canEdit}
             />
             <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
+            {/* #505 the paginating print surface (the live CM body is virtualised → prints one screenful). */}
+            <PrintSurface md={published?.publishedMd ?? null} title={page?.title ?? ""} />
             {/* #464 / ADR-175 rework slice 2/4: the who-viewed analytics moved OUT of this bottom-of-editor
                 spot (the user couldn't find it) into a right panel (analyticsOpen, below) — opened from the
                 ⋯ menu, manager-only. The static bottom render is retired. */}
@@ -1220,6 +1223,8 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
               canEdit={canEdit}
             />
             <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
+            {/* #505 the paginating print surface (guest CM body is virtualised too). */}
+            <PrintSurface md={publishedMd} title={pageTitle} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #227 the shared TocChrome (rail on wide / overlay on narrow); yields to the comments
                 panel when open (shared right zone — no pointer overlap). */}
@@ -1480,6 +1485,8 @@ function PublicPageContent({ pageId, onSpace }: { pageId: string; onSpace?: (s: 
             the member Reading surface (tokens.css). The band top-offset (`.lp-editor-host .cm-content`
             padding-top) has higher specificity, so it still wins over this rule's padding-top. */}
         <div ref={setBodyEl} data-testid="public-body" data-pane="preview" className="h-full" />
+        {/* #505 the paginating print surface (the public CM body is virtualised too). */}
+        <PrintSurface md={page.content} title={page.title} />
       </div>
       {/* #227 the SAME shared TocChrome the member views render (rail on wide / overlay on narrow) — no
           public-only reimplementation. The toggle lives in the band's PageStatus (member parity, ①).
