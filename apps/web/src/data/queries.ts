@@ -283,6 +283,27 @@ export function useBulkPublishPages() {
   });
 }
 
+// #511 / ADR-185 (slice 3): bulk VISIBILITY for a selection. The server re-checks the per-page `share`
+// gate, writes the private marker pair, cascades to descendants and reindexes each affected page, and
+// returns the same partial-success map. Reversible (private ⇄ not private), so no destructive posture —
+// but privatising REVOKES access, so the caller is told plainly how many pages actually changed.
+export interface BulkVisibilityResult { results: { id: string; ok: boolean; reason?: string }[]; changed: number; skipped: number }
+export function useBulkSetPageVisibility() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { spaceId: string; pageIds: string[]; makePrivate: boolean }) =>
+      apiFetch<BulkVisibilityResult>(`/spaces/${encodeURIComponent(args.spaceId)}/pages/bulk-visibility`, token, {
+        method: "POST",
+        body: JSON.stringify({ pageIds: args.pageIds, private: args.makePrivate }),
+      }),
+    onSuccess: (_r, args) => {
+      qc.invalidateQueries({ queryKey: ["pages-overview", args.spaceId] });
+      qc.invalidateQueries({ queryKey: ["pages", args.spaceId] });
+    },
+  });
+}
+
 // #437 / ADR-167: the DIRECT permanent path (modes 'both' / 'direct_only'; the server 400s otherwise).
 export function useDirectDeletePage() {
   const { token } = useSession();

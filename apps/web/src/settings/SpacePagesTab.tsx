@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Trash2, Upload } from "lucide-react";
-import { useSpacePagesOverview, useBulkDeletePages, useBulkPublishPages } from "../data/queries";
+import { Trash2, Upload, Lock, LockOpen } from "lucide-react";
+import { useSpacePagesOverview, useBulkDeletePages, useBulkPublishPages, useBulkSetPageVisibility } from "../data/queries";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
@@ -29,6 +29,7 @@ export function SpacePagesTab() {
   const pages = useSpacePagesOverview(spaceId);
   const bulkDelete = useBulkDeletePages();
   const bulkPublish = useBulkPublishPages();
+  const bulkVisibility = useBulkSetPageVisibility();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -69,6 +70,21 @@ export function SpacePagesTab() {
     });
   };
 
+  // #511 slice 3: visibility is REVERSIBLE (private ⇄ not), so it runs on click like publish rather than
+  // through the destructive confirm. Privatising still REVOKES reach, so the toast reports what actually
+  // changed — the server skips any page whose `share` gate the caller fails.
+  const runBulkVisibility = (makePrivate: boolean) => {
+    const ids = [...selected];
+    bulkVisibility.mutate({ spaceId, pageIds: ids, makePrivate }, {
+      onSuccess: (r) => {
+        clearSelection();
+        if (r && r.skipped > 0) notify.info(t("spacePages.bulkVisibilityPartial", { changed: r.changed, skipped: r.skipped }));
+        else notify.success(t(makePrivate ? "spacePages.bulkPrivateDone" : "spacePages.bulkUnprivateDone", { count: r?.changed ?? 0 }));
+      },
+      onError: () => notify.error(t("toast.actionFailed")),
+    });
+  };
+
   const n = selected.size;
 
   return (
@@ -86,6 +102,12 @@ export function SpacePagesTab() {
           <span className="text-sm text-fg-dim" data-testid="bulk-selected-count">{t("spacePages.selectedCount", { count: n })}</span>
           <Button variant="default" size="sm" data-testid="bulk-publish" disabled={bulkPublish.isPending} onClick={runBulkPublish}>
             <Upload size={14} /> {t("spacePages.publish")}
+          </Button>
+          <Button variant="default" size="sm" data-testid="bulk-private" disabled={bulkVisibility.isPending} onClick={() => runBulkVisibility(true)}>
+            <Lock size={14} /> {t("spacePages.makePrivate")}
+          </Button>
+          <Button variant="default" size="sm" data-testid="bulk-unprivate" disabled={bulkVisibility.isPending} onClick={() => runBulkVisibility(false)}>
+            <LockOpen size={14} /> {t("spacePages.clearPrivate")}
           </Button>
           <Button variant="danger" size="sm" data-testid="bulk-delete" onClick={() => setConfirmOpen(true)}>
             <Trash2 size={14} /> {t("common.delete")}
