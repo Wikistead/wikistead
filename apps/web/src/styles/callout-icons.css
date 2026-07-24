@@ -192,14 +192,19 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
 /* #456 S4 + rev: the code-fence settings panel. It renders in CodeMirror's tooltip layer.
    review ②: strip CM's default `.cm-tooltip` chrome (border/bg/padding/shadow) so the panel shows
    only its OWN frame — no "second box outside the panel". The panel therefore carries its own surface. */
-.cm-tooltip:has(.cm-lp-fence-settings) { border: none; background: transparent; padding: 0; box-shadow: none; }
+/* #456 review rejection (measured): CM injects its own `.cm-tooltip{background:#f5f5f5}` baseTheme at editor
+   mount — SAME specificity as these rules but LATER in source order, so it won the cascade and the panel
+   printed light-grey even though --panel resolved dark (#252526) at the node. Force the panel's own
+   theme-aware surface to win: `!important` beats CM's non-important baseTheme regardless of source order.
+   var(--panel) already follows light/dark, so light is unchanged. */
+.cm-tooltip:has(.cm-lp-fence-settings) { border: none; background: var(--panel) !important; padding: 0; box-shadow: none; }
 .cm-tooltip:has(.cm-lp-fence-settings) .cm-tooltip-arrow:before,
 .cm-tooltip:has(.cm-lp-fence-settings) .cm-tooltip-arrow:after { border-bottom-color: var(--panel); border-top-color: var(--panel); }
 .cm-lp-fence-settings {
   display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; min-width: 232px;
   /* review ③: DS surface — match the app's popovers (shadcn/Tailwind): panel bg, hairline border,
      the token radius + elevation, DS font. */
-  background: var(--panel); color: var(--foreground); border: 1px solid var(--border);
+  background: var(--panel) !important; color: var(--foreground); border: 1px solid var(--border);
   border-radius: var(--radius, 8px); box-shadow: var(--shadow-2, 0 4px 16px rgba(0,0,0,.18));
   font-family: var(--font-sans, inherit);
 }
