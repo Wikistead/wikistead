@@ -4470,12 +4470,14 @@ export function enterMacroAt(view: EditorView, pos: number, raw = false): boolea
   if (view.state.readOnly) return false;
   const tbl = tableBlockAt(view.state, pos);
   if (tbl) {
-    // #502 floor: a peer co-editing → reveal the table SOURCE (merges) instead of the clobbering grid RichUI.
-    if (peerEditingMacroAt(view, tbl.from)) {
-      view.dispatch({ selection: EditorSelection.cursor(tbl.from), effects: setMacroRenderActive.of({ from: tbl.from, to: tbl.to, raw: true }) });
-      view.focus();
-      return true;
-    }
+    // #502 Option B (ADR-184 addendum 2): the table grid co-edits IN PLACE now. Its
+    // InnerEditHost.replaceSource writes a MINIMAL diff to the canonical Y.Text (slice 1), and the raw table
+    // source a peer may reveal is ALSO canonical — so grid↔source↔grid all converge through the page's
+    // yCollab (no ephemeral; canonical is the single source of truth). The old floor (redirect a co-occupied
+    // grid to raw source) is therefore removed. Single-user is byte-identical (there was never a peer to
+    // redirect for). The callout/fence editUI floors below STAY: their bodies ride an EPHEMERAL doc
+    // (mountSurface), which does NOT converge with a canonical raw source, so redirecting to source remains
+    // the safe merge path there until that body-granularity question is resolved (a follow-up slice).
     return openTableEditing(view, pos); // pipe OR :::table (#86)
   }
   const fence = macroFenceAt(view.state, pos);
