@@ -9,7 +9,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalStorageDriver } from '../storage/index.js'
-import { buildExport, buildSpaceExport, buildTenantExport } from '../export/index.js'
+import { buildExport, buildSpaceExport, buildTenantExport, buildSelectionExport, SELECTION_EXPORT_CAP } from '../export/index.js'
 import { buildHtmlExport } from '../render/html-export.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -204,6 +204,43 @@ describe('buildSpaceExport / buildTenantExport (#309)', () => {
     await deleteTuples(fgaClient, spaceGrants).catch(() => {})
     await admin`DELETE FROM pages WHERE id IN (${PAGE2}, ${PRIV}, ${REST})`.catch(() => {})
     await admin`DELETE FROM spaces WHERE id = ${SPACE2}`.catch(() => {})
+  })
+
+  // #511 / ADR-185 (slice 4): exporting a SELECTION from the Pages tab. The gate is per-page `view`, the same
+  // one the per-page export uses — a page the caller cannot view is OMITTED, never exported and never turned
+  // into an error that would confirm it exists. These reuse the private / restricted fixtures above, which is
+  // the point: the space grant must not become a shortcut past the per-node cut for a selected id either.
+  it('buildSelectionExport bundles only the SELECTED pages, with their subtree', async () => {
+    const res = await buildSelectionExport(db, fgaClient, storage, { userId: SPACE_USER, spaceId: SPACE, pageIds: [ROOT] })
+    const entries = Object.keys(unzipSync(res!.body)).join('\n')
+    expect(res!.filename).toBe('Export Space-selection.zip')
+    expect(entries, 'the selected root and its viewable child are in').toMatch(/Root Page/)
+    expect(entries, 'a page that was NOT selected stays out').not.toMatch(/Second Space Page/)
+  })
+
+  it('buildSelectionExport OMITS a selected page the caller cannot view (private / restricted)', async () => {
+    const res = await buildSelectionExport(db, fgaClient, storage, {
+      userId: SPACE_USER, spaceId: SPACE, pageIds: [ROOT, PRIV, REST],
+    })
+    const entries = Object.keys(unzipSync(res!.body)).join('\n')
+    expect(entries, 'the viewable selection is exported').toMatch(/Root Page/)
+    // The space grant does NOT reach a private page (`but not private`) nor a restricted one — selecting them
+    // must not export them, and must not error either (omission, not an existence oracle).
+    expect(entries, 'the private page is not in the archive').not.toMatch(/Private Page/)
+    expect(entries, 'the restricted page is not in the archive').not.toMatch(/Restricted Page/)
+  })
+
+  it('buildSelectionExport ignores ids from another space, and 404s for a space the caller cannot view', async () => {
+    const res = await buildSelectionExport(db, fgaClient, storage, { userId: SPACE_USER, spaceId: SPACE, pageIds: [PAGE2] })
+    expect(Object.keys(unzipSync(res!.body)), 'an id outside this space contributes nothing').toEqual([])
+    expect(await buildSelectionExport(db, fgaClient, storage, { userId: SPACE_USER, spaceId: SPACE2, pageIds: [PAGE2] }),
+      'a space the caller cannot view is a uniform 404').toBeNull()
+  })
+
+  it('buildSelectionExport enforces the selection cap', async () => {
+    const tooMany = Array.from({ length: SELECTION_EXPORT_CAP + 1 }, (_, i) => `sel-${i}`)
+    await expect(buildSelectionExport(db, fgaClient, storage, { userId: SPACE_USER, spaceId: SPACE, pageIds: tooMany }))
+      .rejects.toMatchObject({ statusCode: 400, reason: 'too_many' })
   })
 
   it('buildSpaceExport returns null (→ 404) when the space is not viewable', async () => {

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
-import { buildExport, buildSpaceExport, buildTenantExport, ExportTooLargeError, type ExportResult } from '../export/index.js'
+import { buildExport, buildSpaceExport, buildTenantExport, buildSelectionExport, ExportTooLargeError, type ExportResult } from '../export/index.js'
 import { buildHtmlExport } from '../render/html-export.js'
 
 // Send an export result as a download, or 413 when it exceeds the size cap (a huge tenant/space).
@@ -27,6 +27,21 @@ export async function exportPlugin(app: FastifyInstance) {
   app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/export', async (req, reply) => {
     try {
       const result = await buildSpaceExport(req.db, app.fga, app.storageDriver, { userId: req.user.sub, spaceId: req.params.spaceId })
+      if (!result) return reply.code(404).send({ error: 'not found' })
+      return sendExport(reply, result)
+    } catch (e) {
+      if (e instanceof ExportTooLargeError) return reply.code(413).send({ error: 'export too large' })
+      throw e
+    }
+  })
+
+  // #511 / ADR-185 (slice 4): export a SELECTION from the Pages tab. POST because the selection is a body,
+  // not a path — but it answers with the same ZIP stream the other export routes do. Per-page `view` gating
+  // and the nested+attachments bundling live in buildSelectionExport.
+  app.post<{ Params: { spaceId: string }; Body: { pageIds?: unknown } }>('/spaces/:spaceId/pages/bulk-export', async (req, reply) => {
+    const pageIds = Array.isArray(req.body?.pageIds) ? req.body.pageIds.filter((x): x is string => typeof x === 'string') : []
+    try {
+      const result = await buildSelectionExport(req.db, app.fga, app.storageDriver, { userId: req.user.sub, spaceId: req.params.spaceId, pageIds })
       if (!result) return reply.code(404).send({ error: 'not found' })
       return sendExport(reply, result)
     } catch (e) {

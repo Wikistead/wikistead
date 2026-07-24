@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Trash2, Upload, Lock, LockOpen } from "lucide-react";
+import { Trash2, Upload, Lock, LockOpen, Download } from "lucide-react";
 import { useSpacePagesOverview, useBulkDeletePages, useBulkPublishPages, useBulkSetPageVisibility } from "../data/queries";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
+import { downloadSelectionExport } from "../data/exportApi";
+import { useSession } from "../session/SessionProvider";
 
 interface SpaceCtx { spaceId: string; name: string; accentKey: string | null }
 
@@ -30,6 +32,7 @@ export function SpacePagesTab() {
   const bulkDelete = useBulkDeletePages();
   const bulkPublish = useBulkPublishPages();
   const bulkVisibility = useBulkSetPageVisibility();
+  const { token } = useSession();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -85,6 +88,19 @@ export function SpacePagesTab() {
     });
   };
 
+  // #511 slice 4: export the selection. Read-only, so it just runs; the server view-gates each page and a
+  // 413 means the archive blew the size budget (its own message, not a generic failure).
+  const [exporting, setExporting] = useState(false);
+  const runBulkExport = async () => {
+    const ids = [...selected];
+    setExporting(true);
+    const status = await downloadSelectionExport(token ?? "", spaceId, ids);
+    setExporting(false);
+    if (status >= 200 && status < 300) { clearSelection(); notify.success(t("spacePages.bulkExportDone", { count: ids.length })); }
+    else if (status === 413) notify.error(t("spacePages.exportTooLarge"));
+    else notify.error(t("toast.actionFailed"));
+  };
+
   const n = selected.size;
 
   return (
@@ -108,6 +124,9 @@ export function SpacePagesTab() {
           </Button>
           <Button variant="default" size="sm" data-testid="bulk-unprivate" disabled={bulkVisibility.isPending} onClick={() => runBulkVisibility(false)}>
             <LockOpen size={14} /> {t("spacePages.clearPrivate")}
+          </Button>
+          <Button variant="default" size="sm" data-testid="bulk-export" disabled={exporting} onClick={runBulkExport}>
+            <Download size={14} /> {t("spacePages.exportSelected")}
           </Button>
           <Button variant="danger" size="sm" data-testid="bulk-delete" onClick={() => setConfirmOpen(true)}>
             <Trash2 size={14} /> {t("common.delete")}

@@ -6,12 +6,17 @@ const API_URL = (import.meta as any).env?.VITE_API_URL ?? "/api";
 // Shared download core (#309): fetch an export URL and, on success, save the blob honoring the
 // server's filename. Returns the HTTP status (0 = network error) so callers can show a DEDICATED
 // message for 413 (archive over the size budget) instead of a generic failure.
-async function fetchToDownload(token: string, url: string): Promise<number> {
+async function fetchToDownload(token: string, url: string, body?: unknown): Promise<number> {
   let res: Response;
   try {
     res = await fetch(url, {
+      method: body === undefined ? "GET" : "POST",
       credentials: "include",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
   } catch { return 0; }
   if (!res.ok) return res.status;
@@ -45,6 +50,14 @@ export function downloadSpaceExport(token: string, spaceId: string): Promise<num
 }
 export function downloadTenantExport(token: string): Promise<number> {
   return fetchToDownload(token, `${API_URL}/export`);
+}
+
+// #511 / ADR-185 (slice 4): export the CURRENT SELECTION from the space Pages tab. POST because the
+// selection travels in the body; the response is the same ZIP stream (and the same 413 on the size budget).
+// The server view-gates every selected page, so an id the caller cannot see is simply absent from the
+// archive — the client never needs to pre-filter, and never learns whether such a page exists.
+export function downloadSelectionExport(token: string, spaceId: string, pageIds: string[]): Promise<number> {
+  return fetchToDownload(token, `${API_URL}/spaces/${encodeURIComponent(spaceId)}/pages/bulk-export`, { pageIds });
 }
 
 // #308 / ADR-132: import an export ZIP into a space (member-only; the server gates `edit`). The file is sent as
