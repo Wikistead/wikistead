@@ -88,17 +88,6 @@
 .wks-prose .cm-lp-md-table { border-collapse: collapse; margin: 1.5em 0; font-size: 0.95em; max-width: 100%; }
 .wks-prose .cm-lp-md-table :is(th, td) { border: var(--wks-table-cell-border); padding: var(--wks-table-cell-padding); text-align: left; vertical-align: top; height: 1.8em; min-width: 5em; /* #406a column floor, so a wide table scrolls instead of collapsing to one character per line */ }
 .wks-prose .cm-lp-md-table th { font-weight: 700; background: var(--wks-table-th-bg); color: var(--fg); }
-/* #518: explicit headers (GFM top row = thead th; :::table row headers = the first cell of a row when
- * it's a <th>) stick on scroll. The scroll wrapper (overflow-x → also a vertical scroll container per
- * the CSS overflow rule) gets a max-height so a tall table scrolls INSIDE its box with the header
- * pinned — page-basis sticky-top is impossible while the overflow-x wrapper exists (it becomes the
- * vertical scroll ancestor), so the box-scroll model is the one that actually keeps the header visible.
- * Short tables stay their natural height (no scrollbar). Opaque th-bg + an inset box-shadow edge keep
- * the separating border with the sticky cell (a border-collapse border would otherwise scroll away). */
-.wks-prose .cm-lp-table-scroll { max-height: min(70vh, 32rem); overflow-y: auto; }
-.wks-prose .cm-lp-md-table thead th { position: sticky; top: 0; z-index: 2; box-shadow: inset 0 -1px 0 var(--border); }
-.wks-prose .cm-lp-md-table th:first-child { position: sticky; left: 0; z-index: 1; box-shadow: inset -1px 0 0 var(--border); }
-.wks-prose .cm-lp-md-table thead th:first-child { z-index: 3; box-shadow: inset -1px -1px 0 var(--border); }
 
 /* inline images (#305): Tailwind preflight makes img a block; an image sharing its paragraph with
  * text goes back inline (thumbnail); a standalone image (only child of its paragraph) is a full block. */
