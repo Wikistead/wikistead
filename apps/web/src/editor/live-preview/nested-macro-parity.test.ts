@@ -166,3 +166,42 @@ describe("#450: a list macro nested in a container resolves through the host sea
     expect(row.querySelector("[data-testid=macro-children-nested]"), "no host → no host-dispatched list").toBeNull();
   });
 });
+
+// #264 / ADR-186 (E): the slash palette inserts a macro's `slash.insert` VERBATIM (fixed colon count,
+// no depth adjustment), so inserting `::::columns` inside an existing column makes `::::columns` nested
+// in `::::columns` — the same 4-colon count, VIOLATING the outer>inner readability convention. The
+// resolution is the lenient stack resolver (a close pops the innermost; colon count never gates the
+// close — directive-parser.ts), which ADR-186 (E) closes #264 on: the notation stays standard `:::`
+// (no bespoke syntax), the parser is just lenient. This pins that the leniency reaches the RENDER, so a
+// deep same-colon nest is NOT truncated — a regression guard if anyone re-introduces colon-count gating.
+describe("#264 (E): deep same-colon nesting renders (lenient resolver → render, no truncation)", () => {
+  it("a ::::columns nested inside a ::::columns renders both levels; the outer's later column is not truncated", () => {
+    const body = [
+      ":::column",   // outer column 1 — holds a NESTED columns of the SAME colon count
+      "::::columns",
+      ":::column",
+      "inner-A",
+      ":::",
+      ":::column",
+      "inner-B",
+      ":::",
+      "::::",        // closes the inner ::::columns (pops innermost, not the outer)
+      ":::",         // closes outer column 1
+      ":::column",   // outer column 2 — must survive (not eaten by the inner close)
+      "outer-B",
+      ":::",
+    ].join("\n");
+    const row = columnsLiveRender(body);
+    expect(row.classList.contains("cm-lp-columns"), "outer columns row").toBe(true);
+    // the inner ::::columns rendered as a nested columns row inside a column (deep nest resolved + drawn)
+    expect(row.querySelector(".cm-lp-column .cm-lp-columns"), "the inner ::::columns renders nested").not.toBeNull();
+    // both inner bodies present …
+    expect(row.textContent).toContain("inner-A");
+    expect(row.textContent).toContain("inner-B");
+    // … AND the outer's second column is NOT truncated by the inner columns' close fence
+    expect(row.textContent).toContain("outer-B");
+    // the inner columns did NOT leak an extra OUTER column: exactly 2 direct .cm-lp-column children
+    const directCols = Array.from(row.children).filter((c) => (c as HTMLElement).classList.contains("cm-lp-column"));
+    expect(directCols.length, "the inner columns stayed inside column 1 (no leaked 3rd outer column)").toBe(2);
+  });
+});
