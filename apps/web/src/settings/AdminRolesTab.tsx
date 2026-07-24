@@ -5,6 +5,7 @@ import {
   useRoleAssignments, useAssignRole, useUnassignRole, useAdminSpaces,
   useTenantRoleDefaults, useSetTenantRoleDefaults, useTenantMemberCandidates,
   useRoleMappings, useCreateRoleMapping, useDeleteRoleMapping,
+  useDefaultRole, useSetDefaultRole,
 } from "../data/queries";
 import { useSession } from "../session/SessionProvider";
 import { Button, IconButton } from "../ui/Button";
@@ -138,6 +139,12 @@ export function AdminRolesTab() {
   const mapRole = (roles.data?.custom ?? []).find((r) => r.id === mapRoleId);
   const mapScope: "space" | "tenant" = mapRole?.scope === "tenant" ? "tenant" : "space";
   const mapResourceId = mapScope === "tenant" ? tenantId : mapSpaceId;
+
+  // #497 / ADR-183 §3: the tenant default role — a tenant-scope custom role conferred on any member
+  // no mapping matches (applied at their next login). Only tenant-scope roles are eligible.
+  const defaultRole = useDefaultRole();
+  const setDefaultRole = useSetDefaultRole();
+  const tenantRoles = (roles.data?.custom ?? []).filter((r) => r.scope === "tenant");
 
   const onError = (e: unknown) => {
     const status = (e as { status?: number })?.status;
@@ -327,6 +334,26 @@ export function AdminRolesTab() {
           {(assignments.data?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("adminRoles.assignEmpty")}</p>}
         </div>
       )}
+      {/* #497 / ADR-183 §3: the tenant default role — a tenant-scope custom role conferred on any
+          member no mapping matches (applied at their next login; manual assignments win). */}
+      <h3 className="mt-8 text-sm font-medium">{t("adminRoles.defaultRoleTitle")}</h3>
+      <p className="mt-0 mb-2 text-xs text-fg-dim">{t("adminRoles.defaultRoleBody")}</p>
+      <Select
+        size="sm"
+        value={defaultRole.data?.defaultRoleId ?? ""}
+        ariaLabel={t("adminRoles.defaultRoleTitle")}
+        testId="default-role"
+        options={[
+          { value: "", label: t("adminRoles.defaultRoleNone") },
+          ...tenantRoles.map((r) => ({ value: r.id, label: r.name })),
+        ]}
+        onChange={(v) => setDefaultRole.mutate(v || null, {
+          onSuccess: () => notify.success(t("toast.saved")),
+          onError,
+        })}
+      />
+      {tenantRoles.length === 0 && <p className="mt-1.5 text-xs text-fg-dim">{t("adminRoles.defaultRoleNeedsTenant")}</p>}
+
       {/* #497 / ADR-183: declarative group → role mappings. A mapping confers a custom role on an IdP
           group; membership resolves live (no reconcile). Same server machinery as assignment (#485 per-scope authority) — the console lists every mapping and flags an orphaned one whose
           group no member currently carries (IdP rename/empty; surfaced, never auto-migrated). */}

@@ -1145,7 +1145,11 @@
     "mappingEmpty": "No group mappings yet.",
     "mappingOrphan": "No members",
     "mappingOrphanHint": "No member currently carries this group — likely renamed or emptied at the identity provider. The mapping stays until you remove it; nothing is auto-migrated.",
-    "mappingDeleteConfirm": "Remove the mapping from group \"{{group}}\" to \"{{role}}\"? The role is revoked from that group. This cannot be undone."
+    "mappingDeleteConfirm": "Remove the mapping from group \"{{group}}\" to \"{{role}}\"? The role is revoked from that group. This cannot be undone.",
+    "defaultRoleTitle": "Default role",
+    "defaultRoleBody": "A tenant role given to any member no group mapping matches. It is applied at their next sign-in and removed once a mapping starts matching; a hand-placed assignment of the same role always wins.",
+    "defaultRoleNone": "None (plain member)",
+    "defaultRoleNeedsTenant": "Create a tenant-scope custom role above to use it as the default."
   },
   "detailsEdit": {
     "title": "Edit collapsible",

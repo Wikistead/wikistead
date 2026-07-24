@@ -1510,6 +1510,26 @@ export function useDeleteRoleMapping() {
   });
 }
 
+// #497 / ADR-183 §3: the tenant DEFAULT role — a tenant-scope custom role conferred on any member no
+// mapping matches (evaluated at their next login; manual wins). null = plain member (today).
+export function useDefaultRole(enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["default-role"],
+    queryFn: () => apiFetch<{ defaultRoleId: string | null }>("/admin/roles/default-role", token),
+    enabled,
+  });
+}
+export function useSetDefaultRole() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (defaultRoleId: string | null) =>
+      apiFetch<{ defaultRoleId: string | null }>("/admin/roles/default-role", token, { method: "PUT", body: JSON.stringify({ defaultRoleId }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["default-role"] }),
+  });
+}
+
 export function useAuditLog(before: number | null, enabled = true) {
   const { token } = useSession();
   return useQuery({
