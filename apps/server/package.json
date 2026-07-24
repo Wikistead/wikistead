@@ -22,6 +22,7 @@
     "migrate": "tsx --env-file=../../.env src/migrate.ts",
     "fga:bootstrap": "tsx --env-file=../../.env ../../infra/openfga/bootstrap.ts",
     "fga:seed": "tsx --env-file=../../.env ../../infra/openfga/seed.ts",
+    "fga:resync": "tsx --env-file=../../.env ../../infra/openfga/resync.ts",
     "fga:migrate-comment-direct": "tsx --env-file=../../.env ../../infra/openfga/migrate-comment-direct.ts",
     "db:seed": "tsx --env-file=../../.env ../../infra/db/seed.ts",
     "storage:gc": "tsx --env-file=../../.env src/storage/gc.ts",
