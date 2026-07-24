@@ -43,4 +43,62 @@ describe("plantuml inline editUI (#174 addendum)", () => {
     expect(code.textContent).toContain("<img");
     ctrl.destroy();
   });
+
+  // #525: the read surface already swapped a plantuml fence for host-rendered image bytes, but an OPEN
+  // editUI kept showing source — no seam existed for it. These pin the seam: with a host renderer the
+  // preview becomes the diagram; without one (or on a null result) it stays the degrade-to-source preview.
+  describe("#525 host-mediated preview render", () => {
+    const blob = () => new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" }); // PNG magic
+    const objectUrl = () => {
+      // happy-dom may not implement createObjectURL; stub both halves so the macro can build an <img>.
+      URL.createObjectURL = vi.fn(() => "blob:plantuml-test") as unknown as typeof URL.createObjectURL;
+      URL.revokeObjectURL = vi.fn() as unknown as typeof URL.revokeObjectURL;
+    };
+
+    it("renders the diagram in the preview when the host lends a renderer", async () => {
+      objectUrl();
+      const container = document.createElement("div");
+      const renderDiagram = vi.fn(async () => blob());
+      const ctrl = plantumlMacro.editUI!.mount(container, asMacroSource("@startuml\nA -> B\n@enduml"), ctx, vi.fn(), { renderDiagram });
+      await vi.waitFor(() => {
+        expect(container.querySelector('[data-testid="plantuml-edit-rendered"]')).toBeTruthy();
+      });
+      // the macro handed over only its SOURCE — it never sees the endpoint/lang (ADR-024 narrow host-API)
+      expect(renderDiagram).toHaveBeenCalledWith("@startuml\nA -> B\n@enduml");
+      expect(container.querySelector('[data-testid="plantuml-edit-preview"] code'), "source pre replaced by the image").toBeNull();
+      ctrl.destroy();
+    });
+
+    it("keeps the degrade-to-source preview when the host renderer returns null (unconfigured / failed)", async () => {
+      objectUrl();
+      const container = document.createElement("div");
+      const ctrl = plantumlMacro.editUI!.mount(container, asMacroSource("@startuml\nA -> B\n@enduml"), ctx, vi.fn(), { renderDiagram: async () => null });
+      await vi.waitFor(() => {
+        expect(container.querySelector('[data-testid="plantuml-edit-preview"] code')).toBeTruthy();
+      });
+      expect(container.querySelector('[data-testid="plantuml-edit-rendered"]')).toBeNull(); // never a broken embed
+      ctrl.destroy();
+    });
+
+    it("without a host renderer the preview is unchanged (no host → source, the shipped behaviour)", () => {
+      const container = document.createElement("div");
+      const ctrl = plantumlMacro.editUI!.mount(container, asMacroSource("@startuml\nA -> B\n@enduml"), ctx, vi.fn());
+      expect(container.querySelector('[data-testid="plantuml-edit-preview"] code')?.textContent).toContain("@startuml");
+      expect(container.querySelector('[data-testid="plantuml-edit-rendered"]')).toBeNull();
+      ctrl.destroy();
+    });
+
+    it("destroy invalidates an in-flight render (a late result never touches the detached panel)", async () => {
+      objectUrl();
+      const container = document.createElement("div");
+      let resolve!: (b: Blob | null) => void;
+      const ctrl = plantumlMacro.editUI!.mount(container, asMacroSource("@startuml\nA -> B\n@enduml"), ctx, vi.fn(), {
+        renderDiagram: () => new Promise<Blob | null>((r) => { resolve = r; }),
+      });
+      ctrl.destroy();      // panel closed while the render is still in flight
+      resolve(blob());     // …and it lands afterwards
+      await Promise.resolve();
+      expect(container.querySelector('[data-testid="plantuml-edit-rendered"]')).toBeNull();
+    });
+  });
 });

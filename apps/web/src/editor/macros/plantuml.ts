@@ -44,12 +44,45 @@ export const plantumlMacro: FenceMacro = {
       const preview = document.createElement("div");
       preview.className = "cm-lp-plantuml cm-lp-plantuml-edit-preview";
       preview.setAttribute("data-testid", "plantuml-edit-preview");
-      const renderPreview = (code: string) => {
+      const showSource = (code: string) => {
         const pre = document.createElement("pre");
         const el = document.createElement("code");
         el.textContent = code.trim(); // textContent (never innerHTML) — XSS-safe for user text
         pre.appendChild(el);
         preview.replaceChildren(pre);
+      };
+      // #525: when the host lends a renderer (an operator has configured the external service), the preview
+      // shows the DIAGRAM — the read surface already did, so an open editUI showing source was the odd one
+      // out. The macro still never fetches (ADR-024): it hands its source to the host seam and gets bytes.
+      // `seq` makes it latest-wins so a slow render for an older keystroke can't overwrite a newer preview,
+      // and each object URL is revoked when replaced so a long editing session doesn't leak blobs. No
+      // renderer (or a null result = unconfigured / failed / non-viewer) → the degrade-to-source preview.
+      let seq = 0;
+      let objectUrl: string | null = null;
+      const dropUrl = () => { if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; } };
+      const renderPreview = (code: string) => {
+        const host = editEnv?.renderDiagram;
+        if (!host) { showSource(code); return; }
+        const mine = ++seq;
+        void host(asMacroSource(code)).then((blob) => {
+          if (mine !== seq) return; // superseded by a newer keystroke
+          if (!blob) { showSource(code); return; } // degrade — never a broken embed
+          dropUrl();
+          objectUrl = URL.createObjectURL(blob);
+          const img = document.createElement("img");
+          img.className = "cm-lp-macro-rendered";
+          img.alt = "plantuml diagram";
+          img.setAttribute("data-testid", "plantuml-edit-rendered");
+          img.src = objectUrl;
+          preview.replaceChildren(img);
+        }).catch(() => { if (mine === seq) showSource(code); });
+      };
+      // Typing calls this per keystroke; a render is a network round-trip, so coalesce to the pause in
+      // typing (the read surface renders once per widget). The initial preview is immediate.
+      let idle: ReturnType<typeof setTimeout> | undefined;
+      const schedulePreview = (code: string) => {
+        if (idle) clearTimeout(idle);
+        idle = setTimeout(() => renderPreview(code), 500);
       };
       renderPreview(source);
       wrap.append(src, preview);
@@ -63,7 +96,7 @@ export const plantumlMacro: FenceMacro = {
         doc: asMacroSource(source),
         kind: "code",
         testid: "plantuml-edit-src",
-        onInput: (v) => renderPreview(v), // local live preview, no doc write
+        onInput: (v) => schedulePreview(v), // local live preview, no doc write (coalesced — #525)
         onCommit: (v) => save(v), // one offset-invariant Y.Text edit, on blur
       }) ?? mountSourceEditor({
         parent: src,
@@ -71,13 +104,20 @@ export const plantumlMacro: FenceMacro = {
         dark: ctx.theme === "dark",
         vim: editEnv?.vim,
         testid: "plantuml-edit-src",
-        onInput: (v) => renderPreview(v),
+        onInput: (v) => schedulePreview(v),
         onCommit: (v) => save(asMacroSource(v)),
       });
       const focus = setTimeout(() => editor.focus(), 0);
       return {
         handlesEscape: () => editor.inVimInsert(), // #243 C3 slice 2b: first Escape = vim insert→normal, not exit
-        destroy() { clearTimeout(focus); editor.destroy(); wrap.remove(); },
+        destroy() {
+          clearTimeout(focus);
+          if (idle) clearTimeout(idle); // #525: no render fires after the panel is gone
+          seq++; // invalidate an in-flight render so its .then() can't touch the detached DOM
+          dropUrl();
+          editor.destroy();
+          wrap.remove();
+        },
       };
     },
   },
