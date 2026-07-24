@@ -420,6 +420,10 @@
   "spaceMembers": {
     "title": "Members & permissions",
     "body": "Grant members access to this space. Access flows to every published page in it.",
+    "customRolesTitle": "Custom roles",
+    "customRolesBody": "Assign a custom role (defined in tenant settings → Roles) to a member of this space. The role's capabilities apply across the space.",
+    "customRolesEmpty": "No custom roles assigned in this space yet.",
+    "selectRole": "Select a role",
     "addPlaceholder": "Search members…",
     "capability": "Permission",
     "view": "Can view",

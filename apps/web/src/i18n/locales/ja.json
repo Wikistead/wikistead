@@ -420,6 +420,10 @@
   "spaceMembers": {
     "title": "メンバーと権限",
     "body": "このスペースへのアクセスをメンバーに付与します。配下のすべての公開ページに波及します。",
+    "customRolesTitle": "カスタムロール",
+    "customRolesBody": "カスタムロール（テナント設定 → ロールで定義）をこのスペースのメンバーに割り当てます。ロールの権限がスペース全体に適用されます。",
+    "customRolesEmpty": "このスペースにはまだカスタムロールの割当がありません。",
+    "selectRole": "ロールを選択",
     "addPlaceholder": "メンバーを検索…",
     "capability": "権限",
     "view": "閲覧可",

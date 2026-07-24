@@ -6,6 +6,7 @@ import { MemberSearchInput } from "../ui/MemberSearchInput";
 import {
   useSpaceAccess, useGrantSpaceAccess, useRevokeSpaceAccess, useMemberCandidates, useTenantGroups,
   useCommentOpen, useSetCommentOpen, useMemberIdentities,
+  useAssignableRoles, useRoleAssignments, useAssignRole, useUnassignRole,
   type PageRelation,
 } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
@@ -47,6 +48,37 @@ export function SpaceMembersTab() {
   const [capability, setCapability] = useState<PageRelation>("view");
   const candidates = useMemberCandidates(spaceId, picked ? "" : query);
   const groups = useTenantGroups(spaceId, mode === "group");
+
+  // #485 / #514: custom-role assignment lives here in space settings (not the tenant Roles tab). The role
+  // DEFINITIONS come from the manager-readable list; assign/list/unassign reuse the manage-gated role_assignment
+  // routes with resourceType="space". The tenant Roles tab keeps DEFINITION editing; here a manager only ASSIGNS.
+  const assignable = useAssignableRoles(spaceId);
+  const roleAssignments = useRoleAssignments("space", spaceId);
+  const assignRole = useAssignRole();
+  const unassignRole = useUnassignRole();
+  const [roleId, setRoleId] = useState("");
+  const [roleQuery, setRoleQuery] = useState("");
+  const [rolePicked, setRolePicked] = useState<{ sub: string; label: string } | null>(null);
+  const roleCandidates = useMemberCandidates(spaceId, rolePicked ? "" : roleQuery);
+  const customRoles = assignable.data?.custom ?? [];
+  const assignRoleIdentities = useMemberIdentities(
+    (roleAssignments.data ?? []).filter((a) => a.principal.startsWith("user:")).map((a) => a.principal.replace(/^user:/, "")),
+  );
+  const addRoleAssignment = () => {
+    if (!roleId || !rolePicked) return;
+    assignRole.mutate(
+      { roleId, resourceType: "space", resourceId: spaceId, principal: `user:${rolePicked.sub}` },
+      {
+        onSuccess: () => { notify.success(t("toast.accessGranted")); setRolePicked(null); setRoleQuery(""); },
+        onError: () => notify.error(t("toast.actionFailed")),
+      },
+    );
+  };
+  const rolePrincipalLabel = (principal: string): string => {
+    if (principal.startsWith("group:")) return `${principal.replace(/^group:/, "").replace(/#member$/, "")} (${t("spaceMembers.group")})`;
+    const sub = principal.replace(/^user:/, "");
+    return assignRoleIdentities.data?.[sub]?.displayName || sub;
+  };
 
   const add = () => {
     if (mode === "group") {
@@ -152,6 +184,60 @@ export function SpaceMembersTab() {
         ))}
         {grants.length === 0 && <p className="text-sm text-fg-dim">{t("spaceMembers.empty")}</p>}
       </div>
+
+      {/* #485 / #514: assign CUSTOM ROLES (defined in the tenant Roles tab) to members of THIS space —
+          the assignment IA the user asked for (create in tenant, assign in space). Only shown when the
+          tenant has custom resource-scope roles to assign; each assignment expands to the role's capability
+          bundle server-side (manage-gated). */}
+      {customRoles.length > 0 && (
+        <div className="mt-8 border-t border-border pt-4" data-testid="space-role-assign">
+          <h3 className="mt-0 text-sm font-medium">{t("spaceMembers.customRolesTitle")}</h3>
+          <p className="mt-0 mb-3 text-sm text-fg-dim">{t("spaceMembers.customRolesBody")}</p>
+          <div className="mb-4 flex items-start gap-2">
+            <Select
+              value={roleId}
+              onChange={setRoleId}
+              ariaLabel={t("spaceMembers.selectRole")}
+              testId="space-role-select"
+              size="sm"
+              options={[
+                { value: "", label: t("spaceMembers.selectRole") },
+                ...customRoles.map((r) => ({ value: r.id, label: r.name })),
+              ]}
+            />
+            <MemberSearchInput
+              query={roleQuery}
+              onQueryChange={setRoleQuery}
+              picked={rolePicked ? { grantee: `user:${rolePicked.sub}`, label: rolePicked.label } : null}
+              onPick={(c) => { setRolePicked(c ? { sub: c.sub, label: c.displayName || c.sub } : null); if (c) setRoleQuery(""); }}
+              candidates={roleCandidates.data ?? []}
+              placeholder={t("spaceMembers.addPlaceholder")}
+              ariaLabel={t("spaceMembers.addPlaceholder")}
+              inputTestId="space-role-member-input"
+              listTestId="space-role-member-candidates"
+              itemTestId="space-role-member-candidate"
+            />
+            <Button variant="primary" size="sm" disabled={!roleId || !rolePicked || assignRole.isPending} onClick={addRoleAssignment} data-testid="space-role-assign-add">{t("spaceMembers.add")}</Button>
+          </div>
+          <div className="flex flex-col gap-1" data-testid="space-role-assign-list">
+            {(roleAssignments.data ?? []).map((a) => (
+              <div key={a.id} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="space-role-assign-item">
+                <span className="min-w-[52px] flex-none rounded-full border border-[var(--accent)] px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-[var(--accent)]">{a.roleName}</span>
+                <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{rolePrincipalLabel(a.principal)}</span>
+                {/* #504: red at rest; no confirm — an unassignment is re-assignable in one step */}
+                <IconButton aria-label={t("spaceMembers.revoke")} data-testid="space-role-assign-revoke" variant="danger"
+                  onClick={() => unassignRole.mutate(a.id, {
+                    onSuccess: () => notify.success(t("toast.accessRevoked")),
+                    onError: () => notify.error(t("toast.actionFailed")),
+                  })}>
+                  <X size={14} />
+                </IconButton>
+              </div>
+            ))}
+            {(roleAssignments.data?.length ?? 0) === 0 && <p className="text-sm text-fg-dim">{t("spaceMembers.customRolesEmpty")}</p>}
+          </div>
+        </div>
+      )}
 
       {/* #100 / ADR-029: comment AUDIENCE toggles — who may comment on this space's pages. A resource
           setting (space#comment_open), separate from the per-member grants above. Default OFF. */}

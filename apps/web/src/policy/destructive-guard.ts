@@ -32,6 +32,7 @@ export const ALLOWLIST: Record<string, string> = {
   "WatchListPage.tsx:unwatch": "re-watching is one click on the page (#504 exception)",
   "PermissionsDialog.tsx:revoke": "a page grant is re-grantable in one step (#504 exception)",
   "SpaceMembersTab.tsx:revoke": "a space grant is re-grantable in one step (#504 exception)",
+  "SpaceMembersTab.tsx:unassignRole": "a space role assignment is re-assignable in one step (#485/#504 exception)",
   "AdminEmbedsTab.tsx:remove": "the removal is STAGED until Save — undoable in place (#504 exception)",
   "SpaceSettingsPage.tsx:removeIcon": "re-uploading restores the space icon (#504 exception)",
   "TenantBrandingTab.tsx:removeLogo": "re-uploading restores the tenant logo (#504 exception)",
