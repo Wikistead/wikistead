@@ -313,11 +313,6 @@
     "neverUsed": "未使用",
     "lastUsed": "最終使用",
     "lastUsedRel": "{{rel}}に使用",
-    "issuePolicy": "API キーを作成できる人",
-    "issueMembers": "すべてのメンバー",
-    "issueAdminsOnly": "管理者のみ",
-    "issueMembersHint": "メンバーは自分のアカウント設定から自分のキーを作成します。キーが所有者の権限を超えることはありません。",
-    "issueAdminsOnlyHint": "メンバーは既に持っているキーの確認と失効はできますが、新規作成はできません。",
     "revokeConfirm": "API キー「{{name}}」を失効しますか？以後この認証は使えません。"
   },
   "adminAuth": {

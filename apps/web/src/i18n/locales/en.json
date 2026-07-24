@@ -313,11 +313,6 @@
     "neverUsed": "Never used",
     "lastUsed": "Last used",
     "lastUsedRel": "Used {{rel}}",
-    "issuePolicy": "Who may create API keys",
-    "issueMembers": "Any member",
-    "issueAdminsOnly": "Administrators only",
-    "issueMembersHint": "Members create their own keys from their account settings. A key never exceeds its owner’s permissions.",
-    "issueAdminsOnlyHint": "Members can see and revoke the keys they already hold, but cannot create new ones.",
     "revokeConfirm": "Revoke the API key \"{{name}}\"? It never authenticates again."
   },
   "adminAuth": {

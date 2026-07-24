@@ -178,7 +178,10 @@ export function AdminRolesTab() {
             ]}
             idPrefix="builtin-member"
             list={TENANT_CAPABILITIES}
-            disabled={defaults.isLoading || setDefaults.isPending}
+            // #496 review: also disabled until the defaults have actually ARRIVED. On a failed query
+            // `data` is undefined with isLoading false, and the `?? true` fallbacks below would let one
+            // click write a capability the tenant never had. An authz control must not guess its state.
+            disabled={!defaults.data || setDefaults.isPending}
             onChange={(caps) => setDefaults.mutate({ memberCreateSpaces: caps.includes("createSpaces"), memberIssueApiKeys: caps.includes("issueApiKeys") }, {
               onSuccess: () => notify.success(t("toast.saved")),
               onError,

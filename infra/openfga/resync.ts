@@ -21,6 +21,11 @@
 //     migrate-445 wrote the tenant_settings.space_creation_policy value into the wildcard tuple, then DROPped
 //     the column (mig 075 — point of no return). There is no DB column left to derive it from; a default role's
 //     createSpaces capability sets it at runtime, so it lives in FGA only (like the other markers below).
+//   - the API-key issuance default (tenant:<tid>#member api_key_issue tenant:<tid>) — FGA-only since
+//     ADR-181/#496, exactly like space_creator above. migrate-496 wrote tenant_settings.api_key_issue_policy
+//     into the member userset, then mig 084 DROPped the column (point of no return). After a store rebuild a
+//     tenant that had opted all members in is back to admin-only until the Roles-tab toggle is flipped again
+//     — fail-closed (nobody gains issuance), but silent, so it is named here.
 //   - visibility / policy MARKERS — public view, PRIVATE, RESTRICTED, FROZEN, comment_open audience, and
 //     per-share-link view/edit markers — all FGA-only. (Consequence to be aware of: a PRIVATE published page
 //     gets its space-link back here but NOT its private marker, so after recovery it is space-visible until
@@ -70,6 +75,7 @@ const groupFgaId = (tenantId: string, name: string): string =>
   try {
     // 1/2. tenant memberships + group memberships (both from the members table). The space-creation default
     // (tenant:<tid>#member space_creator tenant:<tid>) is NOT rebuilt here — it is FGA-only since ADR-171/#471.
+    // Same for the API-key issuance default (api_key_issue) since ADR-181/#496 — no column left to read.
     // Its DB column (tenant_settings.space_creation_policy) was DROPped in migration 075 after migrate-445
     // copied its value into the wildcard tuple (point of no return), so there is nothing left to derive it from
     // (see the KNOWN LIMITATION note above). Querying it here crashed the whole resync at the first statement
@@ -125,5 +131,5 @@ const groupFgaId = (tenantId: string, name: string): string =>
     await sql.end()
   }
 
-  console.log(`fga:resync done — ${wrote} tuple(s) written. NOT recovered (FGA-only): space grants, the space-creation default (space_creator, FGA-only since ADR-171), visibility/policy markers (private/restricted/frozen/public/comment_open/share-link), drafts' creator grant, share_links, custom role assignments.`)
+  console.log(`fga:resync done — ${wrote} tuple(s) written. NOT recovered (FGA-only): space grants, the space-creation default (space_creator, FGA-only since ADR-171), the API-key issuance default (api_key_issue, FGA-only since ADR-181), visibility/policy markers (private/restricted/frozen/public/comment_open/share-link), drafts' creator grant, share_links, custom role assignments.`)
 })().catch((err) => { console.error(err); process.exit(1) })
