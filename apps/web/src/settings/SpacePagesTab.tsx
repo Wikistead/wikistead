@@ -114,7 +114,11 @@ export function SpacePagesTab() {
     bulkMove.mutate({ spaceId, targetSpaceId, pageIds: ids }, {
       onSuccess: (r) => {
         clearSelection();
+        // A page selected together with its parent rode along rather than moving in its own right, so it
+        // is neither a move nor a skip — saying "moved N" with the raw selection size would overstate it.
+        const alongside = (r?.results ?? []).filter((x) => x.movedWithAncestor).length;
         if (r && r.skipped > 0) notify.info(t("spacePages.bulkMovePartial", { moved: r.moved, skipped: r.skipped }));
+        else if (alongside > 0) notify.info(t("spacePages.bulkMoveNested", { moved: r?.moved ?? 0, nested: alongside }));
         else notify.success(t("spacePages.bulkMoveDone", { count: r?.moved ?? 0 }));
       },
       onError: () => notify.error(t("toast.actionFailed")),

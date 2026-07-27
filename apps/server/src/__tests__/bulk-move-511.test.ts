@@ -10,9 +10,9 @@ import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
-import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { fgaClient, writeTuples, deleteTuples, check } from '@wikistead/authz'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, deletePage, bulkMovePages, BULK_MOVE_CAP } from '../routes/pages.js'
+import { createPage, deletePage, publishPage, bulkMovePages, BULK_MOVE_CAP } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -56,12 +56,16 @@ beforeAll(async () => {
   dest = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: CALLER, plan: tenant.plan, name: 'bulk-move-dst' })).id
   // OTHER's space: CALLER is only a VIEWER there, so it is a destination they may see but not manage.
   foreign = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: OTHER, plan: tenant.plan, name: 'bulk-move-foreign' })).id
-  await writeTuples(fgaClient, [{ user: `user:${CALLER}`, relation: 'viewer', object: `space:${foreign}` }])
+  // `editor_member`, not `viewer`. With only viewer the caller lacks the destination's `edit` too,
+  // so weakening the gate from `manage` to `edit` left the refusal test green — it could not tell the two
+  // apart, which is the whole point of this suite. As an editor they hold `edit` and NOT `manage`, so the
+  // refusal below is attributable to `manage` alone.
+  await writeTuples(fgaClient, [{ user: `user:${CALLER}`, relation: 'editor_member', object: `space:${foreign}` }])
 }, 90_000)
 
 afterAll(async () => {
   for (const id of ids) await deletePage(db, fgaClient, app.searchDriver, { pageId: id, userId: CALLER }).catch(() => {})
-  await deleteTuples(fgaClient, [{ user: `user:${CALLER}`, relation: 'viewer', object: `space:${foreign}` }]).catch(() => {})
+  await deleteTuples(fgaClient, [{ user: `user:${CALLER}`, relation: 'editor_member', object: `space:${foreign}` }]).catch(() => {})
   await deleteTuples(fgaClient, [
     { user: `user:${CALLER}`, relation: 'space_creator', object: `tenant:${TENANT}` },
     { user: `user:${CALLER}`, relation: 'member', object: `tenant:${TENANT}` },
@@ -77,8 +81,10 @@ describe('#511 bulkMovePages — manage on BOTH sides, and no bulk bypass', () =
     const p = await mkPage('move-foreign')
     // Non-vacuity: the caller really can see that space, so the refusal below is about `manage`, not about
     // the space being invisible — otherwise this would pass for the wrong reason.
-    const { allowed } = await fgaClient.check({ user: `user:${CALLER}`, relation: 'viewer', object: `space:${foreign}` })
-    expect(allowed, 'the caller can view the destination').toBe(true)
+    // The caller can EDIT the destination but not MANAGE it: that is exactly the gap between what movePage
+    // asks for and what the approved decision requires, so the refusal below is attributable to `manage`.
+    expect(await check(fgaClient, `user:${CALLER}`, 'edit', { type: 'space', id: foreign }), 'edit: yes').toBe(true)
+    expect(await check(fgaClient, `user:${CALLER}`, 'manage', { type: 'space', id: foreign }), 'manage: no').toBe(false)
     // …and is NOT a tenant admin, who would manage every space through `admin from tenant` and make the
     // refusal below unobservable.
     const admin = await fgaClient.check({ user: `user:${CALLER}`, relation: 'admin', object: `tenant:${TENANT}` })
@@ -90,10 +96,19 @@ describe('#511 bulkMovePages — manage on BOTH sides, and no bulk bypass', () =
     expect(await spaceOf(p), 'the page did not move').toBe(source)
   })
 
-  it('moves the selection into a space the caller manages, subtree and all', async () => {
+  it('moves the selection into a space the caller manages, subtree and FGA link and all', async () => {
     const parent = await mkPage('move-parent')
     const child = await createPage(db, fgaClient, app.searchDriver, { tenantId: tenant.id, spaceId: source, userId: CALLER, title: 'move-child', parentId: parent })
     ids.push(child.id)
+    // PUBLISH both: `page#space` is written at publish, so a draft has no link at all and the tuple swap is
+    // skipped entirely. caught that this test's "the subtree came along" claim was DB-only — it never
+    // exercised the FGA side it was meant to cover.
+    for (const id of [parent, child.id]) {
+      await publishPage(db, fgaClient, app.searchDriver, app.storageDriver, { pageId: id, subject: `user:${CALLER}`, createdBy: `user:${CALLER}` })
+    }
+    const linkedTo = async (pageId: string, spaceId: string) =>
+      (await fgaClient.read({ user: `space:${spaceId}`, relation: 'space', object: `page:${pageId}` })).tuples?.length ?? 0
+    expect(await linkedTo(parent, source), 'linked to the source before the move').toBeGreaterThan(0)
 
     const res = await bulkMovePages(db, fgaClient, app.searchDriver, {
       spaceId: source, targetSpaceId: dest, pageIds: [parent], userId: CALLER,
@@ -103,6 +118,45 @@ describe('#511 bulkMovePages — manage on BOTH sides, and no bulk bypass', () =
     // The descendant travels with its parent — a move that left children behind would orphan them in the
     // old space, which is the silent structural damage the ADR's cascade rule exists to prevent.
     expect(await spaceOf(child.id), 'the subtree came along').toBe(dest)
+    // …and the authority moved with it: the link the space inheritance actually traverses now points at the
+    // destination, for the child as well as the root.
+    expect(await linkedTo(parent, dest), 'the root is linked to the destination').toBeGreaterThan(0)
+    expect(await linkedTo(parent, source), 'and no longer to the source').toBe(0)
+    expect(await linkedTo(child.id, dest), 'the child is linked to the destination').toBeGreaterThan(0)
+  })
+
+  it('selecting a parent AND its child does not FLATTEN the hierarchy', async () => {
+    // The Pages tab is a flat list with a select-all checkbox, so "select everything and move" is the
+    // ordinary gesture. Each move lands at the destination root, so moving the child in its own right would
+    // put it BESIDE its parent — silently destroying the structure the confirm promises to carry along.
+    const parent = await mkPage('flat-parent')
+    const child = await createPage(db, fgaClient, app.searchDriver, { tenantId: tenant.id, spaceId: source, userId: CALLER, title: 'flat-child', parentId: parent })
+    ids.push(child.id)
+
+    const res = await bulkMovePages(db, fgaClient, app.searchDriver, {
+      spaceId: source, targetSpaceId: dest, pageIds: [parent, child.id], userId: CALLER,
+    })
+    expect(res.moved, 'one real move — the child rode along').toBe(1)
+    expect(res.results.find((r) => r.id === child.id)).toMatchObject({ ok: true, movedWithAncestor: true })
+    const [row] = await db.sql<{ parent_id: string | null }[]>`SELECT parent_id FROM pages WHERE id = ${child.id}`
+    expect(row?.parent_id, 'the child is STILL under its parent').toBe(parent)
+    expect(await spaceOf(child.id)).toBe(dest)
+  })
+
+  it('the space HOME cannot be moved out of its space', async () => {
+    const home = await mkPage('the-home')
+    await adminPool`UPDATE spaces SET home_page_id = ${home} WHERE id = ${source}`
+    try {
+      const res = await bulkMovePages(db, fgaClient, app.searchDriver, {
+        spaceId: source, targetSpaceId: dest, pageIds: [home], userId: CALLER,
+      })
+      expect(res.results[0], 'refused with its own reason, not a permission one').toMatchObject({ ok: false, reason: 'space_home' })
+      // Otherwise spaces.home_page_id keeps pointing at a page in ANOTHER space: the source has a home it
+      // does not contain, and cannot create a new one while that row is alive.
+      expect(await spaceOf(home), 'the home stayed put').toBe(source)
+    } finally {
+      await adminPool`UPDATE spaces SET home_page_id = NULL WHERE id = ${source}`
+    }
   })
 
   it('reports partial success, and an absent id reports what a forbidden one would', async () => {
