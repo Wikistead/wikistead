@@ -31,25 +31,33 @@ test("#420: role manager — create, edit, assign on a space, unassign, delete",
   await expect(page.getByTestId("custom-role-row").filter({ hasText: name }).getByTestId("custom-cap-publish"))
     .toBeChecked({ timeout: 10_000 });
 
-  // Assign on the demo space to a throwaway member sub.
-  await page.getByTestId("assign-role").click();
+  // Assign on the demo space. #514 / ADR-188 slice 4 moved this control OFF the Roles tab (which now only
+  // DEFINES roles) and into the space's own Members tab, so the role's lifecycle is exercised where the
+  // grant actually lives now.
+  await page.goto("/spaces/demo_space/settings/members");
+  await expect(page.getByTestId("space-role-assign")).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId("space-role-select").click();
   await page.getByRole("option", { name }).click();
-  await expect(page.getByRole("option")).toHaveCount(0); // the role listbox is fully closed (radix restores pointer-events)
-  await page.getByTestId("assign-space").click();
-  await page.getByRole("option").first().click(); // the first real space (no placeholder rows)
-  await page.getByTestId("assign-sub").fill(`e2e-holder-${Date.now()}`); // a raw sub is still accepted
-  await page.getByTestId("assign-add").click();
-  await expect(page.getByTestId("assignment-list")).toContainText(name, { timeout: 8000 });
+  await expect(page.getByRole("option")).toHaveCount(0); // the listbox is fully closed (radix restores pointer-events)
+  await page.getByTestId("space-role-member-input").fill("dev");
+  await page.getByTestId("space-role-member-candidate").first().click();
+  await page.getByTestId("space-role-assign-add").click();
+  await expect(page.getByTestId("space-role-assign-list")).toContainText(name, { timeout: 8000 });
 
   // Deleting a role with live assignments is refused (the 409 guard) — the toast explains.
-  await row.getByTestId("role-delete").click();
+  await page.goto("/admin/roles");
+  const row2 = page.getByTestId("custom-role-row").filter({ hasText: name });
+  await row2.getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click(); // #504: delete confirms first
   await expect(page.getByTestId("custom-roles")).toContainText(name); // still there (409)
 
-  // Unassign → then delete succeeds.
-  await page.getByTestId("assignment-row").filter({ hasText: name }).getByTestId("assignment-remove").click();
-  await expect(page.getByTestId("assignment-list")).not.toContainText(name, { timeout: 8000 });
-  await row.getByTestId("role-delete").click();
+  // Unassign (again where the grant lives) → then delete succeeds.
+  await page.goto("/spaces/demo_space/settings/members");
+  await page.getByTestId("space-role-assign-item").filter({ hasText: name }).getByTestId("space-role-assign-revoke").click();
+  await expect(page.getByTestId("space-role-assign-list")).not.toContainText(name, { timeout: 8000 });
+  await page.goto("/admin/roles");
+  const row3 = page.getByTestId("custom-role-row").filter({ hasText: name });
+  await row3.getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click(); // #504: delete confirms first
   await expect(page.getByTestId("custom-roles")).not.toContainText(name, { timeout: 8000 });
 });
@@ -128,18 +136,22 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   await page.getByTestId("role-save").click();
   await expect(page.getByTestId("custom-roles")).toContainText(name, { timeout: 8000 });
 
-  // Selecting the tenant role in the assignment panel hides the space picker (tenant-wide note).
-  await page.getByTestId("assign-role").click();
+  // #514 / ADR-188 slice 4: a TENANT role is an attribute of a member, so it is granted on the Members
+  // page — no space picker anywhere, because the scope is the tenant itself.
+  await page.goto("/admin/members");
+  await expect(page.getByTestId("tenant-role-assignments")).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId("tenant-assign-role").click();
   await page.getByRole("option", { name }).click();
-  await expect(page.getByTestId("assign-tenant-note")).toBeVisible();
-  await expect(page.getByTestId("assign-space")).toHaveCount(0);
-  await page.getByTestId("assign-sub").fill(`e2e-tholder-${Date.now()}`);
-  await page.getByTestId("assign-add").click();
-  await expect(page.getByTestId("assignment-list")).toContainText(name, { timeout: 8000 });
+  await expect(page.getByRole("option")).toHaveCount(0);
+  await page.getByTestId("tenant-assign-member").click();
+  await page.getByRole("option").nth(1).click(); // skip the placeholder row
+  await page.getByTestId("tenant-assign-add").click();
+  await expect(page.getByTestId("tenant-assignment-list")).toContainText(name, { timeout: 8000 });
 
   // Unassign + delete (leave the board clean).
-  await page.getByTestId("assignment-row").filter({ hasText: name }).getByTestId("assignment-remove").click();
-  await expect(page.getByTestId("assignment-list")).not.toContainText(name, { timeout: 8000 });
+  await page.getByTestId("tenant-assignment-row").filter({ hasText: name }).getByTestId("tenant-assignment-remove").click();
+  await expect(page.getByTestId("tenant-assignment-list")).not.toContainText(name, { timeout: 8000 });
+  await page.goto("/admin/roles");
   await page.getByTestId("custom-role-row").filter({ hasText: name }).getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click(); // #504: delete confirms first
   await expect(page.getByTestId("custom-roles")).not.toContainText(name, { timeout: 8000 });
@@ -164,18 +176,21 @@ test("#420 built-ins render as read-only capability checkboxes, and members are 
   await expect(viewerDelete).not.toBeChecked();
   await expect(page.getByTestId("builtin-roles"), "the cap · cap · cap text is gone").not.toContainText(" · ");
 
-  // the assignment controls carry visible labels, not just aria ones
-  const form = page.getByTestId("assign-form");
-  await expect(form.locator("label", { hasText: /./ }).first()).toBeVisible();
-  const labels = (await form.locator("label").allInnerTexts()).join("|");
-  expect(labels.length, `the assignment row is labelled (got "${labels}")`).toBeGreaterThan(0);
-
-  // the member field searches by name: typing offers candidates, picking one fills the field
-  await page.getByTestId("assign-sub").fill("e");
-  const item = page.getByTestId("assign-sub-item").first();
+  // The ruling was about VOCABULARY — "never ask for an internal sub, search by name" — not about
+  // which screen shows it. #514 slice 4 moved assignment to where each grant lives, so the property is
+  // pinned there: the space Members tab still picks a person by name and resolves the principal itself.
+  await page.goto("/spaces/demo_space/settings/members");
+  await expect(page.getByTestId("space-role-assign")).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId("space-role-member-input").fill("e");
+  const item = page.getByTestId("space-role-member-candidate").first();
   await expect(item, "a tenant member matched the search").toBeVisible({ timeout: 8000 });
   const picked = (await item.innerText()).split("\n")[0]!.trim();
   await item.click();
-  await expect(page.getByTestId("assign-sub")).toHaveValue(picked);
-  await expect(page.getByTestId("assign-sub-list"), "the list closes once a member is chosen").toHaveCount(0);
+  await expect(page.getByTestId("space-role-member-input"), "the field now holds the person's NAME, not a sub").toHaveValue(picked);
+  await expect(page.getByTestId("space-role-member-candidates"), "the list closes once a member is chosen").toHaveCount(0);
+
+  // …and the Roles tab no longer offers any assignment control at all (it DEFINES roles now).
+  await page.goto("/admin/roles");
+  await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("assign-form"), "assignment left the definitions tab").toHaveCount(0);
 });

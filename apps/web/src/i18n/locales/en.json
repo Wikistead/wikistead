@@ -1188,7 +1188,11 @@
     "defaultRoleTitle": "Default role",
     "defaultRoleBody": "A tenant role given to any member no group mapping matches. It is applied at their next sign-in and removed once a mapping starts matching; a hand-placed assignment of the same role always wins.",
     "defaultRoleNone": "None (plain member)",
-    "defaultRoleNeedsTenant": "Create a tenant-scope custom role above to use it as the default."
+    "defaultRoleNeedsTenant": "Create a tenant-scope custom role above to use it as the default.",
+    "tenantAssignTitle": "Tenant role assignments",
+    "tenantAssignBody": "A tenant role (like creating spaces) is an attribute of a member, so it is granted here. Roles for a SPACE are granted in that space's Members tab.",
+    "memberLabel": "Member",
+    "memberPlaceholder": "Select member"
   },
   "detailsEdit": {
     "title": "Edit collapsible",
