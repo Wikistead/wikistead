@@ -146,9 +146,13 @@ export const builtinDirectiveDescriptors: Record<string, MacroHtmlDescriptor> = 
 
 // The built-in fence descriptors (info-string language → descriptor).
 export const builtinFenceDescriptors: Record<string, MacroHtmlDescriptor> = {
-  mermaid: { exportFidelity: "preserve", htmlRender: mermaidHtmlRender },
+  // #85 / ADR-059 "Security decisions": mermaid and excalidraw are degrade FIXED on the server — no
+  // headless render, no inline SVG, no macro JS in the exported document. What lands on paper is the
+  // source / a placeholder, and the fidelity badge is what tells the reader so. These values are in
+  // lockstep with the editor registrations (pinned — see the fidelity-lockstep test).
+  mermaid: { exportFidelity: "degrade", htmlRender: mermaidHtmlRender },
   plantuml: { exportFidelity: "degrade", htmlRender: plantumlHtmlRender },
-  excalidraw: { exportFidelity: "preserve", htmlRender: excalidrawHtmlRender },
+  excalidraw: { exportFidelity: "degrade", htmlRender: excalidrawHtmlRender },
 };
 
 // A MacroHtmlRegistry over ALL built-in macros, for the server export renderer.

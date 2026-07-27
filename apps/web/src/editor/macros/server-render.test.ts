@@ -198,10 +198,13 @@ describe("renderMarkdownToHtml — built-in M2 directives (#85 slice 2)", () => 
     expect(out(":::warning\n<b>careful</b>\n:::", reg)).toContain('<div class="callout callout-warning">');
     expect(out(":::warning\n<b>careful</b>\n:::", reg)).not.toContain("<b>careful</b>"); // escaped
   });
-  it("fence macros dispatch: mermaid/plantuml → <pre>, plantuml is degrade-badged", () => {
+  it("fence macros dispatch: mermaid/plantuml → <pre>, both degrade-badged", () => {
     const m = out("```mermaid\ngraph TD; A-->B\n```", reg);
     expect(m).toContain('<pre class="mermaid">graph TD; A--&gt;B'); // body escaped inside pre
-    expect(m).not.toContain("wks-fidelity-degrade"); // mermaid = preserve, no badge
+    // #85 / ADR-059: what reaches the static document is the diagram's SOURCE, so the block is badged.
+    // It read `not.toContain` here while the export showed source with nothing saying so — a silent
+    // degradation, which is precisely what the fidelity contract exists to rule out.
+    expect(m).toContain("wks-fidelity-degrade");
     const p = out("```plantuml\n@startuml\n@enduml\n```", reg);
     expect(p).toContain('<pre class="plantuml">');
     expect(p).toContain('data-fidelity="degrade"'); // plantuml = degrade → badged

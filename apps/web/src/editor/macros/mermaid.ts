@@ -95,7 +95,13 @@ async function renderMermaidOffscreen(
 export const mermaidMacro: FenceMacro = {
   kind: "fence",
   lang: "mermaid",
-  exportFidelity: "preserve", // declarative text body → round-trips verbatim
+  // #85 / ADR-059 "Security decisions": mermaid's server export is degrade FIXED — the SVG is never
+  // rendered server-side and mermaid's JS is never shipped in exported/published HTML, so the static
+  // document carries the diagram's SOURCE. The `.md` still round-trips verbatim (ADR-022 Tier 2); what
+  // this field drives is the EXPORT render, and there the diagram genuinely does not survive. Declaring
+  // "preserve" printed the source with no marker at all — a silent degradation, the one thing ADR-022
+  // Part 6 forbids.
+  exportFidelity: "degrade",
   foldable: false, // #174 / ADR-087: no collapse button on a rendered diagram (the reviewer flagged it)
   summary: () => "Mermaid diagram",
   slash: { labelKey: "palette.mermaid", keywords: "diagram flowchart graph chart mermaid", insert: "```mermaid\n\n```", caret: 11 },

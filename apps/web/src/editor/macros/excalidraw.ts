@@ -53,7 +53,11 @@ export function themeAdaptStrokes(elements: any[], dark: boolean): any[] {
 export const excalidrawMacro: FenceMacro = {
   kind: "fence",
   lang: "excalidraw",
-  exportFidelity: "preserve", // the JSON is a standard code fence → lossless round-trip
+  // #85 / ADR-059: degrade — the export emits a placeholder (never inline SVG, an explicit security
+  // decision), so the drawing itself does not reach the static document. The fence JSON round-trips
+  // losslessly in Markdown; this field is about the rendered export, which is a placeholder and must
+  // say so. Marked "preserve", the drawing vanished into the words "[Excalidraw drawing]" unannounced.
+  exportFidelity: "degrade",
   summary: () => "Excalidraw drawing",
   slash: { labelKey: "palette.excalidraw", keywords: "diagram draw whiteboard sketch excalidraw", insert: "```excalidraw\n\n```", caret: 14 },
   liveRender(body, ctx) {

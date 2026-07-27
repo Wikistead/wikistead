@@ -3020,6 +3020,32 @@ export async function bakeListSnapshot(
   return { v: 1, blocks }
 }
 
+// #85 / ADR-059: the same per-block resolution, but as a NAMED VIEWER. The member read surface keeps the
+// literal `:::tagged`/`:::children` and resolves it live through the member-only /list route, so any
+// DOM-free render of `published_md` (HTML export — and, since ADR-191, print) saw the unresolved directive
+// and emitted an empty box: a page whose body is a dynamic list exported and PRINTED as nothing. Baking the
+// ANONYMOUS snapshot in here instead would be the wrong list (a member exporting their own page would get
+// the public subset silently), so the viewer's own subject resolves it — the identical call the /list route
+// makes, with its host-page view gate and its per-item view filter, so an unviewable page cannot enter an
+// export any more than it can enter the on-screen list.
+export async function resolveListSnapshotForViewer(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { pageId: string; md: string; subject: string; context?: { current_time: string } },
+): Promise<ListSnapshot> {
+  const listDirs = listDirectiveRanges(args.md)
+  const blocks: { spec: string; results: Backlink[] }[] = []
+  for (const d of listDirs) {
+    const body = args.md.slice(d.bodyFrom, d.bodyTo)
+    const specLine = `${d.name} ${body.split('\n').map((l) => l.trim()).find((l) => l.length > 0) ?? ''}`.trim()
+    const results = await getListResults(db, fga, {
+      pageId: args.pageId, name: d.name as ListDirectiveName, body, subject: args.subject, context: args.context,
+    })
+    blocks.push({ spec: specLine, results })
+  }
+  return { v: 1, blocks }
+}
+
 // Escape the characters that would break out of a Markdown link's `[text]` label — a page title is arbitrary
 // text and must not inject markup into the substituted list (the public render sanitizes HTML too, but keep the
 // generated Markdown well-formed). Backslash first, then the brackets that close the label; newlines fold to a
