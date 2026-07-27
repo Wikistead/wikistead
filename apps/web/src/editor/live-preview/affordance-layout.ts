@@ -37,6 +37,9 @@ const AFFORDANCES = [
 const AFFORDANCE_SEL = AFFORDANCES.join(", ");
 // Presence is placed but never displaced (see the #453 invariant above).
 const PINNED = ".cm-macro-presence-box";
+// Affordances whose visibility the OWNER decides (see the plugin): their current computed style is not the
+// answer during a measure — the answer is whether the owner is about to show them.
+const OWNER_GATED = ".cm-lp-macro-richui-raw";
 
 const GAP = 3; // px between stacked affordance rows
 
@@ -84,7 +87,11 @@ export function focusedWrap(view: EditorView, pointer: { x: number; y: number } 
   return innermost(under);
 }
 
-export function resolveAffordanceLayout(view: EditorView): Placed[] {
+// `focus` is the block the owner is ABOUT to show chrome for. Placement must be computed against what the
+// write pass will make visible, not against what is visible right now — otherwise an affordance shown by
+// this very pass was never measured, and lands unplaced. (That is exactly what a first cut of the owner-
+// driven visibility did: the static case came back with the original 8px collision.)
+export function resolveAffordanceLayout(view: EditorView, focus: HTMLElement | null = null): Placed[] {
   const els = Array.from(view.dom.querySelectorAll<HTMLElement>(AFFORDANCE_SEL));
   if (els.length < 2) return els.map((el) => ({ el, top: 0, bottom: 0, left: 0, right: 0, dy: 0 }));
 
@@ -92,8 +99,11 @@ export function resolveAffordanceLayout(view: EditorView): Placed[] {
   // apart and simply never intersect, so one uniform pass handles both "same block" and "nested block"
   // without having to decide which block an element belongs to (the pill is not even inside the wrap).
   const rank = (el: HTMLElement): number => AFFORDANCES.findIndex((sel) => el.matches(sel));
+  // "visible" means visible AFTER this pass: an owner-gated affordance counts when its block is focused.
+  const willShow = (el: HTMLElement) =>
+    el.matches(OWNER_GATED) ? focus != null && focus.contains(el) : isVisible(el);
   const candidates = els
-    .filter((el) => isVisible(el))
+    .filter(willShow)
     .map((el) => ({ el, r: el.getBoundingClientRect() }))
     .filter((c) => c.r.width > 0 && c.r.height > 0)
     .sort((a, b) => rank(a.el) - rank(b.el) || a.r.top - b.r.top);
@@ -153,7 +163,10 @@ export const affordanceLayout = ViewPlugin.fromClass(
     schedule(view: EditorView): void {
       view.requestMeasure({
         key: this,
-        read: () => ({ placed: resolveAffordanceLayout(view), focus: focusedWrap(view, this.pointer) }),
+        read: () => {
+          const focus = focusedWrap(view, this.pointer);
+          return { placed: resolveAffordanceLayout(view, focus), focus };
+        },
         write: ({ placed, focus }) => {
           // one wrap wears the focus mark; the CSS that used to react to `:hover` now reacts to this
           for (const w of Array.from(view.dom.querySelectorAll<HTMLElement>(".cm-lp-macro-wrap"))) {
