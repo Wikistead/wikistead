@@ -26,7 +26,7 @@ const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 // clickable-whole-surface exception (the #273 download card) keeps its own `pointer`. Typed-body
 // macros (callout/table/todo/details/tagged/mermaid/plantuml/code) keep the caret affordances.
 const ATOM_CLASS_MACROS = new Set(["embed-page", "embed-external", "excalidraw", "columns", "tabs", "children"]);
-import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset, appendMarkdownInto, buildFenceHeader, buildLinkList, withListHost } from "../macros/md-render";
+import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset, appendMarkdownInto, buildFenceHeader, buildLinkList, withListHost, dispatchMacroRender } from "../macros/md-render";
 import { setActiveTabIndex } from "../macros/layout-directives"; // #278 item 1: record the clicked tab before the island's commit rebuilds the tabs widget
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
@@ -2628,11 +2628,19 @@ class MacroWidget extends WidgetType {
       // rebuilds mid-capture), so the handler must find the FRESH wrap; the container's start offset
       // is unchanged by an in-slot commit (all edits land after it).
       if (isLayout) wrap.dataset.layoutFrom = String(this.from);
-      if (isLayout) setPendingBaseOffset(this.bodyFrom);
       // #370 thread the view's ListSource through the md-render seam so a `:::tagged`/`:::children`
       // NESTED in this container resolves (same view-filtered fetch as the top level — no new authz path).
-      const rendered = withListHost(view.state.facet(listSource), () => this.macro.liveRender(this.body, { theme: this.theme })); // #200: the widget's built theme (eq() rebuilds on a switch), not a live DOM read
-      if (isLayout) setPendingBaseOffset(null);
+      // ADR-177 §2 (#450): the dispatch itself is the SHARED one — this surface and the two md-render sinks
+      // now reach `liveRender` through one function, so "renders top-level but not nested" cannot come back
+      // from three call sites drifting apart. `onThrow: "throw"` preserves THIS surface's existing
+      // behaviour (a throwing macro is not swallowed here, unlike the md-render sinks); unifying that is a
+      // behaviour change and belongs to its own slice. The base offset rides the same seam as before
+      // (#200: the widget's built theme — eq rebuilds on a switch — not a live DOM read).
+      const rendered = withListHost(view.state.facet(listSource), () => dispatchMacroRender(
+        this.macro,
+        this.body,
+        { theme: this.theme, ...(isLayout ? { baseOffset: this.bodyFrom } : {}), onThrow: "throw" },
+      ))!;
       wrap.appendChild(rendered);
       // #215 / ADR-100 (Consumers 1 & 2): draw the nested-macro ring + edit button on the selected nested
       // subtree, or swap it for its editUI island when nested-edit is active. Only for layout containers,
