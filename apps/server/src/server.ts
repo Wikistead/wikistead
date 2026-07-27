@@ -5,6 +5,7 @@ import { startAuditDrainWorker } from './audit/outbox.js'
 import { startWebhookDrainWorker } from './routes/webhooks.js'
 import { startAnalyticsDrainWorker } from './analytics/outbox.js'
 import { startShareLinkSweepWorker } from './routes/share-links.js'
+import { startAdminDriftWorker } from './auth/admin-mapping.js' // #497 / ADR-183 2b
 import { startTrashRetentionWorker } from './routes/pages.js'
 import { fgaClient } from '@wikistead/authz'
 import { assertProductionFgaPersistent, assertFgaModelFresh } from './openfga-guard.js'
@@ -43,6 +44,9 @@ export async function startServer(): Promise<FastifyInstance> {
   // privatisation so a "private but link alive on FGA" leak window self-heals. Coarse interval (failures
   // are rare); started here (not buildApp) so inject-driven tests don't spawn a timer.
   startShareLinkSweepWorker(fgaClient, Number(process.env.SHARE_LINK_SWEEP_POLL_MS ?? 60000))
+  // #497 / ADR-183 §2b: revoke admin materialised from an IdP group the member no longer carries. Login
+  // fixes the member who signs in; this is the only thing that fixes the one who never does again.
+  startAdminDriftWorker(fgaClient, Number(process.env.ADMIN_DRIFT_POLL_MS ?? 900000))
 
   // Background webhook delivery (#228 / ADR-108): drains the in-tx webhook outbox, signs (HMAC) and POSTs
   // each event to matching active hooks via the pinned SSRF-safe client. Started here (not buildApp) so
