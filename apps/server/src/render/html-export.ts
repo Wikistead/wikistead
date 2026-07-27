@@ -34,13 +34,16 @@ const EXPORT_STYLES = `
 /* #85 / ADR-059: the export document reproduces the EDITOR's look (single design language) so a
    downloaded page reads the same as on-screen — callout colours + icons, heading sizes/colour,
    typography — plus the fidelity indicator on degraded blocks. Self-contained (no external CSS). */
-:root{color-scheme:light dark;
+/* #85 review / #505 ruling: this document is LIGHT-FIXED, and not only when printed. The file is made to
+   be SHARED — downloaded, mailed, attached, printed by someone else — and the ruling that fixed print to
+   a light base was about exactly that kind of artifact. It used to follow the READER's OS theme, so the
+   same export was black-on-white for its author and white-on-black for whoever they sent it to, with the
+   exact-colour print rule below carrying that dark surface onto paper. Setting color-scheme to light also
+   stops the browser painting form controls and scrollbars dark around it. */
+:root{color-scheme:light;
   --bg:#ffffff;--fg:#1f2328;--fg-dim:#656d76;--border:#d0d7de;--head:#35a77c;
   --callout-info:#0969da;--callout-note:#57606a;--callout-tip:#2ea043;--callout-warning:#d29922;--callout-danger:#f0584d;
   --font-body:"Inter","Noto Sans JP",system-ui,sans-serif;--font-code:ui-monospace,SFMono-Regular,Menlo,monospace;}
-@media (prefers-color-scheme:dark){:root{
-  --bg:#1e1e1e;--fg:#dddddd;--fg-dim:#9a9a9a;--border:#3a3a3a;--head:#83c092;
-  --callout-info:#4493f8;--callout-note:#9198a1;--callout-tip:#3fb950;--callout-warning:#e3b341;--callout-danger:#f0584d;}}
 body{margin:0;background:var(--bg);color:var(--fg);}
 .wks-export{max-width:46rem;margin:2rem auto;padding:0 1rem;font-family:var(--font-body);line-height:1.7;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
 .wks-export :is(h1,h2,h3,h4,h5,h6){color:var(--head);font-weight:700;line-height:1.3;margin:1.2em 0 .5em;}
@@ -93,12 +96,11 @@ body{margin:0;background:var(--bg);color:var(--fg);}
 /* #207 part 2: this document IS the print/PDF source (the app prints it from an offscreen frame — the
    whole doc rendered statically, every macro, no raw ::: leak). Make it print well: a compact even
    page margin, and release the narrow on-screen reading column so the print uses the full sheet width
-   (#207 part 1's intent, applied on the render path the app actually prints). Force a light surface so
-   "Save as PDF" under a dark OS theme still yields black-on-white, not white-on-dark. */
+   (#207 part 1's intent, applied on the render path the app actually prints). The light surface is no
+   longer re-declared here — the document itself is light-fixed above, so there is one place to change it
+   and no way for the screen and the sheet to disagree. */
 @page{margin:14mm;}
 @media print{
-  :root{--bg:#ffffff;--fg:#1f2328;--fg-dim:#656d76;--border:#d0d7de;--head:#35a77c;
-    --callout-info:#0969da;--callout-note:#57606a;--callout-tip:#2ea043;--callout-warning:#d29922;--callout-danger:#f0584d;}
   .wks-export{max-width:none;margin:0;}
 }
 `

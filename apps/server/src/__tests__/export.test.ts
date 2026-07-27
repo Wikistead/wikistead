@@ -413,8 +413,12 @@ describe('buildHtmlExport', () => {
     // headings match the editor sizes/colour (not plain text)
     expect(css).toContain('.wks-export h1{font-size:1.8em}')
     expect(css).toContain('--head') // heading colour token (green, like the editor)
-    // dark theme is handled
-    expect(css).toContain('prefers-color-scheme:dark')
+    // #85 review: the document is LIGHT-FIXED, not theme-following. A downloaded file is something people
+    // send on, and the reader's OS theme deciding its colours meant the same export arrived dark for the
+    // recipient — and printed that way, because the sheet carries exact colours. Pinned as an absence:
+    // no dark override anywhere in the stylesheet, and the scheme declared as light rather than both.
+    expect(css).not.toContain('prefers-color-scheme:dark')
+    expect(css).toContain('color-scheme:light;')
     // #207 part 2: this document IS what the app prints (offscreen frame, all macros static). It must
     // carry its OWN print rules so the printed output uses the full sheet (release the narrow reading
     // column) with a compact even margin — else printing the export reintroduces #207 part 1's
