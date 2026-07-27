@@ -107,27 +107,13 @@ export function AdminRolesTab() {
   // #504: deleting a role is irreversible (its assignments go with it) — red trigger + confirm.
   const [deletingRole, setDeletingRole] = useState<{ id: string; name: string } | null>(null);
 
-  // Assignment panel: pick a custom role + a space + a member sub → expand. Space-scope only in
-  // the v1 console (page-scope assignment is reachable via the API; a page picker is a follow-up).
+  // #514 slice 4: the assignment panel moved off this tab (see the note in the JSX). `spaces` stays —
+  // the group→role MAPPING form below still needs a space picker for space-scope mappings.
   const spaces = useAdminSpaces();
-  const assign = useAssignRole();
-  const unassign = useUnassignRole();
-  const [assignRoleId, setAssignRoleId] = useState("");
-  const [assignSpaceId, setAssignSpaceId] = useState("");
-  const [assignSub, setAssignSub] = useState("");
-  // #420the member field is a name search; `assignSub` stays the resolved sub the server wants,
-  // and typing a raw sub still works (the picker assists, it never gates — ADR-161).
-  const [memberQuery, setMemberQuery] = useState("");
-  const [pickedMember, setPickedMember] = useState<{ grantee: string; label: string } | null>(null);
-  const memberCandidates = useTenantMemberCandidates(memberQuery);
-  // #445: default tenant-role presets (CE) + the tenant scope for custom-role assignment.
+  // #445: default tenant-role presets (CE).
   const { tenantId } = useSession();
   const defaults = useTenantRoleDefaults();
   const setDefaults = useSetTenantRoleDefaults();
-  const assignRole = (roles.data?.custom ?? []).find((r) => r.id === assignRoleId);
-  const assignScope: "space" | "tenant" = assignRole?.scope === "tenant" ? "tenant" : "space";
-  const assignResourceId = assignScope === "tenant" ? tenantId : assignSpaceId;
-  const assignments = useRoleAssignments(assignScope, assignResourceId);
 
   // #497 / ADR-183: declarative group → role mappings. A mapping owns a group-principal role
   // assignment; group members resolve live at check time (no reconcile). The role's scope decides
@@ -279,72 +265,11 @@ export function AdminRolesTab() {
         <Button variant="default" size="sm" data-testid="role-create" onClick={() => setCreating(true)}>{t("adminRoles.create")}</Button>
       )}
 
-      {/* Assignments: role → space → member. The server expands to the fixed FGA tuples (with the
-         reference-counted unassign); provenance shows WHO holds WHICH role. */}
-      <h3 className="mt-8 text-sm font-medium">{t("adminRoles.assignTitle")}</h3>
-      <p className="mt-0 mb-2 text-xs text-fg-dim">{t("adminRoles.assignBody")}</p>
-      {/* #420each control says what it is. Two unlabelled dropdowns side by side gave no way
-          to tell which one was the role and which the space; and the member field asked for a "sub",
-          an internal identifier nobody outside the code knows — it is a name search now, resolving to
-          the same `user:<sub>` principal the server has always expected. */}
-      <div className="mb-3 flex flex-wrap items-end gap-3" data-testid="assign-form">
-        <label className="flex flex-col gap-1 text-xs text-fg-dim">
-          {t("adminRoles.roleLabel")}
-          <Select size="sm" value={assignRoleId} ariaLabel={t("adminRoles.roleLabel")} testId="assign-role"
-            options={(roles.data?.custom ?? []).map((r) => ({ value: r.id, label: r.name }))}
-            onChange={setAssignRoleId} />
-        </label>
-        {assignScope === "space" && (
-          <label className="flex flex-col gap-1 text-xs text-fg-dim">
-            {t("adminRoles.spaceLabel")}
-            <Select size="sm" value={assignSpaceId} ariaLabel={t("adminRoles.spaceLabel")} testId="assign-space"
-              options={(spaces.data ?? []).map((s) => ({ value: s.id, label: s.name || s.id }))}
-              onChange={setAssignSpaceId} />
-          </label>
-        )}
-        {assignScope === "tenant" && <span className="pb-1.5 text-xs text-fg-dim" data-testid="assign-tenant-note">{t("adminRoles.assignTenantScope")}</span>}
-        <label className="flex w-64 flex-col gap-1 text-xs text-fg-dim">
-          {t("adminRoles.subLabel")}
-          <MemberSearchInput
-            inputSize="sm"
-            query={memberQuery}
-            onQueryChange={(q) => { setMemberQuery(q); setAssignSub(q.trim()); }}
-            picked={pickedMember}
-            onPick={(c) => {
-              setPickedMember(c ? { grantee: c.sub, label: c.displayName || c.sub } : null);
-              setAssignSub(c ? c.sub : "");
-              if (c) setMemberQuery("");
-            }}
-            candidates={memberCandidates.candidates}
-            placeholder={t("adminRoles.subPlaceholder")}
-            ariaLabel={t("adminRoles.subLabel")}
-            inputTestId="assign-sub"
-            listTestId="assign-sub-list"
-            itemTestId="assign-sub-item"
-          />
-        </label>
-        <Button variant="primary" size="sm" data-testid="assign-add"
-          disabled={!assignRoleId || !assignResourceId || !assignSub.trim() || assign.isPending}
-          onClick={() => assign.mutate({ roleId: assignRoleId, resourceType: assignScope, resourceId: assignResourceId, principal: `user:${assignSub.trim()}` }, {
-            onSuccess: () => { notify.success(t("toast.saved")); setAssignSub(""); setMemberQuery(""); setPickedMember(null); },
-            onError,
-          })}>{t("adminRoles.assign")}</Button>
-      </div>
-      {assignResourceId && (
-        <div className="flex flex-col gap-1" data-testid="assignment-list">
-          {assignments.data?.map((a) => (
-            <div key={a.id} className="flex items-center gap-2 text-sm" data-testid="assignment-row">
-              <span className="min-w-0 flex-1 truncate">{a.principal.replace(/^user:/, "")}</span>
-              <span className="text-xs text-fg-dim">{a.roleName}</span>
-              {/* #504: red at rest; no confirm — an unassignment is re-assignable in one step
-                  (exception candidate, listed for the review ruling) */}
-              <IconButton aria-label={t("adminRoles.unassign")} data-testid="assignment-remove" variant="danger"
-                onClick={() => unassign.mutate(a.id, { onSuccess: () => notify.success(t("toast.saved")), onError })}>×</IconButton>
-            </div>
-          ))}
-          {(assignments.data?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("adminRoles.assignEmpty")}</p>}
-        </div>
-      )}
+      {/* #514 / ADR-188 slice 4: this tab DEFINES roles; it no longer grants them. A resource role is
+          assigned where the resource is (a space's Members tab, #485) and a tenant role where the
+          principal is (the Members page) — assignment living next to the definitions is what made
+          "define" and "grant" read as one screen. Authorization is untouched by the move: every
+          assign/unassign still goes through requireAssignmentAuthority on the server. */}
       {/* #497 / ADR-183 §3: the tenant default role — a tenant-scope custom role conferred on any
           member no mapping matches (applied at their next login; manual assignments win). */}
       <h3 className="mt-8 text-sm font-medium">{t("adminRoles.defaultRoleTitle")}</h3>

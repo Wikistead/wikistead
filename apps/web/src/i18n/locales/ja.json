@@ -1187,7 +1187,11 @@
     "defaultRoleTitle": "デフォルトロール",
     "defaultRoleBody": "どのグループマッピングにも該当しないメンバーに付与するテナントロール。次回サインイン時に適用され、マッピングが該当し始めると外れます。同じロールを手動で割り当てている場合は手動が優先されます。",
     "defaultRoleNone": "なし（通常メンバー）",
-    "defaultRoleNeedsTenant": "デフォルトにするテナントスコープのカスタムロールを上で作成してください。"
+    "defaultRoleNeedsTenant": "デフォルトにするテナントスコープのカスタムロールを上で作成してください。",
+    "tenantAssignTitle": "テナントロールの割り当て",
+    "tenantAssignBody": "テナントロール（スペースの作成など）はメンバーの属性なので、ここで付与します。スペースのロールは各スペースの「メンバー」タブで付与します。",
+    "memberLabel": "メンバー",
+    "memberPlaceholder": "メンバーを選択"
   },
   "detailsEdit": {
     "title": "折りたたみを編集",

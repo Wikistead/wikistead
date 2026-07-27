@@ -66,14 +66,15 @@ describe("destructive-operation policy guard (#510)", () => {
   });
 
   it("the allowlist is load-bearing — removing an entry turns the real file red", () => {
-    // AdminRolesTab's unassign is a sanctioned red-only exception; without its entry it must violate.
-    const f = join(SRC, "settings/AdminRolesTab.tsx");
+    // The tenant role un-assignment is a sanctioned red-only exception; without its entry it must
+    // violate. (#514 slice 4 moved this surface out of AdminRolesTab and beside the members.)
+    const f = join(SRC, "settings/TenantRoleAssignments.tsx");
     const src = readFileSync(f, "utf8");
     const without = { ...ALLOWLIST };
-    delete without["AdminRolesTab.tsx:unassign"];
-    const v = analyzeDestructive("AdminRolesTab.tsx", src, without);
+    delete without["TenantRoleAssignments.tsx:unassign"];
+    const v = analyzeDestructive("TenantRoleAssignments.tsx", src, without);
     expect(v.map((x) => x.identifier), "unassign is only green because it is allowlisted").toContain("unassign");
     // …and with the shipped allowlist it is green
-    expect(analyzeDestructive("AdminRolesTab.tsx", src).map((x) => x.identifier)).not.toContain("unassign");
+    expect(analyzeDestructive("TenantRoleAssignments.tsx", src).map((x) => x.identifier)).not.toContain("unassign");
   });
 });

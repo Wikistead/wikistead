@@ -10,6 +10,7 @@ import {
   listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember, eraseMemberAnalytics,
   ApiError, type Member, type Invite,
 } from "../data/membersApi";
+import { TenantRoleAssignments } from "./TenantRoleAssignments";
 
 // Admin Console: member list (role change / remove) + invites (create / revoke).
 // All actions hit admin-only endpoints; a non-admin sees an "admin only" notice
@@ -69,6 +70,10 @@ export function MembersPage() {
     <div style={{ padding: 24, maxWidth: 720 }}>
       <h2 style={{ marginTop: 0 }}>{t("members.title")}</h2>
       {error && <p style={{ color: "crimson" }}>{error}</p>}
+
+      {/* #514 / ADR-188 slice 4: a TENANT role is an attribute of a member, so it is granted here —
+          beside the people — while a SPACE role is granted in that space's Members tab. */}
+      <TenantRoleAssignments members={members} />
 
       <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 32 }}>
         <thead>
