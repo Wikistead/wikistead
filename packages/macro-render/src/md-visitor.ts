@@ -1,4 +1,4 @@
-import { parser, Strikethrough, Table } from "@lezer/markdown";
+import { parser, Strikethrough, Table, TaskList } from "@lezer/markdown";
 import { directiveExtension, parseDirectiveOpen, resolveDirectiveRanges, type ResolvedDirective } from "./directive-parser.js";
 import { highlightExtension } from "./highlight-ext.js";
 import { footnoteExtension } from "./footnote-ext.js";
@@ -14,7 +14,11 @@ import { HEADINGS, footnoteRefLabel } from "./md-nodes.js";
 // html-escape), and the only per-sink asymmetries (macro dispatch, DOM extras, cosmetic class maps) live
 // behind the delegated `fence` / `directive` hooks (ADR-160 §1).
 
-export const mdParser = parser.configure([directiveExtension, Strikethrough, Table, highlightExtension, footnoteExtension]);
+// #505/#207/#85 (ADR-191): TaskList joins the GFM set. Without it `- [ ] todo` reached the static
+// surfaces as literal text and `- [x]` came out as a stray `<span>x</span>` — so a checklist that reads
+// as checkboxes in the editor printed as mangled prose, which the print acceptance ("no rendered element
+// breaks") forbids. Adding it HERE fixes both static sinks at once, which is the point of one visitor.
+export const mdParser = parser.configure([directiveExtension, Strikethrough, Table, TaskList, highlightExtension, footnoteExtension]);
 export type MdNode = ReturnType<typeof mdParser.parse>["topNode"];
 
 // Container roles emitted via open/close; leaf roles via leaf().
@@ -25,10 +29,11 @@ export type MdOpenRole =
   | "table" | "thead" | "tbody" | "tr" | "th" | "td"
   | "link" | "attachmentRef"
   | "footnoteSection" | "footnoteList" | "footnoteItem";
-export type MdLeafRole = "hr" | "br" | "inlineCode" | "literalBlock" | "footnoteRef" | "footnoteBack";
+export type MdLeafRole = "hr" | "br" | "inlineCode" | "literalBlock" | "footnoteRef" | "footnoteBack" | "taskMarker";
 export interface MdRoleData {
   href?: string | null;      // link (null = scheme-rejected → non-link)
   n?: number | null;         // footnoteRef / footnoteItem / footnoteBack number
+  checked?: boolean;         // taskMarker — a GFM `- [x]` item (#505)
   unreferenced?: boolean;    // footnoteItem
   text?: string;             // inlineCode / literalBlock
 }
@@ -170,6 +175,9 @@ function walkInlineNode(st: WalkState, node: MdNode): void {
       st.sink.close("link");
       return;
     }
+    // #505: GFM task marker. The parser gives `[ ]` / `[x]` as its own node inside the item's paragraph;
+    // both sinks turn it into a disabled checkbox, so a printed / exported checklist looks like one.
+    case "TaskMarker": st.sink.leaf("taskMarker", { checked: /x/i.test(txt(st.src, node)) }); return;
     case "HardBreak": st.sink.leaf("br"); return;
     // HTML* and anything else inline → literal inert text (the XSS-safe default).
     default: st.sink.text(txt(st.src, node));
@@ -192,6 +200,10 @@ function walkBlock(st: WalkState, node: MdNode): number | void {
     case "BulletList": sink.open("ul"); walkBlockChildren(st, node); sink.close("ul"); return;
     case "OrderedList": sink.open("ol"); walkBlockChildren(st, node); sink.close("ol"); return;
     case "ListItem": sink.open("li"); walkBlockChildren(st, node); sink.close("li"); return;
+    // #505: a GFM task item. The parser wraps the item body in `Task` (TaskMarker + the inline content)
+    // with NO Paragraph, so without this case the whole thing fell to the block default and printed as
+    // literal "[ ] todo". Walk it as INLINE so the marker becomes a checkbox and the rest stays prose.
+    case "Task": walkInlineChildren(st, node); return;
     case "FencedCode": case "CodeBlock": {
       const t = node.getChild("CodeText");
       const info = node.name === "FencedCode" ? node.getChild("CodeInfo") : null;

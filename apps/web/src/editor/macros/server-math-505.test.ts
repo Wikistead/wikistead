@@ -80,3 +80,36 @@ describe("#505: math in the canonical HTML", () => {
     }
   });
 });
+
+// #505 / #207 / #85: a GFM checklist is a rendered element too, and it was one of the ones that BROKE.
+// The static surfaces (the print portal and the HTML export both walk the shared visitor) had no
+// TaskList in the parser, so `- [ ] todo` printed as literal text and `- [x]` came out as a stray
+// `<span>x</span>` — mangled prose where the editor shows checkboxes.
+describe("#505: task lists on the static path", () => {
+  it("renders checkboxes instead of literal [ ] / [x]", () => {
+    const out = renderMarkdownToHtml("- [ ] todo\n- [x] done").toString();
+    expect(out).toContain('<input type="checkbox" disabled>');
+    expect(out).toContain('<input type="checkbox" disabled checked>');
+    expect(out, "the literal marker must be gone").not.toContain("[ ]");
+    expect(out, "…and the stray span the old parse produced").not.toMatch(/<span>x<\/span>/);
+    expect(out).toContain("todo");
+    expect(out).toContain("done");
+  });
+
+  it("the checkbox is disabled — a document, not a control", () => {
+    // The editable checkbox belongs to the editing surface; a printed sheet must not offer a control.
+    const out = renderMarkdownToHtml("- [x] done").toString();
+    expect(out).toMatch(/<input[^>]*\sdisabled/);
+  });
+
+  it("leaves a plain bullet alone", () => {
+    const out = renderMarkdownToHtml("- plain item").toString();
+    expect(out).not.toContain("checkbox");
+    expect(out).toContain("plain item");
+  });
+
+  it("does not turn a bracket in prose into a checkbox", () => {
+    const out = renderMarkdownToHtml("see [ ] in the text").toString();
+    expect(out).not.toContain("checkbox");
+  });
+});
