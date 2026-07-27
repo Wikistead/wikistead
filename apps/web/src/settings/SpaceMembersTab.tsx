@@ -232,6 +232,7 @@ export function SpaceMembersTab() {
               candidates={roleCandidates.data ?? []}
               placeholder={t("spaceMembers.addPlaceholder")}
               ariaLabel={t("spaceMembers.addPlaceholder")}
+              inputSize="sm" // #535: one size variant per row — the Select and Button beside it are `sm`
               inputTestId="space-role-member-input"
               listTestId="space-role-member-candidates"
               itemTestId="space-role-member-candidate"

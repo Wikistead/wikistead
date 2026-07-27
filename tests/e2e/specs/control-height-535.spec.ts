@@ -5,11 +5,7 @@ import { test, expect } from "@playwright/test";
 // row lands at once; this measures the rows in a real browser, because px is the whole complaint.
 const ROWS = [
   { url: "/admin/roles", row: "[data-testid=mapping-form]", name: "tenant group mapping" },
-  // The space role-assignment row is NOT here yet, and deliberately: measuring it shows two causes this
-  // change does not reach — an IconButton (its own 28px, and it is used across the whole app, so giving it
-  // a height is its own verified change) and a member-search Input left at the default variant next to
-  // `sm` neighbours. Adding the row now would pin a failure rather than a contract; #535 carries the
-  // measurement and the next step.
+  { url: "/spaces/demo_space/settings/members", row: "[data-testid=space-role-assign]", name: "space role assignment" },
 ];
 
 for (const { url, row, name } of ROWS) {
