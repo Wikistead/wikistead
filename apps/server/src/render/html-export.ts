@@ -2,6 +2,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { check } from '@wikistead/authz'
 import { renderMarkdownToHtml, builtinMacroRegistry, escapeHtml } from '@wikistead/macro-render'
 import type { TenantDb } from '../db/index.js'
+import { resolveListSnapshotForViewer, substituteListSnapshots } from '../routes/pages.js'
 import { sanitizeExportHtml } from './sanitize.js'
 
 // #85 / ADR-059 slice 3b: the server-side HTML export route body. This is the ONE
@@ -134,10 +135,19 @@ export async function buildHtmlExport(
   const [row] = await db.sql<PageRow[]>`SELECT title, published_md FROM pages WHERE id = ${args.pageId}`
   if (!row) return null // viewable per FGA but gone from the tenant table → 404 (no leak)
 
+  // #85 / ADR-145: `:::tagged` / `:::children` are DYNAMIC lists — the member surface keeps the literal
+  // directive and resolves it live, so this DOM-free path used to render an empty box where the reader sees
+  // a list of pages. Since ADR-191 folded print onto this renderer, that empty box is also what got PRINTED.
+  // Resolve them here for the EXPORTING VIEWER (their own subject → the /list route's host gate + per-item
+  // view filter), then substitute the same static Markdown list the public snapshot uses.
+  const md = row.published_md ?? ''
+  const subject = `user:${args.userId}`
+  const resolved = substituteListSnapshots(md, await resolveListSnapshotForViewer(db, fga, { pageId: args.pageId, md, subject }))
+
   // Shared renderer (single source of truth with the editor) → SafeHtml, then the final sanitizer.
   // renderMarkdownToHtml already produces SafeHtml (dynamic values escaped; `:::table` uses the
   // table-model allowlist), but the sanitizer re-checks the WHOLE output so raw passthrough is zero.
-  const rendered = renderMarkdownToHtml(row.published_md ?? '', builtinMacroRegistry())
+  const rendered = renderMarkdownToHtml(resolved, builtinMacroRegistry())
   const safeBody = sanitizeExportHtml(rendered.value)
 
   const title = row.title ?? 'Untitled'

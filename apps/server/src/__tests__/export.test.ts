@@ -23,6 +23,8 @@ let db: TenantDb
 // ids
 const SPACE = 'exp-space'
 const ROOT = 'exp-root', CHILD = 'exp-child', HIDDEN = 'exp-hidden', OTHER = 'exp-other', XSS = 'exp-xss', DEGRADE = 'exp-degrade'
+// #85: a page whose BODY is a dynamic `:::children` list, over one viewable and one unviewable child.
+const LISTS = 'exp-lists', LIST_OK = 'exp-list-ok', LIST_SECRET = 'exp-list-secret'
 const ATT = 'exp-att-ok', FORBIDDEN_ATT = 'exp-att-forbidden'
 const USER = 'exp-user'
 
@@ -32,6 +34,9 @@ const grants = [
   { user: `user:${USER}`, relation: 'view_direct', object: `page:${CHILD}` },
   { user: `user:${USER}`, relation: 'view_direct', object: `page:${XSS}` },
   { user: `user:${USER}`, relation: 'view_direct', object: `page:${DEGRADE}` },
+  { user: `user:${USER}`, relation: 'view_direct', object: `page:${LISTS}` },
+  { user: `user:${USER}`, relation: 'view_direct', object: `page:${LIST_OK}` },
+  // NOTE: no grant for LIST_SECRET → it must not reach the exported list.
   // NOTE: no grants for HIDDEN or OTHER → not viewable by USER.
 ]
 
@@ -82,6 +87,14 @@ beforeAll(async () => {
   await admin`INSERT INTO pages (id, tenant_id, space_id, parent_id, title, ydoc, published_md) VALUES
     (${DEGRADE}, ${TENANT}, ${SPACE}, NULL, 'Degrade Page', ${ydoc(degradeBody)}, ${degradeBody})
     ON CONFLICT (id) DO NOTHING`
+  // #85: a page whose published body is a `:::children` list. Both children are PUBLISHED (the list only
+  // considers published pages); only one is viewable by USER, so the export must show exactly one.
+  const listsBody = '# Lists\n\n:::children\n:::\n'
+  await admin`INSERT INTO pages (id, tenant_id, space_id, parent_id, title, ydoc, published_md, published_at) VALUES
+    (${LISTS},       ${TENANT}, ${SPACE}, NULL,     'Lists Page',   ${ydoc(listsBody)}, ${listsBody}, now()),
+    (${LIST_OK},     ${TENANT}, ${SPACE}, ${LISTS}, 'Visible Note', ${ydoc('ok')},      'ok',          now()),
+    (${LIST_SECRET}, ${TENANT}, ${SPACE}, ${LISTS}, 'Secret Note',  ${ydoc('no')},      'no',          now())
+    ON CONFLICT (id) DO NOTHING`
   // ATT belongs to ROOT (viewable). FORBIDDEN_ATT belongs to OTHER (not viewable).
   // ATT's filename is a zip-slip attempt.
   const k1 = `${TENANT}/exp/${ATT}.png`, k2 = `${TENANT}/exp/${FORBIDDEN_ATT}.png`
@@ -96,7 +109,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await deleteTuples(fgaClient, grants).catch(() => {})
   await admin`DELETE FROM attachments WHERE tenant_id = ${TENANT} AND id LIKE 'exp-att%'`.catch(() => {})
-  await admin`DELETE FROM pages WHERE id IN (${ROOT}, ${CHILD}, ${HIDDEN}, ${OTHER}, ${XSS}, ${DEGRADE})`.catch(() => {})
+  await admin`DELETE FROM pages WHERE id IN (${ROOT}, ${CHILD}, ${HIDDEN}, ${OTHER}, ${XSS}, ${DEGRADE}, ${LIST_OK}, ${LIST_SECRET}, ${LISTS})`.catch(() => {})
   await admin`DELETE FROM spaces WHERE id = ${SPACE}`.catch(() => {})
   await db.release()
   await admin.end()
@@ -353,16 +366,17 @@ describe('buildHtmlExport', () => {
       expect(doc, 'the export stylesheet aligns it').toContain('.cm-lp-align-right{display:flex;flex-direction:column;align-items:flex-end;}')
       expect(doc).toContain('.cm-lp-align-left{display:flex;flex-direction:column;align-items:flex-start;}')
 
-      // The same wrapper on an aligned DIAGRAM fence. (The rejection expected mermaid to arrive as a
-      // degraded block; it is registered exportFidelity "preserve", so the export keeps the fence as
-      // <pre class="mermaid"> and the wrapper simply wraps that — no fidelity-badge nesting to reason
-      // about.)
+      // The same wrapper on an aligned DIAGRAM fence. This used to assert the OPPOSITE — that mermaid
+      // carried no badge — on the grounds that its fence round-trips verbatim in Markdown. True of the
+      // `.md`, but this document is the RENDER, and here the diagram is not drawn at all (ADR-059 fixes
+      // mermaid as degrade server-side: no headless render, no mermaid JS in exported HTML). So the
+      // aligned fence keeps its <pre> AND now wears the badge that says the block was simplified.
       await admin`UPDATE pages SET published_md = ${'```mermaid align=left\nflowchart TD\n  A-->B\n```\n'} WHERE id = ${CHILD}`
       const diagram = (await buildHtmlExport(db, fgaClient, { userId: USER, pageId: CHILD }))!.body
       expect(diagram, 'the diagram fence is aligned too').toContain('class="cm-lp-align-left"')
       expect(diagram).toContain('<pre class="mermaid">')
       // check the BODY, not the whole document — the stylesheet always defines .wks-fidelity-degrade
-      expect(diagram.split('</head>')[1] ?? '', 'preserve fidelity ⇒ no degrade badge around it').not.toContain('wks-fidelity-degrade')
+      expect(diagram.split('</head>')[1] ?? '', 'a diagram that cannot be drawn statically says so').toContain('wks-fidelity-degrade')
     } finally {
       await admin`UPDATE pages SET published_md = ${before!.published_md} WHERE id = ${CHILD}`
     }
@@ -423,6 +437,21 @@ describe('buildHtmlExport', () => {
     expect(lc).not.toContain('<img src=x onerror')
     // A `javascript:` link href is dropped by the renderer's scheme allowlist.
     expect(lc).not.toContain('javascript:')
+  })
+
+  // #85 / ADR-145: `:::tagged` and `:::children` are resolved by the CLIENT on the member surface, so this
+  // DOM-free path rendered the bare directive — an empty box where the reader sees a list of pages. Since
+  // ADR-191 folded print onto this renderer, that empty box is what a member PRINTED. The export resolves
+  // the list for the exporting viewer; the per-item view filter is the same one the live list uses, so the
+  // list can never grow a page the viewer could not open.
+  it('resolves a dynamic :::children list for the exporting viewer — and only their viewable pages', async () => {
+    const res = await buildHtmlExport(db, fgaClient, { userId: USER, pageId: LISTS })
+    const body = (res!.body.split('</head>')[1] ?? '')
+    expect(body, 'the viewable child is listed, as a link').toContain('Visible Note')
+    expect(body).toContain(`href="/p/${LIST_OK}"`)
+    expect(body, 'an unviewable child never appears — not its title, not its id').not.toContain('Secret Note')
+    expect(body).not.toContain(LIST_SECRET)
+    expect(body, 'the directive itself is gone, not passed through as text').not.toContain(':::children')
   })
 
   it('wraps a degrade macro with a VISIBLE fidelity indicator (#85 (c))', async () => {

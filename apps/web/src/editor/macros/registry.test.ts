@@ -36,7 +36,9 @@ describe("macro registry", () => {
     const m = findFenceMacro("mermaid");
     expect(m).toBeDefined();
     expect(m!.kind).toBe("fence");
-    expect(m!.exportFidelity).toBe("preserve"); // required, declarative body round-trips
+    // #85 / ADR-059: degrade. The fence body round-trips verbatim in Markdown, but the field drives the
+    // EXPORT RENDER, and the export never draws the diagram (no headless render, no mermaid JS shipped).
+    expect(m!.exportFidelity).toBe("degrade");
     expect(registeredFenceLangs()).toContain("mermaid");
   });
 
@@ -89,7 +91,7 @@ describe("macro registry", () => {
   it("registers the excalidraw fence macro with a modal richEditUI", () => {
     const m = findFenceMacro("excalidraw");
     expect(m).toBeDefined();
-    expect(m!.exportFidelity).toBe("preserve");
+    expect(m!.exportFidelity).toBe("degrade"); // #85: the export emits a placeholder, never the drawing
     expect(m!.richEditUI?.present).toBe("modal"); // mouse edit = modal (React out of CM)
   });
 
