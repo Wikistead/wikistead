@@ -474,7 +474,7 @@
     "selectGroup": "Select a group",
     "noGroups": "No groups (imported from your IdP)",
     "commentAudienceTitle": "Commenting",
-    "commentAudienceBody": "Allow commenting on this space's pages. A per-member comment grant is set on each page; these toggles open commenting to a whole audience.",
+    "commentAudienceBody": "These toggles open commenting to a whole AUDIENCE — everyone who can view, or guests holding a view link. To let specific people comment instead, give them the commenter role above (space-wide), or grant it on a single page from that page's permissions. The two are independent: turning these toggles off does not take commenting away from someone who holds the commenter role.",
     "commentGuests": "Guests with a view link may comment",
     "commentMembers": "Anyone who can view (public) may comment"
   },
