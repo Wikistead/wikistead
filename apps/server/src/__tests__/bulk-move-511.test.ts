@@ -143,6 +143,43 @@ describe('#511 bulkMovePages — manage on BOTH sides, and no bulk bypass', () =
     expect(await spaceOf(child.id)).toBe(dest)
   })
 
+  it('an ancestor SKIPS a level and still carries its descendant', async () => {
+    // The first cut of the guard read the parent chain from the SELECTION only, so it stopped at the first
+    // unselected parent: P > M > C with only P and C picked walked C -> M, found M unknown, and moved C to
+    // the destination root anyway. The Pages tab does not show nesting, so nobody could see M in between.
+    const p1 = await mkPage('gap-P')
+    const mid = await createPage(db, fgaClient, app.searchDriver, { tenantId: tenant.id, spaceId: source, userId: CALLER, title: 'gap-M', parentId: p1 })
+    const leaf = await createPage(db, fgaClient, app.searchDriver, { tenantId: tenant.id, spaceId: source, userId: CALLER, title: 'gap-C', parentId: mid.id })
+    ids.push(mid.id, leaf.id)
+
+    const res = await bulkMovePages(db, fgaClient, app.searchDriver, {
+      spaceId: source, targetSpaceId: dest, pageIds: [p1, leaf.id], userId: CALLER,   // M deliberately NOT selected
+    })
+    expect(res.moved, 'only the ancestor is a move of its own').toBe(1)
+    expect(res.results.find((r) => r.id === leaf.id)).toMatchObject({ ok: true, movedWithAncestor: true })
+    const [row] = await db.sql<{ parent_id: string | null }[]>`SELECT parent_id FROM pages WHERE id = ${leaf.id}`
+    expect(row?.parent_id, 'still under the unselected middle page').toBe(mid.id)
+    expect(await spaceOf(leaf.id)).toBe(dest)
+  })
+
+  it('a descendant is NOT reported ok when its ancestor could not move', async () => {
+    // The carried case used to assert ok on the assumption the ancestor moved. When the ancestor is skipped
+    // the descendant never goes anywhere, and calling that a success is simply false.
+    const p2 = await createPage(db, fgaClient, app.searchDriver, { tenantId: tenant.id, spaceId: source, userId: OTHER, title: 'stuck-P' })
+    const kid = await createPage(db, fgaClient, app.searchDriver, { tenantId: tenant.id, spaceId: source, userId: OTHER, title: 'stuck-C', parentId: p2.id })
+    ids.push(p2.id, kid.id)
+    // OTHER owns them and they are drafts, so the caller's space inheritance never reaches them.
+    expect(await check(fgaClient, `user:${CALLER}`, 'manage', { type: 'page', id: p2.id }), 'the caller cannot move the parent').toBe(false)
+
+    const res = await bulkMovePages(db, fgaClient, app.searchDriver, {
+      spaceId: source, targetSpaceId: dest, pageIds: [p2.id, kid.id], userId: CALLER,
+    })
+    expect(res.moved).toBe(0)
+    expect(res.results.find((r) => r.id === kid.id), 'the descendant did not move, so it is not ok')
+      .toMatchObject({ ok: false })
+    expect(await spaceOf(kid.id), 'and the document agrees').toBe(source)
+  })
+
   it('the space HOME cannot be moved out of its space', async () => {
     const home = await mkPage('the-home')
     await adminPool`UPDATE spaces SET home_page_id = ${home} WHERE id = ${source}`
