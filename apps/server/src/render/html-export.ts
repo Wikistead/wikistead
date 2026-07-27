@@ -142,13 +142,21 @@ export async function buildHtmlExport(
 
   const [row] = await db.sql<PageRow[]>`SELECT title, published_md FROM pages WHERE id = ${args.pageId}`
   if (!row) return null // viewable per FGA but gone from the tenant table → 404 (no leak)
+  // #85 review: a page that was never published has nothing to export. It used to produce a document
+  // containing only the title, which is worse than an error in both places it lands: the download was a
+  // file that looks like the page and is empty, and print — which since ADR-191 fetches this same
+  // document and falls back to the live surface on 404 — printed that title-only sheet instead of
+  // falling back, so Ctrl+P on a draft stopped printing the draft. Absent, not empty. The test is a NULL
+  // published_md — what an unpublished page has; a page published with an empty body still exports (it is
+  // an empty page, which is a fact about the page, not a missing version).
+  if (row.published_md == null) return null
 
   // #85 / ADR-145: `:::tagged` / `:::children` are DYNAMIC lists — the member surface keeps the literal
   // directive and resolves it live, so this DOM-free path used to render an empty box where the reader sees
   // a list of pages. Since ADR-191 folded print onto this renderer, that empty box is also what got PRINTED.
   // Resolve them here for the EXPORTING VIEWER (their own subject → the /list route's host gate + per-item
   // view filter), then substitute the same static Markdown list the public snapshot uses.
-  const md = row.published_md ?? ''
+  const md = row.published_md
   const subject = `user:${args.userId}`
   const resolved = substituteListSnapshots(md, await resolveListSnapshotForViewer(db, fga, { pageId: args.pageId, md, subject }))
 
