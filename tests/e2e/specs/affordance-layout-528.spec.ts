@@ -127,3 +127,146 @@ test("#528: only the INNERMOST block shows an entry affordance (no ancestor hint
   expect(report.count, "the innermost block does offer an entry affordance").toBeGreaterThan(0);
   expect(report.pairs, "an ancestor must not show its own entry affordance while a descendant shows one").toEqual([]);
 });
+
+// #528①: the collision came BACK while the pointer moved. The owner wrote an inline transform, and
+// a hover-gated affordance re-mounts as the pointer crosses it — CodeMirror rebuilds the widget, the inline
+// style goes with it, and nothing re-measured because the triggers were only pointerover/transitionend.
+// Measured on the rejection: at rest the pill sat at 255..272 (clear); mid-move it read `transform: none`
+// at 295..312 and overlapped the ✎ row at 283..302 by 7px. So the pin moves the mouse.
+test("#528the affordances stay apart WHILE the pointer moves", async ({ page }) => {
+  await openScratch(page, `aff528m-${Date.now().toString(36)}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(NESTED);
+  await sleep(600);
+  await page.getByText("inner body text", { exact: false }).first().click();
+  await sleep(500);
+
+  const box = await page.getByText("inner body text", { exact: false }).first().boundingBox();
+  expect(box, "the inner macro is on screen").not.toBeNull();
+
+  // Sample the DISPLACEMENT, not just the overlap. Filtering on visibility hides the very frames that
+  // matter: mid-remount the element can be transparent for a tick, so an overlap check quietly skips it and
+  // then the flicker the user reported never shows up in the measurement. What the report describes is the
+  // owner's transform being wiped (`transform: none` on an element the owner had displaced), so that is
+  // what gets asserted — and the overlap is checked too, on whatever is on screen at the time.
+  const lost: string[] = [];
+  const collisions: string[] = [];
+  for (let step = 0; step < 12; step++) {
+    await page.mouse.move(box!.x + 8 + step * 10, box!.y - 8 + (step % 4) * 6);
+    await sleep(80);
+    const frame = await page.evaluate((sel) => {
+      const out: { cls: string; transform: string; top: number; bottom: number; left: number; right: number; shown: boolean }[] = [];
+      for (const el of document.querySelectorAll<HTMLElement>(sel)) {
+        const cs = getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) continue;
+        out.push({
+          cls: el.className,
+          transform: cs.transform,
+          top: r.top, bottom: r.bottom, left: r.left, right: r.right,
+          shown: cs.visibility !== "hidden" && cs.display !== "none" && parseFloat(cs.opacity || "1") > 0.01,
+        });
+      }
+      return out;
+    }, AFFORDANCE_SEL);
+
+    // The pill is the one the owner displaces (the ✎ row keeps its own place). If it is on screen and the
+    // owner had moved it, a `none` transform means the inline style was wiped and nothing re-measured.
+    const pill = frame.find((f) => f.cls.includes("cm-lp-macro-richui-raw"));
+    const row = frame.find((f) => f.cls.includes("cm-lp-macro-btnrow"));
+    if (pill && row && pill.shown && row.shown && pill.transform === "none") {
+      const overlapping = pill.left < row.right && row.left < pill.right && pill.top < row.bottom && row.top < pill.bottom;
+      lost.push(`step ${step}: pill lost its displacement (overlapping=${overlapping})`);
+    }
+    const shownRects = frame.filter((f) => f.shown);
+    for (let i = 0; i < shownRects.length; i++) {
+      for (let j = i + 1; j < shownRects.length; j++) {
+        const a = shownRects[i]!, b = shownRects[j]!;
+        if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) {
+          collisions.push(`step ${step}: ${a.cls} × ${b.cls} (${Math.round(Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top))}px)`);
+        }
+      }
+    }
+  }
+  expect(lost, "the owner's placement must survive the pointer moving over the block").toEqual([]);
+  expect(collisions, "no overlap at any point during the movement").toEqual([]);
+});
+
+// #528measured by the user and it overturned the earlier "innermost-only already holds" report —
+// that check counted VISIBLE affordances without asking which block each belonged to. With the caret in the
+// inner :::note, the affordance on screen belonged to the parent columns, and an unrelated tabs block showed
+// a permanent ✎ as well. The rule: exactly one block offers an entry affordance — the focused one.
+test("#528only the FOCUSED block offers an affordance (asserted by ownership, not by count)", async ({ page }) => {
+  await openScratch(page, `aff528f-${Date.now().toString(36)}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(`${NESTED}\n::::tabs\n:::tab[One]\nunrelated tab body\n:::\n::::\n\nend\n`);
+  await sleep(700);
+  await page.getByText("inner body text", { exact: false }).first().click();
+  await sleep(600);
+
+  const report = await page.evaluate(() => {
+    const visible = (e: HTMLElement) => {
+      const c = getComputedStyle(e);
+      return c.display !== "none" && c.visibility !== "hidden" && parseFloat(c.opacity || "1") > 0.01;
+    };
+    // which block does the caret sit in? the innermost wrap containing the cursor
+    const cursor = document.querySelector(".cm-cursor-primary") as HTMLElement | null;
+    const cr = cursor?.getBoundingClientRect();
+    const wraps = [...document.querySelectorAll<HTMLElement>(".cm-lp-macro-wrap")];
+    const containing = cr
+      ? wraps.filter((w) => { const r = w.getBoundingClientRect(); return cr.top >= r.top - 2 && cr.bottom <= r.bottom + 2; })
+      : [];
+    // innermost = the one contained by all the others
+    const focused = containing.find((w) => containing.every((o) => o === w || o.contains(w))) ?? null;
+    const owners = [...document.querySelectorAll<HTMLElement>(".cm-lp-macro-edit")]
+      .filter(visible)
+      .map((b) => {
+        const wrap = b.closest(".cm-lp-macro-wrap");
+        return wrap === focused ? "focused" : wrap ? "other-block" : "no-block";
+      });
+    return { owners, hasFocused: !!focused };
+  });
+
+  expect(report.hasFocused, "the caret is inside a macro block").toBe(true);
+  expect(report.owners.filter((o) => o !== "focused"), "no block but the focused one offers an affordance").toEqual([]);
+});
+
+// #528②: the raw pill and the rendered block's ✎ row were the same size, the same corner and the
+// same glyph, so a user could not tell which was which. They do different things — one enters the rich
+// editor from the source, the other edits the rendered block — so each carries its own tooltip and its own
+// mark. This pins that they are distinguishable, not that they look any particular way.
+test("#528the two entry affordances are told apart", async ({ page }) => {
+  await openScratch(page, `aff528d-${Date.now().toString(36)}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(NESTED);
+  await sleep(600);
+  await page.getByText("inner body text", { exact: false }).first().click();
+  await sleep(600);
+
+  const rep = await page.evaluate(() => {
+    const visible = (e: HTMLElement) => {
+      const c = getComputedStyle(e);
+      return c.display !== "none" && c.visibility !== "hidden" && parseFloat(c.opacity || "1") > 0.01;
+    };
+    const pill = document.querySelector<HTMLElement>(".cm-lp-macro-richui-raw");
+    const rows = [...document.querySelectorAll<HTMLElement>(".cm-lp-macro-edit")]
+      .filter((e) => !e.classList.contains("cm-lp-macro-richui-raw"));
+    return {
+      pillTip: pill?.dataset.tip ?? null,
+      pillSvg: pill?.querySelector("svg")?.innerHTML ?? null,
+      rowTips: rows.map((r) => r.dataset.tip ?? ""),
+      rowSvgs: rows.map((r) => r.querySelector("svg")?.innerHTML ?? ""),
+      anyVisible: [pill, ...rows].filter((e): e is HTMLElement => !!e).some(visible),
+    };
+  });
+
+  expect(rep.pillTip, "the pill names what it does").toBeTruthy();
+  expect(rep.rowTips.every((t) => t.length > 0), "so does each block's own control").toBe(true);
+  expect(rep.rowTips, "…and it is not the same words as the pill's").not.toContain(rep.pillTip);
+  if (rep.pillSvg && rep.rowSvgs.some((g) => g.length > 0)) {
+    expect(rep.rowSvgs.filter((g) => g.length > 0), "nor the same glyph").not.toContain(rep.pillSvg);
+  }
+});

@@ -53,6 +53,37 @@ function isVisible(el: HTMLElement): boolean {
   return parseFloat(cs.opacity || "1") > 0.01;
 }
 
+// #528(user measurement, which overturned the earlier "innermost-only already holds" report — that
+// check counted visible affordances without asking which block owned them): exactly ONE block offers entry
+// chrome. The focused block is the innermost wrap holding the caret; with the caret elsewhere it is the
+// innermost wrap under the pointer; caret wins when both apply. Ancestors stay quiet while a descendant is
+// focused, and an unrelated block shows nothing at all.
+export function focusedWrap(view: EditorView, pointer: { x: number; y: number } | null): HTMLElement | null {
+  const wraps = Array.from(view.dom.querySelectorAll<HTMLElement>(".cm-lp-macro-wrap"));
+  if (wraps.length === 0) return null;
+  const innermost = (candidates: HTMLElement[]) =>
+    candidates.find((w) => candidates.every((o) => o === w || o.contains(w))) ?? null;
+
+  // caret first — `coordsAtPos` puts it in the same viewport space as the wrap rectangles
+  const head = view.state.selection.main.head;
+  const c = view.coordsAtPos(head);
+  if (c) {
+    const holding = wraps.filter((w) => {
+      const r = w.getBoundingClientRect();
+      return c.top >= r.top - 2 && c.bottom <= r.bottom + 2 && c.left >= r.left - 2 && c.left <= r.right + 2;
+    });
+    const byCaret = innermost(holding);
+    if (byCaret) return byCaret;
+  }
+  if (!pointer) return null;
+  const under = wraps.filter((w) => {
+    const r = w.getBoundingClientRect();
+    // include the gutter above the block, where its chrome row lives
+    return pointer.x >= r.left && pointer.x <= r.right && pointer.y >= r.top - 24 && pointer.y <= r.bottom;
+  });
+  return innermost(under);
+}
+
 export function resolveAffordanceLayout(view: EditorView): Placed[] {
   const els = Array.from(view.dom.querySelectorAll<HTMLElement>(AFFORDANCE_SEL));
   if (els.length < 2) return els.map((el) => ({ el, top: 0, bottom: 0, left: 0, right: 0, dy: 0 }));
@@ -103,19 +134,36 @@ export const affordanceLayout = ViewPlugin.fromClass(
       //     opacity 0 and would conclude there is nothing to resolve (this is why the first cut of this
       //     plugin left the 8px collision in place).
       // Both are answered by re-measuring on the DOM events that mark them. Neither dispatches.
-      this.onSettle = () => this.schedule(view);
-      view.dom.addEventListener("pointerover", this.onSettle);
-      view.dom.addEventListener("transitionend", this.onSettle);
+      // The owner now decides VISIBILITY as well as placement, so the two can never disagree: it marks the
+      // focused wrap and the affordances it shows in the same measure pass that positions them. Pointer
+      // position is tracked (measure-only, never dispatched) because "which block is under the pointer" is
+      // an input to that decision — it is not an event we react to after CSS has already shown something.
+      this.pointer = null;
+      this.onMove = (e: PointerEvent) => { this.pointer = { x: e.clientX, y: e.clientY }; this.schedule(view); };
+      this.onLeave = () => { this.pointer = null; this.schedule(view); };
+      view.dom.addEventListener("pointermove", this.onMove);
+      view.dom.addEventListener("pointerleave", this.onLeave);
       this.schedule(view);
     }
-    onSettle: () => void;
+    pointer: { x: number; y: number } | null;
+    onMove: (e: PointerEvent) => void;
+    onLeave: () => void;
     update(u: ViewUpdate) { this.schedule(u.view); }
     destroy(): void { /* listeners die with view.dom */ }
     schedule(view: EditorView): void {
       view.requestMeasure({
         key: this,
-        read: () => resolveAffordanceLayout(view),
-        write: (placed) => {
+        read: () => ({ placed: resolveAffordanceLayout(view), focus: focusedWrap(view, this.pointer) }),
+        write: ({ placed, focus }) => {
+          // one wrap wears the focus mark; the CSS that used to react to `:hover` now reacts to this
+          for (const w of Array.from(view.dom.querySelectorAll<HTMLElement>(".cm-lp-macro-wrap"))) {
+            w.classList.toggle("cm-aff-focus", w === focus);
+          }
+          // an affordance is shown only if the focused block owns it — and it is placed in the same pass,
+          // so there is no frame where it is on screen without the owner having measured it (#528)
+          for (const el of Array.from(view.dom.querySelectorAll<HTMLElement>(".cm-lp-macro-richui-raw"))) {
+            el.classList.toggle("cm-aff-shown", focus != null && focus.contains(el));
+          }
           for (const p of placed) {
             const t = p.dy ? `translateY(${Math.round(p.dy)}px)` : "";
             if (p.el.style.transform !== t) p.el.style.transform = t;
