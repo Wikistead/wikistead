@@ -1,0 +1,41 @@
+import { test, expect } from "@playwright/test";
+
+// #485 review bounce: the space Members tab offered custom roles that the server then refused —
+// a role carrying `comment` 400'd with `capability "comment" is not assignable at space scope`, because
+// space commenting was an audience wildcard with no per-principal relation. #529/ADR-193 gave `comment`
+// a real per-principal leaf (`space#commenter`), so the refusal is gone at the root rather than papered
+// over in the picker. This pins the bounced case end to end: define a role WITH comment, assign it on a
+// space, and see it land.
+test("#485: a role carrying `comment` assigns at space scope (the bounce is gone)", async ({ page }) => {
+  const name = `cmt-role-${Date.now().toString(36)}`;
+  await page.goto("/admin/roles");
+  await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
+
+  await page.getByTestId("role-create").click();
+  await page.getByTestId("role-name-input").fill(name);
+  await page.getByTestId("role-cap-view").check();
+  await page.getByTestId("role-cap-comment").check(); // the capability that used to make the assign 400
+  await page.getByTestId("role-save").click();
+  await expect(page.getByTestId("custom-roles")).toContainText(name, { timeout: 8000 });
+
+  // assign it where a space role now lives (#514 slice 4)
+  await page.goto("/spaces/demo_space/settings/members");
+  await expect(page.getByTestId("space-role-assign")).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId("space-role-select").click();
+  await page.getByRole("option", { name }).click();
+  await expect(page.getByRole("option")).toHaveCount(0);
+  await page.getByTestId("space-role-member-input").fill("dev");
+  await page.getByTestId("space-role-member-candidate").first().click();
+  await page.getByTestId("space-role-assign-add").click();
+
+  // it landed — no 400, no generic failure toast
+  await expect(page.getByTestId("space-role-assign-list"), "the comment-bearing role assigned").toContainText(name, { timeout: 8000 });
+
+  // clean up: revoke, then delete the role (a role with live assignments is refused by the 409 guard)
+  await page.getByTestId("space-role-assign-item").filter({ hasText: name }).getByTestId("space-role-assign-revoke").click();
+  await expect(page.getByTestId("space-role-assign-list")).not.toContainText(name, { timeout: 8000 });
+  await page.goto("/admin/roles");
+  await page.getByTestId("custom-role-row").filter({ hasText: name }).getByTestId("role-delete").click();
+  await page.getByTestId("role-delete-confirm").click();
+  await expect(page.getByTestId("custom-roles")).not.toContainText(name, { timeout: 8000 });
+});
