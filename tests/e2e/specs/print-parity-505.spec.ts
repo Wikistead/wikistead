@@ -106,3 +106,25 @@ async function publish(page: Page, id: string) {
   expect([200, 201, 204]).toContain(status);
   await sleep(600);
 }
+
+// The THIRD surface: the editor's own live-preview. ADR-191 folds print onto the static renderer, but the
+// screen is what the author judges the result against — so the gate has to say the same elements render
+// there too. Drift here is what produced the bugs this work keeps finding (math rendered on one surface
+// and not the other; a checklist that was checkboxes on screen and literal `[ ]` on paper).
+test("#505: the editor surface renders the same element types (the third face of the parity)", async ({ page }) => {
+  await openScratch(page, `parity505s-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(FIXTURE);
+  await sleep(1400);
+  await page.getByText("last line", { exact: true }).click(); // caret out of every block → all render
+  await sleep(700);
+
+  const cm = page.locator("[data-pane=preview] .cm-content");
+  await expect(cm.locator(".cm-lp-callout"), "callout").not.toHaveCount(0);
+  await expect(cm.locator("input[type=checkbox]"), "checklist").not.toHaveCount(0);
+  await expect(cm.locator(".cm-lp-table, table"), "table").not.toHaveCount(0);
+  await expect(cm.locator(".cm-lp-math, .katex, math"), "math").not.toHaveCount(0);
+  // the fence renders as the code card (its header is the tell), not as raw ``` lines
+  await expect(cm.locator(".cm-lp-code-line, .cm-lp-fence-card, .cm-lp-code-header"), "code card").not.toHaveCount(0);
+});
