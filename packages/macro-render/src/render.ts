@@ -36,8 +36,9 @@ const EMPTY_REGISTRY: MacroHtmlRegistry = { fence: () => undefined, directive: (
 
 // #85 fidelity badge (ADR-059 (c)): wrap a DEGRADED macro's export HTML so a reader sees it was
 // simplified. Preserve-fidelity macros render plain (no wrapper). The badge is static, escaped markup.
-function withFidelity(name: string, fidelity: "preserve" | "degrade", body: SafeHtml): SafeHtml {
+function withFidelity(name: string, fidelity: "preserve" | "degrade", body: SafeHtml, note?: (name: string) => void): SafeHtml {
   if (fidelity === "preserve") return body;
+  note?.(name);
   return html`<div class="wks-export-macro wks-fidelity-degrade" data-macro="${name}" data-fidelity="degrade"><span class="wks-fidelity-badge" role="img" aria-label="simplified for export" title="Simplified for export — the interactive version is in the app">◐</span>${body}</div>`;
 }
 
@@ -56,7 +57,14 @@ interface Frame { role: MdOpenRole | null; prefix: SafeHtml; suffix: SafeHtml; p
 // into its parent. blockGap re-creates the historical renderBlocks "\n" join byte-for-byte.
 class HtmlSink implements MdSink {
   private stack: Frame[] = [{ role: null, prefix: html``, suffix: html``, parts: [], blockContainer: true }];
-  constructor(private macros: MacroHtmlRegistry) {}
+  // #85 / ADR-022 Part 6: the degraded blocks of THIS render, in document order — the badge marks each
+  // block where it sits, the report is what lets the document also say so once, up front.
+  readonly degraded: string[];
+  private readonly note = (name: string) => { this.degraded.push(name) };
+  // A container's body renders through its own sink (renderInner), so the collector is PASSED DOWN:
+  // a degraded macro nested inside `:::columns` is badged there and counted here. Sharing the array is
+  // what keeps the document's one-line summary from disagreeing with the badges the reader can see.
+  constructor(private macros: MacroHtmlRegistry, degraded: string[] = []) { this.degraded = degraded }
 
   result(): SafeHtml { return joinSafe(this.stack[0]!.parts); }
   private top(): Frame { return this.stack[this.stack.length - 1]!; }
@@ -136,7 +144,7 @@ class HtmlSink implements MdSink {
         // #422: diagram-fence align export parity (#255's `align=left|right` off the info string) —
         // the same fixed-enum → fixed-class wrapper as the editor/read surfaces (never interpolated).
         const align = parseFenceInfo(args.info).align;
-        try { this.emit(alignWrap(withFidelity(lang!, macro.exportFidelity, macro.htmlRender(args.body)), align)); return; }
+        try { this.emit(alignWrap(withFidelity(lang!, macro.exportFidelity, macro.htmlRender(args.body), this.note), align)); return; }
         catch { /* a macro that throws must not break the render → fall through to plain code */ }
       }
     }
@@ -153,9 +161,9 @@ class HtmlSink implements MdSink {
       // #85: hand the macro a recursive renderer so a container directive's nested Markdown body renders
       // as real HTML (SafeHtml — the same allowlist boundary at every depth). #335: nested body → the
       // visitor walks it topLevel=false, so its footnotes stay literal.
-      const renderInner = (md: string): SafeHtml => renderDoc(md, this.macros, false);
+      const renderInner = (md: string): SafeHtml => renderDoc(md, this.macros, false, this.degraded);
       const align = args.name === "table" ? args.attrs?.align : undefined;
-      try { this.emit(alignWrap(withFidelity(args.name!, macro.exportFidelity, macro.htmlRender(args.body, renderInner, args.label ?? undefined)), align)); return; }
+      try { this.emit(alignWrap(withFidelity(args.name!, macro.exportFidelity, macro.htmlRender(args.body, renderInner, args.label ?? undefined), this.note), align)); return; }
       catch { /* fall through to the generic box */ }
     }
     // Generic fallback: the wks-directive box around the node's own (block-joined) children.
@@ -187,10 +195,24 @@ export function renderMarkdownToHtml(src: string, macros: MacroHtmlRegistry = EM
   return renderDoc(src, macros, true);
 }
 
+// #85 / ADR-022 Part 6 + ADR-059 (5): the same render, plus the list of blocks it had to simplify.
+// The per-block badge answers "why does this one look like that?" only once the reader is already
+// looking at it; a document handed to someone else needs to say up front that parts of it are not the
+// whole thing. `degraded` names each degraded macro in document order (duplicates kept — the count is
+// the point), and is EMPTY for a page that came through whole, so the caller adds no note at all.
+export function renderMarkdownToHtmlWithReport(
+  src: string,
+  macros: MacroHtmlRegistry = EMPTY_REGISTRY,
+): { html: SafeHtml; degraded: string[] } {
+  const sink = new HtmlSink(macros);
+  walkMarkdown(src, sink, { topLevel: true });
+  return { html: sink.result(), degraded: sink.degraded };
+}
+
 // #335 / ADR-130: footnotes resolve at the TOP LEVEL only — the visitor collects/numbers/sections when
 // topLevel; a nested body (macro renderInner) walks with topLevel=false → footnotes render literally.
-function renderDoc(src: string, macros: MacroHtmlRegistry, topLevel: boolean): SafeHtml {
-  const sink = new HtmlSink(macros);
+function renderDoc(src: string, macros: MacroHtmlRegistry, topLevel: boolean, degraded?: string[]): SafeHtml {
+  const sink = new HtmlSink(macros, degraded);
   walkMarkdown(src, sink, { topLevel });
   return sink.result();
 }

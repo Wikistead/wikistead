@@ -144,9 +144,12 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string, watch?: W
   // right-panel items are visually identical and open/closed is read from the panel itself, not a tick.
   if (p.onToggleComments) items.push({ value: "comments", label: p.openComments ? `${t("page.comments")} (${p.openComments})` : t("page.comments"), icon: <MessageSquare size={14} />, testId: "comments-toggle" });
   if (p.onExport) items.push({ value: "export", label: t("page.export"), icon: <Download size={14} />, testId: "export-page" });
-  // #85 bounce: the HTML export is sealed until the post-launch Option-A redesign — show the item but
-  // GRAYED OUT (disabled) with a hint, rather than hiding it (per the user), so its return is discoverable.
-  if (p.onExportHtml) items.push({ value: "export-html", label: t("page.exportHtml"), icon: <Download size={14} />, testId: "export-page-html", disabled: true, hint: t("page.exportHtmlDisabled") });
+  // #85: the HTML export was GRAYED OUT because of three named defects in the static renderer — math
+  // leaked as raw `$$`, table/callout/embed diverged from the screen, and the sheet came out dark. All
+  // three are closed (KaTeX MathML on the static path, the prose/callout/todo convergence, and the
+  // light-fixed export), the dynamic lists it used to drop now resolve, and a block that still cannot be
+  // drawn statically says so. The item is live.
+  if (p.onExportHtml) items.push({ value: "export-html", label: t("page.exportHtml"), icon: <Download size={14} />, testId: "export-page-html" });
   // #207 bounce: print is sealed (same root as #85 — both print paths are low-fidelity until the
   // post-launch Option-A render core). Grayed out with a hint rather than hidden (matches #85).
   if (p.onPrint) items.push({ value: "print", label: t("page.print"), icon: <Printer size={14} />, testId: "print-page", disabled: true, hint: t("page.printDisabled") });
