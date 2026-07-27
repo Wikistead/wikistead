@@ -115,6 +115,12 @@ export function PageTree({
         onClick={() => onOpen(d.pageId)}
       >
        <div
+         // #530: the tooltip is anchored to the ROW and MEASURES the name inside it. Anchoring it to the
+         // name meant the hover buttons shrank the name out from under the cursor mid-hover, the pointer
+         // landed on the row instead, and the host treated that as leaving — so the row that most needed
+         // its name shown was the one that would not show it.
+         data-tip-if-truncated={d.name || t("common.untitled")}
+         data-tip-measure="[data-testid=tree-page-name]"
          className={cn(
            "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded-lg pr-2 transition-colors duration-[120ms]",
            selected
@@ -163,8 +169,7 @@ export function PageTree({
             measure that at show time: on mouse-enter the row's hover buttons have not appeared yet, and
             they are what clips the name. */}
         {/* #315: a draft row also dims its title so "not published yet" reads from the whole row. */}
-        <span className={cn("min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap", !d.published && "text-fg-dim")} data-testid="tree-page-name"
-          data-tip-if-truncated={d.name || t("common.untitled")}>{d.name || t("common.untitled")}</span>
+        <span className={cn("min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap", !d.published && "text-fg-dim")} data-testid="tree-page-name">{d.name || t("common.untitled")}</span>
         {/* #109 Fix B: private (allowlist-only) lock. Shown only to viewers of the page — non-viewers 404. */}
         {d.private && <Lock size={12} className="mx-0.5 flex-none text-fg-dim" data-testid="tree-private-lock" aria-label={t("sidebar.private")} />}
         {/* #329 rework: freeze badge, paired with the lock (the title bar shows both, so the tree does too). */}
