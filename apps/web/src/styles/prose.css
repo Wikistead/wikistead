@@ -84,7 +84,11 @@
  * now sits in a scroll box pinned to the column width (`width: 0; min-width: 100%`), and takes its
  * natural width inside that. */
 .wks-prose .cm-lp-table-scroll { width: 0; min-width: 100%; max-width: 100%; overflow-x: auto; }
-.wks-prose .cm-lp-table-scroll > .cm-lp-md-table { min-width: max-content; }
+/* #505/#381 (measured): the scroll wrapper sets `overflow-x`, which makes it a BFC — so the table's own
+   block margins can NOT collapse out through it and got ADDED to the previous block's margin instead.
+   A fence followed by a table sat 70.8px apart in nested prose against 48px on the CM surface (the
+   parity spec's tolerance is 8). The WRAPPER owns the block spacing; the table inside it owns none. */
+.wks-prose .cm-lp-table-scroll > .cm-lp-md-table { min-width: max-content; margin-top: 0; margin-bottom: 0; }
 .wks-prose .cm-lp-md-table { border-collapse: collapse; margin: 1.5em 0; font-size: 0.95em; max-width: 100%; }
 .wks-prose .cm-lp-md-table :is(th, td) { border: var(--wks-table-cell-border); padding: var(--wks-table-cell-padding); text-align: left; vertical-align: top; height: 1.8em; min-width: 5em; /* #406a column floor, so a wide table scrolls instead of collapsing to one character per line */ }
 .wks-prose .cm-lp-md-table th { font-weight: 700; background: var(--wks-table-th-bg); color: var(--fg); }
