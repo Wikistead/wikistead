@@ -46,6 +46,7 @@ const EXCLUDED_PATHS = new Set([
   '/spaces/:spaceId/assignable-roles', // manager-readable role list for the in-space assignment picker (#485/#514; space settings plumbing)
   '/admin/roles', '/admin/roles/:roleId', '/admin/roles/tenant-defaults', // custom-role definitions + default presets (#420/#445; admin console plumbing)
   '/admin/roles/assignments', '/admin/roles/:roleId/assignments', '/admin/roles/assignments/:assignmentId', // role assignments (#420 inc3)
+  '/admin/roles/admin-mappings', '/admin/roles/admin-mappings/:mappingId', // IdP group -> tenant admin declarations (#497 §2b; admin console plumbing)
   '/spaces/:spaceId/branding', '/spaces/:spaceId/icon-image', '/branding', '/branding/logo', '/tenant/branding', '/tenant/branding/logo', // branding/UI
   '/me/settings', '/me/capabilities', '/me/avatar', '/members/:sub', '/members/:sub/avatar-image', '/members/invites', '/members/invites/:id', // account/invite UI plumbing
   '/ai/ask', '/ai/capability',     // AI feature surface (own contract)
