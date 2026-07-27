@@ -502,7 +502,13 @@ importers:
       '@lezer/markdown':
         specifier: 1.6.4
         version: 1.6.4
+      katex:
+        specifier: 0.16.11
+        version: 0.16.11
     devDependencies:
+      '@types/katex':
+        specifier: 0.16.7
+        version: 0.16.7
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
