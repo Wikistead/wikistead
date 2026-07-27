@@ -134,3 +134,22 @@ test("#505: the editor surface renders the same element types (the third face of
   // the fence renders as the code card (its header is the tell), not as raw ``` lines
   await expect(cm.locator(".cm-lp-code-line, .cm-lp-fence-card, .cm-lp-code-header"), "code card").not.toHaveCount(0);
 });
+
+// #85 / ADR-194: the portal survives for the ONE path the app cannot intercept — the browser's own
+// File → Print, which fires natively with no chance to build a document first. What must not survive is
+// the difference: it renders macros live now, so a diagram on that path is a diagram, not a chip.
+test("#85: the native-print portal draws diagrams, like every other surface", async ({ page }) => {
+  const id = await openScratch(page, `portaldiagram-${Date.now()}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText("# D\n\n```mermaid\ngraph TD; A-->B;\n```\n");
+  await sleep(1200);
+  await publish(page, id);
+  await page.reload();
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(2500); // the portal renders on mount and the diagram draws asynchronously
+
+  const portal = page.locator("[data-print-root]");
+  await expect(portal.locator("svg"), "the portal drew the diagram").not.toHaveCount(0);
+  await expect(portal.locator("[data-testid=macro-static-chip]"), "…instead of the compact chip").toHaveCount(0);
+});

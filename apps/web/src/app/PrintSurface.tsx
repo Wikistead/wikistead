@@ -9,9 +9,16 @@ import { createPortal } from "react-dom";
 // body level. @media print (print.css) hides the live app and shows only this — normal document flow, so
 // the browser paginates it across as many sheets as it takes.
 //
+// #85 / ADR-194: the app's OWN print action (menu, Ctrl+P) no longer comes through here — it builds the
+// export document in the browser and prints that. This portal remains for the one print path the app cannot
+// intercept: the BROWSER's own File → Print, which fires natively with no chance to build anything
+// asynchronously first. Without it that path prints the virtualised editor, which is the defect #505 opened
+// with. It is not a second renderer — it is the same markdown renderer the app reads with, now rendering macros LIVE
+// so a diagram on this path is a diagram too, and wearing `.wks-prose`, whose face the same sheet declares
+// for every surface. Retiring it needs a way to intercept native print, which does not exist.
+//
 // Display-only: it READS the published Markdown the route already holds and never touches the Y.Text /
-// collab session. Unpublished (draft-only) pages have no published body → nothing to print here (the
-// export/print canonical is the published content, matching the HTML export).
+// collab session.
 export function PrintSurface({ md, title }: { md: string | null; title: string }) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -22,10 +29,14 @@ export function PrintSurface({ md, title }: { md: string | null; title: string }
     host.replaceChildren();
     if (md == null || md.trim() === "") return;
     // Lazy-import the renderer (it lives in the CM6 editor bundle; the reading route already pulls that in,
-    // so this adds ~nothing eager). staticMacros keeps macros as their static/degraded form for print.
+    // so this adds ~nothing eager).
     void import("../editor/macros/md-render").then(({ renderMarkdownToDom }) => {
       if (cancelled || !bodyRef.current) return;
-      bodyRef.current.replaceChildren(renderMarkdownToDom(md, undefined, { staticMacros: true }));
+      // LIVE macros (#85): the static mode renders a diagram as a compact chip, which is the "export shows
+      // source, screen shows a figure" gap on the one path that still comes through here. These renders are
+      // asynchronous and fill themselves in — the portal is built when the body changes, long before anyone
+      // reaches for File → Print, so by then they have drawn.
+      bodyRef.current.replaceChildren(renderMarkdownToDom(md));
     });
     return () => { cancelled = true; };
   }, [md]);
