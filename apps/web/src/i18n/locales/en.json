@@ -534,7 +534,6 @@
     "export": "Export as Markdown",
     "exportHtml": "Export as HTML",
     "print": "Print / PDF",
-    "printDisabled": "Print / PDF is temporarily unavailable while the render pipeline is being rebuilt.",
     "history": "History",
     "attachments": "Attachments",
     "permissions": "Permissions",

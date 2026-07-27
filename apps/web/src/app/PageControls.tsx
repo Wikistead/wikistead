@@ -130,7 +130,9 @@ function RoundBtn({ label, icon, onClick, testId, primary, disabled, badge, acti
 export interface WatchItem { watching: boolean; toggle: () => void; disabled: boolean }
 export interface WatchItems { page: WatchItem }
 
-function overflowItems(p: PageControlsProps, t: (k: string) => string, watch?: WatchItems): OverflowItem[] {
+// Exported for the menu-composition pins (#207): a plain builder with no hooks, so a test can ask what
+// the ⋯ menu offers without mounting the page.
+export function overflowItems(p: PageControlsProps, t: (k: string) => string, watch?: WatchItems): OverflowItem[] {
   const items: OverflowItem[] = [];
   // #368: Watch lives in the ⋯ menu in VIEW mode (member-only; only for a real page). Eye = watching,
   // EyeOff = not — a toggle item (trailing ✓ when on). Icon is the EYE glyph per the ticket; the
@@ -150,9 +152,11 @@ function overflowItems(p: PageControlsProps, t: (k: string) => string, watch?: W
   // light-fixed export), the dynamic lists it used to drop now resolve, and a block that still cannot be
   // drawn statically says so. The item is live.
   if (p.onExportHtml) items.push({ value: "export-html", label: t("page.exportHtml"), icon: <Download size={14} />, testId: "export-page-html" });
-  // #207 bounce: print is sealed (same root as #85 — both print paths are low-fidelity until the
-  // post-launch Option-A render core). Grayed out with a hint rather than hidden (matches #85).
-  if (p.onPrint) items.push({ value: "print", label: t("page.print"), icon: <Printer size={14} />, testId: "print-page", disabled: true, hint: t("page.printDisabled") });
+  // #207: print was sealed for the same reason the HTML export above was — both printed a low-fidelity
+  // document until the render core was rebuilt. It goes through that very export now (ADR-191: one
+  // server-rendered document, math and checklists and callouts all static, no raw ::: leak), with a
+  // three-surface parity gate keeping the screen and the page from drifting apart again. The item is live.
+  if (p.onPrint) items.push({ value: "print", label: t("page.print"), icon: <Printer size={14} />, testId: "print-page" });
   if (p.onAttachments) items.push({ value: "attachments", label: t("page.attachments"), icon: <Paperclip size={14} />, testId: "attachments-toggle" });
   if (p.onHistory) items.push({ value: "history", label: t("page.history"), icon: <History size={14} />, testId: "history-toggle" });
   // #322 / ADR-133: "Related" — open the related right-rail panel (both modes; §Backlinks 1-hop today).

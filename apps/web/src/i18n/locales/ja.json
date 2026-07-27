@@ -534,7 +534,6 @@
     "export": "Markdown でエクスポート",
     "exportHtml": "HTML でエクスポート",
     "print": "印刷 / PDF",
-    "printDisabled": "印刷 / PDF はレンダリング経路の再構築中のため一時的に利用できません。",
     "history": "履歴",
     "attachments": "添付ファイル",
     "permissions": "権限",
