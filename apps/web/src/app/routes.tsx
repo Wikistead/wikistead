@@ -577,6 +577,23 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   }
   // #364 / ADR-157 §4: /p/<home-id> canonicalises to the space root (one location for the home).
   if (homeOwner) return <Navigate to={`/spaces/${homeOwner.id}`} replace />;
+  // #505 / ADR-191: the browser's own Ctrl+P used to take a DIFFERENT road to paper than the app's print
+  // action — the menu item renders the page server-side (export.html, every macro static) while a native
+  // Ctrl+P fell to the print stylesheet over the client portal. Two roads means two things to keep in
+  // parity, which is exactly the drift this work keeps finding. Send the shortcut down the same road; the
+  // portal remains only as the fallback for a page with no published body.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "p" && e.key !== "P") return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      if (!pageId) return; // no page in view → let the browser do whatever it does
+      e.preventDefault();
+      void printPageHtml(token, pageId).then((ok) => { if (!ok) window.print(); });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pageId, token]);
+
   const docName = `t:${tenantId}:p:${pageId}`;
   // One props bag drives the floating control groups (status / actions / vim) and the
   // mobile ⋯ — same handlers as the old toolbar, only relocated (behaviour unchanged).
