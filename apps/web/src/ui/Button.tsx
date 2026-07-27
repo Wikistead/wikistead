@@ -63,7 +63,11 @@ export function IconButton({
     <button
       type={type}
       className={cn(
-        "inline-flex items-center justify-center rounded-md border border-transparent bg-transparent p-1.5 leading-none cursor-pointer transition-colors duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] disabled:opacity-50 disabled:cursor-default focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
+        // #535: a declared square, same 32px as the `sm` controls it sits beside in a form row. It used to
+        // size itself from p-1.5 + whatever glyph it held (~28px), so any row mixing it with a Select or
+        // Input came out ragged. Callers that need another size still pass one — `cn` lets a caller's class
+        // win, which is how the round page-chrome buttons keep their h-9 w-9.
+        "inline-flex size-8 items-center justify-center rounded-md border border-transparent bg-transparent leading-none cursor-pointer transition-colors duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] disabled:opacity-50 disabled:cursor-default focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
         variant === "danger"
           ? "text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:text-destructive"
           : "text-fg-dim hover:bg-panel-2 hover:text-foreground",
