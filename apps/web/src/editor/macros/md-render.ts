@@ -237,8 +237,9 @@ export interface TranscludeHostSeam {
   readonly deniedLabel: string;
 }
 export interface DiagramHostSeam {
-  // Mirrors the host's diagram renderer: a lang + source in, an image (or a failure) out.
-  readonly render: (lang: string, source: string) => Promise<{ ok: true; blob: Blob } | { ok: false } | null>;
+  // Mirrors the host's diagram renderer, including its legacy shapes: a bare Blob is a success and `null`
+  // is a degrade, which is what existing callers already pass around (decorations.ts DiagramRenderResult).
+  readonly render: (lang: string, source: string) => Promise<Blob | { ok: true; blob: Blob } | { ok: false; reason?: string } | null>;
   readonly handles: (lang: string) => boolean;
 }
 let activeTranscludeHost: TranscludeHostSeam | null = null;
@@ -462,6 +463,24 @@ class DomSink implements MdSink {
         const el = dispatchMacroRender(macro, body, { theme: currentMacroTheme() });
         if (el) {
           tagMacro(el, args.nodeFrom, lang!); // #215: tag for nested hit-test
+          // #450 slice 3: a diagram the HOST renders (plantuml today) gets the same swap here as the
+          // top-level widget. The macro's own liveRender returns its source card — it cannot fetch
+          // (ADR-024) — so without this a nested diagram showed source while the identical block one level
+          // up showed a picture. No host installed → the source card stays, which is what an unresolvable
+          // diagram should look like.
+          const diagramHost = activeDiagramHost;
+          if (diagramHost && lang && diagramHost.handles(lang) && !staticRender) {
+            void diagramHost.render(lang, body).then((res) => {
+              const blob = res instanceof Blob ? res : res && "ok" in res && res.ok ? res.blob : null;
+              if (!blob) return; // failure or degrade keeps the source card — never a broken embed
+              const img = document.createElement("img");
+              img.src = URL.createObjectURL(blob);
+              img.alt = "";
+              img.setAttribute("data-testid", "macro-diagram-nested");
+              img.className = "cm-lp-macro-diagram";
+              el.replaceChildren(img);
+            });
+          }
           // #267: a rendered diagram is centred by default (#255); this path has no widget wrap, so apply
           // the SAME cm-lp-align-* class (global CSS backs it outside .cm-editor).
           if (DIAGRAM_MACROS.has(lang!)) el.classList.add(`cm-lp-align-${fence!.align ?? "center"}`);
