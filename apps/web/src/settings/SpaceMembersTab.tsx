@@ -16,10 +16,22 @@ import { Switch } from "../ui/Switch";
 
 interface SpaceCtx { spaceId: string; name: string }
 // #330 / ADR-141: `moderate` → space#moderator (revert/freeze/patrol + edit; grants/settings stay manage-only).
-// #529 / ADR-193: `comment` joined the space capabilities (space#commenter), so it belongs in the grant
-// picker. It also has to be in THIS list for ordering: rows sort by CAPS.indexOf, and a capability
-// missing from it lands at -1 and sorts above everything.
-const CAPS: PageRelation[] = ["view", "comment", "edit", "moderate", "manage"];
+// #529 / ADR-193: `comment` became a space capability (space#commenter). Two different lists follow from
+// that, and conflating them is what the review rejected — "why is a role that isn't in the roles
+// list showing up here?".
+//
+// ORDER covers every capability a grant row can HOLD, because rows sort by indexOf and anything missing
+// lands at -1 and floats above the rest. A comment grant made through the API (or before this change) has
+// to display correctly.
+const CAP_ORDER: PageRelation[] = ["view", "comment", "edit", "moderate", "manage"];
+// GRANTABLE is what this picker OFFERS, and it deliberately stops at the four built-in roles the Roles tab
+// lists. Offering `commenter` here made the product speak with two voices: a name that is a role in one
+// screen and absent from the other, while the standing ruling was that the built-in roles are not
+// changing yet — whether `viewer` should include commenting is a question about what viewer MEANS, and it
+// belongs to that decision, not to this dropdown. The capability keeps working server-side; the place it
+// becomes grantable is #514 / ADR-188 §6, where built-in and custom roles merge into ONE assignment UI and
+// the two-lists problem stops existing. Adding it back before then re-creates the mismatch.
+const GRANTABLE: PageRelation[] = ["view", "edit", "moderate", "manage"];
 // #445the WIRE value stays the verb (the internal relation — view→viewer_member, edit→editor_member,
 // etc. — is unchanged), but the LABEL is the noun a role is called, shown as a literal to match the Roles tab
 // (which renders `r.name` verbatim). One noun set across Members and Roles.
@@ -107,7 +119,7 @@ export function SpaceMembersTab() {
     setQuery("");
   };
 
-  const grants = (access.data ?? []).slice().sort((a, b) => CAPS.indexOf(b.capability) - CAPS.indexOf(a.capability));
+  const grants = (access.data ?? []).slice().sort((a, b) => CAP_ORDER.indexOf(b.capability) - CAP_ORDER.indexOf(a.capability));
   // #523 / ADR-190 slice D: the server now resolves each user grantee's full name (override ?? OIDC
   // display_name) on the manage-gated grant list (slice A), so an un-customized member reads as their
   // name, not a sub — the #513 root fix. A departed / cross-tenant sub comes back null and falls back to
@@ -168,7 +180,7 @@ export function SpaceMembersTab() {
           ariaLabel={t("spaceMembers.capability")}
           testId="space-grant-capability"
           size="sm"
-          options={CAPS.map((c) => ({ value: c, label: capNoun(c) }))}
+          options={GRANTABLE.map((c) => ({ value: c, label: capNoun(c) }))}
         />
         <Button variant="primary" size="sm" disabled={(mode === "group" ? !groupName : !picked) || grant.isPending} onClick={add} data-testid="space-grant-add">{t("spaceMembers.add")}</Button>
       </div>
