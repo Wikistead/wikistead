@@ -65,7 +65,13 @@ test("#505: the print surface renders every element (nothing reaches paper as ra
   assertNothingRaw(markup, "print portal");
 
   // and the elements are actually present, as elements
-  await expect(portal.locator(".callout, .cm-lp-callout"), "callout box").toHaveCount(1);
+  // #450: the `:::todo` container's class starts with cm-lp-callout too (it wears the callout box with the
+  // tenant accent), and it only started drawing as a box on this surface once the sink stopped skipping
+  // icon-less containers. So this counts the two boxes SEPARATELY rather than expecting one of anything —
+  // the note and the todo are both supposed to be here, and the earlier `toHaveCount(1)` would have gone
+  // red for the right thing happening.
+  await expect(portal.locator(".callout-note, .cm-lp-callout-note"), "the note callout box").toHaveCount(1);
+  await expect(portal.locator(".todo, .cm-lp-todo"), "the todo box").toHaveCount(1);
   await expect(portal.locator("input[type=checkbox]"), "both checklist items").toHaveCount(2);
   await expect(portal.locator("table"), "table").toHaveCount(1);
   await expect(portal.locator("pre"), "code fence").not.toHaveCount(0);

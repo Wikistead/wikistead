@@ -88,7 +88,11 @@ test("#425: :::details ✎ opens the panel editUI (no raw `:::`); summary+body r
   await edit.dispatchEvent("mousedown"); // hover-shown (opacity); mousedown is the wired trigger
   await sleep(300);
   await expect(page.getByTestId("details-editui")).toBeVisible({ timeout: 5000 });
-  const inEdit = await page.locator("[data-pane=preview] .cm-content").innerText();
+  // The details editUI mounts a NESTED CodeMirror for the body, whose `.cm-content` also lives inside the
+  // preview pane — so this selector became ambiguous (strict-mode violation) and the test had been red on
+  // master, for a reason unrelated to what it checks. Read the OUTER surface, which is what "the DOM never
+  // shows raw fences" is about; the nested editor is identified by its own testid.
+  const inEdit = await page.locator("[data-pane=preview] .cm-content:not([data-testid])").innerText();
   expect(inEdit, "the DOM never shows raw fences while editing").not.toContain(":::details");
   // edit summary + body → commit (change events) → Escape exits to the rendered widget
   const summary = page.getByTestId("details-edit-summary");

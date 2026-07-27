@@ -470,14 +470,29 @@ class DomSink implements MdSink {
         return;
       }
     }
-    // #170 / ADR-049 (Y): a CONTAINER directive with an icon = a typed callout → the shared PANEL
-    // (single source of truth with the CM widget), not a generic box.
-    if (!atDepthCap && macro?.containerClass && macro.icon) {
+    // #170 / ADR-049 (Y): a CONTAINER directive → the shared PANEL (single source of truth with the CM
+    // widget), not a generic box.
+    //
+    // #450 (measured): this used to require `macro.icon`, so the two containers that carry no icon
+    // `:::todo` and `:::details` — fell all the way through to the generic `cm-lp-md-directive` box on
+    // every surface this sink draws (the read surface and the print portal). `:::todo` lost its accent
+    // box and list-checks icon, and `:::details` lost its DISCLOSURE and its `[label]` outright — the
+    // summary text a reader was given simply was not in the document, the same content loss #472 fixed
+    // for the callout label. Meanwhile the SafeHtml sink renders both properly, so the two sinks of
+    // ADR-160's one-walk-two-sinks disagreed about the same source.
+    //
+    // A collapsible container becomes a real <details>: it matches what the other sink emits, keeps the
+    // label, and gives the reader the same collapse the editor shows — no new CSS to drift. Everything
+    // else takes the panel, whose icon and accent come from the container class's own CSS variables
+    // (--cb-icon/--cb-color), so an icon-less container is styled by its class rather than skipped.
+    if (!atDepthCap && macro?.containerClass) {
       nestedDirectiveDepth++;
       try {
-        const panel = renderCalloutPanel(macro.containerClass, macro.icon, parsed?.label ?? "", body, nestedBodyBase ?? undefined);
-        tagMacro(panel, args.nodeFrom, parsed!.name); // #215: anchor in the OUTER src coords
-        into.appendChild(panel);
+        const el = macro.collapsible
+          ? renderDisclosure(parsed?.label ?? "", body, nestedBodyBase ?? undefined)
+          : renderCalloutPanel(macro.containerClass, macro.icon ?? "", parsed?.label ?? "", body, nestedBodyBase ?? undefined);
+        tagMacro(el, args.nodeFrom, parsed!.name); // #215: anchor in the OUTER src coords
+        into.appendChild(el);
       } finally { nestedDirectiveDepth--; }
       return;
     }
@@ -558,6 +573,21 @@ export function renderInlineMarkdownToDom(text: string): DocumentFragment {
 // the CM live widget (decorations.ts, top-level callouts) AND the nested dispatch above (callouts
 // inside transclude/columns), so both render identically. Display-only; XSS-safe (title via
 // textContent, body via the sanitized renderMarkdownToDom, icon via data-icon + CSS mask, no innerHTML).
+// #450: a COLLAPSIBLE container (`:::details`) on a read surface — the same `<details><summary>` the
+// SafeHtml sink emits, so the two sinks agree and the label reaches the reader. Native disclosure: no
+// script, no stylesheet, and it survives into print and into a saved page.
+export function renderDisclosure(label: string, body: string, baseOffset?: number): HTMLElement {
+  const el = document.createElement("details");
+  el.className = "cm-lp-details-disclosure";
+  const summary = document.createElement("summary");
+  summary.textContent = label.trim() || "Details"; // text, never HTML — same boundary as the panel title
+  el.appendChild(summary);
+  const bodyEl = document.createElement("div");
+  appendMarkdownInto(bodyEl, body, baseOffset);
+  el.appendChild(bodyEl);
+  return el;
+}
+
 export function renderCalloutPanel(containerClass: string, icon: string, label: string, body: string, baseOffset?: number): HTMLElement {
   const wrap = document.createElement("div");
   // #453the callout takes the selection ring, so it wears the shared atom-box marker too
