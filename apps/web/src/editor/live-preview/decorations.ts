@@ -34,7 +34,7 @@ import { countTasks, renderProgressRing, updateProgressRing } from "../macros/pr
 import { calloutTypeOption } from "../macros/callout-type-ui";
 import { renderCellInline } from "../macros/table-cell-dom";
 import { openMacroModal } from "./macro-modal";
-import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost, nestedSelectionField, setNestedSelection, nestedEditActiveField, setNestedEditActive, slotEditField, setSlotEditActive, type NestedSelection, type SlotEdit } from "./macro-edit";
+import { macroRenderActiveField, setMacroRenderActive, makeInnerEditHost, minimalChange, nestedSelectionField, setNestedSelection, nestedEditActiveField, setNestedEditActive, slotEditField, setSlotEditActive, type NestedSelection, type SlotEdit } from "./macro-edit";
 import { mountSourceEditor } from "../macros/source-editor";
 import { fenceSettingsField, toggleFenceSettings } from "./fence-settings-panel";
 import type * as Y from "yjs";
@@ -1717,8 +1717,34 @@ export class EditableEditUIWidget extends WidgetType {
     dom.__editUICtrl?.destroy();
     dom.replaceChildren();
     const save = (newBody: MacroSource) => {
-      const ch = editUISaveChange(this.from, this.to, this.wrapSource, this.tier, newBody);
-      view.dispatch({ changes: ch, effects: setMacroRenderActive.of({ from: ch.from, to: ch.from + ch.insert.length }) });
+      // #502 (review rejection, reproduced): `this.from/this.to` are captured when the WIDGET is built. For a
+      // lone editor that is fine — each commit re-points render-active and the widget is rebuilt. Under
+      // co-edit it is not: a peer's edit moves the block while this closure keeps the old numbers, so the
+      // replace landed beside the block instead of over it and the fence DUPLICATED (measured: 2 fences
+      // became 4, `` ```…``````mermaid ``), after which both clients re-parsed the broken source and the
+      // body was lost. ADR-184 says the flush replaces a range RE-DERIVED at flush time — so read the live
+      // range from macroRenderActiveField, which CM maps through every document change. The captured range
+      // is only the fallback for the window where the field has already been cleared.
+      const live = view.state.field(macroRenderActiveField, false);
+      // A peer's flush replaces the WHOLE block, and mapping our range through that collapses it to a
+      // point. Measured: the second client then wrote at `from === to` — a pure INSERT — and the fence
+      // duplicated. A collapsed range means the block we were editing is already gone (the peer wrote the
+      // merged text we would be writing), so there is nothing left to commit.
+      if (live && live.to <= live.from) { view.focus(); return }
+      const from = live ? live.from : this.from;
+      const to = live ? Math.min(live.to, view.state.doc.length) : this.to;
+      const ch = editUISaveChange(from, to, this.wrapSource, this.tier, newBody);
+      // Idempotence, the other half of the same defence: if the document already reads exactly what this
+      // commit would write, writing it again can only churn (and, with any range drift, duplicate).
+      if (view.state.doc.sliceString(ch.from, Math.min(ch.to, view.state.doc.length)) === ch.insert) { view.focus(); return }
+      // #502 Option B: narrow the whole-block rewrite to the span that actually changed. A wholesale
+      // replace is what made a peer's range collapse in the first place — their editor lost the block out
+      // from under them and their RichUI closed. Writing only the edited characters leaves the block (and
+      // therefore the peer's open panel, and their caret) intact, and it is the same minimal-diff rule the
+      // table grid already commits through.
+      const cur = view.state.doc.sliceString(ch.from, Math.min(ch.to, view.state.doc.length));
+      const min = minimalChange(cur, ch.insert, ch.from);
+      view.dispatch({ changes: min, effects: setMacroRenderActive.of({ from: ch.from, to: ch.from + ch.insert.length }) });
       view.focus();
     };
     // #243 / ADR-111 C3 (slice 2): pass the OUTER editor's vim ON/OFF as a SEPARATE editEnv (not folded into
@@ -1826,8 +1852,21 @@ export class EditableEditUIWidget extends WidgetType {
         // throws "update in progress", and the merged body would be lost). Deferring runs it after the
         // current update completes, on the still-alive outer view (design-review). Guarded against a
         // torn-down view (full editor unmount between here and the microtask).
+        // #502 (review rejection, measured): on Escape this flush fired ON TOP of the exit path's own
+        // commit-on-blur — the SAME block written twice, and because the second write still carried the
+        // pre-first-write range it landed BESIDE the block instead of over it: 2 fences became 4
+        // (`` ```…``````mermaid ``), both clients re-parsed the broken source, and the body was lost.
+        // The exit path always blurs (which commits) BEFORE it clears render-active, so a flush that finds
+        // the field already gone is by definition a second write of something just committed. Skip it.
+        // A teardown with the island still OPEN (the peer simply left) still has the field, and still
+        // flushes — that is the case this flush exists for.
         if (flushed !== String(this.source)) {
-          queueMicrotask(() => { try { opts.onCommit?.(asMacroSource(flushed)); } catch { /* outer view gone */ } });
+          queueMicrotask(() => {
+            try {
+              if (!view.state.field(macroRenderActiveField, false)) return; // exited → already committed
+              opts.onCommit?.(asMacroSource(flushed));
+            } catch { /* outer view gone */ }
+          });
         }
         swap(undefined, flushed); // back to a local surface so a now-lone editor keeps editing (no-op if destroying)
       },
