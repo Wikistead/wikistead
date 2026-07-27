@@ -18,7 +18,9 @@ const docText = (p: Page) => p.evaluate(() => {
     { state: { doc: { toString(): string } } };
   return view.state.doc.toString();
 });
-const fences = (s: string) => (s.match(/```/g) || []).length;
+// The document must be EXACTLY this after the edit. A fence COUNT cannot see the corruption this bug
+// produces: ```` is two non-overlapping ``` matches, so a broken doc counted as "2 fences" and passed.
+const EXPECTED = "# t\n\n```mermaid\ngraph TD\n  A[start] --> B[end]X\n```\n\nafter\n";
 const islandOpen = (p: Page) => p.evaluate(() => !!document.querySelector(".cm-lp-editui-wrap"));
 
 async function enterFenceIsland(p: Page) {
@@ -43,7 +45,7 @@ test("#502: Escaping a co-edited island commits once, without duplicating the bl
   await b.goto(`/p/${id}`); await b.waitForSelector("[data-pane=preview] .cm-content");
   await enterEdit(b); await sleep(800);
 
-  expect(fences(await docText(a)), "one fence pair to begin with").toBe(2);
+  expect(await docText(a), "the fixture starts intact").toBe(DOC);
 
   await enterFenceIsland(a);
   await enterFenceIsland(b);
@@ -58,10 +60,8 @@ test("#502: Escaping a co-edited island commits once, without duplicating the bl
   await sleep(1500);
 
   for (const [who, page] of [["A", a], ["B", b]] as const) {
-    const doc = await docText(page);
-    expect(fences(doc), `${who}: the block must not duplicate`).toBe(2);
-    expect(doc, `${who}: the body survives, with the edit`).toContain("A[start] --> B[end]X");
-    expect(doc, `${who}: no concatenated fences`).not.toContain("``````");
+    // exact string: the edit landed once, the block is intact, and no stray backticks anywhere
+    expect(await docText(page), `${who}: the document after one edit + Escape`).toBe(EXPECTED);
   }
   // the peer was not thrown out of their own editor by the commit
   expect(await islandOpen(b), "B's RichUI survives A's commit").toBe(true);

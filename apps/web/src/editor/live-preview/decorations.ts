@@ -1731,7 +1731,17 @@ export class EditableEditUIWidget extends WidgetType {
       // duplicated. A collapsed range means the block we were editing is already gone (the peer wrote the
       // merged text we would be writing), so there is nothing left to commit.
       if (live && live.to <= live.from) { view.focus(); return }
-      const from = live ? live.from : this.from;
+      // The captured range is only a fallback, and a STALE one writes scattered characters rather than a
+      // clean block (review: that is what produced a ```` run). Use it only when the document still reads
+      // exactly what this widget was built from; otherwise the block has moved and this commit is void.
+      if (!live) {
+        const capped = view.state.doc.sliceString(this.from, Math.min(this.to, view.state.doc.length));
+        if (capped !== this.wrapSource(this.source)) { view.focus(); return }
+      }
+      // render-active is only required to CONTAIN the block (the mount condition is a superset test), so
+      // clamp to this widget's own extent — writing the field's range verbatim could replace an enclosing
+      // block. Length is taken from the captured extent, which the check above keeps honest.
+      const from = live ? Math.max(live.from, Math.min(this.from, live.to)) : this.from;
       const to = live ? Math.min(live.to, view.state.doc.length) : this.to;
       const ch = editUISaveChange(from, to, this.wrapSource, this.tier, newBody);
       // Idempotence, the other half of the same defence: if the document already reads exactly what this
