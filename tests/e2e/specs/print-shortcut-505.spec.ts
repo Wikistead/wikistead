@@ -44,7 +44,7 @@ test("#85/#505: Ctrl+P prints the browser-built document, and asks the server fo
 // PUBLISHED version, so there is nothing to fetch — and the app is supposed to fall back to printing the
 // live surface. It did not: the export answered 200 with a document holding only the title, so Ctrl+P on
 // a draft printed a blank sheet with a heading. The endpoint reports absence now, and the fallback runs.
-test("#85/#505: Ctrl+P on an unpublished page falls back to printing the live surface", async ({ page }) => {
+test("#85/#505: Ctrl+P on an UNPUBLISHED page prints the draft itself, not the application", async ({ page }) => {
   await page.addInitScript(() => {
     (window as unknown as { __printed: number }).__printed = 0;
     window.print = () => { (window as unknown as { __printed: number }).__printed += 1; };
@@ -59,10 +59,14 @@ test("#85/#505: Ctrl+P on an unpublished page falls back to printing the live su
     const r = await fetch(`${api}/pages/${pageId}/export.html`, { headers: { Authorization: "Bearer dev-token" } });
     return r.status;
   }, { api: API, pageId: id });
-  expect(status, "an unpublished page has no export document").toBe(404);
+  expect(status, "the server has no published version to export").toBe(404);
 
+  // #85 / ADR-194: and yet the page prints, because a draft HAS a document — the browser builds it from
+  // the surface in front of the author. Before this it fell back to printing the application chrome.
   await page.keyboard.press("Control+p");
-  await sleep(1200);
-  const printed = await page.evaluate(() => (window as unknown as { __printed: number }).__printed);
-  expect(printed, "the app printed the live surface instead of an empty document").toBeGreaterThan(0);
+  await sleep(7000);
+  const docs = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("iframe")).map((f) => (f as HTMLIFrameElement).srcdoc || "").filter(Boolean));
+  expect(docs.length, "the draft produced a document of its own").toBeGreaterThan(0);
+  expect(docs.pop()!, "…carrying what the author is looking at").toContain("never published");
 });

@@ -580,6 +580,17 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   if (homeOwner) return <Navigate to={`/spaces/${homeOwner.id}`} replace />;
   // #505 / ADR-191: the browser's own Ctrl+P used to take a DIFFERENT road to paper than the app's print
   // action — the menu item renders the page server-side (export.html, every macro static) while a native
+  // #85 / ADR-194: what the export and print build FROM. The published body when there is one — that is
+  // what "export this page" has always meant — and otherwise the live document, so a draft prints as itself
+  // instead of falling back to printing the application. Reading the surface (a getter the editor sets) is
+  // what makes that possible without a published version to fetch.
+  const docTextRef = useRef<(() => string) | null>(null);
+  const exportSource = useCallback((): string => {
+    const pub = published?.publishedMd ?? "";
+    if (pub.trim()) return pub;
+    return docTextRef.current?.() ?? "";
+  }, [published?.publishedMd]);
+
   // Ctrl+P fell to the print stylesheet over the client portal. Two roads means two things to keep in
   // parity, which is exactly the drift this work keeps finding. Send the shortcut down the same road; the
   // portal remains only as the fallback for a page with no published body.
@@ -591,13 +602,13 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
       e.preventDefault();
       // #85 / ADR-194: the same document the menu's Print produces, so the shortcut cannot print something
       // else. A page with no published body still falls to the live surface (see onPrint).
-      const md = published?.publishedMd ?? "";
+      const md = exportSource();
       if (md.trim()) void printBrowserExport(md, page?.title ?? "Untitled");
       else window.print();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [pageId, token, published?.publishedMd, page?.title]);
+  }, [pageId, token, exportSource, page?.title]);
 
   const docName = `t:${tenantId}:p:${pageId}`;
   // One props bag drives the floating control groups (status / actions / vim) and the
@@ -660,15 +671,15 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
     // it highlighted: they are already that way here. The server route stays for the API path (no browser
     // to draw with), and nothing the server serves to anyone else changes.
     onExportHtml: () => {
-      const md = published?.publishedMd ?? "";
+      const md = exportSource();
       if (md.trim()) void downloadBrowserExport(md, page?.title ?? "Untitled");
-      else if (pageId) void downloadPageExport(token, pageId, "html"); // no published body → the server answers
+      else if (pageId) void downloadPageExport(token, pageId, "html"); // nothing on screen either → the server answers
     },
     // Print takes the SAME road as the download — the sheet and the file are the same document, so there is
     // nothing left to keep in parity between them. A page with no published body still prints the live
     // surface, which is what it did before; giving drafts a rendered export is the next slice.
     onPrint: () => {
-      const md = published?.publishedMd ?? "";
+      const md = exportSource();
       if (md.trim()) void printBrowserExport(md, page?.title ?? "Untitled");
       else window.print();
     },
@@ -763,7 +774,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
               empty={!editing && !pageQ.isLoading && !publishedQ.isLoading && !(published?.publishedMd ?? "").trim()}
               canEdit={canEdit}
             />
-            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} docTextRef={docTextRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
             {/* #505the paginating print surface (the live CM body is virtualised → prints one screenful). */}
             <PrintSurface md={published?.publishedMd ?? null} title={page?.title ?? ""} />
             {/* #464 / ADR-175 rework slice 2/4: the who-viewed analytics moved OUT of this bottom-of-editor

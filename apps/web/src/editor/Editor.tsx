@@ -100,6 +100,10 @@ export interface EditorProps {
   // The host sets this ref to a getter that builds an anchor from the current
   // selection (for "Add comment on selection"). Null when nothing is selected.
   anchorGetterRef?: MutableRefObject<AnchorGetter | null>;
+  // #85 / ADR-194: read the CURRENT body out of the live surface. The export/print path needs it for a page
+  // with no published version — a draft has a document, it just has no published one, and printing it used
+  // to fall back to printing the app itself. Display-only: a getter, never a writer.
+  docTextRef?: MutableRefObject<(() => string) | null>;
   // #192 / ADR-091: table of contents. onHeadings fires with the doc's headings (initial + each edit);
   // onActiveHeading reports the topmost visible heading on scroll (scroll-spy); tocJumpRef is set to a
   // "scroll to this heading offset" function the TOC rail calls. All display-only (read state / scroll).
@@ -159,7 +163,7 @@ function tint(color: string): string {
 // visible heading). All display-only. Returns a cleanup. Adds the headings listener via appendConfig so
 // the mount functions don't need to know about the TOC.
 
-export const Editor = memo(function Editor({ docName, pageId, guestSurface = false, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
+export const Editor = memo(function Editor({ docName, pageId, guestSurface = false, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, docTextRef, onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme(); // #200: re-render macro widgets (Excalidraw etc.) on a light/dark switch
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
@@ -444,6 +448,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       views.push(v);
       previewViewRef.current = v;
       if (anchorGetterRef) anchorGetterRef.current = null;
+      if (docTextRef) docTextRef.current = null;
       const tocCleanup = wireToc(v, { onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress }); // #192 TOC (reading/view surface)
       return () => {
         tocCleanup();
@@ -513,6 +518,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
     views.push(previewView);
     previewViewRef.current = previewView;
 
+    if (docTextRef) docTextRef.current = () => previewView.state.doc.toString();
     if (anchorGetterRef) {
       anchorGetterRef.current = () => {
         const sel = previewView.state.selection.main;
@@ -529,6 +535,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       views.forEach((v) => v.destroy());
       previewViewRef.current = null;
       if (anchorGetterRef) anchorGetterRef.current = null;
+      if (docTextRef) docTextRef.current = null;
       previewHost.replaceChildren();
       // #454: leaving the EDIT surface keeps the collab connection alive (effect 1 — sync must not
       // drop), but the presence THIS surface published must go with it: yCollab's plugin does not
