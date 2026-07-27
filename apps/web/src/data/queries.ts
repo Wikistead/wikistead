@@ -1618,6 +1618,20 @@ export function useRoleMappings(enabled = true) {
     enabled,
   });
 }
+// #514 / ADR-188 §8: the mappings for ONE resource. The unfiltered list above is the tenant-wide config
+// view and is admin-only; filtered by a space it answers to that space's own manage authority
+// (roles.ts requireListAuthority), which is what lets a space manager configure their space's mappings
+// without seeing anyone else's.
+export function useResourceRoleMappings(resourceType: "space" | "tenant", resourceId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["role-mappings", resourceType, resourceId],
+    queryFn: () => apiFetch<RoleMapping[]>(
+      `/admin/roles/mappings?resourceType=${encodeURIComponent(resourceType)}&resourceId=${encodeURIComponent(resourceId)}`, token,
+    ).then((r) => r ?? []),
+    enabled: enabled && resourceId.length > 0,
+  });
+}
 export function useCreateRoleMapping() {
   const { token } = useSession();
   const qc = useQueryClient();

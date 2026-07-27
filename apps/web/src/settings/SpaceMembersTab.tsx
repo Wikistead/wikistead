@@ -13,6 +13,7 @@ import { Button, IconButton } from "../ui/Button";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
 import { Switch } from "../ui/Switch";
+import { SpaceGroupMappings } from "./SpaceGroupMappings";
 
 interface SpaceCtx { spaceId: string; name: string }
 // #330 / ADR-141: `moderate` → space#moderator (revert/freeze/patrol + edit; grants/settings stay manage-only).
@@ -256,6 +257,12 @@ export function SpaceMembersTab() {
           </div>
         </div>
       )}
+
+      {/* #514 / ADR-188 §8: a mapping onto a SPACE role is this space's configuration, so it lives here
+          rather than on the tenant Roles tab (which kept a space picker only tenant admins could reach).
+          The server already gated it per resource — creating needs `manage` on this space, and the
+          filtered list answers to the same authority. */}
+      {customRoles.length > 0 && <SpaceGroupMappings spaceId={spaceId} />}
 
       {/* #100 / ADR-029: comment AUDIENCE toggles — who may comment on this space's pages. A resource
           setting (space#comment_open), separate from the per-member grants above. Default OFF. */}
