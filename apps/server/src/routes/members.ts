@@ -248,8 +248,9 @@ export async function membersPlugin(app: FastifyInstance) {
     if (invalid) return reply.code(400).send({ error: invalid })
     // Every page in THIS tenant (req.db is RLS-scoped, so the tenant boundary is the database's, not a filter).
     const rows = await req.db.sql<{ id: string; parent_id: string | null }[]>`SELECT id, parent_id FROM pages`
-    // A tenant admin manages every space, so every space's page#space links may be trusted (the read cost
-    // scales with the number of SPACES, not pages).
+    // A tenant admin manages every space, so every space's page#space links may be trusted. (The read cost
+    // is (linked pages / 50) round-trips PLUS one per space — NOT "spaces, not pages"; that earlier claim
+    // came from a measurement against page ids with no tuples at all. See rollup.ts for the real numbers.)
     const spaceRows = await req.db.sql<{ id: string }[]>`SELECT id FROM spaces`
     // #520a tenant admin IS a manager of every space (`space#manager … or admin from tenant`), so the
     // per-page fan-out — worst here, this scope being the whole tenant — collapses to the private pages only.
