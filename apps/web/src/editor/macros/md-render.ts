@@ -1,7 +1,7 @@
 import { parseFenceInfo, safeHref, walkMarkdown, walkInlineMarkdown, type MdSink, type MdOpenRole, type MdLeafRole, type MdRoleData } from "@wikistead/macro-render"; // #267 fence align=; #384/ADR-160 the ONE tree-walk + shared URL judge
 import katex from "katex"; // #505: the print portal / preview draw math too — same renderer as the editor
 import { parseDirectiveOpen } from "./directive-parser";
-import { findDirectiveMacro, findFenceMacro } from "./registry";
+import { findDirectiveMacro, findFenceMacro, type MacroContext, type MacroSource, type MacroTheme } from "./registry";
 import { currentMacroTheme } from "./theme";
 import { parseFrontmatterRange, parseFmTags, type FmTag } from "../live-preview/frontmatter";
 
@@ -57,6 +57,56 @@ let renderBase: number | null = null;
 let pendingBaseOffset: number | null = null;
 export function setPendingBaseOffset(v: number | null): void { pendingBaseOffset = v; }
 export function takePendingBaseOffset(): number | null { const v = pendingBaseOffset; pendingBaseOffset = null; return v; }
+
+// ADR-177 §2 (#450): THE macro dispatch. Every surface that turns a registered macro into DOM goes
+// through here — the CM widget, the fence sink and the directive sink — so "a macro that renders at top
+// level renders nested" holds because it is the same code, not because three call sites were kept in
+// step by hand. That drift is what "`:::children` renders top-level but not nested" was.
+//
+// This is the seam the macro SDK will be assembled at (ADR-177 §3, Review-gated): when a macro is handed
+// more than `{theme}`, exactly one function decides what it gets. Keeping the assembly in one place is a
+// pre-condition of that work, which is why the helper lands before it.
+//
+// The POST-processing stays at each site on purpose — the widget's host resolution, the fence's plain-card
+// fallback and the directive's generic box are genuinely different jobs, and folding them together would
+// trade the drift this removes for a new one.
+//
+// `onThrow` records an EXISTING divergence rather than papering over it: the two md-render sinks swallow a
+// throwing macro and fall back to plain content, while the widget site lets it propagate. Unifying that is
+// a behaviour change, so it is deliberately not made here; the parameter makes the difference visible and
+// greppable instead of implicit.
+export interface MacroDispatch {
+  theme: MacroTheme
+  /** Body base handed to columns/tabs through the take-once singleton (the one gap the narrow API can't cross). */
+  baseOffset?: number | null
+  /** Count this render against the nesting cap (the directive sink does; the fence sink never has). */
+  countDepth?: boolean
+  /** How a throwing macro is handled. 'null' = the caller falls back; 'throw' = today's widget behaviour. */
+  onThrow?: "null" | "throw"
+}
+
+export function dispatchMacroRender(
+  macro: { liveRender?: (body: MacroSource, ctx: MacroContext) => HTMLElement },
+  body: string,
+  opts: MacroDispatch,
+): HTMLElement | null {
+  if (!macro.liveRender) return null;
+  // The sinks hold plain slices of the document; the brand is asserted at this seam, exactly where the
+  // call sites asserted it before, so the cast moves rather than multiplies.
+  const src = body as MacroSource;
+  const usesBase = opts.baseOffset !== undefined;
+  if (opts.countDepth) nestedDirectiveDepth++;
+  if (usesBase) setPendingBaseOffset(opts.baseOffset ?? null);
+  try {
+    return macro.liveRender(src, { theme: opts.theme });
+  } catch (err) {
+    if (opts.onThrow === "throw") throw err;
+    return null; // a macro that throws must never break the surrounding render
+  } finally {
+    if (usesBase) setPendingBaseOffset(null);
+    if (opts.countDepth) nestedDirectiveDepth--;
+  }
+}
 
 // #351STATIC (no-macro) render mode for lightweight surfaces — the title-link hover card.
 // While active, a fence/directive macro is NEVER dispatched to liveRender: no widget/canvas/iframe is
@@ -379,8 +429,8 @@ class DomSink implements MdSink {
       // to its liveRender — the SINGLE source of truth. Unknown lang / no liveRender / a macro that THROWS
       // → the plain card below (never break the whole render). liveRender only gets `{theme}` (ADR-024).
       if (macro?.liveRender) {
-        try {
-          const el = macro.liveRender(body, { theme: currentMacroTheme() });
+        const el = dispatchMacroRender(macro, body, { theme: currentMacroTheme() });
+        if (el) {
           tagMacro(el, args.nodeFrom, lang!); // #215: tag for nested hit-test
           // #267: a rendered diagram is centred by default (#255); this path has no widget wrap, so apply
           // the SAME cm-lp-align-* class (global CSS backs it outside .cm-editor).
@@ -388,7 +438,7 @@ class DomSink implements MdSink {
           into.appendChild(el);
           return;
         }
-        catch { /* a macro that throws must not break the render → fall through to plain code */ }
+        // a macro that threw falls through to the plain card below (unchanged)
       }
     }
     // #381the static fence is the SAME card as the CM surface — a shared header (filename tab +
@@ -442,12 +492,9 @@ class DomSink implements MdSink {
       return;
     }
     if (!atDepthCap && !staticRender && macro?.liveRender) {
-      nestedDirectiveDepth++;
-      setPendingBaseOffset(nestedBodyBase); // hand the body base to columns/tabs (narrow API can't pass it)
-      let el: HTMLElement | null = null;
-      try { el = macro.liveRender(body, { theme: currentMacroTheme() }); }
-      catch { /* a macro that throws must not break the render → fall through to the generic box */ }
-      finally { setPendingBaseOffset(null); nestedDirectiveDepth--; }
+      // baseOffset hands the body base to columns/tabs (the narrow API can't pass it); countDepth keeps
+      // the nesting cap honest. A throwing macro falls through to the generic box, as before.
+      const el = dispatchMacroRender(macro, body, { theme: currentMacroTheme(), baseOffset: nestedBodyBase, countDepth: true });
       if (el) {
         tagMacro(el, args.nodeFrom, parsed!.name); // #215 tag
         // #393 / ADR-151: `:::table{align=…}` block alignment on the read/nested surface. FIXED enum →
