@@ -142,6 +142,12 @@ export async function filterAuthorized(
   // byte-identical; listSpaces passes 'space' to batch its per-space capability fan-out the same way the
   // page tree does. The capability→relation mapping already differs per type (RELATION[type]).
   resourceType: ResourceRef['type'] = 'page',
+  // #534: how many 50-id batches may be in flight at once. ONE by default — #489's pacing, so a large
+  // confirm cannot monopolise the store — but a caller whose set is big AND whose result is an enhancement
+  // rather than a gate may raise it. The title dictionary is the case that forced this: capped at 2000 ids,
+  // it is up to 40 SEQUENTIAL round-trips, which is the measured ~14s before the editor opens. Bounded, not
+  // unbounded: the point of #489 was never "one at a time", it was "not all at once".
+  concurrency = 1,
 ): Promise<Set<string>> {
   const hooks = getAuthzHooks()
   // The relation is the same for every id (depends only on capability + type), so resolve once.
@@ -161,8 +167,10 @@ export async function filterAuthorized(
 
   // 2. server-side BatchCheck, chunked at the server's default max (50). The chunks run SEQUENTIALLY —
   //    #489's pacing: one batch in flight per caller, so a big confirm can't monopolise the store.
-  for (let i = 0; i < toBatch.length; i += BATCH_CHECK_MAX) {
-    const chunk = toBatch.slice(i, i + BATCH_CHECK_MAX)
+  const chunks: string[][] = []
+  for (let i = 0; i < toBatch.length; i += BATCH_CHECK_MAX) chunks.push(toBatch.slice(i, i + BATCH_CHECK_MAX))
+  const lanes = Math.max(1, Math.min(Math.trunc(concurrency), 8)) // clamped: never an unbounded fan-out
+  const runChunk = async (chunk: string[]) => {
     // Index-based correlation ids (not the page id) so any id shape is safe against the id charset/length
     // constraint on correlation_id; map the response back by correlation id.
     const byCorr = new Map(chunk.map((id, j) => [String(j), id]))
@@ -189,6 +197,10 @@ export async function filterAuthorized(
       if (final) out.add(id)
     }
     // Any chunk id with no response entry is denied (fail closed) — never silently treated as allowed.
+  }
+  // Run the chunks `lanes` at a time. With the default of 1 this is exactly the old sequential loop.
+  for (let i = 0; i < chunks.length; i += lanes) {
+    await Promise.all(chunks.slice(i, i + lanes).map(runChunk))
   }
   return out
 }

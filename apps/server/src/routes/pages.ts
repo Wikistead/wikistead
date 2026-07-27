@@ -3238,7 +3238,12 @@ export async function getTitleDictionary(
   const windowRows = capped ? rows.slice(0, DICT_CAP) : rows
   // Addendum 3: the final confirm on the capped window (belt-and-braces for the ListObjects shape;
   // a SINGLE filterAuthorized pass — never per-link display-time checks, anti-test 8).
-  const confirmed = await filterAuthorized(fga, principal, 'view', windowRows.map((r) => r.id))
+  // #534: the window is capped at 2000, i.e. up to 40 batches. Sequentially that is the ~14s a user waits
+  // for the editor to open on a large space. The dictionary is an ENHANCEMENT (auto internal links), never a
+  // gate, so it is exactly the caller that may take a few lanes — bounded at 4, which keeps #489's "not all
+  // at once" while cutting 40 waves to 10. The confirm itself is unchanged: same relation, same fail-closed
+  // handling, so what lands in the dictionary is identical.
+  const confirmed = await filterAuthorized(fga, principal, 'view', windowRows.map((r) => r.id), undefined, 'page', 4)
   return { entries: windowRows.filter((r) => confirmed.has(r.id)), capped }
 }
 
