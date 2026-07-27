@@ -226,6 +226,36 @@ export interface ListHostSeam {
   readonly emptyLabel: string;
   readonly untitledLabel: string;
 }
+// #450 / ADR-177 slice 3: the SAME seam shape for the other two host-mediated resolutions. Until now the
+// transclude and diagram resolutions lived inside the top-level MacroWidget, so a macro nested in a layout
+// container reached the DOM sink instead and rendered its placeholder forever — the "renders top-level
+// only" defect the ADR names, and the shape #527 reported from a page. The host installs these around a
+// render exactly as it does the list host; a sink without them still gets the placeholder, which is the
+// correct answer when nobody can resolve (the macro itself never fetches — ADR-024).
+export interface TranscludeHostSeam {
+  readonly resolve: (refId: string) => Promise<string | null>;
+  readonly deniedLabel: string;
+}
+export interface DiagramHostSeam {
+  // Mirrors the host's diagram renderer: a lang + source in, an image (or a failure) out.
+  readonly render: (lang: string, source: string) => Promise<{ ok: true; blob: Blob } | { ok: false } | null>;
+  readonly handles: (lang: string) => boolean;
+}
+let activeTranscludeHost: TranscludeHostSeam | null = null;
+let activeDiagramHost: DiagramHostSeam | null = null;
+export function withTranscludeHost<T>(host: TranscludeHostSeam | null, fn: () => T): T {
+  const prev = activeTranscludeHost;
+  activeTranscludeHost = host;
+  try { return fn(); } finally { activeTranscludeHost = prev; }
+}
+export function withDiagramHost<T>(host: DiagramHostSeam | null, fn: () => T): T {
+  const prev = activeDiagramHost;
+  activeDiagramHost = host;
+  try { return fn(); } finally { activeDiagramHost = prev; }
+}
+export const currentTranscludeHost = (): TranscludeHostSeam | null => activeTranscludeHost;
+export const currentDiagramHost = (): DiagramHostSeam | null => activeDiagramHost;
+
 let activeListHost: ListHostSeam | null = null;
 export function withListHost<T>(host: ListHostSeam | null, fn: () => T): T {
   const prev = activeListHost;
@@ -481,6 +511,31 @@ class DomSink implements MdSink {
           holder.appendChild(buildLinkList(items, args.label, { navigate: host.navigate, untitledLabel: host.untitledLabel }, listName));
         } else {
           holder.style.display = "none"; // nested read render: an empty/denied list shows nothing (top-level read parity)
+        }
+      });
+      return;
+    }
+    // #450 slice 3: a NESTED `:::embed-page` resolves through the transclude-host seam with the same
+    // lifecycle the top-level widget has had since #108 — placeholder → host-resolved markdown (authz
+    // re-checked server-side on the REFERENCED page) → swap, or the uniform denied placeholder that hides
+    // whether the page exists at all. Without this the nested copy sat at its placeholder forever, which is
+    // the "renders top-level only" defect. Static mode keeps the chip (a hover card must stay fetch-free).
+    if (parsed?.name === "embed-page" && activeTranscludeHost && !staticRender && body.trim() !== "") {
+      const host = activeTranscludeHost;
+      const holder = document.createElement("div");
+      holder.className = "cm-lp-macro";
+      holder.setAttribute("data-testid", "macro-embed-page-nested");
+      into.appendChild(holder);
+      void host.resolve(body.trim()).then((content) => {
+        holder.replaceChildren();
+        if (content == null) {
+          const ph = document.createElement("div");
+          ph.className = "cm-lp-embed-page-denied";
+          ph.setAttribute("data-testid", "macro-embed-page-denied");
+          ph.textContent = host.deniedLabel; // uniform — denied / cycle / absent are indistinguishable
+          holder.appendChild(ph);
+        } else {
+          appendMarkdownInto(holder, content); // sanitized DOM (no innerHTML), same as the top-level path
         }
       });
       return;

@@ -26,7 +26,7 @@ const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 // clickable-whole-surface exception (the #273 download card) keeps its own `pointer`. Typed-body
 // macros (callout/table/todo/details/tagged/mermaid/plantuml/code) keep the caret affordances.
 const ATOM_CLASS_MACROS = new Set(["embed-page", "embed-external", "excalidraw", "columns", "tabs", "children"]);
-import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset, appendMarkdownInto, buildFenceHeader, buildLinkList, withListHost, dispatchMacroRender } from "../macros/md-render";
+import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset, appendMarkdownInto, buildFenceHeader, buildLinkList, withListHost, withTranscludeHost, dispatchMacroRender } from "../macros/md-render";
 import { setActiveTabIndex } from "../macros/layout-directives"; // #278 item 1: record the clicked tab before the island's commit rebuilds the tabs widget
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
@@ -2670,11 +2670,20 @@ class MacroWidget extends WidgetType {
       // behaviour (a throwing macro is not swallowed here, unlike the md-render sinks); unifying that is a
       // behaviour change and belongs to its own slice. The base offset rides the same seam as before
       // (#200: the widget's built theme — eq rebuilds on a switch — not a live DOM read).
-      const rendered = withListHost(view.state.facet(listSource), () => dispatchMacroRender(
+      // #450 slice 3: the transclude host rides the same seam as the list host, so a macro NESTED inside
+      // this container resolves the way the top-level widget always has instead of sitting at its
+      // placeholder. Installed around the render and removed after — no module state outlives the call.
+      const resolveNested = view.state.facet(transcludeResolver);
+      const rendered = withTranscludeHost(
+        resolveNested === noopTranscludeResolver
+          ? null
+          : { resolve: resolveNested, deniedLabel: "Cannot display this content" },
+        () => withListHost(view.state.facet(listSource), () => dispatchMacroRender(
         this.macro,
         this.body,
         { theme: this.theme, ...(isLayout ? { baseOffset: this.bodyFrom } : {}), onThrow: "throw" },
-      ))!;
+      )),
+      )!;
       wrap.appendChild(rendered);
       // #215 / ADR-100 (Consumers 1 & 2): draw the nested-macro ring + edit button on the selected nested
       // subtree, or swap it for its editUI island when nested-edit is active. Only for layout containers,
