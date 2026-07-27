@@ -2231,6 +2231,73 @@ export async function bulkSetPageVisibility(
 }
 
 
+// #511 / ADR-185 (slice 5): bulk MOVE — relocate a selection into another space. Same shape as the other
+// verbs: every page goes through the SINGLE-page primitive (`movePage`), so the cycle guard, the depth cap,
+// the space-home leaf rule, the subtree relocation and the outbox reindex are the exact code the per-page
+// route runs, and a bulk call cannot become a bulk bypass.
+//
+// One thing is NOT delegated, on purpose. The approved decision is that a move requires `manage` on
+// BOTH sides, but `movePage`'s cross-space gate asks for `manage` on the page and only `edit` on the
+// destination space. Delegating alone would therefore ship a WEAKER destination gate than the one approved,
+// so the destination's `manage` is checked here, once, before anything moves. Raising `movePage`'s own gate
+// would change the single-page contract and is not this slice's call to make.
+export const BULK_MOVE_CAP = 500
+export interface BulkMoveResult { results: { id: string; ok: boolean; reason?: string }[]; moved: number; skipped: number }
+
+export async function bulkMovePages(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { spaceId: string; targetSpaceId: string; pageIds: string[]; userId: string },
+): Promise<BulkMoveResult> {
+  // Existence-hiding on the SOURCE space, exactly as the other verbs (never a per-item map that could be
+  // read as an oracle).
+  if (!(await check(fga, `user:${args.userId}`, 'view', { type: 'space', id: args.spaceId }))) {
+    throw Object.assign(new Error('not found'), { statusCode: 404 })
+  }
+  if (args.targetSpaceId === args.spaceId) {
+    throw Object.assign(new Error('the destination is the current space'), { statusCode: 400, reason: 'same_space' })
+  }
+  // The destination gate. 404 rather than 403: a caller who cannot manage the target must not learn from the
+  // status code whether that space exists — and the picker only ever offers spaces they manage, so a request
+  // that lands here did not come from the UI.
+  if (!(await check(fga, `user:${args.userId}`, 'manage', { type: 'space', id: args.targetSpaceId }))) {
+    throw Object.assign(new Error('not found'), { statusCode: 404 })
+  }
+  const requested = [...new Set(args.pageIds)]
+  if (requested.length > BULK_MOVE_CAP) {
+    throw Object.assign(new Error(`selection exceeds the ${BULK_MOVE_CAP}-page cap`), { statusCode: 400, reason: 'too_many' })
+  }
+  const live = requested.length
+    ? (await db.sql<{ id: string }[]>`
+        SELECT id FROM pages
+        WHERE id = ANY(${requested}) AND space_id = ${args.spaceId} AND deleted_root_id IS NULL
+      `).map((r) => r.id)
+    : []
+  const liveSet = new Set(live)
+
+  const results: { id: string; ok: boolean; reason?: string }[] = []
+  for (const id of requested) {
+    if (!liveSet.has(id)) { results.push({ id, ok: false, reason: 'not_found' }); continue }
+    try {
+      // Land at the destination's ROOT: a bulk selection has no single sensible parent, and moving under one
+      // would silently re-nest pages the caller never pointed at. The page's own subtree travels with it.
+      await movePage(db, fga, driver, { pageId: id, userId: args.userId, parentId: null, afterId: null, spaceId: args.targetSpaceId })
+      results.push({ id, ok: true })
+    } catch (e) {
+      // Same anti-oracle fold as the other verbs: a page the caller cannot move (403) reports what an absent
+      // id reports, so the reason can never distinguish forbidden-but-real from does-not-exist. A 400 is a
+      // structural refusal (depth cap, the space-home leaf rule) and keeps its static reason.
+      const status = (e as { statusCode?: number })?.statusCode
+      const reason = status === 404 || status === 403 ? 'not_found'
+        : status === 400 ? ((e as { reason?: string }).reason ?? 'policy') : 'error'
+      results.push({ id, ok: false, reason })
+    }
+  }
+  const moved = results.filter((r) => r.ok).length
+  return { results, moved, skipped: results.length - moved }
+}
+
 // #411 / ADR-153: the gate-free physical delete — callers authorize (deletePage/purgePage: caller manage;
 // retention sweep: system context, the trash entry itself is the authority). Never routed directly.
 async function physicalDeletePage(
@@ -3340,6 +3407,19 @@ export async function pagesPlugin(app: FastifyInstance) {
     const r = await bulkSetPageVisibility(req.db, app.fga, app.searchDriver, {
       spaceId: req.params.spaceId, pageIds, makePrivate: req.body.private,
       tenantId: req.tenant.id, userId: req.user.sub, plan: req.tenant.plan,
+    })
+    return reply.code(200).send(r)
+  })
+
+  // #511 / ADR-185 (slice 5): bulk move (member-only; no guest config). The destination's `manage` is
+  // checked inside bulkMovePages — the approved decision requires manage on BOTH sides and the single-page
+  // primitive only asks `edit` of the destination space.
+  app.post<{ Params: { spaceId: string }; Body: { pageIds?: unknown; targetSpaceId?: unknown } }>('/spaces/:spaceId/pages/bulk-move', async (req, reply) => {
+    const pageIds = Array.isArray(req.body?.pageIds) ? req.body.pageIds.filter((x): x is string => typeof x === 'string') : []
+    const targetSpaceId = typeof req.body?.targetSpaceId === 'string' ? req.body.targetSpaceId : ''
+    if (!targetSpaceId) return reply.code(400).send({ error: 'targetSpaceId required' })
+    const r = await bulkMovePages(req.db, app.fga, app.searchDriver, {
+      spaceId: req.params.spaceId, targetSpaceId, pageIds, userId: req.user.sub,
     })
     return reply.code(200).send(r)
   })
