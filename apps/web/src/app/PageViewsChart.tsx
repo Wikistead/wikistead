@@ -19,7 +19,20 @@ const SERIES = [
 
 export interface DailyPoint { day: string; viewerClass: "member" | "guest" | "anon"; views: number }
 
-const W = 520, H = 180, PAD_L = 34, PAD_R = 12, PAD_T = 12, PAD_B = 24;
+const W = 520, H = 180, PAD_L = 34, PAD_R = 12, PAD_T = 12, PAD_B = 30;
+
+// #533: the x axis carried no date labels at all, so a point could not be read back to a day. Pick at most
+// `max` evenly spaced indices, ALWAYS including the first and last day — that thins 90 days to roughly
+// weekly and 13 months to roughly monthly without a per-range special case, and keeps the labels from
+// colliding (the spacing is a function of the label budget, not of the range).
+export function axisTicks(count: number, max = 6): number[] {
+  if (count <= 0) return [];
+  if (count <= max) return Array.from({ length: count }, (_, i) => i);
+  const step = (count - 1) / (max - 1);
+  const out = new Set<number>();
+  for (let i = 0; i < max; i++) out.add(Math.round(i * step));
+  return [...out].sort((a, b) => a - b);
+}
 
 // Pivot the flat {day, viewerClass, views} rows into an ordered per-day matrix (missing cells = 0), so every
 // series is a continuous line over the SAME day axis.
@@ -36,6 +49,9 @@ export function PageViewsChart({ daily, height = H }: { daily: DailyPoint[]; hei
   const [hover, setHover] = useState<number | null>(null);
   const { days, byDay } = useMemo(() => pivot(daily), [daily]);
   const fmtDay = useMemo(() => new Intl.DateTimeFormat(i18n.language, { month: "short", day: "numeric" }), [i18n.language]);
+  // Over a long range the day number is noise and the labels crowd; switch to month/year past ~4 months.
+  // Same Intl formatter family as everywhere else — no new date-formatting implementation (#533).
+  const fmtMonth = useMemo(() => new Intl.DateTimeFormat(i18n.language, { month: "short", year: "2-digit" }), [i18n.language]);
 
   const max = Math.max(1, ...daily.map((d) => d.views));
   const plotW = W - PAD_L - PAD_R, plotH = height - PAD_T - PAD_B;
@@ -66,6 +82,15 @@ export function PageViewsChart({ daily, height = H }: { daily: DailyPoint[]; hei
             onMouseEnter={() => setHover(i)} data-testid="page-views-hitcol" />
         ))}
         {hover != null && <line x1={x(hover)} x2={x(hover)} y1={PAD_T} y2={PAD_T + plotH} className="stroke-fg-dim" strokeWidth={1} opacity={0.4} />}
+        {/* #533: the x axis — thinned date labels, first and last always shown. `textAnchor` is clamped at
+            the edges so the outermost labels stay inside the viewBox instead of being cut off. */}
+        {axisTicks(days.length).map((i) => (
+          <text key={i} x={x(i)} y={height - 8} fontSize={9} className="fill-fg-dim"
+            textAnchor={i === 0 && days.length > 1 ? "start" : i === days.length - 1 && days.length > 1 ? "end" : "middle"}
+            data-testid="page-views-xtick">
+            {(days.length > 120 ? fmtMonth : fmtDay).format(new Date(days[i]!))}
+          </text>
+        ))}
         {/* the three series lines (2px) + markers on hover */}
         {SERIES.map((s) => {
           const pts = days.map((day, i) => `${x(i)},${y(byDay.get(day)![s.key])}`).join(" ");
@@ -73,6 +98,14 @@ export function PageViewsChart({ daily, height = H }: { daily: DailyPoint[]; hei
             <g key={s.key}>
               <polyline points={pts} fill="none" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"
                 style={{ stroke: `var(--views-${s.key})` }} />
+              {/* #533: an SVG polyline of ONE point draws nothing, so narrowing the range to a single day
+                  rendered an empty chart that looked exactly like "no data". A lone day is drawn as a dot
+                  — the value is still readable, and it stays distinct from the empty state below. */}
+              {days.length === 1 && (
+                <circle cx={x(0)} cy={y(byDay.get(days[0]!)![s.key])} r={3.5}
+                  style={{ fill: `var(--views-${s.key})` }} stroke="var(--panel)" strokeWidth={1.5}
+                  data-testid="page-views-single-dot" />
+              )}
               {hover != null && (
                 <circle cx={x(hover)} cy={y(byDay.get(days[hover]!)![s.key])} r={3.5}
                   style={{ fill: `var(--views-${s.key})` }} stroke="var(--panel)" strokeWidth={1.5} />
