@@ -121,9 +121,23 @@ export function resolveAffordanceLayout(view: EditorView, focus: HTMLElement | n
   // unmeasured — and unmeasured means unplaced, which is the original 8px collision all over again.
   const willShow = (el: HTMLElement) =>
     isVisible(el) || (el.matches(OWNER_GATED) && focus != null && focus.contains(el));
+  // Measure where each affordance would sit WITHOUT the displacement this owner already applied. A rect
+  // reflects the transform, so measuring it raw means reading back our own answer: the pair looks resolved,
+  // the pass concludes dy 0, the element snaps home, the next pass displaces it again — an oscillation that
+  // showed up as the pair overlapping on every other sampled frame while the pointer moved. Subtracting the
+  // current variable turns the reading back into the block's own geometry.
+  const applied = (el: HTMLElement): number => {
+    const name = el.matches(".cm-lp-macro-richui-raw") ? "--aff-dy-pill" : el.matches(".cm-lp-macro-btnrow") ? "--aff-dy-row" : null;
+    if (!name) return 0;
+    return parseFloat(view.dom.style.getPropertyValue(name) || "0") || 0;
+  };
   const candidates = els
     .filter(willShow)
-    .map((el) => ({ el, r: el.getBoundingClientRect() }))
+    .map((el) => {
+      const b = el.getBoundingClientRect();
+      const dy = applied(el);
+      return { el, r: { top: b.top - dy, bottom: b.bottom - dy, left: b.left, right: b.right, width: b.width, height: b.height } };
+    })
     .filter((c) => c.r.width > 0 && c.r.height > 0)
     .sort((a, b) => rank(a.el) - rank(b.el) || a.r.top - b.r.top);
 
