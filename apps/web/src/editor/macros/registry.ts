@@ -13,6 +13,7 @@
 // is *enforcing* a boundary first-party code already respects — not redrawing it.
 
 import type { SafeHtml } from "./safe-html";
+import { ALLOWED_CAPABILITIES } from "./macro-registry"; // #450 §4b: the one capability vocabulary
 
 export type MacroTheme = "light" | "dark";
 
@@ -373,6 +374,24 @@ function validateMacro(macro: Macro): void {
   if (m.exportFidelity !== "preserve" && m.exportFidelity !== "degrade")
     throw new Error(`macro exportFidelity must be "preserve" | "degrade" (got ${JSON.stringify(m.exportFidelity)})`);
   if (typeof m.htmlRender !== "function") throw new Error("macro htmlRender must be a function");
+  // #450 / ADR-177 rev2 §4b: capabilities are enforced at REGISTRATION, not merely disclosed. The narrow
+  // host-API (ADR-024) is an invariant, and an invariant checked only in a manifest reviewed by a human is
+  // an invariant until someone is in a hurry. A macro may declare only what the host actually brokers.
+  const caps = (macro as { capabilities?: unknown }).capabilities;
+  if (caps !== undefined) {
+    if (!Array.isArray(caps)) throw new Error("macro capabilities must be an array when present");
+    for (const c of caps) {
+      if (typeof c !== "string" || !ALLOWED_CAPABILITIES.has(c)) {
+        throw new Error(`macro capability ${JSON.stringify(c)} is not brokered by the host (allowed: ${[...ALLOWED_CAPABILITIES].join(", ")})`);
+      }
+    }
+    // A host-resolved list is, by construction, not something a static file can reproduce — its content
+    // depends on the workspace at read time. Declaring it while claiming `preserve` would promise an export
+    // fidelity the macro cannot keep, which is the Open-formats contract (ADR-023) told as a lie.
+    if (caps.includes("host-list") && m.exportFidelity !== "degrade") {
+      throw new Error('a macro declaring "host-list" must set exportFidelity: "degrade" — a host-resolved list cannot be reproduced in a static export');
+    }
+  }
   const rich = m.richEditUI;
   if (rich !== undefined) {
     if (rich.present !== "modal" && rich.present !== "inline")
