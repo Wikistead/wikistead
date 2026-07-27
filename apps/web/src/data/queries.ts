@@ -286,7 +286,9 @@ export function useBulkPublishPages() {
 // #511 / ADR-185 (slice 5): bulk MOVE into another space. The destination must be one the caller MANAGES —
 // the picker only offers those, and the server checks it again (the approved decision is manage on BOTH
 // sides, and the single-page primitive only asks `edit` of the destination, so the bulk path adds it).
-export interface BulkMoveResult { results: { id: string; ok: boolean; reason?: string }[]; moved: number; skipped: number }
+// `movedWithAncestor`: the page travelled inside a selected parent's subtree, so it is at the destination
+// but was never a move of its own — reporting it as one would overstate what happened.
+export interface BulkMoveResult { results: { id: string; ok: boolean; reason?: string; movedWithAncestor?: boolean }[]; moved: number; skipped: number }
 export function useBulkMovePages() {
   const { token } = useSession();
   const qc = useQueryClient();

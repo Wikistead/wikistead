@@ -2242,7 +2242,13 @@ export async function bulkSetPageVisibility(
 // so the destination's `manage` is checked here, once, before anything moves. Raising `movePage`'s own gate
 // would change the single-page contract and is not this slice's call to make.
 export const BULK_MOVE_CAP = 500
-export interface BulkMoveResult { results: { id: string; ok: boolean; reason?: string }[]; moved: number; skipped: number }
+// `movedWithAncestor` marks a page that travelled inside its selected parent's subtree rather than being
+// moved in its own right — it IS at the destination, so it is `ok`, but it was never a separate move.
+export interface BulkMoveResult {
+  results: { id: string; ok: boolean; reason?: string; movedWithAncestor?: boolean }[]
+  moved: number
+  skipped: number
+}
 
 export async function bulkMovePages(
   db: TenantDb,
@@ -2269,16 +2275,44 @@ export async function bulkMovePages(
     throw Object.assign(new Error(`selection exceeds the ${BULK_MOVE_CAP}-page cap`), { statusCode: 400, reason: 'too_many' })
   }
   const live = requested.length
-    ? (await db.sql<{ id: string }[]>`
-        SELECT id FROM pages
+    ? (await db.sql<{ id: string; parent_id: string | null }[]>`
+        SELECT id, parent_id FROM pages
         WHERE id = ANY(${requested}) AND space_id = ${args.spaceId} AND deleted_root_id IS NULL
-      `).map((r) => r.id)
+      `)
     : []
-  const liveSet = new Set(live)
+  const liveSet = new Set(live.map((r) => r.id))
+  const parentOf = new Map(live.map((r) => [r.id, r.parent_id]))
 
-  const results: { id: string; ok: boolean; reason?: string }[] = []
+  // #511a page whose ANCESTOR is also selected must not be moved on its own turn. Each move lands
+  // at the destination ROOT, so moving parent and child separately would put the child beside its parent
+  // instead of under it — the Pages tab is a FLAT list with a select-all checkbox, so "select everything and
+  // move" would quietly flatten the whole hierarchy while the confirm promises nested pages come along. The
+  // parent's move already carries its subtree. This is the same rule slice 1 applies to delete, where a page
+  // already trashed by an ancestor in the same batch is a no-op on its own turn.
+  const movesWithAnAncestor = (id: string): boolean => {
+    const seen = new Set<string>()
+    let cur = parentOf.get(id) ?? null
+    while (cur && !seen.has(cur)) {
+      if (liveSet.has(cur)) return true
+      seen.add(cur)
+      cur = parentOf.get(cur) ?? null   // unknown parent = outside the selection, so the walk ends here
+    }
+    return false
+  }
+
+  // #511the space HOME cannot leave its space. movePage only forbids NESTING the home (the leaf
+  // rule), so a root-level move slipped past — and `spaces.home_page_id` keeps pointing at the page after it
+  // lands elsewhere, so the source space has a home it no longer contains and cannot make a new one (the
+  // create path 409s while that row is alive). The overview list, unlike the page tree, does not hide the
+  // home, so select-all reaches it.
+  const [srcHome] = await db.sql<{ home_page_id: string | null }[]>`SELECT home_page_id FROM spaces WHERE id = ${args.spaceId}`
+  const homePageId = srcHome?.home_page_id ?? null
+
+  const results: { id: string; ok: boolean; reason?: string; movedWithAncestor?: boolean }[] = []
   for (const id of requested) {
     if (!liveSet.has(id)) { results.push({ id, ok: false, reason: 'not_found' }); continue }
+    if (id === homePageId) { results.push({ id, ok: false, reason: 'space_home' }); continue }
+    if (movesWithAnAncestor(id)) { results.push({ id, ok: true, movedWithAncestor: true }); continue }
     try {
       // Land at the destination's ROOT: a bulk selection has no single sensible parent, and moving under one
       // would silently re-nest pages the caller never pointed at. The page's own subtree travels with it.
@@ -2294,8 +2328,11 @@ export async function bulkMovePages(
       results.push({ id, ok: false, reason })
     }
   }
-  const moved = results.filter((r) => r.ok).length
-  return { results, moved, skipped: results.length - moved }
+  // `moved` counts real moves. A page that rode along inside its selected parent is `ok` but was never a
+  // move of its own, and counting it would report more relocations than happened.
+  const ok = results.filter((r) => r.ok)
+  const moved = ok.filter((r) => !r.movedWithAncestor).length
+  return { results, moved, skipped: results.length - ok.length }
 }
 
 // #411 / ADR-153: the gate-free physical delete — callers authorize (deletePage/purgePage: caller manage;

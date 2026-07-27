@@ -456,7 +456,8 @@
     "moveTarget": "Destination space",
     "moveNoTargets": "There is no other space you manage.",
     "bulkMoveDone": "Moved {{count}} page(s).",
-    "bulkMovePartial": "Moved {{moved}}; skipped {{skipped}}."
+    "bulkMovePartial": "Moved {{moved}}; skipped {{skipped}}.",
+    "bulkMoveNested": "Moved {{moved}} page(s); {{nested}} moved with their parent."
   },
   "spaceMembers": {
     "title": "Members & permissions",

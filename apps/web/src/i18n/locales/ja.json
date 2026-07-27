@@ -456,7 +456,8 @@
     "moveTarget": "移動先のスペース",
     "moveNoTargets": "移動先にできるスペース（自分が管理しているもの）がありません。",
     "bulkMoveDone": "{{count}} 件のページを移動しました。",
-    "bulkMovePartial": "{{moved}} 件を移動・{{skipped}} 件をスキップ。"
+    "bulkMovePartial": "{{moved}} 件を移動・{{skipped}} 件をスキップ。",
+    "bulkMoveNested": "{{moved}} 件を移動・{{nested}} 件は親と一緒に移動しました。"
   },
   "spaceMembers": {
     "title": "メンバーと権限",
