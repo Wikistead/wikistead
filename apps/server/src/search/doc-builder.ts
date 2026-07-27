@@ -19,6 +19,28 @@ const DIRECT_GRANT_RELATIONS = ['manage_direct', 'edit_direct', 'view_direct', '
 
 interface PageRow { id: string; tenant_id: string; space_id: string; title: string; published_md: string | null; updated_at: Date; deleted_at: Date | null }
 
+// EVERY tuple on the object, not just the first page. `fga.read` returns ONE page (50 by default) plus a
+// continuation token; ignoring it silently truncates the viewer denormalisation, and the truncation is
+// invisible — the doc still indexes, just without the viewers who happened to sort past the cut.
+//
+// Measured on the server-test stack (#497 work): `tenant:tenant_dev` held 57 tuples, the admin tuple sat
+// outside the first 50, and the tenant admin therefore vanished from viewerUsers. Stage 1 dropped their
+// own pages from search and stage 2 could not put them back — it only ever NARROWS the stage-1 candidate
+// set, so anything stage 1 loses is unrecoverable (the ADR-126 stage-1/stage-2 asymmetry, in the
+// under-inclusion direction). The tenant object carries a tuple per member, so this is not an exotic
+// scale: any tenant past ~50 members loses its admins from search, and a space past 50 grants loses
+// members. The result is silent — no error, just missing hits.
+async function readAllTuples(fga: OpenFgaClient, object: string) {
+  const out: NonNullable<Awaited<ReturnType<OpenFgaClient['read']>>['tuples']> = []
+  let continuationToken: string | undefined
+  do {
+    const res = await fga.read({ object }, continuationToken ? { continuationToken } : undefined)
+    out.push(...(res.tuples ?? []))
+    continuationToken = res.continuation_token || undefined
+  } while (continuationToken)
+  return out
+}
+
 function categorize(
   user: string,
   viewerUsers: Set<string>,
@@ -70,10 +92,10 @@ export async function buildSearchDoc(
   //    members must NOT be denormalized as viewers (else an unpublished page's title
   //    would surface to space members in stage-1 search). stage-2 FGA is the real
   //    gate, but excluding them from stage-1 keeps drafts out of space search.
-  const { tuples: pageTuples } = await fga.read({ object: `page:${pageId}` })
+  const pageTuples = await readAllTuples(fga, `page:${pageId}`)
   let linkedToSpace = false
   let parentId: string | null = null
-  for (const { key } of pageTuples ?? []) {
+  for (const { key } of pageTuples) {
     if (!key) continue
     if (key.relation === 'space' && key.user === `space:${page.space_id}`) { linkedToSpace = true; continue }
     // #218 / ADR-103: this page's parent (for the inherited-grant walk below).
@@ -106,9 +128,9 @@ export async function buildSearchDoc(
   // here (`linkedToSpace`) so a folder-granted member is never denormalised onto an unpublished child.
   let ancestor = linkedToSpace ? parentId : null
   for (let depth = 0; ancestor && depth < MAX_ANCESTOR_WALK; depth++) {
-    const { tuples: ancTuples } = await fga.read({ object: `page:${ancestor}` })
+    const ancTuples = await readAllTuples(fga, `page:${ancestor}`)
     let next: string | null = null
-    for (const { key } of ancTuples ?? []) {
+    for (const { key } of ancTuples) {
       if (!key) continue
       if (key.relation === 'parent' && key.user?.startsWith('page:')) { next = key.user.slice('page:'.length); continue }
       if (!DIRECT_GRANT_RELATIONS.includes(key.relation)) continue
@@ -121,8 +143,8 @@ export async function buildSearchDoc(
   //    present) that is NOT (effective-)private (ADR-098/#218 cuts space inheritance). For a draft
   //    (or a private page) these are withheld, matching the FGA `view` graph exactly.
   if (linkedToSpace && !isPrivate) {
-    const { tuples: spaceTuples } = await fga.read({ object: `space:${page.space_id}` })
-    for (const { key } of spaceTuples ?? []) {
+    const spaceTuples = await readAllTuples(fga, `space:${page.space_id}`)
+    for (const { key } of spaceTuples) {
       // #274 / ADR-135: member edit grants moved to the editor_member leaf — ADD it here (approval
       // condition 3: never a swap — a pre-migration store's legacy `editor` member tuples must keep
       // resolving into the denorm during the Step-A window). Post-migration, `editor` holds only
@@ -136,8 +158,8 @@ export async function buildSearchDoc(
       if (!key || !['manager', 'editor', 'editor_member', 'viewer', 'moderator', 'deleter', 'sharer', 'settings_editor', 'publisher', 'commenter'].includes(key.relation)) continue
       categorize(key.user, viewerUsers, viewerGroups, setPublic)
     }
-    const { tuples: tenantTuples } = await fga.read({ object: `tenant:${tenantId}` })
-    for (const { key } of tenantTuples ?? []) {
+    const tenantTuples = await readAllTuples(fga, `tenant:${tenantId}`)
+    for (const { key } of tenantTuples) {
       if (!key || key.relation !== 'admin') continue
       categorize(key.user, viewerUsers, viewerGroups, setPublic)
     }
