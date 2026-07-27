@@ -32,7 +32,15 @@ async function promote(
 ): Promise<void> {
   await db.tx(async (tx) => {
     await tx`UPDATE members SET role = 'admin', admin_origin = 'mapping', updated_at = now() WHERE sub = ${sub}`
-    await writeTuples(fga, [{ user: `user:${sub}`, relation: 'admin', object: `tenant:${tenant.id}` }])
+    // Tolerates "already there", the mirror of the demotion's tolerance and for the same reason: the tuple
+    // and the row can disagree after a partial failure (or after a demotion whose DB half rolled back), and
+    // a member stuck with an FGA admin tuple but role='member' could otherwise NEVER be reconciled — every
+    // promotion attempt would throw on the duplicate write. Present is the state we wanted.
+    try {
+      await writeTuples(fga, [{ user: `user:${sub}`, relation: 'admin', object: `tenant:${tenant.id}` }])
+    } catch (err) {
+      if (!/already exist/i.test(String((err as Error)?.message ?? err))) throw err
+    }
     await auditIfEntitled(tx, tenant, { actor: `user:${sub}`, action: 'member.role_changed', target: `user:${sub}` })
   })
   emit({ type: 'member.role_changed', tenantId: tenant.id, actorId: sub, targetSub: sub, role: 'admin' })

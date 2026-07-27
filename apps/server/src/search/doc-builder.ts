@@ -30,11 +30,14 @@ interface PageRow { id: string; tenant_id: string; space_id: string; title: stri
 // under-inclusion direction). The tenant object carries a tuple per member, so this is not an exotic
 // scale: any tenant past ~50 members loses its admins from search, and a space past 50 grants loses
 // members. The result is silent — no error, just missing hits.
-async function readAllTuples(fga: OpenFgaClient, object: string) {
+async function readAllTuples(fga: OpenFgaClient, object: string, relation?: string) {
   const out: NonNullable<Awaited<ReturnType<OpenFgaClient['read']>>['tuples']> = []
   let continuationToken: string | undefined
   do {
-    const res = await fga.read({ object }, continuationToken ? { continuationToken } : undefined)
+    const res = await fga.read(
+      relation ? { object, relation } : { object },
+      continuationToken ? { continuationToken } : undefined,
+    )
     out.push(...(res.tuples ?? []))
     continuationToken = res.continuation_token || undefined
   } while (continuationToken)
@@ -158,7 +161,11 @@ export async function buildSearchDoc(
       if (!key || !['manager', 'editor', 'editor_member', 'viewer', 'moderator', 'deleter', 'sharer', 'settings_editor', 'publisher', 'commenter'].includes(key.relation)) continue
       categorize(key.user, viewerUsers, viewerGroups, setPublic)
     }
-    const tenantTuples = await readAllTuples(fga, `tenant:${tenantId}`)
+    // ONLY the admin tuples. The tenant object holds one `member` tuple per member and the loop threw
+    // every one of them away, so reading the whole object paged through the entire membership to find a
+    // handful of admins — and now that the read is paginated, that waste is paid in round-trips rather
+    // than hidden by the truncation this used to suffer from.
+    const tenantTuples = await readAllTuples(fga, `tenant:${tenantId}`, 'admin')
     for (const { key } of tenantTuples) {
       if (!key || key.relation !== 'admin') continue
       categorize(key.user, viewerUsers, viewerGroups, setPublic)
