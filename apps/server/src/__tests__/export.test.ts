@@ -11,6 +11,7 @@ import { fgaClient, writeTuples, deleteTuples, check } from '@wikistead/authz'
 import { LogicalStorageDriver } from '../storage/index.js'
 import { buildExport, buildSpaceExport, buildTenantExport, buildSelectionExport, SELECTION_EXPORT_CAP } from '../export/index.js'
 import { buildHtmlExport } from '../render/html-export.js'
+import { resolveAnonymousListSnapshot } from '../routes/pages.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -475,6 +476,18 @@ describe('buildHtmlExport', () => {
     expect(body, 'an unviewable child never appears — not its title, not its id').not.toContain('Secret Note')
     expect(body).not.toContain(LIST_SECRET)
     expect(body, 'the directive itself is gone, not passed through as text').not.toContain(':::children')
+  })
+
+  // #85 / ADR-194 acceptance 4: the export resolves dynamic lists for the EXPORTING VIEWER, and the public
+  // surface must keep resolving them as ANONYMOUS. The two subjects sitting side by side in one codebase is
+  // exactly the shape that leaks if someone later "unifies" them, so the difference is pinned: the same page
+  // yields the member's list through the export and nothing through the anonymous resolver, because the
+  // child was never granted to the public.
+  it('the public resolution stays anonymous while the export resolves for the viewer', async () => {
+    const exported = (await buildHtmlExport(db, fgaClient, { userId: USER, pageId: LISTS }))!.body
+    expect(exported, 'the member sees their viewable child').toContain('Visible Note')
+    const anon = await resolveAnonymousListSnapshot(db, fgaClient, { pageId: LISTS, name: 'children', body: '' })
+    expect(anon.map((r) => r.title), 'the anonymous surface sees nothing — no public grant exists').toEqual([])
   })
 
   it('wraps a degrade macro with a VISIBLE fidelity indicator (#85 (c))', async () => {
