@@ -301,8 +301,11 @@ export function AdminRolesTab() {
           group; membership resolves live (no reconcile). Same server machinery as assignment (,
           #485 per-scope authority) — the console lists every mapping and flags an orphaned one whose
           group no member currently carries (IdP rename/empty; surfaced, never auto-migrated). */}
+      {/* #514 / ADR-188 §8: TENANT-scope mappings only. A mapping onto a SPACE role is that space's own
+          configuration and is made in its Members tab — the same symmetry as assignment (slice 4), so a
+          space manager can set it up without a screen only tenant admins can open. */}
       <h3 className="mt-8 text-sm font-medium">{t("adminRoles.mappingTitle")}</h3>
-      <p className="mt-0 mb-2 text-xs text-fg-dim">{t("adminRoles.mappingBody")}</p>
+      <p className="mt-0 mb-2 text-xs text-fg-dim">{t("adminRoles.mappingTenantBody")}</p>
       <div className="mb-3 flex flex-wrap items-end gap-3" data-testid="mapping-form">
         <label className="flex w-56 flex-col gap-1 text-xs text-fg-dim">
           {t("adminRoles.mappingGroupLabel")}
@@ -312,18 +315,10 @@ export function AdminRolesTab() {
         <label className="flex flex-col gap-1 text-xs text-fg-dim">
           {t("adminRoles.roleLabel")}
           <Select size="sm" value={mapRoleId} ariaLabel={t("adminRoles.roleLabel")} testId="mapping-role"
-            options={(roles.data?.custom ?? []).map((r) => ({ value: r.id, label: r.name }))}
+            options={(roles.data?.custom ?? []).filter((r) => r.scope === "tenant").map((r) => ({ value: r.id, label: r.name }))}
             onChange={setMapRoleId} />
         </label>
-        {mapScope === "space" && (
-          <label className="flex flex-col gap-1 text-xs text-fg-dim">
-            {t("adminRoles.spaceLabel")}
-            <Select size="sm" value={mapSpaceId} ariaLabel={t("adminRoles.spaceLabel")} testId="mapping-space"
-              options={(spaces.data ?? []).map((s) => ({ value: s.id, label: s.name || s.id }))}
-              onChange={setMapSpaceId} />
-          </label>
-        )}
-        {mapScope === "tenant" && <span className="pb-1.5 text-xs text-fg-dim" data-testid="mapping-tenant-note">{t("adminRoles.assignTenantScope")}</span>}
+        <span className="pb-1.5 text-xs text-fg-dim" data-testid="mapping-tenant-note">{t("adminRoles.assignTenantScope")}</span>
         <Button variant="primary" size="sm" data-testid="mapping-add"
           disabled={!mapGroup.trim() || !mapRoleId || !mapResourceId || createMapping.isPending}
           onClick={() => createMapping.mutate({ groupName: mapGroup.trim(), roleId: mapRoleId, resourceType: mapScope, resourceId: mapResourceId }, {

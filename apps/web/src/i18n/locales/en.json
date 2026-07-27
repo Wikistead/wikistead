@@ -483,7 +483,8 @@
     "commentAudienceTitle": "Commenting",
     "commentAudienceBody": "These toggles open commenting to a whole AUDIENCE — everyone who can view, or guests holding a view link. To let specific people comment instead, give them the commenter role above (space-wide), or grant it on a single page from that page's permissions. The two are independent: turning these toggles off does not take commenting away from someone who holds the commenter role.",
     "commentGuests": "Guests with a view link may comment",
-    "commentMembers": "Anyone who can view (public) may comment"
+    "commentMembers": "Anyone who can view (public) may comment",
+    "mappingBody": "Confer a role on everyone in an IdP group, for THIS space. Membership resolves live from your identity provider — nobody is added or billed."
   },
   "auth": {
     "signInTitle": "Sign in to wikistead",
@@ -1197,7 +1198,8 @@
     "tenantAssignTitle": "Tenant role assignments",
     "tenantAssignBody": "A tenant role (like creating spaces) is an attribute of a member, so it is granted here. Roles for a SPACE are granted in that space's Members tab.",
     "memberLabel": "Member",
-    "memberPlaceholder": "Select member"
+    "memberPlaceholder": "Select member",
+    "mappingTenantBody": "Confer a TENANT role (like creating spaces) on everyone in an IdP group. Membership resolves live from your identity provider — nobody is added or billed. A mapping onto a space's role is made in that space's Members tab."
   },
   "detailsEdit": {
     "title": "Edit collapsible",
