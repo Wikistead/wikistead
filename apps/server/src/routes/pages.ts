@@ -2187,26 +2187,20 @@ export async function bulkSetPageVisibility(
     : []
   const liveSet = new Set(live)
 
-  // #511which of these pages ALREADY carry their own private marker, read once for the batch. The
-  // predicate is the page's OWN marker (what this verb writes), not effective privacy — a child of a private
-  // folder inherits privacy but writing its own marker still changes something (it survives the parent being
-  // cleared). Store-wide read intersected with the RLS-scoped liveSet, so no other tenant's id can enter an
-  // answer. Used ONLY to label the outcome; the per-page `share` gate inside the primitive is unaffected.
-  const alreadyPrivate = new Set<string>()
-  if (liveSet.size > 0) {
-    let continuationToken: string | undefined
-    do {
-      const res = await fga.read(
-        { user: 'user:*', relation: 'private', object: 'page:' },
-        continuationToken ? { continuationToken } : undefined,
-      )
-      for (const t of res.tuples ?? []) {
-        const object = t.key?.object
-        if (object?.startsWith('page:') && liveSet.has(object.slice(5))) alreadyPrivate.add(object.slice(5))
-      }
-      continuationToken = res.continuation_token || undefined
-    } while (continuationToken)
-  }
+  // #511which of these pages ALREADY carry their own private marker. The predicate is the page's
+  // OWN marker (what this verb writes), not effective privacy — a child of a private folder inherits
+  // privacy, but writing its own marker still changes something (it survives the parent being cleared).
+  //
+  // Read PER SELECTED PAGE, never store-wide. The first cut of this asked FGA for every `private` marker
+  // in the store and intersected the answer with the selection: correct, but its cost scaled with the
+  // TENANT rather than with the request, so privatising one page in a large tenant paid for a full
+  // paginated scan. That is the FGA cliff #499 and #500 were both about. `readPagePrivate` over the
+  // RLS-scoped live rows is bounded by the selection (≤ the 500-page cap) and is the shape the page tree
+  // already uses for its lock badges. A read fault falls back to "not already private", which only costs
+  // a truthful `changed` label — the per-page `share` gate inside the primitive is untouched either way.
+  const liveIds = [...liveSet]
+  const privateFlags = await Promise.all(liveIds.map((id) => readPagePrivate(fga, id).catch(() => false)))
+  const alreadyPrivate = new Set(liveIds.filter((_, i) => privateFlags[i]))
 
   const results: { id: string; ok: boolean; noop?: boolean; reason?: string }[] = []
   for (const id of requested) {
@@ -3311,7 +3305,9 @@ export async function pagesPlugin(app: FastifyInstance) {
 
   // #511 / ADR-185 (slice 3): bulk visibility (member-only; no guest config). `private: true` makes the
   // selection private, `false` clears it. The per-page `share` gate, the marker pair, the subtree cascade and
-  // the synchronous reindex all ride inside bulkSetPageVisibility; the response is a partial-success map.
+  // the outbox reindex all ride inside bulkSetPageVisibility; the response is a partial-success map. That
+  // reindex is a TRUSTED path, not a synchronous one — the row commits with the page's transaction
+  // and a worker collects what the inline call misses; search safety comes from the FGA re-check at read.
   app.post<{ Params: { spaceId: string }; Body: { pageIds?: unknown; private?: unknown } }>('/spaces/:spaceId/pages/bulk-visibility', async (req, reply) => {
     const pageIds = Array.isArray(req.body?.pageIds) ? req.body.pageIds.filter((x): x is string => typeof x === 'string') : []
     if (typeof req.body?.private !== 'boolean') return reply.code(400).send({ error: 'private (boolean) required' })
