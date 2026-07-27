@@ -5236,7 +5236,7 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // its wrap, overlapping the PREVIOUS line — with pointer-events alive there, hovering that line hit
   // the row (a wrap CHILD), satisfied `.cm-lp-macro-wrap:hover`, and lit the chrome "permanently" in a
   // slot island (where the line above is dense editing text). Interactivity returns with visibility.
-  ".cm-lp-macro-btnrow": { position: "absolute", top: "-1.5em", left: "0", display: "inline-flex", alignItems: "center", gap: "4px", zIndex: "3", pointerEvents: "none" },
+  ".cm-lp-macro-btnrow": { position: "absolute", top: "-1.5em", left: "0", display: "inline-flex", alignItems: "center", gap: "4px", zIndex: "3", pointerEvents: "none", transform: "translateY(var(--aff-dy-row, 0px))" },
   // #278① (the FINAL permanent form, superseding theboundary guards): every wrap-state
   // reveal is DIRECT-CHILD (`>`) — a wrap's hover/atom-sel lights ONLY its own top-level chrome and
   // can never reach a NESTED macro's chrome (the atom-selected container leaking the inner warning's
@@ -5284,7 +5284,12 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // .cm-lp-macro-raw sits on the head line only while the block is revealed, so gating on IT (not on
   // the caret-position macroRawHead) means "revealed ⇒ hint shown", whichever line the caret is on.
   // The hover rules remain for mouse affordance; macroRawHead keeps its non-pill styling duties.
-  ".cm-lp-macro-richui-raw": { top: "-1.5em", left: "0", zIndex: "4", opacity: "0", pointerEvents: "none", display: "inline-flex", alignItems: "center", gap: "3px", padding: "1px 5px", transition: "opacity 120ms" },
+  // #528the displacement is read from a CSS VARIABLE, not written onto the element. A widget that
+  // CodeMirror rebuilds comes back without any inline style, so an owner that styles the element directly
+  // loses the placement for however many frames it takes to measure again — visible as the flicker in the
+  // report. The variable lives on a node the rebuild does not touch, so a fresh element is born already
+  // placed. The owner sets `--aff-dy`; everything else here is unchanged.
+  ".cm-lp-macro-richui-raw": { top: "-1.5em", left: "0", zIndex: "4", opacity: "0", pointerEvents: "none", display: "inline-flex", alignItems: "center", gap: "3px", padding: "1px 5px", transition: "opacity 120ms", transform: "translateY(var(--aff-dy-pill, 0px))" },
   ".cm-lp-macro-richui-key": { fontSize: "0.72em", fontWeight: "600", letterSpacing: "0.02em" },
   //①: the zone `:has` walks DIRECT-child lines only (`>`), so hovering raw lines inside a slot
   // island can never light pills of the OUTER document (or vice versa) — .cm-content elements nest.

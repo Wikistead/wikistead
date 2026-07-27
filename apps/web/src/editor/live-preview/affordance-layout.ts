@@ -39,7 +39,12 @@ const AFFORDANCE_SEL = AFFORDANCES.join(", ");
 const PINNED = ".cm-macro-presence-box";
 // Affordances whose visibility the OWNER decides (see the plugin): their current computed style is not the
 // answer during a measure — the answer is whether the owner is about to show them.
-const OWNER_GATED = ".cm-lp-macro-richui-raw";
+// BOTH of them: making the chrome row focus-driven put it in the same bind as the pill. On the first pass
+// the row is still invisible (the focus class lands in the WRITE phase), so a read that trusted computed
+// style saw no row to collide with, gave the pill dy=0, and the write then made both visible on top of each
+// other — the original 8px overlap, reintroduced by the fix for it. Measured, not reasoned: the diagnostic
+// showed both elements inside the focused wrap with `transform: none`.
+const OWNER_GATED = ".cm-lp-macro-richui-raw, .cm-lp-macro-btnrow";
 
 const GAP = 3; // px between stacked affordance rows
 
@@ -67,7 +72,13 @@ export function focusedWrap(view: EditorView, pointer: { x: number; y: number } 
   const innermost = (candidates: HTMLElement[]) =>
     candidates.find((w) => candidates.every((o) => o === w || o.contains(w))) ?? null;
 
-  // caret first — `coordsAtPos` puts it in the same viewport space as the wrap rectangles
+  // Caret first, located through the DOM rather than through coordinates: with the caret inside a macro the
+  // block is often revealed as RAW source, and `coordsAtPos` then reports a position the rendered wrap's
+  // rectangle no longer covers — measured as `focus:false` while the caret was plainly inside the block.
+  // The wrap that CONTAINS the cursor element is the answer, and it does not depend on geometry at all.
+  const cursorEl = view.dom.querySelector<HTMLElement>(".cm-cursor-primary") ?? view.dom.querySelector<HTMLElement>(".cm-cursor");
+  const byDom = cursorEl ? innermost(wraps.filter((w) => w.contains(cursorEl))) : null;
+  if (byDom) return byDom;
   const head = view.state.selection.main.head;
   const c = view.coordsAtPos(head);
   if (c) {
@@ -93,15 +104,23 @@ export function focusedWrap(view: EditorView, pointer: { x: number; y: number } 
 // driven visibility did: the static case came back with the original 8px collision.)
 export function resolveAffordanceLayout(view: EditorView, focus: HTMLElement | null = null): Placed[] {
   const els = Array.from(view.dom.querySelectorAll<HTMLElement>(AFFORDANCE_SEL));
-  if (els.length < 2) return els.map((el) => ({ el, top: 0, bottom: 0, left: 0, right: 0, dy: 0 }));
+  // With fewer than two affordances present there is nothing to resolve, so the owner says NOTHING rather
+  // than saying "dy: 0". The difference matters: an instruction of 0 clears the transform, and CodeMirror
+  // rebuilds the chrome row as the pointer crosses it — so a pass landing in that gap used to wipe the
+  // placement computed a frame earlier, and the pair reappeared on top of each other. That is the flicker
+  // in the report, reproduced here as "pill lost its displacement" on 13 of 12 sampled steps.
+  if (els.length < 2) return [];
 
   // Priority order across the WHOLE viewport, not per block: two affordances of different blocks are far
   // apart and simply never intersect, so one uniform pass handles both "same block" and "nested block"
   // without having to decide which block an element belongs to (the pill is not even inside the wrap).
   const rank = (el: HTMLElement): number => AFFORDANCES.findIndex((sel) => el.matches(sel));
   // "visible" means visible AFTER this pass: an owner-gated affordance counts when its block is focused.
+  // OR, not replace: an owner-gated affordance is also shown by its block being in RAW mode, a rule the
+  // owner does not drive. Treating "the owner will show it" as the only way to be visible left the raw case
+  // unmeasured — and unmeasured means unplaced, which is the original 8px collision all over again.
   const willShow = (el: HTMLElement) =>
-    el.matches(OWNER_GATED) ? focus != null && focus.contains(el) : isVisible(el);
+    isVisible(el) || (el.matches(OWNER_GATED) && focus != null && focus.contains(el));
   const candidates = els
     .filter(willShow)
     .map((el) => ({ el, r: el.getBoundingClientRect() }))
@@ -177,9 +196,14 @@ export const affordanceLayout = ViewPlugin.fromClass(
           for (const el of Array.from(view.dom.querySelectorAll<HTMLElement>(".cm-lp-macro-richui-raw"))) {
             el.classList.toggle("cm-aff-shown", focus != null && focus.contains(el));
           }
+          // Write the displacement as a VARIABLE on the editor root, which no widget rebuild touches, so an
+          // element CodeMirror re-creates is already placed the moment it appears (#528). Writing the
+          // transform onto the element itself lost the placement on every rebuild.
+          const root = view.dom;
           for (const p of placed) {
-            const t = p.dy ? `translateY(${Math.round(p.dy)}px)` : "";
-            if (p.el.style.transform !== t) p.el.style.transform = t;
+            const name = p.el.matches(".cm-lp-macro-richui-raw") ? "--aff-dy-pill" : "--aff-dy-row";
+            const v = `${Math.round(p.dy)}px`;
+            if (root.style.getPropertyValue(name) !== v) root.style.setProperty(name, v);
           }
         },
       });
