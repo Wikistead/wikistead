@@ -2432,6 +2432,15 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
   const onDocPointerDown = (e: PointerEvent) => {
     const t = e.target as HTMLElement | null;
     if (!t || host.contains(t)) return;
+    // #527: a macro MODAL opened from inside this island is a page-level overlay, so every pointer down
+    // in it reads as "outside the island". Committing there destroys the island — and with it the inner
+    // view the modal captured — while the modal is still open, so its Save later dispatches into a
+    // detached editor and the drawing never reaches the canonical Y.Text. Measured: an Excalidraw scene
+    // edited inside `:::columns` left the document byte-identical, with no error anywhere, while the
+    // same edit at top level wrote back normally. The modal IS this island's edit surface for that
+    // macro, so it is exempt exactly like the tab bar below; the island commits when the modal closes
+    // and focus genuinely leaves.
+    if (t.closest("[data-testid=macro-modal], .wks-macro-modal")) return;
     const wrapEl = host.closest(".cm-lp-macro-wrap") as HTMLElement | null;
     // #278 point 2: the tab-bar exemption narrows to NON-ACTIVE tabs (the tab-SWITCH path owns
     // that commit so it can record the clicked index first). A click on the ACTIVE tab is the RENAME
