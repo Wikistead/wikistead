@@ -18,9 +18,13 @@ const buttonVariants = cva(
         danger: "bg-destructive border-destructive text-destructive-foreground font-semibold hover:bg-[color-mix(in_srgb,var(--danger)_85%,black)]",
         dangerGhost: "bg-transparent border-border text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:border-destructive",
       },
+      // #535: the height is DECLARED, not left to the padding. Buttons used to size themselves from their
+      // text (py-1 + text-xs ≈ 28px), while Select and Input carry explicit h-8 / h-9 — so any row holding
+      // all three came out ragged (measured: Button 28 / Select 34 / Input 38). Matching the shadcn scale
+      // here fixes every such row at once; per-row px nudges would leave the next screen to rediscover it.
       size: {
-        md: "text-sm px-3 py-1.5",
-        sm: "text-xs px-[9px] py-1",
+        md: "h-9 text-sm px-3",
+        sm: "h-8 text-xs px-[9px]",
       },
     },
     defaultVariants: { variant: "default", size: "md" },
