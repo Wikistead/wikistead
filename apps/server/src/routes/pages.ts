@@ -2281,29 +2281,43 @@ export async function bulkMovePages(
     throw Object.assign(new Error(`selection exceeds the ${BULK_MOVE_CAP}-page cap`), { statusCode: 400, reason: 'too_many' })
   }
   const live = requested.length
-    ? (await db.sql<{ id: string; parent_id: string | null }[]>`
-        SELECT id, parent_id FROM pages
+    ? (await db.sql<{ id: string }[]>`
+        SELECT id FROM pages
         WHERE id = ANY(${requested}) AND space_id = ${args.spaceId} AND deleted_root_id IS NULL
-      `)
+      `).map((r) => r.id)
     : []
-  const liveSet = new Set(live.map((r) => r.id))
-  const parentOf = new Map(live.map((r) => [r.id, r.parent_id]))
+  const liveSet = new Set(live)
 
-  // #511a page whose ANCESTOR is also selected must not be moved on its own turn. Each move lands
-  // at the destination ROOT, so moving parent and child separately would put the child beside its parent
-  // instead of under it — the Pages tab is a FLAT list with a select-all checkbox, so "select everything and
-  // move" would quietly flatten the whole hierarchy while the confirm promises nested pages come along. The
-  // parent's move already carries its subtree. This is the same rule slice 1 applies to delete, where a page
-  // already trashed by an ancestor in the same batch is a no-op on its own turn.
-  const movesWithAnAncestor = (id: string): boolean => {
+  // #511the parent chain must be read for the WHOLE SPACE, not just the selection. Reading only the
+  // selected rows made the walk stop at the first unselected parent, so P > M > C with only P and C picked
+  // walked C -> M, found M unknown, and treated C as unrelated — it moved to the destination root and the
+  // hierarchy flattened anyway. The Pages tab does not show nesting, so nobody could see that M sat in
+  // between. Whole-space is bounded by the space and is the same read the tree already does.
+  const spaceRows = await db.sql<{ id: string; parent_id: string | null }[]>`
+    SELECT id, parent_id FROM pages WHERE space_id = ${args.spaceId} AND deleted_root_id IS NULL
+  `
+  const parentOf = new Map(spaceRows.map((r) => [r.id, r.parent_id]))
+
+  // The NEAREST selected ancestor, or null. A page with one is carried by that ancestor's move rather than
+  // moved in its own right — every move lands at the destination root, so moving both would place the
+  // descendant beside its ancestor and silently flatten what the confirm promises to keep. Same rule slice 1
+  // applies to delete, where a page already trashed by an ancestor is a no-op on its own turn.
+  const nearestSelectedAncestor = (id: string): string | null => {
     const seen = new Set<string>()
     let cur = parentOf.get(id) ?? null
     while (cur && !seen.has(cur)) {
-      if (liveSet.has(cur)) return true
+      if (liveSet.has(cur)) return cur
       seen.add(cur)
-      cur = parentOf.get(cur) ?? null   // unknown parent = outside the selection, so the walk ends here
+      cur = parentOf.get(cur) ?? null
     }
-    return false
+    return null
+  }
+  const depthOf = (id: string): number => {
+    const seen = new Set<string>()
+    let d = 0
+    let cur = parentOf.get(id) ?? null
+    while (cur && !seen.has(cur)) { d++; seen.add(cur); cur = parentOf.get(cur) ?? null }
+    return d
   }
 
   // #511the space HOME cannot leave its space. movePage only forbids NESTING the home (the leaf
@@ -2314,16 +2328,30 @@ export async function bulkMovePages(
   const [srcHome] = await db.sql<{ home_page_id: string | null }[]>`SELECT home_page_id FROM spaces WHERE id = ${args.spaceId}`
   const homePageId = srcHome?.home_page_id ?? null
 
-  const results: { id: string; ok: boolean; reason?: string; movedWithAncestor?: boolean }[] = []
-  for (const id of requested) {
-    if (!liveSet.has(id)) { results.push({ id, ok: false, reason: 'not_found' }); continue }
-    if (id === homePageId) { results.push({ id, ok: false, reason: 'space_home' }); continue }
-    if (movesWithAnAncestor(id)) { results.push({ id, ok: true, movedWithAncestor: true }); continue }
+  // Ancestors first, so a descendant's outcome can depend on whether its ancestor ACTUALLY moved. Reported
+  // in the caller's original order below.
+  const byId = new Map<string, { id: string; ok: boolean; reason?: string; movedWithAncestor?: boolean }>()
+  const arrived = new Set<string>()   // pages now at the destination, whether moved directly or carried
+  const ordered = [...requested].sort((a, b) => depthOf(a) - depthOf(b))
+
+  for (const id of ordered) {
+    if (!liveSet.has(id)) { byId.set(id, { id, ok: false, reason: 'not_found' }); continue }
+    if (id === homePageId) { byId.set(id, { id, ok: false, reason: 'space_home' }); continue }
+    const anc = nearestSelectedAncestor(id)
+    if (anc) {
+      // #511this used to assert `ok` on the ASSUMPTION the ancestor moved. When the ancestor was
+      // skipped — a private page the caller cannot manage, say — the descendant never went anywhere and was
+      // still reported as a success. Report what actually happened: it arrived only if its ancestor did.
+      if (arrived.has(anc)) { arrived.add(id); byId.set(id, { id, ok: true, movedWithAncestor: true }) }
+      else byId.set(id, { id, ok: false, reason: byId.get(anc)?.reason ?? 'not_found' })
+      continue
+    }
     try {
       // Land at the destination's ROOT: a bulk selection has no single sensible parent, and moving under one
       // would silently re-nest pages the caller never pointed at. The page's own subtree travels with it.
       await movePage(db, fga, driver, { pageId: id, userId: args.userId, parentId: null, afterId: null, spaceId: args.targetSpaceId })
-      results.push({ id, ok: true })
+      arrived.add(id)
+      byId.set(id, { id, ok: true })
     } catch (e) {
       // Same anti-oracle fold as the other verbs: a page the caller cannot move (403) reports what an absent
       // id reports, so the reason can never distinguish forbidden-but-real from does-not-exist. A 400 is a
@@ -2331,9 +2359,11 @@ export async function bulkMovePages(
       const status = (e as { statusCode?: number })?.statusCode
       const reason = status === 404 || status === 403 ? 'not_found'
         : status === 400 ? ((e as { reason?: string }).reason ?? 'policy') : 'error'
-      results.push({ id, ok: false, reason })
+      byId.set(id, { id, ok: false, reason })
     }
   }
+  const results = requested.map((id) => byId.get(id)!)
+
   // `moved` counts real moves. A page that rode along inside its selected parent is `ok` but was never a
   // move of its own, and counting it would report more relocations than happened.
   const ok = results.filter((r) => r.ok)
