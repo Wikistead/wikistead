@@ -341,6 +341,25 @@ describe('buildHtmlExport', () => {
     expect(await buildHtmlExport(db, fgaClient, { userId: USER, pageId: HIDDEN })).toBeNull()
   })
 
+  // #85 review: a never-published page has nothing to export, and used to yield a document with only the
+  // title in it. Two places that mattered: the download was an empty file wearing the page's name, and
+  // print (which fetches this document and falls back to the live surface on 404) printed the empty sheet
+  // instead of falling back — Ctrl+P on a draft stopped printing the draft.
+  it('a page that was never published is absent, not an empty document', async () => {
+    const DRAFT = 'exp-draft-only'
+    await admin`INSERT INTO pages (id, tenant_id, space_id, parent_id, title, ydoc, published_md, published_at) VALUES
+      (${DRAFT}, ${TENANT}, ${SPACE}, NULL, 'Draft Only', ${ydoc('typed but never published')}, NULL, NULL)
+      ON CONFLICT (id) DO NOTHING`
+    const tuple = [{ user: `user:${USER}`, relation: 'view_direct', object: `page:${DRAFT}` }]
+    await writeTuples(fgaClient, tuple)
+    try {
+      expect(await buildHtmlExport(db, fgaClient, { userId: USER, pageId: DRAFT })).toBeNull()
+    } finally {
+      await deleteTuples(fgaClient, tuple).catch(() => {})
+      await admin`DELETE FROM pages WHERE id = ${DRAFT}`.catch(() => {})
+    }
+  })
+
   it('renders a viewable page to an HTML document (published content, shared renderer)', async () => {
     const res = await buildHtmlExport(db, fgaClient, { userId: USER, pageId: CHILD })
     expect(res!.contentType).toContain('text/html')
