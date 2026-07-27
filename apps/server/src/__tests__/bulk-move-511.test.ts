@@ -177,6 +177,32 @@ describe('#511 bulkMovePages — manage on BOTH sides, and no bulk bypass', () =
     expect(res.results[0]).toMatchObject({ ok: false, reason: 'not_found' })
   })
 
+  it("another tenant's space is not a destination, and says so the same way", async () => {
+    // The FGA store is shared across tenants, so a space the caller manages ELSEWHERE passes the relation
+    // check. Without the tenant-scoped lookup the move got as far as the composite foreign key and reported
+    // `error`, breaking the uniform answer every other unreachable destination gives.
+    const other = `tenant_bm_${Date.now().toString(36)}`
+    await adminPool`INSERT INTO tenants (id, slug, plan) VALUES (${other}, ${other}, 'free')`
+    await adminPool`INSERT INTO spaces (id, tenant_id, name) VALUES ('bm-cross-space', ${other}, 'Elsewhere')`
+    await writeTuples(fgaClient, [{ user: `user:${CALLER}`, relation: 'manager', object: 'space:bm-cross-space' }]).catch(() => {})
+    try {
+      expect(await check(fgaClient, `user:${CALLER}`, 'manage', { type: 'space', id: 'bm-cross-space' }),
+        'FGA alone would let this through').toBe(true)
+      const p = await mkPage('move-cross-tenant')
+      await expect(bulkMovePages(db, fgaClient, app.searchDriver, {
+        spaceId: source, targetSpaceId: 'bm-cross-space', pageIds: [p], userId: CALLER,
+      })).rejects.toMatchObject({ statusCode: 404 })
+      expect(await spaceOf(p), 'nothing moved').toBe(source)
+    } finally {
+      await deleteTuples(fgaClient, [{ user: `user:${CALLER}`, relation: 'manager', object: 'space:bm-cross-space' }]).catch(() => {})
+      await adminPool`DELETE FROM search_outbox WHERE tenant_id = ${other}`.catch(() => {})
+      await adminPool`DELETE FROM audit_outbox WHERE tenant_id = ${other}`.catch(() => {})
+      await adminPool`DELETE FROM audit_log WHERE tenant_id = ${other}`.catch(() => {})
+      await adminPool`DELETE FROM spaces WHERE tenant_id = ${other}`.catch(() => {})
+      await adminPool`DELETE FROM tenants WHERE id = ${other}`.catch(() => {})
+    }
+  })
+
   it('a caller who cannot view the SOURCE space gets a uniform 404 for the whole request', async () => {
     await expect(bulkMovePages(db, fgaClient, app.searchDriver, {
       spaceId: source, targetSpaceId: dest, pageIds: [], userId: 'bulk-move-stranger',

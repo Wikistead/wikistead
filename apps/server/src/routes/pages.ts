@@ -2264,10 +2264,16 @@ export async function bulkMovePages(
   if (args.targetSpaceId === args.spaceId) {
     throw Object.assign(new Error('the destination is the current space'), { statusCode: 400, reason: 'same_space' })
   }
+  // The destination must be in THIS tenant. The FGA store is shared across tenants, so a caller who manages
+  // a space elsewhere passes the relation check — and the move then died on the composite foreign key deep
+  // inside the loop, reporting `error` where every other unreachable destination reports the same uniform
+  // 404 (#511). RLS is the tenant boundary, so ask the tenant-scoped handle first: another tenant's
+  // space simply is not there.
+  const [destRow] = await db.sql<{ id: string }[]>`SELECT id FROM spaces WHERE id = ${args.targetSpaceId}`
   // The destination gate. 404 rather than 403: a caller who cannot manage the target must not learn from the
   // status code whether that space exists — and the picker only ever offers spaces they manage, so a request
   // that lands here did not come from the UI.
-  if (!(await check(fga, `user:${args.userId}`, 'manage', { type: 'space', id: args.targetSpaceId }))) {
+  if (!destRow || !(await check(fga, `user:${args.userId}`, 'manage', { type: 'space', id: args.targetSpaceId }))) {
     throw Object.assign(new Error('not found'), { statusCode: 404 })
   }
   const requested = [...new Set(args.pageIds)]
