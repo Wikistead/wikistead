@@ -24,6 +24,7 @@ import { setDictInvalidatePublisher, DICT_CHANNEL_PREFIX } from './search/outbox
 import { LogicalStorageDriver } from './storage/index.js'
 import type { StorageDriver } from './storage/index.js'
 import IORedis from 'ioredis'
+import { invalidateTitleDictCache } from './title-dict-cache.js' // #534
 import { SESSION_COOKIE, readSession } from './auth/session.js'
 import { assertSecretKey } from './auth/secret-crypto.js'
 import { spacesPlugin } from './routes/spaces.js'
@@ -136,6 +137,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   // it out to connected clients over the existing WS (stateless message), which drop the title from
   // their in-memory dictionary in-window. Liveness only — the dictionary endpoint stays the authority.
   setDictInvalidatePublisher((tenantId, pageId) => {
+    // #534: the server forgets its own cached dictionaries for this tenant in the same breath it tells the
+    // browsers to forget theirs, so the cache cannot outlive the signal that makes it wrong.
+    invalidateTitleDictCache(tenantId)
     void valkey.publish(`${DICT_CHANNEL_PREFIX}${tenantId}`, JSON.stringify({ pageId })).catch(() => { /* liveness only */ })
   })
 

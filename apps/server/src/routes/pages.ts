@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readUserTuplesByType, requireTenantAdmin } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
+import { getCachedTitleDict, setCachedTitleDict, titleDictGeneration } from '../title-dict-cache.js' // #534
 import { docName } from '@wikistead/types'
 import { resolveDirectiveRanges } from '@wikistead/macro-render' // #353: scan `:::query` blocks for the anon snapshot
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
@@ -3745,7 +3746,21 @@ export async function pagesPlugin(app: FastifyInstance) {
       if (!(await check(app.fga, subject, 'view', { type: 'page', id: req.params.pageId }, context))) {
         return reply.code(404).send({ error: 'not found' })
       }
-      return await getTitleDictionary(req.db, app.fga, { subject })
+      // #534: the confirm behind this costs ~1.3s on a large space, and the client refetches every 30s.
+      // Serve a few seconds of it from a per-viewer cache — keyed on tenant AND subject, because a
+      // dictionary IS "what this principal may see", and dropped for the whole tenant the moment the
+      // dictionary invalidation fires, so the disclosure window is no wider than the one that already
+      // existed. A miss computes; nothing is ever served stale in place of a fresh answer.
+      const cached = getCachedTitleDict(req.tenant.id, subject)
+      if (cached) return cached
+      // Read the generation BEFORE computing. A revoke landing during the ~1.3s this takes clears the
+      // cache and bumps the generation, so the result — computed against the tuples as they were — is
+      // returned to this request but refused as a cache entry. Without that, the stale answer would be
+      // written after the invalidation and republished for another TTL (design review, #534).
+      const gen = titleDictGeneration(req.tenant.id)
+      const fresh = await getTitleDictionary(req.db, app.fga, { subject })
+      setCachedTitleDict(req.tenant.id, subject, fresh, Date.now(), gen)
+      return fresh
     } catch (e) {
       req.log.warn({ err: e, pageId: req.params.pageId }, 'title-dictionary degraded: authz backend unavailable')
       return { entries: [], capped: false, degraded: true }

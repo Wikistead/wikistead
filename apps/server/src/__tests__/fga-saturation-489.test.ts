@@ -7,7 +7,8 @@
 //   3. POST /pages/:id/view never 500s when the authz check itself ERRORS (FGA deadline) — the view
 //      record is non-critical; skip + 204 (uniform for every page → no oracle; nothing recorded).
 // 1 is pure (a counting fake FGA); 2–3 ride the real app (Postgres + OpenFGA + inject).
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
+import { clearTitleDictCache } from '../title-dict-cache.js'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { pool } from '../db/pool.js'
@@ -50,6 +51,10 @@ afterAll(async () => {
 }, 40_000)
 
 describe('filterAuthorized — paced server-side BatchCheck (#489 fix 1 → #500 / ADR-183)', () => {
+  // #534: the dictionary route caches per viewer for a few seconds. Without this, a pin that asks the
+  // route a second time can be answered from the cache and stop proving whatever it was written to prove —
+  // measured on this very file, where "healthy again" was served from the entry the degraded case warmed.
+  beforeEach(() => clearTitleDictCache())
   it('runs ONE batch in flight at a time (never a store-monopolising burst), with identical semantics', async () => {
     // #500 / ADR-183 superseded the #489 per-id fan-out with server-side BatchCheck: O(N/50) round-trips
     // instead of O(N). The saturation guard is now "one batch in flight per caller" — the chunks run
