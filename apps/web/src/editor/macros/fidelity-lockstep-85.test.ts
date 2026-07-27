@@ -29,6 +29,20 @@ const serverDescriptor = (m: { kind: string; lang?: string; name?: string }) =>
 const nameOf = (m: { kind: string; lang?: string; name?: string }) => (m.kind === "fence" ? m.lang! : m.name!);
 
 describe("#85: the editor and server macro registries agree on export fidelity", () => {
+  // #450 review: the check below runs editor → server, so a name that exists ONLY in the server
+  // descriptor table is invisible to it — a descriptor for a macro nobody registers renders on the
+  // export path and on no other surface, which is the same drift pointing the other way. ADR-177 §2
+  // asks for name-set EQUALITY, so this closes the return direction.
+  it("the server dispatches nothing the editor does not register", () => {
+    const registered = new Set(registeredMacros().map((m) => (m.kind === "fence" ? m.lang! : m.name!)));
+    const serverNames = [...Object.keys(builtinFenceDescriptors), ...Object.keys(builtinDirectiveDescriptors)];
+    // `column`/`tab` are not macros: they are the ITEM syntax the columns/tabs renderers parse out of a
+    // container body, so they have no registration by design.
+    const itemNames = new Set(["column", "tab"]);
+    const orphans = serverNames.filter((n) => !registered.has(n) && !itemNames.has(n));
+    expect(orphans).toEqual([]);
+  });
+
   it("every registered macro can be rendered server-side (or is resolved before render)", () => {
     const missing = registeredMacros()
       .filter((m) => !RESOLVED_BEFORE_RENDER.has(nameOf(m)))
