@@ -114,10 +114,19 @@ export function mountSourceEditor(opts: SourceEditorOptions): SourceEditorHandle
         EditorView.domEventHandlers({ blur: (e, v) => {
           const to = e.relatedTarget as Node | null;
           if (to && v.dom.contains(to)) return false;
+          // #527: a macro MODAL opened from inside this editor is a page-level overlay, so focus moving
+          // into it looks exactly like leaving. Committing there destroys this editor while the modal is
+          // still holding it, and the modal's Save then dispatches into a detached view — the edit is
+          // lost with no error at all. Measured: an Excalidraw scene edited inside `:::columns` left the
+          // document byte-identical, while the same edit at top level wrote back. Same reasoning as the
+          //in-island editUI case above — a surface this editor opened is not somewhere else.
+          if (to && (to as HTMLElement).closest?.("[data-testid=macro-modal], .wks-macro-modal")) return false;
           if (opts.guardTeardownBlur && to === null) {
             setTimeout(() => {
               if (!v.dom.isConnected) return; // destroyed meanwhile (Escape-cancel keeps its no-commit semantics)
               if (v.hasFocus || v.dom.contains(document.activeElement)) return; // focus returned — not a leave
+              // #527: same exemption on the deferred path — the modal may take focus a tick later.
+              if (document.activeElement?.closest?.("[data-testid=macro-modal], .wks-macro-modal")) return;
               if (document.activeElement === document.body || document.activeElement === null) { v.focus(); return; }
               opts.onCommit(v.state.doc.toString()); // focus landed somewhere real → a genuine leave
             }, 0);
