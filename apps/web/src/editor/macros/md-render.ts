@@ -1,4 +1,5 @@
 import { parseFenceInfo, safeHref, walkMarkdown, walkInlineMarkdown, type MdSink, type MdOpenRole, type MdLeafRole, type MdRoleData } from "@wikistead/macro-render"; // #267 fence align=; #384/ADR-160 the ONE tree-walk + shared URL judge
+import katex from "katex"; // #505: the print portal / preview draw math too — same renderer as the editor
 import { parseDirectiveOpen } from "./directive-parser";
 import { findDirectiveMacro, findFenceMacro } from "./registry";
 import { currentMacroTheme } from "./theme";
@@ -299,6 +300,21 @@ class DomSink implements MdSink {
 
   leaf(role: MdLeafRole, data?: MdRoleData): void {
     switch (role) {
+      // #505 / ADR-191: the visitor decided this run is math (one delimiter rule for every surface); draw
+      // it with the same KaTeX call the editor makes, so the print portal shows the formula the author
+      // sees instead of raw `$x^2$`. katex.render BUILDS DOM (never innerHTML of user text) and
+      // trust:false keeps \href and friends disabled — the editor's exact configuration.
+      case "math": {
+        const el = document.createElement(data?.display ? "div" : "span");
+        el.className = data?.display ? "cm-lp-math cm-lp-math-block" : "cm-lp-math cm-lp-math-inline";
+        try {
+          katex.render(data?.tex ?? "", el, { displayMode: !!data?.display, throwOnError: false, trust: false, strict: "warn" });
+        } catch {
+          el.textContent = data?.tex ?? ""; // degrade to the TeX — readable, never a broken embed
+        }
+        this.top().appendChild(el);
+        return;
+      }
       // #505: a static checklist (the shared visitor's GFM task marker). Disabled — this renderer draws a
       // DOCUMENT (print portal, preview, public read), not a control; the editable checkbox is the
       // editing surface's job. Built as an element, never innerHTML.

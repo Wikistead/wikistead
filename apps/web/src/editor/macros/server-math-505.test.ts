@@ -113,3 +113,26 @@ describe("#505: task lists on the static path", () => {
     expect(out).not.toContain("checkbox");
   });
 });
+
+// #505: the case the print-parity gate caught. Markdown emits an `Escape` node for every backslash, so a
+// formula like $$\int_0^1 x\,dx$$ reached the sink as four fragments and never matched a text-run scan —
+// it printed as raw TeX while simpler formulas rendered. Math is resolved over the whole node's source
+// now (what the editor does over the whole document), so backslashes cannot split a span.
+describe("#505: math spans survive markdown escape nodes", () => {
+  it("renders block math containing backslash commands", () => {
+    const out = renderMarkdownToHtml("$$\\int_0^1 x\\,dx$$").toString();
+    expect(out).toContain("<math");
+    expect(out.replace(/<annotation[^>]*>[\s\S]*?<\/annotation>/g, ""), "no raw delimiters left").not.toContain("$$");
+  });
+
+  it("renders inline math containing backslash commands", () => {
+    const out = renderMarkdownToHtml("before $\\alpha\\,\\beta$ after").toString();
+    expect(out).toContain("<math");
+    expect(out).toContain("before");
+    expect(out).toContain("after");
+  });
+
+  it("still leaves inline code alone when it holds a dollar", () => {
+    expect(renderMarkdownToHtml("`$x$` code").toString()).not.toContain("<math");
+  });
+});

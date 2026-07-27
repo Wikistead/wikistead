@@ -3,6 +3,7 @@ import { directiveExtension, parseDirectiveOpen, resolveDirectiveRanges, type Re
 import { highlightExtension } from "./highlight-ext.js";
 import { footnoteExtension } from "./footnote-ext.js";
 import { safeHref } from "./url-safety.js";
+import { findMathSpans } from "./math.js"; // #505: one math-delimiter rule, both sinks
 import { HEADINGS, footnoteRefLabel } from "./md-nodes.js";
 
 // #384 / ADR-160: ONE markdown tree-walk, two sinks. This visitor owns every structural decision the
@@ -29,11 +30,13 @@ export type MdOpenRole =
   | "table" | "thead" | "tbody" | "tr" | "th" | "td"
   | "link" | "attachmentRef"
   | "footnoteSection" | "footnoteList" | "footnoteItem";
-export type MdLeafRole = "hr" | "br" | "inlineCode" | "literalBlock" | "footnoteRef" | "footnoteBack" | "taskMarker";
+export type MdLeafRole = "hr" | "br" | "inlineCode" | "literalBlock" | "footnoteRef" | "footnoteBack" | "taskMarker" | "math";
 export interface MdRoleData {
   href?: string | null;      // link (null = scheme-rejected → non-link)
   n?: number | null;         // footnoteRef / footnoteItem / footnoteBack number
   checked?: boolean;         // taskMarker — a GFM `- [x]` item (#505)
+  tex?: string;              // math — the TeX between the delimiters (#505)
+  display?: boolean;         // math — $$block$$ vs $inline$ (#505)
   unreferenced?: boolean;    // footnoteItem
   text?: string;             // inlineCode / literalBlock
 }
@@ -130,6 +133,23 @@ export function collectFootnotes(tree: MdNode, src: string): FootnoteData {
 // walkMarkdown call with topLevel=false → map null → literal footnotes; ADR-130 §A). No module state.
 interface WalkState { src: string; sink: MdSink; fnNumbers: Map<string, number> | null }
 
+// #505 / ADR-191: prose text is where `$…$` / `$$…$$` live, so the visitor splits them out HERE and hands
+// each one to the sink as a `math` leaf. Doing it in the visitor rather than in each sink is what ADR-160
+// asks for — the delimiter rules (the Pandoc guards that keep prose about money from becoming math) are
+// decided ONCE, so the DOM surface and the HTML export cannot drift about what math even is. Each sink
+// still chooses how to draw it. Text that contains no math takes exactly the path it always did.
+function emitProse(st: WalkState, s: string): void {
+  const spans = findMathSpans(s);
+  if (spans.length === 0) { st.sink.text(s); return }
+  let at = 0;
+  for (const m of spans) {
+    if (m.from > at) st.sink.text(s.slice(at, m.from));
+    st.sink.leaf("math", { tex: m.tex, display: m.display });
+    at = m.to;
+  }
+  if (at < s.length) st.sink.text(s.slice(at));
+}
+
 function walkInlineChildren(st: WalkState, parent: MdNode): void {
   let pos = parent.from;
   let first = true; // trim the leading syntax space after an opening mark (e.g. "# " / "- " / "> ")
@@ -137,12 +157,36 @@ function walkInlineChildren(st: WalkState, parent: MdNode): void {
     const v = first ? s.replace(/^[ \t]+/, "") : s;
     if (v) { st.sink.text(v); first = false; }
   };
+  // #505 / ADR-191: math spans are resolved over this node's WHOLE source, once, before the child walk —
+  // the same thing the editor does over the whole document. Scanning the per-child text runs instead was
+  // measurably wrong: markdown emits an `Escape` node for every backslash, so `$$\int_0^1 x\,dx$$` reached
+  // the sink as four fragments and never matched, and the formula printed as raw TeX. A span found here
+  // swallows whatever the parser put inside it (those Escapes are TeX, not markdown).
+  const spans = findMathSpans(st.src.slice(parent.from, parent.to))
+    .map((m) => ({ ...m, from: m.from + parent.from, to: m.to + parent.from }));
+  const spanAt = (i: number) => spans.find((sp) => i >= sp.from && i < sp.to);
+  // Emit source[pos, end) as prose, breaking out any math span it crosses.
+  const flushTo = (end: number) => {
+    while (pos < end) {
+      const here = spanAt(pos);
+      if (here) {
+        if (pos === here.from) { st.sink.leaf("math", { tex: here.tex, display: here.display }); first = false; }
+        pos = Math.min(here.to, end);
+        continue;
+      }
+      const next = spans.find((sp) => sp.from > pos && sp.from < end);
+      const stop = next ? next.from : end;
+      pushText(st.src.slice(pos, stop));
+      pos = stop;
+    }
+  };
   for (let c = parent.firstChild; c; c = c.nextSibling) {
-    if (c.from > pos) pushText(st.src.slice(pos, c.from));
+    if (c.from > pos) flushTo(c.from);
+    if (spanAt(c.from)) { pos = Math.max(pos, c.to); continue } // inside math — the span owns this text
     if (!MARKS.has(c.name)) { walkInlineNode(st, c); first = false; }
     pos = c.to;
   }
-  if (pos < parent.to) pushText(st.src.slice(pos, parent.to));
+  if (pos < parent.to) flushTo(parent.to);
 }
 
 function walkInlineNode(st: WalkState, node: MdNode): void {
@@ -180,7 +224,7 @@ function walkInlineNode(st: WalkState, node: MdNode): void {
     case "TaskMarker": st.sink.leaf("taskMarker", { checked: /x/i.test(txt(st.src, node)) }); return;
     case "HardBreak": st.sink.leaf("br"); return;
     // HTML* and anything else inline → literal inert text (the XSS-safe default).
-    default: st.sink.text(txt(st.src, node));
+    default: emitProse(st, txt(st.src, node));
   }
 }
 
