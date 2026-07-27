@@ -1247,7 +1247,7 @@ class AttachmentCardWidget extends WidgetType {
       const reveal = document.createElement("button");
       reveal.type = "button";
       reveal.className = "cm-lp-macro-edit cm-lp-macro-edit-hint";
-      reveal.dataset.tip = "Edit";
+      reveal.dataset.tip = "Edit this block"; // #528 ②: distinct from the raw pill's "Rich edit this macro"
       reveal.innerHTML = MACRO_EDIT_BUTTON_HTML;
       reveal.setAttribute("data-testid", "macro-edit");
       reveal.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(wrap), true); });
@@ -1401,7 +1401,7 @@ class StandaloneImageWidget extends WidgetType {
       const reveal = document.createElement("button");
       reveal.type = "button";
       reveal.className = "cm-lp-macro-edit cm-lp-macro-edit-hint";
-      reveal.dataset.tip = "Edit";
+      reveal.dataset.tip = "Edit this block"; // #528 ②: distinct from the raw pill's "Rich edit this macro"
       reveal.innerHTML = MACRO_EDIT_BUTTON_HTML;
       reveal.setAttribute("data-testid", "macro-edit");
       reveal.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterMacroAt(view, view.posAtDOM(wrap), true); });
@@ -1588,8 +1588,8 @@ class MacroRawRichuiPill extends WidgetType {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "cm-lp-macro-edit cm-lp-macro-richui-raw";
-    btn.dataset.tip = "Rich edit (Ctrl+Enter)";
-    btn.innerHTML = MACRO_EDIT_BUTTON_HTML;
+    btn.dataset.tip = "Rich edit this macro (Ctrl+Enter)";
+    btn.innerHTML = MACRO_RAW_PILL_HTML;
     btn.setAttribute("data-testid", this.testid);
     // Own mousedown → open the RichUI; preventDefault so the caret isn't also re-placed, stopPropagation so it
     // does not bubble to the line. ignoreEvent keeps CM from routing the click as an editor gesture.
@@ -1942,6 +1942,13 @@ const MACRO_EDIT_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="n
 // (editUI-opening and raw-revealing alike; what the press DOES stays per-macro). Trusted constant markup
 // (no user input → XSS-safe). Never compose a bare-pencil variant — the uniform face is the contract.
 const MACRO_EDIT_BUTTON_HTML = MACRO_EDIT_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
+// #528 ②: the raw-mode pill and the rendered block's ✎ row sat at the same corner, the same width and
+// nearly the same height, so nothing told them apart. They do different things — the pill enters the RICH
+// editor from the raw source, the ✎ row edits the RENDERED block — so they get different marks: a pencil
+// for editing what you see, angle brackets for going in through the source. The tooltip (the fast one from
+// #530, via data-tip) names each; aria-label stays the accessible name, since a tooltip describes.
+const MACRO_SOURCE_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/></svg>';
+const MACRO_RAW_PILL_HTML = MACRO_SOURCE_ICON + '<span class="cm-lp-macro-richui-key">Ctrl+↵</span>';
 // #198 (comment 724): Lucide copy / check glyphs for the code-fence copy button. Trusted constants
 // (no user input) → safe as innerHTML.
 // #213: structural editing for columns/tabs — add / remove a child :::column / :::tab as a real Y.Text
@@ -2686,7 +2693,7 @@ class MacroWidget extends WidgetType {
             const edit = document.createElement("button");
             edit.type = "button";
             edit.className = "cm-lp-macro-edit cm-lp-macro-edit-hint cm-lp-nested-macro-edit";
-            edit.dataset.tip = "Edit (Ctrl+Enter)";
+            edit.dataset.tip = "Edit this block (Ctrl+Enter)"; // #528 ②
             edit.innerHTML = MACRO_EDIT_BUTTON_HTML; // #424: the uniform face (the macro IS selected here, so Ctrl+↵ works directly)
             edit.setAttribute("data-testid", "nested-macro-edit");
             edit.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); enterNestedMacroAt(view, this.nestedSel!); });
@@ -2719,7 +2726,7 @@ class MacroWidget extends WidgetType {
             // Hover-gated variant (the base .cm-lp-nested-macro-edit is opacity:1 — only drawn on selection);
             // -hover overrides to opacity:0 + reveals on the slot's :hover (CSS below).
             edit.className = "cm-lp-macro-edit cm-lp-macro-edit-hint cm-lp-nested-macro-edit cm-lp-nested-macro-edit-hover";
-            edit.dataset.tip = "Edit (Ctrl+Enter)";
+            edit.dataset.tip = "Edit this block (Ctrl+Enter)"; // #528 ②
             // #424 (user ruling, supersedes the bare-pencil rule): ONE face for every entry button
             // icon + Ctrl+↵ — even where the key needs the macro selected first; uniformity beats the nuance.
             edit.innerHTML = MACRO_EDIT_BUTTON_HTML;
@@ -5235,7 +5242,7 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // can never reach a NESTED macro's chrome (the atom-selected container leaking the inner warning's
   // ✎ was exactly a descendant match) nor an island's (a deep descendant by construction). One rule
   // shape for top level, nested renders and islands alike; no enumeration guards remain.
-  ".cm-lp-macro-wrap:hover > .cm-lp-macro-btnrow, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow": { pointerEvents: "auto" },
+  ".cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-btnrow, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow": { pointerEvents: "auto" },
   // #393 / ADR-151 addendum 3: the pipe (GFM) table's root is `.cm-lp-table-wrap` (TableWidget) /
   // `.cm-lp-table-edit` (EditableTableWidget), NOT `.cm-lp-macro-wrap` — so the reveal rules above never
   // reach its align btnrow. Mirror them for the table wraps so a pipe table's hover align segment reveals
@@ -5281,7 +5288,13 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   ".cm-lp-macro-richui-key": { fontSize: "0.72em", fontWeight: "600", letterSpacing: "0.02em" },
   // ①: the zone `:has` walks DIRECT-child lines only (`>`), so hovering raw lines inside a slot
   // island can never light pills of the OUTER document (or vice versa) — .cm-content elements nest.
-  ".cm-lp-macro-raw .cm-lp-macro-richui-raw, .cm-content:has(> .cm-lp-macro-raw-zone:hover) .cm-lp-macro-richui-raw": { opacity: "0.9", pointerEvents: "auto" },
+  // #528 this used to read `.cm-content:has(> .cm-lp-macro-raw-zone:hover)` — CSS decided, on its
+  // own, when the pill appeared. The layout owner could then only react to it through pointer/transition
+  // events, and a pointer that moved WITHIN a zone (no new pointerover) or crossed out mid-fade (no
+  // transitionend) left frames where the pill was on screen and unplaced: the flicker in the report.
+  // Visibility is now the owner's decision too — it adds `cm-aff-shown` in the same measure pass that
+  // places the element, so "visible" and "positioned" cannot come apart.
+  ".cm-lp-macro-raw .cm-lp-macro-richui-raw, .cm-lp-macro-richui-raw.cm-aff-shown": { opacity: "0.9", pointerEvents: "auto" },
   ".cm-lp-macro-richui-raw:hover": { opacity: "1", pointerEvents: "auto" },
   // #278 (owner ruling, supersedes the reposition + the hover-only): island chrome
   // renders EXACTLY like top-level — same reveal triggers (hover OR macroRawHead), same -1.5em/left:0
@@ -5344,7 +5357,7 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // own btnrow chrome / direct edit / retarget / align, and can never reach a nested macro's or an
   // island's chrome (both are deeper descendants by construction). This retires the
   // `:not(island *)` + island-scoped enumeration entirely: one rule shape everywhere.
-  ".cm-lp-macro-wrap:hover > .cm-lp-macro-btnrow .cm-lp-macro-edit, .cm-lp-macro-wrap:hover > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-macro-wrap:hover > .cm-lp-macro-edit, .cm-lp-macro-wrap:hover > .cm-lp-macro-retarget, .cm-lp-macro-wrap:hover > .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-align": { opacity: "1" },
+  ".cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-btnrow .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-align": { opacity: "1" },
   // #393 / ADR-151 addendum 3: same opacity reveal for the pipe table's align segment on hover (its wrap
   // is `.cm-lp-table-wrap` for the rendered widget, `.cm-lp-table-edit` while the RichUI island is open
   // wants the whole-table align visible in BOTH states, orthogonal to the toolbar's per-cell align).
