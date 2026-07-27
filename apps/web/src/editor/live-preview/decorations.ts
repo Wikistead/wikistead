@@ -1840,6 +1840,11 @@ export class EditableEditUIWidget extends WidgetType {
     const swap = (collab?: { text: Y.Text; awareness: unknown }, initial?: string) => {
       if (destroying) return;
       swapping = true;
+      // #502 (review rejection, measured): the swap is an internal re-mount, invisible to the person typing
+      // but the new surface opens at offset 0, so a peer arriving or leaving yanked their caret to the top
+      // of the island mid-edit. Carry it across. The text comes over via `initial` / the shared body; the
+      // caret has to be carried the same way, or the re-mount is only half invisible.
+      const keptCaret = inner.caret();
       try {
         inner.destroy(); // its teardown blur would otherwise commit and close the island
         inner = mountHostSurface(view, { ...surfaceOpts, doc: asMacroSource(initial ?? opts.doc) }, collab);
@@ -1847,6 +1852,7 @@ export class EditableEditUIWidget extends WidgetType {
         swapping = false; // synchronous window: the blur handler commits inline, so this covers exactly it
       }
       inner.focus();
+      inner.restoreCaret(keptCaret);
     };
     const ctrl = new IslandCoEditController({
       awareness: coHost.awareness,
@@ -2316,7 +2322,14 @@ const slotIslandTheme = EditorView.theme({
 // #456 S1/S3: the host's side of the shared-surface seam. A macro asks for an editing surface and
 // gets a handle; the surface itself is the same CM6 mount the slot islands use, built from the shared
 // factory, so behaviour cannot drift per macro. The macro never receives the view.
-function mountHostSurface(view: EditorView, opts: HostSurfaceOptions, collab?: { text: Y.Text; awareness: unknown }): HostSurfaceHandle {
+// The host's own view of a mounted surface: the macro-facing handle plus the caret accessors the co-edit
+// swap needs (#502). Internal to this module.
+type MountedSurface = HostSurfaceHandle & {
+  caret(): { anchor: number; head: number };
+  restoreCaret(sel: { anchor: number; head: number }): void;
+};
+
+function mountHostSurface(view: EditorView, opts: HostSurfaceOptions, collab?: { text: Y.Text; awareness: unknown }): MountedSurface {
   const factory = view.state.facet(nestedLivePreviewConfig);
   const markdown = opts.kind !== "code"; // default: the content is prose, so keep reading typography
   const handle = mountSourceEditor({
@@ -2343,6 +2356,20 @@ function mountHostSurface(view: EditorView, opts: HostSurfaceOptions, collab?: {
     focus: () => handle.focus(),
     inVimInsert: () => handle.inVimInsert(),
     destroy: () => handle.destroy(),
+    // #502 (review rejection): the co-edit swap destroys this surface and mounts a fresh one, which starts at
+    // offset 0 — so a peer joining or leaving threw the local caret to the top of the island while its owner
+    // was typing. These two carry the caret across that re-mount. Kept INTERNAL to the host (the returned
+    // type is widened here, not in the macro-facing HostSurfaceHandle): a macro has no business moving a
+    // caret, and the narrow host-API stays as it is.
+    caret: () => ({ anchor: handle.view.state.selection.main.anchor, head: handle.view.state.selection.main.head }),
+    restoreCaret: (sel: { anchor: number; head: number }) => {
+      // The body may have been merged with the peer's edits while we were bound, so the old offsets can sit
+      // past the end. Clamp rather than drop: a caret a few characters off is a far smaller injury than one
+      // teleported to the start, which is what the reject was about.
+      const len = handle.view.state.doc.length;
+      const clamp = (n: number) => Math.max(0, Math.min(n, len));
+      handle.view.dispatch({ selection: { anchor: clamp(sel.anchor), head: clamp(sel.head) } });
+    },
   };
 }
 
