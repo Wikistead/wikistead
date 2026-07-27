@@ -299,6 +299,18 @@ class DomSink implements MdSink {
 
   leaf(role: MdLeafRole, data?: MdRoleData): void {
     switch (role) {
+      // #505: a static checklist (the shared visitor's GFM task marker). Disabled — this renderer draws a
+      // DOCUMENT (print portal, preview, public read), not a control; the editable checkbox is the
+      // editing surface's job. Built as an element, never innerHTML.
+      case "taskMarker": {
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.disabled = true;
+        box.checked = !!data?.checked;
+        box.className = "cm-lp-task-checkbox";
+        this.top().appendChild(box);
+        return;
+      }
       case "hr": this.top().appendChild(document.createElement("hr")); return;
       case "br": this.top().appendChild(document.createElement("br")); return;
       case "inlineCode": { const el = document.createElement("code"); el.textContent = data?.text ?? ""; this.top().appendChild(el); return; }

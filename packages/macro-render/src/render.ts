@@ -113,6 +113,11 @@ class HtmlSink implements MdSink {
 
   leaf(role: MdLeafRole, data?: MdRoleData): void {
     switch (role) {
+      // #505: a static checklist. `disabled` because this surface is a document, not a control — the
+      // editable checkbox lives on the editing surface; here it must simply LOOK like the checklist it is.
+      case "taskMarker":
+        this.emit(unsafeHtml(`<input type="checkbox" disabled${data?.checked ? " checked" : ""}>`));
+        return;
       case "hr": this.emit(unsafeHtml("<hr>")); return;
       case "br": this.emit(unsafeHtml("<br>")); return;
       case "inlineCode": this.emit(html`<code>${data?.text ?? ""}</code>`); return;
