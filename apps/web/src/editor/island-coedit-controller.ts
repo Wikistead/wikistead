@@ -115,7 +115,15 @@ export class IslandCoEditController {
     // body (bind/unbind imbalance → data loss). Just dispose it. (design-review must-fix.)
     if (this.bound) {
       const flushed = ephemeralBody(session.doc).toString(); // the merged co-edit → back to the canon
-      this.deps.onUnbind(flushed);
+      // #502 review: EVERY co-occupant used to flush when occupancy dropped, so a client leaving and the
+      // client staying wrote the SAME text concurrently. Neither could see the other's in-flight write, and
+      // Yjs merged two inserts into a doubled edit (measured: "QRS" landed as "QRSQRS" when a peer closed
+      // their tab). Elect ONE writer the same way seeding does — the lowest clientID still present — so the
+      // merged body reaches the canon exactly once. A lone occupant is trivially the minimum, so the
+      // last-one-out still flushes; that is the case this flush exists for.
+      const present = coOccupantClientIDs(this.deps.awareness, this.deps.anchor);
+      const elected = present.length === 0 || Math.min(...present) === this.deps.awareness.clientID;
+      if (elected) this.deps.onUnbind(flushed);
     }
     this.bound = false;
     session.destroy();
