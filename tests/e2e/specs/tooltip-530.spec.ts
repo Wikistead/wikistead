@@ -16,7 +16,9 @@ test("#530: a truncated sidebar page name shows the fast tooltip (not a native t
     return rows.findIndex((el) => el.scrollWidth > el.clientWidth);
   });
   test.skip(idx < 0, "no truncated page name in this fixture");
-  const row = page.locator("[data-testid=tree-page-name]").nth(idx);
+  // #530the conditional tooltip is declared on the ROW now and MEASURES the name inside it (the
+  // name shrinks out from under the cursor when the hover buttons appear), so read the attribute there.
+  const row = page.locator("[data-testid=tree-page]").nth(idx).locator("div").first();
 
   await row.hover();
   // the mechanism swapped: a delegated attribute, never a native `title`. Sincethe sidebar rows
@@ -30,8 +32,9 @@ test("#530: a truncated sidebar page name shows the fast tooltip (not a native t
 
   // the bubble appears well inside the native delay (native is ~1000ms+; ours is 180ms)
   const shown = await page.evaluate(async () => {
-    const el = [...document.querySelectorAll<HTMLElement>("[data-testid=tree-page-name]")]
-      .find((e) => (e.dataset.tip || e.dataset.tipIfTruncated) && e.scrollWidth - e.clientWidth > 1);
+    const name = [...document.querySelectorAll<HTMLElement>("[data-testid=tree-page-name]")]
+      .find((e) => e.scrollWidth - e.clientWidth > 1);
+    const el = name?.closest("[data-tip-if-truncated]") as HTMLElement | null;
     if (!el) return { appeared: false, ms: -1 };
     const t0 = performance.now();
     el.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));

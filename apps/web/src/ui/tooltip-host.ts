@@ -62,9 +62,22 @@ function hide(): void {
 // showing. Rounded because sub-pixel layout can leave a fractional difference on a label that DOES fit.
 const isTruncated = (el: HTMLElement): boolean => el.scrollWidth - el.clientWidth > 1;
 
+// #530 (review rejection, measured): a conditional tooltip used to be declared ON the element it measures —
+// but that element is exactly the one whose width changes on hover. On a tree row, the hover buttons appear
+// and the name span SHRINKS out from under the cursor; the pointer is then over the row, not the name, and
+// the leave rule below hides the tooltip. So the row could be hovered and never show its own name — and
+// only when the cursor happened to sit past the shrunken width, which is why it looked intermittent.
+// `data-tip-measure` splits the two roles: the ANCHOR (which the pointer must stay within, so the row) and
+// the MEASURED element (the clipped label inside it). Absent the attribute, the target measures itself.
+const measuredEl = (target: HTMLElement): HTMLElement => {
+  const sel = target.dataset.tipMeasure;
+  if (!sel) return target;
+  return (target.querySelector(sel) as HTMLElement | null) ?? target;
+};
+
 function textFor(target: HTMLElement): string | undefined {
   const conditional = target.dataset.tipIfTruncated;
-  if (conditional) return isTruncated(target) ? conditional : undefined;
+  if (conditional) return isTruncated(measuredEl(target)) ? conditional : undefined;
   return target.dataset.tip || undefined;
 }
 
