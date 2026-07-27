@@ -6,6 +6,7 @@ import { check, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples,
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
+import { spaceGrantTuplesFor } from '../space-grant-expansion.js' // #514 §6: the ONE capability→relation table
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
@@ -376,7 +377,9 @@ const SPACE_CAPS: SpaceCapability[] = ['view', 'comment', 'edit', 'moderate', 'm
 // the Step-A window (listSpaceAccess filters principals to user/group, so post-migration the mapping
 // only ever sees share_link tuples there — which that filter drops).
 // #529 / ADR-193: `comment` gains its own space leaf, so a comment-only grant is finally expressible.
-const CAP_TO_RELATION: Record<SpaceCapability, string> = { view: 'viewer', comment: 'commenter', edit: 'editor_member', moderate: 'moderator', manage: 'manager' }
+// #514 / ADR-188 §6: the built-in grant no longer keeps its own capability→relation table. Both this path
+// and the custom-role assignment expand through space-grant-expansion.ts, so the two cannot drift (the gap
+// between them is where the #485 bug lived).
 const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', commenter: 'comment', editor: 'edit', editor_member: 'edit', moderator: 'moderate', manager: 'manage' }
 
 // #258 / ADR-110: a member VIEW grant writes BOTH `viewer` (unchanged — pages inherit view via
@@ -385,10 +388,8 @@ const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', comme
 // its space-scoped templates to guests/anon). Additive: no existing `viewer` tuple is migrated. Only for the
 // `viewer` relation (member/group grants — validateSpaceGrant already forbids wildcard/share_link here);
 // editor/manager grants are single-tuple as before. Revoke deletes the same pair (kept in sync).
-function spaceGrantTuples(grantee: string, relation: string, spaceId: string): { user: string; relation: string; object: string }[] {
-  const base = { user: grantee, relation, object: `space:${spaceId}` }
-  return relation === 'viewer' ? [base, { user: grantee, relation: 'viewer_member', object: `space:${spaceId}` }] : [base]
-}
+const spaceGrantTuples = spaceGrantTuplesFor // the shared expansion (#514 §6); the viewer/viewer_member
+// pairing that used to be special-cased here is the `view` entry of that one table.
 
 function validateSpaceGrant(grantee: string, capability: string): asserts capability is SpaceCapability {
   if (!SPACE_CAPS.includes(capability as SpaceCapability)) {
@@ -492,13 +493,12 @@ export async function grantSpaceAccess(
 ): Promise<void> {
   validateSpaceGrant(args.grantee, args.capability)
   await requireSpaceManage(fga, args.userId, args.spaceId)
-  const relation = CAP_TO_RELATION[args.capability] // narrowed here (assertion doesn't flow into the closure)
   // Durable audit (#177) + FGA in one tx; FGA LAST so a grant failure rolls the audit back.
   await db.tx(async (tx) => {
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_granted', target: `space:${args.spaceId}` })
     }
-    await writeTuples(fga, spaceGrantTuples(args.grantee, relation, args.spaceId))
+    await writeTuples(fga, spaceGrantTuples(args.grantee, args.capability, args.spaceId))
   })
   await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
   emit({ type: 'space.access_granted', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
@@ -512,13 +512,12 @@ export async function revokeSpaceAccess(
 ): Promise<void> {
   validateSpaceGrant(args.grantee, args.capability)
   await requireSpaceManage(fga, args.userId, args.spaceId)
-  const relation = CAP_TO_RELATION[args.capability] // narrowed here (assertion doesn't flow into the closure)
   // Durable audit (#177) + FGA in one tx; FGA LAST so a revoke failure rolls the audit back.
   await db.tx(async (tx) => {
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_revoked', target: `space:${args.spaceId}` })
     }
-    await deleteTuples(fga, spaceGrantTuples(args.grantee, relation, args.spaceId))
+    await deleteTuples(fga, spaceGrantTuples(args.grantee, args.capability, args.spaceId))
   })
   await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
   // #362 E1: revocation watch sweep (post-FGA, best-effort; per-watcher view re-check inside — a watcher

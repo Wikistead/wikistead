@@ -19,6 +19,7 @@ import { auditIfEntitled } from '../audit/outbox.js'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { reindexPublishedPages } from './spaces.js'
+import { spaceGrantTuplesFor } from '../space-grant-expansion.js' // #514 §6: the ONE capability→relation table
 import { groupGrantee } from '../auth/group-sync.js' // #497: mappings assign the group principal
 import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-190: name user principals on the gated list
 import type { TenantDb } from '../db/index.js'
@@ -71,13 +72,10 @@ const PAGE_CAP_RELATION: Record<RoleCapability, string> = {
 }
 // #529 / ADR-193: total now (every capability has a space leaf) — keep it a full Record so adding a
 // capability without deciding its space mapping fails to compile instead of 400ing at runtime.
-const SPACE_CAP_RELATIONS: Record<RoleCapability, string[]> = {
-  view: ['viewer', 'viewer_member'], // the #258 pair — same tuples the member view grant writes
-  comment: ['commenter'], // #529 / ADR-193: the space-scoped comment grant (pages inherit it, private-guarded)
-  edit: ['editor_member'],
-  moderate: ['moderator'],
-  delete: ['deleter'], share: ['sharer'], settings: ['settings_editor'], publish: ['publisher'],
-}
+// #514 / ADR-188 §6: this table moved to space-grant-expansion.ts, which the BUILT-IN member grant now
+// expands through as well — one table, so the assignment path and the grant path cannot disagree about
+// what a capability confers (the gap between them is where the #485 bug lived). `manage` lives there too
+// as a single `manager` leaf, but custom roles still cannot request it: it is not in ROLE_CAPABILITIES.
 
 // #445 / ADR-171: tenant capability → the single tenant-relation leaf its assignment expands to.
 // `space_creator` confers no page view (not in `viewable`, never in the doc-builder), so tenant
@@ -97,9 +95,16 @@ function expansionTuples(resourceType: 'page' | 'space' | 'tenant', resourceId: 
     throw Object.assign(new Error(`capability "${cap}" is a tenant capability — not assignable at ${resourceType} scope`), { statusCode: 400 })
   }
   if (resourceType === 'page') return [{ user: principal, relation: PAGE_CAP_RELATION[cap as RoleCapability], object: `page:${resourceId}` }]
-  const rels = SPACE_CAP_RELATIONS[cap as RoleCapability]
-  if (!rels) throw Object.assign(new Error(`capability "${cap}" is not assignable at space scope`), { statusCode: 400 })
-  return rels.map((relation) => ({ user: principal, relation, object: `space:${resourceId}` }))
+  // Two-layer defence (#514 §6 review): the shared table carries `manage` because the BUILT-IN grant needs
+  // it, so absence from the table no longer refuses a custom role that asks for the superset. The vocabulary
+  // check in parseDefinition is the first layer and no write path bypasses it today; this is the second, so
+  // a future path that reaches here with `manage` is refused rather than silently granted manager.
+  if (!ROLE_CAPABILITIES.includes(cap as RoleCapability)) {
+    throw Object.assign(new Error(`capability "${cap}" is not assignable at space scope`), { statusCode: 400 })
+  }
+  const tuples = spaceGrantTuplesFor(principal, cap, resourceId)
+  if (tuples.length === 0) throw Object.assign(new Error(`capability "${cap}" is not assignable at space scope`), { statusCode: 400 })
+  return tuples
 }
 
 const forbidden = () => Object.assign(new Error('forbidden'), { statusCode: 403 })

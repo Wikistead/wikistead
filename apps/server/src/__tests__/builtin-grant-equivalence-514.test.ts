@@ -77,3 +77,26 @@ describe('#514 §6 — what a built-in `manager` grant confers (the equivalence 
     }
   }, 120_000)
 })
+
+// #514 §6: the two paths now share ONE capability→relation table (space-grant-expansion.ts). That table
+// carries `manage`, because the built-in grant needs it — so the invariant that a CUSTOM role can never
+// request it has to be pinned on the vocabulary, not on the table's absence.
+describe('#514 §6 — sharing the table does not let a custom role ask for `manage`', () => {
+  it('`manage` is absent from the custom-role vocabulary', async () => {
+    const { ROLE_CAPABILITIES } = await import('../routes/roles.js')
+    expect([...ROLE_CAPABILITIES], 'a custom bundle lists the atoms; manage is the built-in superset')
+      .not.toContain('manage')
+  })
+
+  it('…while the shared table still expands it to the single `manager` leaf (never the bundle)', async () => {
+    const { spaceGrantTuplesFor } = await import('../space-grant-expansion.js')
+    const tuples = spaceGrantTuplesFor('user:probe', 'manage', 'space-probe')
+    expect(tuples.map((t) => t.relation), 'one leaf, not an expansion').toEqual(['manager'])
+  })
+
+  it('and a view grant still writes the #258 pair from that same table', async () => {
+    const { spaceGrantTuplesFor } = await import('../space-grant-expansion.js')
+    expect(spaceGrantTuplesFor('user:probe', 'view', 'space-probe').map((t) => t.relation))
+      .toEqual(['viewer', 'viewer_member'])
+  })
+})
