@@ -41,6 +41,14 @@
   --wks-table-cell-padding: 3px 8px;
 }
 
+/* #85 / ADR-194: the prose sheet declares the prose FACE, not just its headings. On screen the body text
+   is monospace because it sits inside the editor's .cm-content, which sets --font-body; anything else
+   rendering the same markdown (the read surface, the print portal, the exported file) fell back to the app
+   chrome's sans and read as a different document — the first thing the #85 review named. Declaring it
+   here means every container that receives renderMarkdownToDom output gets the same face by construction,
+   which is exactly what ADR-163 says this sheet is for. */
+.wks-prose { font-family: var(--font-body); }
+
 /* ── block prose (formerly the callout-icons :is(container-list) block, #185) ──
  * Tailwind's preflight strips h1-h6 / blockquote / hr / list defaults, so without these a nested
  * heading renders as plain body text. Headings mirror the editor's .cm-lp-h* sizes + --font-body. */
