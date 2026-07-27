@@ -1,6 +1,7 @@
 import { SafeHtml, html, joinSafe, unsafeHtml } from "./safe-html.js";
 import { walkMarkdown, mdParser, type MdSink, type MdOpenRole, type MdLeafRole, type MdRoleData } from "./md-visitor.js";
 import { parseFenceInfo } from "./fence-info.js";
+import { findMathSpans, renderMathHtml } from "./math.js"; // #505/ADR-191: math on the static path
 
 // #85 / ADR-059 + ADR-085 → #384 / ADR-160: the SERVER-SIDE, DOM-FREE markdown → HTML renderer for
 // published / static export — now a SINK over the ONE shared visitor (md-visitor.ts). The visitor owns
@@ -92,7 +93,23 @@ class HtmlSink implements MdSink {
     this.emit(joinSafe([f.prefix, ...f.parts, f.suffix]));
   }
 
-  text(s: string): void { this.emit(html`${s}`); }
+  // #505 / ADR-191: inert text is also where `$…$` / `$$…$$` live. Rendering math HERE — rather than
+  // pre-processing the source — means the parser has already decided what is text: a fence body or an
+  // inline code span never reaches this method, so code that merely LOOKS like math is excluded
+  // structurally instead of by a second, drift-prone "am I in code" scan. Non-math text keeps going
+  // through the same escaping boundary it always did; only the matched spans become KaTeX markup.
+  text(s: string): void {
+    const spans = findMathSpans(s);
+    if (spans.length === 0) { this.emit(html`${s}`); return }
+    let at = 0;
+    for (const m of spans) {
+      if (m.from > at) this.emit(html`${s.slice(at, m.from)}`);
+      const rendered = renderMathHtml(m.tex, m.display);
+      this.emit(rendered ?? html`${s.slice(m.from, m.to)}`); // failed render → the TeX, escaped, verbatim
+      at = m.to;
+    }
+    if (at < s.length) this.emit(html`${s.slice(at)}`);
+  }
 
   leaf(role: MdLeafRole, data?: MdRoleData): void {
     switch (role) {

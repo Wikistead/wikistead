@@ -4,7 +4,12 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc -b",
     "dev": "tsc -b -w",
@@ -12,7 +17,11 @@
     "lint": "echo 'noop'"
   },
   "dependencies": {
-    "@lezer/markdown": "1.6.4"
+    "@lezer/markdown": "1.6.4",
+    "katex": "0.16.11"
   },
-  "devDependencies": { "typescript": "^5.6.0" }
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/katex": "0.16.7"
+  }
 }
