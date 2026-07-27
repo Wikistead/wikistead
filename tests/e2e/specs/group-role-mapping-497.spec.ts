@@ -24,12 +24,17 @@ test("#497: group→role mapping — create a custom role, map a group, list, de
   await expect(page.getByRole("option")).toHaveCount(0); // the role listbox closed (radix pointer-events restored)
   await page.getByTestId("mapping-space").click();
   await page.getByRole("option").first().click();
+  const spaceName = ((await page.getByTestId("mapping-space").innerText()) || "").trim();
   await page.getByTestId("mapping-add").click();
 
-  // The mapping lists: group name → role name.
+  // The mapping lists: group name → role name → WHICH SPACE. The last part was missing: a space-scope
+  // row named only the role, so the same role mapped to two spaces produced two identical-looking rows
+  // and the list could not tell you what it did.
   const row = page.getByTestId("mapping-row").filter({ hasText: group });
   await expect(row).toContainText(group, { timeout: 8000 });
   await expect(row).toContainText(role);
+  expect(spaceName.length, "the picker names the space it chose").toBeGreaterThan(0);
+  await expect(row, "the row names the space the mapping targets").toContainText(spaceName);
 
   // Delete confirms first (#504 danger), then the row is gone.
   await row.getByTestId("mapping-remove").click();

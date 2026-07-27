@@ -119,6 +119,13 @@ export function AdminRolesTab() {
   // assignment; group members resolve live at check time (no reconcile). The role's scope decides
   // the target (tenant → this tenant; space → a picked space), mirroring the assignment form.
   const mappings = useRoleMappings();
+  // #497: "· <scope>" for a mapping row — the tenant, or the space it targets by NAME (resolved from the
+  // space list already loaded above). Unknown space → no suffix, never the uuid.
+  const mappingScope = (m: { resourceType: string; resourceId: string }): string => {
+    if (m.resourceType === "tenant") return ` · ${t("adminRoles.scopeTenant")}`;
+    const space = (spaces.data ?? []).find((s) => s.id === m.resourceId);
+    return space ? ` · ${space.name || space.id}` : "";
+  };
   const createMapping = useCreateRoleMapping();
   const deleteMapping = useDeleteRoleMapping();
   const [mapGroup, setMapGroup] = useState("");
@@ -329,7 +336,12 @@ export function AdminRolesTab() {
           <div key={m.id} className="flex items-center gap-2 text-sm" data-testid="mapping-row">
             <span className="min-w-0 truncate font-medium">{m.groupName}</span>
             <span className="text-fg-dim">→</span>
-            <span className="min-w-0 flex-1 truncate text-xs text-fg-dim">{m.roleName}{m.resourceType === "tenant" ? ` · ${t("adminRoles.scopeTenant")}` : ""}</span>
+            {/* #497: a space-scope mapping said only which ROLE it confers, so two mappings of the same
+                role to different spaces read identically — the row could not tell you what it did. The
+                space name comes from the list this tab already holds; nothing new is asked of the server,
+                so no projection and no authority changes. A space that is not in that list (a space
+                manager looking at a filtered view) shows no scope rather than a raw id. */}
+            <span className="min-w-0 flex-1 truncate text-xs text-fg-dim">{m.roleName}{mappingScope(m)}</span>
             {m.orphaned && (
               <span className="rounded border border-[var(--callout-warning)] px-1 text-[10px] uppercase tracking-wide text-[var(--callout-warning)]" data-testid="mapping-orphan" data-tip={t("adminRoles.mappingOrphanHint")}>{t("adminRoles.mappingOrphan")}</span>
             )}
