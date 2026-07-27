@@ -33,7 +33,7 @@ test("#207: the Print menu item is enabled again", async ({ page }) => {
   await sleep(600);
   await publishAndWait(page, id, "Print me");
 
-  await page.getByTestId("page-more").click();
+  await page.getByTestId("page-overflow-trigger").click();
   const item = page.getByTestId("print-page");
   await expect(item, "the print entry is offered").toBeVisible({ timeout: 8000 });
   // the seal was a `disabled` item carrying a hint; neither may be back
@@ -41,7 +41,7 @@ test("#207: the Print menu item is enabled again", async ({ page }) => {
   await expect(item).toBeEnabled();
 });
 
-test("#207: printing fetches the server-rendered document (not the virtualised live surface)", async ({ page }) => {
+test("#207: printing renders the export document, not the virtualised live surface", async ({ page }) => {
   const id = await openScratch(page, `print207b-${Date.now().toString(36)}`);
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
@@ -50,29 +50,41 @@ test("#207: printing fetches the server-rendered document (not the virtualised l
   await sleep(600);
   await publishAndWait(page, id, "Print me");
 
-  // stub the print dialog so the run is not blocked by the browser's modal
-  await page.addInitScript(() => { (window as unknown as { print: () => void }).print = () => {}; });
+  // Capture what gets printed. Printing builds the export document into an offscreen iframe and calls
+  // print() on THAT window (#85 / ADR-194 slice 2 — the document is assembled in the browser rather than
+  // fetched, but it is still the export document, never the CodeMirror surface). Stubbing print on every
+  // frame lets us read the document that was about to go to paper.
+  await page.addInitScript(() => {
+    const w = window as unknown as { print: () => void; __printedHtml?: string };
+    w.print = () => { w.__printedHtml = document.documentElement.outerHTML; };
+  });
   await page.reload();
-  await sleep(800);
+  // Wait for the PUBLISHED body to be in hand before printing. The handler falls back to printing the live
+  // surface when it has no published markdown yet, so clicking too early measures the fallback rather than
+  // the feature — which is exactly what the last assertion below catches.
+  await expect(page.getByText("tail", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await sleep(1500);
 
-  const exportHit = page.waitForRequest((r) => r.url().includes(`/pages/${id}/export.html`), { timeout: 10_000 });
-  await page.getByTestId("page-more").click();
+  await page.getByTestId("page-overflow-trigger").click();
   await page.getByTestId("print-page").click();
-  const req = await exportHit;
-  expect(req.url(), "print goes through the single server renderer").toContain("export.html");
 
-  // …and what that document contains is the parity substance: rendered callout, checkboxes, math, table —
-  // the very things that used to print as raw text and were the reason for the seal.
-  const body = await page.evaluate(async ({ id }) => {
-    const r = await fetch(`/api/pages/${id}/export.html`, { credentials: "include" });
-    return r.ok ? await r.text() : "";
-  }, { id });
-  expect(body.length, "the export document was served").toBeGreaterThan(0);
-  const doc = { has: (s: string) => body.includes(s) };
-  expect(doc.has("callout"), "the callout is rendered, not raw :::").toBe(true);
-  expect(body, "no raw directive marker leaks into the printed document").not.toMatch(/:::note/);
-  expect(doc.has('type="checkbox"'), "checklists are checkboxes").toBe(true);
-  expect(body, "and no literal task marker survives").not.toMatch(/\[[ xX]\] a finished/);
-  expect(doc.has("<table"), "the table is a table").toBe(true);
-  expect(body, "math is rendered, not left as raw TeX").not.toContain("$E = mc^2$");
+  // the printed document is the export one: its body carries the RENDERED constructs, and none of the
+  // raw markers that made printing unusable enough to seal the menu item.
+  const printed = await page.waitForFunction(() => {
+    for (const f of [...document.querySelectorAll("iframe")]) {
+      const w = f.contentWindow as unknown as { __printedHtml?: string } | null;
+      if (w?.__printedHtml) return w.__printedHtml;
+    }
+    return null;
+  }, undefined, { timeout: 15_000 }).then((h) => h.jsonValue() as Promise<string>);
+
+  expect(printed.length, "something was handed to the printer").toBeGreaterThan(0);
+  expect(printed, "the callout is rendered, not a raw directive").not.toMatch(/:::note/);
+  expect(printed, "the checklist is a checkbox, not a literal marker").not.toMatch(/\[[ xX]\] a finished/);
+  expect(printed, "math is rendered, not raw TeX").not.toContain("$E = mc^2$");
+  // The document is the standalone export, not the app: it carries the page title and none of the app
+  // chrome. (Rendered `cm-lp-*` class names DO survive into it by design — ADR-194 builds the export from
+  // the DOM the browser already drew — so their presence is not the discriminator; the chrome is.)
+  expect(printed, "the export document is titled after the page").toContain("Print me");
+  expect(printed, "and carries none of the app chrome").not.toContain("page-overflow-trigger");
 });
