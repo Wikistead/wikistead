@@ -199,6 +199,29 @@ describe('#497 §2b — admin materialisation is per user, and the model stays s
     expect(await memberRow(DEPROVISIONED)).toMatchObject({ role: 'member', admin_origin: 'manual' })
   })
 
+  it('a row that fails for an UNTOLERATED reason still costs only itself (gap 1)', async () => {
+    // The previous regression only pinned the tuple-tolerance half. Per-row ISOLATION is a separate
+    // property, and with the tolerance in place it stayed green even with the guard back around the whole
+    // loop — so it was not actually guarded. This drives a row whose demotion throws for a reason the
+    // tolerance does NOT cover: a sub that cannot form a legal FGA principal, which the store rejects as a
+    // validation error rather than a missing tuple. Bad rows like this are exactly what one wants isolated.
+    await addMapping()
+    const BAD = 'am bad sub with spaces'
+    subs.push(BAD)
+    await db.sql`
+      INSERT INTO members (tenant_id, sub, role, admin_origin, groups)
+      VALUES (${TENANT}, ${BAD}, 'admin', 'mapping', ${db.sql.array([])})
+      ON CONFLICT (tenant_id, sub) DO UPDATE SET role = 'admin', admin_origin = 'mapping'`
+
+    const GOOD = VIA_GROUP
+    await seedMember(GOOD, { role: 'member', groups: [GROUP] })
+    await evaluateAdminMapping(db, fgaClient, tenant, GOOD, [GROUP])
+    await db.sql`UPDATE members SET groups = ${db.sql.array([])} WHERE sub = ${GOOD}`
+
+    await reconcileMaterialisedAdmins(fgaClient)
+    expect(await isTenantAdmin(fgaClient, GOOD, TENANT), 'the healthy row is still revoked').toBe(false)
+  })
+
   it('the drift sweep leaves manual admins and still-matching members alone', async () => {
     await addMapping()
     await seedMember(HAND, { role: 'admin', adminOrigin: 'manual', groups: [] })   // manual, no group at all
