@@ -172,6 +172,7 @@ import { Home, Lock, Snowflake } from "lucide-react";
 import { useHeadingHashLanding, replaceHashWith } from "../toc/useHashLanding"; // #313: #<slug> deep links
 import { PageTitle } from "./PageTitle";
 import { PrintSurface } from "./PrintSurface"; // #505the print-only static (paginating) surface
+import { downloadBrowserExport, printBrowserExport } from "../data/exportBrowser"; // #85 / ADR-194 Option B
 import { PageMeta } from "./PageMeta";
 import { ProgressRing } from "./ProgressRing"; // #290: title-band page-progress ring
 import { useTheme } from "./ThemeProvider"; // #376: public reader remounts on theme switch (diagram re-render)
@@ -202,7 +203,7 @@ import { DeleteBacklinkWarning } from "./DeleteBacklinkWarning";
 import { SaveTemplateDialog } from "./SaveTemplateDialog";
 // TemplatesRoute / RecentChangesRoute / WatchListRoute are lazy-loaded (see the lazy block at the top).
 import { uploadAttachment } from "../attachments/useAttachments";
-import { downloadPageExport, printPageHtml } from "../data/exportApi";
+import { downloadPageExport } from "../data/exportApi";
 import { useActiveSpace } from "./ActiveSpace";
 
 // Same-origin collab (ADR-016): a relative "/collab" is resolved against the
@@ -588,11 +589,15 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
       if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
       if (!pageId) return; // no page in view → let the browser do whatever it does
       e.preventDefault();
-      void printPageHtml(token, pageId).then((ok) => { if (!ok) window.print(); });
+      // #85 / ADR-194: the same document the menu's Print produces, so the shortcut cannot print something
+      // else. A page with no published body still falls to the live surface (see onPrint).
+      const md = published?.publishedMd ?? "";
+      if (md.trim()) void printBrowserExport(md, page?.title ?? "Untitled");
+      else window.print();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [pageId, token]);
+  }, [pageId, token, published?.publishedMd, page?.title]);
 
   const docName = `t:${tenantId}:p:${pageId}`;
   // One props bag drives the floating control groups (status / actions / vim) and the
@@ -649,14 +654,22 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
     onRelated: pageId ? toggleRelated : undefined,
     onAnalytics: page?.canManage && pageId ? toggleAnalytics : undefined, // #464: manager-only analytics right panel
     onExport: () => { if (pageId) void downloadPageExport(token, pageId); },
-    // #85: unsealed. The seal named three defects — raw `$$`, table/callout/embed divergence, a dark
-    // sheet — and the shared DOM-free renderer now closes all three (see PageControls).
-    onExportHtml: () => { if (pageId) void downloadPageExport(token, pageId, "html"); },
-    // #207 part 2: print the full server-rendered HTML (all macros static, no raw ::: leak) rather
-    // than window.print on the virtualised CM surface. Fall back to the live-surface print only when
-    // the page has no exportable HTML (unpublished draft → 404), so drafts can still be printed.
+    // #85 / ADR-194 (Option B): the file is written by THIS browser, out of the document it already draws
+    // the app's own renderer and the app's own stylesheet, so the export cannot look like a different
+    // product than the screen it came from. That is also how diagrams reach it as diagrams and code reaches
+    // it highlighted: they are already that way here. The server route stays for the API path (no browser
+    // to draw with), and nothing the server serves to anyone else changes.
+    onExportHtml: () => {
+      const md = published?.publishedMd ?? "";
+      if (md.trim()) void downloadBrowserExport(md, page?.title ?? "Untitled");
+      else if (pageId) void downloadPageExport(token, pageId, "html"); // no published body → the server answers
+    },
+    // Print takes the SAME road as the download — the sheet and the file are the same document, so there is
+    // nothing left to keep in parity between them. A page with no published body still prints the live
+    // surface, which is what it did before; giving drafts a rendered export is the next slice.
     onPrint: () => {
-      if (pageId) void printPageHtml(token, pageId).then((ok) => { if (!ok) window.print(); });
+      const md = published?.publishedMd ?? "";
+      if (md.trim()) void printBrowserExport(md, page?.title ?? "Untitled");
       else window.print();
     },
     onPermissions: page?.canManage ? () => setPermsOpen(true) : undefined,

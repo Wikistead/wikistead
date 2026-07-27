@@ -1,19 +1,16 @@
 import { test, expect } from "@playwright/test";
 import { openScratch, enterEdit, sleep, API } from "../helpers";
 
-// #505 / ADR-191: the app's print action renders the page server-side (export.html — every macro static,
-// one canonical renderer), but the browser's own Ctrl+P used to fall to the print stylesheet over the
-// client portal instead. Two roads to paper means two things to keep in parity, which is the drift this
-// work keeps finding. The shortcut takes the same road now.
-test("#505: Ctrl+P goes through the server-rendered export, not the client portal", async ({ page }) => {
+// #505 → #85 / ADR-194 (Option B): the shortcut and the menu print the SAME document, and since the ruling
+// that document is built by this browser out of the surface it already drew — not fetched from the server.
+// This spec used to assert the opposite (a request to /export.html), which was the contract before the
+// ruling; re-aimed rather than deleted, because what it is really guarding is "one road to paper".
+test("#85/#505: Ctrl+P prints the browser-built document, and asks the server for nothing", async ({ page }) => {
   const requested: string[] = [];
   page.on("request", (r) => { if (r.url().includes("/export.html")) requested.push(r.url()); });
-  // the print dialog would block the run — stub it out; what we pin is WHICH document gets printed
-  await page.addInitScript(() => {
-    (window as unknown as { __printed: number }).__printed = 0;
-    window.print = () => { (window as unknown as { __printed: number }).__printed += 1; };
-  });
-
+  // The document is printed from an offscreen frame, so the frame's own srcdoc is what proves WHICH
+  // document went to paper. It is read at assertion time rather than on insertion: the frame is appended
+  // first and its srcdoc set after, so an observer watching insertions sees an empty one.
   // On a PUBLISHED page. The export is of the published version, so an unpublished page has no document
   // to print — see the second test, which pins that the shortcut falls back there instead of printing an
   // empty sheet. This one used to run on the demo page, which is not published: it passed because the
@@ -26,18 +23,21 @@ test("#505: Ctrl+P goes through the server-rendered export, not the client porta
   await page.evaluate(async ({ api, pageId }) => {
     await fetch(`${api}/pages/${pageId}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
   }, { api: API, pageId: id });
-  await sleep(400);
+  // Reload so the app re-reads the published body it will print (the publish above went straight to the
+  // API, which the client's cache has no reason to have noticed).
+  await page.reload();
+  await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(800);
   await page.keyboard.press("Control+p");
-  await sleep(1500);
+  await sleep(6000); // the body renders with LIVE macros and waits for them to settle before serializing
 
-  expect(requested.length, "the shortcut fetched the server-rendered document").toBeGreaterThan(0);
-  expect(requested[0], "…for the page in view").toContain("/export.html");
-  // the app's own action uses the same door (sanity: the endpoint is reachable for this page)
-  const status = await page.evaluate(async ({ api, pageId }) => {
-    const r = await fetch(`${api}/pages/${pageId}/export.html`, { headers: { Authorization: "Bearer dev-token" } });
-    return r.status;
-  }, { api: API, pageId: id });
-  expect(status).toBe(200);
+  const docs = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("iframe")).map((f) => (f as HTMLIFrameElement).srcdoc || ""));
+  expect(docs.filter(Boolean).length, "the shortcut built a document to print").toBeGreaterThan(0);
+  const doc = docs.filter(Boolean).pop()!;
+  expect(doc, "…and it is the export document, wearing the app's own markup").toContain("wks-export-doc");
+  expect(doc, "…carrying the page's content").toContain("body text");
+  expect(requested, "nothing was fetched from the server to print it").toEqual([]);
 });
 
 // #85 review: the same shortcut on a page that was never published. The export document is of the
