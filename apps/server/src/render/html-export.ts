@@ -61,7 +61,7 @@ body{margin:0;background:var(--bg);color:var(--fg);}
 .callout>:first-child{margin-top:0}.callout>:last-child{margin-bottom:0}
 /* the callout's [label] is its title — same weight/colour relationship the editor panel uses */
 .callout-title{font-weight:700;color:var(--cb);margin-bottom:.2em;}
-/* #505/#207 (ADR-191, measured): a :::todo printed as a bare div — the box the editor draws (accent bar,
+/* #505/#207 (ADR-191, measured): a todo container printed as a bare div — the box the editor draws (accent bar,
    tint, list-checks icon) was missing, so a checklist container lost its shape on paper. It is a container
    like a callout, so it wears the same box; the icon + accent mirror the editor's #290 rule. */
 .todo{position:relative;margin:.8em 0;padding:.55em .8em .55em 2.5em;border-radius:6px;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent);}
