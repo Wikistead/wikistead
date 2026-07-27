@@ -449,7 +449,14 @@
     "exportTooLarge": "That selection is too large to export at once",
     "bulkPrivateTitle": "Make pages private",
     "bulkPrivateConfirm": "Make {{count}} page(s) private? A private page leaves the space's shared permissions, so unless you are the page's own owner you will lose access to it and will not be able to undo this yourself.",
-    "bulkVisibilityUnchanged": "{{changed}} changed, {{unchanged}} already in that state"
+    "bulkVisibilityUnchanged": "{{changed}} changed, {{unchanged}} already in that state",
+    "moveSelected": "Move",
+    "moveTitle": "Move pages to another space",
+    "moveBody": "Move {{count}} page(s), and everything nested under them, to another space. Only spaces you manage are listed.",
+    "moveTarget": "Destination space",
+    "moveNoTargets": "There is no other space you manage.",
+    "bulkMoveDone": "Moved {{count}} page(s).",
+    "bulkMovePartial": "Moved {{moved}}; skipped {{skipped}}."
   },
   "spaceMembers": {
     "title": "Members & permissions",

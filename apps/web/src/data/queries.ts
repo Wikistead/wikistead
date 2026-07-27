@@ -283,6 +283,29 @@ export function useBulkPublishPages() {
   });
 }
 
+// #511 / ADR-185 (slice 5): bulk MOVE into another space. The destination must be one the caller MANAGES —
+// the picker only offers those, and the server checks it again (the approved decision is manage on BOTH
+// sides, and the single-page primitive only asks `edit` of the destination, so the bulk path adds it).
+export interface BulkMoveResult { results: { id: string; ok: boolean; reason?: string }[]; moved: number; skipped: number }
+export function useBulkMovePages() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { spaceId: string; targetSpaceId: string; pageIds: string[] }) =>
+      apiFetch<BulkMoveResult>(`/spaces/${encodeURIComponent(args.spaceId)}/pages/bulk-move`, token, {
+        method: "POST",
+        body: JSON.stringify({ pageIds: args.pageIds, targetSpaceId: args.targetSpaceId }),
+      }),
+    onSuccess: (_r, args) => {
+      // Both ends change: the pages leave one tree and arrive in another.
+      for (const id of [args.spaceId, args.targetSpaceId]) {
+        qc.invalidateQueries({ queryKey: ["pages-overview", id] });
+        qc.invalidateQueries({ queryKey: ["pages", id] });
+      }
+    },
+  });
+}
+
 // #511 / ADR-185 (slice 3): bulk VISIBILITY for a selection. The server re-checks the per-page `share`
 // gate, writes the private marker pair, cascades to descendants and reindexes each affected page, and
 // returns the same partial-success map. NOT reversible by the caller in the direction that matters: private

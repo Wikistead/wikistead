@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Trash2, Upload, Lock, LockOpen, Download } from "lucide-react";
-import { useSpacePagesOverview, useBulkDeletePages, useBulkPublishPages, useBulkSetPageVisibility } from "../data/queries";
+import { Trash2, Upload, Lock, LockOpen, Download, FolderInput } from "lucide-react";
+import { useSpacePagesOverview, useBulkDeletePages, useBulkPublishPages, useBulkSetPageVisibility, useBulkMovePages, useSpaces } from "../data/queries";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
@@ -32,10 +32,14 @@ export function SpacePagesTab() {
   const bulkDelete = useBulkDeletePages();
   const bulkPublish = useBulkPublishPages();
   const bulkVisibility = useBulkSetPageVisibility();
+  const bulkMove = useBulkMovePages();
+  const spaces = useSpaces();
   const { token } = useSession();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [privateConfirmOpen, setPrivateConfirmOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveTarget, setMoveTarget] = useState("");
 
   const rows = pages.data ?? [];
   const allSelected = rows.length > 0 && rows.every((p) => selected.has(p.id));
@@ -98,6 +102,25 @@ export function SpacePagesTab() {
     });
   };
 
+  // #511 slice 5: move the selection into another space. The picker lists ONLY spaces the caller manages
+  // (the approved rule), and the server re-checks that manage on the destination — the UI narrowing is a
+  // convenience, never the gate.
+  const moveTargets = (spaces.data ?? []).filter((s) => s.id !== spaceId && s.capability === "manage");
+  const runBulkMove = () => {
+    const ids = [...selected];
+    const targetSpaceId = moveTarget;
+    setMoveOpen(false);
+    if (!targetSpaceId) return;
+    bulkMove.mutate({ spaceId, targetSpaceId, pageIds: ids }, {
+      onSuccess: (r) => {
+        clearSelection();
+        if (r && r.skipped > 0) notify.info(t("spacePages.bulkMovePartial", { moved: r.moved, skipped: r.skipped }));
+        else notify.success(t("spacePages.bulkMoveDone", { count: r?.moved ?? 0 }));
+      },
+      onError: () => notify.error(t("toast.actionFailed")),
+    });
+  };
+
   // #511 slice 4: export the selection. Read-only, so it just runs; the server view-gates each page and a
   // 413 means the archive blew the size budget (its own message, not a generic failure).
   const [exporting, setExporting] = useState(false);
@@ -126,26 +149,35 @@ export function SpacePagesTab() {
       {!pages.isLoading && rows.length === 0 && <p className="text-sm text-fg-dim">{t("spacePages.empty")}</p>}
 
       {/* #511: the bulk action bar appears only with a selection. Delete is red-at-rest (#504 posture) and
-          confirmed before it runs (the ConfirmDialog's onConfirm is the guard the #510 policy checks). */}
+          confirmed before it runs (the ConfirmDialog's onConfirm is the guard the #510 policy checks).
+          #511 the count used to be the only shrinkable thing in a row of six buttons, so once the
+          buttons claimed the width flex squeezed it — and Japanese has no word boundaries to break on, so it
+          wrapped ONE CHARACTER PER LINE and the bar grew tall. Every child is shrink-0 now and the row wraps
+          instead: at narrow widths the buttons move to the next line rather than crushing the label. The
+          destructive action sits apart from the rest (ml-auto pushes it and the clear-selection escape to
+          the end) so a mis-click on delete is less likely than when it was flush against export. */}
       {n > 0 && (
-        <div className="mb-3 flex items-center gap-3 rounded-md border border-border bg-panel p-2" data-testid="space-pages-bulkbar">
-          <span className="text-sm text-fg-dim" data-testid="bulk-selected-count">{t("spacePages.selectedCount", { count: n })}</span>
-          <Button variant="default" size="sm" data-testid="bulk-publish" disabled={bulkPublish.isPending} onClick={runBulkPublish}>
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-panel p-2" data-testid="space-pages-bulkbar">
+          <span className="shrink-0 whitespace-nowrap text-sm text-fg-dim" data-testid="bulk-selected-count">{t("spacePages.selectedCount", { count: n })}</span>
+          <Button className="shrink-0" variant="default" size="sm" data-testid="bulk-publish" disabled={bulkPublish.isPending} onClick={runBulkPublish}>
             <Upload size={14} /> {t("spacePages.publish")}
           </Button>
-          <Button variant="default" size="sm" data-testid="bulk-private" disabled={bulkVisibility.isPending} onClick={() => setPrivateConfirmOpen(true)}>
+          <Button className="shrink-0" variant="default" size="sm" data-testid="bulk-private" disabled={bulkVisibility.isPending} onClick={() => setPrivateConfirmOpen(true)}>
             <Lock size={14} /> {t("spacePages.makePrivate")}
           </Button>
-          <Button variant="default" size="sm" data-testid="bulk-unprivate" disabled={bulkVisibility.isPending} onClick={() => runBulkVisibility(false)}>
+          <Button className="shrink-0" variant="default" size="sm" data-testid="bulk-unprivate" disabled={bulkVisibility.isPending} onClick={() => runBulkVisibility(false)}>
             <LockOpen size={14} /> {t("spacePages.clearPrivate")}
           </Button>
-          <Button variant="default" size="sm" data-testid="bulk-export" disabled={exporting} onClick={runBulkExport}>
+          <Button className="shrink-0" variant="default" size="sm" data-testid="bulk-move" disabled={bulkMove.isPending} onClick={() => setMoveOpen(true)}>
+            <FolderInput size={14} /> {t("spacePages.moveSelected")}
+          </Button>
+          <Button className="shrink-0" variant="default" size="sm" data-testid="bulk-export" disabled={exporting} onClick={runBulkExport}>
             <Download size={14} /> {t("spacePages.exportSelected")}
           </Button>
-          <Button variant="danger" size="sm" data-testid="bulk-delete" onClick={() => setConfirmOpen(true)}>
+          <Button className="ml-auto shrink-0" variant="danger" size="sm" data-testid="bulk-delete" onClick={() => setConfirmOpen(true)}>
             <Trash2 size={14} /> {t("common.delete")}
           </Button>
-          <Button variant="ghost" size="sm" onClick={clearSelection}>{t("spacePages.clearSelection")}</Button>
+          <Button className="shrink-0" variant="ghost" size="sm" onClick={clearSelection}>{t("spacePages.clearSelection")}</Button>
         </div>
       )}
 
@@ -203,6 +235,37 @@ export function SpacePagesTab() {
         confirmLabel={t("common.delete")}
         confirmTestId="bulk-delete-confirm"
         typedConfirmText={n > TYPE_CONFIRM_THRESHOLD ? "delete" : undefined}
+      />
+
+      {/* #511 slice 5: the move destination. A page move relocates the whole subtree across spaces, so it
+          is confirmed rather than run from the bar, and the picker offers only spaces the caller manages. */}
+      <ConfirmDialog
+        open={moveOpen}
+        onClose={() => setMoveOpen(false)}
+        onConfirm={runBulkMove}
+        title={t("spacePages.moveTitle")}
+        message={t("spacePages.moveBody", { count: n })}
+        confirmLabel={t("spacePages.moveSelected")}
+        confirmTestId="bulk-move-confirm"
+        tone="primary"
+        warning={
+          moveTargets.length === 0
+            ? <p className="text-sm text-fg-dim" data-testid="bulk-move-empty">{t("spacePages.moveNoTargets")}</p>
+            : (
+              <label className="flex flex-col gap-1 text-sm">
+                {t("spacePages.moveTarget")}
+                <select
+                  className="rounded-md border border-border bg-panel p-1"
+                  data-testid="bulk-move-target"
+                  value={moveTarget}
+                  onChange={(e) => setMoveTarget(e.target.value)}
+                >
+                  <option value="">—</option>
+                  {moveTargets.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </label>
+            )
+        }
       />
 
       {/* #511 the one-way-door confirm. Not "are you sure" theatre — it names the specific
