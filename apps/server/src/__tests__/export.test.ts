@@ -7,7 +7,7 @@ import * as Y from 'yjs'
 import { unzipSync, strFromU8 } from 'fflate'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
-import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { fgaClient, writeTuples, deleteTuples, check } from '@wikistead/authz'
 import { LogicalStorageDriver } from '../storage/index.js'
 import { buildExport, buildSpaceExport, buildTenantExport, buildSelectionExport, SELECTION_EXPORT_CAP } from '../export/index.js'
 import { buildHtmlExport } from '../render/html-export.js'
@@ -231,10 +231,25 @@ describe('buildSpaceExport / buildTenantExport (#309)', () => {
   })
 
   it('buildSelectionExport ignores ids from another space, and 404s for a space the caller cannot view', async () => {
-    const res = await buildSelectionExport(db, fgaClient, storage, { userId: SPACE_USER, spaceId: SPACE, pageIds: [PAGE2] })
-    expect(Object.keys(unzipSync(res!.body)), 'an id outside this space contributes nothing').toEqual([])
-    expect(await buildSelectionExport(db, fgaClient, storage, { userId: SPACE_USER, spaceId: SPACE2, pageIds: [PAGE2] }),
-      'a space the caller cannot view is a uniform 404').toBeNull()
+    // this used to pass for the WRONG reason. PAGE2 was unviewable, so collectTree's per-page
+    // `view` gate dropped it and the space filter was never exercised — I had reported the filter as
+    // mere defence in depth on that evidence, which was a fixture artefact, not a fact. Grant the caller
+    // a direct view of PAGE2 first: now the ONLY thing keeping another space's page out of THIS space's
+    // archive is the space_id condition in the pre-pass SELECT.
+    const crossGrant = [{ user: `user:${SPACE_USER}`, relation: 'view_direct', object: `page:${PAGE2}` }]
+    await writeTuples(fgaClient, crossGrant).catch(() => {})
+    try {
+      expect(await check(fgaClient, `user:${SPACE_USER}`, 'view', { type: 'page', id: PAGE2 }),
+        'the caller CAN view it — so the view gate cannot be what excludes it').toBe(true)
+      const res = await buildSelectionExport(db, fgaClient, storage, { userId: SPACE_USER, spaceId: SPACE, pageIds: [PAGE2] })
+      expect(Object.keys(unzipSync(res!.body)), 'an id outside this space contributes nothing').toEqual([])
+      expect(await buildSelectionExport(db, fgaClient, storage, { userId: SPACE_USER, spaceId: SPACE2, pageIds: [PAGE2] }),
+        'a space the caller cannot view is a uniform 404').toBeNull()
+    } finally {
+      // Hand it back: later cases in this file assert on what SPACE_USER can reach, and a grant left
+      // behind would quietly change their meaning.
+      await deleteTuples(fgaClient, crossGrant).catch(() => {})
+    }
   })
 
   it('buildSelectionExport enforces the selection cap', async () => {

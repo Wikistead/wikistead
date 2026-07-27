@@ -106,7 +106,11 @@ export function SpacePagesTab() {
     setExporting(true);
     const status = await downloadSelectionExport(token ?? "", spaceId, ids);
     setExporting(false);
-    if (status >= 200 && status < 300) { clearSelection(); notify.success(t("spacePages.bulkExportDone", { count: ids.length })); }
+    // Deliberately count-free: the archive contains what the caller may VIEW, which can be fewer
+    // pages than they selected, and the server does not say which were dropped — reporting "exported N"
+    // from the selection size would be a number the answer never vouched for, and reporting the real
+    // figure would tell a member which of the ids they hold actually exist.
+    if (status >= 200 && status < 300) { clearSelection(); notify.success(t("spacePages.bulkExportDone")); }
     else if (status === 413) notify.error(t("spacePages.exportTooLarge"));
     else notify.error(t("toast.actionFailed"));
   };

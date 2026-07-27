@@ -445,7 +445,7 @@
     "bulkUnprivateDone": "{{count}} ページの非公開を解除しました",
     "bulkVisibilityPartial": "{{changed}} 件変更・{{skipped}} 件スキップ（権限なし）",
     "exportSelected": "エクスポート",
-    "bulkExportDone": "{{count}} ページをエクスポートしました",
+    "bulkExportDone": "エクスポートをダウンロードしました",
     "exportTooLarge": "選択が大きすぎて一度にエクスポートできません",
     "bulkPrivateTitle": "ページを非公開にする",
     "bulkPrivateConfirm": "{{count}} 件のページを非公開にしますか？ 非公開ページはスペース共通の権限から外れるため、自分がそのページ自身の所有者でない場合はアクセスを失い、自分では元に戻せなくなります。",
