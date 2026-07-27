@@ -97,7 +97,11 @@ describe('#497 §2b — admin materialisation is per user, and the model stays s
     // is bypassable by editing a group in the IdP.
     await expect(
       writeTuples(fgaClient, [{ user: `group:${GROUP}#member`, relation: 'admin', object: `tenant:${TENANT}` }]),
-    ).rejects.toThrow()
+    ).rejects.toThrow(/type restriction/i) // the MODEL refused it, not a dead connection
+    // Control: the same write with a user principal succeeds, so the refusal above is the model talking
+    // and not an unreachable store making every assertion pass.
+    await writeTuples(fgaClient, [adminTuple(ANCHOR)]).catch(() => {})
+    expect(await isTenantAdmin(fgaClient, ANCHOR, TENANT)).toBe(true)
   })
 
   it('materialises admin for a member carrying the mapped group, with mapping provenance', async () => {
@@ -167,6 +171,32 @@ describe('#497 §2b — admin materialisation is per user, and the model stays s
     expect(await reconcileMaterialisedAdmins(fgaClient)).toBeGreaterThanOrEqual(1)
     expect(await isTenantAdmin(fgaClient, VIA_GROUP, TENANT), 'revoked without the member doing anything').toBe(false)
     expect(await memberRow(VIA_GROUP)).toMatchObject({ role: 'member', admin_origin: 'manual' })
+  })
+
+  it('a row the sweep cannot process does NOT stop it revoking the others (blocker 1)', async () => {
+    // SCIM deprovision (ee-server scim/provision.ts) deletes the admin tuple and empties the member's
+    // groups but leaves role='admin'/admin_origin='mapping' behind. The sweep then tries to delete a
+    // tuple that is not there, which OpenFGA treats as an error — and with one try/catch around the whole
+    // tenant loop that single row made the sweep a no-op, so REAL drifted admins kept their access
+    // indefinitely. This pins the blast radius of one bad row at one row.
+    await addMapping()
+    const DEPROVISIONED = 'am-deprovisioned'
+    subs.push(DEPROVISIONED)
+    await db.sql`
+      INSERT INTO members (tenant_id, sub, role, admin_origin, groups)
+      VALUES (${TENANT}, ${DEPROVISIONED}, 'admin', 'mapping', ${db.sql.array([])})
+      ON CONFLICT (tenant_id, sub) DO UPDATE SET role = 'admin', admin_origin = 'mapping', groups = ${db.sql.array([])}`
+    // deliberately NO admin tuple for this one — that is the shape deprovision leaves behind
+
+    // A genuine drifted admin, sorted after the broken row is irrelevant: neither may be skipped.
+    await seedMember(VIA_GROUP, { role: 'member', groups: [GROUP] })
+    await evaluateAdminMapping(db, fgaClient, tenant, VIA_GROUP, [GROUP])
+    await db.sql`UPDATE members SET groups = ${db.sql.array([])} WHERE sub = ${VIA_GROUP}`
+
+    await reconcileMaterialisedAdmins(fgaClient)
+    expect(await isTenantAdmin(fgaClient, VIA_GROUP, TENANT), 'the real drift admin is still revoked').toBe(false)
+    // And the tuple-less row is reconciled too rather than retried forever: absent IS the target state.
+    expect(await memberRow(DEPROVISIONED)).toMatchObject({ role: 'member', admin_origin: 'manual' })
   })
 
   it('the drift sweep leaves manual admins and still-matching members alone', async () => {

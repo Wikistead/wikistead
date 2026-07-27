@@ -144,7 +144,11 @@ export async function membersPlugin(app: FastifyInstance) {
     }
 
     await req.db.tx(async (tx) => {
-      await tx`UPDATE members SET role = ${role}, updated_at = now() WHERE sub = ${req.params.sub}`
+      // #497 §2b: a role change made HERE is a person's decision, so it also resets the provenance to
+      // 'manual'. Without this the column outlives the grant it described: demoting a group-materialised
+      // admin left admin_origin='mapping' behind, and re-appointing them by hand produced an admin the
+      // drift sweep considered machine-owned and revoked out from under the person who appointed them.
+      await tx`UPDATE members SET role = ${role}, admin_origin = 'manual', updated_at = now() WHERE sub = ${req.params.sub}`
       const adminTuple = [{ user: `user:${req.params.sub}`, relation: 'admin', object: `tenant:${req.tenant.id}` }]
       if (role === 'admin') await writeTuples(req.server.fga, adminTuple)
       else await deleteTuples(req.server.fga, adminTuple)

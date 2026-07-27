@@ -12,7 +12,7 @@ import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples, isTenantAdmin } from '@wikistead/authz'
-import { evaluateAdminMapping } from '../auth/admin-mapping.js'
+import { evaluateAdminMapping, reconcileMaterialisedAdmins } from '../auth/admin-mapping.js'
 import { buildApp } from '../app.js'
 import { createSession } from '../auth/session.js'
 import type { Tenant } from '@wikistead/types'
@@ -46,6 +46,9 @@ async function seed(sub: string, role: 'admin' | 'member', groups: string[] = []
   const sid = await createSession(app.valkey, { tenantId: TENANT, sub, role, groups })
   cookies[sub] = `wks_sess=${sid}`
 }
+
+const memberRow = async (sub: string) =>
+  (await db.sql<{ role: string; admin_origin: string }[]>`SELECT role, admin_origin FROM members WHERE sub = ${sub}`)[0]
 
 const req = (sub: string, method: string, url: string, payload?: unknown) =>
   app.inject({ method: method as 'GET', url, headers: { host: HOST, cookie: cookies[sub]! }, payload: payload as object })
@@ -140,6 +143,26 @@ describe('#497 §2b admin-mapping routes — only a tenant admin may declare an 
       await adminPool`DELETE FROM group_admin_mappings WHERE tenant_id = ${other}`
       await adminPool`DELETE FROM tenants WHERE id = ${other}`
     }
+  })
+
+  it('a HAND re-appointment resets provenance, so the sweep does not revoke it (blocker 2)', async () => {
+    // The column has to describe the CURRENT grant, not a past one. Materialise an admin, demote them
+    // through the console, then re-appoint them by hand: without PATCH resetting admin_origin the row
+    // read back as machine-owned, and the drift sweep revoked an admin a person had just appointed.
+    await req(ADMIN, 'POST', '/admin/roles/admin-mappings', { groupName: GROUP })
+    await seed(TARGET, 'member', [GROUP])
+    await evaluateAdminMapping(db, fgaClient, { id: TENANT, plan: 'business' }, TARGET, [GROUP])
+    expect(await memberRow(TARGET)).toMatchObject({ role: 'admin', admin_origin: 'mapping' })
+
+    expect((await req(ADMIN, 'PATCH', `/members/${TARGET}`, { role: 'member' })).statusCode).toBe(200)
+    expect((await req(ADMIN, 'PATCH', `/members/${TARGET}`, { role: 'admin' })).statusCode).toBe(200)
+    expect(await memberRow(TARGET), 'a person appointed them, so the row says so').toMatchObject({ role: 'admin', admin_origin: 'manual' })
+
+    // They carry no mapped group (the mapping is still there but their groups were never re-synced), so
+    // a machine-owned admin here WOULD be swept. A hand-appointed one must survive.
+    await db.sql`UPDATE members SET groups = ${db.sql.array([])} WHERE sub = ${TARGET}`
+    await reconcileMaterialisedAdmins(fgaClient)
+    expect(await isTenantAdmin(fgaClient, TARGET, TENANT), 'the console appointment stands').toBe(true)
   })
 
   it('a guest token cannot reach the surface at all (member-only)', async () => {
