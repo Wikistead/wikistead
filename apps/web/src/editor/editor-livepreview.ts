@@ -77,6 +77,7 @@ import { attachFileDrop } from "./live-preview/image-drop";
 import { cmTheme } from "../styles/cm-theme";
 import { remoteCursors } from "./remote-cursors";
 import { macroPresenceOverlay, macroPresencePublisher } from "./macro-presence-overlay";
+import { affordanceLayout } from "./live-preview/affordance-layout";
 
 // The CodeMirror EditorView is built ONCE (a React effect that doesn't re-run on HMR),
 // so hot-swapping this module would leave a STALE view running the old extensions (a
@@ -166,6 +167,11 @@ export function buildLivePreviewExtensions(opts: LivePreviewSharedOpts, env: Liv
     everforestHighlight,
     livePreviewTheme,
     livePreview,
+    // #528 / ADR-192: the ONE owner that places every block affordance (✎ chrome row, raw rich-edit pill,
+    // presence box). They used to claim the same corner from three different offset parents, so whichever
+    // two were visible together overlapped; the owner measures them all against one origin and resolves the
+    // set. Measure-phase only — it never dispatches (the #92 presence-safety rule).
+    affordanceLayout,
     // #243: re-anchor the caret after a revealed diagram re-mounts as an atom and settles taller
     // (async SVG), so leaving a mermaid/plantuml block by `j` never pushes the caret off-screen. Editable
     // surface only — the read-only view never reveals macros (no caret-in), so the transition can't occur.
